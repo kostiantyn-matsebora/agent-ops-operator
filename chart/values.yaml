@@ -50,6 +50,36 @@ service:
   apiPort: 8080
   metricsPort: 9090
 
+# Auth between the manager and channel adapters (/channel/* endpoints). The
+# token is generated once and injected into both sides as env — the manager
+# never reads Secrets from the API.
+adapterAuth:
+  # Name of the generated token Secret (key: token). Reused across upgrades.
+  secretName: agentops-adapter-token
+  # Use an existing Secret (key: token) instead of generating one.
+  existingSecret: ""
+
+# Reference channel adapter: serves Channels with spec.type=telegram. Exactly
+# ONE instance per bot token, ever (Telegram getUpdates single-consumer) —
+# hence replicas 1 + Recreate. When migrating from the in-process poller
+# (< chart 1.0), make sure the old manager is stopped before enabling this.
+telegramAdapter:
+  enabled: false
+  image:
+    repository: kmatsebora/agentops-channel-telegram
+    tag: 0.1.0
+  # Secret holding the bot token.
+  botTokenSecret:
+    name: agentops-telegram
+    key: botToken
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
 # Agent session persistence (the "home" volume runtime pods mount at /data/home).
 # Without it, sessions live in emptyDir and die with each runtime pod — replies
 # after an idle period lose conversational context. With multiple concurrent

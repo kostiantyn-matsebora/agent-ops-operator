@@ -57,15 +57,26 @@ metadata:
   name: home-ops
   namespace: agent-ops
 spec:
-  telegram:
-    botTokenSecretRef:
-      name: agentops-telegram
-      key: botToken
-    chatId: "-1001234567890"
-    feedThreadId: 2
-    pollingEnabled: false   # MUST stay false while claude-runner v0.6 polls this bot
+  # served by the channel-telegram adapter (the bot token lives in the
+  # adapter's deployment, not here — the manager reads no secrets)
+  type: telegram
   defaultProfileRef:
     name: ha-engineer
+  # opaque to the operator; the shape below is what channel-telegram parses
+  config:
+    chatId: "-1001234567890"
+    feedThreadId: 2
+    pollingEnabled: false   # MUST stay false while another consumer polls this bot
+    # approvers: [123456789]
+  # optional: have the agent post to Telegram itself instead of the default
+  # "printed answer is the deliverable" flow
+  # delivery:
+  #   mode: agent
+  #   agentInstructions: |
+  #     If chat credentials are available (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID
+  #     set), send exactly ONE chat message via the Telegram Bot API (curl,
+  #     parse_mode=HTML, message_thread_id=$TG_THREAD_ID unless empty).
+  #     Without credentials, your final printed answer IS the deliverable.
 ---
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource

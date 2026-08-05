@@ -31,9 +31,6 @@ rules:
     resources: ["configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get"]           # channel bot tokens only (own namespace, uncached GET)
-  - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
   - apiGroups: ["coordination.k8s.io"]

@@ -93,9 +93,10 @@ type InflightRun struct {
 type ConversationStatus struct {
 	// +optional
 	Phase ConversationPhase `json:"phase,omitempty"`
-	// Chat thread id (e.g. Telegram forum topic).
+	// Chat thread id — an opaque string in the channel type's own id space
+	// (e.g. a Telegram forum topic id in decimal, a Slack ts).
 	// +optional
-	ThreadID *int64 `json:"threadId,omitempty"`
+	ThreadID *string `json:"threadId,omitempty"`
 	// Agent session id (resume handle).
 	// +optional
 	SessionID string `json:"sessionId,omitempty"`
@@ -120,7 +121,7 @@ type ConversationStatus struct {
 // +kubebuilder:resource:shortName=conv
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profileRef.name`
-// +kubebuilder:printcolumn:name="Thread",type=integer,JSONPath=`.status.threadId`
+// +kubebuilder:printcolumn:name="Thread",type=string,JSONPath=`.status.threadId`
 // +kubebuilder:printcolumn:name="Runtime",type=string,JSONPath=`.status.runtimePod`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

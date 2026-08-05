@@ -15,16 +15,18 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.polling
-      name: Polling
-      type: boolean
+    - jsonPath: .spec.type
+      name: Type
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: 'Channel is a chat surface (v1: Telegram supergroup with Topics).'
+        description: |-
+          Channel is a chat surface served by a channel-type implementation (built-in
+          or an external adapter).
         properties:
           apiVersion:
             description: |-
@@ -44,8 +46,16 @@ spec:
           metadata:
             type: object
           spec:
-            description: ChannelSpec configures one chat surface.
+            description: |-
+              ChannelSpec configures one chat surface: type-agnostic metadata plus an
+              opaque per-type config that only the channel implementation interprets.
             properties:
+              config:
+                description: |-
+                  Config carries whatever the channel type needs; schema-less by design.
+                  Validated by the serving adapter, never by the operator.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               defaultProfileRef:
                 description: DefaultProfileRef handles bare messages (no /profile
                   prefix).
@@ -57,63 +67,41 @@ spec:
                 required:
                 - name
                 type: object
-              telegram:
-                description: TelegramChannel configures a Telegram supergroup (Topics
-                  enabled) as chat surface.
+              delivery:
+                description: |-
+                  DeliverySpec is the type-agnostic hint for how dispatched prompts should
+                  instruct the agent to deliver its answer.
                 properties:
-                  approvers:
+                  agentInstructions:
                     description: |-
-                      Approvers: Telegram user ids allowed to approve actions. Empty = anyone
-                      in the (private) group.
-                    items:
-                      format: int64
-                      type: integer
-                    type: array
-                  botTokenSecretRef:
-                    description: BotTokenSecretRef selects the bot token.
-                    properties:
-                      key:
-                        description: The key of the secret to select from.  Must be
-                          a valid secret key.
-                        type: string
-                      name:
-                        default: ""
-                        description: |-
-                          Name of the referent.
-                          This field is effectively required, but due to backwards compatibility is
-                          allowed to be empty. Instances of this type with an empty value here are
-                          almost certainly wrong.
-                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                        type: string
-                      optional:
-                        description: Specify whether the Secret or its key must be
-                          defined
-                        type: boolean
-                    required:
-                    - key
-                    type: object
-                    x-kubernetes-map-type: atomic
-                  chatId:
-                    description: ChatID of the supergroup (-100…).
+                      AgentInstructions is injected verbatim as the prompt's delivery section
+                      when Mode is "agent" (e.g. Bot API curl steps).
                     type: string
-                  feedThreadId:
-                    description: 'FeedThreadID: topic for raw notification passthrough
-                      (optional).'
-                    format: int64
-                    type: integer
-                  pollingEnabled:
-                    default: false
-                    description: |-
-                      PollingEnabled starts the getUpdates loop for this channel. Keep false
-                      while another system polls the same bot token (getUpdates conflicts).
-                    type: boolean
-                required:
-                - botTokenSecretRef
-                - chatId
+                  mode:
+                    default: result
+                    description: DeliveryMode selects how agent replies reach the
+                      channel.
+                    enum:
+                    - result
+                    - agent
+                    type: string
                 type: object
+              type:
+                description: |-
+                  Type names the channel implementation serving this channel (e.g.
+                  "telegram"). The operator never interprets it beyond routing.
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: spec.type is immutable
+                  rule: self == oldSelf
+            required:
+            - type
             type: object
           status:
-            description: ChannelStatus reports connectivity.
+            description: |-
+              ChannelStatus reports connectivity (conditions are owned by the serving
+              channel implementation, via the adapter contract).
             properties:
               conditions:
                 items:
@@ -171,8 +159,6 @@ spec:
                   - type
                   type: object
                 type: array
-              polling:
-                type: boolean
             type: object
         type: object
     served: true

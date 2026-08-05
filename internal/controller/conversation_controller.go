@@ -28,16 +28,15 @@ import (
 // LabelSignatureHash indexes conversations by grouping signature.
 const LabelSignatureHash = "agentops.dev/signature-hash"
 
-// ChatFactory resolves a Channel into a chat Provider (nil, nil = chat disabled).
-type ChatFactory func(ctx context.Context, ch *agentopsv1alpha1.Channel) (chat.Provider, error)
-
 // ConversationReconciler reconciles Conversation objects.
 type ConversationReconciler struct {
 	client.Client
 	Scheme      *runtime.Scheme
 	Runtime     runtimepod.Config
 	MaxRuntimes int
-	ChatFactory ChatFactory
+	// Ops carries outbound channel operations (topic creation) to the serving
+	// channel implementation; nil disables chat entirely (tests).
+	Ops *chat.OpQueue
 }
 
 // Reconcile implements the reconciliation loop.
@@ -64,10 +63,15 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	// chat topic
-	if conv.Spec.ChannelRef != nil && conv.Status.ThreadID == nil {
+	// chat topic: enqueue asynchronously; the thread id lands via op completion
+	// (status patch), which re-triggers reconciliation. Requeue as a fallback —
+	// the op id is stable per conversation, so re-enqueues dedup.
+	topicPending := false
+	if conv.Spec.ChannelRef != nil && conv.Status.ThreadID == nil && r.Ops != nil {
 		if err := r.ensureTopic(ctx, &conv); err != nil {
-			logger.Error(err, "ensureTopic (continuing chat-less)")
+			logger.Error(err, "ensureTopic enqueue (continuing chat-less)")
+		} else {
+			topicPending = true
 		}
 	}
 
@@ -122,6 +126,9 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	if topicPending {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
 	if needsWorker {
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
@@ -142,21 +149,11 @@ func (r *ConversationReconciler) ensureTopic(ctx context.Context, conv *agentops
 	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Spec.ChannelRef.Name}, &ch); err != nil {
 		return err
 	}
-	provider, err := r.ChatFactory(ctx, &ch)
-	if err != nil || provider == nil {
-		return err
+	if ch.Spec.Type == "" {
+		return nil
 	}
-	title := conv.Spec.Title
-	if title == "" {
-		title = conv.Name
-	}
-	id, err := provider.EnsureTopic(ctx, title)
-	if err != nil {
-		return err
-	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.ThreadID = &id
-	return r.Status().Patch(ctx, conv, patch)
+	r.Ops.EnqueueEnsureTopic(ctx, &ch, conv)
+	return nil
 }
 
 func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {

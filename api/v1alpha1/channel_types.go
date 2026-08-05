@@ -1,53 +1,69 @@
 package v1alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// TelegramChannel configures a Telegram supergroup (Topics enabled) as chat surface.
-type TelegramChannel struct {
-	// BotTokenSecretRef selects the bot token.
-	BotTokenSecretRef corev1.SecretKeySelector `json:"botTokenSecretRef"`
-	// ChatID of the supergroup (-100…).
-	ChatID string `json:"chatId"`
-	// FeedThreadID: topic for raw notification passthrough (optional).
+// DeliveryMode selects how agent replies reach the channel.
+// +kubebuilder:validation:Enum=result;agent
+type DeliveryMode string
+
+const (
+	// DeliveryResult: the agent's printed answer is the deliverable — captured
+	// via POST /work/done and surfaced by the channel implementation.
+	DeliveryResult DeliveryMode = "result"
+	// DeliveryAgent: the agent posts to the chat surface itself, following the
+	// channel's AgentInstructions.
+	DeliveryAgent DeliveryMode = "agent"
+)
+
+// DeliverySpec is the type-agnostic hint for how dispatched prompts should
+// instruct the agent to deliver its answer.
+type DeliverySpec struct {
+	// +kubebuilder:default=result
 	// +optional
-	FeedThreadID *int64 `json:"feedThreadId,omitempty"`
-	// Approvers: Telegram user ids allowed to approve actions. Empty = anyone
-	// in the (private) group.
+	Mode DeliveryMode `json:"mode,omitempty"`
+	// AgentInstructions is injected verbatim as the prompt's delivery section
+	// when Mode is "agent" (e.g. Bot API curl steps).
 	// +optional
-	Approvers []int64 `json:"approvers,omitempty"`
-	// PollingEnabled starts the getUpdates loop for this channel. Keep false
-	// while another system polls the same bot token (getUpdates conflicts).
-	// +kubebuilder:default=false
-	// +optional
-	PollingEnabled bool `json:"pollingEnabled,omitempty"`
+	AgentInstructions string `json:"agentInstructions,omitempty"`
 }
 
-// ChannelSpec configures one chat surface.
+// ChannelSpec configures one chat surface: type-agnostic metadata plus an
+// opaque per-type config that only the channel implementation interprets.
 type ChannelSpec struct {
-	// +optional
-	Telegram *TelegramChannel `json:"telegram,omitempty"`
+	// Type names the channel implementation serving this channel (e.g.
+	// "telegram"). The operator never interprets it beyond routing.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.type is immutable"
+	Type string `json:"type"`
 	// DefaultProfileRef handles bare messages (no /profile prefix).
 	// +optional
 	DefaultProfileRef *ObjectRef `json:"defaultProfileRef,omitempty"`
+	// +optional
+	Delivery *DeliverySpec `json:"delivery,omitempty"`
+	// Config carries whatever the channel type needs; schema-less by design.
+	// Validated by the serving adapter, never by the operator.
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +optional
+	Config *runtime.RawExtension `json:"config,omitempty"`
 }
 
-// ChannelStatus reports connectivity.
+// ChannelStatus reports connectivity (conditions are owned by the serving
+// channel implementation, via the adapter contract).
 type ChannelStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	// +optional
-	Polling bool `json:"polling,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Polling",type=boolean,JSONPath=`.status.polling`
+// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// Channel is a chat surface (v1: Telegram supergroup with Topics).
+// Channel is a chat surface served by a channel-type implementation (built-in
+// or an external adapter).
 type Channel struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

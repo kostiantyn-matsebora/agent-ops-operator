@@ -58,14 +58,22 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// testOps builds the channel plumbing against the envtest client; the queue's
+// registry is empty, so every channel type behaves as adapter-served.
+func testOps() *chat.OpQueue {
+	return &chat.OpQueue{Client: k8sClient, Namespace: ns, Registry: chat.NewRegistry()}
+}
+
 func reconciler() *controller.ConversationReconciler {
+	return reconcilerWithOps(nil) // chat disabled in lifecycle tests
+}
+
+func reconcilerWithOps(ops *chat.OpQueue) *controller.ConversationReconciler {
 	return &controller.ConversationReconciler{
 		Client:      k8sClient,
 		Scheme:      scheme,
 		MaxRuntimes: 2,
-		ChatFactory: func(ctx context.Context, ch *agentopsv1alpha1.Channel) (chat.Provider, error) {
-			return nil, nil // chat disabled in tests
-		},
+		Ops:         ops,
 		Runtime: runtimepod.Config{
 			Image: "busybox:stub", ServiceAccount: "default",
 			ControlURL: "http://manager:8080", IdleTTLMinutes: 10,
@@ -74,7 +82,13 @@ func reconciler() *controller.ConversationReconciler {
 }
 
 func apiServer() *httpapi.Server {
-	return &httpapi.Server{Client: k8sClient, Reader: k8sClient, Namespace: ns}
+	ops := testOps()
+	return &httpapi.Server{
+		Client: k8sClient, Reader: k8sClient, Namespace: ns,
+		Ops:          ops,
+		Router:       &chat.Router{Client: k8sClient, Reader: k8sClient, Namespace: ns, Ops: ops},
+		AdapterToken: "test-adapter-token",
+	}
 }
 
 func mkProfile(t *testing.T, name string) {

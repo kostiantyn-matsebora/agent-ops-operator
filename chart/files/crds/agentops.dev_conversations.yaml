@@ -25,7 +25,7 @@ spec:
       type: string
     - jsonPath: .status.threadId
       name: Thread
-      type: integer
+      type: string
     - jsonPath: .status.runtimePod
       name: Runtime
       type: string
@@ -265,9 +265,10 @@ spec:
                 description: Agent session id (resume handle).
                 type: string
               threadId:
-                description: Chat thread id (e.g. Telegram forum topic).
-                format: int64
-                type: integer
+                description: |-
+                  Chat thread id — an opaque string in the channel type's own id space
+                  (e.g. a Telegram forum topic id in decimal, a Slack ts).
+                type: string
             type: object
         type: object
     served: true

@@ -18,4 +18,6 @@ You are running headless in a Kubernetes agent runtime pod. Your working directo
 
 ## Finish
 
-If chat credentials are available (`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set), send exactly ONE chat message via the Telegram Bot API (`curl`, `parse_mode=HTML`, include `message_thread_id=$TG_THREAD_ID` unless the variable is empty), formatted per the MESSAGE FORMAT SPECIFICATION below — **Template 3** (Task/agent answer), or **Template 6** when you need clarification. The user continues by writing in the topic. **Without chat credentials, your final printed answer IS the deliverable** (it lands in the Conversation status and pod logs) — format it per the same template, plain text instead of HTML. Then print a one-line summary `AGENT-TASK: {{AGENT_NAME}}: <done|clarify|refused>`.
+{{DELIVERY_INSTRUCTIONS}}
+
+Format the answer per the MESSAGE FORMAT SPECIFICATION below — **Template 3** (Task/agent answer), or **Template 6** when you need clarification. The user continues by replying in this conversation. Then print a one-line summary `AGENT-TASK: {{AGENT_NAME}}: <done|clarify|refused>`.

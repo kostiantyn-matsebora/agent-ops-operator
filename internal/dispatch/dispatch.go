@@ -31,11 +31,33 @@ func withFormat(tpl string) string {
 	return tpl + "\n\n---\n\n" + formatSpec
 }
 
+// Delivery tells the agent how its answer reaches the user; derived from the
+// conversation's Channel metadata (spec.delivery), never from channel-type
+// knowledge compiled into the operator.
+type Delivery struct {
+	// Mode "agent" injects AgentInstructions verbatim; anything else (incl.
+	// chat-less conversations) uses the default printed-answer wording.
+	Mode              string
+	AgentInstructions string
+}
+
+// resultDelivery is the default delivery section: the printed answer is the
+// deliverable, captured via POST /work/done.
+const resultDelivery = "Your final printed answer IS the deliverable — it is captured by the runtime's completion report and shown to the user by the channel (it also lands in the Conversation status and pod logs). Do not attempt to send chat messages yourself."
+
+// Instructions renders the delivery section injected into prompts.
+func (d Delivery) Instructions() string {
+	if d.Mode == "agent" && d.AgentInstructions != "" {
+		return d.AgentInstructions
+	}
+	return resultDelivery
+}
+
 // WorkUnit is what a worker receives from GET /work.
 type WorkUnit struct {
 	RunID           string            `json:"runId"`
 	Convo           string            `json:"convo"`
-	ThreadID        *int64            `json:"threadId,omitempty"`
+	ThreadID        *string           `json:"threadId,omitempty"`
 	ResumeSessionID string            `json:"resumeSessionId,omitempty"`
 	PromptFile      string            `json:"promptFile,omitempty"` // repo-relative; worker renders PromptVars
 	PromptText      string            `json:"promptText,omitempty"` // fully rendered by the manager
@@ -78,7 +100,7 @@ func PendingInputs(c *agentopsv1alpha1.Conversation) []agentopsv1alpha1.InputIte
 // Next resolves the next work unit. Returns the unit and the consumed input
 // ids, or ok=false when there is nothing to dispatch (inflight or empty).
 func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile,
-	resolve PayloadResolver, now time.Time) (WorkUnit, []string, bool, error) {
+	resolve PayloadResolver, delivery Delivery, now time.Time) (WorkUnit, []string, bool, error) {
 
 	if c.Status.Inflight != nil {
 		return WorkUnit{}, nil, false, nil
@@ -100,6 +122,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 	if first.Agent != "" {
 		agentName = first.Agent
 	}
+	deliverySection := delivery.Instructions()
 
 	switch first.Type {
 	case agentopsv1alpha1.InputTask, agentopsv1alpha1.InputJob:
@@ -108,7 +131,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			return WorkUnit{}, nil, false, err
 		}
 		unit.RunID = runID
-		vars := map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload}
+		vars := map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection}
 		if profile.Spec.Prompt != "" {
 			unit.PromptFile = profile.Spec.Prompt
 			unit.PromptVars = vars
@@ -123,7 +146,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			return WorkUnit{}, nil, false, err
 		}
 		unit.RunID = runID
-		vars := map[string]string{"AGENT_NAME": agentName, "SIGNAL_JSON": payload, "ALERTS_JSON": payload}
+		vars := map[string]string{"AGENT_NAME": agentName, "SIGNAL_JSON": payload, "ALERTS_JSON": payload, "DELIVERY_INSTRUCTIONS": deliverySection}
 		if profile.Spec.Prompt != "" {
 			unit.PromptFile = profile.Spec.Prompt
 			unit.PromptVars = vars
@@ -140,7 +163,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 				return WorkUnit{}, nil, false, err
 			}
 			unit.RunID = runID
-			unit.PromptText = render(withFormat(taskTemplate), map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload})
+			unit.PromptText = render(withFormat(taskTemplate), map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection})
 			return unit, []string{first.ID}, true, nil
 		}
 		// batch consecutive inputs of the same type into one resume
@@ -169,7 +192,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 		}
 		unit.RunID = runID + "-resume"
 		unit.ResumeSessionID = c.Status.SessionID
-		vars := map[string]string{"USER_REPLY": joined, "AGENT_NAME": agentName}
+		vars := map[string]string{"USER_REPLY": joined, "AGENT_NAME": agentName, "DELIVERY_INSTRUCTIONS": deliverySection}
 		if profile.Spec.ReplyPrompt != "" {
 			unit.PromptFile = profile.Spec.ReplyPrompt
 			unit.PromptVars = vars

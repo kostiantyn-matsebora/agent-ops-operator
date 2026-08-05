@@ -5,10 +5,21 @@
 //	POST /work/done                worker completion report
 //	POST /task                     {"profile","agent"?,"task","channel"?}
 //	POST /ingest/alertmanager/{source}  Alertmanager webhook
+//
+// plus the channel adapter contract (bearer-token auth, see ADAPTER_TOKEN):
+//
+//	GET  /channel/ops?type=&wait=       outbound op long-poll (204 on timeout)
+//	POST /channel/ops/{id}/done         async op completion
+//	POST /channel/inbound               {"channel","threadId"?,"text"} -> router
+//	GET  /channel/channels?type=        channels served by an adapter (+config)
+//	GET  /channel/state/{channel}/{key} adapter cursor state (annotation-backed)
+//	PUT  /channel/state/{channel}/{key}
+//	POST /channel/channels/{name}/status  {"ready","reason"?,"message"?}
 package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,15 +29,21 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/ingest"
 )
+
+// StateAnnotationPrefix namespaces adapter cursor state kept as Channel
+// annotations (e.g. agentops.dev/adapter-state-offset).
+const StateAnnotationPrefix = "agentops.dev/adapter-state-"
 
 // Server carries dependencies for the HTTP surface.
 type Server struct {
@@ -34,6 +51,13 @@ type Server struct {
 	Reader    client.Reader // APIReader: strong reads for dispatch state
 	Namespace string
 	Addr      string
+
+	// Channel adapter contract. AdapterToken guards /channel/*; empty
+	// disables the surface (503) — the manager reads it from env, never from
+	// the Secret API.
+	Ops          *chat.OpQueue
+	Router       *chat.Router
+	AdapterToken string
 
 	cooldowns map[string]*ingest.Cooldown
 }
@@ -51,6 +75,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /work/done", s.handleWorkDone)
 	mux.HandleFunc("POST /task", s.handleTask)
 	mux.HandleFunc("POST /ingest/alertmanager/{source}", s.handleAlertmanager)
+	mux.HandleFunc("GET /channel/ops", s.adapterAuth(s.handleChannelOps))
+	mux.HandleFunc("POST /channel/ops/{id}/done", s.adapterAuth(s.handleChannelOpDone))
+	mux.HandleFunc("POST /channel/inbound", s.adapterAuth(s.handleChannelInbound))
+	mux.HandleFunc("GET /channel/channels", s.adapterAuth(s.handleChannelList))
+	mux.HandleFunc("GET /channel/state/{channel}/{key}", s.adapterAuth(s.handleStateGet))
+	mux.HandleFunc("PUT /channel/state/{channel}/{key}", s.adapterAuth(s.handleStatePut))
+	mux.HandleFunc("POST /channel/channels/{name}/status", s.adapterAuth(s.handleChannelStatus))
 	return mux
 }
 
@@ -135,11 +166,27 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: convoName}, &conv); err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
+	// channel metadata: delivery instructions, and the pending-topic gate — a
+	// channel-bound conversation waits for its thread id before its first unit
+	// is dispatched (inputs stay queued; the ensure-topic op completion
+	// re-frees it). Dangling channelRefs stay chat-less.
+	var delivery dispatch.Delivery
+	if conv.Spec.ChannelRef != nil {
+		var ch agentopsv1alpha1.Channel
+		if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ChannelRef.Name}, &ch); err == nil {
+			if ch.Spec.Type != "" && conv.Status.ThreadID == nil {
+				return dispatch.WorkUnit{}, false, nil
+			}
+			if ch.Spec.Delivery != nil {
+				delivery = dispatch.Delivery{Mode: string(ch.Spec.Delivery.Mode), AgentInstructions: ch.Spec.Delivery.AgentInstructions}
+			}
+		}
+	}
 	var profile agentopsv1alpha1.AgentProfile
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
-	unit, ids, ok, err := dispatch.Next(&conv, &profile, s.resolvePayload(ctx, s.Namespace), time.Now())
+	unit, ids, ok, err := dispatch.Next(&conv, &profile, s.resolvePayload(ctx, s.Namespace), delivery, time.Now())
 	if err != nil || !ok {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -270,6 +317,196 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 202, map[string]string{"conversation": conv.Name})
+}
+
+// ---- channel adapter contract ----------------------------------------------
+
+// adapterAuth guards /channel/* with the shared bearer token (constant-time).
+func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.AdapterToken == "" {
+			writeJSON(w, 503, map[string]string{"error": "adapter auth not configured"})
+			return
+		}
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) != 1 {
+			writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
+	channelType := r.URL.Query().Get("type")
+	if channelType == "" {
+		writeJSON(w, 400, map[string]string{"error": "missing type"})
+		return
+	}
+	wait, _ := strconv.Atoi(r.URL.Query().Get("wait"))
+	if wait > 30 {
+		wait = 30
+	}
+	deadline := time.Now().Add(time.Duration(wait) * time.Second)
+	for {
+		if op := s.Ops.Claim(channelType); op != nil {
+			writeJSON(w, 200, op)
+			return
+		}
+		if time.Now().After(deadline) {
+			w.WriteHeader(204)
+			return
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+func (s *Server) handleChannelOpDone(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	var res chat.OpResult
+	if err := json.Unmarshal(body, &res); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	// duplicate completions are legal (at-least-once) — always 200
+	s.Ops.Complete(r.Context(), r.PathValue("id"), res)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+type inboundReq struct {
+	Channel  string  `json:"channel"`
+	ThreadID *string `json:"threadId,omitempty"`
+	Text     string  `json:"text"`
+	Sender   string  `json:"sender,omitempty"`
+}
+
+func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	var in inboundReq
+	if err := json.Unmarshal(body, &in); err != nil || in.Channel == "" || in.Text == "" {
+		writeJSON(w, 400, map[string]string{"error": `need {"channel","text"}`})
+		return
+	}
+	ctx := r.Context()
+	var ch agentopsv1alpha1.Channel
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: in.Channel}, &ch); err != nil {
+		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", in.Channel)})
+		return
+	}
+	if err := s.Router.HandleMessage(ctx, &ch, chat.InboundMessage{ThreadID: in.ThreadID, Text: in.Text}); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 202, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
+	channelType := r.URL.Query().Get("type")
+	if channelType == "" {
+		writeJSON(w, 400, map[string]string{"error": "missing type"})
+		return
+	}
+	var list agentopsv1alpha1.ChannelList
+	if err := s.Client.List(r.Context(), &list, client.InNamespace(s.Namespace)); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	type chanOut struct {
+		Name   string          `json:"name"`
+		Config json.RawMessage `json:"config,omitempty"`
+	}
+	out := []chanOut{}
+	for i := range list.Items {
+		ch := &list.Items[i]
+		if ch.Spec.Type != channelType {
+			continue
+		}
+		c := chanOut{Name: ch.Name}
+		if ch.Spec.Config != nil {
+			c.Config = ch.Spec.Config.Raw
+		}
+		out = append(out, c)
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) stateChannel(ctx context.Context, w http.ResponseWriter, name string) *agentopsv1alpha1.Channel {
+	var ch agentopsv1alpha1.Channel
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &ch); err != nil {
+		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", name)})
+		return nil
+	}
+	return &ch
+}
+
+func (s *Server) handleStateGet(w http.ResponseWriter, r *http.Request) {
+	ch := s.stateChannel(r.Context(), w, r.PathValue("channel"))
+	if ch == nil {
+		return
+	}
+	writeJSON(w, 200, map[string]string{"value": ch.Annotations[StateAnnotationPrefix+r.PathValue("key")]})
+}
+
+func (s *Server) handleStatePut(w http.ResponseWriter, r *http.Request) {
+	ch := s.stateChannel(r.Context(), w, r.PathValue("channel"))
+	if ch == nil {
+		return
+	}
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<10))
+	var in struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	patch := client.MergeFrom(ch.DeepCopy())
+	if ch.Annotations == nil {
+		ch.Annotations = map[string]string{}
+	}
+	ch.Annotations[StateAnnotationPrefix+r.PathValue("key")] = in.Value
+	if err := s.Client.Patch(r.Context(), ch, patch); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
+	ch := s.stateChannel(r.Context(), w, r.PathValue("name"))
+	if ch == nil {
+		return
+	}
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	var in struct {
+		Ready   bool   `json:"ready"`
+		Reason  string `json:"reason,omitempty"`
+		Message string `json:"message,omitempty"`
+	}
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	cond := metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "AdapterReady"}
+	if !in.Ready {
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "AdapterError"
+	}
+	if in.Reason != "" {
+		cond.Reason = in.Reason
+	}
+	cond.Message = in.Message
+	patch := client.MergeFrom(ch.DeepCopy())
+	apimeta.SetStatusCondition(&ch.Status.Conditions, cond)
+	if err := s.Client.Status().Patch(r.Context(), ch, patch); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 // ---- alertmanager ingest ----------------------------------------------------
