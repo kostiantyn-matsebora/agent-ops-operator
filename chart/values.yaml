@@ -1,0 +1,92 @@
+image:
+  repository: kmatsebora/agentops-manager
+  tag: 0.2.3
+
+# Concurrency cap: live agent runtime pods across all conversations.
+maxRuntimes: 8
+# Idle minutes before a runtime pod exits (respawned on demand); AgentRuntime
+# CRs may override per runtime.
+runtimeIdleTtlMinutes: 10
+
+serviceAccounts:
+  # the manager (CRDs + pod lifecycle in its namespace only)
+  manager: agentops-manager
+  # agent runtime pods run under this SA — its permissions ARE the agent's powers
+  runtime: agentops-runtime
+
+# The agent's powers, declared in the release (empty = agents can do nothing
+# in-cluster). Object names: <runtime-sa>-<name>.
+rbac:
+  runtime:
+    # ClusterRoles created + bound to the runtime SA: [{name, rules: [...]}]
+    clusterRoles: []
+    # Existing ClusterRoles to bind (e.g. ["view"] for cluster-wide reads)
+    bindClusterRoles: []
+    # Namespaced Roles in other namespaces: [{name, namespace, rules: [...]}]
+    namespaced: []
+
+# Demo advisor: a project-agnostic, read-only "k8s-engineer" agent you can try
+# minutes after install — no chat, no repo, no MCP setup. Ask via the HTTP API:
+#   kubectl -n <ns> run q --rm -i --image=curlimages/curl --restart=Never -- \
+#     curl -s -X POST http://agentops-manager.<ns>.svc:8080/task \
+#     -H 'Content-Type: application/json' \
+#     -d '{"profile":"k8s-engineer","task":"why is pod X crashlooping?"}'
+# Answer: kubectl get conversation <name> -o jsonpath='{.status.runs[0].result}'
+# (or follow the runtime pod logs live). Requires ONE secret with a Claude
+# credential (claude setup-token output or an Anthropic API key).
+demo:
+  enabled: false
+  runtimeImage: kmatsebora/agentops-runtime-claude:0.1.1
+  credentialsSecret:
+    name: agentops-claude
+    key: oauthToken
+    # env var the credential feeds: CLAUDE_CODE_OAUTH_TOKEN (setup-token) or ANTHROPIC_API_KEY
+    envName: CLAUDE_CODE_OAUTH_TOKEN
+  # read-only cluster access for the advisor (binds the built-in "view"
+  # ClusterRole + node/namespace reads to the runtime SA)
+  readOnlyRbac: true
+
+service:
+  apiPort: 8080
+  metricsPort: 9090
+
+# Agent session persistence (the "home" volume runtime pods mount at /data/home).
+# Without it, sessions live in emptyDir and die with each runtime pod — replies
+# after an idle period lose conversational context. With multiple concurrent
+# runtime pods the volume must be ReadWriteMany (or all pods must land on one node).
+persistence:
+  enabled: false
+  # Create a PVC with this name (AgentRuntime CRs reference it via home.pvcRef;
+  # it is also exported as the manager's HOME_PVC bootstrap default).
+  name: agentops-home
+  size: 5Gi
+  # "" = cluster default StorageClass
+  storageClassName: ""
+  accessModes:
+    - ReadWriteMany
+  # Bind to a pre-provisioned PV instead of dynamic provisioning.
+  volumeName: ""
+  # Use an existing PVC instead of creating one (overrides everything above).
+  existingClaim: ""
+
+# Extra env for the manager (e.g. RUNTIME_IMAGE bootstrap fallback).
+extraEnv: []
+
+nodeSelector: {}
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# CRD management (cert-manager pattern): templated, so upgrades work.
+crds:
+  # Install/upgrade the agentops.dev CRDs with this release.
+  enabled: true
+  # Keep CRDs on `helm uninstall` (helm.sh/resource-policy: keep) — protects
+  # every Conversation/AgentProfile/... from cascade deletion. Disable only if
+  # you really want uninstall to wipe all agentops data.
+  keep: true

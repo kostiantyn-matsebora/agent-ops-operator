@@ -1,0 +1,125 @@
+package dispatch
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+)
+
+func inlineResolver(item agentopsv1alpha1.InputItem) (string, error) { return item.Payload, nil }
+
+func conv(inputs ...agentopsv1alpha1.InputItem) *agentopsv1alpha1.Conversation {
+	c := &agentopsv1alpha1.Conversation{}
+	c.Name = "c1"
+	c.Spec.Inputs = inputs
+	return c
+}
+
+func profile() *agentopsv1alpha1.AgentProfile {
+	p := &agentopsv1alpha1.AgentProfile{}
+	p.Spec.Agent = "ha-engineer"
+	p.Spec.AllowedTools = "Read,Bash"
+	p.Spec.MaxTurns = 60
+	return p
+}
+
+var now = time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+
+func TestTaskUsesBuiltinTemplate(t *testing.T) {
+	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "check vacuum"})
+	u, ids, ok, err := Next(c, profile(), inlineResolver, now)
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if len(ids) != 1 || ids[0] != "i1" {
+		t.Fatalf("ids: %v", ids)
+	}
+	if u.PromptFile != "" || !strings.Contains(u.PromptText, "check vacuum") || !strings.Contains(u.PromptText, "ha-engineer") {
+		t.Fatalf("built-in template not rendered: %+v", u)
+	}
+	if u.ResumeSessionID != "" {
+		t.Fatal("task must be a fresh session")
+	}
+}
+
+func TestAgentOverride(t *testing.T) {
+	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x", Agent: "node-doctor"})
+	u, _, _, _ := Next(c, profile(), inlineResolver, now)
+	if !strings.Contains(u.PromptText, "node-doctor") {
+		t.Fatalf("agent override ignored:\n%s", u.PromptText)
+	}
+}
+
+func TestProfilePromptWins(t *testing.T) {
+	p := profile()
+	p.Spec.Prompt = "scripts/custom.md"
+	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	u, _, _, _ := Next(c, p, inlineResolver, now)
+	if u.PromptFile != "scripts/custom.md" || u.PromptText != "" {
+		t.Fatalf("profile prompt must win: %+v", u)
+	}
+	if u.PromptVars["USER_TASK"] != "x" {
+		t.Fatalf("vars: %v", u.PromptVars)
+	}
+}
+
+func TestReplyBatchingAndResume(t *testing.T) {
+	c := conv(
+		agentopsv1alpha1.InputItem{ID: "r1", Type: agentopsv1alpha1.InputReply, Payload: "first"},
+		agentopsv1alpha1.InputItem{ID: "r2", Type: agentopsv1alpha1.InputReply, Payload: "second"},
+		agentopsv1alpha1.InputItem{ID: "a1", Type: agentopsv1alpha1.InputAlert, Payload: "{}"},
+	)
+	c.Status.SessionID = "sess-1"
+	u, ids, ok, err := Next(c, profile(), inlineResolver, now)
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("must batch consecutive replies only: %v", ids)
+	}
+	if u.ResumeSessionID != "sess-1" || !strings.HasSuffix(u.RunID, "-resume") {
+		t.Fatalf("resume expected: %+v", u)
+	}
+	if !strings.Contains(u.PromptText, "first\n---\nsecond") {
+		t.Fatalf("joined replies missing:\n%s", u.PromptText)
+	}
+}
+
+func TestReplyWithoutSessionDegradesToTask(t *testing.T) {
+	c := conv(agentopsv1alpha1.InputItem{ID: "r1", Type: agentopsv1alpha1.InputReply, Payload: "hello"})
+	u, _, ok, _ := Next(c, profile(), inlineResolver, now)
+	if !ok || u.ResumeSessionID != "" || !strings.Contains(u.PromptText, "hello") {
+		t.Fatalf("degrade to task: %+v", u)
+	}
+}
+
+func TestInflightBlocksDispatch(t *testing.T) {
+	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	c.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r", InputIDs: []string{"other"}}
+	_, _, ok, err := Next(c, profile(), inlineResolver, now)
+	if ok || err != nil {
+		t.Fatal("inflight must block dispatch (strictly serial)")
+	}
+}
+
+func TestProcessedInputsSkipped(t *testing.T) {
+	c := conv(
+		agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "old"},
+		agentopsv1alpha1.InputItem{ID: "i2", Type: agentopsv1alpha1.InputTask, Payload: "new"},
+	)
+	c.Status.ProcessedInputIDs = []string{"i1"}
+	u, ids, ok, _ := Next(c, profile(), inlineResolver, now)
+	if !ok || len(ids) != 1 || ids[0] != "i2" || !strings.Contains(u.PromptText, "new") {
+		t.Fatalf("processed input not skipped: %v %+v", ids, u)
+	}
+}
+
+func TestAlertUsesInvestigateTemplate(t *testing.T) {
+	c := conv(agentopsv1alpha1.InputItem{ID: "a1", Type: agentopsv1alpha1.InputAlert, Payload: `{"alerts":[]}`})
+	u, _, ok, _ := Next(c, profile(), inlineResolver, now)
+	if !ok || !strings.Contains(u.PromptText, "READ-ONLY triage") || !strings.Contains(u.PromptText, `{"alerts":[]}`) {
+		t.Fatalf("investigate template: %+v", u)
+	}
+}

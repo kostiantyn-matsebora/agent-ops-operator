@@ -1,0 +1,8 @@
+apiVersion: v2
+name: agent-ops-operator
+description: >-
+  Kubernetes operator for agents you can address — monitoring signals and chat
+  tasks become Conversations executed by per-conversation agent runtime pods.
+type: application
+version: 0.4.1
+appVersion: "0.2.3"

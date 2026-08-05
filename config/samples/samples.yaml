@@ -1,0 +1,98 @@
+# Validation samples for the agentops.dev API group. Mirrors the current
+# claude-runner setup as CRs (shadow — nothing consumes these until the manager
+# is deployed and pointed at them).
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: home-observability
+  namespace: agent-ops
+spec:
+  servers:
+    victorialogs:
+      type: sse
+      url: http://mcp-victorialogs.internal.komatoo.net/sse
+    victoriametrics:
+      type: sse
+      url: http://mcp-victoriametrics.internal.komatoo.net/sse
+---
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: ha-engineer
+  namespace: agent-ops
+spec:
+  repository:
+    url: git@github.com:kostiantyn-matsebora/home-data-center.git
+    ref: master
+    auth:
+      type: ssh
+      secretRef:
+        name: agentops-repo-key
+  agent: ha-engineer
+  allowedTools: "Read,Grep,Glob,Bash,Skill,mcp__victorialogs__*,mcp__victoriametrics__*,mcp__homeassistant__*"
+  maxTurns: 60
+  mcp:
+    configRefs:
+      - name: home-observability
+    servers:
+      homeassistant:
+        type: sse
+        url: http://192.168.2.3:8123/mcp_server/sse
+        headers:
+          - name: Authorization
+            valueFrom:
+              secretKeyRef:
+                name: agentops-ha
+                key: bearerHeader
+  env:
+    - name: HA_CLAUDE_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: agentops-ha
+          key: token
+---
+apiVersion: agentops.dev/v1alpha1
+kind: Channel
+metadata:
+  name: home-ops
+  namespace: agent-ops
+spec:
+  telegram:
+    botTokenSecretRef:
+      name: agentops-telegram
+      key: botToken
+    chatId: "-1004369687194"
+    feedThreadId: 2
+    pollingEnabled: false   # MUST stay false while claude-runner v0.6 polls this bot
+  defaultProfileRef:
+    name: ha-engineer
+---
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: alertmanager
+  namespace: agent-ops
+spec:
+  type: alertmanagerWebhook
+  channelRef:
+    name: home-ops
+  profileRef:
+    name: ha-engineer
+  grouping:
+    signatureLabels: ["alertgroup", "alertname", "namespace"]
+    windowDays: 7
+    cooldownHours: 6
+---
+apiVersion: agentops.dev/v1alpha1
+kind: Conversation
+metadata:
+  name: sample-task
+  namespace: agent-ops
+spec:
+  profileRef:
+    name: ha-engineer
+  title: "🛠 sample validation task"
+  inputs:
+    - id: in-1
+      type: task
+      payload: "Sample task input (validation only)"
