@@ -3,14 +3,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"strconv"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -83,27 +80,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ChatFactory: resolves a Channel to a provider; the bot token is the
-	// manager's own credential (scoped secret read in its namespace).
-	chatFactory := func(ctx context.Context, ch *agentopsv1alpha1.Channel) (chat.Provider, error) {
-		if ch.Spec.Telegram == nil {
-			return nil, nil
-		}
-		var sec corev1.Secret
-		if err := mgr.GetAPIReader().Get(ctx, types.NamespacedName{
-			Namespace: ch.Namespace, Name: ch.Spec.Telegram.BotTokenSecretRef.Name,
-		}, &sec); err != nil {
-			return nil, err
-		}
-		token := string(sec.Data[ch.Spec.Telegram.BotTokenSecretRef.Key])
-		return chat.NewTelegram(token, ch.Spec.Telegram.ChatID), nil
-	}
+	// Channel plumbing: built-in channel types register in-process providers
+	// here; every other type is served by an external adapter consuming the op
+	// queue over /channel/*. The manager reads no secrets — adapter auth
+	// arrives via env (ADAPTER_TOKEN), transport credentials live adapter-side.
+	registry := chat.NewRegistry()
+	ops := &chat.OpQueue{Client: mgr.GetClient(), Namespace: namespace, Registry: registry}
+	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: namespace, Ops: ops}
 
 	reconciler := &controller.ConversationReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		MaxRuntimes: envInt("MAX_RUNTIMES", 8),
-		ChatFactory: chatFactory,
+		Ops:         ops,
 		Runtime: runtimepod.Config{
 			Image:          env("RUNTIME_IMAGE", ""),
 			ServiceAccount: env("RUNTIME_SA", "agentops-runtime"),
@@ -120,31 +109,15 @@ func main() {
 	}
 
 	if err := mgr.Add(&httpapi.Server{
-		Client:    mgr.GetClient(),
-		Reader:    mgr.GetAPIReader(),
-		Namespace: namespace,
-		Addr:      env("API_ADDR", ":8080"),
+		Client:       mgr.GetClient(),
+		Reader:       mgr.GetAPIReader(),
+		Namespace:    namespace,
+		Addr:         env("API_ADDR", ":8080"),
+		Ops:          ops,
+		Router:       router,
+		AdapterToken: os.Getenv("ADAPTER_TOKEN"),
 	}); err != nil {
 		setupLog.Error(err, "http api")
-		os.Exit(1)
-	}
-
-	// Telegram poller (leader-only): serves Channels with pollingEnabled.
-	if err := mgr.Add(&chat.Poller{
-		Client:    mgr.GetClient(),
-		Reader:    mgr.GetAPIReader(),
-		Namespace: namespace,
-		Token: func(ctx context.Context, ch *agentopsv1alpha1.Channel) (string, error) {
-			var sec corev1.Secret
-			if err := mgr.GetAPIReader().Get(ctx, types.NamespacedName{
-				Namespace: ch.Namespace, Name: ch.Spec.Telegram.BotTokenSecretRef.Name,
-			}, &sec); err != nil {
-				return "", err
-			}
-			return string(sec.Data[ch.Spec.Telegram.BotTokenSecretRef.Key]), nil
-		},
-	}); err != nil {
-		setupLog.Error(err, "telegram poller")
 		os.Exit(1)
 	}
 

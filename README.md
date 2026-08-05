@@ -33,7 +33,7 @@ approvable from your phone.
 | `AgentRuntime` | **What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, home volume (session persistence), service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env. |
 | `Conversation` | One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. |
 | `ConversationInput` | Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd. |
-| `Channel` | Chat surface. v1: Telegram supergroup with Topics — bot token secretRef, approver allowlist, `pollingEnabled` gate, default profile for bare messages. |
+| `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, default profile, delivery hints) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). Channel types are served by out-of-process **channel adapters** — the operator ships `channel-telegram/` as the reference; bring your own for Slack/Teams/… with zero operator changes. |
 | `SignalSource` | Ingest lane: `alertmanagerWebhook` (implemented) / `cron` / `k8sEvents` (roadmap) with signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. |
 | `MCPConfig` | Reusable MCP server sets, shareable across profiles; secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
 
@@ -54,6 +54,36 @@ approvable from your phone.
   spec (investigation / answer / action report / recurrence / clarification) —
   no stream-of-consciousness walls. Profiles with custom prompts control their own format.
 
+## The channel adapter contract
+
+A channel adapter is a deployment that dials the manager (never the reverse) —
+same pattern as runtimes, so NetworkPolicies stay simple and transport
+credentials never leave the adapter:
+
+1. Long-poll `GET /channel/ops?type=<your-type>&wait=25` for outbound
+   operations: `ensure-topic` (create a thread for a conversation) and `send`
+   (post a message; chat HTML subset). Delivery is at-least-once — dedup by
+   `op.id`.
+2. Complete each op with `POST /channel/ops/{id}/done` — `{"threadId":"…"}`
+   for `ensure-topic` (an opaque string in your id space), `{"error":"…"}` on
+   failure (surfaced as a Conversation condition and regenerated).
+3. Push user messages with `POST /channel/inbound
+   {"channel","threadId"?,"text"}` — command parsing, conversation
+   creation/adoption, busy-acks all happen manager-side in the shared router.
+4. Read your channels + opaque `spec.config` from `GET /channel/channels?type=`,
+   persist cursors (e.g. poll offsets) via `GET/PUT /channel/state/{channel}/{key}`,
+   report config problems via `POST /channel/channels/{name}/status`.
+
+All `/channel/*` calls carry `Authorization: Bearer $ADAPTER_TOKEN` (the chart
+provisions the shared token Secret into the manager and every adapter). No
+Kubernetes API access needed — the reference adapter
+[`channel-telegram/`](channel-telegram/) is dependency-free Go.
+
+Delivery of agent answers is channel-metadata-driven: by default the agent's
+printed answer is the deliverable (captured via `/work/done`); a channel may
+set `spec.delivery.mode: agent` plus `agentInstructions` to have the agent
+post to the chat surface itself (the Telegram sample does this).
+
 ## The work contract
 
 An `AgentRuntime` image must:
@@ -66,6 +96,8 @@ An `AgentRuntime` image must:
 4. Exit `0` after `RUNTIME_IDLE_TTL_M` minutes without work
 
 Reference implementation: [`runtime-claude/`](runtime-claude/) (Node.js + claude-code, ~200 lines).
+The same bring-your-own pattern applies to chat transports — see the channel
+adapter contract above and [`channel-telegram/`](channel-telegram/).
 
 ## Try it in five minutes (demo advisor)
 
@@ -117,8 +149,42 @@ Point Alertmanager at `http://agentops-manager.<ns>.svc:8080/ingest/alertmanager
 | `POST /task` `{"profile","task","agent"?,"channel"?}` | start a conversation programmatically |
 | `POST /ingest/alertmanager/{source}` | Alertmanager webhook |
 | `GET /work`, `POST /work/done` | runtime-facing dispatch (see contract) |
+| `GET/POST /channel/*` | adapter-facing channel contract (bearer token; see adapter contract) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics |
+
+## Migrating to chart 1.0 (extensible channels) — BREAKING
+
+Chart 1.0 restructures the `Channel` CRD and moves Telegram out of the manager
+into the `channel-telegram` adapter. For a live install:
+
+1. **Stop the old manager** (`kubectl -n <ns> scale deploy agentops-manager
+   --replicas=0`) — this stops the in-process poller, freeing the bot token's
+   single getUpdates slot.
+2. **Migrate Channel CRs** from the typed sub-struct to metadata + config:
+
+   ```yaml
+   # before                              # after
+   spec:                                 spec:
+     telegram:                             type: telegram
+       botTokenSecretRef: {…}              defaultProfileRef: {name: …}
+       chatId: "-100…"                     config:
+       approvers: [1, 2]                     chatId: "-100…"
+       pollingEnabled: true                  approvers: [1, 2]
+     defaultProfileRef: {name: …}            pollingEnabled: true
+   ```
+
+   The bot token secretRef moves out of the CR entirely — it becomes
+   `telegramAdapter.botTokenSecret` in chart values (mounted into the adapter;
+   the manager reads no Secrets at all anymore).
+3. **Upgrade**: `helm upgrade … --set telegramAdapter.enabled=true`. The new
+   CRD applies, the manager restarts without Telegram code, the adapter starts
+   as the sole getUpdates consumer (replicas 1, Recreate).
+4. `status.threadId` is now a **string** (existing numeric ids remain valid as
+   decimal strings) — update anything that parsed it as a number.
+
+Rollback = reverse order: disable the adapter, restore the previous chart
+version and Channel CR shape.
 
 ## Development
 

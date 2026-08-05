@@ -16,4 +16,6 @@ You are running headless in a Kubernetes agent runtime pod as the agent `{{AGENT
 
 ## Finish
 
-If chat credentials are available (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` set), send exactly ONE chat message via the Telegram Bot API (`curl`, `parse_mode=HTML`, `message_thread_id=$TG_THREAD_ID` unless empty), formatted per the MESSAGE FORMAT SPECIFICATION below — **Template 1** (Investigation report). Without chat credentials, your final printed answer IS the deliverable — same template, plain text. Then print `INVESTIGATE: <diagnosed|hypothesis|insufficient-data>`.
+{{DELIVERY_INSTRUCTIONS}}
+
+Format the answer per the MESSAGE FORMAT SPECIFICATION below — **Template 1** (Investigation report). Then print `INVESTIGATE: <diagnosed|hypothesis|insufficient-data>`.

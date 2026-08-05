@@ -1,7 +1,9 @@
 # Claude context — agent-ops-operator
 
 Go/controller-runtime Kubernetes operator (see README.md for the product view).
-Self-contained module — no dependencies outside this directory; keep it that way.
+Self-contained modules — no dependencies outside this directory; keep it that
+way. Two Go modules: the operator (root) and `channel-telegram/` (reference
+channel adapter, dependency-free).
 
 ## Terminology (binding)
 
@@ -9,12 +11,17 @@ Self-contained module — no dependencies outside this directory; keep it that w
   env `RUNTIME_*`, pkg `runtimepod`, pods `agentops-conv-<conversation>`.
 - `AgentProfile` = who the agent is; `AgentRuntime` = what executes it;
   `Conversation` = topic + session + serial input queue.
+- **Channel adapter** = out-of-process channel-type implementation consuming
+  `/channel/*` (ops long-poll + inbound push). `Channel.spec` = type-agnostic
+  metadata (`type`, `defaultProfileRef`, `delivery`) + opaque `config` that
+  only the serving adapter interprets. `status.threadId` is an opaque STRING.
 - API group `agentops.dev/v1alpha1` (provisional; rename possible pre-1.0).
 
 ## Build / test
 
 ```sh
 go build ./... && go vet ./...
+(cd channel-telegram && go build ./... && go vet ./...)
 # regen after editing api/v1alpha1/ (deepcopy + CRDs):
 go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 object paths=./api/...
 go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/... output:crd:artifacts:config=chart/files/crds
@@ -27,6 +34,7 @@ Images (bump the tag on every change — never overwrite a pushed tag):
 ```sh
 docker build --platform linux/amd64 -t <registry>/agentops-manager:<tag> .
 docker build --platform linux/amd64 -t <registry>/agentops-runtime-claude:<tag> ./runtime-claude/
+docker build --platform linux/amd64 -t <registry>/agentops-channel-telegram:<tag> ./channel-telegram/
 # then update the image refs (chart values for the manager, AgentRuntime CRs for
 # runtimes), helm upgrade, and verify with a live task:
 #   POST /task {"profile":"stub","task":"..."}   (stub runtime = no LLM cost)
@@ -36,12 +44,17 @@ docker build --platform linux/amd64 -t <registry>/agentops-runtime-claude:<tag> 
 
 ```
 api/v1alpha1/            CRD types (+ generated deepcopy); CRD YAML in chart/files/crds/
-cmd/manager/main.go      wiring: reconciler, httpapi, telegram poller, env config
+cmd/manager/main.go      wiring: reconciler, httpapi, chat registry/ops/router, env config
 internal/
-  controller/            Conversation reconciler: topic, MCP ConfigMap, runtime-pod
-                         pool (cap + idle eviction), ownerRef GC, input pruning
-  httpapi/               /work long-poll dispatch, /work/done, /task, /ingest/alertmanager
-  chat/                  Provider interface, Telegram impl, polling loop (leader-only)
+  controller/            Conversation reconciler: topic op enqueue (async), MCP
+                         ConfigMap, runtime-pod pool (cap + idle eviction),
+                         ownerRef GC, input pruning
+  httpapi/               /work long-poll dispatch, /work/done, /task,
+                         /ingest/alertmanager, /channel/* adapter contract
+                         (bearer auth via ADAPTER_TOKEN env)
+  chat/                  channel-type-agnostic core: Provider+Registry
+                         (in-process built-ins), OpQueue (outbound ops,
+                         at-least-once), Router (transport-neutral inbound)
   dispatch/              input → work-unit resolution + built-in lane templates
                          (templates/format.md = mandatory message format spec)
   ingest/                signature grouping, fingerprint cooldown
@@ -50,6 +63,8 @@ internal/
   addressing/            /<profile>[:<agent>] parsing
   integration/           envtest suite (real API server, fake chat, no kubelet)
 runtime-claude/          reference AgentRuntime (Node + claude-code) — /work contract
+channel-telegram/        reference channel adapter (own module, no deps) —
+                         /channel contract; getUpdates poller + Bot API live HERE
 chart/                   Helm chart: manager Deployment/RBAC/Service + CRDs as gated
                          templates (crds.enabled, crds.keep -> helm.sh/resource-policy:
                          keep so uninstall never cascade-deletes CRs); CRD source of
@@ -60,15 +75,20 @@ config/samples/          example CRs (the only config/ content — deployment-sp
 
 ## Invariants (do not break)
 
-- **The manager never reads agent secrets.** Everything secret-shaped compiles
-  to `valueFrom` in the runtime pod spec (the kubelet resolves it). The only
-  secret the manager reads is the Channel bot token — via `GetAPIReader()`
-  (uncached GET; the cached client would demand list/watch RBAC on all secrets).
+- **The manager reads NO secrets — zero Secret API reads.** Everything
+  secret-shaped compiles to `valueFrom` in pod specs (the kubelet resolves it);
+  transport credentials live in channel adapters; the adapter auth token
+  reaches the manager via env (`ADAPTER_TOKEN`). RBAC grants the manager no
+  `secrets` verbs at all — keep it that way.
 - **Strictly serial per conversation** (one inflight unit); parallelism is
   across conversations, capped by `MAX_RUNTIMES` with idle-runtime eviction.
 - **HTTP API is NOT leader-gated** (`NeedLeaderElection()=false`) — webhooks
-  must serve during rollouts. The **chat poller IS leader-only** (default
-  gating) — exactly one getUpdates consumer per bot token, ever.
+  must serve during rollouts. **Exactly one getUpdates consumer per bot token,
+  ever** — now the telegram ADAPTER's job: replicas 1 + strategy Recreate; the
+  manager itself has no poller.
+- **Channel ops are at-least-once.** `spec.config` is opaque to the operator —
+  never parse channel-type config manager-side; adapters validate their own
+  and report via the Channel Ready condition.
 - Runtime pods: ownerRef → Conversation (GC); repo checkout at
   **`/data/workspace`** (claude-code sessions are keyed by cwd — moving this
   path breaks session resume); `/data/workspace` and `/data/home` are mount
@@ -88,7 +108,8 @@ config/samples/          example CRs (the only config/ content — deployment-sp
   `pods/eviction` slash form — use `--subresource=eviction`.
 - Never run two getUpdates consumers against one Telegram bot token (409s and
   stolen updates) — when migrating from another system, stop its poller before
-  setting `pollingEnabled: true`.
+  setting `pollingEnabled: true` (now in Channel `spec.config`) / enabling the
+  telegram adapter.
 
 ## After changes
 

@@ -34,6 +34,11 @@ spec:
               value: {{ .Values.runtimeIdleTtlMinutes | quote }}
             - name: RUNTIME_SA
               value: {{ .Values.serviceAccounts.runtime | quote }}
+            - name: ADAPTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.adapterAuth.existingSecret | default .Values.adapterAuth.secretName }}
+                  key: token
             {{- if .Values.persistence.enabled }}
             - name: HOME_PVC
               value: {{ .Values.persistence.existingClaim | default .Values.persistence.name | quote }}

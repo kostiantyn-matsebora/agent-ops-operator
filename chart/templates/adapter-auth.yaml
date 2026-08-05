@@ -1,0 +1,21 @@
+{{- if not .Values.adapterAuth.existingSecret }}
+{{- /* Generate once, reuse across upgrades (lookup); under template-only
+       rendering (no cluster) a fresh token is generated — pin one with
+       adapterAuth.existingSecret for GitOps flows. */}}
+{{- $name := .Values.adapterAuth.secretName }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-manager
+type: Opaque
+data:
+  {{- if and $existing $existing.data $existing.data.token }}
+  token: {{ $existing.data.token }}
+  {{- else }}
+  token: {{ randAlphaNum 32 | b64enc }}
+  {{- end }}
+{{- end }}
