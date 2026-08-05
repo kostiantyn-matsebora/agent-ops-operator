@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentops-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentops-manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentops-manager
+    spec:
+      serviceAccountName: {{ .Values.serviceAccounts.manager }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: manager
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MAX_RUNTIMES
+              value: {{ .Values.maxRuntimes | quote }}
+            - name: RUNTIME_IDLE_TTL_M
+              value: {{ .Values.runtimeIdleTtlMinutes | quote }}
+            - name: RUNTIME_SA
+              value: {{ .Values.serviceAccounts.runtime | quote }}
+            {{- if .Values.persistence.enabled }}
+            - name: HOME_PVC
+              value: {{ .Values.persistence.existingClaim | default .Values.persistence.name | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          ports:
+            - containerPort: 8080
+            - containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+          resources:
+{{ toYaml .Values.resources | indent 12 }}

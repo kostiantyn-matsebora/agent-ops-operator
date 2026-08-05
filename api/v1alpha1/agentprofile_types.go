@@ -1,0 +1,121 @@
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// RepoAuthType selects the git auth mechanism.
+// +kubebuilder:validation:Enum=ssh;https
+type RepoAuthType string
+
+const (
+	RepoAuthSSH   RepoAuthType = "ssh"
+	RepoAuthHTTPS RepoAuthType = "https"
+)
+
+// RepoAuth references credentials for a (possibly private) git repository.
+type RepoAuth struct {
+	Type RepoAuthType `json:"type"`
+	// SecretRef points to a Secret holding either key `sshKey` (type=ssh,
+	// private deploy key) or key `token` (type=https, PAT; optional `username`).
+	SecretRef ObjectRef `json:"secretRef"`
+}
+
+// RepositorySpec identifies the git repository an agent runs from. The runtime
+// checks it out as its working directory, so the agent has access to the whole
+// repo (CLAUDE.md, .claude/agents, skills, any assets). Optional: without a
+// repository the agent runs as a pure advisor over its tools.
+type RepositorySpec struct {
+	// +optional
+	URL string `json:"url,omitempty"`
+	// Branch or ref to check out.
+	// +kubebuilder:default=main
+	// +optional
+	Ref string `json:"ref,omitempty"`
+	// +optional
+	Auth *RepoAuth `json:"auth,omitempty"`
+}
+
+// AgentProfileSpec is a self-contained, addressable agent definition:
+// repository + agent role + MCP config + credentials + limits.
+type AgentProfileSpec struct {
+	// +optional
+	Repository RepositorySpec `json:"repository,omitempty"`
+
+	// Agent is the default agent to adopt: name of `.claude/agents/<agent>.md`
+	// in the repository. May be overridden per task (`/<profile>:<agent>`).
+	// +optional
+	Agent string `json:"agent,omitempty"`
+
+	// Prompt / ReplyPrompt are repo-relative template paths (job-style lanes).
+	// When empty, the operator's built-in lane templates wrap the agent.
+	// +optional
+	Prompt string `json:"prompt,omitempty"`
+	// +optional
+	ReplyPrompt string `json:"replyPrompt,omitempty"`
+
+	// RuntimeRef selects the AgentRuntime (execution backend) for this
+	// profile. Falls back to the AgentRuntime named "default", then to the
+	// manager's bootstrap configuration.
+	// +optional
+	RuntimeRef *ObjectRef `json:"runtimeRef,omitempty"`
+
+	// MCP configuration (tri-form: inline / MCPConfig refs / raw ConfigMap or Secret).
+	// +optional
+	MCP *MCPSpec `json:"mcp,omitempty"`
+
+	// Env: extra environment for the agent process; values may use valueFrom
+	// (secretKeyRef / configMapKeyRef) for credentials the agent needs.
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// AllowedTools passed to the agent runtime.
+	// +optional
+	AllowedTools string `json:"allowedTools,omitempty"`
+	// +kubebuilder:default=60
+	// +optional
+	MaxTurns int32 `json:"maxTurns,omitempty"`
+
+	// Resources for the runtime pod running this profile.
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// AgentProfileStatus reports validation/resolution state.
+type AgentProfileStatus struct {
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// ObservedGeneration of the last processed spec.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=aprof
+// +kubebuilder:printcolumn:name="Repo",type=string,JSONPath=`.spec.repository.url`
+// +kubebuilder:printcolumn:name="Agent",type=string,JSONPath=`.spec.agent`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// AgentProfile is an addressable agent definition (repo + role + MCP + env).
+type AgentProfile struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   AgentProfileSpec   `json:"spec,omitempty"`
+	Status AgentProfileStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// AgentProfileList contains a list of AgentProfile.
+type AgentProfileList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []AgentProfile `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&AgentProfile{}, &AgentProfileList{})
+}

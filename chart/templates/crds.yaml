@@ -1,0 +1,18 @@
+{{- /*
+CRDs as gated templates (cert-manager pattern):
+  crds.enabled — install/upgrade CRDs with the release
+  crds.keep    — annotate with helm.sh/resource-policy: keep so `helm uninstall`
+                 leaves the CRDs (and therefore every CR) untouched
+*/ -}}
+{{- if .Values.crds.enabled }}
+{{- range $path, $_ := .Files.Glob "files/crds/*.yaml" }}
+{{- $crd := $.Files.Get $path | fromYaml }}
+{{- if $.Values.crds.keep }}
+{{- $meta := index $crd "metadata" }}
+{{- $ann := merge (dict "helm.sh/resource-policy" "keep") (index $meta "annotations" | default dict) }}
+{{- $_ := set $meta "annotations" $ann }}
+{{- end }}
+---
+{{ toYaml $crd }}
+{{- end }}
+{{- end }}

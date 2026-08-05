@@ -1,0 +1,95 @@
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// HomeVolume selects durable agent state storage for runtime pods.
+type HomeVolume struct {
+	// PVCRef mounts an existing (usually RWX) PVC at /data/home.
+	// +optional
+	PVCRef *ObjectRef `json:"pvcRef,omitempty"`
+	// EmptyDir (default when no pvcRef): session state dies with the pod.
+	// +optional
+	EmptyDir bool `json:"emptyDir,omitempty"`
+}
+
+// AgentRuntimeSpec defines HOW agents execute: the worker image implementing
+// the operator's work contract, and its pod-level defaults. Adopters bring
+// their own agent backend (claude-code, aider, custom) by supplying an image
+// that:
+//
+//  1. long-polls  GET  $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25
+//  2. executes the returned unit (promptText or promptFile+promptVars against
+//     the checked-out repository), streaming progress to STDOUT (pod logs)
+//  3. reports    POST $CONTROL_URL/work/done {convo,runId,status,sessionId,result}
+//  4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
+type AgentRuntimeSpec struct {
+	// +kubebuilder:validation:MinLength=1
+	Image string `json:"image"`
+	// Command/Args override the image entrypoint.
+	// +optional
+	Command []string `json:"command,omitempty"`
+	// +optional
+	Args []string `json:"args,omitempty"`
+	// Env: extra environment for every worker of this runtime.
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+	// ServiceAccountName is this runtime's security identity: its RBAC defines
+	// exactly what agents executing on this runtime may do in the cluster.
+	// Give each runtime with a different trust level its OWN ServiceAccount —
+	// runtimes sharing an SA share powers. Falls back to the operator's default
+	// runtime SA when empty.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// IdleTTLMinutes before an idle worker exits (respawned on demand).
+	// +kubebuilder:default=10
+	// +optional
+	IdleTTLMinutes int32 `json:"idleTtlMinutes,omitempty"`
+	// Home volume for durable agent session state.
+	// +optional
+	Home *HomeVolume `json:"home,omitempty"`
+	// Resources default for runtime pods (AgentProfile.resources overrides).
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// AgentRuntimeStatus reports validation state.
+type AgentRuntimeStatus struct {
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=wrt
+// +kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.spec.image`
+// +kubebuilder:printcolumn:name="TTL",type=integer,JSONPath=`.spec.idleTtlMinutes`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// AgentRuntime defines an executable agent backend (worker image + pod defaults).
+// AgentProfiles select one via spec.runtimeRef; the CR named "default" is the
+// namespace fallback.
+type AgentRuntime struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   AgentRuntimeSpec   `json:"spec,omitempty"`
+	Status AgentRuntimeStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// AgentRuntimeList contains a list of AgentRuntime.
+type AgentRuntimeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []AgentRuntime `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&AgentRuntime{}, &AgentRuntimeList{})
+}

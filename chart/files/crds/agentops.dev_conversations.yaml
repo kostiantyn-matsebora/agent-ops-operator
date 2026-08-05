@@ -1,0 +1,276 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: conversations.agentops.dev
+spec:
+  group: agentops.dev
+  names:
+    kind: Conversation
+    listKind: ConversationList
+    plural: conversations
+    shortNames:
+    - conv
+    singular: conversation
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.profileRef.name
+      name: Profile
+      type: string
+    - jsonPath: .status.threadId
+      name: Thread
+      type: integer
+    - jsonPath: .status.runtimePod
+      name: Runtime
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Conversation is one incident/task conversation: a chat topic, an agent
+          session, and a queue of work units executed strictly serially.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ConversationSpec pins a conversation to a channel topic and an agent profile,
+              and carries its queue of work units (append-only; pruned once processed).
+            properties:
+              channelRef:
+                description: ChannelRef — omit for chat-less conversations (HTTP-only
+                  / shadow).
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              inputs:
+                items:
+                  description: |-
+                    InputItem is one queued work unit. Payload is inline OR referenced via
+                    PayloadRef (a ConversationInput object) for large payloads.
+                  properties:
+                    agent:
+                      description: Agent override for task inputs (`/<profile>:<agent>`
+                        addressing).
+                      type: string
+                    id:
+                      minLength: 1
+                      type: string
+                    jobName:
+                      description: JobName for job inputs.
+                      type: string
+                    payload:
+                      type: string
+                    payloadRef:
+                      description: ObjectRef references another object by name (same
+                        namespace).
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    receivedAt:
+                      format: date-time
+                      type: string
+                    type:
+                      description: InputType classifies a work unit.
+                      enum:
+                      - task
+                      - alert
+                      - reply
+                      - recurrence
+                      - job
+                      type: string
+                  required:
+                  - id
+                  - type
+                  type: object
+                type: array
+              profileRef:
+                description: ObjectRef references another object by name (same namespace).
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              signature:
+                description: |-
+                  Signature groups same/similar problems into one conversation
+                  (e.g. alertgroup/alertname/namespace, job:<name>).
+                type: string
+              title:
+                type: string
+            required:
+            - profileRef
+            type: object
+          status:
+            description: ConversationStatus is the observed state.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              inflight:
+                description: InflightRun tracks the unit currently dispatched to the
+                  worker.
+                properties:
+                  dispatchedAt:
+                    format: date-time
+                    type: string
+                  inputIds:
+                    items:
+                      type: string
+                    type: array
+                  runId:
+                    type: string
+                required:
+                - runId
+                type: object
+              lastActivity:
+                format: date-time
+                type: string
+              phase:
+                description: ConversationPhase is the coarse conversation state.
+                enum:
+                - Idle
+                - Queued
+                - Working
+                type: string
+              processedInputIds:
+                description: IDs of processed inputs (bounded; used to prune spec.inputs).
+                items:
+                  type: string
+                type: array
+              runs:
+                description: Last runs, newest last (bounded).
+                items:
+                  description: RunStatus records one completed agent run.
+                  properties:
+                    exitCode:
+                      format: int32
+                      type: integer
+                    finishedAt:
+                      format: date-time
+                      type: string
+                    inputIds:
+                      items:
+                        type: string
+                      type: array
+                    jobKind:
+                      type: string
+                    result:
+                      type: string
+                    runId:
+                      type: string
+                    startedAt:
+                      format: date-time
+                      type: string
+                    status:
+                      type: string
+                  required:
+                  - runId
+                  - status
+                  type: object
+                type: array
+              runtimePod:
+                type: string
+              sessionId:
+                description: Agent session id (resume handle).
+                type: string
+              threadId:
+                description: Chat thread id (e.g. Telegram forum topic).
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
