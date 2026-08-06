@@ -59,16 +59,6 @@ spec:
               type-agnostic routing metadata plus an opaque per-type config that only the
               serving signal implementation interprets.
             properties:
-              channelRef:
-                description: ObjectRef references another object by name (same namespace).
-                properties:
-                  name:
-                    description: Name of the referenced object.
-                    minLength: 1
-                    type: string
-                required:
-                - name
-                type: object
               config:
                 description: |-
                   Config carries whatever the signal type needs; schema-less by design.
@@ -95,9 +85,9 @@ spec:
                 x-kubernetes-map-type: atomic
               grouping:
                 description: |-
-                  GroupingSpec controls signature-based conversation grouping and dedupe.
-                  This is deliberately typed, manager-side policy — it applies to every source
-                  type, built-in or adapter-fed; adapters only normalize signals.
+                  NOTE: the source carries NO wiring — which profile answers and which
+                  channels mirror is declared exclusively on a Pipeline that claims this
+                  source. Unclaimed sources drop signals (Wired=False condition).
                 properties:
                   cooldownHours:
                     default: 6
@@ -119,16 +109,6 @@ spec:
                     format: int32
                     type: integer
                 type: object
-              profileRef:
-                description: ObjectRef references another object by name (same namespace).
-                properties:
-                  name:
-                    description: Name of the referenced object.
-                    minLength: 1
-                    type: string
-                required:
-                - name
-                type: object
               type:
                 description: |-
                   Type names the signal implementation serving this source (e.g.
@@ -140,7 +120,6 @@ spec:
                 - message: spec.type is immutable
                   rule: self == oldSelf
             required:
-            - profileRef
             - type
             type: object
           status:

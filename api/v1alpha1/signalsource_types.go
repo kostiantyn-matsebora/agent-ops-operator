@@ -39,9 +39,9 @@ type SignalSourceSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.type is immutable"
 	Type string `json:"type"`
-	// +optional
-	ChannelRef *ObjectRef `json:"channelRef,omitempty"`
-	ProfileRef ObjectRef  `json:"profileRef"`
+	// NOTE: the source carries NO wiring — which profile answers and which
+	// channels mirror is declared exclusively on a Pipeline that claims this
+	// source. Unclaimed sources drop signals (Wired=False condition).
 	// +optional
 	Grouping GroupingSpec `json:"grouping,omitempty"`
 	// CredentialsSecretRef names the Secret holding this source's transport

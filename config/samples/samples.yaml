@@ -86,8 +86,8 @@ spec:
   # Secrets to run several bots through one adapter.
   credentialsSecretRef:
     name: agentops-telegram
-  defaultProfileRef:
-    name: ha-engineer
+  # NO wiring here: bare messages are answered by the profile of the Pipeline
+  # referencing this channel (home-ops-pipeline below)
   # opaque to the operator; the shape below is what channel-telegram parses
   config:
     chatId: "-1001234567890"
@@ -105,8 +105,9 @@ spec:
   #     Without credentials, your final printed answer IS the deliverable.
 ---
 # Built-in signal type: the manager itself hosts the Alertmanager webhook.
-# This CR is intentionally IDENTICAL to its pre-extensibility shape — the
-# compat proof that alertmanagerWebhook sources need no migration.
+# NO wiring here — which profile answers and which channels mirror comes from
+# the Pipeline claiming this source (home-ops-pipeline below); unclaimed
+# sources drop signals with Wired=False.
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource
 metadata:
@@ -114,10 +115,6 @@ metadata:
   namespace: agent-ops
 spec:
   type: alertmanagerWebhook
-  channelRef:
-    name: home-ops
-  profileRef:
-    name: ha-engineer
   grouping:
     signatureLabels: ["alertgroup", "alertname", "namespace"]
     windowDays: 7
@@ -163,10 +160,6 @@ metadata:
   namespace: agent-ops
 spec:
   type: cron
-  channelRef:
-    name: home-ops
-  profileRef:
-    name: ha-engineer
   config:
     schedule: "0 6 * * *"
     input: "Run the daily infrastructure health check: node pressure, failed pods, storage headroom. Report only what needs attention."

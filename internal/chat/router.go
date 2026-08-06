@@ -89,14 +89,12 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	return nil
 }
 
-// defaultProfile resolves the profile for bare messages: the channel's Ready
-// Pipeline's profile first, then the channel's own defaultProfileRef.
+// defaultProfile resolves the profile for bare messages — pipeline-only
+// wiring: the oldest Ready Pipeline referencing this channel supplies it;
+// channels in no pipeline have no default ("" → guidance message).
 func (r *Router) defaultProfile(ctx context.Context, ch *agentopsv1alpha1.Channel) string {
 	if p := PipelineForChannel(ctx, r.Client, r.Namespace, ch.Name); p != nil {
 		return p.Spec.ProfileRef.Name
-	}
-	if ch.Spec.DefaultProfileRef != nil {
-		return ch.Spec.DefaultProfileRef.Name
 	}
 	return ""
 }

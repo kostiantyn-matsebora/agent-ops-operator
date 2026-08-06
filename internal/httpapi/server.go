@@ -668,13 +668,16 @@ func (s *Server) handleAlertmanager(w http.ResponseWriter, r *http.Request) {
 		payloadJSON, _ := json.MarshalIndent(payloadDoc, "", "  ")
 		return string(payloadJSON)
 	}
-	queued, touched, err := s.routeSignals(ctx, &source, signals, combine)
+	queued, touched, reason, err := s.routeSignals(ctx, &source, signals, combine)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	if queued == 0 {
-		writeJSON(w, 200, map[string]any{"queued": 0, "reason": "all within cooldown"})
+		if reason == "" {
+			reason = "all within cooldown"
+		}
+		writeJSON(w, 200, map[string]any{"queued": 0, "reason": reason})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"queued": queued, "conversations": touched})

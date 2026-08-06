@@ -75,21 +75,11 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              defaultProfileRef:
-                description: DefaultProfileRef handles bare messages (no /profile
-                  prefix).
-                properties:
-                  name:
-                    description: Name of the referenced object.
-                    minLength: 1
-                    type: string
-                required:
-                - name
-                type: object
               delivery:
                 description: |-
-                  DeliverySpec is the type-agnostic hint for how dispatched prompts should
-                  instruct the agent to deliver its answer.
+                  NOTE: the channel carries NO wiring — bare messages are answered by the
+                  profile of the oldest Ready Pipeline referencing this channel; channels
+                  in no pipeline answer bare messages with guidance only.
                 properties:
                   agentInstructions:
                     description: |-

@@ -13,15 +13,18 @@ dependency-free.
 - `AgentProfile` = who the agent is; `AgentRuntime` = what executes it;
   `Conversation` = session + serial input queue + one thread PER bound channel
   (`spec.channelRefs[]` / `status.threads[]{channel,threadId}`).
-- **`Pipeline`** = the wiring: sources[] × channels[] + profile. Resolution is
-  PIPELINE-FIRST (Ready pipelines only), source/channel-level refs are the
-  fallback; one pipeline per source (older claimant wins), channels shareable.
+- **`Pipeline`** = THE wiring, exclusively: sources[] × channels[] + profile.
+  No other CR carries wiring (SignalSource has no profile/channel refs,
+  Channel has no default profile) — unclaimed sources DROP signals
+  (`Wired=False` + response reason), unwired channels answer bare messages
+  with guidance only. One pipeline per source (older claimant wins), channels
+  shareable, Ready pipelines only.
   Multi-channel conversations: manager fans replies/acks to every bound
   thread, relays user messages to sibling channels as attributed text, FORCES
   result delivery, and dispatches once ≥1 thread binding exists.
 - **Channel adapter** = out-of-process channel-type implementation consuming
   `/channel/*` (ops long-poll + inbound push). `Channel.spec` = type-agnostic
-  metadata (`type`, `defaultProfileRef`, `delivery`, `credentialsSecretRef`)
+  metadata (`type`, `delivery`, `credentialsSecretRef` — NO wiring)
   + opaque `config` that only the serving adapter interprets.
   `status.threadId` is an opaque STRING.
 - **`ChannelAdapter` CR** = pure implementation (`type` + `image`, never
