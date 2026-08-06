@@ -69,6 +69,16 @@ type WorkUnit struct {
 // PayloadResolver returns the payload for an input (inline or via ConversationInput).
 type PayloadResolver func(item agentopsv1alpha1.InputItem) (string, error)
 
+// singleThread returns the thread id handed to the runtime: only
+// single-channel conversations expose one (agent-direct delivery needs it);
+// multi-channel conversations are manager-distributed and get none.
+func singleThread(c *agentopsv1alpha1.Conversation) *string {
+	if len(c.Spec.ChannelRefs) == 1 {
+		return c.ThreadFor(c.Spec.ChannelRefs[0].Name)
+	}
+	return nil
+}
+
 func render(tpl string, vars map[string]string) string {
 	out := tpl
 	for k, v := range vars {
@@ -114,7 +124,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 	runID := now.UTC().Format("2006-01-02T15-04-05-000Z")
 	unit := WorkUnit{
 		Convo:        c.Name,
-		ThreadID:     c.Status.ThreadID,
+		ThreadID:     singleThread(c),
 		AllowedTools: profile.Spec.AllowedTools,
 		MaxTurns:     profile.Spec.MaxTurns,
 	}

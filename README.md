@@ -37,6 +37,7 @@ approvable from your phone.
 | `ChannelAdapter` | **What serves a channel type**: a container image implementing the adapter contract, plugged in as a CR — the reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
 | `SignalSource` | Ingest lane, split like `Channel`: **type-agnostic routing metadata** (open `type`, profile/channel refs, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. `alertmanagerWebhook` is built-in; everything else is adapter-served. |
 | `SignalAdapter` | **What serves a signal type**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR with the same posture (owned workload, zero-RBAC SA, singleton, derived type-scoped token, credential projection). A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
+| `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. Resolution is pipeline-first: sources/channels outside any pipeline keep their own refs unchanged. One pipeline per source (older claimant wins); channels are shareable. |
 | `MCPConfig` | Reusable MCP server sets, shareable across profiles; secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
 
 ## Behaviors that matter
@@ -102,6 +103,13 @@ Delivery of agent answers is channel-metadata-driven: by default the agent's
 printed answer is the deliverable (captured via `/work/done`); a channel may
 set `spec.delivery.mode: agent` plus `agentInstructions` to have the agent
 post to the chat surface itself (the Telegram sample does this).
+**Multi-channel conversations** (Pipeline-bound to several channels) always
+force the default result mode — the manager owns distribution and fans the
+result out to every bound thread; `agent` mode keeps its meaning only for
+single-channel conversations. A conversation dispatches once at least one of
+its topics exists (one broken channel never deadlocks it), and channel
+implementations must never re-ingest their own outbound posts as inbound
+(relayed messages would loop otherwise).
 
 ## The signal adapter contract
 
@@ -234,6 +242,25 @@ into the `channel-telegram` adapter. For a live install:
 
 Rollback = reverse order: disable the adapter, restore the previous chart
 version and Channel CR shape.
+
+## Migrating to chart 1.3 (Pipelines, multi-channel conversations) — BREAKING
+
+`Conversation.spec.channelRef`/`status.threadId` became `spec.channelRefs[]` /
+`status.threads[]` (`{channel, threadId}` per bound channel). Upgrading is
+behavior-neutral (no Pipeline CRs = single-channel flows unchanged), but
+existing chat-bound conversations lose their binding fields; to keep replying
+in their existing topics with session continuity, patch each one:
+
+```sh
+kubectl -n <ns> patch conversation <name> --type=merge \
+  -p '{"spec":{"channelRefs":[{"name":"<channel>"}]}}'
+kubectl -n <ns> patch conversation <name> --subresource=status --type=merge \
+  -p '{"status":{"threads":[{"channel":"<channel>","threadId":"<thread>"}]}}'
+```
+
+(Unmigrated topics still work — replying triggers re-adoption as a fresh
+conversation without the old session.) Mirroring is opt-in per Pipeline CR;
+deleting the Pipeline reverts new conversations to source-level routing.
 
 ## Migrating to chart 1.1 (ChannelAdapter CR)
 

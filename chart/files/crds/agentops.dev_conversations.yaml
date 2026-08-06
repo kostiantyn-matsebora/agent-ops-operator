@@ -23,7 +23,7 @@ spec:
     - jsonPath: .spec.profileRef.name
       name: Profile
       type: string
-    - jsonPath: .status.threadId
+    - jsonPath: .status.threads[0].threadId
       name: Thread
       type: string
     - jsonPath: .status.runtimePod
@@ -36,8 +36,9 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Conversation is one incident/task conversation: a chat topic, an agent
-          session, and a queue of work units executed strictly serially.
+          Conversation is one incident/task conversation: chat threads (one per bound
+          channel, all mirroring the same exchange), an agent session, and a queue of
+          work units executed strictly serially.
         properties:
           apiVersion:
             description: |-
@@ -58,20 +59,26 @@ spec:
             type: object
           spec:
             description: |-
-              ConversationSpec pins a conversation to a channel topic and an agent profile,
-              and carries its queue of work units (append-only; pruned once processed).
+              ConversationSpec pins a conversation to its chat surfaces and an agent
+              profile, and carries its queue of work units (append-only; pruned once
+              processed).
             properties:
-              channelRef:
-                description: ChannelRef — omit for chat-less conversations (HTTP-only
-                  / shadow).
-                properties:
-                  name:
-                    description: Name of the referenced object.
-                    minLength: 1
-                    type: string
-                required:
-                - name
-                type: object
+              channelRefs:
+                description: |-
+                  ChannelRefs — every listed channel mirrors the whole conversation (own
+                  thread per channel, replies and acks fanned out). Empty = chat-less
+                  (HTTP-only / shadow).
+                items:
+                  description: ObjectRef references another object by name (same namespace).
+                  properties:
+                    name:
+                      description: Name of the referenced object.
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
               inputs:
                 items:
                   description: |-
@@ -264,11 +271,26 @@ spec:
               sessionId:
                 description: Agent session id (resume handle).
                 type: string
-              threadId:
-                description: |-
-                  Chat thread id — an opaque string in the channel type's own id space
-                  (e.g. a Telegram forum topic id in decimal, a Slack ts).
-                type: string
+              threads:
+                description: 'Threads: one binding per bound channel whose topic has
+                  been created.'
+                items:
+                  description: ThreadBinding pins one bound channel to its conversation
+                    thread.
+                  properties:
+                    channel:
+                      description: Channel name (same namespace).
+                      type: string
+                    threadId:
+                      description: |-
+                        ThreadID — an opaque string in the channel type's own id space (e.g. a
+                        Telegram forum topic id in decimal, a Slack ts).
+                      type: string
+                  required:
+                  - channel
+                  - threadId
+                  type: object
+                type: array
             type: object
         type: object
     served: true

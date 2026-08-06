@@ -155,6 +155,17 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		if title == "" {
 			title = "🔍 " + source.Name
 		}
+		// routing binds pipeline-first: a source claimed by a Ready Pipeline
+		// fans into the pipeline's channels with the pipeline's profile;
+		// unclaimed sources keep their own refs (legacy single-channel path)
+		profileRef := source.Spec.ProfileRef
+		var channelRefs []agentopsv1alpha1.ObjectRef
+		if p := chat.PipelineForSource(ctx, s.Client, s.Namespace, source.Name); p != nil {
+			profileRef = p.Spec.ProfileRef
+			channelRefs = append(channelRefs, p.Spec.ChannelRefs...)
+		} else if source.Spec.ChannelRef != nil {
+			channelRefs = []agentopsv1alpha1.ObjectRef{*source.Spec.ChannelRef}
+		}
 		conv = &agentopsv1alpha1.Conversation{}
 		conv.Namespace = s.Namespace
 		conv.GenerateName = "alert-"
@@ -163,12 +174,10 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		}
 		conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
 		conv.Spec = agentopsv1alpha1.ConversationSpec{
-			ProfileRef: source.Spec.ProfileRef,
-			Title:      title,
-			Signature:  signature,
-		}
-		if source.Spec.ChannelRef != nil {
-			conv.Spec.ChannelRef = source.Spec.ChannelRef
+			ProfileRef:  profileRef,
+			ChannelRefs: channelRefs,
+			Title:       title,
+			Signature:   signature,
 		}
 		if err := s.Client.Create(ctx, conv); err != nil {
 			return err

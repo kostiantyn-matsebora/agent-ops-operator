@@ -4,11 +4,15 @@
 //	message inside a known thread  -> reply input on that conversation
 //	/agents | /help                -> AgentProfile listing
 //	/<profile>[:<agent>] <task>    -> new task conversation (own thread)
-//	plain text, no thread          -> channel's defaultProfileRef conversation
+//	plain text, no thread          -> default-profile conversation
 //	message in an unknown thread   -> adopted as a conversation in that thread
 //
+// Conversations are bound to a SET of channels (the originating channel's
+// Ready Pipeline's channels, or just the originating channel): every bound
+// channel mirrors the whole conversation — acks fan out to all of them and a
+// user message on one channel is relayed to the siblings as attributed text.
 // Transport-specific concerns (update parsing, offsets, approver filtering)
-// stay in the adapter. Acks flow back as send ops on the OpQueue.
+// stay in the adapter. Outbound flows back as send ops on the OpQueue.
 package chat
 
 import (
@@ -34,6 +38,9 @@ type InboundMessage struct {
 	// general surface.
 	ThreadID *string
 	Text     string
+	// Sender is an optional transport-side identity, used only for attribution
+	// when relaying to sibling channels.
+	Sender string
 }
 
 // Router turns inbound messages into Conversations and inputs.
@@ -44,7 +51,7 @@ type Router struct {
 	Ops       *OpQueue
 }
 
-// HandleMessage routes one inbound message for a channel.
+// HandleMessage routes one inbound message arriving on a channel.
 func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel, msg InboundMessage) error {
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
@@ -62,7 +69,8 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 			if busy {
 				ack = "⏳ Noted — I'll pick this up as soon as the current step finishes."
 			}
-			r.Ops.EnqueueSend(ctx, ch, msg.ThreadID, ack)
+			r.relayToSiblings(ctx, conv, ch.Name, msg.Sender, text)
+			r.FanOutSend(ctx, conv, ack)
 			return nil
 		}
 		// unknown thread: adopt as a conversation pinned to it
@@ -73,12 +81,44 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if cmd, ok := addressing.Parse(text); ok {
 		return r.handleCommand(ctx, ch, cmd)
 	}
-	if ch.Spec.DefaultProfileRef == nil {
-		r.Ops.EnqueueSend(ctx, ch, nil, "⚠️ No default profile on this channel — use /&lt;profile&gt; &lt;task&gt; (see /agents).")
-		return nil
+	if profile := r.defaultProfile(ctx, ch); profile != "" {
+		_, err := r.CreateTaskConversation(ctx, ch, profile, "", text)
+		return err
 	}
-	_, err := r.CreateTaskConversation(ctx, ch, ch.Spec.DefaultProfileRef.Name, "", text)
-	return err
+	r.Ops.EnqueueSend(ctx, ch, nil, "⚠️ No default profile on this channel — use /&lt;profile&gt; &lt;task&gt; (see /agents).")
+	return nil
+}
+
+// defaultProfile resolves the profile for bare messages: the channel's Ready
+// Pipeline's profile first, then the channel's own defaultProfileRef.
+func (r *Router) defaultProfile(ctx context.Context, ch *agentopsv1alpha1.Channel) string {
+	if p := PipelineForChannel(ctx, r.Client, r.Namespace, ch.Name); p != nil {
+		return p.Spec.ProfileRef.Name
+	}
+	if ch.Spec.DefaultProfileRef != nil {
+		return ch.Spec.DefaultProfileRef.Name
+	}
+	return ""
+}
+
+// boundChannels resolves the channel set a new conversation originating on ch
+// binds to: the channel's Ready Pipeline's channels (origin guaranteed
+// included), or just the origin.
+func (r *Router) boundChannels(ctx context.Context, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
+	if p := PipelineForChannel(ctx, r.Client, r.Namespace, ch.Name); p != nil {
+		refs := append([]agentopsv1alpha1.ObjectRef{}, p.Spec.ChannelRefs...)
+		found := false
+		for _, ref := range refs {
+			if ref.Name == ch.Name {
+				found = true
+			}
+		}
+		if !found {
+			refs = append(refs, agentopsv1alpha1.ObjectRef{Name: ch.Name})
+		}
+		return refs
+	}
+	return []agentopsv1alpha1.ObjectRef{{Name: ch.Name}}
 }
 
 func (r *Router) handleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command) error {
@@ -112,7 +152,8 @@ func (r *Router) handleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 	return err
 }
 
-// CreateTaskConversation starts a task conversation on a channel.
+// CreateTaskConversation starts a task conversation originating on a channel,
+// bound to the channel's resolved set (pipeline channels or just the origin).
 func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, agentOverride, task string) (*agentopsv1alpha1.Conversation, error) {
 	title := "🛠 " + strings.Join(strings.Fields(task), " ")
 	if agentOverride != "" || profile != "" {
@@ -125,9 +166,9 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 	conv.Namespace = r.Namespace
 	conv.GenerateName = "task-"
 	conv.Spec = agentopsv1alpha1.ConversationSpec{
-		ChannelRef: &agentopsv1alpha1.ObjectRef{Name: ch.Name},
-		ProfileRef: agentopsv1alpha1.ObjectRef{Name: profile},
-		Title:      title,
+		ChannelRefs: r.boundChannels(ctx, ch),
+		ProfileRef:  agentopsv1alpha1.ObjectRef{Name: profile},
+		Title:       title,
 		Inputs: []agentopsv1alpha1.InputItem{{
 			ID: newInputID(), Type: agentopsv1alpha1.InputTask,
 			Payload: task, Agent: agentOverride, ReceivedAt: metav1.Now(),
@@ -137,10 +178,13 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 }
 
 // adoptThread: user wrote in a thread we don't know — bind a new conversation
-// to it. Created without channelRef first so the controller can't race a topic
-// creation; the threadId lands via status patch, then the channel is attached.
+// to it. Created without channelRefs first so the controller can't race a
+// topic creation on the origin; the origin's thread binding lands via status
+// patch, then the full channel set is attached (sibling topics are ensured by
+// the controller from there).
 func (r *Router) adoptThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID, text string) error {
-	if ch.Spec.DefaultProfileRef == nil {
+	profile := r.defaultProfile(ctx, ch)
+	if profile == "" {
 		r.Ops.EnqueueSend(ctx, ch, &threadID, "⚠️ No default profile configured — I can't adopt this topic.")
 		return nil
 	}
@@ -148,7 +192,7 @@ func (r *Router) adoptThread(ctx context.Context, ch *agentopsv1alpha1.Channel, 
 	conv.Namespace = r.Namespace
 	conv.GenerateName = "adopted-"
 	conv.Spec = agentopsv1alpha1.ConversationSpec{
-		ProfileRef: agentopsv1alpha1.ObjectRef{Name: ch.Spec.DefaultProfileRef.Name},
+		ProfileRef: agentopsv1alpha1.ObjectRef{Name: profile},
 		Title:      "🛠 " + strings.Join(strings.Fields(text), " "),
 		Inputs: []agentopsv1alpha1.InputItem{{
 			ID: newInputID(), Type: agentopsv1alpha1.InputTask, Payload: text, ReceivedAt: metav1.Now(),
@@ -158,12 +202,12 @@ func (r *Router) adoptThread(ctx context.Context, ch *agentopsv1alpha1.Channel, 
 		return err
 	}
 	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.ThreadID = &threadID
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: ch.Name, ThreadID: threadID}}
 	if err := r.Client.Status().Patch(ctx, conv, patch); err != nil {
 		return err
 	}
 	spec := client.MergeFrom(conv.DeepCopy())
-	conv.Spec.ChannelRef = &agentopsv1alpha1.ObjectRef{Name: ch.Name}
+	conv.Spec.ChannelRefs = r.boundChannels(ctx, ch)
 	if err := r.Client.Patch(ctx, conv, spec); err != nil {
 		return err
 	}
@@ -171,8 +215,8 @@ func (r *Router) adoptThread(ctx context.Context, ch *agentopsv1alpha1.Channel, 
 	return nil
 }
 
-// convByThread resolves a thread id to its conversation, scoped to the channel
-// (a mid-adoption conversation may not carry its channelRef yet).
+// convByThread resolves a (channel, thread) pair to its conversation. Thread
+// ids are opaque strings scoped per channel — no cross-channel collisions.
 func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) *agentopsv1alpha1.Conversation {
 	var list agentopsv1alpha1.ConversationList
 	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace)); err != nil {
@@ -180,14 +224,57 @@ func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	}
 	for i := range list.Items {
 		c := &list.Items[i]
-		if c.Status.ThreadID == nil || *c.Status.ThreadID != threadID {
+		bound := c.ThreadFor(ch.Name)
+		if bound == nil || *bound != threadID {
 			continue
 		}
-		if c.Spec.ChannelRef == nil || c.Spec.ChannelRef.Name == ch.Name {
+		if len(c.Spec.ChannelRefs) == 0 || c.BoundTo(ch.Name) {
 			return c
 		}
 	}
 	return nil
+}
+
+// FanOutSend posts a message to every bound channel of a conversation, each in
+// its own thread (channels without a binding yet are skipped — their topic
+// catches up via reconciliation).
+func (r *Router) FanOutSend(ctx context.Context, conv *agentopsv1alpha1.Conversation, text string) {
+	for _, ref := range conv.Spec.ChannelRefs {
+		tid := conv.ThreadFor(ref.Name)
+		if tid == nil {
+			continue
+		}
+		var bound agentopsv1alpha1.Channel
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref.Name}, &bound); err != nil {
+			continue
+		}
+		r.Ops.EnqueueSend(ctx, &bound, tid, text)
+	}
+}
+
+// relayToSiblings mirrors a user message onto the conversation's other
+// channels as attributed text ("channels fully repeat the conversation").
+// Channel implementations must never re-ingest their own outbound posts.
+func (r *Router) relayToSiblings(ctx context.Context, conv *agentopsv1alpha1.Conversation, origin, sender, text string) {
+	who := origin
+	if sender != "" {
+		who = origin + "/" + sender
+	}
+	relay := "💬 <b>" + who + "</b>: " + text
+	for _, ref := range conv.Spec.ChannelRefs {
+		if ref.Name == origin {
+			continue
+		}
+		tid := conv.ThreadFor(ref.Name)
+		if tid == nil {
+			continue
+		}
+		var bound agentopsv1alpha1.Channel
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref.Name}, &bound); err != nil {
+			continue
+		}
+		r.Ops.EnqueueSend(ctx, &bound, tid, relay)
+	}
 }
 
 func (r *Router) appendInput(ctx context.Context, conv *agentopsv1alpha1.Conversation, item agentopsv1alpha1.InputItem) error {

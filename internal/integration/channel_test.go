@@ -81,7 +81,7 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	var conv *agentopsv1alpha1.Conversation
 	for i := range list.Items {
 		c := &list.Items[i]
-		if c.Spec.ChannelRef != nil && c.Spec.ChannelRef.Name == "chan-inb" {
+		if c.BoundTo("chan-inb") {
 			conv = c
 		}
 	}
@@ -120,7 +120,7 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Name, conv.Namespace = "topic-1", ns
 	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-topic"}
-	conv.Spec.ChannelRef = &agentopsv1alpha1.ObjectRef{Name: "chan-topic"}
+	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "chan-topic"}}
 	conv.Spec.Title = "needs a topic"
 	conv.Spec.Inputs = []agentopsv1alpha1.InputItem{{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "do"}}
 	if err := k8sClient.Create(ctx, conv); err != nil {
@@ -156,8 +156,8 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	}
 	var after agentopsv1alpha1.Conversation
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "topic-1"}, &after)
-	if after.Status.ThreadID == nil || *after.Status.ThreadID != "1712345678.000200" {
-		t.Fatalf("threadId not landed: %+v", after.Status)
+	if tid := after.ThreadFor("chan-topic"); tid == nil || *tid != "1712345678.000200" {
+		t.Fatalf("thread binding not landed: %+v", after.Status)
 	}
 
 	// duplicate completion is tolerated
@@ -167,8 +167,8 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 		t.Fatalf("duplicate done: %d", rec.Code)
 	}
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "topic-1"}, &after)
-	if *after.Status.ThreadID != "1712345678.000200" {
-		t.Fatalf("duplicate done overwrote threadId: %v", *after.Status.ThreadID)
+	if tid := after.ThreadFor("chan-topic"); *tid != "1712345678.000200" {
+		t.Fatalf("duplicate done overwrote thread binding: %v", *tid)
 	}
 
 	// gate lifted — the unit dispatches with the string thread id
@@ -203,13 +203,12 @@ func TestThreadedReplyQueuesInputWithBusyAck(t *testing.T) {
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Name, conv.Namespace = "reply-1", ns
 	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-reply"}
-	conv.Spec.ChannelRef = &agentopsv1alpha1.ObjectRef{Name: "chan-reply"}
+	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "chan-reply"}}
 	if err := k8sClient.Create(ctx, conv); err != nil {
 		t.Fatal(err)
 	}
-	tid := "4242"
 	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.ThreadID = &tid
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "chan-reply", ThreadID: "4242"}}
 	conv.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r1", InputIDs: []string{"x"}}
 	if err := k8sClient.Status().Patch(ctx, conv, patch); err != nil {
 		t.Fatal(err)

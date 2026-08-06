@@ -63,16 +63,17 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	// chat topic: enqueue asynchronously; the thread id lands via op completion
-	// (status patch), which re-triggers reconciliation. Requeue as a fallback —
-	// the op id is stable per conversation, so re-enqueues dedup.
+	// chat topics: enqueue asynchronously, one ensure-topic per bound channel
+	// still missing its thread binding; ids land via op completion (status
+	// patch), which re-triggers reconciliation. Requeue as a fallback — op ids
+	// are stable per conversation×channel, so re-enqueues dedup.
 	topicPending := false
-	if conv.Spec.ChannelRef != nil && conv.Status.ThreadID == nil && r.Ops != nil {
-		if err := r.ensureTopic(ctx, &conv); err != nil {
-			logger.Error(err, "ensureTopic enqueue (continuing chat-less)")
-		} else {
-			topicPending = true
+	if r.Ops != nil {
+		pending, err := r.ensureTopics(ctx, &conv)
+		if err != nil {
+			logger.Error(err, "ensureTopics enqueue (continuing chat-less)")
 		}
+		topicPending = pending
 	}
 
 	// input pruning: drop processed inputs from spec, GC consumed payload objects
@@ -144,16 +145,30 @@ func (r *ConversationReconciler) setPhase(ctx context.Context, conv *agentopsv1a
 	return r.Status().Patch(ctx, conv, patch)
 }
 
-func (r *ConversationReconciler) ensureTopic(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	var ch agentopsv1alpha1.Channel
-	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Spec.ChannelRef.Name}, &ch); err != nil {
-		return err
+// ensureTopics enqueues topic creation for every bound channel lacking a
+// thread binding; reports whether any are still pending. Dangling channelRefs
+// are skipped (that channel stays chat-less) without blocking the others.
+func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentopsv1alpha1.Conversation) (bool, error) {
+	pending := false
+	var firstErr error
+	for _, ref := range conv.Spec.ChannelRefs {
+		if conv.ThreadFor(ref.Name) != nil {
+			continue
+		}
+		var ch agentopsv1alpha1.Channel
+		if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if ch.Spec.Type == "" {
+			continue
+		}
+		r.Ops.EnqueueEnsureTopic(ctx, &ch, conv)
+		pending = true
 	}
-	if ch.Spec.Type == "" {
-		return nil
-	}
-	r.Ops.EnqueueEnsureTopic(ctx, &ch, conv)
-	return nil
+	return pending, firstErr
 }
 
 func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
