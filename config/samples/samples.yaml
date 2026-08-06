@@ -123,6 +123,25 @@ spec:
     windowDays: 7
     cooldownHours: 6
 ---
+# Pipeline: the wiring object — every referenced source's signals become
+# conversations bound to ALL referenced channels (each channel mirrors the
+# whole conversation: threads everywhere, replies fanned out by the manager,
+# user messages relayed to sibling surfaces). A source belongs to at most one
+# pipeline; sources/channels outside any pipeline keep their own refs.
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: home-ops-pipeline
+  namespace: agent-ops
+spec:
+  signalSourceRefs:
+    - name: alertmanager
+    - name: daily-healthcheck
+  channelRefs:
+    - name: home-ops
+  profileRef:
+    name: ha-engineer
+---
 # SignalAdapter: plugs the signal type "cron" in as a CR — the reconciler
 # deploys and owns the adapter workload. One active adapter per type.
 apiVersion: agentops.dev/v1alpha1

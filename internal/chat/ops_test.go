@@ -29,7 +29,7 @@ func TestEnsureTopicDedupsByConversation(t *testing.T) {
 	ch := testChannel("c1", "slack")
 	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"))
 	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1")) // reconcile-driven repeat
-	if op := q.Claim("slack"); op == nil || op.ID != "topic:conv-1" || op.Kind != OpEnsureTopic {
+	if op := q.Claim("slack"); op == nil || op.ID != "topic:conv-1:c1" || op.Kind != OpEnsureTopic {
 		t.Fatalf("first claim: %+v", op)
 	}
 	if op := q.Claim("slack"); op != nil {

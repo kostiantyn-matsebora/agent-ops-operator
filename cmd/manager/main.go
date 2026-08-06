@@ -127,6 +127,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Pipeline wiring: validation-only reconciler; routing reads Ready
+	// pipelines at decision time (pipeline-first, source-level fallback).
+	if err := (&controller.PipelineReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "pipeline controller")
+		os.Exit(1)
+	}
+
 	reconciler := &controller.ConversationReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),

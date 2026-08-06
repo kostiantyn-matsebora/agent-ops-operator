@@ -36,13 +36,16 @@ type InputItem struct {
 	ReceivedAt metav1.Time `json:"receivedAt,omitempty"`
 }
 
-// ConversationSpec pins a conversation to a channel topic and an agent profile,
-// and carries its queue of work units (append-only; pruned once processed).
+// ConversationSpec pins a conversation to its chat surfaces and an agent
+// profile, and carries its queue of work units (append-only; pruned once
+// processed).
 type ConversationSpec struct {
-	// ChannelRef — omit for chat-less conversations (HTTP-only / shadow).
+	// ChannelRefs — every listed channel mirrors the whole conversation (own
+	// thread per channel, replies and acks fanned out). Empty = chat-less
+	// (HTTP-only / shadow).
 	// +optional
-	ChannelRef *ObjectRef `json:"channelRef,omitempty"`
-	ProfileRef ObjectRef  `json:"profileRef"`
+	ChannelRefs []ObjectRef `json:"channelRefs,omitempty"`
+	ProfileRef  ObjectRef   `json:"profileRef"`
 	// +optional
 	Title string `json:"title,omitempty"`
 	// Signature groups same/similar problems into one conversation
@@ -89,14 +92,22 @@ type InflightRun struct {
 	DispatchedAt metav1.Time `json:"dispatchedAt,omitempty"`
 }
 
+// ThreadBinding pins one bound channel to its conversation thread.
+type ThreadBinding struct {
+	// Channel name (same namespace).
+	Channel string `json:"channel"`
+	// ThreadID — an opaque string in the channel type's own id space (e.g. a
+	// Telegram forum topic id in decimal, a Slack ts).
+	ThreadID string `json:"threadId"`
+}
+
 // ConversationStatus is the observed state.
 type ConversationStatus struct {
 	// +optional
 	Phase ConversationPhase `json:"phase,omitempty"`
-	// Chat thread id — an opaque string in the channel type's own id space
-	// (e.g. a Telegram forum topic id in decimal, a Slack ts).
+	// Threads: one binding per bound channel whose topic has been created.
 	// +optional
-	ThreadID *string `json:"threadId,omitempty"`
+	Threads []ThreadBinding `json:"threads,omitempty"`
 	// Agent session id (resume handle).
 	// +optional
 	SessionID string `json:"sessionId,omitempty"`
@@ -121,18 +132,39 @@ type ConversationStatus struct {
 // +kubebuilder:resource:shortName=conv
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profileRef.name`
-// +kubebuilder:printcolumn:name="Thread",type=string,JSONPath=`.status.threadId`
+// +kubebuilder:printcolumn:name="Thread",type=string,JSONPath=`.status.threads[0].threadId`
 // +kubebuilder:printcolumn:name="Runtime",type=string,JSONPath=`.status.runtimePod`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// Conversation is one incident/task conversation: a chat topic, an agent
-// session, and a queue of work units executed strictly serially.
+// Conversation is one incident/task conversation: chat threads (one per bound
+// channel, all mirroring the same exchange), an agent session, and a queue of
+// work units executed strictly serially.
 type Conversation struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   ConversationSpec   `json:"spec,omitempty"`
 	Status ConversationStatus `json:"status,omitempty"`
+}
+
+// ThreadFor returns the thread id bound for a channel, or nil.
+func (c *Conversation) ThreadFor(channel string) *string {
+	for i := range c.Status.Threads {
+		if c.Status.Threads[i].Channel == channel {
+			return &c.Status.Threads[i].ThreadID
+		}
+	}
+	return nil
+}
+
+// BoundTo reports whether the conversation references a channel.
+func (c *Conversation) BoundTo(channel string) bool {
+	for i := range c.Spec.ChannelRefs {
+		if c.Spec.ChannelRefs[i].Name == channel {
+			return true
+		}
+	}
+	return false
 }
 
 // +kubebuilder:object:root=true

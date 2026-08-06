@@ -81,9 +81,10 @@ func (q *OpQueue) init() {
 	}
 }
 
-// EnqueueEnsureTopic queues topic creation for a conversation. The id is
-// stable per conversation so reconcile-driven re-enqueues dedup while one is
-// pending and after completion.
+// EnqueueEnsureTopic queues topic creation for a conversation on ONE of its
+// bound channels. The id is stable per conversation×channel so
+// reconcile-driven re-enqueues dedup while one is pending and after
+// completion.
 func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.Channel, conv *agentopsv1alpha1.Conversation) {
 	title := conv.Spec.Title
 	if title == "" {
@@ -91,7 +92,7 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 	}
 	// ':' keeps the id a single URL path segment for /channel/ops/{id}/done
 	q.enqueue(ctx, &Op{
-		ID: "topic:" + conv.Name, Channel: ch.Name, Conversation: conv.Name,
+		ID: "topic:" + conv.Name + ":" + ch.Name, Channel: ch.Name, Conversation: conv.Name,
 		Kind: OpEnsureTopic, Title: title, channelType: ch.Spec.Type,
 	})
 }
@@ -220,17 +221,20 @@ func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) e
 		return client.IgnoreNotFound(err)
 	}
 	patch := client.MergeFrom(conv.DeepCopy())
-	cond := metav1.Condition{Type: ConditionTopicReady, Status: metav1.ConditionTrue, Reason: "TopicCreated"}
+	cond := metav1.Condition{Type: ConditionTopicReady, Status: metav1.ConditionTrue, Reason: "TopicCreated",
+		Message: "channel " + op.Channel}
 	if res.Error != "" {
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "AdapterError"
-		cond.Message = res.Error
+		cond.Message = "channel " + op.Channel + ": " + res.Error
 	} else if res.ThreadID == "" {
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "AdapterError"
-		cond.Message = "adapter completed ensure-topic without a thread id"
-	} else {
-		conv.Status.ThreadID = &res.ThreadID
+		cond.Message = "channel " + op.Channel + ": adapter completed ensure-topic without a thread id"
+	} else if conv.ThreadFor(op.Channel) == nil {
+		conv.Status.Threads = append(conv.Status.Threads, agentopsv1alpha1.ThreadBinding{
+			Channel: op.Channel, ThreadID: res.ThreadID,
+		})
 	}
 	apimeta.SetStatusCondition(&conv.Status.Conditions, cond)
 	if err := q.Client.Status().Patch(ctx, &conv, patch); err != nil {

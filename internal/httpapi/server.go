@@ -172,19 +172,26 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 		return dispatch.WorkUnit{}, false, err
 	}
 	// channel metadata: delivery instructions, and the pending-topic gate — a
-	// channel-bound conversation waits for its thread id before its first unit
-	// is dispatched (inputs stay queued; the ensure-topic op completion
-	// re-frees it). Dangling channelRefs stay chat-less.
+	// channel-bound conversation waits until AT LEAST ONE thread binding
+	// exists before its first unit dispatches (waiting for all would deadlock
+	// on one broken channel; late topics catch up). Dangling channelRefs stay
+	// chat-less. Multi-channel conversations force result delivery — the
+	// manager owns distribution on mirrored conversations.
 	var delivery dispatch.Delivery
-	if conv.Spec.ChannelRef != nil {
-		var ch agentopsv1alpha1.Channel
-		if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ChannelRef.Name}, &ch); err == nil {
-			if ch.Spec.Type != "" && conv.Status.ThreadID == nil {
-				return dispatch.WorkUnit{}, false, nil
+	if len(conv.Spec.ChannelRefs) > 0 {
+		chatBound := false
+		for _, ref := range conv.Spec.ChannelRefs {
+			var ch agentopsv1alpha1.Channel
+			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ch); err != nil || ch.Spec.Type == "" {
+				continue
 			}
-			if ch.Spec.Delivery != nil {
+			chatBound = true
+			if len(conv.Spec.ChannelRefs) == 1 && ch.Spec.Delivery != nil {
 				delivery = dispatch.Delivery{Mode: string(ch.Spec.Delivery.Mode), AgentInstructions: ch.Spec.Delivery.AgentInstructions}
 			}
+		}
+		if chatBound && len(conv.Status.Threads) == 0 {
+			return dispatch.WorkUnit{}, false, nil
 		}
 	}
 	var profile agentopsv1alpha1.AgentProfile
@@ -263,6 +270,17 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	// multi-channel conversations: the manager fans the reply out to every
+	// bound thread (mirrored surfaces never mistake silence for success)
+	if len(conv.Spec.ChannelRefs) > 1 && s.Router != nil {
+		text := strings.TrimSpace(result)
+		if d.Status != "succeeded" {
+			text = "❌ run failed (" + d.Status + ")"
+		} else if text == "" {
+			text = "❌ run finished without output"
+		}
+		s.Router.FanOutSend(ctx, &conv, text)
+	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -280,7 +298,10 @@ type taskReq struct {
 	Agent   string `json:"agent,omitempty"`
 	Task    string `json:"task"`
 	Channel string `json:"channel,omitempty"`
-	Title   string `json:"title,omitempty"`
+	// Pipeline binds the conversation to the named Pipeline's channel set
+	// (mirrored surfaces). Mutually additive with Channel.
+	Pipeline string `json:"pipeline,omitempty"`
+	Title    string `json:"title,omitempty"`
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
@@ -314,8 +335,24 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 			Payload: t.Task, Agent: t.Agent, ReceivedAt: metav1.Now(),
 		}},
 	}
+	if t.Pipeline != "" {
+		var p agentopsv1alpha1.Pipeline
+		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: t.Pipeline}, &p); err != nil {
+			writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown pipeline %q", t.Pipeline)})
+			return
+		}
+		conv.Spec.ChannelRefs = append(conv.Spec.ChannelRefs, p.Spec.ChannelRefs...)
+	}
 	if t.Channel != "" {
-		conv.Spec.ChannelRef = &agentopsv1alpha1.ObjectRef{Name: t.Channel}
+		already := false
+		for _, ref := range conv.Spec.ChannelRefs {
+			if ref.Name == t.Channel {
+				already = true
+			}
+		}
+		if !already {
+			conv.Spec.ChannelRefs = append(conv.Spec.ChannelRefs, agentopsv1alpha1.ObjectRef{Name: t.Channel})
+		}
 	}
 	if err := s.Client.Create(ctx, conv); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -440,7 +477,7 @@ func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 		forbidScope(w)
 		return
 	}
-	if err := s.Router.HandleMessage(ctx, &ch, chat.InboundMessage{ThreadID: in.ThreadID, Text: in.Text}); err != nil {
+	if err := s.Router.HandleMessage(ctx, &ch, chat.InboundMessage{ThreadID: in.ThreadID, Text: in.Text, Sender: in.Sender}); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}

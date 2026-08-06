@@ -11,7 +11,14 @@ dependency-free.
 - **Agent runtime**, never "worker": CRD `AgentRuntime`, SA `agentops-runtime`,
   env `RUNTIME_*`, pkg `runtimepod`, pods `agentops-conv-<conversation>`.
 - `AgentProfile` = who the agent is; `AgentRuntime` = what executes it;
-  `Conversation` = topic + session + serial input queue.
+  `Conversation` = session + serial input queue + one thread PER bound channel
+  (`spec.channelRefs[]` / `status.threads[]{channel,threadId}`).
+- **`Pipeline`** = the wiring: sources[] × channels[] + profile. Resolution is
+  PIPELINE-FIRST (Ready pipelines only), source/channel-level refs are the
+  fallback; one pipeline per source (older claimant wins), channels shareable.
+  Multi-channel conversations: manager fans replies/acks to every bound
+  thread, relays user messages to sibling channels as attributed text, FORCES
+  result delivery, and dispatches once ≥1 thread binding exists.
 - **Channel adapter** = out-of-process channel-type implementation consuming
   `/channel/*` (ops long-poll + inbound push). `Channel.spec` = type-agnostic
   metadata (`type`, `defaultProfileRef`, `delivery`, `credentialsSecretRef`)
@@ -68,7 +75,8 @@ internal/
                          SignalAdapter reconcilers on shared workload machinery
                          (adapterworkload.go: ownership, credential projection,
                          type-conflict guard); Channel + SignalSource
-                         reconcilers (Served condition)
+                         reconcilers (Served condition); Pipeline reconciler
+                         (wiring validation, source-conflict guard)
   httpapi/               /work long-poll dispatch, /work/done, /task,
                          /ingest/alertmanager, /channel/* adapter contract
                          (bearer auth via ADAPTER_TOKEN env)
@@ -118,6 +126,9 @@ config/samples/          example CRs (the only config/ content — deployment-sp
 - **Channel ops are at-least-once.** `spec.config` is opaque to the operator —
   never parse channel-type config manager-side; adapters validate their own
   and report via the Channel Ready condition.
+- **No relay loops**: channel implementations (adapters AND in-process
+  providers) must never re-ingest their own outbound posts as inbound —
+  cross-channel relay depends on it.
 - Runtime pods: ownerRef → Conversation (GC); repo checkout at
   **`/data/workspace`** (claude-code sessions are keyed by cwd — moving this
   path breaks session resume); `/data/workspace` and `/data/home` are mount
