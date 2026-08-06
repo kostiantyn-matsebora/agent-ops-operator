@@ -67,10 +67,10 @@ type OpQueue struct {
 	Registry  *Registry
 
 	mu     sync.Mutex
-	ops    map[string]*Op   // by id, queued + claimed
+	ops    map[string]*Op      // by id, queued + claimed
 	order  map[string][]string // channel type -> queued op ids, FIFO
-	recent map[string]bool  // completed ids (dedup window)
-	ring   []string         // eviction order for recent
+	recent map[string]bool     // completed ids (dedup window)
+	ring   []string            // eviction order for recent
 }
 
 func (q *OpQueue) init() {

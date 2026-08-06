@@ -2,8 +2,9 @@
 
 Go/controller-runtime Kubernetes operator (see README.md for the product view).
 Self-contained modules — no dependencies outside this directory; keep it that
-way. Two Go modules: the operator (root) and `channel-telegram/` (reference
-channel adapter, dependency-free).
+way. Three Go modules: the operator (root), `channel-telegram/` (reference
+channel adapter), and `signal-cron/` (reference signal adapter) — the adapters
+dependency-free.
 
 ## Terminology (binding)
 
@@ -21,6 +22,14 @@ channel adapter, dependency-free).
   per-surface on `Channel.credentialsSecretRef`, projected into the adapter
   pod as `envFrom` with prefix `AGENTOPS_CRED_<CHANNEL>_` (kubelet-resolved;
   the contract's channel listing advertises `credentialEnvPrefix`).
+- **`SignalAdapter` CR / signal adapter** = same pattern for ingest, but
+  inbound-only (no ops queue): adapters push normalized signals
+  (`fingerprint`, `labels`, `title?`, `payload`, `kind: alert|job`) to
+  `/signal/inbound`; grouping/cooldown/recurrence stay MANAGER-side from
+  `SignalSource.spec.grouping` — adapters normalize, the manager groups.
+  Workload names `agentops-signal-<name>`; token derivation context
+  `signal-adapter:<name>` (never interchangeable with channel tokens).
+  `alertmanagerWebhook` is the one built-in signal type.
 - API group `agentops.dev/v1alpha1` (provisional; rename possible pre-1.0).
 
 ## Build / test
@@ -41,6 +50,7 @@ Images (bump the tag on every change — never overwrite a pushed tag):
 docker build --platform linux/amd64 -t <registry>/agentops-manager:<tag> .
 docker build --platform linux/amd64 -t <registry>/agentops-runtime-claude:<tag> ./runtime-claude/
 docker build --platform linux/amd64 -t <registry>/agentops-channel-telegram:<tag> ./channel-telegram/
+docker build --platform linux/amd64 -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
 # then update the image refs (chart values for the manager, AgentRuntime CRs for
 # runtimes), helm upgrade, and verify with a live task:
 #   POST /task {"profile":"stub","task":"..."}   (stub runtime = no LLM cost)
@@ -54,9 +64,11 @@ cmd/manager/main.go      wiring: reconciler, httpapi, chat registry/ops/router, 
 internal/
   controller/            Conversation reconciler: topic op enqueue (async), MCP
                          ConfigMap, runtime-pod pool (cap + idle eviction),
-                         ownerRef GC, input pruning; ChannelAdapter reconciler
-                         (adapter Deployment ownership, credential projection,
-                         type-conflict guard); Channel reconciler (Served cond)
+                         ownerRef GC, input pruning; ChannelAdapter +
+                         SignalAdapter reconcilers on shared workload machinery
+                         (adapterworkload.go: ownership, credential projection,
+                         type-conflict guard); Channel + SignalSource
+                         reconcilers (Served condition)
   httpapi/               /work long-poll dispatch, /work/done, /task,
                          /ingest/alertmanager, /channel/* adapter contract
                          (bearer auth via ADAPTER_TOKEN env)
@@ -73,6 +85,8 @@ internal/
 runtime-claude/          reference AgentRuntime (Node + claude-code) — /work contract
 channel-telegram/        reference channel adapter (own module, no deps) —
                          /channel contract; getUpdates poller + Bot API live HERE
+signal-cron/             reference signal adapter (own module, no deps) —
+                         /signal contract; five-field cron parser + scheduler
 chart/                   Helm chart: manager Deployment/RBAC/Service + CRDs as gated
                          templates (crds.enabled, crds.keep -> helm.sh/resource-policy:
                          keep so uninstall never cascade-deletes CRs); CRD source of
