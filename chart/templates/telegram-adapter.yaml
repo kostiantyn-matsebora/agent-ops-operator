@@ -1,46 +1,21 @@
 {{- if .Values.telegramAdapter.enabled }}
-# Telegram reference adapter. getUpdates allows exactly one consumer per bot
-# token — replicas MUST stay 1 and the strategy Recreate so a rollout never
-# runs two pollers side by side.
-apiVersion: apps/v1
-kind: Deployment
+# Telegram reference adapter, plugged in as a ChannelAdapter CR — the operator's
+# reconciler owns the workload (replicas 1 + Recreate via singleton: getUpdates
+# allows exactly one consumer per bot token), injects the contract URL plus a
+# per-adapter derived token, and projects each served Channel's
+# credentialsSecretRef into the pod. The chart ships no channel-type-specific
+# workload templates.
+apiVersion: agentops.dev/v1alpha1
+kind: ChannelAdapter
 metadata:
-  name: agentops-channel-telegram
+  name: telegram
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-channel-telegram
 spec:
-  replicas: 1
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: agentops-channel-telegram
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: agentops-channel-telegram
-    spec:
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-{{ toYaml . | indent 8 }}
-      {{- end }}
-      containers:
-        - name: adapter
-          image: "{{ .Values.telegramAdapter.image.repository }}:{{ .Values.telegramAdapter.image.tag }}"
-          env:
-            - name: MANAGER_URL
-              value: "http://agentops-manager.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.apiPort }}"
-            - name: ADAPTER_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.adapterAuth.existingSecret | default .Values.adapterAuth.secretName }}
-                  key: token
-            - name: TELEGRAM_BOT_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.telegramAdapter.botTokenSecret.name }}
-                  key: {{ .Values.telegramAdapter.botTokenSecret.key }}
-          resources:
-{{ toYaml .Values.telegramAdapter.resources | indent 12 }}
+  type: telegram
+  image: "{{ .Values.telegramAdapter.image.repository }}:{{ .Values.telegramAdapter.image.tag }}"
+  singleton: true
+  resources:
+{{ toYaml .Values.telegramAdapter.resources | indent 4 }}
 {{- end }}

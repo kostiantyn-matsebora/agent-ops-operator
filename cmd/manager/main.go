@@ -87,6 +87,27 @@ func main() {
 	registry := chat.NewRegistry()
 	ops := &chat.OpQueue{Client: mgr.GetClient(), Namespace: namespace, Registry: registry}
 	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: namespace, Ops: ops}
+	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080")
+
+	// ChannelAdapter lifecycle: adapters are plugged in as CRs; the reconciler
+	// owns their Deployments (zero-RBAC SA, derived contract token, projected
+	// per-channel credentials — all kubelet-resolved, zero Secret API reads).
+	if err := (&controller.ChannelAdapterReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		ManagerURL:  controlURL,
+		MasterToken: os.Getenv("ADAPTER_TOKEN"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "channeladapter controller")
+		os.Exit(1)
+	}
+	if err := (&controller.ChannelReconciler{
+		Client:   mgr.GetClient(),
+		Registry: registry,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "channel controller")
+		os.Exit(1)
+	}
 
 	reconciler := &controller.ConversationReconciler{
 		Client:      mgr.GetClient(),

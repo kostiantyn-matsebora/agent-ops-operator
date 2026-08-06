@@ -39,9 +39,13 @@ type Op struct {
 }
 
 // ChannelInfo is one channel served by this adapter, with its opaque config.
+// CredentialEnvPrefix (set when the Channel declares credentialsSecretRef)
+// locates the channel's projected credentials in this process's environment:
+// Secret key K is available as env <prefix>K.
 type ChannelInfo struct {
-	Name   string          `json:"name"`
-	Config json.RawMessage `json:"config,omitempty"`
+	Name                string          `json:"name"`
+	Config              json.RawMessage `json:"config,omitempty"`
+	CredentialEnvPrefix string          `json:"credentialEnvPrefix,omitempty"`
 }
 
 func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int, error) {

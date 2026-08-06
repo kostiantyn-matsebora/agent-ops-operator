@@ -19,14 +19,22 @@ metadata:
   namespace: {{ .Release.Namespace }}
 rules:
   - apiGroups: ["agentops.dev"]
-    resources: ["conversations", "conversationinputs", "agentprofiles", "mcpconfigs", "channels", "signalsources", "agentruntimes"]
+    resources: ["conversations", "conversationinputs", "agentprofiles", "mcpconfigs", "channels", "signalsources", "agentruntimes", "channeladapters"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["agentops.dev"]
-    resources: ["conversations/status", "conversationinputs/status", "agentprofiles/status", "mcpconfigs/status", "channels/status", "signalsources/status", "agentruntimes/status"]
+    resources: ["conversations/status", "conversationinputs/status", "agentprofiles/status", "mcpconfigs/status", "channels/status", "signalsources/status", "agentruntimes/status", "channeladapters/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch", "create", "delete", "patch"]
+  # ChannelAdapter reconciler: owns adapter workloads + their zero-RBAC SAs
+  # (own namespace only)
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

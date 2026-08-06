@@ -321,7 +321,15 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 
 // ---- channel adapter contract ----------------------------------------------
 
-// adapterAuth guards /channel/* with the shared bearer token (constant-time).
+// adapterScopeKey carries the authenticated adapter's type scope through the
+// request context ("" = master token, full scope).
+type adapterScopeKey struct{}
+
+// adapterAuth guards /channel/* (constant-time): the master token (ADAPTER_TOKEN
+// env) has full scope; a per-adapter token — HMAC-derived from the master key
+// and the ChannelAdapter name, validated by re-derivation against the adapter
+// list (stateless, survives restarts, zero Secret reads) — is scoped to that
+// adapter's spec.type.
 func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.AdapterToken == "" {
@@ -329,18 +337,44 @@ func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) != 1 {
-			writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) == 1 {
+			next(w, r)
 			return
 		}
-		next(w, r)
+		var adapters agentopsv1alpha1.ChannelAdapterList
+		if err := s.Client.List(r.Context(), &adapters, client.InNamespace(s.Namespace)); err == nil {
+			for i := range adapters.Items {
+				want := chat.DeriveAdapterToken(s.AdapterToken, adapters.Items[i].Name)
+				if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
+					ctx := context.WithValue(r.Context(), adapterScopeKey{}, adapters.Items[i].Spec.Type)
+					next(w, r.WithContext(ctx))
+					return
+				}
+			}
+		}
+		writeJSON(w, 401, map[string]string{"error": "unauthorized"})
 	}
+}
+
+// scopeAllows enforces the per-adapter type scope; master-token requests
+// (empty scope) pass everything.
+func scopeAllows(r *http.Request, channelType string) bool {
+	scope, _ := r.Context().Value(adapterScopeKey{}).(string)
+	return scope == "" || scope == channelType
+}
+
+func forbidScope(w http.ResponseWriter) {
+	writeJSON(w, 403, map[string]string{"error": "token is scoped to another channel type"})
 }
 
 func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	channelType := r.URL.Query().Get("type")
 	if channelType == "" {
 		writeJSON(w, 400, map[string]string{"error": "missing type"})
+		return
+	}
+	if !scopeAllows(r, channelType) {
+		forbidScope(w)
 		return
 	}
 	wait, _ := strconv.Atoi(r.URL.Query().Get("wait"))
@@ -397,6 +431,10 @@ func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", in.Channel)})
 		return
 	}
+	if !scopeAllows(r, ch.Spec.Type) {
+		forbidScope(w)
+		return
+	}
 	if err := s.Router.HandleMessage(ctx, &ch, chat.InboundMessage{ThreadID: in.ThreadID, Text: in.Text}); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -410,6 +448,10 @@ func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "missing type"})
 		return
 	}
+	if !scopeAllows(r, channelType) {
+		forbidScope(w)
+		return
+	}
 	var list agentopsv1alpha1.ChannelList
 	if err := s.Client.List(r.Context(), &list, client.InNamespace(s.Namespace)); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -418,6 +460,11 @@ func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
 	type chanOut struct {
 		Name   string          `json:"name"`
 		Config json.RawMessage `json:"config,omitempty"`
+		// CredentialEnvPrefix locates this channel's projected credentials in
+		// the adapter's own environment: Secret key K is env <prefix>K. Derived
+		// from projection metadata (the secret NAME on the Channel), never from
+		// Secret values.
+		CredentialEnvPrefix string `json:"credentialEnvPrefix,omitempty"`
 	}
 	out := []chanOut{}
 	for i := range list.Items {
@@ -429,22 +476,29 @@ func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
 		if ch.Spec.Config != nil {
 			c.Config = ch.Spec.Config.Raw
 		}
+		if ch.Spec.CredentialsSecretRef != nil {
+			c.CredentialEnvPrefix = controller.CredentialEnvPrefix(ch.Name)
+		}
 		out = append(out, c)
 	}
 	writeJSON(w, 200, out)
 }
 
-func (s *Server) stateChannel(ctx context.Context, w http.ResponseWriter, name string) *agentopsv1alpha1.Channel {
+func (s *Server) stateChannel(r *http.Request, w http.ResponseWriter, name string) *agentopsv1alpha1.Channel {
 	var ch agentopsv1alpha1.Channel
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &ch); err != nil {
+	if err := s.Reader.Get(r.Context(), types.NamespacedName{Namespace: s.Namespace, Name: name}, &ch); err != nil {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", name)})
+		return nil
+	}
+	if !scopeAllows(r, ch.Spec.Type) {
+		forbidScope(w)
 		return nil
 	}
 	return &ch
 }
 
 func (s *Server) handleStateGet(w http.ResponseWriter, r *http.Request) {
-	ch := s.stateChannel(r.Context(), w, r.PathValue("channel"))
+	ch := s.stateChannel(r, w, r.PathValue("channel"))
 	if ch == nil {
 		return
 	}
@@ -452,7 +506,7 @@ func (s *Server) handleStateGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStatePut(w http.ResponseWriter, r *http.Request) {
-	ch := s.stateChannel(r.Context(), w, r.PathValue("channel"))
+	ch := s.stateChannel(r, w, r.PathValue("channel"))
 	if ch == nil {
 		return
 	}
@@ -477,7 +531,7 @@ func (s *Server) handleStatePut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
-	ch := s.stateChannel(r.Context(), w, r.PathValue("name"))
+	ch := s.stateChannel(r, w, r.PathValue("name"))
 	if ch == nil {
 		return
 	}

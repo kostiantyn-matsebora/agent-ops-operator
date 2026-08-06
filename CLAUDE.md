@@ -13,8 +13,14 @@ channel adapter, dependency-free).
   `Conversation` = topic + session + serial input queue.
 - **Channel adapter** = out-of-process channel-type implementation consuming
   `/channel/*` (ops long-poll + inbound push). `Channel.spec` = type-agnostic
-  metadata (`type`, `defaultProfileRef`, `delivery`) + opaque `config` that
-  only the serving adapter interprets. `status.threadId` is an opaque STRING.
+  metadata (`type`, `defaultProfileRef`, `delivery`, `credentialsSecretRef`)
+  + opaque `config` that only the serving adapter interprets.
+  `status.threadId` is an opaque STRING.
+- **`ChannelAdapter` CR** = pure implementation (`type` + `image`, never
+  credentials); its reconciler owns the adapter Deployment. Credentials are
+  per-surface on `Channel.credentialsSecretRef`, projected into the adapter
+  pod as `envFrom` with prefix `AGENTOPS_CRED_<CHANNEL>_` (kubelet-resolved;
+  the contract's channel listing advertises `credentialEnvPrefix`).
 - API group `agentops.dev/v1alpha1` (provisional; rename possible pre-1.0).
 
 ## Build / test
@@ -48,7 +54,9 @@ cmd/manager/main.go      wiring: reconciler, httpapi, chat registry/ops/router, 
 internal/
   controller/            Conversation reconciler: topic op enqueue (async), MCP
                          ConfigMap, runtime-pod pool (cap + idle eviction),
-                         ownerRef GC, input pruning
+                         ownerRef GC, input pruning; ChannelAdapter reconciler
+                         (adapter Deployment ownership, credential projection,
+                         type-conflict guard); Channel reconciler (Served cond)
   httpapi/               /work long-poll dispatch, /work/done, /task,
                          /ingest/alertmanager, /channel/* adapter contract
                          (bearer auth via ADAPTER_TOKEN env)
@@ -76,16 +84,23 @@ config/samples/          example CRs (the only config/ content — deployment-sp
 ## Invariants (do not break)
 
 - **The manager reads NO secrets — zero Secret API reads.** Everything
-  secret-shaped compiles to `valueFrom` in pod specs (the kubelet resolves it);
-  transport credentials live in channel adapters; the adapter auth token
-  reaches the manager via env (`ADAPTER_TOKEN`). RBAC grants the manager no
+  secret-shaped compiles to `valueFrom`/`envFrom` in pod specs (the kubelet
+  resolves it); transport credentials are declared per Channel
+  (`credentialsSecretRef`) and PROJECTED into adapter pods, never read; the
+  adapter auth token reaches the manager via env (`ADAPTER_TOKEN`), and
+  per-adapter tokens are DERIVED (HMAC of master + adapter name, validated by
+  re-derivation — nothing minted or stored). RBAC grants the manager no
   `secrets` verbs at all — keep it that way.
+- **Adapter pods have zero ambient authority**: dedicated SA with no RBAC,
+  `automountServiceAccountToken: false`. One ACTIVE ChannelAdapter per type
+  (newer claimant gets `TypeConflict`, is not deployed).
 - **Strictly serial per conversation** (one inflight unit); parallelism is
   across conversations, capped by `MAX_RUNTIMES` with idle-runtime eviction.
 - **HTTP API is NOT leader-gated** (`NeedLeaderElection()=false`) — webhooks
   must serve during rollouts. **Exactly one getUpdates consumer per bot token,
-  ever** — now the telegram ADAPTER's job: replicas 1 + strategy Recreate; the
-  manager itself has no poller.
+  ever** — the telegram adapter runs ONE poll loop per distinct token (channels
+  sharing a token share it), single-instance via ChannelAdapter `singleton`
+  (replicas 1 + Recreate); the manager itself has no poller.
 - **Channel ops are at-least-once.** `spec.config` is opaque to the operator —
   never parse channel-type config manager-side; adapters validate their own
   and report via the Channel Ready condition.
