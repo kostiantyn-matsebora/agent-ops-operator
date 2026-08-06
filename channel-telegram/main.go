@@ -4,15 +4,21 @@
 // for other transports (Slack, Teams, …).
 //
 //	outbound: long-poll GET /channel/ops?type=telegram  ->  Bot API calls
-//	inbound:  getUpdates per pollingEnabled channel     ->  POST /channel/inbound
+//	inbound:  one getUpdates loop per DISTINCT bot token -> POST /channel/inbound
+//
+// Credentials are per channel: each served Channel's credentialsSecretRef is
+// projected into this pod's environment and located via the channel listing's
+// credentialEnvPrefix (key botToken); TELEGRAM_BOT_TOKEN remains the fallback
+// for channels without projected credentials (hand-deployed deployments).
+// Channels sharing a token share one getUpdates loop — the single-consumer
+// rule holds per TOKEN. Run single-instance (replicas 1 / Recreate; the
+// ChannelAdapter reconciler's singleton mode does exactly that).
 //
 // The getUpdates offset persists through the contract's state API (a Channel
-// annotation on the manager side), so restarts never replay updates. Exactly
-// ONE instance may run per bot token (getUpdates single-consumer) — deploy
-// replicas: 1 / strategy: Recreate.
+// annotation on the manager side), so restarts never replay updates.
 //
-// Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_BOT_TOKEN,
-// CHANNEL_TYPE (default "telegram").
+// Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_BOT_TOKEN (optional
+// fallback), CHANNEL_TYPE (default "telegram"), projected AGENTOPS_CRED_* vars.
 package main
 
 import (
@@ -22,6 +28,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"sync"
 	"syscall"
@@ -36,14 +43,23 @@ type channelConfig struct {
 	PollingEnabled bool    `json:"pollingEnabled,omitempty"`
 }
 
+// servedChannel is one validated channel with its resolved credentials.
+type servedChannel struct {
+	cfg   channelConfig
+	token string
+}
+
 type adapter struct {
-	mgr         *Manager
-	tg          *Telegram
-	channelType string
+	mgr           *Manager
+	channelType   string
+	fallbackToken string
 
 	mu       sync.Mutex
-	channels map[string]channelConfig // validated, by channel name
+	channels map[string]servedChannel // validated, by channel name
 	reported map[string]string        // last status message per channel (avoid spam)
+	clients  map[string]*Telegram     // bot client per token
+	loops    map[string]context.CancelFunc
+	loopWG   sync.WaitGroup
 }
 
 func mustEnv(key string) string {
@@ -60,11 +76,13 @@ func main() {
 		channelType = "telegram"
 	}
 	a := &adapter{
-		mgr:         NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
-		tg:          NewTelegram(mustEnv("TELEGRAM_BOT_TOKEN")),
-		channelType: channelType,
-		channels:    map[string]channelConfig{},
-		reported:    map[string]string{},
+		mgr:           NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
+		channelType:   channelType,
+		fallbackToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+		channels:      map[string]servedChannel{},
+		reported:      map[string]string{},
+		clients:       map[string]*Telegram{},
+		loops:         map[string]context.CancelFunc{},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -73,28 +91,40 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); a.opsLoop(ctx) }()
-	go func() { defer wg.Done(); a.pollLoop(ctx) }()
+	go func() { defer wg.Done(); a.pollManager(ctx) }()
 	wg.Wait()
+	a.loopWG.Wait()
 }
 
-// refreshChannels re-reads served channels and validates their config,
-// reporting validity changes as the channel's Ready condition.
+// refreshChannels re-reads served channels, validates config, resolves each
+// channel's bot token (projected credentials via credentialEnvPrefix, key
+// botToken; TELEGRAM_BOT_TOKEN fallback), and reports validity changes as the
+// channel's Ready condition.
 func (a *adapter) refreshChannels(ctx context.Context) {
 	infos, err := a.mgr.Channels(ctx, a.channelType)
 	if err != nil {
 		log.Printf("list channels: %v", err)
 		return
 	}
-	next := map[string]channelConfig{}
+	next := map[string]servedChannel{}
 	for _, info := range infos {
 		var cfg channelConfig
 		problem := ""
+		token := ""
+		if info.CredentialEnvPrefix != "" {
+			token = os.Getenv(info.CredentialEnvPrefix + "botToken")
+		}
+		if token == "" {
+			token = a.fallbackToken
+		}
 		if len(info.Config) == 0 {
 			problem = "spec.config is missing"
 		} else if err := json.Unmarshal(info.Config, &cfg); err != nil {
 			problem = "spec.config is not valid JSON for the telegram adapter: " + err.Error()
 		} else if cfg.ChatID == "" {
 			problem = "spec.config.chatId is required"
+		} else if token == "" {
+			problem = "no bot token: set Channel.credentialsSecretRef (Secret key botToken) or provide the adapter a TELEGRAM_BOT_TOKEN fallback"
 		}
 		a.mu.Lock()
 		last := a.reported[info.Name]
@@ -114,18 +144,30 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 			a.reported[info.Name] = "ok"
 			a.mu.Unlock()
 		}
-		next[info.Name] = cfg
+		next[info.Name] = servedChannel{cfg: cfg, token: token}
 	}
 	a.mu.Lock()
 	a.channels = next
 	a.mu.Unlock()
 }
 
-func (a *adapter) config(name string) (channelConfig, bool) {
+func (a *adapter) channel(name string) (servedChannel, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	cfg, ok := a.channels[name]
-	return cfg, ok
+	sc, ok := a.channels[name]
+	return sc, ok
+}
+
+// client returns (caching) the Bot API client for a token.
+func (a *adapter) client(token string) *Telegram {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if c := a.clients[token]; c != nil {
+		return c
+	}
+	c := NewTelegram(token)
+	a.clients[token] = c
+	return c
 }
 
 // ---- outbound: ops long-poll ------------------------------------------------
@@ -152,16 +194,17 @@ func (a *adapter) opsLoop(ctx context.Context) {
 }
 
 func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) {
-	cfg, ok := a.config(op.Channel)
+	sc, ok := a.channel(op.Channel)
 	if !ok {
 		a.refreshChannels(ctx)
-		if cfg, ok = a.config(op.Channel); !ok {
-			return "", fmt.Sprintf("channel %s is not served (missing or invalid config)", op.Channel)
+		if sc, ok = a.channel(op.Channel); !ok {
+			return "", fmt.Sprintf("channel %s is not served (missing/invalid config or credentials)", op.Channel)
 		}
 	}
+	tg := a.client(sc.token)
 	switch op.Kind {
 	case "ensure-topic":
-		id, err := a.tg.CreateTopic(ctx, cfg.ChatID, op.Title)
+		id, err := tg.CreateTopic(ctx, sc.cfg.ChatID, op.Title)
 		if err != nil {
 			return "", err.Error()
 		}
@@ -173,7 +216,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 				tid = &n
 			}
 		}
-		if err := a.tg.Send(ctx, cfg.ChatID, tid, op.Text); err != nil {
+		if err := tg.Send(ctx, sc.cfg.ChatID, tid, op.Text); err != nil {
 			return "", err.Error()
 		}
 		return "", ""
@@ -181,63 +224,128 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 	return "", "unknown op kind " + op.Kind
 }
 
-// ---- inbound: getUpdates ----------------------------------------------------
+// ---- inbound: one getUpdates loop per distinct token ------------------------
 
-func (a *adapter) pollLoop(ctx context.Context) {
-	lastRefresh := time.Time{}
+// pollManager keeps exactly one polling goroutine alive per distinct bot token
+// among polling-enabled channels (channels sharing a token share a loop — the
+// getUpdates single-consumer rule holds per token).
+func (a *adapter) pollManager(ctx context.Context) {
 	for ctx.Err() == nil {
-		if time.Since(lastRefresh) > 30*time.Second {
-			a.refreshChannels(ctx)
-			lastRefresh = time.Now()
-		}
+		a.refreshChannels(ctx)
+
+		want := map[string]bool{}
 		a.mu.Lock()
-		names := make([]string, 0, len(a.channels))
-		for name, cfg := range a.channels {
-			if cfg.PollingEnabled {
-				names = append(names, name)
+		for _, sc := range a.channels {
+			if sc.cfg.PollingEnabled {
+				want[sc.token] = true
 			}
+		}
+		// stop loops for gone tokens, start loops for new ones
+		for token, cancel := range a.loops {
+			if !want[token] {
+				cancel()
+				delete(a.loops, token)
+			}
+		}
+		for token := range want {
+			if _, running := a.loops[token]; running {
+				continue
+			}
+			loopCtx, cancel := context.WithCancel(ctx)
+			a.loops[token] = cancel
+			a.loopWG.Add(1)
+			go func(token string) {
+				defer a.loopWG.Done()
+				a.pollToken(loopCtx, token)
+			}(token)
 		}
 		a.mu.Unlock()
-		if len(names) == 0 {
-			sleepCtx(ctx, 10*time.Second) // nothing enabled — idle re-list
+
+		sleepCtx(ctx, 30*time.Second)
+	}
+}
+
+// tokenGroup returns the polling-enabled channels using a token, sorted by
+// name (the first is the group leader holding the shared offset cursor).
+func (a *adapter) tokenGroup(token string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var names []string
+	for name, sc := range a.channels {
+		if sc.token == token && sc.cfg.PollingEnabled {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// pollToken is the single getUpdates consumer for one bot token. The offset
+// cursor persists per channel through the state API: written to the group
+// leader, read as the max across the group (safe on leader change — getUpdates
+// never replays updates already confirmed by a higher-offset request).
+func (a *adapter) pollToken(ctx context.Context, token string) {
+	tg := a.client(token)
+	for ctx.Err() == nil {
+		group := a.tokenGroup(token)
+		if len(group) == 0 {
+			return // pollManager cancels us; be safe anyway
+		}
+		offset := int64(0)
+		for _, name := range group {
+			raw, err := a.mgr.GetState(ctx, name, "telegram-offset")
+			if err != nil {
+				if ctx.Err() == nil {
+					log.Printf("offset read %s: %v", name, err)
+					sleepCtx(ctx, 5*time.Second)
+				}
+				offset = -1
+				break
+			}
+			if n, _ := strconv.ParseInt(raw, 10, 64); n > offset {
+				offset = n
+			}
+		}
+		if offset < 0 {
 			continue
 		}
-		for _, name := range names {
-			if err := a.pollChannel(ctx, name); err != nil && ctx.Err() == nil {
-				log.Printf("poll %s: %v", name, err)
+		updates, err := tg.GetUpdates(ctx, offset)
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Printf("getUpdates (%d channel(s)): %v", len(group), err)
 				sleepCtx(ctx, 5*time.Second)
 			}
+			continue
+		}
+		leader := group[0]
+		for _, upd := range updates {
+			offset = upd.UpdateID + 1
+			// persist BEFORE handling: a poison message must not replay forever
+			if err := a.mgr.PutState(ctx, leader, "telegram-offset", strconv.FormatInt(offset, 10)); err != nil {
+				if ctx.Err() == nil {
+					log.Printf("offset write %s: %v", leader, err)
+				}
+				break
+			}
+			a.dispatch(ctx, group, upd)
 		}
 	}
 }
 
-func (a *adapter) pollChannel(ctx context.Context, name string) error {
-	cfg, ok := a.config(name)
-	if !ok {
-		return nil
+// dispatch routes one update to the group channel whose chatId matches.
+func (a *adapter) dispatch(ctx context.Context, group []string, upd tgUpdate) {
+	m := upd.Message
+	if m == nil || m.Chat == nil || m.Text == "" {
+		return
 	}
-	raw, err := a.mgr.GetState(ctx, name, "telegram-offset")
-	if err != nil {
-		return err
-	}
-	offset, _ := strconv.ParseInt(raw, 10, 64)
-	updates, err := a.tg.GetUpdates(ctx, offset)
-	if err != nil {
-		return err
-	}
-	for _, upd := range updates {
-		offset = upd.UpdateID + 1
-		// persist BEFORE handling, like the old poller: a poison message must
-		// not be replayed forever
-		if err := a.mgr.PutState(ctx, name, "telegram-offset", strconv.FormatInt(offset, 10)); err != nil {
-			return err
-		}
-		m := upd.Message
-		if m == nil || m.Chat == nil || strconv.FormatInt(m.Chat.ID, 10) != cfg.ChatID || m.Text == "" {
+	chatID := strconv.FormatInt(m.Chat.ID, 10)
+	for _, name := range group {
+		sc, ok := a.channel(name)
+		if !ok || sc.cfg.ChatID != chatID {
 			continue
 		}
-		if len(cfg.Approvers) > 0 && (m.From == nil || !containsID(cfg.Approvers, m.From.ID)) {
-			continue // not an approved user — ignore silently
+		if len(sc.cfg.Approvers) > 0 && (m.From == nil || !containsID(sc.cfg.Approvers, m.From.ID)) {
+			return // not an approved user — ignore silently
 		}
 		var threadID *string
 		if m.IsTopicMessage {
@@ -247,8 +355,8 @@ func (a *adapter) pollChannel(ctx context.Context, name string) error {
 		if err := a.mgr.Inbound(ctx, name, threadID, m.Text); err != nil {
 			log.Printf("inbound %s: %v", name, err)
 		}
+		return // first matching channel wins
 	}
-	return nil
 }
 
 func containsID(list []int64, id int64) bool {

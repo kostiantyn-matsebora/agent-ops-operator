@@ -33,7 +33,8 @@ approvable from your phone.
 | `AgentRuntime` | **What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, home volume (session persistence), service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env. |
 | `Conversation` | One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. |
 | `ConversationInput` | Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd. |
-| `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, default profile, delivery hints) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). Channel types are served by out-of-process **channel adapters** — the operator ships `channel-telegram/` as the reference; bring your own for Slack/Teams/… with zero operator changes. |
+| `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, default profile, delivery hints, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). |
+| `ChannelAdapter` | **What serves a channel type**: a container image implementing the adapter contract, plugged in as a CR — the reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
 | `SignalSource` | Ingest lane: `alertmanagerWebhook` (implemented) / `cron` / `k8sEvents` (roadmap) with signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. |
 | `MCPConfig` | Reusable MCP server sets, shareable across profiles; secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
 
@@ -74,10 +75,27 @@ credentials never leave the adapter:
    persist cursors (e.g. poll offsets) via `GET/PUT /channel/state/{channel}/{key}`,
    report config problems via `POST /channel/channels/{name}/status`.
 
-All `/channel/*` calls carry `Authorization: Bearer $ADAPTER_TOKEN` (the chart
-provisions the shared token Secret into the manager and every adapter). No
-Kubernetes API access needed — the reference adapter
-[`channel-telegram/`](channel-telegram/) is dependency-free Go.
+**Credentials** are declared per Channel (`spec.credentialsSecretRef`, a Secret
+name) and projected into the adapter pod by the ChannelAdapter reconciler as
+env vars — every key `K` of the Secret appears as `<credentialEnvPrefix>K`,
+with the prefix advertised per channel in the `GET /channel/channels` listing
+(e.g. key `botToken` → `AGENTOPS_CRED_HOME_OPS_botToken`). The kubelet resolves
+the values; neither the manager nor any reconciler ever reads a Secret through
+the API. Several Channels with different Secrets = several bots/workspaces
+through one adapter process.
+
+**Auth**: all `/channel/*` calls carry `Authorization: Bearer <token>`. A
+ChannelAdapter-managed workload gets a per-adapter token derived from the
+master key (`HMAC(ADAPTER_TOKEN, adapter name)`, validated statelessly by
+re-derivation) and **scoped to its `spec.type`** — cross-type calls get 403.
+The bare master token (chart-provisioned into the manager as env) keeps full
+scope, so hand-deployed adapters work unchanged. No Kubernetes API access
+needed — the reference adapter [`channel-telegram/`](channel-telegram/) is
+dependency-free Go.
+
+A `Channel` whose type nothing serves (no in-process provider, no Ready
+`ChannelAdapter`, no adapter-reported readiness) carries a `Served=False`
+condition — typos fail visibly instead of queueing ops forever.
 
 Delivery of agent answers is channel-metadata-driven: by default the agent's
 printed answer is the deliverable (captured via `/work/done`); a channel may
@@ -174,9 +192,9 @@ into the `channel-telegram` adapter. For a live install:
      defaultProfileRef: {name: …}            pollingEnabled: true
    ```
 
-   The bot token secretRef moves out of the CR entirely — it becomes
-   `telegramAdapter.botTokenSecret` in chart values (mounted into the adapter;
-   the manager reads no Secrets at all anymore).
+   The bot token secretRef moves out of the CR entirely (the manager reads no
+   Secrets at all anymore) — since chart 1.1 it returns as
+   `spec.credentialsSecretRef` on the Channel (see below).
 3. **Upgrade**: `helm upgrade … --set telegramAdapter.enabled=true`. The new
    CRD applies, the manager restarts without Telegram code, the adapter starts
    as the sole getUpdates consumer (replicas 1, Recreate).
@@ -185,6 +203,27 @@ into the `channel-telegram` adapter. For a live install:
 
 Rollback = reverse order: disable the adapter, restore the previous chart
 version and Channel CR shape.
+
+## Migrating to chart 1.1 (ChannelAdapter CR)
+
+Chart 1.1 replaces the chart's Telegram adapter Deployment with a
+`ChannelAdapter` CR — the reconciler owns the workload. For a live install
+running the chart-1.0 adapter:
+
+1. **Upgrade with the adapter disabled** (`telegramAdapter.enabled=false`, the
+   default): helm removes the old Deployment — the bot token's single
+   getUpdates slot is free, and the new CRD + manager (with the ChannelAdapter
+   reconciler) are in place.
+2. **Move the bot token to the Channel**: add
+   `spec.credentialsSecretRef: {name: <your bot-token secret>}` (Secret key
+   `botToken`) to each telegram Channel. `TELEGRAM_BOT_TOKEN` env remains a
+   fallback for hand-deployed adapters only.
+3. **Enable the adapter** (`--set telegramAdapter.enabled=true`, or apply your
+   own `ChannelAdapter` CR): the reconciler deploys the workload with the
+   projected credentials as the sole getUpdates consumer.
+
+Rollback: delete the `ChannelAdapter` CR (the reconciler's Deployment is
+GC'd), then redeploy chart 1.0.x whose template restores the old wiring.
 
 ## Development
 

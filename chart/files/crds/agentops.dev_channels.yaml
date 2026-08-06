@@ -56,6 +56,25 @@ spec:
                   Validated by the serving adapter, never by the operator.
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              credentialsSecretRef:
+                description: |-
+                  CredentialsSecretRef names the Secret holding this surface's transport
+                  credentials (e.g. a bot token) — credentials are per-surface usage, never
+                  per-implementation. The operator only writes the NAME into the serving
+                  adapter's pod spec (kubelet-resolved envFrom projection); nothing reads
+                  the Secret's values through the API.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               defaultProfileRef:
                 description: DefaultProfileRef handles bare messages (no /profile
                   prefix).

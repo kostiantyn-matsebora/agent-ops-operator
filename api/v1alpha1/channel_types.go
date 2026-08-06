@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -43,6 +44,13 @@ type ChannelSpec struct {
 	DefaultProfileRef *ObjectRef `json:"defaultProfileRef,omitempty"`
 	// +optional
 	Delivery *DeliverySpec `json:"delivery,omitempty"`
+	// CredentialsSecretRef names the Secret holding this surface's transport
+	// credentials (e.g. a bot token) — credentials are per-surface usage, never
+	// per-implementation. The operator only writes the NAME into the serving
+	// adapter's pod spec (kubelet-resolved envFrom projection); nothing reads
+	// the Secret's values through the API.
+	// +optional
+	CredentialsSecretRef *corev1.LocalObjectReference `json:"credentialsSecretRef,omitempty"`
 	// Config carries whatever the channel type needs; schema-less by design.
 	// Validated by the serving adapter, never by the operator.
 	// +kubebuilder:pruning:PreserveUnknownFields
