@@ -1,10 +1,6 @@
-# signal-source-model
+# signal-source-model — delta
 
-## Purpose
-
-The restructured `SignalSource` CRD: an open string `spec.type` with opaque per-type `config` and name-only credential references, manager-side grouping policy applied uniformly to every source type, and unchanged in-process compatibility for the built-in `alertmanagerWebhook` type.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: SignalSource CRD splits shared metadata from type-specific config
 The `SignalSource` CRD SHALL consist of type-agnostic metadata — required immutable open-string `spec.type`, typed `spec.grouping` (signatureLabels, windowDays, cooldownHours), optional `spec.credentialsSecretRef` — plus an optional opaque `spec.config` (`x-kubernetes-preserve-unknown-fields`) whose shape only the serving signal implementation defines and validates. The operator SHALL never interpret `spec.config` and SHALL never read the credential Secret's values (name-only projection). **The source SHALL carry no wiring: `channelRef` and `profileRef` are removed (BREAKING) — a `Pipeline` claim is the only way a source reaches a profile and channels.**
@@ -25,6 +21,8 @@ The `SignalSource` CRD SHALL consist of type-agnostic metadata — required immu
 - **WHEN** a SignalSource sets `credentialsSecretRef: {name: pd-api-key}`
 - **THEN** the operator references that Secret name in the serving adapter's pod spec without ever reading the Secret through the API
 
+## ADDED Requirements
+
 ### Requirement: Unwired sources are visible and drop signals loudly
 A SignalSource SHALL carry a `Wired` condition: True (naming the pipeline) when a Ready `Pipeline` claims it, False otherwise. Signals arriving for an unwired source SHALL NOT create conversations; the ingest/inbound response SHALL state the reason explicitly.
 
@@ -39,21 +37,3 @@ A SignalSource SHALL carry a `Wired` condition: True (naming the pipeline) when 
 #### Scenario: Claim flips the condition
 - **WHEN** a Ready Pipeline adds the source to its `signalSourceRefs`
 - **THEN** the source's `Wired` condition becomes True naming that pipeline and subsequent signals route
-
-### Requirement: Grouping policy stays manager-side for every source type
-Signature grouping, fingerprint cooldown, window-based conversation reuse, and recurrence-on-session SHALL be applied by the manager from `spec.grouping` for signals of every source type — built-in or adapter-fed. Adapters SHALL NOT need to implement any grouping logic.
-
-#### Scenario: Adapter-fed signals group like built-in ones
-- **WHEN** two normalized signals with different fingerprints but identical signature labels arrive via an adapter within the source's window
-- **THEN** they land in the same conversation, the second as a recurrence when a session exists
-
-#### Scenario: Cooldown suppresses adapter-fed duplicates
-- **WHEN** an adapter re-delivers a signal with a fingerprint seen within `cooldownHours`
-- **THEN** no new input is created (at-least-once delivery is safe)
-
-### Requirement: Built-in Alertmanager webhook remains in-process and unchanged
-`type: alertmanagerWebhook` SHALL remain served in-process by the manager at `POST /ingest/alertmanager/{source}` with unchanged external behavior (payload format, firing filter, grouping, status bookkeeping), internally routed through the same normalized-signal core the adapter contract uses.
-
-#### Scenario: Existing Alertmanager configuration keeps working
-- **WHEN** Alertmanager posts to the pre-existing webhook URL after the upgrade
-- **THEN** alerts group into conversations exactly as before, with no Alertmanager or CR reconfiguration

@@ -49,12 +49,11 @@ func mkSignalAdapter(t *testing.T, name, sourceType string) *agentopsv1alpha1.Si
 	return a
 }
 
-func mkSignalSource(t *testing.T, name, sourceType, profile, credSecret string) {
+func mkSignalSource(t *testing.T, name, sourceType, credSecret string) {
 	t.Helper()
 	src := &agentopsv1alpha1.SignalSource{}
 	src.Name, src.Namespace = name, ns
 	src.Spec.Type = sourceType
-	src.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: profile}
 	if credSecret != "" {
 		src.Spec.CredentialsSecretRef = &corev1.LocalObjectReference{Name: credSecret}
 	}
@@ -77,8 +76,20 @@ func postSignal(t *testing.T, srv http.Handler, token, source string, signals []
 func TestSignalInboundRouting(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-signal")
-	mkSignalSource(t, "sig-src", "sig-t", "prof-signal", "")
+	mkSignalSource(t, "sig-src", "sig-t", "")
+	// pipeline-only wiring: the source routes via its claiming pipeline
+	mkPipeline(t, "sig-pipe", []string{"sig-src"}, nil, "prof-signal")
+	reconcilePipeline(t, "sig-pipe")
 	h := apiServer().Handler()
+
+	// unwired sources drop signals loudly, BEFORE burning cooldown slots
+	mkSignalSource(t, "sig-unwired", "sig-t", "")
+	rec0 := postSignal(t, h, testMasterToken, "sig-unwired", []map[string]any{{
+		"fingerprint": "u-1", "labels": map[string]string{"alertname": "x"},
+	}})
+	if rec0.Code != 200 || !strings.Contains(rec0.Body.String(), "not claimed by a Ready pipeline") {
+		t.Fatalf("unwired drop reason expected: %d %s", rec0.Code, rec0.Body.String())
+	}
 
 	// job-kind signal with title override → job-lane conversation
 	rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
@@ -160,7 +171,7 @@ func TestSignalInboundRouting(t *testing.T) {
 
 func TestSignalContractSurface(t *testing.T) {
 	mkProfile(t, "prof-sigsurf")
-	mkSignalSource(t, "surf-src", "surf-t", "prof-sigsurf", "surf-secret")
+	mkSignalSource(t, "surf-src", "surf-t", "surf-secret")
 	h := apiServer().Handler()
 	get := func(method, path, token string, body []byte) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, bytes.NewReader(body))
@@ -238,8 +249,8 @@ func TestSignalAuthScoping(t *testing.T) {
 func TestSignalAdapterLifecycle(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-siglife")
-	mkSignalSource(t, "life-src-a", "life-sig-t", "prof-siglife", "life-secret")
-	mkSignalSource(t, "life-src-b", "life-sig-t", "prof-siglife", "")
+	mkSignalSource(t, "life-src-a", "life-sig-t", "life-secret")
+	mkSignalSource(t, "life-src-b", "life-sig-t", "")
 	mkSignalAdapter(t, "life-sig", "life-sig-t")
 	reconcileSignalAdapter(t, "life-sig")
 
@@ -291,7 +302,7 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mkSignalSource(t, "life-am", agentopsv1alpha1.SourceAlertmanager, "prof-siglife", "")
+	mkSignalSource(t, "life-am", agentopsv1alpha1.SourceAlertmanager, "")
 	reconcileSrc("life-am")
 	var src agentopsv1alpha1.SignalSource
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-am"}, &src)
@@ -302,6 +313,18 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-src-a"}, &src)
 	if !apimeta.IsStatusConditionFalse(src.Status.Conditions, controller.ConditionServed) {
 		t.Fatal("expected Served=False before adapter Ready")
+	}
+	// pipeline-only wiring: unclaimed → Wired=False; claim flips it
+	if !apimeta.IsStatusConditionFalse(src.Status.Conditions, controller.ConditionWired) {
+		t.Fatalf("expected Wired=False while unclaimed: %+v", src.Status.Conditions)
+	}
+	mkProfile(t, "prof-wired")
+	mkPipeline(t, "life-wire-pipe", []string{"life-src-a"}, nil, "prof-wired")
+	reconcilePipeline(t, "life-wire-pipe")
+	reconcileSrc("life-src-a")
+	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-src-a"}, &src)
+	if w := apimeta.FindStatusCondition(src.Status.Conditions, controller.ConditionWired); w == nil || w.Status != "True" || !strings.Contains(w.Message, "life-wire-pipe") {
+		t.Fatalf("Wired should flip True naming the pipeline: %+v", src.Status.Conditions)
 	}
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("life-sig")}, &deploy)
 	deploy.Status.AvailableReplicas, deploy.Status.ReadyReplicas, deploy.Status.UpdatedReplicas, deploy.Status.Replicas = 1, 1, 1, 1

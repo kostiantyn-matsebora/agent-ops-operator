@@ -33,11 +33,11 @@ approvable from your phone.
 | `AgentRuntime` | **What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, home volume (session persistence), service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env. |
 | `Conversation` | One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. |
 | `ConversationInput` | Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd. |
-| `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, default profile, delivery hints, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). |
+| `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, delivery hints, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). Carries **no wiring** — its default profile comes from the Pipeline referencing it. |
 | `ChannelAdapter` | **What serves a channel type**: a container image implementing the adapter contract, plugged in as a CR — the reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
-| `SignalSource` | Ingest lane, split like `Channel`: **type-agnostic routing metadata** (open `type`, profile/channel refs, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. `alertmanagerWebhook` is built-in; everything else is adapter-served. |
+| `SignalSource` | Ingest lane, split like `Channel`: **type-agnostic metadata** (open `type`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. `alertmanagerWebhook` is built-in; everything else is adapter-served. |
 | `SignalAdapter` | **What serves a signal type**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR with the same posture (owned workload, zero-RBAC SA, singleton, derived type-scoped token, credential projection). A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
-| `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. Resolution is pipeline-first: sources/channels outside any pipeline keep their own refs unchanged. One pipeline per source (older claimant wins); channels are shareable. |
+| `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed, channels get their default profile from their oldest Ready pipeline (`/profile` commands work everywhere regardless). One pipeline per source (older claimant wins); channels are shareable. |
 | `MCPConfig` | Reusable MCP server sets, shareable across profiles; secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
 
 ## Behaviors that matter
@@ -242,6 +242,19 @@ into the `channel-telegram` adapter. For a live install:
 
 Rollback = reverse order: disable the adapter, restore the previous chart
 version and Channel CR shape.
+
+## Migrating to chart 1.4 (pipeline-only wiring) — BREAKING
+
+`SignalSource.spec.channelRef`/`profileRef` and `Channel.spec.defaultProfileRef`
+are removed — wiring exists only on `Pipeline`. Upgrade sequence (order
+matters so alert routing never gaps):
+
+1. **Apply a Pipeline first**, claiming every live source with the intended
+   profile and channels (the old manager ignores it; the new one requires it).
+2. Upgrade to chart 1.4 / manager 0.7. Unclaimed sources now show
+   `Wired=False` and drop signals with an explicit response reason; bare
+   messages on channels outside any pipeline get usage guidance.
+3. Re-apply your CR manifests without the removed fields.
 
 ## Migrating to chart 1.3 (Pipelines, multi-channel conversations) — BREAKING
 

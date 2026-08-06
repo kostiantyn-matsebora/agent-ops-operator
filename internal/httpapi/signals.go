@@ -66,8 +66,15 @@ func combineJoined(group []NormalizedSignal) string {
 // signals: cooldown by fingerprint, signature grouping, window-based
 // conversation reuse with recurrence-on-session, out-of-line payloads, and
 // source status bookkeeping (the single place lastReceived/receivedTotal are
-// updated). Returns the number of fresh signals and conversations touched.
-func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal, combine combineFunc) (int, int, error) {
+// updated). Wiring is pipeline-only: an unwired source drops the batch with a
+// reason BEFORE cooldown (so re-sent fingerprints route once a pipeline
+// claims the source). Returns fresh signals, conversations touched, and the
+// drop reason ("" when routed).
+func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal, combine combineFunc) (int, int, string, error) {
+	pipeline := chat.PipelineForSource(ctx, s.Client, s.Namespace, source.Name)
+	if pipeline == nil {
+		return 0, 0, "source not claimed by a Ready pipeline (Wired=False) — signals dropped", nil
+	}
 	cd := s.cooldowns[source.Name]
 	if cd == nil {
 		hours := source.Spec.Grouping.CooldownHours
@@ -85,7 +92,7 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 	}
 	fresh := cd.Fresh(fps)
 	if len(fresh) == 0 {
-		return 0, 0, nil
+		return 0, 0, "", nil
 	}
 
 	groups := map[string][]NormalizedSignal{}
@@ -97,8 +104,8 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 
 	touched := 0
 	for key, group := range groups {
-		if err := s.routeSignalGroup(ctx, source, key, group, combine); err != nil {
-			return 0, 0, err
+		if err := s.routeSignalGroup(ctx, source, pipeline, key, group, combine); err != nil {
+			return 0, 0, "", err
 		}
 		touched++
 	}
@@ -108,12 +115,13 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 	source.Status.LastReceived = &now
 	source.Status.ReceivedTotal += int64(len(fresh))
 	_ = s.Client.Status().Patch(ctx, source, patch)
-	return len(fresh), touched, nil
+	return len(fresh), touched, "", nil
 }
 
 // routeSignalGroup lands one signature group as an input on the matching
-// conversation (window reuse; created on demand).
-func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, signature string, group []NormalizedSignal, combine combineFunc) error {
+// conversation (window reuse; created on demand with the claiming pipeline's
+// profile and channel set — the only wiring there is).
+func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, pipeline *agentopsv1alpha1.Pipeline, signature string, group []NormalizedSignal, combine combineFunc) error {
 	windowDays := source.Spec.Grouping.WindowDays
 	if windowDays <= 0 {
 		windowDays = 7
@@ -155,17 +163,6 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		if title == "" {
 			title = "🔍 " + source.Name
 		}
-		// routing binds pipeline-first: a source claimed by a Ready Pipeline
-		// fans into the pipeline's channels with the pipeline's profile;
-		// unclaimed sources keep their own refs (legacy single-channel path)
-		profileRef := source.Spec.ProfileRef
-		var channelRefs []agentopsv1alpha1.ObjectRef
-		if p := chat.PipelineForSource(ctx, s.Client, s.Namespace, source.Name); p != nil {
-			profileRef = p.Spec.ProfileRef
-			channelRefs = append(channelRefs, p.Spec.ChannelRefs...)
-		} else if source.Spec.ChannelRef != nil {
-			channelRefs = []agentopsv1alpha1.ObjectRef{*source.Spec.ChannelRef}
-		}
 		conv = &agentopsv1alpha1.Conversation{}
 		conv.Namespace = s.Namespace
 		conv.GenerateName = "alert-"
@@ -174,8 +171,8 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		}
 		conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
 		conv.Spec = agentopsv1alpha1.ConversationSpec{
-			ProfileRef:  profileRef,
-			ChannelRefs: channelRefs,
+			ProfileRef:  pipeline.Spec.ProfileRef,
+			ChannelRefs: append([]agentopsv1alpha1.ObjectRef{}, pipeline.Spec.ChannelRefs...),
 			Title:       title,
 			Signature:   signature,
 		}
@@ -278,12 +275,16 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 	if source == nil {
 		return
 	}
-	queued, touched, err := s.routeSignals(r.Context(), source, in.Signals, combineJoined)
+	queued, touched, reason, err := s.routeSignals(r.Context(), source, in.Signals, combineJoined)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"queued": queued, "conversations": touched})
+	out := map[string]any{"queued": queued, "conversations": touched}
+	if reason != "" {
+		out["reason"] = reason
+	}
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) handleSignalSources(w http.ResponseWriter, r *http.Request) {

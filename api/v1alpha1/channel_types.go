@@ -39,9 +39,9 @@ type ChannelSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.type is immutable"
 	Type string `json:"type"`
-	// DefaultProfileRef handles bare messages (no /profile prefix).
-	// +optional
-	DefaultProfileRef *ObjectRef `json:"defaultProfileRef,omitempty"`
+	// NOTE: the channel carries NO wiring — bare messages are answered by the
+	// profile of the oldest Ready Pipeline referencing this channel; channels
+	// in no pipeline answer bare messages with guidance only.
 	// +optional
 	Delivery *DeliverySpec `json:"delivery,omitempty"`
 	// CredentialsSecretRef names the Secret holding this surface's transport

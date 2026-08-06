@@ -195,10 +195,12 @@ func TestAlertGroupingAndRecurrence(t *testing.T) {
 	src := &agentopsv1alpha1.SignalSource{}
 	src.Name, src.Namespace = "am", ns
 	src.Spec.Type = agentopsv1alpha1.SourceAlertmanager
-	src.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-alert"}
 	if err := k8sClient.Create(ctx, src); err != nil {
 		t.Fatal(err)
 	}
+	// pipeline-only wiring: the webhook source routes via its claiming pipeline
+	mkPipeline(t, "am-pipe", []string{"am"}, nil, "prof-alert")
+	reconcilePipeline(t, "am-pipe")
 
 	srv := apiServer()
 	post := func(fp string) int {

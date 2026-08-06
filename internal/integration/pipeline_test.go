@@ -67,8 +67,8 @@ func cleanupConversation(t *testing.T, name string) {
 
 func TestPipelineValidationAndConflicts(t *testing.T) {
 	mkProfile(t, "prof-pipe")
-	mkChannel(t, "pipe-chan-a", "pipe-ta", "")
-	mkSignalSource(t, "pipe-src", "pipe-sig", "prof-pipe", "")
+	mkChannel(t, "pipe-chan-a", "pipe-ta")
+	mkSignalSource(t, "pipe-src", "pipe-sig", "")
 
 	// all refs resolve → Ready
 	mkPipeline(t, "pipe-ok", []string{"pipe-src"}, []string{"pipe-chan-a"}, "prof-pipe")
@@ -113,7 +113,7 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	if err := k8sClient.Create(ctx, chA); err != nil {
 		t.Fatal(err)
 	}
-	mkChannel(t, "mc-b", "mc-tb", "")
+	mkChannel(t, "mc-b", "mc-tb")
 	mkPipeline(t, "mc-pipe", nil, []string{"mc-a", "mc-b"}, "prof-mc")
 	reconcilePipeline(t, "mc-pipe")
 
@@ -249,11 +249,10 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 func TestSignalRoutingBindsPipelineFirst(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-sigpipe")
-	mkProfile(t, "prof-source-own")
-	mkChannel(t, "sp-chan-a", "sp-ta", "")
-	mkChannel(t, "sp-chan-b", "sp-tb", "")
-	// the source's OWN profile must be overridden by the pipeline's
-	mkSignalSource(t, "sp-src", "sp-sig", "prof-source-own", "")
+	mkChannel(t, "sp-chan-a", "sp-ta")
+	mkChannel(t, "sp-chan-b", "sp-tb")
+	// the source carries no wiring — profile and channels come from the pipeline
+	mkSignalSource(t, "sp-src", "sp-sig", "")
 	mkPipeline(t, "sp-pipe", []string{"sp-src"}, []string{"sp-chan-a", "sp-chan-b"}, "prof-sigpipe")
 	reconcilePipeline(t, "sp-pipe")
 
@@ -284,7 +283,7 @@ func TestSignalRoutingBindsPipelineFirst(t *testing.T) {
 func TestBrokenChannelNeverDeadlocks(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-broken")
-	mkChannel(t, "bk-good", "bk-tg", "")
+	mkChannel(t, "bk-good", "bk-tg")
 	srv := apiServer()
 
 	conv := &agentopsv1alpha1.Conversation{}

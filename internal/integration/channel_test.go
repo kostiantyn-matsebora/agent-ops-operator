@@ -22,15 +22,12 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
 )
 
-func mkChannel(t *testing.T, name, typ string, defaultProfile string) {
+func mkChannel(t *testing.T, name, typ string) {
 	t.Helper()
 	ch := &agentopsv1alpha1.Channel{}
 	ch.Name, ch.Namespace = name, ns
 	ch.Spec.Type = typ
 	ch.Spec.Config = &runtime.RawExtension{Raw: []byte(`{"chatId":"-100","pollingEnabled":true}`)}
-	if defaultProfile != "" {
-		ch.Spec.DefaultProfileRef = &agentopsv1alpha1.ObjectRef{Name: defaultProfile}
-	}
 	if err := k8sClient.Create(context.Background(), ch); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +64,7 @@ func TestChannelAuthRequired(t *testing.T) {
 func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-inb")
-	mkChannel(t, "chan-inb", "tg-inb", "prof-inb")
+	mkChannel(t, "chan-inb", "tg-inb")
 	srv := apiServer()
 
 	// command for a known profile -> task conversation
@@ -114,7 +111,7 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-topic")
-	mkChannel(t, "chan-topic", "tg-topic", "")
+	mkChannel(t, "chan-topic", "tg-topic")
 	srv := apiServer()
 
 	conv := &agentopsv1alpha1.Conversation{}
@@ -197,7 +194,7 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 func TestThreadedReplyQueuesInputWithBusyAck(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-reply")
-	mkChannel(t, "chan-reply", "tg-reply", "prof-reply")
+	mkChannel(t, "chan-reply", "tg-reply")
 	srv := apiServer()
 
 	conv := &agentopsv1alpha1.Conversation{}
@@ -238,7 +235,7 @@ func TestThreadedReplyQueuesInputWithBusyAck(t *testing.T) {
 }
 
 func TestAdapterStateAndChannelListing(t *testing.T) {
-	mkChannel(t, "chan-state", "tg-state", "")
+	mkChannel(t, "chan-state", "tg-state")
 	srv := apiServer()
 
 	rec := adapterReq(srv, "GET", "/channel/channels?type=tg-state", nil, "test-adapter-token")
