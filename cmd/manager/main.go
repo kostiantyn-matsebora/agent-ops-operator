@@ -109,6 +109,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// SignalAdapter lifecycle: the signal sibling of the channel adapter stack
+	// (inbound-only contract; same workload machinery and security posture).
+	if err := (&controller.SignalAdapterReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		ManagerURL:  controlURL,
+		MasterToken: os.Getenv("ADAPTER_TOKEN"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "signaladapter controller")
+		os.Exit(1)
+	}
+	if err := (&controller.SignalSourceReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "signalsource controller")
+		os.Exit(1)
+	}
+
 	reconciler := &controller.ConversationReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),

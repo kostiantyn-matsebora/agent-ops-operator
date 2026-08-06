@@ -82,6 +82,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /channel/state/{channel}/{key}", s.adapterAuth(s.handleStateGet))
 	mux.HandleFunc("PUT /channel/state/{channel}/{key}", s.adapterAuth(s.handleStatePut))
 	mux.HandleFunc("POST /channel/channels/{name}/status", s.adapterAuth(s.handleChannelStatus))
+	mux.HandleFunc("POST /signal/inbound", s.signalAuth(s.handleSignalInbound))
+	mux.HandleFunc("GET /signal/sources", s.signalAuth(s.handleSignalSources))
+	mux.HandleFunc("GET /signal/state/{source}/{key}", s.signalAuth(s.handleSignalStateGet))
+	mux.HandleFunc("PUT /signal/state/{source}/{key}", s.signalAuth(s.handleSignalStatePut))
+	mux.HandleFunc("POST /signal/sources/{name}/status", s.signalAuth(s.handleSignalStatus))
 	return mux
 }
 
@@ -603,138 +608,37 @@ func (s *Server) handleAlertmanager(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cd := s.cooldowns[sourceName]
-	if cd == nil {
-		hours := source.Spec.Grouping.CooldownHours
-		if hours <= 0 {
-			hours = 6
-		}
-		cd = ingest.NewCooldown(time.Duration(hours) * time.Hour)
-		s.cooldowns[sourceName] = cd
-	}
-	var fps []string
+	// normalize: one signal per alert; the group payload keeps today's exact
+	// {receivedAt, alerts} document shape via the combine closure
 	byFP := map[string]amAlert{}
+	signals := make([]NormalizedSignal, 0, len(firing))
 	for _, a := range firing {
-		fps = append(fps, a.Fingerprint)
 		byFP[a.Fingerprint] = a
+		title := "🔍 " + a.Labels["alertname"]
+		if ns := a.Labels["namespace"]; ns != "" {
+			title += " — " + ns
+		}
+		signals = append(signals, NormalizedSignal{
+			Fingerprint: a.Fingerprint, Labels: a.Labels, Title: title,
+		})
 	}
-	fresh := cd.Fresh(fps)
-	if len(fresh) == 0 {
+	combine := func(group []NormalizedSignal) string {
+		alerts := make([]amAlert, 0, len(group))
+		for _, sig := range group {
+			alerts = append(alerts, byFP[sig.Fingerprint])
+		}
+		payloadDoc := map[string]any{"receivedAt": time.Now().UTC().Format(time.RFC3339), "alerts": alerts}
+		payloadJSON, _ := json.MarshalIndent(payloadDoc, "", "  ")
+		return string(payloadJSON)
+	}
+	queued, touched, err := s.routeSignals(ctx, &source, signals, combine)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if queued == 0 {
 		writeJSON(w, 200, map[string]any{"queued": 0, "reason": "all within cooldown"})
 		return
 	}
-
-	groups := map[string][]amAlert{}
-	for _, fp := range fresh {
-		a := byFP[fp]
-		sig := ingest.Signature(a.Labels, source.Spec.Grouping.SignatureLabels)
-		groups[sig] = append(groups[sig], a)
-	}
-
-	created := 0
-	for sig, alerts := range groups {
-		if err := s.routeGroup(ctx, &source, sig, alerts); err != nil {
-			writeJSON(w, 500, map[string]string{"error": err.Error()})
-			return
-		}
-		created++
-	}
-	// bookkeeping
-	patch := client.MergeFrom(source.DeepCopy())
-	now := metav1.Now()
-	source.Status.LastReceived = &now
-	source.Status.ReceivedTotal += int64(len(fresh))
-	_ = s.Client.Status().Patch(ctx, &source, patch)
-
-	writeJSON(w, 200, map[string]any{"queued": len(fresh), "conversations": created})
-}
-
-func (s *Server) routeGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, sig string, alerts []amAlert) error {
-	payloadDoc := map[string]any{"receivedAt": time.Now().UTC().Format(time.RFC3339), "alerts": alerts}
-	payloadJSON, _ := json.MarshalIndent(payloadDoc, "", "  ")
-
-	// existing conversation with the same signature within the window?
-	windowDays := source.Spec.Grouping.WindowDays
-	if windowDays <= 0 {
-		windowDays = 7
-	}
-	var list agentopsv1alpha1.ConversationList
-	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace),
-		client.MatchingLabels{controller.LabelSignatureHash: ingest.SignatureHash(sig)}); err != nil {
-		return err
-	}
-	var conv *agentopsv1alpha1.Conversation
-	cutoff := time.Now().Add(-time.Duration(windowDays) * 24 * time.Hour)
-	for i := range list.Items {
-		c := &list.Items[i]
-		last := c.CreationTimestamp.Time
-		if c.Status.LastActivity != nil {
-			last = c.Status.LastActivity.Time
-		}
-		if last.After(cutoff) {
-			conv = c
-			break
-		}
-	}
-
-	inputType := agentopsv1alpha1.InputAlert
-	if conv == nil {
-		labels := alerts[0].Labels
-		title := "🔍 " + labels["alertname"]
-		if ns := labels["namespace"]; ns != "" {
-			title += " — " + ns
-		}
-		conv = &agentopsv1alpha1.Conversation{}
-		conv.Namespace = s.Namespace
-		conv.GenerateName = "alert-"
-		conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(sig)}
-		conv.Spec = agentopsv1alpha1.ConversationSpec{
-			ProfileRef: source.Spec.ProfileRef,
-			Title:      title,
-			Signature:  sig,
-		}
-		if source.Spec.ChannelRef != nil {
-			conv.Spec.ChannelRef = source.Spec.ChannelRef
-		}
-		if err := s.Client.Create(ctx, conv); err != nil {
-			return err
-		}
-	} else if conv.Status.SessionID != "" {
-		inputType = agentopsv1alpha1.InputRecurrence // same problem, resume with context
-	}
-
-	ci := &agentopsv1alpha1.ConversationInput{}
-	ci.Namespace = s.Namespace
-	ci.GenerateName = conv.Name + "-in-"
-	ci.Spec = agentopsv1alpha1.ConversationInputSpec{
-		ConversationRef: agentopsv1alpha1.ObjectRef{Name: conv.Name},
-		Type:            inputType,
-		Payload:         string(payloadJSON),
-	}
-	if err := s.Client.Create(ctx, ci); err != nil {
-		return err
-	}
-
-	// append the input item with optimistic retry
-	for attempt := 0; attempt < 5; attempt++ {
-		var fresh agentopsv1alpha1.Conversation
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Name}, &fresh); err != nil {
-			return err
-		}
-		patch := client.MergeFrom(fresh.DeepCopy())
-		fresh.Spec.Inputs = append(fresh.Spec.Inputs, agentopsv1alpha1.InputItem{
-			ID:         "in-" + strconv.FormatInt(time.Now().UnixNano(), 36),
-			Type:       inputType,
-			PayloadRef: &agentopsv1alpha1.ObjectRef{Name: ci.Name},
-			ReceivedAt: metav1.Now(),
-		})
-		if err := s.Client.Patch(ctx, &fresh, patch); err != nil {
-			if apierrors.IsConflict(err) {
-				continue
-			}
-			return err
-		}
-		return nil
-	}
-	return fmt.Errorf("conflict appending input to %s", conv.Name)
+	writeJSON(w, 200, map[string]any{"queued": queued, "conversations": touched})
 }

@@ -35,7 +35,8 @@ approvable from your phone.
 | `ConversationInput` | Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd. |
 | `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, default profile, delivery hints, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). |
 | `ChannelAdapter` | **What serves a channel type**: a container image implementing the adapter contract, plugged in as a CR — the reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
-| `SignalSource` | Ingest lane: `alertmanagerWebhook` (implemented) / `cron` / `k8sEvents` (roadmap) with signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. |
+| `SignalSource` | Ingest lane, split like `Channel`: **type-agnostic routing metadata** (open `type`, profile/channel refs, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. `alertmanagerWebhook` is built-in; everything else is adapter-served. |
+| `SignalAdapter` | **What serves a signal type**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR with the same posture (owned workload, zero-RBAC SA, singleton, derived type-scoped token, credential projection). A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
 | `MCPConfig` | Reusable MCP server sets, shareable across profiles; secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
 
 ## Behaviors that matter
@@ -101,6 +102,35 @@ Delivery of agent answers is channel-metadata-driven: by default the agent's
 printed answer is the deliverable (captured via `/work/done`); a channel may
 set `spec.delivery.mode: agent` plus `agentInstructions` to have the agent
 post to the chat surface itself (the Telegram sample does this).
+
+## The signal adapter contract
+
+Signals are one-directional, so this is the channel contract minus the ops
+queue — an adapter normalizes its transport into signals and the manager does
+the rest (**adapters normalize, the manager groups**):
+
+1. Read your sources + opaque `spec.config` from `GET /signal/sources?type=`
+   (entries carry `credentialEnvPrefix` exactly like the channel listing).
+2. Push normalized signals: `POST /signal/inbound {"source", "signals":
+   [{"fingerprint", "labels", "title"?, "payload", "kind": "alert"|"job"}]}`.
+   The manager applies the source's `grouping` policy: fingerprint cooldown
+   (at-least-once delivery is safe — re-sends collapse), signature from
+   `labels` × `signatureLabels`, window reuse, recurrence-on-session.
+   `kind: job` takes the task-lane prompt instead of the read-only
+   investigation lane.
+3. Persist cursors via `GET/PUT /signal/state/{source}/{key}`, report config
+   problems via `POST /signal/sources/{name}/status`.
+
+Auth mirrors channels: master token or a per-`SignalAdapter` derived token
+(distinct derivation context — channel and signal adapters sharing a name
+never share a token), scoped to the adapter's `spec.type`. A `SignalSource`
+whose type nothing serves carries `Served=False`.
+
+Reference implementation: [`signal-cron/`](signal-cron/) — replaces the old
+roadmap `cron` sub-struct: `config: {schedule, input, title?}` fires job-lane
+signals with `<source>@<tick>` fingerprints (restart-safe via the state API);
+the grouping window turns a recurring job into one conversation whose later
+runs resume the agent session.
 
 ## The work contract
 
@@ -168,6 +198,7 @@ Point Alertmanager at `http://agentops-manager.<ns>.svc:8080/ingest/alertmanager
 | `POST /ingest/alertmanager/{source}` | Alertmanager webhook |
 | `GET /work`, `POST /work/done` | runtime-facing dispatch (see contract) |
 | `GET/POST /channel/*` | adapter-facing channel contract (bearer token; see adapter contract) |
+| `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token; see signal adapter contract) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics |
 

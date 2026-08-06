@@ -17,3 +17,13 @@ func DeriveAdapterToken(masterKey, adapterName string) string {
 	mac.Write([]byte("adapter:" + adapterName))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
+
+// DeriveSignalAdapterToken is the SignalAdapter sibling of DeriveAdapterToken
+// with a distinct derivation context, so a ChannelAdapter and a SignalAdapter
+// sharing a name never share a token (each surface validates only against its
+// own CRD list).
+func DeriveSignalAdapterToken(masterKey, adapterName string) string {
+	mac := hmac.New(sha256.New, []byte(masterKey))
+	mac.Write([]byte("signal-adapter:" + adapterName))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}

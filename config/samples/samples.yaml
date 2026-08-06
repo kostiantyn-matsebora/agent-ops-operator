@@ -104,6 +104,9 @@ spec:
   #     parse_mode=HTML, message_thread_id=$TG_THREAD_ID unless empty).
   #     Without credentials, your final printed answer IS the deliverable.
 ---
+# Built-in signal type: the manager itself hosts the Alertmanager webhook.
+# This CR is intentionally IDENTICAL to its pre-extensibility shape — the
+# compat proof that alertmanagerWebhook sources need no migration.
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource
 metadata:
@@ -119,6 +122,36 @@ spec:
     signatureLabels: ["alertgroup", "alertname", "namespace"]
     windowDays: 7
     cooldownHours: 6
+---
+# SignalAdapter: plugs the signal type "cron" in as a CR — the reconciler
+# deploys and owns the adapter workload. One active adapter per type.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: cron
+  namespace: agent-ops
+spec:
+  type: cron
+  image: kmatsebora/agentops-signal-cron:0.1.0
+---
+# Adapter-served signal source: opaque config interpreted only by signal-cron.
+# The grouping window makes consecutive runs land in ONE conversation, later
+# ticks resuming the agent session (a recurring job that remembers).
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: daily-healthcheck
+  namespace: agent-ops
+spec:
+  type: cron
+  channelRef:
+    name: home-ops
+  profileRef:
+    name: ha-engineer
+  config:
+    schedule: "0 6 * * *"
+    input: "Run the daily infrastructure health check: node pressure, failed pods, storage headroom. Report only what needs attention."
+    title: "🛠 Daily health check"
 ---
 apiVersion: agentops.dev/v1alpha1
 kind: Conversation

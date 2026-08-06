@@ -1,22 +1,21 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// SignalSourceType enumerates ingest kinds.
-// +kubebuilder:validation:Enum=alertmanagerWebhook;cron;k8sEvents
-type SignalSourceType string
-
-const (
-	SourceAlertmanager SignalSourceType = "alertmanagerWebhook"
-	SourceCron         SignalSourceType = "cron"
-	SourceK8sEvents    SignalSourceType = "k8sEvents"
-)
+// SourceAlertmanager is the built-in, in-process signal type (the manager
+// hosts its webhook endpoint). Every other type is served by an external
+// signal adapter via the /signal/* contract.
+const SourceAlertmanager = "alertmanagerWebhook"
 
 // GroupingSpec controls signature-based conversation grouping and dedupe.
+// This is deliberately typed, manager-side policy — it applies to every source
+// type, built-in or adapter-fed; adapters only normalize signals.
 type GroupingSpec struct {
-	// SignatureLabels compose the signature (alert labels / event fields).
+	// SignatureLabels compose the signature (signal label keys).
 	// +optional
 	SignatureLabels []string `json:"signatureLabels,omitempty"`
 	// WindowDays: reuse an existing conversation with the same signature
@@ -30,37 +29,32 @@ type GroupingSpec struct {
 	CooldownHours int32 `json:"cooldownHours,omitempty"`
 }
 
-// CronSpec fires a conversation input on a schedule.
-type CronSpec struct {
-	// +kubebuilder:validation:MinLength=1
-	Schedule string `json:"schedule"`
-	// Input text handed to the profile (job lane).
-	// +optional
-	Input string `json:"input,omitempty"`
-}
-
-// EventsSpec watches Kubernetes Events as signals.
-type EventsSpec struct {
-	// Reasons allowlist (e.g. CrashLoopBackOff, OOMKilled, FailedScheduling).
-	// +optional
-	Reasons []string `json:"reasons,omitempty"`
-	// Namespaces allowlist; empty = all.
-	// +optional
-	Namespaces []string `json:"namespaces,omitempty"`
-}
-
-// SignalSourceSpec maps a signal stream to conversations with a profile.
+// SignalSourceSpec maps a signal stream to conversations with a profile:
+// type-agnostic routing metadata plus an opaque per-type config that only the
+// serving signal implementation interprets.
 type SignalSourceSpec struct {
-	Type SignalSourceType `json:"type"`
+	// Type names the signal implementation serving this source (e.g.
+	// "alertmanagerWebhook" built-in, "cron", "pagerduty", …). The operator
+	// never interprets it beyond routing.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.type is immutable"
+	Type string `json:"type"`
 	// +optional
 	ChannelRef *ObjectRef `json:"channelRef,omitempty"`
 	ProfileRef ObjectRef  `json:"profileRef"`
 	// +optional
 	Grouping GroupingSpec `json:"grouping,omitempty"`
+	// CredentialsSecretRef names the Secret holding this source's transport
+	// credentials (e.g. an API key). The operator only writes the NAME into
+	// the serving adapter's pod spec (kubelet-resolved envFrom projection);
+	// nothing reads the Secret's values through the API.
 	// +optional
-	Cron *CronSpec `json:"cron,omitempty"`
+	CredentialsSecretRef *corev1.LocalObjectReference `json:"credentialsSecretRef,omitempty"`
+	// Config carries whatever the signal type needs; schema-less by design.
+	// Validated by the serving adapter, never by the operator.
+	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
-	Events *EventsSpec `json:"events,omitempty"`
+	Config *runtime.RawExtension `json:"config,omitempty"`
 }
 
 // SignalSourceStatus reports ingest liveness.
@@ -81,7 +75,8 @@ type SignalSourceStatus struct {
 // +kubebuilder:printcolumn:name="Received",type=integer,JSONPath=`.status.receivedTotal`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// SignalSource is an ingest lane (Alertmanager webhook, cron, k8s Events).
+// SignalSource is an ingest lane served by a signal-type implementation
+// (built-in Alertmanager webhook or an external signal adapter).
 type SignalSource struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

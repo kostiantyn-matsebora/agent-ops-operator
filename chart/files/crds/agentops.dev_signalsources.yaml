@@ -32,8 +32,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: SignalSource is an ingest lane (Alertmanager webhook, cron, k8s
-          Events).
+        description: |-
+          SignalSource is an ingest lane served by a signal-type implementation
+          (built-in Alertmanager webhook or an external signal adapter).
         properties:
           apiVersion:
             description: |-
@@ -53,8 +54,10 @@ spec:
           metadata:
             type: object
           spec:
-            description: SignalSourceSpec maps a signal stream to conversations with
-              a profile.
+            description: |-
+              SignalSourceSpec maps a signal stream to conversations with a profile:
+              type-agnostic routing metadata plus an opaque per-type config that only the
+              serving signal implementation interprets.
             properties:
               channelRef:
                 description: ObjectRef references another object by name (same namespace).
@@ -66,36 +69,35 @@ spec:
                 required:
                 - name
                 type: object
-              cron:
-                description: CronSpec fires a conversation input on a schedule.
-                properties:
-                  input:
-                    description: Input text handed to the profile (job lane).
-                    type: string
-                  schedule:
-                    minLength: 1
-                    type: string
-                required:
-                - schedule
+              config:
+                description: |-
+                  Config carries whatever the signal type needs; schema-less by design.
+                  Validated by the serving adapter, never by the operator.
                 type: object
-              events:
-                description: EventsSpec watches Kubernetes Events as signals.
+                x-kubernetes-preserve-unknown-fields: true
+              credentialsSecretRef:
+                description: |-
+                  CredentialsSecretRef names the Secret holding this source's transport
+                  credentials (e.g. an API key). The operator only writes the NAME into
+                  the serving adapter's pod spec (kubelet-resolved envFrom projection);
+                  nothing reads the Secret's values through the API.
                 properties:
-                  namespaces:
-                    description: Namespaces allowlist; empty = all.
-                    items:
-                      type: string
-                    type: array
-                  reasons:
-                    description: Reasons allowlist (e.g. CrashLoopBackOff, OOMKilled,
-                      FailedScheduling).
-                    items:
-                      type: string
-                    type: array
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
                 type: object
+                x-kubernetes-map-type: atomic
               grouping:
-                description: GroupingSpec controls signature-based conversation grouping
-                  and dedupe.
+                description: |-
+                  GroupingSpec controls signature-based conversation grouping and dedupe.
+                  This is deliberately typed, manager-side policy — it applies to every source
+                  type, built-in or adapter-fed; adapters only normalize signals.
                 properties:
                   cooldownHours:
                     default: 6
@@ -104,8 +106,8 @@ spec:
                     format: int32
                     type: integer
                   signatureLabels:
-                    description: SignatureLabels compose the signature (alert labels
-                      / event fields).
+                    description: SignatureLabels compose the signature (signal label
+                      keys).
                     items:
                       type: string
                     type: array
@@ -128,12 +130,15 @@ spec:
                 - name
                 type: object
               type:
-                description: SignalSourceType enumerates ingest kinds.
-                enum:
-                - alertmanagerWebhook
-                - cron
-                - k8sEvents
+                description: |-
+                  Type names the signal implementation serving this source (e.g.
+                  "alertmanagerWebhook" built-in, "cron", "pagerduty", …). The operator
+                  never interprets it beyond routing.
+                minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: spec.type is immutable
+                  rule: self == oldSelf
             required:
             - profileRef
             - type
