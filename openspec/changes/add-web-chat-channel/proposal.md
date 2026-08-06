@@ -1,6 +1,8 @@
 # Proposal: add-web-chat-channel
 
 > **Rebased 2026-08-05** on the implemented `make-channel-type-architecture-extendable` change: generic Channel CRD (`type` + opaque `config`), string thread ids, shared Router/OpQueue, and a zero-secret-reads manager are now the ground truth this change builds on.
+>
+> **Rebase note 2026-08-06 (`wire-it-up` landed)**: conversations are now multi-channel — `spec.channelRefs[]` + `status.threads[]{channel,threadId}` replaced the single `channelRef`/`threadId`. Impacts for this change: (1) conversation listing/transcript queries must filter by `BoundTo(<web channel>)` and read the web channel's own thread binding, not a global thread id; (2) the web provider's `Send` receives fan-out results, acks, AND attributed relay messages from sibling channels (a Pipeline can mirror telegram↔web) — render relays as distinct "remote user" messages; (3) the **no-relay-loop rule is binding**: the web provider must never feed its own outbound posts (including relays) back through the Router as inbound user messages; (4) multi-channel conversations force result delivery, which is already this change's default path — the `/work/done`-sourced transcript needs no change, but fan-out `send` ops now ALSO carry the reply, so the SSE/transcript layer should dedupe (prefer runs[] as the source of truth, treat provider sends as ephemeral display events).
 
 ## Why
 
