@@ -116,16 +116,27 @@ func asValidationError(err error, target **jsonschema.ValidationError) bool {
 // while parent nodes only say "doesn't validate with ...".
 func flatten(ve *jsonschema.ValidationError) []Violation {
 	if len(ve.Causes) == 0 {
-		return []Violation{{
-			Path:    "/" + strings.Join(toStrings(ve.InstanceLocation), "/"),
-			Message: fmt.Sprint(ve.ErrorKind),
-		}}
+		return []Violation{leafViolation(ve)}
 	}
 	var out []Violation
 	for _, c := range ve.Causes {
 		out = append(out, flatten(c)...)
 	}
 	return out
+}
+
+// leafViolation renders one leaf error. The library formats leaves as
+// "at '<location>': <reason>" — reason text meant for humans, unlike the raw
+// ErrorKind struct — so we split that apart to keep path and message separate.
+func leafViolation(ve *jsonschema.ValidationError) Violation {
+	s := ve.Error()
+	if rest, found := strings.CutPrefix(s, "at '"); found {
+		if loc, msg, ok := strings.Cut(rest, "': "); ok {
+			return Violation{Path: loc, Message: msg}
+		}
+	}
+	// unexpected shape: keep the library's text rather than invent one
+	return Violation{Path: "/" + strings.Join(toStrings(ve.InstanceLocation), "/"), Message: s}
 }
 
 func toStrings(loc []string) []string {
