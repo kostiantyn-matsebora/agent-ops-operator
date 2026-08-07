@@ -35,13 +35,16 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// the adapter CR is both the readiness source and the schema declarer
+	adapter := r.adapter(ctx, &src)
+
 	// no built-in signal types: every type needs a serving adapter
 	cond := metav1.Condition{Type: ConditionServed, Status: metav1.ConditionFalse, Reason: "NoServingImplementation",
 		Message: fmt.Sprintf("no Ready SignalAdapter named %q (hand-deployed adapters report per-source readiness on the Ready condition)", src.Spec.Adapter)}
-	if name, ready := r.readyAdapter(ctx, &src); ready {
+	if adapter != nil && apimeta.IsStatusConditionTrue(adapter.Status.Conditions, ConditionReady) {
 		cond.Status = metav1.ConditionTrue
 		cond.Reason = "AdapterReady"
-		cond.Message = fmt.Sprintf("served by SignalAdapter %q", name)
+		cond.Message = fmt.Sprintf("served by SignalAdapter %q", adapter.Name)
 	} else if c := apimeta.FindStatusCondition(src.Status.Conditions, "Ready"); c != nil && c.Status == metav1.ConditionTrue {
 		// a hand-deployed adapter (no CR) proved itself via the status
 		// contract — don't contradict it
@@ -70,26 +73,30 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		existing.Status == wired.Status && existing.Message == wired.Message {
 		wiredSame = true
 	}
-	if servedSame && wiredSame {
+	// advisory: never affects Served, Wired, or ingestion
+	var configCond *metav1.Condition
+	if adapter != nil {
+		configCond = validateAgainstAdapter(adapter.Spec.ConfigSchema, src.Spec.Config, adapter.Name)
+	}
+
+	if servedSame && wiredSame && configValidUnchanged(src.Status.Conditions, configCond) {
 		return ctrl.Result{}, nil
 	}
 	patch := client.MergeFrom(src.DeepCopy())
 	apimeta.SetStatusCondition(&src.Status.Conditions, cond)
 	apimeta.SetStatusCondition(&src.Status.Conditions, wired)
+	applyConfigValid(&src.Status.Conditions, configCond)
 	return ctrl.Result{}, r.Status().Patch(ctx, &src, patch)
 }
 
-// readyAdapter resolves the adapter the source names in spec.type — the
-// adapter CR's NAME is the routing key.
-func (r *SignalSourceReconciler) readyAdapter(ctx context.Context, src *agentopsv1alpha1.SignalSource) (string, bool) {
+// adapter resolves the SignalAdapter the source names in spec.adapter — the
+// adapter CR's NAME is the routing key. nil when none exists.
+func (r *SignalSourceReconciler) adapter(ctx context.Context, src *agentopsv1alpha1.SignalSource) *agentopsv1alpha1.SignalAdapter {
 	var a agentopsv1alpha1.SignalAdapter
 	if err := r.Get(ctx, types.NamespacedName{Namespace: src.Namespace, Name: src.Spec.Adapter}, &a); err != nil {
-		return "", false
+		return nil
 	}
-	if apimeta.IsStatusConditionTrue(a.Status.Conditions, ConditionReady) {
-		return a.Name, true
-	}
-	return "", false
+	return &a
 }
 
 // SetupWithManager wires the controller: SignalSources, SignalAdapter events
