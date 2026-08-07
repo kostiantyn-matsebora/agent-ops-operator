@@ -18,7 +18,7 @@ A Helm subchart at `chart/charts/vm-bundle/` SHALL package the VictoriaMetrics e
 - **THEN** only the enabled MCPConfig CRs render, with no adapter or Service
 
 ### Requirement: The alertmanager component packages the adapter with its webhook Service
-When active, the `alertmanager` component SHALL render: the `SignalAdapter` CR (`type: vmAlertmanagerWebhook`, values-configured image, singleton); a `Service` named `agentops-signal-<name>` selecting the reconciler's deterministic pod label `agentops.dev/signal-adapter: <name>` with a values-configured port and numeric `targetPort`; and an optional default `SignalSource` gated on `defaultSource.enabled` plus a configured, non-empty `defaultSource.profileRef` (the bundle ships no profile — the reference targets an operator-owned profile). No `SignalAdapterSpec` schema changes and no reconciler changes SHALL be required; the pod-label selector contract SHALL be pinned by an integration-test assertion.
+When active, the `alertmanager` component SHALL render: the `SignalAdapter` CR (`type: vmAlertmanagerWebhook`, values-configured image, singleton); a `Service` named `agentops-signal-<name>` selecting the reconciler's deterministic pod label `agentops.dev/signal-adapter: <name>` with a values-configured port and numeric `targetPort`; and an optional default `SignalSource` **plus the `Pipeline` claiming it** (wiring is pipeline-only), gated on `defaultSource.enabled` plus a configured, non-empty `defaultSource.profileRef` rendered onto the Pipeline (the bundle ships no profile — the reference targets an operator-owned profile; `defaultSource.channels` optionally binds mirroring channels). No `SignalAdapterSpec` schema changes and no reconciler changes SHALL be required; the pod-label selector contract SHALL be pinned by an integration-test assertion.
 
 #### Scenario: One flag exposes a working webhook URL
 - **WHEN** the chart is installed with `vm-bundle.enabled=true` and a served source exists
@@ -26,7 +26,11 @@ When active, the `alertmanager` component SHALL render: the `SignalAdapter` CR (
 
 #### Scenario: Default source requires an explicit profile
 - **WHEN** `alertmanager.defaultSource.enabled=true` and `defaultSource.profileRef` is empty
-- **THEN** rendering fails with a message naming the missing value rather than emitting an unroutable SignalSource
+- **THEN** rendering fails with a message naming the missing value rather than emitting an unwired SignalSource whose signals would drop
+
+#### Scenario: Default source is wired by its rendered Pipeline
+- **WHEN** the default source renders with a profileRef
+- **THEN** a Pipeline claiming the SignalSource renders alongside it, so the source shows `Wired=True` and its signals route to the configured profile (and channels, when set)
 
 ### Requirement: MCP components ship vmlogs and vmmetrics as referencable MCPConfig CRs
 When active, the `mcp.vmlogs` and `mcp.vmmetrics` components SHALL each render an `MCPConfig` CR (default names `vm-logs` / `vm-metrics`, values-overridable) whose single server entry uses the FIXED server key `victorialogs` / `victoriametrics` respectively (the key is the `mcp__<key>__*` tool namespace in profile allowlists and SHALL NOT be values-configurable), `type: sse`, a values-configured URL, and values-passthrough `headers` supporting `valueFrom` secret references for authenticated endpoints (the manager reads no Secrets). An enabled MCP component with an empty URL SHALL fail rendering with a message naming the required value. Wiring the MCPConfigs into a profile (via `mcp.configRefs` and `allowedTools`) is the operator's step and SHALL be documented with a complete example, including using the same profile as `defaultSource.profileRef` so the alert-handling agent can query logs and metrics.
@@ -42,3 +46,29 @@ When active, the `mcp.vmlogs` and `mcp.vmmetrics` components SHALL each render a
 #### Scenario: Authenticated endpoint without manager Secret reads
 - **WHEN** `mcp.vmmetrics.headers` carries an `Authorization` header with a `secretKeyRef`
 - **THEN** the rendered MCPConfig embeds the `valueFrom` reference and the credential is resolved only in the runtime pod, never read by the manager
+
+### Requirement: MCP components can optionally deploy the MCP server workloads
+Each MCP component SHALL support a `deploy` sub-block (default `enabled: false`): when enabled it renders the upstream MCP server image (values-configured) as a Deployment and Service (`agentops-mcp-<name>`) running in SSE mode against a required `deploy.backend` URL (the VictoriaLogs/VictoriaMetrics instance; empty fails the render naming the value). When the workload is deployed and the component's `url` is empty, the MCPConfig SHALL default to the deployed Service's SSE URL instead of failing; an explicit `url` still wins.
+
+#### Scenario: Deployed MCP server wires itself
+- **WHEN** the bundle renders with `mcp.vmlogs.deploy.enabled=true`, a backend URL, and no `mcp.vmlogs.url`
+- **THEN** a Deployment and Service render and the MCPConfig's server URL is the deployed Service's SSE endpoint
+
+#### Scenario: Deploy without a backend fails loudly
+- **WHEN** `mcp.vmlogs.deploy.enabled=true` with an empty `deploy.backend`
+- **THEN** rendering fails naming `vm-bundle.mcp.vmlogs.deploy.backend`
+
+#### Scenario: Deployment stays off by default
+- **WHEN** the bundle is enabled with default deploy values and explicit URLs
+- **THEN** no MCP server Deployment or Service renders — endpoint-consumption mode is unchanged
+
+### Requirement: The bundle ships no profile — tool wiring targets the operator's own profile
+The bundle SHALL NOT render an AgentProfile (user decision 2026-08-07, reverting an interim bundled-profile addition: the alert-handling profile is operator-owned and typically already exists). `defaultSource.profileRef` is strictly required when the default source is enabled, and the documentation SHALL present wiring the bundle's MCPConfigs into that profile (`mcp.configRefs` + the two tool-namespace allowlist entries) as the one manual step.
+
+#### Scenario: No profile objects from the bundle
+- **WHEN** the bundle renders fully enabled
+- **THEN** no `AgentProfile` object appears in the output
+
+#### Scenario: Default source always requires an explicit profile
+- **WHEN** `defaultSource.enabled=true` with an empty `profileRef`
+- **THEN** rendering fails naming the value — there is no bundled profile to fall back to

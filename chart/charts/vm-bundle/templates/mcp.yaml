@@ -1,0 +1,62 @@
+{{- /*
+MCP components: MCPConfig CRs profiles reference via spec.mcp.configRefs.
+Server keys are FIXED — they are the tool namespaces (mcp__victorialogs__*,
+mcp__victoriametrics__*) in profile allowlists; making them configurable
+would silently break allowlists. An enabled component needs a URL — either
+explicit, or defaulted to the component's own deployed MCP server (deploy
+sub-block); otherwise the render fails: an MCPConfig pointing nowhere just
+silently costs agents their tools.
+*/ -}}
+{{- if and .Values.enabled .Values.mcp.vmlogs.enabled }}
+{{- $vmlogs := .Values.mcp.vmlogs }}
+{{- $vmlogsURL := $vmlogs.url }}
+{{- if and (not $vmlogsURL) .Values.mcpServers.enabled .Values.mcpServers.vmlogs.enabled }}
+{{- $vmlogsURL = printf "http://agentops-mcp-vmlogs.%s.svc:%v/sse" .Release.Namespace .Values.mcpServers.vmlogs.port }}
+{{- end }}
+{{- if not $vmlogsURL }}
+{{- fail "vm-bundle: mcp.vmlogs.url is required when mcp.vmlogs.enabled=true (or enable the mcpServers component to run the MCP server in-cluster)" }}
+{{- end }}
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: {{ $vmlogs.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-vm-bundle
+spec:
+  servers:
+    victorialogs:
+      type: sse
+      url: {{ $vmlogsURL | quote }}
+      {{- with $vmlogs.headers }}
+      headers:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+{{- end }}
+{{- if and .Values.enabled .Values.mcp.vmmetrics.enabled }}
+{{- $vmmetrics := .Values.mcp.vmmetrics }}
+{{- $vmmetricsURL := $vmmetrics.url }}
+{{- if and (not $vmmetricsURL) .Values.mcpServers.enabled .Values.mcpServers.vmmetrics.enabled }}
+{{- $vmmetricsURL = printf "http://agentops-mcp-vmmetrics.%s.svc:%v/sse" .Release.Namespace .Values.mcpServers.vmmetrics.port }}
+{{- end }}
+{{- if not $vmmetricsURL }}
+{{- fail "vm-bundle: mcp.vmmetrics.url is required when mcp.vmmetrics.enabled=true (or enable the mcpServers component to run the MCP server in-cluster)" }}
+{{- end }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: {{ $vmmetrics.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-vm-bundle
+spec:
+  servers:
+    victoriametrics:
+      type: sse
+      url: {{ $vmmetricsURL | quote }}
+      {{- with $vmmetrics.headers }}
+      headers:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+{{- end }}

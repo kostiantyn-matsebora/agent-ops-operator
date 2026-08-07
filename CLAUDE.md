@@ -2,9 +2,9 @@
 
 Go/controller-runtime Kubernetes operator (see README.md for the product view).
 Self-contained modules — no dependencies outside this directory; keep it that
-way. Three Go modules: the operator (root), `channel-telegram/` (reference
-channel adapter), and `signal-cron/` (reference signal adapter) — the adapters
-dependency-free.
+way. Four Go modules: the operator (root), `channel-telegram/` (reference
+channel adapter), `signal-cron/` and `signal-vmalertmanager/` (signal
+adapters) — the adapters dependency-free.
 
 ## Terminology (binding)
 
@@ -61,6 +61,7 @@ docker build --platform linux/amd64 -t <registry>/agentops-manager:<tag> .
 docker build --platform linux/amd64 -t <registry>/agentops-runtime-claude:<tag> ./runtime-claude/
 docker build --platform linux/amd64 -t <registry>/agentops-channel-telegram:<tag> ./channel-telegram/
 docker build --platform linux/amd64 -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
+docker build --platform linux/amd64 -t <registry>/agentops-signal-vmalertmanager:<tag> ./signal-vmalertmanager/
 # then update the image refs (chart values for the manager, AgentRuntime CRs for
 # runtimes), helm upgrade, and verify with a live task:
 #   POST /task {"profile":"stub","task":"..."}   (stub runtime = no LLM cost)
@@ -98,6 +99,11 @@ channel-telegram/        reference channel adapter (own module, no deps) —
                          /channel contract; getUpdates poller + Bot API live HERE
 signal-cron/             reference signal adapter (own module, no deps) —
                          /signal contract; five-field cron parser + scheduler
+signal-vmalertmanager/   webhook-receiving signal adapter (own module, no
+                         deps) — hosts /webhook/{source} for Alertmanager-
+                         format posts; vm-bundle subchart ships it + Service
+                         (pod label agentops.dev/signal-adapter is a CHART
+                         CONTRACT, pinned by integration test)
 chart/                   Helm chart: manager Deployment/RBAC/Service + CRDs as gated
                          templates (crds.enabled, crds.keep -> helm.sh/resource-policy:
                          keep so uninstall never cascade-deletes CRs); CRD source of

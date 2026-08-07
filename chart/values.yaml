@@ -113,6 +113,29 @@ resources:
     cpu: 500m
     memory: 256Mi
 
+# VictoriaMetrics bundle (embedded subchart, OFF by default; never enabled by
+# demo mode — it needs your VM endpoints). See chart/charts/vm-bundle/values.yaml
+# for the full surface. Typical enablement:
+# vm-bundle:
+#   enabled: true
+#   alertmanager:
+#     defaultSource:
+#       enabled: true                   # SignalSource + wiring Pipeline
+#       profileRef: <your-profile>      # your alert-handling profile
+#       channels: [<your-channel>]
+#   # EITHER point at existing MCP servers:
+#   mcp:
+#     vmlogs:    { url: http://mcp-victorialogs.<ns>.svc/sse }
+#     vmmetrics: { url: http://mcp-victoriametrics.<ns>.svc/sse }
+#   # OR deploy them (mcp.*.url left empty then defaults to these):
+#   mcpServers:
+#     enabled: true
+#     vmlogs:    { backend: http://<victorialogs>:9428 }
+#     vmmetrics: { backend: http://<victoriametrics>:8429 }
+#   # No bundled profile: add configRefs [vm-logs, vm-metrics] + the
+#   # mcp__victorialogs__*/mcp__victoriametrics__* allowlist entries to YOUR
+#   # profile (see README).
+
 # CRD management (cert-manager pattern): templated, so upgrades work.
 crds:
   # Install/upgrade the agentops.dev CRDs with this release.

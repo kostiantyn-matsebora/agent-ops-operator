@@ -262,6 +262,12 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	if *deploy.Spec.Replicas != 1 || deploy.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
 		t.Fatal("singleton not enforced")
 	}
+	// CHART CONTRACT: the vm-bundle subchart's Service selects the pod label
+	// agentops.dev/signal-adapter=<adapter name>. Renaming this label breaks
+	// deployed webhook Services — keep this assertion in sync with any change.
+	if deploy.Spec.Template.Labels["agentops.dev/signal-adapter"] != "life-sig" {
+		t.Fatalf("chart-consumed pod label missing/renamed: %+v", deploy.Spec.Template.Labels)
+	}
 	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken ||
 		pod.ServiceAccountName != controller.SignalAdapterDeploymentName("life-sig") {
 		t.Fatal("zero-authority posture missing")

@@ -1,5 +1,7 @@
 # vm-bundle — design
 
+> **Rebase note 2026-08-07 (`pipeline-only-wiring` landed after this was written):** SignalSource no longer carries `profileRef`/`channelRef` — wiring lives exclusively on `Pipeline`, and unclaimed sources drop signals (`Wired=False`). The `defaultSource` component therefore renders a SignalSource **plus a Pipeline** claiming it (`profileRef` and optional `channels` land on the Pipeline). Version numbers below are also stale: `k8s-bundle` has not landed, current chart is 1.4.0 → this change ships 1.5.0.
+
 ## Context
 
 This change merges and supersedes `vm-alert-manager-as-signal-source`, whose design stands except for packaging: the webhook-receiving adapter no longer ships as parent-chart templates but as a component of a `vm-bundle` subchart, alongside two MCPConfig components. The bundle follows the conventions set by the `k8s-bundle` change (embedded subchart under `chart/charts/`, self-gated templates, default-off, per-component flags).
@@ -18,7 +20,7 @@ Key existing machinery: `MCPConfig` CRs are named MCP server sets (`spec.servers
 
 - No demo coupling: `global.demo.enabled` does NOT enable this bundle — it depends on operator-supplied VM endpoints (and typically MCP server deployments) that a demo cluster doesn't have. Only `vm-bundle.enabled` turns it on.
 - No profile shipped in this bundle: the SignalSource's `profileRef` and the MCP `configRefs` point at an operator-owned profile (e.g. `k8s-bundle`'s `k8s-engineer` or a custom SRE profile). Shipping a VM-flavored profile is a possible follow-up.
-- Not deploying VictoriaMetrics, VMAlertmanager, or the MCP server workloads themselves — the bundle consumes their endpoints.
+- Not deploying VictoriaMetrics or VMAlertmanager themselves — the bundle consumes their endpoints. ~~Nor the MCP server workloads~~ **(amended by user request 2026-08-07: each MCP component gains an optional `deploy` sub-block — off by default — rendering the upstream MCP server (ghcr.io/victoriametrics/mcp-victorialogs / mcp-victoriametrics) as a Deployment+Service in SSE mode pointed at a required `backend` URL; when deployed and `url` is left empty, the MCPConfig defaults to the deployed Service's SSE URL).**
 - Built-in `alertmanagerWebhook` untouched (spec-pinned); no `SignalAdapterSpec` schema changes.
 
 ## Decisions
@@ -36,7 +38,9 @@ alertmanager:
   service: { port: 8080 }        # targetPort fixed 8080 (adapter LISTEN_ADDR default)
   defaultSource:
     enabled: false
-    profileRef: ""               # required to render the SignalSource
+    name: vm-alerts              # SignalSource + Pipeline CR name
+    profileRef: ""               # required — rendered onto the PIPELINE (see rebase note)
+    channels: []                 # optional Channel names for the Pipeline (mirroring)
     grouping: {}
 mcp:
   vmlogs:

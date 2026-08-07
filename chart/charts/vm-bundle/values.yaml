@@ -1,0 +1,103 @@
+# VictoriaMetrics bundle: alert ingestion (VMAlertmanager webhook → signal
+# adapter → conversations) + investigation tooling (vmlogs/vmmetrics MCP
+# servers for the handling profile). The WHOLE bundle is off by default and
+# deliberately NOT coupled to demo mode — it consumes operator-supplied
+# VictoriaMetrics endpoints no demo cluster has. Override under the
+# `vm-bundle:` key of the parent chart's values.
+enabled: false
+
+alertmanager:
+  # The webhook-receiving signal source component: SignalAdapter CR + Service.
+  enabled: true
+  # SignalAdapter CR name; the reconciler's workload and the Service are
+  # named agentops-signal-<name>.
+  name: vm-alertmanager
+  image:
+    repository: kmatsebora/agentops-signal-vmalertmanager
+    tag: 0.1.0
+  resources: {}
+  service:
+    # Service port; targetPort is fixed 8080 (the adapter's LISTEN_ADDR default).
+    port: 8080
+  # Optional turnkey source: a SignalSource PLUS the Pipeline claiming it
+  # (wiring is pipeline-only — an unclaimed source drops signals). The
+  # profile is operator-owned; the bundle ships none.
+  defaultSource:
+    enabled: false
+    # SignalSource + Pipeline CR name; also the {source} segment of the
+    # webhook URL: /webhook/<name>
+    name: vm-alerts
+    # REQUIRED when enabled: the operator-owned AgentProfile answering these
+    # alerts (rendered onto the Pipeline). Wire the MCP tools into it — see
+    # the note above the mcpServers block.
+    profileRef: ""
+    # Optional Channel names the Pipeline mirrors conversations to.
+    channels: []
+    # SignalSource grouping policy (manager-side; defaults apply when empty).
+    grouping: {}
+
+mcp:
+  # MCPConfig CRs for AgentProfiles to reference via spec.mcp.configRefs.
+  # Server keys are FIXED (victorialogs / victoriametrics) because they are
+  # the tool namespaces (mcp__victorialogs__*, mcp__victoriametrics__*) baked
+  # into profile allowlists.
+  vmlogs:
+    enabled: true
+    # MCPConfig CR name (what profiles put in configRefs).
+    name: vm-logs
+    # MCP server SSE URL, e.g. http://mcp-victorialogs.<ns>.svc/sse.
+    # REQUIRED when enabled — unless the mcpServers component below deploys
+    # the workload, in which case an empty url defaults to the deployed
+    # Service's SSE endpoint.
+    url: ""
+    # Optional header entries, passthrough — valueFrom secret refs supported
+    # (resolved in the runtime pod; the manager reads no Secrets), e.g.:
+    #   - name: Authorization
+    #     valueFrom: {secretKeyRef: {name: vm-auth, key: bearerHeader}}
+    headers: []
+  vmmetrics:
+    enabled: true
+    name: vm-metrics
+    # MCP server SSE URL; same rules as vmlogs.url.
+    url: ""
+    headers: []
+
+# NOTE: the bundle ships NO AgentProfile. Point defaultSource.profileRef at
+# your own profile and give it the MCP tools with one edit:
+#   spec:
+#     allowedTools: "...,mcp__victorialogs__*,mcp__victoriametrics__*"
+#     mcp:
+#       configRefs: [{name: vm-logs}, {name: vm-metrics}]
+
+# The MCP server WORKLOADS themselves — a separate bundle component (sibling
+# of `mcp`, which only renders the MCPConfig CRs): deploy the upstream
+# VictoriaMetrics MCP images in SSE mode when you don't already run
+# mcp-victorialogs / mcp-victoriametrics somewhere. Off by default.
+mcpServers:
+  enabled: false
+  vmlogs:
+    enabled: true
+    image:
+      repository: ghcr.io/victoriametrics/mcp-victorialogs
+      tag: latest            # pin a release tag in production
+    # REQUIRED when active: the VictoriaLogs instance to query,
+    # e.g. http://vlogs-victoria-logs-single-server.monitoring.svc:9428
+    backend: ""
+    port: 8080
+    # Extra env passthrough (appended after the rendered defaults:
+    # MCP_SERVER_MODE, MCP_LISTEN_ADDR, VL_INSTANCE_ENTRYPOINT).
+    env: []
+    resources: {}
+  vmmetrics:
+    enabled: true
+    image:
+      repository: ghcr.io/victoriametrics/mcp-victoriametrics
+      tag: latest            # pin a release tag in production
+    # REQUIRED when active: the VictoriaMetrics instance to query,
+    # e.g. http://vmsingle-vm.monitoring.svc:8429
+    backend: ""
+    port: 8080
+    # Extra env passthrough (appended after MCP_SERVER_MODE,
+    # MCP_LISTEN_ADDR, VM_INSTANCE_ENTRYPOINT).
+    env: []
+    resources: {}

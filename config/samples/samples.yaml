@@ -150,6 +150,59 @@ spec:
   type: cron
   image: kmatsebora/agentops-signal-cron:0.1.0
 ---
+# VM Alertmanager webhook source (adapter-served; the vm-bundle subchart
+# deploys the adapter + Service). VMAlertmanager posts the standard
+# Alertmanager webhook format to
+#   http://agentops-signal-vm-alertmanager.<ns>.svc:8080/webhook/vm-alerts
+# Open variant: no credentialsSecretRef — anonymous posts accepted
+# (ClusterIP-only posture, matching the built-in endpoint).
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: vm-alerts
+  namespace: agent-ops
+spec:
+  type: vmAlertmanagerWebhook
+  grouping:
+    signatureLabels: ["alertgroup", "alertname", "namespace"]
+---
+# Credentialed variant: the Secret's TOKEN key is projected into the adapter
+# (AGENTOPS_CRED_VM_ALERTS_SECURE_TOKEN) and webhooks must carry
+# Authorization: Bearer <token>. Configure the same token in VMAlertmanager's
+# webhook_configs http_config.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: vm-alerts-secure
+  namespace: agent-ops
+spec:
+  type: vmAlertmanagerWebhook
+  credentialsSecretRef:
+    name: vm-webhook-token   # Secret with key TOKEN
+---
+# Remember: wiring is pipeline-only — claim the source or its signals drop
+# (Wired=False). Profile wiring for VM investigation: give the claiming
+# profile the vm-bundle MCPConfigs and matching allowlist entries, e.g.
+#   spec:
+#     allowedTools: "Read,Grep,Glob,Bash,mcp__victorialogs__*,mcp__victoriametrics__*"
+#     mcp:
+#       configRefs:
+#         - name: vm-logs
+#         - name: vm-metrics
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: vm-alerts
+  namespace: agent-ops
+spec:
+  signalSourceRefs:
+    - name: vm-alerts
+    - name: vm-alerts-secure
+  channelRefs:
+    - name: home-ops
+  profileRef:
+    name: ha-engineer
+---
 # Adapter-served signal source: opaque config interpreted only by signal-cron.
 # The grouping window makes consecutive runs land in ONE conversation, later
 # ticks resuming the agent session (a recurring job that remembers).

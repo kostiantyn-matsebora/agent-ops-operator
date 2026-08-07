@@ -11,6 +11,13 @@ import (
 // signal adapter via the /signal/* contract.
 const SourceAlertmanager = "alertmanagerWebhook"
 
+// SourceVMAlertmanager is the adapter-served webhook signal type
+// (signal-vmalertmanager/): the adapter hosts its own endpoint accepting the
+// standard Alertmanager webhook format (VMAlertmanager and any compatible
+// sender). The built-in SourceAlertmanager stays untouched — migration
+// between the two is per-source.
+const SourceVMAlertmanager = "vmAlertmanagerWebhook"
+
 // GroupingSpec controls signature-based conversation grouping and dedupe.
 // This is deliberately typed, manager-side policy — it applies to every source
 // type, built-in or adapter-fed; adapters only normalize signals.
