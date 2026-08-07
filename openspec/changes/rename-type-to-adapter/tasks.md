@@ -20,4 +20,4 @@
 
 ## 5. Live (home-data-center)
 
-- [ ] 5.1 Apply CRDs; capture annotations of `home-ops` and `vm-alerts` (adapter cursor state), delete + recreate with `adapter:` and the saved annotations, re-claim in pipelines; upgrade manager + adapters together; verify Served/Wired, the Telegram offset did not rewind, and an alert still routes
+- [x] 5.1 Apply CRDs; capture annotations of `home-ops` and `vm-alerts` (adapter cursor state), delete + recreate with `adapter:` and the saved annotations, re-claim in pipelines; upgrade manager + adapters together; verify Served/Wired, the Telegram offset did not rewind, and an alert still routes

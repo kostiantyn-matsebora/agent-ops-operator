@@ -41,7 +41,10 @@ delete-and-recreate. Adapter cursor state is annotation-backed on those very
 objects (`/channel/state/{channel}/{key}` writes
 `agentops.dev/state-<key>`), so a naive recreate loses the Telegram
 `getUpdates` offset and the bot re-processes old updates. The migration
-captures annotations first and restores them on the recreated object.
+captures annotations first and restores them with `kubectl annotate` AFTER the
+manifest is applied — folding them into the applied manifest instead puts them
+in `last-applied-configuration`, so the next `kubectl apply` of the
+annotation-free site manifest strips them again.
 
 Ordering per surface: capture → delete → recreate with `adapter:` + saved
 annotations → confirm `Served=True`. Channels are recreated before the manager
