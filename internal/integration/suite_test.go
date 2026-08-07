@@ -11,8 +11,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -188,34 +188,30 @@ func TestConversationLifecycle(t *testing.T) {
 	}
 }
 
-func TestAlertGroupingAndRecurrence(t *testing.T) {
+// TestSignalBatchGrouping pins the manager-side grouping semantics the
+// removed built-in webhook used to exercise: a batch of same-signature
+// signals collapses to ONE conversation with ONE combined input, and
+// same-signature reuse across batches with a session becomes a recurrence.
+func TestSignalBatchGrouping(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-alert")
-
-	src := &agentopsv1alpha1.SignalSource{}
-	src.Name, src.Namespace = "am", ns
-	src.Spec.Type = agentopsv1alpha1.SourceAlertmanager
-	if err := k8sClient.Create(ctx, src); err != nil {
-		t.Fatal(err)
-	}
-	// pipeline-only wiring: the webhook source routes via its claiming pipeline
+	mkSignalSource(t, "am", "batch-sig-t", "")
+	// pipeline-only wiring: the source routes via its claiming pipeline
 	mkPipeline(t, "am-pipe", []string{"am"}, nil, "prof-alert")
 	reconcilePipeline(t, "am-pipe")
 
-	srv := apiServer()
-	post := func(fp string) int {
-		payload, _ := json.Marshal(map[string]any{"alerts": []map[string]any{{
-			"status": "firing", "fingerprint": fp,
-			"labels": map[string]string{"alertgroup": "g", "alertname": "TestAlert", "namespace": "ha"},
-		}}})
-		rec := httptest.NewRecorder()
-		srvStartMux(srv).ServeHTTP(rec, httptest.NewRequest("POST", "/ingest/alertmanager/am", bytes.NewReader(payload)))
-		return rec.Code
-	}
-	if code := post("fp-a"); code != 200 {
-		t.Fatalf("ingest: %d", code)
-	}
+	h := apiServer().Handler()
+	labels := map[string]string{"alertgroup": "g", "alertname": "TestAlert", "namespace": "ha"}
 
+	// two fresh same-signature signals in ONE batch → one conversation, one
+	// combined out-of-line input
+	rec := postSignal(t, h, testMasterToken, "am", []map[string]any{
+		{"fingerprint": "fp-a", "labels": labels, "payload": "alert-a"},
+		{"fingerprint": "fp-a2", "labels": labels, "payload": "alert-a2"},
+	})
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"conversations":1`) {
+		t.Fatalf("batch: %d %s", rec.Code, rec.Body.String())
+	}
 	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation
@@ -228,29 +224,29 @@ func TestAlertGroupingAndRecurrence(t *testing.T) {
 		t.Fatal("alert conversation not created")
 	}
 	if len(conv.Spec.Inputs) != 1 || conv.Spec.Inputs[0].PayloadRef == nil {
-		t.Fatalf("input with payloadRef expected: %+v", conv.Spec.Inputs)
+		t.Fatalf("one combined input with payloadRef expected: %+v", conv.Spec.Inputs)
+	}
+	var ci agentopsv1alpha1.ConversationInput
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Spec.Inputs[0].PayloadRef.Name}, &ci); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ci.Spec.Payload, "alert-a") || !strings.Contains(ci.Spec.Payload, "alert-a2") {
+		t.Fatalf("combined payload expected: %q", ci.Spec.Payload)
 	}
 
 	// same fingerprint suppressed by cooldown
-	if code := post("fp-a"); code != 200 {
-		t.Fatal("cooldown post")
-	}
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, conv)
-	if len(conv.Spec.Inputs) != 1 {
-		t.Fatalf("cooldown failed, inputs: %d", len(conv.Spec.Inputs))
+	rec = postSignal(t, h, testMasterToken, "am", []map[string]any{{"fingerprint": "fp-a", "labels": labels}})
+	if !strings.Contains(rec.Body.String(), `"queued":0`) {
+		t.Fatalf("cooldown: %s", rec.Body.String())
 	}
 
 	// new fingerprint, same signature, session present -> recurrence into SAME conversation
 	patch := client.MergeFrom(conv.DeepCopy())
 	conv.Status.SessionID = "sess-x"
-	now := time.Now()
-	_ = now
 	if err := k8sClient.Status().Patch(ctx, conv, patch); err != nil {
 		t.Fatal(err)
 	}
-	// reconcile to ensure signature label is set for lookup
-	reconcile(t, conv.Name)
-	if code := post("fp-b"); code != 200 {
+	if rec = postSignal(t, h, testMasterToken, "am", []map[string]any{{"fingerprint": "fp-b", "labels": labels}}); rec.Code != 200 {
 		t.Fatal("recurrence post")
 	}
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
@@ -262,7 +258,7 @@ func TestAlertGroupingAndRecurrence(t *testing.T) {
 		}
 	}
 	if count != 1 {
-		t.Fatalf("duplicate topic created: %d conversations for one signature", count)
+		t.Fatalf("duplicate conversation created: %d for one signature", count)
 	}
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, conv)
 	if len(conv.Spec.Inputs) != 2 || conv.Spec.Inputs[1].Type != agentopsv1alpha1.InputRecurrence {

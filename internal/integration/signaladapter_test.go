@@ -308,13 +308,7 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mkSignalSource(t, "life-am", agentopsv1alpha1.SourceAlertmanager, "")
-	reconcileSrc("life-am")
 	var src agentopsv1alpha1.SignalSource
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-am"}, &src)
-	if c := apimeta.FindStatusCondition(src.Status.Conditions, controller.ConditionServed); c == nil || c.Status != "True" || c.Reason != "InProcessProvider" {
-		t.Fatalf("built-in Served: %+v", src.Status.Conditions)
-	}
 	reconcileSrc("life-src-a")
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-src-a"}, &src)
 	if !apimeta.IsStatusConditionFalse(src.Status.Conditions, controller.ConditionServed) {

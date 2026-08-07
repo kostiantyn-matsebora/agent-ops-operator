@@ -35,7 +35,7 @@ approvable from your phone.
 | `ConversationInput` | Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd. |
 | `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, delivery hints, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). Carries **no wiring** — its default profile comes from the Pipeline referencing it. |
 | `ChannelAdapter` | **What serves a channel type**: a container image implementing the adapter contract, plugged in as a CR — the reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
-| `SignalSource` | Ingest lane, split like `Channel`: **type-agnostic metadata** (open `type`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. `alertmanagerWebhook` is built-in; everything else is adapter-served. |
+| `SignalSource` | Ingest lane, split like `Channel`: **type-agnostic metadata** (open `type`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports. |
 | `SignalAdapter` | **What serves a signal type**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR with the same posture (owned workload, zero-RBAC SA, singleton, derived type-scoped token, credential projection). A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
 | `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed, channels get their default profile from their oldest Ready pipeline (`/profile` commands work everywhere regardless). One pipeline per source (older claimant wins); channels are shareable. |
 | `MCPConfig` | Reusable MCP server sets, shareable across profiles; secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
@@ -248,7 +248,8 @@ helm install agent-ops ./chart -n agent-ops --create-namespace \
 # (see config/samples/ for example CRs)
 ```
 
-Point Alertmanager at `http://agentops-manager.<ns>.svc:8080/ingest/alertmanager/<signalsource-name>`
+For alert ingestion, enable the [VictoriaMetrics bundle](#victoriametrics-bundle-subchart)
+and point any Alertmanager-compatible sender at the adapter's webhook Service
 (`continue: true` route). Helm chart, docs site, and public repo extraction are on the roadmap (Phase D).
 
 ## HTTP API
@@ -256,7 +257,6 @@ Point Alertmanager at `http://agentops-manager.<ns>.svc:8080/ingest/alertmanager
 | Endpoint | Purpose |
 |---|---|
 | `POST /task` `{"profile","task","agent"?,"channel"?}` | start a conversation programmatically |
-| `POST /ingest/alertmanager/{source}` | Alertmanager webhook |
 | `GET /work`, `POST /work/done` | runtime-facing dispatch (see contract) |
 | `GET/POST /channel/*` | adapter-facing channel contract (bearer token; see adapter contract) |
 | `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token; see signal adapter contract) |
@@ -295,6 +295,17 @@ into the `channel-telegram` adapter. For a live install:
 
 Rollback = reverse order: disable the adapter, restore the previous chart
 version and Channel CR shape.
+
+## Migrating to chart 1.6 (built-in alertmanager removed) — BREAKING
+
+The manager's `POST /ingest/alertmanager/{source}` endpoint and the built-in
+`alertmanagerWebhook` type are gone — the `signal-vmalertmanager` adapter
+(vm-bundle) accepts the identical webhook format and is the only Alertmanager
+path. BEFORE upgrading: repoint senders to the adapter Service
+(`/webhook/{source}`, see the VM bundle section) and move sources to
+`type: vmAlertmanagerWebhook` claimed by a Pipeline; sender retries plus
+fingerprint cooldown make the switchover itself lossless. After upgrading,
+retire the old `alertmanagerWebhook` sources.
 
 ## Migrating to chart 1.4 (pipeline-only wiring) — BREAKING
 

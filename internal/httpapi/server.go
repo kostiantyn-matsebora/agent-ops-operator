@@ -4,7 +4,9 @@
 //	GET  /work?convo=&wait=&pod=   worker long-poll dispatch
 //	POST /work/done                worker completion report
 //	POST /task                     {"profile","agent"?,"task","channel"?}
-//	POST /ingest/alertmanager/{source}  Alertmanager webhook
+//
+// The manager hosts NO signal transports — alert/webhook ingestion lives in
+// signal adapters feeding POST /signal/inbound.
 //
 // plus the channel adapter contract (bearer-token auth, see ADAPTER_TOKEN):
 //
@@ -74,7 +76,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /work", s.handleWork)
 	mux.HandleFunc("POST /work/done", s.handleWorkDone)
 	mux.HandleFunc("POST /task", s.handleTask)
-	mux.HandleFunc("POST /ingest/alertmanager/{source}", s.handleAlertmanager)
 	mux.HandleFunc("GET /channel/ops", s.adapterAuth(s.handleChannelOps))
 	mux.HandleFunc("POST /channel/ops/{id}/done", s.adapterAuth(s.handleChannelOpDone))
 	mux.HandleFunc("POST /channel/inbound", s.adapterAuth(s.handleChannelInbound))
@@ -603,82 +604,4 @@ func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
-}
-
-// ---- alertmanager ingest ----------------------------------------------------
-
-type amAlert struct {
-	Status       string            `json:"status"`
-	Fingerprint  string            `json:"fingerprint"`
-	StartsAt     string            `json:"startsAt"`
-	Labels       map[string]string `json:"labels"`
-	Annotations  map[string]string `json:"annotations"`
-	GeneratorURL string            `json:"generatorURL"`
-}
-
-type amPayload struct {
-	Alerts []amAlert `json:"alerts"`
-}
-
-func (s *Server) handleAlertmanager(w http.ResponseWriter, r *http.Request) {
-	sourceName := r.PathValue("source")
-	ctx := r.Context()
-	var source agentopsv1alpha1.SignalSource
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: sourceName}, &source); err != nil {
-		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown source %q", sourceName)})
-		return
-	}
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	var payload amPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
-		return
-	}
-	var firing []amAlert
-	for _, a := range payload.Alerts {
-		if a.Status == "firing" {
-			firing = append(firing, a)
-		}
-	}
-	if len(firing) == 0 {
-		writeJSON(w, 200, map[string]any{"queued": 0, "reason": "no firing alerts"})
-		return
-	}
-
-	// normalize: one signal per alert; the group payload keeps today's exact
-	// {receivedAt, alerts} document shape via the combine closure
-	byFP := map[string]amAlert{}
-	signals := make([]NormalizedSignal, 0, len(firing))
-	for _, a := range firing {
-		byFP[a.Fingerprint] = a
-		title := "🔍 " + a.Labels["alertname"]
-		if ns := a.Labels["namespace"]; ns != "" {
-			title += " — " + ns
-		}
-		signals = append(signals, NormalizedSignal{
-			Fingerprint: a.Fingerprint, Labels: a.Labels, Title: title,
-		})
-	}
-	combine := func(group []NormalizedSignal) string {
-		alerts := make([]amAlert, 0, len(group))
-		for _, sig := range group {
-			alerts = append(alerts, byFP[sig.Fingerprint])
-		}
-		payloadDoc := map[string]any{"receivedAt": time.Now().UTC().Format(time.RFC3339), "alerts": alerts}
-		payloadJSON, _ := json.MarshalIndent(payloadDoc, "", "  ")
-		return string(payloadJSON)
-	}
-	queued, touched, reason, err := s.routeSignals(ctx, &source, signals, combine)
-	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
-	}
-	if queued == 0 {
-		if reason == "" {
-			reason = "all within cooldown"
-		}
-		writeJSON(w, 200, map[string]any{"queued": 0, "reason": reason})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"queued": queued, "conversations": touched})
 }

@@ -39,7 +39,12 @@ adapters) — the adapters dependency-free.
   `SignalSource.spec.grouping` — adapters normalize, the manager groups.
   Workload names `agentops-signal-<name>`; token derivation context
   `signal-adapter:<name>` (never interchangeable with channel tokens).
-  `alertmanagerWebhook` is the one built-in signal type.
+  There are NO built-in signal types — the manager hosts no signal
+  transports; every type needs a serving adapter.
+- On both adapter kinds, `spec.type` is the ROUTING KEY (drives the contract
+  listing, credential projection into the right pod, token scope, the
+  one-adapter-per-type guard, and Served); the CR NAME is identity only, so
+  adapters can be renamed/replaced without re-keying routing.
 - API group `agentops.dev/v1alpha1` (provisional; rename possible pre-1.0).
 
 ## Build / test
@@ -82,7 +87,7 @@ internal/
                          reconcilers (Served condition); Pipeline reconciler
                          (wiring validation, source-conflict guard)
   httpapi/               /work long-poll dispatch, /work/done, /task,
-                         /ingest/alertmanager, /channel/* adapter contract
+                         /channel/* + /signal/* adapter contracts
                          (bearer auth via ADAPTER_TOKEN env)
   chat/                  channel-type-agnostic core: Provider+Registry
                          (in-process built-ins), OpQueue (outbound ops,
