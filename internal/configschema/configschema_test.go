@@ -65,8 +65,14 @@ func TestValidateMissingRequiredField(t *testing.T) {
 		if len(v) == 0 {
 			t.Fatalf("config %q: expected a violation for the missing required field", cfg)
 		}
-		if !strings.Contains(Summarize(v, 0), "chatId") {
-			t.Fatalf("config %q: violation should name chatId, got %q", cfg, Summarize(v, 0))
+		msg := Summarize(v, 0)
+		if !strings.Contains(msg, "chatId") {
+			t.Fatalf("config %q: violation should name chatId, got %q", cfg, msg)
+		}
+		// the message reaches a status condition a human reads, so it must be
+		// prose — not Go's default struct rendering
+		if !strings.Contains(msg, "missing property") || strings.Contains(msg, "&{") {
+			t.Fatalf("config %q: violation must be human-readable, got %q", cfg, msg)
 		}
 	}
 }
@@ -80,6 +86,9 @@ func TestValidateWrongTypeNamesThePath(t *testing.T) {
 	msg := Summarize(v, 0)
 	if !strings.Contains(msg, "feedThreadId") {
 		t.Fatalf("violation should locate feedThreadId: %q", msg)
+	}
+	if !strings.Contains(msg, "want integer") || strings.Contains(msg, "&{") {
+		t.Fatalf("violation must explain the mismatch in prose: %q", msg)
 	}
 }
 
