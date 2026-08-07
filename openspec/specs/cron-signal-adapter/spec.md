@@ -2,15 +2,15 @@
 
 ## Purpose
 
-The reference signal adapter in `signal-cron/`: a dependency-free module that serves `type: cron` SignalSources through the signal adapter contract, parsing five-field schedules and firing job-lane signals with a restart-safe, idempotent cursor.
+The reference signal adapter in `signal-cron/`: a dependency-free module that serves `adapter: cron` SignalSources through the signal adapter contract, parsing five-field schedules and firing job-lane signals with a restart-safe, idempotent cursor.
 
 ## Requirements
 
 ### Requirement: Cron runs as the reference signal adapter
-A reference adapter in `signal-cron/` (own dependency-free Go module and image, precedents `channel-telegram/` and `runtime-claude/`) SHALL serve SignalSources with `spec.type: cron` through the signal adapter contract: parsing `config: {schedule, input, title?}` (five-field cron expression subset), reporting invalid config on the source's Ready condition while continuing to serve other sources, and firing a `kind: job` normalized signal with the configured input as payload each time a schedule elapses.
+A reference adapter in `signal-cron/` (own dependency-free Go module and image, precedents `channel-telegram/` and `runtime-claude/`) SHALL serve SignalSources with `spec.adapter: cron` through the signal adapter contract: parsing `config: {schedule, input, title?}` (five-field cron expression subset), reporting invalid config on the source's Ready condition while continuing to serve other sources, and firing a `kind: job` normalized signal with the configured input as payload each time a schedule elapses.
 
 #### Scenario: Scheduled input fires as a job conversation
-- **WHEN** a `type: cron` source with `schedule: "0 6 * * *"` and an input text is served and 06:00 passes
+- **WHEN** a `adapter: cron` source with `schedule: "0 6 * * *"` and an input text is served and 06:00 passes
 - **THEN** a `kind: job` signal is posted for that source and a conversation runs the input through the task-lane prompt
 
 #### Scenario: Invalid schedule surfaces on the source

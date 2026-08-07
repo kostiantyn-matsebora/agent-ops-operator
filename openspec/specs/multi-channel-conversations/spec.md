@@ -33,15 +33,11 @@ Every bound channel SHALL receive the whole conversation: router acks fan out to
 - **THEN** it is not fed back through `/channel/inbound` (or any provider's inbound path) as a new user message
 
 ### Requirement: Manager fans out agent replies on multi-channel conversations
-For conversations bound to more than one channel, dispatch SHALL force `result` delivery (per-channel `delivery.mode: agent` retains its meaning only for single-channel conversations), and `POST /work/done` SHALL fan the run's result out as one `send` op per bound channel targeting that channel's thread. Failed or empty results SHALL fan out a short failure notice — mirrored surfaces never mistake silence for success. Composition uses the existing op pipeline only: external adapters and in-process providers require no changes.
+For conversations bound to one or more channels, `POST /work/done` SHALL fan the run's result out as one `send` op per bound channel targeting that channel's thread. Failed or empty results SHALL fan out a short failure notice — mirrored surfaces never mistake silence for success. Composition uses the existing op pipeline only: external adapters and in-process providers require no changes.
 
 #### Scenario: One answer, every surface
 - **WHEN** a run completes with a result on a conversation bound to telegram and web
 - **THEN** both channels receive the result as a message in the conversation's own thread
-
-#### Scenario: Agent-direct delivery is single-channel only
-- **WHEN** a conversation is bound to one channel with `delivery.mode: agent`
-- **THEN** dispatch behavior is unchanged from today (agent posts directly; the manager does not double-send)
 
 #### Scenario: Failure is visible on every surface
 - **WHEN** a run finishes with status failed and no result
