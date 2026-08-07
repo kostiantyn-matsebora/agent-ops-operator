@@ -13,6 +13,10 @@ The `ChannelAdapter` and `SignalAdapter` CRDs SHALL carry an optional **config s
 - **WHEN** an adapter CR is applied without `configSchema` or `credentialKeys`
 - **THEN** its type is served exactly as before, and no schema-related condition appears on its Channels/SignalSources
 
+#### Scenario: The richest config is the one declared
+- **WHEN** an implementation's config carries structure worth getting wrong (matchers, durations, caps — e.g. the vm-alertmanager `register` block)
+- **THEN** its adapter CR declares that shape, so a typo'd key or a malformed duration surfaces as a `ConfigValid` violation naming the field instead of silently changing routing
+
 #### Scenario: Declaration without config schema
 - **WHEN** an adapter CR declares only `credentialKeys` (no `configSchema`)
 - **THEN** the credential keys are discoverable on the CR, and no config validation occurs

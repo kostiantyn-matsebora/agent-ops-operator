@@ -27,6 +27,48 @@ spec:
   image: "{{ .Values.alertmanager.image.repository }}:{{ .Values.alertmanager.image.tag }}"
   port: 8080
   singleton: true
+  # The config contract for SignalSources with `adapter: {{ $name }}` — this is
+  # the richest config in the system, so it is the one most worth declaring.
+  # Mirrors registerSpec in signal-vmalertmanager/register.go; bump both in one
+  # diff. Advisory only: violations surface as ConfigValid, never block ingest.
+  configSchema:
+    type: object
+    properties:
+      register:
+        type: object
+        description: >-
+          Sender-side routing this source owns. The adapter writes a
+          VMAlertmanagerConfig from it; omit the block to configure the sender
+          by hand.
+        properties:
+          namespace:
+            type: string
+            description: >-
+              Namespace to write the VMAlertmanagerConfig into. Empty = the
+              adapter's own, which needs no cross-namespace RBAC.
+          matchers:
+            type: array
+            items:
+              type: string
+            description: Alertmanager matchers selecting which alerts arrive here.
+          groupWait:
+            type: string
+            pattern: '^[0-9]+(ms|s|m|h)$'
+          groupInterval:
+            type: string
+            pattern: '^[0-9]+(ms|s|m|h)$'
+          repeatInterval:
+            type: string
+            pattern: '^[0-9]+(ms|s|m|h)$'
+          maxAlerts:
+            type: integer
+            minimum: 0
+            description: Cap alerts per webhook post (0 = Alertmanager default).
+          sendResolved:
+            type: boolean
+        # a typo'd key silently changes routing, so name unknown fields
+        additionalProperties: false
+    additionalProperties: false
   {{- if $reg.enabled }}
   # self-registration talks to the Kubernetes API: mount the SA token. The
   # operator grants nothing — the Role below does.
