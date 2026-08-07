@@ -35,13 +35,13 @@ func (r *ChannelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	cond := metav1.Condition{Type: ConditionServed, Status: metav1.ConditionFalse, Reason: "NoServingImplementation",
-		Message: fmt.Sprintf("no in-process provider or Ready ChannelAdapter named %q (hand-deployed adapters report per-channel readiness on the Ready condition)", ch.Spec.Type)}
+		Message: fmt.Sprintf("no in-process provider or Ready ChannelAdapter named %q (hand-deployed adapters report per-channel readiness on the Ready condition)", ch.Spec.Adapter)}
 
 	switch {
-	case r.Registry != nil && r.Registry.Resolve(ch.Spec.Type) != nil:
+	case r.Registry != nil && r.Registry.Resolve(ch.Spec.Adapter) != nil:
 		cond.Status = metav1.ConditionTrue
 		cond.Reason = "InProcessProvider"
-		cond.Message = fmt.Sprintf("type %q is served in-process by the manager", ch.Spec.Type)
+		cond.Message = fmt.Sprintf("adapter %q is served in-process by the manager", ch.Spec.Adapter)
 	default:
 		if name, ready := r.readyAdapter(ctx, &ch); ready {
 			cond.Status = metav1.ConditionTrue
@@ -70,7 +70,7 @@ func (r *ChannelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // adapter CR's NAME is the routing key.
 func (r *ChannelReconciler) readyAdapter(ctx context.Context, ch *agentopsv1alpha1.Channel) (string, bool) {
 	var a agentopsv1alpha1.ChannelAdapter
-	if err := r.Get(ctx, types.NamespacedName{Namespace: ch.Namespace, Name: ch.Spec.Type}, &a); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: ch.Namespace, Name: ch.Spec.Adapter}, &a); err != nil {
 		return "", false
 	}
 	if apimeta.IsStatusConditionTrue(a.Status.Conditions, ConditionReady) {
@@ -94,7 +94,7 @@ func (r *ChannelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		var reqs []ctrl.Request
 		for i := range list.Items {
-			if list.Items[i].Spec.Type == a.Name {
+			if list.Items[i].Spec.Adapter == a.Name {
 				reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
 			}
 		}

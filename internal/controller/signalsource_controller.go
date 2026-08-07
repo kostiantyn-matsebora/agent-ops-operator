@@ -37,7 +37,7 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// no built-in signal types: every type needs a serving adapter
 	cond := metav1.Condition{Type: ConditionServed, Status: metav1.ConditionFalse, Reason: "NoServingImplementation",
-		Message: fmt.Sprintf("no Ready SignalAdapter named %q (hand-deployed adapters report per-source readiness on the Ready condition)", src.Spec.Type)}
+		Message: fmt.Sprintf("no Ready SignalAdapter named %q (hand-deployed adapters report per-source readiness on the Ready condition)", src.Spec.Adapter)}
 	if name, ready := r.readyAdapter(ctx, &src); ready {
 		cond.Status = metav1.ConditionTrue
 		cond.Reason = "AdapterReady"
@@ -83,7 +83,7 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // adapter CR's NAME is the routing key.
 func (r *SignalSourceReconciler) readyAdapter(ctx context.Context, src *agentopsv1alpha1.SignalSource) (string, bool) {
 	var a agentopsv1alpha1.SignalAdapter
-	if err := r.Get(ctx, types.NamespacedName{Namespace: src.Namespace, Name: src.Spec.Type}, &a); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: src.Namespace, Name: src.Spec.Adapter}, &a); err != nil {
 		return "", false
 	}
 	if apimeta.IsStatusConditionTrue(a.Status.Conditions, ConditionReady) {
@@ -107,7 +107,7 @@ func (r *SignalSourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		var reqs []ctrl.Request
 		for i := range list.Items {
-			if list.Items[i].Spec.Type == a.Name {
+			if list.Items[i].Spec.Adapter == a.Name {
 				reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
 			}
 		}

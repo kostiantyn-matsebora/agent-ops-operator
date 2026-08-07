@@ -1,9 +1,9 @@
 // channel-telegram: the reference channel adapter. Serves Channels with
-// spec.type=telegram against the operator's adapter contract — no Kubernetes
+// spec.adapter=telegram against the operator's adapter contract — no Kubernetes
 // access, no operator changes needed to run more instances of this pattern
 // for other transports (Slack, Teams, …).
 //
-//	outbound: long-poll GET /channel/ops?type=telegram  ->  Bot API calls
+//	outbound: long-poll GET /channel/ops?adapter=telegram  ->  Bot API calls
 //	inbound:  one getUpdates loop per DISTINCT bot token -> POST /channel/inbound
 //
 // Credentials are per channel: each served Channel's credentialsSecretRef is
@@ -18,7 +18,7 @@
 // annotation on the manager side), so restarts never replay updates.
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_BOT_TOKEN (optional
-// fallback), CHANNEL_TYPE (default "telegram"), projected AGENTOPS_CRED_* vars.
+// fallback), ADAPTER_NAME (default "telegram"), projected AGENTOPS_CRED_* vars.
 package main
 
 import (
@@ -71,7 +71,7 @@ func mustEnv(key string) string {
 }
 
 func main() {
-	channelType := os.Getenv("CHANNEL_TYPE")
+	channelType := os.Getenv("ADAPTER_NAME")
 	if channelType == "" {
 		channelType = "telegram"
 	}
@@ -86,7 +86,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("channel-telegram adapter starting (type=%s)", channelType)
+	log.Printf("channel-telegram adapter starting (adapter=%s)", channelType)
 
 	var wg sync.WaitGroup
 	wg.Add(2)

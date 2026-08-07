@@ -11,12 +11,12 @@ alertmanager:
   # The operator's reconciler owns the workload AND the webhook Service
   # (agentops-signal-<name>, port 8080) via the CR's spec.port.
   enabled: true
-  # SignalAdapter CR name — also the type key: the default SignalSource (and
-  # any hand-made one) selects this implementation with spec.type: <name>.
+  # SignalAdapter CR name — also the routing key: the default SignalSource (and
+  # any hand-made one) selects this implementation with spec.adapter: <name>.
   name: vm-alertmanager
   image:
     repository: kmatsebora/agentops-signal-vmalertmanager
-    tag: 0.5.0
+    tag: 0.6.0
   resources: {}
   # Sender self-registration: the adapter writes a VMAlertmanagerConfig
   # pointing at its own webhook, so no alertmanager config is edited by hand.

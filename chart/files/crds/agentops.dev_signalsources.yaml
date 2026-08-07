@@ -17,8 +17,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.type
-      name: Type
+    - jsonPath: .spec.adapter
+      name: Adapter
       type: string
     - jsonPath: .status.conditions[?(@.type=="Wired")].status
       name: Wired
@@ -62,6 +62,16 @@ spec:
               type-agnostic routing metadata plus an opaque per-type config that only the
               serving signal implementation interprets.
             properties:
+              adapter:
+                description: |-
+                  Adapter names the SignalAdapter serving this source — a REFERENCE, not an
+                  attribute: the named adapter's implementation defines and validates
+                  Config's schema. Sibling of Config by design (see Channel.Adapter).
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: spec.adapter is immutable
+                  rule: self == oldSelf
               config:
                 description: |-
                   Config carries whatever the signal type needs; schema-less by design.
@@ -112,18 +122,8 @@ spec:
                     format: int32
                     type: integer
                 type: object
-              type:
-                description: |-
-                  Type names the signal implementation serving this source (e.g.
-                  "alertmanagerWebhook" built-in, "cron", "pagerduty", …). The operator
-                  never interprets it beyond routing.
-                minLength: 1
-                type: string
-                x-kubernetes-validations:
-                - message: spec.type is immutable
-                  rule: self == oldSelf
             required:
-            - type
+            - adapter
             type: object
           status:
             description: SignalSourceStatus reports ingest liveness.

@@ -52,7 +52,7 @@ spec:
           key: token
 ---
 # ChannelAdapter: plugs the "telegram" implementation in as a CR — the CR's
-# NAME is the type key Channels select via spec.type. The reconciler deploys
+# NAME is the key Channels select via spec.adapter. The reconciler deploys
 # and owns the adapter workload (zero-RBAC SA, derived contract token,
 # projected per-channel credentials). Pure implementation: no configuration
 # lives here.
@@ -79,8 +79,9 @@ metadata:
   name: home-ops
   namespace: agent-ops
 spec:
-  # served by the channel-telegram adapter (see the ChannelAdapter above)
-  type: telegram
+  # names the ChannelAdapter serving this surface (see above); that adapter's
+  # implementation is what defines and validates `config` below
+  adapter: telegram
   # this surface's transport credentials (key botToken). Projected into the
   # adapter pod as env AGENTOPS_CRED_HOME_OPS_<key> by the kubelet — nothing
   # reads the Secret through the API. Several Channels may reference different
@@ -115,7 +116,7 @@ spec:
     name: ha-engineer
 ---
 # SignalAdapter: plugs the "cron" implementation in as a CR — the CR's NAME
-# is the type key SignalSources select via spec.type. The reconciler deploys
+# is the key SignalSources select via spec.adapter. The reconciler deploys
 # and owns the adapter workload. No spec.port: cron has no inbound surface,
 # so no Service is rendered.
 apiVersion: agentops.dev/v1alpha1
@@ -126,7 +127,7 @@ metadata:
 spec:
   image: kmatsebora/agentops-signal-cron:0.1.0
 ---
-# VM Alertmanager webhook source — spec.type names the serving SignalAdapter
+# VM Alertmanager webhook source — spec.adapter names the serving SignalAdapter
 # CR (the vm-bundle subchart renders one named vm-alertmanager; its reconciler
 # owns the workload AND the webhook Service). VMAlertmanager posts the
 # standard Alertmanager webhook format to
@@ -139,7 +140,7 @@ metadata:
   name: vm-alerts
   namespace: agent-ops
 spec:
-  type: vm-alertmanager
+  adapter: vm-alertmanager
   grouping:
     signatureLabels: ["alertgroup", "alertname", "namespace"]
 ---
@@ -153,7 +154,7 @@ metadata:
   name: vm-alerts-secure
   namespace: agent-ops
 spec:
-  type: vm-alertmanager
+  adapter: vm-alertmanager
   credentialsSecretRef:
     name: vm-webhook-token   # Secret with key TOKEN
 ---
@@ -189,7 +190,7 @@ metadata:
   name: daily-healthcheck
   namespace: agent-ops
 spec:
-  type: cron
+  adapter: cron
   config:
     schedule: "0 6 * * *"
     input: "Run the daily infrastructure health check: node pressure, failed pods, storage headroom. Report only what needs attention."

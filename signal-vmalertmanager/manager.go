@@ -87,7 +87,7 @@ func (m *Manager) do(ctx context.Context, method, path string, in, out any) erro
 // Sources lists the signal sources of this adapter's type.
 func (m *Manager) Sources(ctx context.Context, sourceType string) ([]SourceInfo, error) {
 	var out []SourceInfo
-	err := m.do(ctx, "GET", "/signal/sources?type="+url.QueryEscape(sourceType), nil, &out)
+	err := m.do(ctx, "GET", "/signal/sources?adapter="+url.QueryEscape(sourceType), nil, &out)
 	return out, err
 }
 

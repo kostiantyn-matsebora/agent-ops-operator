@@ -93,7 +93,7 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 	// ':' keeps the id a single URL path segment for /channel/ops/{id}/done
 	q.enqueue(ctx, &Op{
 		ID: "topic:" + conv.Name + ":" + ch.Name, Channel: ch.Name, Conversation: conv.Name,
-		Kind: OpEnsureTopic, Title: title, channelType: ch.Spec.Type,
+		Kind: OpEnsureTopic, Title: title, channelType: ch.Spec.Adapter,
 	})
 }
 
@@ -101,7 +101,7 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 func (q *OpQueue) EnqueueSend(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID *string, text string) {
 	q.enqueue(ctx, &Op{
 		ID: "send:" + strconv.FormatInt(sendSeq.Add(1), 36), Channel: ch.Name,
-		Kind: OpSend, ThreadID: threadID, Text: text, channelType: ch.Spec.Type,
+		Kind: OpSend, ThreadID: threadID, Text: text, channelType: ch.Spec.Adapter,
 	})
 }
 

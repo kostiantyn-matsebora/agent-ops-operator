@@ -52,7 +52,7 @@ func mkTypedChannel(t *testing.T, name, channelType, credSecret string) {
 	t.Helper()
 	ch := &agentopsv1alpha1.Channel{}
 	ch.Name, ch.Namespace = name, ns
-	ch.Spec.Type = channelType
+	ch.Spec.Adapter = channelType
 	if credSecret != "" {
 		ch.Spec.CredentialsSecretRef = &corev1.LocalObjectReference{Name: credSecret}
 	}
@@ -99,7 +99,7 @@ func TestChannelAdapterDeployment(t *testing.T) {
 	for _, e := range pod.Containers[0].Env {
 		env[e.Name] = e.Value
 	}
-	if env["MANAGER_URL"] != "http://manager:8080" || env["CHANNEL_TYPE"] != "cad-main" {
+	if env["MANAGER_URL"] != "http://manager:8080" || env["ADAPTER_NAME"] != "cad-main" {
 		t.Fatalf("contract env wrong: %+v", env)
 	}
 	if want := chat.DeriveAdapterToken(testMasterToken, "cad-main"); env["ADAPTER_TOKEN"] != want {
@@ -260,11 +260,11 @@ func TestAdapterAuthScoping(t *testing.T) {
 	derived := chat.DeriveAdapterToken(testMasterToken, "scope-slack")
 
 	// cross-key: derived token polling another adapter's key -> 403
-	if rec := get("/channel/ops?type=scope-tg-type&wait=0", derived); rec.Code != 403 {
+	if rec := get("/channel/ops?adapter=scope-tg-type&wait=0", derived); rec.Code != 403 {
 		t.Fatalf("cross-type ops: want 403, got %d %s", rec.Code, rec.Body.String())
 	}
 	// own key (the adapter's NAME) -> served (204: no ops queued)
-	if rec := get("/channel/ops?type=scope-slack&wait=0", derived); rec.Code != 204 {
+	if rec := get("/channel/ops?adapter=scope-slack&wait=0", derived); rec.Code != 204 {
 		t.Fatalf("own-type ops: want 204, got %d %s", rec.Code, rec.Body.String())
 	}
 	// channel-scoped endpoints enforce the resolved channel's type
@@ -272,18 +272,47 @@ func TestAdapterAuthScoping(t *testing.T) {
 		t.Fatalf("cross-type state: want 403, got %d", rec.Code)
 	}
 	// master token keeps full scope
-	if rec := get("/channel/ops?type=scope-tg-type&wait=0", testMasterToken); rec.Code != 204 {
+	if rec := get("/channel/ops?adapter=scope-tg-type&wait=0", testMasterToken); rec.Code != 204 {
 		t.Fatalf("master scope: want 204, got %d", rec.Code)
 	}
 	// garbage token -> 401
-	if rec := get("/channel/ops?type=scope-tg-type&wait=0", "nonsense"); rec.Code != 401 {
+	if rec := get("/channel/ops?adapter=scope-tg-type&wait=0", "nonsense"); rec.Code != 401 {
 		t.Fatalf("bad token: want 401, got %d", rec.Code)
 	}
 
 	// listing carries credentialEnvPrefix for credentialed channels (3.2)
-	rec := get("/channel/channels?type=scope-tg-type", testMasterToken)
+	rec := get("/channel/channels?adapter=scope-tg-type", testMasterToken)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), controller.CredentialEnvPrefix("scope-chan")) {
 		t.Fatalf("listing missing credentialEnvPrefix: %d %s", rec.Code, rec.Body.String())
 	}
 	_ = ctx
+}
+
+// The retired `type` parameter must fail loudly. Treating it as absent would
+// serve an outdated adapter an empty list, which looks healthy while it
+// delivers nothing.
+func TestRetiredTypeParameterIsRefused(t *testing.T) {
+	srv := apiServer()
+	h := srv.Handler()
+	get := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Authorization", "Bearer "+testMasterToken)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, path := range []string{
+		"/channel/ops?type=telegram&wait=0",
+		"/channel/channels?type=telegram",
+		"/signal/sources?type=cron",
+	} {
+		rec := get(path)
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "adapter") {
+			t.Fatalf("%s: want 400 naming 'adapter', got %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	// and the missing-parameter case stays a plain 400
+	if rec := get("/channel/ops?wait=0"); rec.Code != 400 {
+		t.Fatalf("missing adapter: want 400, got %d", rec.Code)
+	}
 }

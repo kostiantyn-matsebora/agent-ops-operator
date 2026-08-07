@@ -12,7 +12,7 @@ import (
 func testChannel(name, typ string) *agentopsv1alpha1.Channel {
 	ch := &agentopsv1alpha1.Channel{}
 	ch.Name = name
-	ch.Spec.Type = typ
+	ch.Spec.Adapter = typ
 	return ch
 }
 

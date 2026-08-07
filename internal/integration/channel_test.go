@@ -26,7 +26,7 @@ func mkChannel(t *testing.T, name, typ string) {
 	t.Helper()
 	ch := &agentopsv1alpha1.Channel{}
 	ch.Name, ch.Namespace = name, ns
-	ch.Spec.Type = typ
+	ch.Spec.Adapter = typ
 	ch.Spec.Config = &runtime.RawExtension{Raw: []byte(`{"chatId":"-100","pollingEnabled":true}`)}
 	if err := k8sClient.Create(context.Background(), ch); err != nil {
 		t.Fatal(err)
@@ -49,14 +49,14 @@ func adapterReq(srv *httpapi.Server, method, path string, body any, token string
 
 func TestChannelAuthRequired(t *testing.T) {
 	srv := apiServer()
-	if rec := adapterReq(srv, "GET", "/channel/ops?type=tg-auth&wait=0", nil, ""); rec.Code != 401 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&wait=0", nil, ""); rec.Code != 401 {
 		t.Fatalf("missing token: %d", rec.Code)
 	}
-	if rec := adapterReq(srv, "GET", "/channel/ops?type=tg-auth&wait=0", nil, "wrong"); rec.Code != 401 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&wait=0", nil, "wrong"); rec.Code != 401 {
 		t.Fatalf("wrong token: %d", rec.Code)
 	}
 	srv.AdapterToken = ""
-	if rec := adapterReq(srv, "GET", "/channel/ops?type=tg-auth&wait=0", nil, "anything"); rec.Code != 503 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&wait=0", nil, "anything"); rec.Code != 503 {
 		t.Fatalf("unconfigured auth must 503: %d", rec.Code)
 	}
 }
@@ -97,7 +97,7 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	if rec.Code != 202 {
 		t.Fatalf("agents inbound: %d", rec.Code)
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?type=tg-inb&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-inb&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("expected queued send op: %d", rec.Code)
 	}
@@ -135,7 +135,7 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "topic-1"}}); err != nil {
 		t.Fatal(err)
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?type=tg-topic&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-topic&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("ensure-topic op expected: %d", rec.Code)
 	}
@@ -223,7 +223,7 @@ func TestThreadedReplyQueuesInputWithBusyAck(t *testing.T) {
 	}
 
 	// busy ack queued for the adapter, addressed to the thread
-	rec = adapterReq(srv, "GET", "/channel/ops?type=tg-reply&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-reply&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("busy ack op expected: %d", rec.Code)
 	}
@@ -238,7 +238,7 @@ func TestAdapterStateAndChannelListing(t *testing.T) {
 	mkChannel(t, "chan-state", "tg-state")
 	srv := apiServer()
 
-	rec := adapterReq(srv, "GET", "/channel/channels?type=tg-state", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/channels?adapter=tg-state", nil, "test-adapter-token")
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"chan-state"`) || !strings.Contains(rec.Body.String(), `"chatId":"-100"`) {
 		t.Fatalf("channel listing: %d %s", rec.Code, rec.Body.String())
 	}

@@ -54,7 +54,7 @@ func mkSignalSource(t *testing.T, name, sourceType, credSecret string) {
 	t.Helper()
 	src := &agentopsv1alpha1.SignalSource{}
 	src.Name, src.Namespace = name, ns
-	src.Spec.Type = sourceType
+	src.Spec.Adapter = sourceType
 	if credSecret != "" {
 		src.Spec.CredentialsSecretRef = &corev1.LocalObjectReference{Name: credSecret}
 	}
@@ -183,7 +183,7 @@ func TestSignalContractSurface(t *testing.T) {
 	}
 
 	// listing carries opaque config slot + credentialEnvPrefix
-	rec := get("GET", "/signal/sources?type=surf-t", testMasterToken, nil)
+	rec := get("GET", "/signal/sources?adapter=surf-t", testMasterToken, nil)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), controller.CredentialEnvPrefix("surf-src")) {
 		t.Fatalf("sources listing: %d %s", rec.Code, rec.Body.String())
 	}
@@ -224,17 +224,17 @@ func TestSignalAuthScoping(t *testing.T) {
 	chanTok := chat.DeriveAdapterToken(testMasterToken, "auth-chan")
 
 	// own key (the adapter's NAME) OK, cross-key 403
-	if rec := get("/signal/sources?type=auth-sig", sigTok); rec.Code != 200 {
+	if rec := get("/signal/sources?adapter=auth-sig", sigTok); rec.Code != 200 {
 		t.Fatalf("own type: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := get("/signal/sources?type=other-type", sigTok); rec.Code != 403 {
+	if rec := get("/signal/sources?adapter=other-type", sigTok); rec.Code != 403 {
 		t.Fatalf("cross type: %d", rec.Code)
 	}
 	// cross-surface tokens are strangers (distinct derivation contexts)
-	if rec := get("/signal/sources?type=auth-chan", chanTok); rec.Code != 401 {
+	if rec := get("/signal/sources?adapter=auth-chan", chanTok); rec.Code != 401 {
 		t.Fatalf("channel token on signal surface: %d", rec.Code)
 	}
-	if rec := get("/channel/ops?type=auth-sig&wait=0", sigTok); rec.Code != 401 {
+	if rec := get("/channel/ops?adapter=auth-sig&wait=0", sigTok); rec.Code != 401 {
 		t.Fatalf("signal token on channel surface: %d", rec.Code)
 	}
 	// same-name adapters on both surfaces never share a token
@@ -242,7 +242,7 @@ func TestSignalAuthScoping(t *testing.T) {
 		t.Fatal("derivation contexts collide")
 	}
 	// master keeps full scope on both surfaces
-	if rec := get("/signal/sources?type=anything", testMasterToken); rec.Code != 200 {
+	if rec := get("/signal/sources?adapter=anything", testMasterToken); rec.Code != 200 {
 		t.Fatalf("master scope: %d", rec.Code)
 	}
 }
@@ -277,7 +277,7 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	for _, e := range pod.Containers[0].Env {
 		env[e.Name] = e.Value
 	}
-	if env["SOURCE_TYPE"] != "life-sig" || env["MANAGER_URL"] == "" {
+	if env["ADAPTER_NAME"] != "life-sig" || env["MANAGER_URL"] == "" {
 		t.Fatalf("contract env: %+v", env)
 	}
 	if _, has := env["LISTEN_ADDR"]; has {

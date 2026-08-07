@@ -82,8 +82,8 @@ metadata:
   name: {{ $src.name }}
   namespace: {{ .Release.Namespace }}
 spec:
-  # the source names its implementation: the SignalAdapter CR above
-  type: {{ $name }}
+  # names the implementation serving this source: the SignalAdapter above
+  adapter: {{ $name }}
   {{- with $src.grouping }}
   grouping:
 {{ toYaml . | indent 4 }}

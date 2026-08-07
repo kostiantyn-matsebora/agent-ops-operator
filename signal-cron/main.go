@@ -1,5 +1,5 @@
 // signal-cron: the reference signal adapter. Serves SignalSources with
-// spec.type=cron against the operator's signal contract — fires the
+// spec.adapter=cron against the operator's signal contract — fires the
 // configured input on a schedule as a job-lane signal. No Kubernetes access;
 // the same bring-your-own pattern applies to any signal transport (PagerDuty,
 // email, k8s events, …).
@@ -21,7 +21,7 @@
 // Run single-instance (the SignalAdapter reconciler's singleton default) —
 // two schedulers would double-fire ticks.
 //
-// Environment: MANAGER_URL, ADAPTER_TOKEN, SOURCE_TYPE (default "cron").
+// Environment: MANAGER_URL, ADAPTER_TOKEN, ADAPTER_NAME (default "cron").
 package main
 
 import (
@@ -66,7 +66,7 @@ func mustEnv(key string) string {
 }
 
 func main() {
-	sourceType := os.Getenv("SOURCE_TYPE")
+	sourceType := os.Getenv("ADAPTER_NAME")
 	if sourceType == "" {
 		sourceType = "cron"
 	}
@@ -78,7 +78,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("signal-cron adapter starting (type=%s)", sourceType)
+	log.Printf("signal-cron adapter starting (adapter=%s)", sourceType)
 
 	for ctx.Err() == nil {
 		a.refreshSources(ctx)

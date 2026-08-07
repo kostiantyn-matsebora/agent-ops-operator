@@ -13,11 +13,15 @@ import (
 // operator's job (it hands agent output to the serving adapter), so no agent
 // ever learns a transport and no runtime holds a surface's credentials.
 type ChannelSpec struct {
-	// Type names the channel implementation serving this channel (e.g.
-	// "telegram"). The operator never interprets it beyond routing.
+	// Adapter names the ChannelAdapter serving this surface — a REFERENCE, not
+	// an attribute: the named adapter's implementation is what defines and
+	// validates Config's schema. The operator never interprets it beyond
+	// routing. (Sibling of Config by design, as Kubernetes pairs a selector
+	// with its implementation-owned config: StorageClass.provisioner +
+	// parameters, IngressClass.controller + parameters.)
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.type is immutable"
-	Type string `json:"type"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.adapter is immutable"
+	Adapter string `json:"adapter"`
 	// NOTE: the channel carries NO wiring — bare messages are answered by the
 	// profile of the oldest Ready Pipeline referencing this channel; channels
 	// in no pipeline answer bare messages with guidance only.
@@ -44,7 +48,7 @@ type ChannelStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
+// +kubebuilder:printcolumn:name="Adapter",type=string,JSONPath=`.spec.adapter`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Channel is a chat surface served by a channel-type implementation (built-in
