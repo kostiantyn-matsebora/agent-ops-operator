@@ -95,12 +95,13 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			"app.kubernetes.io/name":      "agentops-signal-adapter",
 			"agentops.dev/signal-adapter": adapter.Name,
 		},
-		SelectorKey: "agentops.dev/signal-adapter",
-		Image:       adapter.Spec.Image,
-		Env:         env,
-		EnvFrom:     envFrom,
-		Singleton:   adapter.Spec.Singleton == nil || *adapter.Spec.Singleton,
-		Resources:   adapter.Spec.Resources,
+		SelectorKey:      "agentops.dev/signal-adapter",
+		Image:            adapter.Spec.Image,
+		Env:              env,
+		EnvFrom:          envFrom,
+		Singleton:        adapter.Spec.Singleton == nil || *adapter.Spec.Singleton,
+		Resources:        adapter.Spec.Resources,
+		KubernetesAccess: adapter.Spec.KubernetesAccess != nil && *adapter.Spec.KubernetesAccess,
 	})
 	if err != nil {
 		return ctrl.Result{}, err

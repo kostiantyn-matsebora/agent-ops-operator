@@ -4,9 +4,17 @@ renders the SignalAdapter CR ONLY — pure implementation. The operator's
 reconciler owns the workload AND the connectivity: spec.port makes it render
 the Service agentops-signal-<name> and inject LISTEN_ADDR. Gated on the
 bundle flag alone: demo mode never enables this bundle.
+
+With registration enabled the adapter also configures the SENDER (it writes a
+VMAlertmanagerConfig pointing at its own webhook), so the permissions for that
+are rendered here — by the chart, never by the operator.
 */ -}}
 {{- if and .Values.enabled .Values.alertmanager.enabled }}
 {{- $name := .Values.alertmanager.name }}
+{{- $reg := .Values.alertmanager.registration }}
+{{- if and $reg.enabled (or (not $reg.vmalertmanager.name) (not $reg.vmalertmanager.namespace)) }}
+{{- fail "vm-bundle: alertmanager.registration.vmalertmanager.{name,namespace} are required when registration.enabled=true (the adapter needs to know which VMAlertmanager to configure)" }}
+{{- end }}
 # Webhook entry point (Service owned by the SignalAdapter reconciler):
 #   http://agentops-signal-{{ $name }}.{{ .Release.Namespace }}.svc:8080/webhook/<source>
 apiVersion: agentops.dev/v1alpha1
@@ -20,10 +28,48 @@ spec:
   image: "{{ .Values.alertmanager.image.repository }}:{{ .Values.alertmanager.image.tag }}"
   port: 8080
   singleton: true
+  {{- if $reg.enabled }}
+  # self-registration talks to the Kubernetes API: mount the SA token. The
+  # operator grants nothing — the Role below does.
+  kubernetesAccess: true
+  {{- end }}
   {{- with .Values.alertmanager.resources }}
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
+{{- if $reg.enabled }}
+---
+# Least privilege for self-registration: VMAlertmanagerConfig only, in the
+# target VMAlertmanager's namespace, bound to the adapter's deterministic SA.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agentops-signal-{{ $name }}-register
+  namespace: {{ $reg.vmalertmanager.namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-signal-vmalertmanager
+rules:
+  - apiGroups: ["operator.victoriametrics.com"]
+    resources: ["vmalertmanagerconfigs"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agentops-signal-{{ $name }}-register
+  namespace: {{ $reg.vmalertmanager.namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-signal-vmalertmanager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agentops-signal-{{ $name }}-register
+subjects:
+  - kind: ServiceAccount
+    # the SignalAdapter reconciler's deterministic SA name
+    name: agentops-signal-{{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- if .Values.alertmanager.defaultSource.enabled }}
 {{- $src := .Values.alertmanager.defaultSource }}
 {{- $profileRef := $src.profileRef }}
@@ -42,6 +88,20 @@ spec:
   {{- with $src.grouping }}
   grouping:
 {{ toYaml . | indent 4 }}
+  {{- end }}
+  {{- if $reg.enabled }}
+  # opaque to the operator; the adapter reads `register` and configures the
+  # named VMAlertmanager to push here
+  config:
+    register:
+      vmalertmanager:
+        name: {{ $reg.vmalertmanager.name }}
+        namespace: {{ $reg.vmalertmanager.namespace }}
+      {{- with $reg.matchers }}
+      matchers:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      sendResolved: {{ $reg.sendResolved }}
   {{- end }}
 ---
 # Wiring is pipeline-only: this Pipeline claims the source so its signals

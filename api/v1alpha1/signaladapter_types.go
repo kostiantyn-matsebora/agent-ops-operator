@@ -22,6 +22,13 @@ type SignalAdapterSpec struct {
 	// cron).
 	// +optional
 	Port *int32 `json:"port,omitempty"`
+	// KubernetesAccess declares that this implementation talks to the
+	// Kubernetes API (e.g. to register itself with a sender). When true the
+	// reconciler mounts the SA token and injects POD_NAMESPACE — and grants
+	// NOTHING: permissions are bound externally (chart or user) against the
+	// deterministic SA name agentops-signal-<name>.
+	// +optional
+	KubernetesAccess *bool `json:"kubernetesAccess,omitempty"`
 	// Singleton runs the workload as replicas 1 + strategy Recreate so no
 	// rollout ever runs two instances side by side (pollers and schedulers
 	// must not double-fire).

@@ -94,6 +94,10 @@ type adapterWorkload struct {
 	EnvFrom     []corev1.EnvFromSource
 	Singleton   bool
 	Resources   *corev1.ResourceRequirements
+	// KubernetesAccess mounts the SA token and injects POD_NAMESPACE. The SA
+	// still carries zero operator-created RBAC — permissions are granted
+	// externally against the deterministic SA name.
+	KubernetesAccess bool
 }
 
 // ensureAdapterWorkload creates/updates the dedicated zero-RBAC SA and the
@@ -103,8 +107,9 @@ func ensureAdapterWorkload(ctx context.Context, c client.Client, scheme *runtime
 		Name: w.Name, Namespace: w.Owner.GetNamespace(),
 	}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, c, sa, func() error {
-		// zero ambient authority: no RBAC is ever bound to this SA, and the
-		// pod spec disables token automount anyway
+		// zero ambient authority: the operator never binds RBAC to this SA;
+		// token automount stays off unless the implementation declares
+		// kubernetesAccess (and even then, permissions come from outside)
 		return controllerutil.SetControllerReference(w.Owner, sa, scheme)
 	}); err != nil {
 		return nil, err
@@ -122,9 +127,18 @@ func ensureAdapterWorkload(ctx context.Context, c client.Client, scheme *runtime
 		} else {
 			deploy.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RollingUpdateDeploymentStrategyType}
 		}
-		automount := false
+		automount := w.KubernetesAccess
+		env := w.Env
+		if w.KubernetesAccess {
+			env = append(append([]corev1.EnvVar{}, env...), corev1.EnvVar{
+				Name: "POD_NAMESPACE",
+				ValueFrom: &corev1.EnvVarSource{
+					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
+				},
+			})
+		}
 		container := corev1.Container{
-			Name: "adapter", Image: w.Image, Env: w.Env, EnvFrom: w.EnvFrom,
+			Name: "adapter", Image: w.Image, Env: env, EnvFrom: w.EnvFrom,
 		}
 		if w.Resources != nil {
 			container.Resources = *w.Resources

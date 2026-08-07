@@ -65,6 +65,14 @@ spec:
                 description: Image implementing the signal adapter contract.
                 minLength: 1
                 type: string
+              kubernetesAccess:
+                description: |-
+                  KubernetesAccess declares that this implementation talks to the
+                  Kubernetes API (e.g. to register itself with a sender). When true the
+                  reconciler mounts the SA token and injects POD_NAMESPACE — and grants
+                  NOTHING: permissions are bound externally (chart or user) against the
+                  deterministic SA name agentops-signal-<name>.
+                type: boolean
               port:
                 description: |-
                   Port the image's own HTTP surface listens on (webhook-receiving

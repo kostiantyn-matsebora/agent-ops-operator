@@ -54,7 +54,7 @@ func testAdapter(t *testing.T, f *fakeManager) *adapter {
 		mgr:        NewManager(mgrSrv.URL, "tok"),
 		sourceType: "vm-alertmanager",
 		sources:    map[string]string{},
-		reported:   map[string]bool{},
+		reported:   map[string]string{},
 	}
 	a.refreshSources(context.Background())
 	return a

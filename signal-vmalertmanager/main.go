@@ -65,10 +65,14 @@ type amPayload struct {
 type adapter struct {
 	mgr        *Manager
 	sourceType string
+	podNS      string // downward-API namespace ("" without kubernetesAccess)
+	listen     string
+	kube       *kubeClient // nil = no in-cluster access
+	kubeReason string      // why kube is nil (instruction path)
 
 	mu       sync.Mutex
 	sources  map[string]string // source name -> credentialEnvPrefix ("" = open)
-	reported map[string]bool   // Ready reported (avoid spam)
+	reported map[string]string // last reported reason|message (avoid spam)
 }
 
 func mustEnv(key string) string {
@@ -88,11 +92,16 @@ func main() {
 	if listen == "" {
 		listen = ":8080"
 	}
+	kube, kubeReason := newInClusterClient()
 	a := &adapter{
 		mgr:        NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
 		sourceType: sourceType,
+		podNS:      os.Getenv("POD_NAMESPACE"),
+		listen:     listen,
+		kube:       kube,
+		kubeReason: kubeReason,
 		sources:    map[string]string{},
-		reported:   map[string]bool{},
+		reported:   map[string]string{},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -112,9 +121,11 @@ func main() {
 	}
 }
 
-// registryLoop keeps the served-source map fresh (cron-adapter pattern) and
-// reports Ready once per source — there is no config to validate; a source of
-// this type is served as soon as it exists.
+// registryLoop keeps the served-source map fresh (cron-adapter pattern),
+// reconciles sender registration for sources that ask for it, and reports
+// each source's Ready state. Everything reruns every poll, so a registration
+// that failed for want of RBAC heals as soon as the permission is granted —
+// no restart.
 func (a *adapter) registryLoop(ctx context.Context) {
 	for ctx.Err() == nil {
 		a.refreshSources(ctx)
@@ -134,22 +145,76 @@ func (a *adapter) refreshSources(ctx context.Context) {
 	next := map[string]string{}
 	for _, info := range infos {
 		next[info.Name] = info.CredentialEnvPrefix
-		a.mu.Lock()
-		done := a.reported[info.Name]
-		a.mu.Unlock()
-		if !done {
-			// name the webhook path so `kubectl get signalsource -o yaml`
-			// tells the operator exactly what to target
-			msg := fmt.Sprintf("served by signal-vmalertmanager — POST <service>/webhook/%s", info.Name)
-			if err := a.mgr.ReportStatus(ctx, info.Name, true, "AdapterReady", msg); err == nil {
-				a.mu.Lock()
-				a.reported[info.Name] = true
-				a.mu.Unlock()
-			}
-		}
+		reason, msg := a.reconcileRegistration(ctx, info)
+		a.report(ctx, info.Name, reason, msg)
 	}
 	a.mu.Lock()
 	a.sources = next
+	a.mu.Unlock()
+}
+
+// reconcileRegistration ensures the sender-side config for one source and
+// returns the Ready reason/message to publish. A source is served either way:
+// the webhook is live whether or not the sender could be configured for it,
+// so registration trouble reports instructions rather than unserving.
+func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (string, string) {
+	reg := parseRegister(info.Config)
+	if reg == nil {
+		// no registration asked for: name the path an operator should target
+		return "AdapterReady", fmt.Sprintf("served by signal-vmalertmanager — POST %s", a.endpoint(info.Name))
+	}
+	if reg.VMAlertmanager.Namespace == "" || reg.VMAlertmanager.Name == "" {
+		return "RegistrationManual", fmt.Sprintf(
+			"served, but config.register.vmalertmanager needs {name, namespace} — configure the sender by hand to POST %s",
+			a.endpoint(info.Name))
+	}
+	url := a.endpoint(info.Name)
+	if a.kube == nil {
+		return "RegistrationManual", manualInstructions(info.Name, url, reg, a.kubeReason)
+	}
+	ref, err := a.kube.ensureRegistration(ctx, info.Name, url, reg)
+	if err != nil {
+		return "RegistrationManual", manualInstructions(info.Name, url, reg, err.Error())
+	}
+	return "AdapterReady", fmt.Sprintf(
+		"served by signal-vmalertmanager — POST %s; sender registered in VMAlertmanagerConfig %s", url, ref)
+}
+
+// manualInstructions renders the degraded message: why registration could not
+// happen, and exactly what to do instead.
+func manualInstructions(source, url string, reg *registerSpec, cause string) string {
+	return fmt.Sprintf(
+		"served, but could not register the sender automatically (%s). Configure it by hand: "+
+			"create VMAlertmanagerConfig %s/%s (or add a webhook receiver to VMAlertmanager %s/%s) posting to %s",
+		cause, reg.VMAlertmanager.Namespace, registrationName(source),
+		reg.VMAlertmanager.Namespace, reg.VMAlertmanager.Name, url)
+}
+
+// endpoint is this adapter's webhook URL for a source (in-cluster form when
+// the reconciler injected the pod namespace; path-only otherwise).
+func (a *adapter) endpoint(source string) string {
+	if a.podNS == "" {
+		return "<service>/webhook/" + source
+	}
+	return webhookURL(a.sourceType, a.podNS, a.listen, source)
+}
+
+// report publishes a source's Ready state, skipping unchanged repeats so the
+// 15s loop does not spam the status endpoint.
+func (a *adapter) report(ctx context.Context, source, reason, message string) {
+	key := reason + "|" + message
+	a.mu.Lock()
+	unchanged := a.reported[source] == key
+	a.mu.Unlock()
+	if unchanged {
+		return
+	}
+	if err := a.mgr.ReportStatus(ctx, source, true, reason, message); err != nil {
+		log.Printf("report status %s: %v", source, err)
+		return
+	}
+	a.mu.Lock()
+	a.reported[source] = key
 	a.mu.Unlock()
 }
 
