@@ -7,7 +7,7 @@ The generic Channel CRD: type-agnostic metadata plus opaque per-type config, str
 ## Requirements
 
 ### Requirement: Channel CRD splits shared metadata from type-specific config
-The `Channel` CRD SHALL consist of type-agnostic metadata — **required immutable `spec.adapter`, naming the `ChannelAdapter` whose implementation serves this surface and whose schema governs `spec.config`** — plus optional `spec.credentialsSecretRef` (LocalObjectReference naming the Secret holding this surface's transport credentials, per-surface usage, never per-implementation) and an optional opaque `spec.config` object (`x-kubernetes-preserve-unknown-fields`) whose shape is defined and validated solely by that adapter. `spec.adapter` and `spec.config` stay siblings, matching how Kubernetes pairs a selector with its implementation-owned config (`StorageClass.provisioner`/`parameters`, `IngressClass.controller`/`parameters`); the name says the value is a REFERENCE, so `config` is never mistaken for part of one flat schema the selector belongs to. The operator SHALL never interpret `spec.config` and SHALL never read the referenced credential Secret's values (it only projects the secret *name* into adapter pod specs). The channel SHALL carry no wiring and no delivery mode — a channel's default profile for bare messages comes from its oldest Ready `Pipeline`, and the operator delivers all agent output.
+The `Channel` CRD SHALL consist of type-agnostic metadata — required immutable `spec.type` (string channel-type identifier), optional `spec.delivery` hints, optional `spec.credentialsSecretRef` (LocalObjectReference naming the Secret holding this surface's transport credentials — credentials are per-surface usage, never per-implementation) — plus an optional opaque `spec.config` object (`x-kubernetes-preserve-unknown-fields`) whose shape is defined and validated authoritatively by the channel-type implementation. The operator SHALL never interpret `spec.config` semantically and SHALL never read the referenced credential Secret's values (it only projects the secret *name* into adapter pod specs). **When the serving `ChannelAdapter` CR declares a config schema for the type, the manager SHALL mechanically validate `spec.config` against that adapter-declared schema and report the result as an advisory `ConfigValid` condition — admission still accepts arbitrary config, and a violation never blocks serving.** **The channel SHALL carry no wiring: `defaultProfileRef` is removed (BREAKING) — a channel's default profile for bare messages comes from its oldest Ready `Pipeline`.** The typed `spec.telegram` sub-struct SHALL be removed (**BREAKING**; migration documented).
 
 #### Scenario: Default profile comes from the pipeline
 - **WHEN** a bare (non-command) message arrives on a channel referenced by a Ready Pipeline
@@ -28,6 +28,22 @@ The `Channel` CRD SHALL consist of type-agnostic metadata — **required immutab
 #### Scenario: The former type field is gone
 - **WHEN** a Channel is applied carrying `spec.type`
 - **THEN** the field is not part of the schema and is pruned rather than honoured, so a stale manifest cannot silently select an adapter
+
+#### Scenario: Arbitrary config accepted for any type
+- **WHEN** a Channel is applied with `type: slack` and a `config` object with fields the operator has never seen, and no ChannelAdapter declares a schema for `slack`
+- **THEN** the API server accepts it and the operator stores the config without validation or interpretation, and no `ConfigValid` condition is set
+
+#### Scenario: Schema violation surfaces as an advisory condition
+- **WHEN** a Channel's `config` violates the schema the serving ChannelAdapter declares
+- **THEN** the API server still accepts the Channel, its status gains `ConfigValid=False` naming the violation, and `Served`/delivery are unaffected
+
+#### Scenario: Type is required and immutable
+- **WHEN** a Channel is applied without `spec.type`, or an existing Channel's `spec.type` is changed
+- **THEN** the API server rejects the request with a validation error
+
+#### Scenario: Old shape no longer served
+- **WHEN** a manifest using the removed `spec.telegram` sub-struct is applied against the new CRD
+- **THEN** validation fails, and the documented migration (telegram sub-struct → `type: telegram` + `config`) produces an accepted equivalent
 
 ### Requirement: Conversation thread ids are strings
 `ConversationStatus.threadId` SHALL be a string, carried as a string through the dispatch `WorkUnit` and the runtime environment (**BREAKING** for numeric consumers). Channel implementations define their own id format; conversation-to-thread resolution SHALL compare ids as opaque strings scoped to the Channel.
@@ -56,4 +72,3 @@ holds a channel's credentials.
 #### Scenario: Single-channel results are posted by the operator
 - **WHEN** a run completes on a conversation bound to exactly one channel
 - **THEN** the manager enqueues a `send` op carrying the result to that channel's thread, rather than relying on the agent to post it
-
