@@ -7,10 +7,10 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -29,6 +29,8 @@ func AdapterDeploymentName(adapterName string) string {
 // ChannelAdapterReconciler owns channel-adapter workloads: one Deployment
 // (+ zero-RBAC ServiceAccount) per ChannelAdapter, with the contract URL, a
 // derived per-adapter token, and every served Channel's projected credentials.
+// The adapter CR's NAME is the routing key — Channels select it via spec.type,
+// so one adapter per implementation holds by construction.
 type ChannelAdapterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -48,23 +50,6 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// guard 1: credentials never live on the adapter
-	if name := secretShapedEnv(adapter.Spec.Env); name != "" {
-		return ctrl.Result{}, r.fail(ctx, &adapter, ConditionDeployed, "SecretEnvForbidden",
-			fmt.Sprintf("spec.env[%s] references a Secret — credentials belong on Channel.credentialsSecretRef, not on the adapter", name))
-	}
-
-	// guard 2: one active adapter per type (oldest wins; ties by name)
-	if older, err := r.olderClaimant(ctx, &adapter); err != nil {
-		return ctrl.Result{}, err
-	} else if older != "" {
-		if err := r.deleteWorkload(ctx, &adapter); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, r.fail(ctx, &adapter, ConditionTypeConflict, "TypeConflict",
-			fmt.Sprintf("type %q is already served by ChannelAdapter %q — at most one active adapter per type", adapter.Spec.Type, older))
-	}
-
 	// served channels + credential projection (collisions reported, first wins)
 	var channels agentopsv1alpha1.ChannelList
 	if err := r.List(ctx, &channels, client.InNamespace(adapter.Namespace)); err != nil {
@@ -74,7 +59,7 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var creds []credentialItem
 	for i := range channels.Items {
 		ch := &channels.Items[i]
-		if ch.Spec.Type != adapter.Spec.Type {
+		if ch.Spec.Type != adapter.Name {
 			continue
 		}
 		served++
@@ -86,20 +71,18 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	env := []corev1.EnvVar{
 		{Name: "MANAGER_URL", Value: r.ManagerURL},
-		{Name: "CHANNEL_TYPE", Value: adapter.Spec.Type},
+		{Name: "CHANNEL_TYPE", Value: adapter.Name},
 	}
 	if r.MasterToken != "" {
 		env = append(env, corev1.EnvVar{Name: "ADAPTER_TOKEN", Value: chat.DeriveAdapterToken(r.MasterToken, adapter.Name)})
 	}
-	env = append(env, adapter.Spec.Env...)
 
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
 		Owner: &adapter,
 		Name:  AdapterDeploymentName(adapter.Name),
 		Labels: map[string]string{
-			"app.kubernetes.io/name":    "agentops-adapter",
-			"agentops.dev/adapter":      adapter.Name,
-			"agentops.dev/channel-type": adapter.Spec.Type,
+			"app.kubernetes.io/name": "agentops-adapter",
+			"agentops.dev/adapter":   adapter.Name,
 		},
 		SelectorKey: "agentops.dev/adapter",
 		Image:       adapter.Spec.Image,
@@ -115,9 +98,6 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// status
 	patch := client.MergeFrom(adapter.DeepCopy())
 	adapter.Status.ServedChannels = int32(served)
-	apimeta.SetStatusCondition(&adapter.Status.Conditions, metav1.Condition{
-		Type: ConditionTypeConflict, Status: metav1.ConditionFalse, Reason: "NoConflict",
-	})
 	deployed := metav1.Condition{Type: ConditionDeployed, Status: metav1.ConditionTrue, Reason: "WorkloadRendered"}
 	if len(collisions) > 0 {
 		deployed.Reason = "CredentialCollision"
@@ -129,101 +109,26 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if deploy.Status.AvailableReplicas > 0 {
 		ready.Status = metav1.ConditionTrue
 		ready.Reason = "WorkloadAvailable"
-		ready.Message = fmt.Sprintf("serving %d channel(s) of type %q", served, adapter.Spec.Type)
+		ready.Message = fmt.Sprintf("serving %d channel(s)", served)
 	}
 	apimeta.SetStatusCondition(&adapter.Status.Conditions, ready)
 	return ctrl.Result{}, r.Status().Patch(ctx, &adapter, patch)
 }
 
-// olderClaimant returns the name of an older ChannelAdapter serving the same
-// type ("" when this one is the rightful claimant).
-func (r *ChannelAdapterReconciler) olderClaimant(ctx context.Context, adapter *agentopsv1alpha1.ChannelAdapter) (string, error) {
-	var list agentopsv1alpha1.ChannelAdapterList
-	if err := r.List(ctx, &list, client.InNamespace(adapter.Namespace)); err != nil {
-		return "", err
-	}
-	for i := range list.Items {
-		other := &list.Items[i]
-		if other.Name == adapter.Name || other.Spec.Type != adapter.Spec.Type {
-			continue
-		}
-		if other.CreationTimestamp.Time.Before(adapter.CreationTimestamp.Time) ||
-			(other.CreationTimestamp.Time.Equal(adapter.CreationTimestamp.Time) && other.Name < adapter.Name) {
-			return other.Name, nil
-		}
-	}
-	return "", nil
-}
-
-func (r *ChannelAdapterReconciler) deleteWorkload(ctx context.Context, adapter *agentopsv1alpha1.ChannelAdapter) error {
-	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
-		Name: AdapterDeploymentName(adapter.Name), Namespace: adapter.Namespace,
-	}}
-	if err := r.Delete(ctx, deploy); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
-}
-
-// fail records a False terminal condition (and flips Deployed off for
-// non-Deployed failures' sake, keeping status truthful).
-func (r *ChannelAdapterReconciler) fail(ctx context.Context, adapter *agentopsv1alpha1.ChannelAdapter, condType, reason, message string) error {
-	patch := client.MergeFrom(adapter.DeepCopy())
-	status := metav1.ConditionFalse
-	if condType == ConditionTypeConflict {
-		status = metav1.ConditionTrue // conflict PRESENT
-	}
-	apimeta.SetStatusCondition(&adapter.Status.Conditions, metav1.Condition{
-		Type: condType, Status: status, Reason: reason, Message: message,
-	})
-	if condType != ConditionDeployed {
-		apimeta.SetStatusCondition(&adapter.Status.Conditions, metav1.Condition{
-			Type: ConditionDeployed, Status: metav1.ConditionFalse, Reason: reason,
-		})
-	}
-	apimeta.SetStatusCondition(&adapter.Status.Conditions, metav1.Condition{
-		Type: ConditionReady, Status: metav1.ConditionFalse, Reason: reason,
-	})
-	return r.Status().Patch(ctx, adapter, patch)
-}
-
 // SetupWithManager wires the controller: adapter CRs, their owned Deployments,
-// and Channel events (projection inputs) mapped to the serving adapter; other
-// same-type adapters requeue on any adapter event so conflict resolution
-// converges when the older claimant goes away.
+// and Channel events (projection inputs) mapped straight to the adapter the
+// channel names in spec.type.
 func (r *ChannelAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapChannel := func(ctx context.Context, obj client.Object) []ctrl.Request {
 		ch, ok := obj.(*agentopsv1alpha1.Channel)
-		if !ok {
+		if !ok || ch.Spec.Type == "" {
 			return nil
 		}
-		return r.adaptersOfType(ctx, ch.Namespace, ch.Spec.Type)
-	}
-	mapAdapter := func(ctx context.Context, obj client.Object) []ctrl.Request {
-		a, ok := obj.(*agentopsv1alpha1.ChannelAdapter)
-		if !ok {
-			return nil
-		}
-		return r.adaptersOfType(ctx, a.Namespace, a.Spec.Type)
+		return []ctrl.Request{{NamespacedName: types.NamespacedName{Namespace: ch.Namespace, Name: ch.Spec.Type}}}
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.ChannelAdapter{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&agentopsv1alpha1.Channel{}, handler.EnqueueRequestsFromMapFunc(mapChannel)).
-		Watches(&agentopsv1alpha1.ChannelAdapter{}, handler.EnqueueRequestsFromMapFunc(mapAdapter)).
 		Complete(r)
-}
-
-func (r *ChannelAdapterReconciler) adaptersOfType(ctx context.Context, namespace, channelType string) []ctrl.Request {
-	var list agentopsv1alpha1.ChannelAdapterList
-	if err := r.List(ctx, &list, client.InNamespace(namespace)); err != nil {
-		return nil
-	}
-	var reqs []ctrl.Request
-	for i := range list.Items {
-		if list.Items[i].Spec.Type == channelType {
-			reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
-		}
-	}
-	return reqs
 }

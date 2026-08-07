@@ -364,15 +364,16 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 
 // ---- channel adapter contract ----------------------------------------------
 
-// adapterScopeKey carries the authenticated adapter's type scope through the
-// request context ("" = master token, full scope).
+// adapterScopeKey carries the authenticated adapter's scope — its CR name,
+// which IS the type key Channels/SignalSources select — through the request
+// context ("" = master token, full scope).
 type adapterScopeKey struct{}
 
 // adapterAuth guards /channel/* (constant-time): the master token (ADAPTER_TOKEN
 // env) has full scope; a per-adapter token — HMAC-derived from the master key
 // and the ChannelAdapter name, validated by re-derivation against the adapter
 // list (stateless, survives restarts, zero Secret reads) — is scoped to that
-// adapter's spec.type.
+// adapter's name.
 func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.AdapterToken == "" {
@@ -389,7 +390,7 @@ func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 			for i := range adapters.Items {
 				want := chat.DeriveAdapterToken(s.AdapterToken, adapters.Items[i].Name)
 				if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
-					ctx := context.WithValue(r.Context(), adapterScopeKey{}, adapters.Items[i].Spec.Type)
+					ctx := context.WithValue(r.Context(), adapterScopeKey{}, adapters.Items[i].Name)
 					next(w, r.WithContext(ctx))
 					return
 				}

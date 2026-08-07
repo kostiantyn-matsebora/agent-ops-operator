@@ -34,9 +34,9 @@ approvable from your phone.
 | `Conversation` | One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. |
 | `ConversationInput` | Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd. |
 | `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, delivery hints, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). Carries **no wiring** — its default profile comes from the Pipeline referencing it. |
-| `ChannelAdapter` | **What serves a channel type**: a container image implementing the adapter contract, plugged in as a CR — the reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
+| `ChannelAdapter` | **A channel implementation, nothing more**: a container image implementing the adapter contract, plugged in as a CR whose **name is the type key** — Channels select it with `spec.type: <adapter name>`, so one adapter per implementation holds by construction. The reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). **All configuration lives on the served Channels** (connectivity, credentials, opaque `config`) — the adapter CR carries none. Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
 | `SignalSource` | Ingest lane, split like `Channel`: **type-agnostic metadata** (open `type`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports. |
-| `SignalAdapter` | **What serves a signal type**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR with the same posture (owned workload, zero-RBAC SA, singleton, derived type-scoped token, credential projection). A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
+| `SignalAdapter` | **A signal implementation, nothing more**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR whose **name is the type key** SignalSources select via `spec.type`, with the same posture (owned workload, zero-RBAC SA, singleton, derived name-scoped token, credential projection). Webhook-receiving implementations declare `spec.port` and the reconciler also owns a Service `agentops-signal-<name>` + injects `LISTEN_ADDR` — enabling the adapter is a complete appliance. A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
 | `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed, channels get their default profile from their oldest Ready pipeline (`/profile` commands work everywhere regardless). One pipeline per source (older claimant wins); channels are shareable. |
 | `MCPConfig` | Reusable MCP server sets, shareable across profiles; secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
 
@@ -89,7 +89,8 @@ through one adapter process.
 **Auth**: all `/channel/*` calls carry `Authorization: Bearer <token>`. A
 ChannelAdapter-managed workload gets a per-adapter token derived from the
 master key (`HMAC(ADAPTER_TOKEN, adapter name)`, validated statelessly by
-re-derivation) and **scoped to its `spec.type`** — cross-type calls get 403.
+re-derivation) and **scoped to its name** (the type key Channels select) —
+cross-key calls get 403.
 The bare master token (chart-provisioned into the manager as env) keeps full
 scope, so hand-deployed adapters work unchanged. No Kubernetes API access
 needed — the reference adapter [`channel-telegram/`](channel-telegram/) is
@@ -131,7 +132,7 @@ the rest (**adapters normalize, the manager groups**):
 
 Auth mirrors channels: master token or a per-`SignalAdapter` derived token
 (distinct derivation context — channel and signal adapters sharing a name
-never share a token), scoped to the adapter's `spec.type`. A `SignalSource`
+never share a token), scoped to the adapter's name. A `SignalSource`
 whose type nothing serves carries `Served=False`.
 
 Reference implementation: [`signal-cron/`](signal-cron/) — replaces the old
@@ -146,10 +147,12 @@ runs resume the agent session.
 never enabled by demo mode** (it consumes your VictoriaMetrics endpoints).
 Components (individually toggleable once `vm-bundle.enabled=true`):
 
-- **`alertmanager`** — the `vmAlertmanagerWebhook` signal source:
-  `SignalAdapter` CR (reference adapter `signal-vmalertmanager/`, accepts the
-  standard Alertmanager webhook format) + a Service exposing it. Point
-  VMAlertmanager at it:
+- **`alertmanager`** — the Alertmanager-webhook ingestion path: a
+  `SignalAdapter` CR named `vm-alertmanager` (reference adapter
+  `signal-vmalertmanager/`, accepts the standard Alertmanager webhook format)
+  with `port: 8080` — the reconciler owns both the workload and the webhook
+  Service; the chart ships no connectivity. Sources select it with
+  `spec.type: vm-alertmanager`. Point VMAlertmanager at it:
 
   ```yaml
   receivers:
@@ -296,14 +299,28 @@ into the `channel-telegram` adapter. For a live install:
 Rollback = reverse order: disable the adapter, restore the previous chart
 version and Channel CR shape.
 
+## Migrating to chart 1.7 (adapters are pure implementation) — BREAKING
+
+`ChannelAdapter`/`SignalAdapter` lose `spec.type` and `spec.env` — the CR
+**name** is now the type key (`Channel`/`SignalSource.spec.type` names the
+serving adapter), and adapter CRs carry no configuration at all.
+`SignalAdapter` gains `spec.port`: when set, the reconciler owns the Service
+`agentops-signal-<name>` and injects `LISTEN_ADDR` (the vm-bundle chart no
+longer ships one). To upgrade: rename adapter CRs (or re-type
+channels/sources) so names and `spec.type` values match — the shipped
+`telegram`, `cron`, and `vm-alertmanager` names already do; `spec.type` on
+sources/channels is immutable, so a source whose type key changes (e.g.
+`vmAlertmanagerWebhook` → `vm-alertmanager`) is deleted and recreated, then
+re-claimed by its Pipeline.
+
 ## Migrating to chart 1.6 (built-in alertmanager removed) — BREAKING
 
 The manager's `POST /ingest/alertmanager/{source}` endpoint and the built-in
 `alertmanagerWebhook` type are gone — the `signal-vmalertmanager` adapter
 (vm-bundle) accepts the identical webhook format and is the only Alertmanager
 path. BEFORE upgrading: repoint senders to the adapter Service
-(`/webhook/{source}`, see the VM bundle section) and move sources to
-`type: vmAlertmanagerWebhook` claimed by a Pipeline; sender retries plus
+(`/webhook/{source}`, see the VM bundle section) and move sources to the
+adapter's type key claimed by a Pipeline; sender retries plus
 fingerprint cooldown make the switchover itself lossless. After upgrading,
 retire the old `alertmanagerWebhook` sources.
 

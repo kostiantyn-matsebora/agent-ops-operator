@@ -6,6 +6,7 @@ import (
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -19,12 +20,10 @@ import (
 const ConditionWired = "Wired"
 
 // SignalSourceReconciler keeps the Served and Wired conditions current on
-// every SignalSource — the signal sibling of ChannelReconciler. Built-in
-// types (alertmanagerWebhook, hosted by the manager's own HTTP surface) are
-// always served; everything else needs a Ready SignalAdapter or an
-// adapter-reported Ready condition (hand-deployed adapters). Wiring is
-// pipeline-only: sources route signals only while a Ready Pipeline claims
-// them.
+// every SignalSource — the signal sibling of ChannelReconciler. Every type
+// needs a Ready SignalAdapter named by spec.type, or an adapter-reported
+// Ready condition (hand-deployed adapters). Wiring is pipeline-only: sources
+// route signals only while a Ready Pipeline claims them.
 type SignalSourceReconciler struct {
 	client.Client
 }
@@ -38,7 +37,7 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// no built-in signal types: every type needs a serving adapter
 	cond := metav1.Condition{Type: ConditionServed, Status: metav1.ConditionFalse, Reason: "NoServingImplementation",
-		Message: fmt.Sprintf("no Ready SignalAdapter serves type %q (hand-deployed adapters report per-source readiness on the Ready condition)", src.Spec.Type)}
+		Message: fmt.Sprintf("no Ready SignalAdapter named %q (hand-deployed adapters report per-source readiness on the Ready condition)", src.Spec.Type)}
 	if name, ready := r.readyAdapter(ctx, &src); ready {
 		cond.Status = metav1.ConditionTrue
 		cond.Reason = "AdapterReady"
@@ -80,22 +79,21 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, r.Status().Patch(ctx, &src, patch)
 }
 
+// readyAdapter resolves the adapter the source names in spec.type — the
+// adapter CR's NAME is the routing key.
 func (r *SignalSourceReconciler) readyAdapter(ctx context.Context, src *agentopsv1alpha1.SignalSource) (string, bool) {
-	var list agentopsv1alpha1.SignalAdapterList
-	if err := r.List(ctx, &list, client.InNamespace(src.Namespace)); err != nil {
+	var a agentopsv1alpha1.SignalAdapter
+	if err := r.Get(ctx, types.NamespacedName{Namespace: src.Namespace, Name: src.Spec.Type}, &a); err != nil {
 		return "", false
 	}
-	for i := range list.Items {
-		a := &list.Items[i]
-		if a.Spec.Type == src.Spec.Type && apimeta.IsStatusConditionTrue(a.Status.Conditions, ConditionReady) {
-			return a.Name, true
-		}
+	if apimeta.IsStatusConditionTrue(a.Status.Conditions, ConditionReady) {
+		return a.Name, true
 	}
 	return "", false
 }
 
 // SetupWithManager wires the controller: SignalSources, SignalAdapter events
-// mapped onto the sources of that adapter's type, and Pipeline events mapped
+// mapped onto the sources naming that adapter, and Pipeline events mapped
 // onto all sources (claim changes flip Wired).
 func (r *SignalSourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapAdapter := func(ctx context.Context, obj client.Object) []ctrl.Request {
@@ -109,7 +107,7 @@ func (r *SignalSourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		var reqs []ctrl.Request
 		for i := range list.Items {
-			if list.Items[i].Spec.Type == a.Spec.Type {
+			if list.Items[i].Spec.Type == a.Name {
 				reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
 			}
 		}

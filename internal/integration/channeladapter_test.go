@@ -35,11 +35,12 @@ func reconcileAdapter(t *testing.T, name string) {
 	}
 }
 
-func mkAdapter(t *testing.T, name, channelType string) *agentopsv1alpha1.ChannelAdapter {
+// mkAdapter creates a ChannelAdapter — its NAME is the type key Channels
+// select via spec.type.
+func mkAdapter(t *testing.T, name string) *agentopsv1alpha1.ChannelAdapter {
 	t.Helper()
 	a := &agentopsv1alpha1.ChannelAdapter{}
 	a.Name, a.Namespace = name, ns
-	a.Spec.Type = channelType
 	a.Spec.Image = "example/adapter:1"
 	if err := k8sClient.Create(context.Background(), a); err != nil {
 		t.Fatal(err)
@@ -62,10 +63,10 @@ func mkTypedChannel(t *testing.T, name, channelType, credSecret string) {
 
 func TestChannelAdapterDeployment(t *testing.T) {
 	ctx := context.Background()
-	mkTypedChannel(t, "cad-chan-a", "cad-type", "bot-secret-a")
-	mkTypedChannel(t, "cad-chan-b", "cad-type", "bot-secret-b")
-	mkTypedChannel(t, "cad-nocred", "cad-type", "")
-	mkAdapter(t, "cad-main", "cad-type")
+	mkTypedChannel(t, "cad-chan-a", "cad-main", "bot-secret-a")
+	mkTypedChannel(t, "cad-chan-b", "cad-main", "bot-secret-b")
+	mkTypedChannel(t, "cad-nocred", "cad-main", "")
+	mkAdapter(t, "cad-main")
 	reconcileAdapter(t, "cad-main")
 
 	var deploy appsv1.Deployment
@@ -92,12 +93,13 @@ func TestChannelAdapterDeployment(t *testing.T) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: pod.ServiceAccountName}, &sa); err != nil {
 		t.Fatalf("dedicated SA not created: %v", err)
 	}
-	// contract wiring: MANAGER_URL, CHANNEL_TYPE, derived (never master) token
+	// contract wiring: MANAGER_URL, CHANNEL_TYPE (= adapter name), derived
+	// (never master) token
 	env := map[string]string{}
 	for _, e := range pod.Containers[0].Env {
 		env[e.Name] = e.Value
 	}
-	if env["MANAGER_URL"] != "http://manager:8080" || env["CHANNEL_TYPE"] != "cad-type" {
+	if env["MANAGER_URL"] != "http://manager:8080" || env["CHANNEL_TYPE"] != "cad-main" {
 		t.Fatalf("contract env wrong: %+v", env)
 	}
 	if want := chat.DeriveAdapterToken(testMasterToken, "cad-main"); env["ADAPTER_TOKEN"] != want {
@@ -130,8 +132,8 @@ func TestChannelAdapterDeployment(t *testing.T) {
 
 func TestChannelAdapterCredentialChangeRollsTemplate(t *testing.T) {
 	ctx := context.Background()
-	mkTypedChannel(t, "roll-chan", "roll-type", "roll-secret-1")
-	mkAdapter(t, "roll-main", "roll-type")
+	mkTypedChannel(t, "roll-chan", "roll-main", "roll-secret-1")
+	mkAdapter(t, "roll-main")
 	reconcileAdapter(t, "roll-main")
 
 	name := types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("roll-main")}
@@ -160,60 +162,20 @@ func TestChannelAdapterCredentialChangeRollsTemplate(t *testing.T) {
 	}
 }
 
-func TestChannelAdapterGuards(t *testing.T) {
+func TestChannelAdapterCredentialCollision(t *testing.T) {
 	ctx := context.Background()
-
-	// type conflict: the newer claimant reports and does not deploy
-	mkAdapter(t, "guard-first", "guard-type")
-	reconcileAdapter(t, "guard-first")
-	second := mkAdapter(t, "guard-second", "guard-type")
-	// creationTimestamp granularity is 1s — force unambiguous ordering via name
-	// tiebreak only if timestamps collide; reconcile decides either way, so
-	// assert on whichever got the conflict
-	reconcileAdapter(t, "guard-second")
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "guard-second"}, second)
-	if !apimeta.IsStatusConditionTrue(second.Status.Conditions, controller.ConditionTypeConflict) {
-		t.Fatalf("TypeConflict not set on newer adapter: %+v", second.Status.Conditions)
-	}
-	var deploy appsv1.Deployment
-	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("guard-second")}, &deploy); err == nil {
-		t.Fatal("conflicting adapter was deployed")
-	}
-
-	// secret-shaped env rejected
-	bad := &agentopsv1alpha1.ChannelAdapter{}
-	bad.Name, bad.Namespace = "guard-secretenv", ns
-	bad.Spec.Type = "guard-type-2"
-	bad.Spec.Image = "example/adapter:1"
-	bad.Spec.Env = []corev1.EnvVar{{
-		Name: "SNEAKY_TOKEN",
-		ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{Name: "s"}, Key: "k",
-		}},
-	}}
-	if err := k8sClient.Create(ctx, bad); err != nil {
-		t.Fatal(err)
-	}
-	reconcileAdapter(t, "guard-secretenv")
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "guard-secretenv"}, bad)
-	cond := apimeta.FindStatusCondition(bad.Status.Conditions, controller.ConditionDeployed)
-	if cond == nil || cond.Reason != "SecretEnvForbidden" {
-		t.Fatalf("secret env not rejected: %+v", bad.Status.Conditions)
-	}
-	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("guard-secretenv")}, &deploy); err == nil {
-		t.Fatal("secret-env adapter was deployed")
-	}
 
 	// sanitized-prefix collision reported, first channel wins
 	mkTypedChannel(t, "col.chan", "guard-col", "sec-1")
 	mkTypedChannel(t, "col-chan", "guard-col", "sec-2")
-	col := mkAdapter(t, "guard-col", "guard-col")
+	col := mkAdapter(t, "guard-col")
 	reconcileAdapter(t, "guard-col")
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "guard-col"}, col)
 	dep := apimeta.FindStatusCondition(col.Status.Conditions, controller.ConditionDeployed)
 	if dep == nil || dep.Reason != "CredentialCollision" {
 		t.Fatalf("collision not reported: %+v", col.Status.Conditions)
 	}
+	var deploy appsv1.Deployment
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("guard-col")}, &deploy)
 	efs := deploy.Spec.Template.Spec.Containers[0].EnvFrom
 	if len(efs) != 1 || efs[0].SecretRef.Name != "sec-2" { // "col-chan" sorts first
@@ -250,14 +212,14 @@ func TestChannelServedCondition(t *testing.T) {
 		t.Fatalf("registry-served type should be Served=True: %+v", ch.Status.Conditions)
 	}
 
-	// adapter becomes Ready -> Served flips True
-	mkTypedChannel(t, "srv-ext", "srv-ext-type", "")
+	// adapter becomes Ready -> Served flips True (channel names the adapter)
+	mkTypedChannel(t, "srv-ext", "srv-adapter", "")
 	reconcileChan("srv-ext")
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "srv-ext"}, &ch)
 	if !apimeta.IsStatusConditionFalse(ch.Status.Conditions, controller.ConditionServed) {
 		t.Fatal("expected Served=False before adapter exists")
 	}
-	mkAdapter(t, "srv-adapter", "srv-ext-type")
+	mkAdapter(t, "srv-adapter")
 	reconcileAdapter(t, "srv-adapter")
 	// no kubelet: make the workload report availability, then let the adapter
 	// reconciler compute Ready
@@ -283,7 +245,7 @@ func TestChannelServedCondition(t *testing.T) {
 
 func TestAdapterAuthScoping(t *testing.T) {
 	ctx := context.Background()
-	mkAdapter(t, "scope-slack", "scope-slack-type")
+	mkAdapter(t, "scope-slack")
 	mkTypedChannel(t, "scope-chan", "scope-tg-type", "scope-secret")
 
 	srv := apiServer() // AdapterToken = testMasterToken
@@ -297,12 +259,12 @@ func TestAdapterAuthScoping(t *testing.T) {
 	}
 	derived := chat.DeriveAdapterToken(testMasterToken, "scope-slack")
 
-	// cross-type: derived token polling another type -> 403
+	// cross-key: derived token polling another adapter's key -> 403
 	if rec := get("/channel/ops?type=scope-tg-type&wait=0", derived); rec.Code != 403 {
 		t.Fatalf("cross-type ops: want 403, got %d %s", rec.Code, rec.Body.String())
 	}
-	// own type -> served (204: no ops queued)
-	if rec := get("/channel/ops?type=scope-slack-type&wait=0", derived); rec.Code != 204 {
+	// own key (the adapter's NAME) -> served (204: no ops queued)
+	if rec := get("/channel/ops?type=scope-slack&wait=0", derived); rec.Code != 204 {
 		t.Fatalf("own-type ops: want 204, got %d %s", rec.Code, rec.Body.String())
 	}
 	// channel-scoped endpoints enforce the resolved channel's type

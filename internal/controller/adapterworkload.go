@@ -26,8 +26,6 @@ const (
 	ConditionDeployed = "Deployed"
 	// ConditionReady: the adapter workload is available.
 	ConditionReady = "Ready"
-	// ConditionTypeConflict: another (older) adapter already serves the type.
-	ConditionTypeConflict = "TypeConflict"
 )
 
 // CredentialEnvPrefix is the deterministic env-name prefix under which a
@@ -85,16 +83,6 @@ func projectCredentials(items []credentialItem) ([]corev1.EnvFromSource, []strin
 	return envFrom, collisions
 }
 
-// secretShapedEnv returns the name of the first env entry referencing a Secret.
-func secretShapedEnv(env []corev1.EnvVar) string {
-	for _, e := range env {
-		if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
-			return e.Name
-		}
-	}
-	return ""
-}
-
 // adapterWorkload describes one adapter Deployment to render.
 type adapterWorkload struct {
 	Owner       client.Object // the adapter CR (ownerRef → GC)
@@ -102,7 +90,7 @@ type adapterWorkload struct {
 	Labels      map[string]string
 	SelectorKey string // pod-selector label key (value = adapter CR name)
 	Image       string
-	Env         []corev1.EnvVar // fully assembled (contract env + adapter spec env)
+	Env         []corev1.EnvVar // fully assembled contract env
 	EnvFrom     []corev1.EnvFromSource
 	Singleton   bool
 	Resources   *corev1.ResourceRequirements

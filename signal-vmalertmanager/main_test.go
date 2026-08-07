@@ -52,7 +52,7 @@ func testAdapter(t *testing.T, f *fakeManager) *adapter {
 	mgrSrv := f.server(t)
 	a := &adapter{
 		mgr:        NewManager(mgrSrv.URL, "tok"),
-		sourceType: "vmAlertmanagerWebhook",
+		sourceType: "vm-alertmanager",
 		sources:    map[string]string{},
 		reported:   map[string]bool{},
 	}

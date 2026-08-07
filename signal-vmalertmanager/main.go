@@ -1,11 +1,12 @@
 // signal-vmalertmanager: webhook-receiving signal adapter. Serves
-// SignalSources with spec.type=vmAlertmanagerWebhook against the operator's
-// signal contract by hosting its OWN HTTP endpoint accepting the standard
+// SignalSources whose spec.type names its SignalAdapter CR (SOURCE_TYPE,
+// injected by the reconciler = the CR name) against the operator's signal
+// contract by hosting its OWN HTTP endpoint accepting the standard
 // Alertmanager webhook format — VictoriaMetrics VMAlertmanager is the
 // packaged story, but any Alertmanager-compatible sender works:
 //
 //	webhook:  POST /webhook/{source}   (LISTEN_ADDR, default :8080; 1 MiB cap)
-//	sources:  GET /signal/sources?type=vmAlertmanagerWebhook (15s poll)
+//	sources:  GET /signal/sources?type=<SOURCE_TYPE> (15s poll)
 //	push:     POST /signal/inbound     (normalized; alert lane)
 //
 // Normalization keeps built-in-path parity: firing-only, fingerprint verbatim
@@ -22,8 +23,10 @@
 // ClusterIP-only posture).
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, SOURCE_TYPE (default
-// "vmAlertmanagerWebhook"), LISTEN_ADDR (default ":8080"), projected
-// AGENTOPS_CRED_* vars.
+// "vm-alertmanager" — hand-deployed instances set it themselves; in-cluster
+// the reconciler injects the CR name), LISTEN_ADDR (default ":8080" —
+// in-cluster the reconciler injects it from SignalAdapter.spec.port),
+// projected AGENTOPS_CRED_* vars.
 package main
 
 import (
@@ -79,7 +82,7 @@ func mustEnv(key string) string {
 func main() {
 	sourceType := os.Getenv("SOURCE_TYPE")
 	if sourceType == "" {
-		sourceType = "vmAlertmanagerWebhook"
+		sourceType = "vm-alertmanager"
 	}
 	listen := os.Getenv("LISTEN_ADDR")
 	if listen == "" {

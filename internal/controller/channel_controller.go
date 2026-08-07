@@ -6,6 +6,7 @@ import (
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -34,7 +35,7 @@ func (r *ChannelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	cond := metav1.Condition{Type: ConditionServed, Status: metav1.ConditionFalse, Reason: "NoServingImplementation",
-		Message: fmt.Sprintf("no in-process provider or Ready ChannelAdapter serves type %q (hand-deployed adapters report per-channel readiness on the Ready condition)", ch.Spec.Type)}
+		Message: fmt.Sprintf("no in-process provider or Ready ChannelAdapter named %q (hand-deployed adapters report per-channel readiness on the Ready condition)", ch.Spec.Type)}
 
 	switch {
 	case r.Registry != nil && r.Registry.Resolve(ch.Spec.Type) != nil:
@@ -65,22 +66,21 @@ func (r *ChannelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, r.Status().Patch(ctx, &ch, patch)
 }
 
+// readyAdapter resolves the adapter the channel names in spec.type — the
+// adapter CR's NAME is the routing key.
 func (r *ChannelReconciler) readyAdapter(ctx context.Context, ch *agentopsv1alpha1.Channel) (string, bool) {
-	var list agentopsv1alpha1.ChannelAdapterList
-	if err := r.List(ctx, &list, client.InNamespace(ch.Namespace)); err != nil {
+	var a agentopsv1alpha1.ChannelAdapter
+	if err := r.Get(ctx, types.NamespacedName{Namespace: ch.Namespace, Name: ch.Spec.Type}, &a); err != nil {
 		return "", false
 	}
-	for i := range list.Items {
-		a := &list.Items[i]
-		if a.Spec.Type == ch.Spec.Type && apimeta.IsStatusConditionTrue(a.Status.Conditions, ConditionReady) {
-			return a.Name, true
-		}
+	if apimeta.IsStatusConditionTrue(a.Status.Conditions, ConditionReady) {
+		return a.Name, true
 	}
 	return "", false
 }
 
 // SetupWithManager wires the controller: Channels, plus ChannelAdapter events
-// mapped onto the channels of that adapter's type (readiness transitions flip
+// mapped onto the channels naming that adapter (readiness transitions flip
 // Served without any Channel edit).
 func (r *ChannelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapAdapter := func(ctx context.Context, obj client.Object) []ctrl.Request {
@@ -94,7 +94,7 @@ func (r *ChannelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		var reqs []ctrl.Request
 		for i := range list.Items {
-			if list.Items[i].Spec.Type == a.Spec.Type {
+			if list.Items[i].Spec.Type == a.Name {
 				reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
 			}
 		}
