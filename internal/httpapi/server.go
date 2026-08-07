@@ -172,13 +172,11 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: convoName}, &conv); err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
-	// channel metadata: delivery instructions, and the pending-topic gate — a
-	// channel-bound conversation waits until AT LEAST ONE thread binding
-	// exists before its first unit dispatches (waiting for all would deadlock
-	// on one broken channel; late topics catch up). Dangling channelRefs stay
-	// chat-less. Multi-channel conversations force result delivery — the
-	// manager owns distribution on mirrored conversations.
-	var delivery dispatch.Delivery
+	// pending-topic gate: a channel-bound conversation waits until AT LEAST ONE
+	// thread binding exists before its first unit dispatches (waiting for all
+	// would deadlock on one broken channel; late topics catch up). Dangling
+	// channelRefs stay chat-less. Delivery itself needs no channel lookup — the
+	// operator routes every result to the bound channels after /work/done.
 	if len(conv.Spec.ChannelRefs) > 0 {
 		chatBound := false
 		for _, ref := range conv.Spec.ChannelRefs {
@@ -187,9 +185,6 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 				continue
 			}
 			chatBound = true
-			if len(conv.Spec.ChannelRefs) == 1 && ch.Spec.Delivery != nil {
-				delivery = dispatch.Delivery{Mode: string(ch.Spec.Delivery.Mode), AgentInstructions: ch.Spec.Delivery.AgentInstructions}
-			}
 		}
 		if chatBound && len(conv.Status.Threads) == 0 {
 			return dispatch.WorkUnit{}, false, nil
@@ -199,7 +194,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
-	unit, ids, ok, err := dispatch.Next(&conv, &profile, s.resolvePayload(ctx, s.Namespace), delivery, time.Now())
+	unit, ids, ok, err := dispatch.Next(&conv, &profile, s.resolvePayload(ctx, s.Namespace), time.Now())
 	if err != nil || !ok {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -271,9 +266,11 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	// multi-channel conversations: the manager fans the reply out to every
-	// bound thread (mirrored surfaces never mistake silence for success)
-	if len(conv.Spec.ChannelRefs) > 1 && s.Router != nil {
+	// The operator delivers: agent output goes to EVERY bound thread, through
+	// the serving adapters. This is the only delivery path — agents never post
+	// to a transport themselves, so no runtime holds channel credentials and
+	// no surface can mistake silence for success.
+	if len(conv.Spec.ChannelRefs) > 0 && s.Router != nil {
 		text := strings.TrimSpace(result)
 		if d.Status != "succeeded" {
 			text = "❌ run failed (" + d.Status + ")"

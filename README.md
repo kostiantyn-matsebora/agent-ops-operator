@@ -33,7 +33,7 @@ approvable from your phone.
 | `AgentRuntime` | **What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, home volume (session persistence), service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env. |
 | `Conversation` | One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. |
 | `ConversationInput` | Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd. |
-| `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, delivery hints, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). Carries **no wiring** — its default profile comes from the Pipeline referencing it. |
+| `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). It describes WHERE output goes, never how it is sent. Carries **no wiring** — its default profile comes from the Pipeline referencing it. |
 | `ChannelAdapter` | **A channel implementation, nothing more**: a container image implementing the adapter contract, plugged in as a CR whose **name is the type key** — Channels select it with `spec.type: <adapter name>`, so one adapter per implementation holds by construction. The reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). **All configuration lives on the served Channels** (connectivity, credentials, opaque `config`) — the adapter CR carries none. Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
 | `SignalSource` | Ingest lane, split like `Channel`: **type-agnostic metadata** (open `type`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports. |
 | `SignalAdapter` | **A signal implementation, nothing more**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR whose **name is the type key** SignalSources select via `spec.type`, with the same posture (owned workload, zero-RBAC SA, singleton, derived name-scoped token, credential projection). Webhook-receiving implementations declare `spec.port` and the reconciler also owns a Service `agentops-signal-<name>` + injects `LISTEN_ADDR` — enabling the adapter is a complete appliance. A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
@@ -100,14 +100,12 @@ A `Channel` whose type nothing serves (no in-process provider, no Ready
 `ChannelAdapter`, no adapter-reported readiness) carries a `Served=False`
 condition — typos fail visibly instead of queueing ops forever.
 
-Delivery of agent answers is channel-metadata-driven: by default the agent's
-printed answer is the deliverable (captured via `/work/done`); a channel may
-set `spec.delivery.mode: agent` plus `agentInstructions` to have the agent
-post to the chat surface itself (the Telegram sample does this).
-**Multi-channel conversations** (Pipeline-bound to several channels) always
-force the default result mode — the manager owns distribution and fans the
-result out to every bound thread; `agent` mode keeps its meaning only for
-single-channel conversations. A conversation dispatches once at least one of
+**The operator delivers, always.** An agent's printed answer is its whole
+deliverable: the runtime reports it via `/work/done` and the manager posts it
+to every bound thread through the serving adapters. Agents never send chat
+messages themselves, so no prompt carries transport instructions and no
+runtime holds a channel's credentials — the surface is the adapter's business
+alone. A conversation dispatches once at least one of
 its topics exists (one broken channel never deadlocks it), and channel
 implementations must never re-ingest their own outbound posts as inbound
 (relayed messages would loop otherwise).

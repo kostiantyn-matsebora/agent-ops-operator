@@ -6,33 +6,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// DeliveryMode selects how agent replies reach the channel.
-// +kubebuilder:validation:Enum=result;agent
-type DeliveryMode string
-
-const (
-	// DeliveryResult: the agent's printed answer is the deliverable — captured
-	// via POST /work/done and surfaced by the channel implementation.
-	DeliveryResult DeliveryMode = "result"
-	// DeliveryAgent: the agent posts to the chat surface itself, following the
-	// channel's AgentInstructions.
-	DeliveryAgent DeliveryMode = "agent"
-)
-
-// DeliverySpec is the type-agnostic hint for how dispatched prompts should
-// instruct the agent to deliver its answer.
-type DeliverySpec struct {
-	// +kubebuilder:default=result
-	// +optional
-	Mode DeliveryMode `json:"mode,omitempty"`
-	// AgentInstructions is injected verbatim as the prompt's delivery section
-	// when Mode is "agent" (e.g. Bot API curl steps).
-	// +optional
-	AgentInstructions string `json:"agentInstructions,omitempty"`
-}
-
 // ChannelSpec configures one chat surface: type-agnostic metadata plus an
 // opaque per-type config that only the channel implementation interprets.
+//
+// A Channel describes WHERE output goes, never HOW it is sent: delivery is the
+// operator's job (it hands agent output to the serving adapter), so no agent
+// ever learns a transport and no runtime holds a surface's credentials.
 type ChannelSpec struct {
 	// Type names the channel implementation serving this channel (e.g.
 	// "telegram"). The operator never interprets it beyond routing.
@@ -42,8 +21,6 @@ type ChannelSpec struct {
 	// NOTE: the channel carries NO wiring — bare messages are answered by the
 	// profile of the oldest Ready Pipeline referencing this channel; channels
 	// in no pipeline answer bare messages with guidance only.
-	// +optional
-	Delivery *DeliverySpec `json:"delivery,omitempty"`
 	// CredentialsSecretRef names the Secret holding this surface's transport
 	// credentials (e.g. a bot token) — credentials are per-surface usage, never
 	// per-implementation. The operator only writes the NAME into the serving

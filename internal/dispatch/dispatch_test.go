@@ -29,7 +29,7 @@ var now = time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 
 func TestTaskUsesBuiltinTemplate(t *testing.T) {
 	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "check vacuum"})
-	u, ids, ok, err := Next(c, profile(), inlineResolver, Delivery{}, now)
+	u, ids, ok, err := Next(c, profile(), inlineResolver, now)
 	if err != nil || !ok {
 		t.Fatal(err, ok)
 	}
@@ -46,7 +46,7 @@ func TestTaskUsesBuiltinTemplate(t *testing.T) {
 
 func TestAgentOverride(t *testing.T) {
 	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x", Agent: "node-doctor"})
-	u, _, _, _ := Next(c, profile(), inlineResolver, Delivery{}, now)
+	u, _, _, _ := Next(c, profile(), inlineResolver, now)
 	if !strings.Contains(u.PromptText, "node-doctor") {
 		t.Fatalf("agent override ignored:\n%s", u.PromptText)
 	}
@@ -56,7 +56,7 @@ func TestProfilePromptWins(t *testing.T) {
 	p := profile()
 	p.Spec.Prompt = "scripts/custom.md"
 	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
-	u, _, _, _ := Next(c, p, inlineResolver, Delivery{}, now)
+	u, _, _, _ := Next(c, p, inlineResolver, now)
 	if u.PromptFile != "scripts/custom.md" || u.PromptText != "" {
 		t.Fatalf("profile prompt must win: %+v", u)
 	}
@@ -72,7 +72,7 @@ func TestReplyBatchingAndResume(t *testing.T) {
 		agentopsv1alpha1.InputItem{ID: "a1", Type: agentopsv1alpha1.InputAlert, Payload: "{}"},
 	)
 	c.Status.SessionID = "sess-1"
-	u, ids, ok, err := Next(c, profile(), inlineResolver, Delivery{}, now)
+	u, ids, ok, err := Next(c, profile(), inlineResolver, now)
 	if err != nil || !ok {
 		t.Fatal(err, ok)
 	}
@@ -89,7 +89,7 @@ func TestReplyBatchingAndResume(t *testing.T) {
 
 func TestReplyWithoutSessionDegradesToTask(t *testing.T) {
 	c := conv(agentopsv1alpha1.InputItem{ID: "r1", Type: agentopsv1alpha1.InputReply, Payload: "hello"})
-	u, _, ok, _ := Next(c, profile(), inlineResolver, Delivery{}, now)
+	u, _, ok, _ := Next(c, profile(), inlineResolver, now)
 	if !ok || u.ResumeSessionID != "" || !strings.Contains(u.PromptText, "hello") {
 		t.Fatalf("degrade to task: %+v", u)
 	}
@@ -98,7 +98,7 @@ func TestReplyWithoutSessionDegradesToTask(t *testing.T) {
 func TestInflightBlocksDispatch(t *testing.T) {
 	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
 	c.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r", InputIDs: []string{"other"}}
-	_, _, ok, err := Next(c, profile(), inlineResolver, Delivery{}, now)
+	_, _, ok, err := Next(c, profile(), inlineResolver, now)
 	if ok || err != nil {
 		t.Fatal("inflight must block dispatch (strictly serial)")
 	}
@@ -110,7 +110,7 @@ func TestProcessedInputsSkipped(t *testing.T) {
 		agentopsv1alpha1.InputItem{ID: "i2", Type: agentopsv1alpha1.InputTask, Payload: "new"},
 	)
 	c.Status.ProcessedInputIDs = []string{"i1"}
-	u, ids, ok, _ := Next(c, profile(), inlineResolver, Delivery{}, now)
+	u, ids, ok, _ := Next(c, profile(), inlineResolver, now)
 	if !ok || len(ids) != 1 || ids[0] != "i2" || !strings.Contains(u.PromptText, "new") {
 		t.Fatalf("processed input not skipped: %v %+v", ids, u)
 	}
@@ -118,7 +118,7 @@ func TestProcessedInputsSkipped(t *testing.T) {
 
 func TestDefaultDeliveryIsPrintedAnswer(t *testing.T) {
 	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
-	u, _, ok, _ := Next(c, profile(), inlineResolver, Delivery{}, now)
+	u, _, ok, _ := Next(c, profile(), inlineResolver, now)
 	if !ok || !strings.Contains(u.PromptText, "printed answer IS the deliverable") {
 		t.Fatalf("default delivery section missing:\n%s", u.PromptText)
 	}
@@ -127,32 +127,24 @@ func TestDefaultDeliveryIsPrintedAnswer(t *testing.T) {
 	}
 }
 
-func TestAgentDeliveryInjectsChannelInstructions(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
-	d := Delivery{Mode: "agent", AgentInstructions: "Send exactly ONE message via the Frobnicator API."}
-	u, _, ok, _ := Next(c, profile(), inlineResolver, d, now)
-	if !ok || !strings.Contains(u.PromptText, "Frobnicator API") {
-		t.Fatalf("agent delivery instructions not injected:\n%s", u.PromptText)
-	}
-	if strings.Contains(u.PromptText, "printed answer IS the deliverable") {
-		t.Fatalf("default delivery text must be replaced in agent mode:\n%s", u.PromptText)
-	}
-}
-
-func TestAgentDeliveryReachesPromptVars(t *testing.T) {
+// Delivery is the operator's job: no channel-supplied text can ever reach a
+// prompt, so an agent never learns a transport or handles credentials.
+func TestDeliveryWordingIsInvariant(t *testing.T) {
 	p := profile()
 	p.Spec.Prompt = "scripts/custom.md"
 	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
-	d := Delivery{Mode: "agent", AgentInstructions: "custom-delivery"}
-	u, _, _, _ := Next(c, p, inlineResolver, d, now)
-	if u.PromptVars["DELIVERY_INSTRUCTIONS"] != "custom-delivery" {
+	u, _, _, _ := Next(c, p, inlineResolver, now)
+	if !strings.Contains(u.PromptVars["DELIVERY_INSTRUCTIONS"], "printed answer IS the deliverable") {
 		t.Fatalf("delivery var missing for repo prompts: %v", u.PromptVars)
+	}
+	if !strings.Contains(u.PromptVars["DELIVERY_INSTRUCTIONS"], "Do not attempt to send chat messages yourself") {
+		t.Fatalf("prompt must forbid agent-side posting: %v", u.PromptVars)
 	}
 }
 
 func TestAlertUsesInvestigateTemplate(t *testing.T) {
 	c := conv(agentopsv1alpha1.InputItem{ID: "a1", Type: agentopsv1alpha1.InputAlert, Payload: `{"alerts":[]}`})
-	u, _, ok, _ := Next(c, profile(), inlineResolver, Delivery{}, now)
+	u, _, ok, _ := Next(c, profile(), inlineResolver, now)
 	if !ok || !strings.Contains(u.PromptText, "READ-ONLY triage") || !strings.Contains(u.PromptText, `{"alerts":[]}`) {
 		t.Fatalf("investigate template: %+v", u)
 	}

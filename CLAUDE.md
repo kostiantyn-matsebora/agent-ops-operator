@@ -20,11 +20,15 @@ adapters) — the adapters dependency-free.
   with guidance only. One pipeline per source (older claimant wins), channels
   shareable, Ready pipelines only.
   Multi-channel conversations: manager fans replies/acks to every bound
-  thread, relays user messages to sibling channels as attributed text, FORCES
-  result delivery, and dispatches once ≥1 thread binding exists.
+  thread, relays user messages to sibling channels as attributed text, and
+  dispatches once ≥1 thread binding exists.
+  **The OPERATOR delivers** — agent output is posted to every bound thread by
+  the manager via the adapters, for single- and multi-channel alike. Agents
+  never post to a transport (no delivery mode on Channel), so prompts carry no
+  transport steps and runtimes hold no channel credentials.
 - **Channel adapter** = out-of-process channel-type implementation consuming
   `/channel/*` (ops long-poll + inbound push). `Channel.spec` = type-agnostic
-  metadata (`type`, `delivery`, `credentialsSecretRef` — NO wiring)
+  metadata (`type`, `credentialsSecretRef` — NO wiring, NO delivery mode)
   + opaque `config` that only the serving adapter interprets.
   `status.threadId` is an opaque STRING.
 - **`ChannelAdapter` CR** = pure implementation (`image` + workload knobs,
