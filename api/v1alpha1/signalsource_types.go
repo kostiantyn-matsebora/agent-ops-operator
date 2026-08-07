@@ -28,12 +28,12 @@ type GroupingSpec struct {
 // type-agnostic routing metadata plus an opaque per-type config that only the
 // serving signal implementation interprets.
 type SignalSourceSpec struct {
-	// Type names the signal implementation serving this source (e.g.
-	// "alertmanagerWebhook" built-in, "cron", "pagerduty", …). The operator
-	// never interprets it beyond routing.
+	// Adapter names the SignalAdapter serving this source — a REFERENCE, not an
+	// attribute: the named adapter's implementation defines and validates
+	// Config's schema. Sibling of Config by design (see Channel.Adapter).
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.type is immutable"
-	Type string `json:"type"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.adapter is immutable"
+	Adapter string `json:"adapter"`
 	// NOTE: the source carries NO wiring — which profile answers and which
 	// channels mirror is declared exclusively on a Pipeline that claims this
 	// source. Unclaimed sources drop signals (Wired=False condition).
@@ -65,7 +65,7 @@ type SignalSourceStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=sigsrc
-// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
+// +kubebuilder:printcolumn:name="Adapter",type=string,JSONPath=`.spec.adapter`
 // +kubebuilder:printcolumn:name="Wired",type=string,JSONPath=`.status.conditions[?(@.type=="Wired")].status`
 // +kubebuilder:printcolumn:name="Served",type=string,JSONPath=`.status.conditions[?(@.type=="Served")].status`
 // +kubebuilder:printcolumn:name="Received",type=integer,JSONPath=`.status.receivedTotal`

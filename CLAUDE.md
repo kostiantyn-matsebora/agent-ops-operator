@@ -28,7 +28,7 @@ adapters) — the adapters dependency-free.
   transport steps and runtimes hold no channel credentials.
 - **Channel adapter** = out-of-process channel-type implementation consuming
   `/channel/*` (ops long-poll + inbound push). `Channel.spec` = type-agnostic
-  metadata (`type`, `credentialsSecretRef` — NO wiring, NO delivery mode)
+  metadata (`adapter`, `credentialsSecretRef` — NO wiring, NO delivery mode)
   + opaque `config` that only the serving adapter interprets.
   `status.threadId` is an opaque STRING.
 - **`ChannelAdapter` CR** = pure implementation (`image` + workload knobs,
@@ -54,8 +54,10 @@ adapters) — the adapters dependency-free.
   from `SignalSource.spec.config.register`, degrading to instructions in the
   Ready condition when it can't).
 - On both adapter kinds, the CR NAME is the ROUTING KEY:
-  `Channel`/`SignalSource.spec.type` names the serving adapter (drives the
-  contract listing, credential projection, token scope, and Served) — one
+  `Channel`/`SignalSource.spec.adapter` names the serving adapter — a
+  REFERENCE, not an attribute: that adapter's implementation defines the schema
+  of the sibling `config` (drives the contract listing `?adapter=`, the
+  injected `ADAPTER_NAME`, credential projection, token scope, Served) — one
   adapter per implementation by construction; duplicate adapters for one
   implementation are impossible. Adapter CRs carry no configuration —
   connectivity/creds/config live ONLY on Channel/SignalSource.

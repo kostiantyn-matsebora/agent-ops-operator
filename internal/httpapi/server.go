@@ -181,7 +181,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 		chatBound := false
 		for _, ref := range conv.Spec.ChannelRefs {
 			var ch agentopsv1alpha1.Channel
-			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ch); err != nil || ch.Spec.Type == "" {
+			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ch); err != nil || ch.Spec.Adapter == "" {
 				continue
 			}
 			chatBound = true
@@ -397,6 +397,22 @@ func (s *Server) adapterAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// adapterParam reads the contract's adapter selector. The retired `type`
+// parameter is refused loudly rather than treated as absent: an outdated
+// adapter must fail visibly instead of being served an empty list and looking
+// healthy while delivering nothing.
+func adapterParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if name := r.URL.Query().Get("adapter"); name != "" {
+		return name, true
+	}
+	if r.URL.Query().Get("type") != "" {
+		writeJSON(w, 400, map[string]string{"error": "the 'type' parameter was renamed to 'adapter' (it names the adapter CR)"})
+		return "", false
+	}
+	writeJSON(w, 400, map[string]string{"error": "missing adapter"})
+	return "", false
+}
+
 // scopeAllows enforces the per-adapter type scope; master-token requests
 // (empty scope) pass everything.
 func scopeAllows(r *http.Request, channelType string) bool {
@@ -409,9 +425,8 @@ func forbidScope(w http.ResponseWriter) {
 }
 
 func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
-	channelType := r.URL.Query().Get("type")
-	if channelType == "" {
-		writeJSON(w, 400, map[string]string{"error": "missing type"})
+	channelType, ok := adapterParam(w, r)
+	if !ok {
 		return
 	}
 	if !scopeAllows(r, channelType) {
@@ -472,7 +487,7 @@ func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", in.Channel)})
 		return
 	}
-	if !scopeAllows(r, ch.Spec.Type) {
+	if !scopeAllows(r, ch.Spec.Adapter) {
 		forbidScope(w)
 		return
 	}
@@ -484,9 +499,8 @@ func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
-	channelType := r.URL.Query().Get("type")
-	if channelType == "" {
-		writeJSON(w, 400, map[string]string{"error": "missing type"})
+	channelType, ok := adapterParam(w, r)
+	if !ok {
 		return
 	}
 	if !scopeAllows(r, channelType) {
@@ -510,7 +524,7 @@ func (s *Server) handleChannelList(w http.ResponseWriter, r *http.Request) {
 	out := []chanOut{}
 	for i := range list.Items {
 		ch := &list.Items[i]
-		if ch.Spec.Type != channelType {
+		if ch.Spec.Adapter != channelType {
 			continue
 		}
 		c := chanOut{Name: ch.Name}
@@ -531,7 +545,7 @@ func (s *Server) stateChannel(r *http.Request, w http.ResponseWriter, name strin
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", name)})
 		return nil
 	}
-	if !scopeAllows(r, ch.Spec.Type) {
+	if !scopeAllows(r, ch.Spec.Adapter) {
 		forbidScope(w)
 		return nil
 	}

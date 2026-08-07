@@ -162,7 +162,7 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 			}
 			continue
 		}
-		if ch.Spec.Type == "" {
+		if ch.Spec.Adapter == "" {
 			continue
 		}
 		r.Ops.EnqueueEnsureTopic(ctx, &ch, conv)

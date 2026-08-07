@@ -84,7 +84,7 @@ func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int
 func (m *Manager) NextOp(ctx context.Context, channelType string, waitSeconds int) (*Op, error) {
 	var op Op
 	code, err := m.do(ctx, "GET",
-		fmt.Sprintf("/channel/ops?type=%s&wait=%d", url.QueryEscape(channelType), waitSeconds), nil, &op)
+		fmt.Sprintf("/channel/ops?adapter=%s&wait=%d", url.QueryEscape(channelType), waitSeconds), nil, &op)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func (m *Manager) Inbound(ctx context.Context, channel string, threadID *string,
 // Channels lists the channels of this adapter's type.
 func (m *Manager) Channels(ctx context.Context, channelType string) ([]ChannelInfo, error) {
 	var out []ChannelInfo
-	_, err := m.do(ctx, "GET", "/channel/channels?type="+url.QueryEscape(channelType), nil, &out)
+	_, err := m.do(ctx, "GET", "/channel/channels?adapter="+url.QueryEscape(channelType), nil, &out)
 	return out, err
 }
 

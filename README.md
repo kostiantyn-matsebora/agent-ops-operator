@@ -33,10 +33,10 @@ approvable from your phone.
 | `AgentRuntime` | **What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, home volume (session persistence), service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env. |
 | `Conversation` | One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. |
 | `ConversationInput` | Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd. |
-| `Channel` | Chat surface, split in two parts: **type-agnostic metadata** (`type`, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). It describes WHERE output goes, never how it is sent. Carries **no wiring** — its default profile comes from the Pipeline referencing it. |
-| `ChannelAdapter` | **A channel implementation, nothing more**: a container image implementing the adapter contract, plugged in as a CR whose **name is the type key** — Channels select it with `spec.type: <adapter name>`, so one adapter per implementation holds by construction. The reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). **All configuration lives on the served Channels** (connectivity, credentials, opaque `config`) — the adapter CR carries none. Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
-| `SignalSource` | Ingest lane, split like `Channel`: **type-agnostic metadata** (open `type`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports. |
-| `SignalAdapter` | **A signal implementation, nothing more**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR whose **name is the type key** SignalSources select via `spec.type`, with the same posture (owned workload, zero-RBAC SA, singleton, derived name-scoped token, credential projection). Webhook-receiving implementations declare `spec.port` and the reconciler also owns a Service `agentops-signal-<name>` + injects `LISTEN_ADDR` — enabling the adapter is a complete appliance. A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
+| `Channel` | Chat surface, split in two parts: **implementation-agnostic metadata** (`adapter`, `credentialsSecretRef` — this surface's transport credentials by *name*) and an **opaque `config`** only the serving channel implementation interprets (schema-less by design). It describes WHERE output goes, never how it is sent. Carries **no wiring** — its default profile comes from the Pipeline referencing it. |
+| `ChannelAdapter` | **A channel implementation, nothing more**: a container image implementing the adapter contract, plugged in as a CR whose **name is the type key** — Channels select it with `spec.adapter: <adapter name>`, so one adapter per implementation holds by construction. The reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). **All configuration lives on the served Channels** (connectivity, credentials, opaque `config`) — the adapter CR carries none. Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
+| `SignalSource` | Ingest lane, split like `Channel`: **implementation-agnostic metadata** (`adapter`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports. |
+| `SignalAdapter` | **A signal implementation, nothing more**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR whose **name is the type key** SignalSources select via `spec.adapter`, with the same posture (owned workload, zero-RBAC SA, singleton, derived name-scoped token, credential projection). Webhook-receiving implementations declare `spec.port` and the reconciler also owns a Service `agentops-signal-<name>` + injects `LISTEN_ADDR` — enabling the adapter is a complete appliance. A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
 | `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed, channels get their default profile from their oldest Ready pipeline (`/profile` commands work everywhere regardless). One pipeline per source (older claimant wins); channels are shareable. |
 | `MCPConfig` | Reusable MCP server sets, shareable across profiles; secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
 
@@ -63,7 +63,7 @@ A channel adapter is a deployment that dials the manager (never the reverse) —
 same pattern as runtimes, so NetworkPolicies stay simple and transport
 credentials never leave the adapter:
 
-1. Long-poll `GET /channel/ops?type=<your-type>&wait=25` for outbound
+1. Long-poll `GET /channel/ops?adapter=<your-adapter>&wait=25` for outbound
    operations: `ensure-topic` (create a thread for a conversation) and `send`
    (post a message; chat HTML subset). Delivery is at-least-once — dedup by
    `op.id`.
@@ -73,7 +73,7 @@ credentials never leave the adapter:
 3. Push user messages with `POST /channel/inbound
    {"channel","threadId"?,"text"}` — command parsing, conversation
    creation/adoption, busy-acks all happen manager-side in the shared router.
-4. Read your channels + opaque `spec.config` from `GET /channel/channels?type=`,
+4. Read your channels + opaque `spec.config` from `GET /channel/channels?adapter=`,
    persist cursors (e.g. poll offsets) via `GET/PUT /channel/state/{channel}/{key}`,
    report config problems via `POST /channel/channels/{name}/status`.
 
@@ -96,7 +96,7 @@ scope, so hand-deployed adapters work unchanged. No Kubernetes API access
 needed — the reference adapter [`channel-telegram/`](channel-telegram/) is
 dependency-free Go.
 
-A `Channel` whose type nothing serves (no in-process provider, no Ready
+A `Channel` whose adapter nothing serves (no in-process provider, no Ready
 `ChannelAdapter`, no adapter-reported readiness) carries a `Served=False`
 condition — typos fail visibly instead of queueing ops forever.
 
@@ -116,7 +116,7 @@ Signals are one-directional, so this is the channel contract minus the ops
 queue — an adapter normalizes its transport into signals and the manager does
 the rest (**adapters normalize, the manager groups**):
 
-1. Read your sources + opaque `spec.config` from `GET /signal/sources?type=`
+1. Read your sources + opaque `spec.config` from `GET /signal/sources?adapter=`
    (entries carry `credentialEnvPrefix` exactly like the channel listing).
 2. Push normalized signals: `POST /signal/inbound {"source", "signals":
    [{"fingerprint", "labels", "title"?, "payload", "kind": "alert"|"job"}]}`.
@@ -131,7 +131,7 @@ the rest (**adapters normalize, the manager groups**):
 Auth mirrors channels: master token or a per-`SignalAdapter` derived token
 (distinct derivation context — channel and signal adapters sharing a name
 never share a token), scoped to the adapter's name. A `SignalSource`
-whose type nothing serves carries `Served=False`.
+whose adapter nothing serves carries `Served=False`.
 
 Reference implementation: [`signal-cron/`](signal-cron/) — replaces the old
 roadmap `cron` sub-struct: `config: {schedule, input, title?}` fires job-lane
@@ -150,7 +150,7 @@ Components (individually toggleable once `vm-bundle.enabled=true`):
   `signal-vmalertmanager/`, accepts the standard Alertmanager webhook format)
   with `port: 8080` — the reconciler owns both the workload and the webhook
   Service; the chart ships no connectivity. Sources select it with
-  `spec.type: vm-alertmanager`.
+  `spec.adapter: vm-alertmanager`.
 
   With `registration.enabled=true` (plus the target
   `registration.vmalertmanager: {name, namespace}`) the **adapter configures
@@ -318,6 +318,23 @@ into the `channel-telegram` adapter. For a live install:
 
 Rollback = reverse order: disable the adapter, restore the previous chart
 version and Channel CR shape.
+
+## Migrating to chart 1.12 (`spec.type` → `spec.adapter`) — BREAKING
+
+`Channel.spec.type` and `SignalSource.spec.type` are now `spec.adapter`: the
+value was always a reference to the serving adapter CR, and the old name read
+as an intrinsic attribute, making the sibling `config` look like part of one
+flat schema. The contract follows — `?type=` becomes `?adapter=` on
+`/channel/ops`, `/channel/channels` and `/signal/sources` (the retired
+parameter returns 400 naming its replacement rather than an empty list), and
+`CHANNEL_TYPE`/`SOURCE_TYPE` collapse into `ADAPTER_NAME`.
+
+`adapter` is immutable, so live Channels and SignalSources are delete-and-
+recreate. **Carry their annotations across**: adapter cursor state (the
+Telegram `getUpdates` offset, cron last-fire) lives in
+`agentops.dev/adapter-state-*` annotations on those objects, and a bare
+recreate makes the adapter re-read old updates. Manager and adapter images
+must be upgraded together, since both sides of the contract change at once.
 
 ## Migrating to chart 1.8 (adapters can configure their senders)
 

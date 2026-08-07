@@ -59,7 +59,7 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var creds []credentialItem
 	for i := range channels.Items {
 		ch := &channels.Items[i]
-		if ch.Spec.Type != adapter.Name {
+		if ch.Spec.Adapter != adapter.Name {
 			continue
 		}
 		served++
@@ -71,7 +71,7 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	env := []corev1.EnvVar{
 		{Name: "MANAGER_URL", Value: r.ManagerURL},
-		{Name: "CHANNEL_TYPE", Value: adapter.Name},
+		{Name: "ADAPTER_NAME", Value: adapter.Name},
 	}
 	if r.MasterToken != "" {
 		env = append(env, corev1.EnvVar{Name: "ADAPTER_TOKEN", Value: chat.DeriveAdapterToken(r.MasterToken, adapter.Name)})
@@ -121,10 +121,10 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 func (r *ChannelAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapChannel := func(ctx context.Context, obj client.Object) []ctrl.Request {
 		ch, ok := obj.(*agentopsv1alpha1.Channel)
-		if !ok || ch.Spec.Type == "" {
+		if !ok || ch.Spec.Adapter == "" {
 			return nil
 		}
-		return []ctrl.Request{{NamespacedName: types.NamespacedName{Namespace: ch.Namespace, Name: ch.Spec.Type}}}
+		return []ctrl.Request{{NamespacedName: types.NamespacedName{Namespace: ch.Namespace, Name: ch.Spec.Adapter}}}
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.ChannelAdapter{}).

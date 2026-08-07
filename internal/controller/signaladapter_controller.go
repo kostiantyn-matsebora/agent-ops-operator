@@ -67,7 +67,7 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var creds []credentialItem
 	for i := range sources.Items {
 		src := &sources.Items[i]
-		if src.Spec.Type != adapter.Name {
+		if src.Spec.Adapter != adapter.Name {
 			continue
 		}
 		served++
@@ -79,7 +79,7 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	env := []corev1.EnvVar{
 		{Name: "MANAGER_URL", Value: r.ManagerURL},
-		{Name: "SOURCE_TYPE", Value: adapter.Name},
+		{Name: "ADAPTER_NAME", Value: adapter.Name},
 	}
 	if r.MasterToken != "" {
 		env = append(env, corev1.EnvVar{Name: "ADAPTER_TOKEN", Value: chat.DeriveSignalAdapterToken(r.MasterToken, adapter.Name)})
@@ -172,10 +172,10 @@ func (r *SignalAdapterReconciler) ensureService(ctx context.Context, adapter *ag
 func (r *SignalAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapSource := func(ctx context.Context, obj client.Object) []ctrl.Request {
 		src, ok := obj.(*agentopsv1alpha1.SignalSource)
-		if !ok || src.Spec.Type == "" {
+		if !ok || src.Spec.Adapter == "" {
 			return nil
 		}
-		return []ctrl.Request{{NamespacedName: types.NamespacedName{Namespace: src.Namespace, Name: src.Spec.Type}}}
+		return []ctrl.Request{{NamespacedName: types.NamespacedName{Namespace: src.Namespace, Name: src.Spec.Adapter}}}
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.SignalAdapter{}).

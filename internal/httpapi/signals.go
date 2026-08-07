@@ -288,9 +288,8 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSignalSources(w http.ResponseWriter, r *http.Request) {
-	sourceType := r.URL.Query().Get("type")
-	if sourceType == "" {
-		writeJSON(w, 400, map[string]string{"error": "missing type"})
+	sourceType, ok := adapterParam(w, r)
+	if !ok {
 		return
 	}
 	if !scopeAllows(r, sourceType) {
@@ -312,7 +311,7 @@ func (s *Server) handleSignalSources(w http.ResponseWriter, r *http.Request) {
 	out := []srcOut{}
 	for i := range list.Items {
 		src := &list.Items[i]
-		if src.Spec.Type != sourceType {
+		if src.Spec.Adapter != sourceType {
 			continue
 		}
 		o := srcOut{Name: src.Name}
@@ -334,7 +333,7 @@ func (s *Server) signalSource(r *http.Request, w http.ResponseWriter, name strin
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown signal source %q", name)})
 		return nil
 	}
-	if !scopeAllows(r, src.Spec.Type) {
+	if !scopeAllows(r, src.Spec.Adapter) {
 		forbidScope(w)
 		return nil
 	}

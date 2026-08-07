@@ -15,8 +15,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.type
-      name: Type
+    - jsonPath: .spec.adapter
+      name: Adapter
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -54,6 +54,19 @@ spec:
               operator's job (it hands agent output to the serving adapter), so no agent
               ever learns a transport and no runtime holds a surface's credentials.
             properties:
+              adapter:
+                description: |-
+                  Adapter names the ChannelAdapter serving this surface — a REFERENCE, not
+                  an attribute: the named adapter's implementation is what defines and
+                  validates Config's schema. The operator never interprets it beyond
+                  routing. (Sibling of Config by design, as Kubernetes pairs a selector
+                  with its implementation-owned config: StorageClass.provisioner +
+                  parameters, IngressClass.controller + parameters.)
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: spec.adapter is immutable
+                  rule: self == oldSelf
               config:
                 description: |-
                   Config carries whatever the channel type needs; schema-less by design.
@@ -82,17 +95,8 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              type:
-                description: |-
-                  Type names the channel implementation serving this channel (e.g.
-                  "telegram"). The operator never interprets it beyond routing.
-                minLength: 1
-                type: string
-                x-kubernetes-validations:
-                - message: spec.type is immutable
-                  rule: self == oldSelf
             required:
-            - type
+            - adapter
             type: object
           status:
             description: |-
