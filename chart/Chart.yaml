@@ -4,5 +4,12 @@ description: >-
   Kubernetes operator for agents you can address — monitoring signals and chat
   tasks become Conversations executed by per-conversation agent runtime pods.
 type: application
-version: 1.4.0
+version: 1.5.0
 appVersion: "0.7.0"
+dependencies:
+  # embedded subchart (chart/charts/vm-bundle); templates are additionally
+  # self-gated on vm-bundle.enabled
+  - name: vm-bundle
+    version: 0.1.0
+    repository: ""
+    condition: vm-bundle.enabled

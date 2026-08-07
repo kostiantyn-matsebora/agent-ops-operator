@@ -140,6 +140,59 @@ signals with `<source>@<tick>` fingerprints (restart-safe via the state API);
 the grouping window turns a recurring job into one conversation whose later
 runs resume the agent session.
 
+## VictoriaMetrics bundle (subchart)
+
+`chart/charts/vm-bundle/` packages the VM experience — **off by default,
+never enabled by demo mode** (it consumes your VictoriaMetrics endpoints).
+Components (individually toggleable once `vm-bundle.enabled=true`):
+
+- **`alertmanager`** — the `vmAlertmanagerWebhook` signal source:
+  `SignalAdapter` CR (reference adapter `signal-vmalertmanager/`, accepts the
+  standard Alertmanager webhook format) + a Service exposing it. Point
+  VMAlertmanager at it:
+
+  ```yaml
+  receivers:
+    - name: agentops
+      webhook_configs:
+        - url: http://agentops-signal-vm-alertmanager.<ns>.svc:8080/webhook/<source>
+          # recommended: create the source with credentialsSecretRef (Secret
+          # key TOKEN) and configure the same bearer token here:
+          # http_config: {authorization: {credentials: <token>}}
+  ```
+
+  `defaultSource.enabled=true` + `profileRef` renders a turnkey
+  SignalSource **and the Pipeline claiming it** (wiring is pipeline-only —
+  unclaimed sources drop signals with `Wired=False`). Migration from the
+  built-in `alertmanagerWebhook` is per-source: create a new source with the
+  new type, claim it in a pipeline, repoint `webhook_configs`, retire the old
+  source — both paths can run in parallel during cutover.
+
+- **`mcp.vmlogs` / `mcp.vmmetrics`** — `MCPConfig` CRs (`vm-logs`/`vm-metrics`)
+  with fixed server keys `victorialogs`/`victoriametrics` (the keys ARE the
+  tool namespaces). URLs point at your MCP servers; `headers` pass through
+  with `valueFrom` secret refs for authenticated endpoints.
+
+- **`mcpServers`** (off by default) — optionally deploy the MCP server
+  workloads themselves (upstream `ghcr.io/victoriametrics/mcp-victorialogs`
+  / `mcp-victoriametrics` images in SSE mode; pin the tags in production).
+  Each needs its `backend` (the VictoriaLogs/VictoriaMetrics instance URL);
+  with the workloads deployed, empty `mcp.*.url` values default onto the
+  deployed Services automatically.
+
+The bundle ships **no profile** — `defaultSource.profileRef` names your own
+alert-handling profile, and giving it the MCP tools is one edit on that
+profile (the one manual wiring step):
+
+  ```yaml
+  spec:
+    allowedTools: "Read,Grep,Glob,Bash,mcp__victorialogs__*,mcp__victoriametrics__*"
+    mcp:
+      configRefs:
+        - name: vm-logs
+        - name: vm-metrics
+  ```
+
 ## The work contract
 
 An `AgentRuntime` image must:

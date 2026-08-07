@@ -1,0 +1,81 @@
+{{- /*
+VM Alertmanager component: the webhook-receiving signal adapter (SignalAdapter
+CR — the operator's reconciler owns the workload) plus the Service exposing
+its webhook endpoint on the reconciler's deterministic pod label. Gated on the
+bundle flag alone: demo mode never enables this bundle.
+*/ -}}
+{{- if and .Values.enabled .Values.alertmanager.enabled }}
+{{- $name := .Values.alertmanager.name }}
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-signal-vmalertmanager
+spec:
+  type: vmAlertmanagerWebhook
+  image: "{{ .Values.alertmanager.image.repository }}:{{ .Values.alertmanager.image.tag }}"
+  singleton: true
+  {{- with .Values.alertmanager.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+---
+# Webhook entry point: VMAlertmanager posts to
+#   http://agentops-signal-{{ $name }}.{{ .Release.Namespace }}.svc:{{ .Values.alertmanager.service.port }}/webhook/<source>
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentops-signal-{{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-signal-vmalertmanager
+spec:
+  selector:
+    # deterministic pod label set by the SignalAdapter reconciler (contract
+    # pinned by integration test — do not rename)
+    agentops.dev/signal-adapter: {{ $name }}
+  ports:
+    - name: webhook
+      port: {{ .Values.alertmanager.service.port }}
+      targetPort: 8080
+{{- if .Values.alertmanager.defaultSource.enabled }}
+{{- $src := .Values.alertmanager.defaultSource }}
+{{- $profileRef := $src.profileRef }}
+{{- if not $profileRef }}
+{{- fail "vm-bundle: alertmanager.defaultSource.profileRef is required when defaultSource.enabled=true (the Pipeline claiming the source needs an operator-owned profile — unwired sources drop signals)" }}
+{{- end }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: {{ $src.name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: vmAlertmanagerWebhook
+  {{- with $src.grouping }}
+  grouping:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+---
+# Wiring is pipeline-only: this Pipeline claims the source so its signals
+# route (Wired=True) to the configured profile and channels.
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: {{ $src.name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  signalSourceRefs:
+    - name: {{ $src.name }}
+  {{- with $src.channels }}
+  channelRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  profileRef:
+    name: {{ $profileRef }}
+{{- end }}
+{{- end }}

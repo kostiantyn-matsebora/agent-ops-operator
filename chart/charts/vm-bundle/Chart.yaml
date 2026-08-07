@@ -1,0 +1,8 @@
+apiVersion: v2
+name: vm-bundle
+description: >-
+  VictoriaMetrics bundle for the agent-ops operator: the VM Alertmanager
+  webhook signal source (adapter + Service + optional wired default source)
+  and vmlogs/vmmetrics MCPConfig CRs for alert-investigating profiles.
+type: application
+version: 0.1.0
