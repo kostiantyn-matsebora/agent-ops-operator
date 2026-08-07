@@ -8,10 +8,13 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/configschema"
 )
 
 // Adapter workload machinery shared by the ChannelAdapter and SignalAdapter
@@ -26,6 +29,22 @@ const (
 	ConditionDeployed = "Deployed"
 	// ConditionReady: the adapter workload is available.
 	ConditionReady = "Ready"
+	// ConditionSchemaValid: the adapter CR's declared spec.configSchema
+	// compiles. Absent when nothing is declared; False never blocks the
+	// workload, it only disables downstream config validation for the type.
+	ConditionSchemaValid = "SchemaValid"
+	// ReasonInvalidSchema: the declared configSchema does not compile.
+	ReasonInvalidSchema = "InvalidSchema"
+
+	// ConditionConfigValid reports a served Channel/SignalSource's spec.config
+	// against the schema its adapter declares. ADVISORY: absent when nothing is
+	// declared, and False never affects Served, projection, or ingestion — the
+	// adapter's own Ready report stays authoritative.
+	ConditionConfigValid = "ConfigValid"
+	// ReasonSchemaValidated: config conforms to the declared schema.
+	ReasonSchemaValidated = "SchemaValidated"
+	// ReasonSchemaViolation: config violates the declared schema.
+	ReasonSchemaViolation = "SchemaViolation"
 )
 
 // CredentialEnvPrefix is the deterministic env-name prefix under which a
@@ -154,4 +173,85 @@ func ensureAdapterWorkload(ctx context.Context, c client.Client, scheme *runtime
 		return controllerutil.SetControllerReference(w.Owner, deploy, scheme)
 	})
 	return deploy, err
+}
+
+// compileDeclaredSchema compiles an adapter CR's optional spec.configSchema
+// and returns the SchemaValid condition to record, or nil when nothing is
+// declared (absence means "nothing to check").
+//
+// A schema that does not compile is reported where it was authored and MUST
+// NOT affect the workload — it only disables downstream config validation.
+func compileDeclaredSchema(raw *runtime.RawExtension) (*configschema.Schema, *metav1.Condition) {
+	if raw == nil || len(raw.Raw) == 0 {
+		return nil, nil
+	}
+	schema, err := configschema.Compile(raw.Raw)
+	if err != nil {
+		return nil, &metav1.Condition{
+			Type: ConditionSchemaValid, Status: metav1.ConditionFalse, Reason: ReasonInvalidSchema,
+			Message: truncate("configSchema does not compile: "+err.Error(), 1024),
+		}
+	}
+	return schema, &metav1.Condition{
+		Type: ConditionSchemaValid, Status: metav1.ConditionTrue, Reason: "SchemaCompiled",
+		Message: "spec.configSchema compiles; served CRs are validated against it",
+	}
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}
+
+// applySchemaCondition records (or clears) SchemaValid on an adapter CR's
+// condition list.
+func applySchemaCondition(conds *[]metav1.Condition, cond *metav1.Condition) {
+	if cond == nil {
+		apimeta.RemoveStatusCondition(conds, ConditionSchemaValid)
+		return
+	}
+	apimeta.SetStatusCondition(conds, *cond)
+}
+
+// validateAgainstAdapter renders the advisory ConfigValid condition for one
+// served CR, or nil when there is nothing to check (no adapter CR, no declared
+// schema, or a schema that does not compile — absence means "no contract",
+// never "unknown").
+//
+// Advisory by construction: callers record the condition and change nothing
+// else, so a violation can never stop a channel being served or a signal being
+// ingested. The adapter's own Ready report stays authoritative, because a
+// CR-declared schema may drift from the running image.
+func validateAgainstAdapter(declared *runtime.RawExtension, config *runtime.RawExtension, adapterName string) *metav1.Condition {
+	schema, cond := compileDeclaredSchema(declared)
+	if schema == nil || cond == nil || cond.Status != metav1.ConditionTrue {
+		return nil
+	}
+	var raw []byte
+	if config != nil {
+		raw = config.Raw
+	}
+	violations := configschema.Validate(schema, raw)
+	if len(violations) == 0 {
+		return &metav1.Condition{
+			Type: ConditionConfigValid, Status: metav1.ConditionTrue, Reason: ReasonSchemaValidated,
+			Message: fmt.Sprintf("spec.config conforms to the schema declared by %q", adapterName),
+		}
+	}
+	return &metav1.Condition{
+		Type: ConditionConfigValid, Status: metav1.ConditionFalse, Reason: ReasonSchemaViolation,
+		Message: truncate(fmt.Sprintf("spec.config violates the schema declared by %q: %s",
+			adapterName, configschema.Summarize(violations, 0)), 1024),
+	}
+}
+
+// applyConfigValid records or clears ConfigValid on a served CR.
+func applyConfigValid(conds *[]metav1.Condition, cond *metav1.Condition) {
+	if cond == nil {
+		apimeta.RemoveStatusCondition(conds, ConditionConfigValid)
+		return
+	}
+	apimeta.SetStatusCondition(conds, *cond)
 }

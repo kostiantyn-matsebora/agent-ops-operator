@@ -37,16 +37,19 @@ func (r *ChannelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	cond := metav1.Condition{Type: ConditionServed, Status: metav1.ConditionFalse, Reason: "NoServingImplementation",
 		Message: fmt.Sprintf("no in-process provider or Ready ChannelAdapter named %q (hand-deployed adapters report per-channel readiness on the Ready condition)", ch.Spec.Adapter)}
 
+	// the adapter CR is both the readiness source and the schema declarer
+	adapter := r.adapter(ctx, &ch)
+
 	switch {
 	case r.Registry != nil && r.Registry.Resolve(ch.Spec.Adapter) != nil:
 		cond.Status = metav1.ConditionTrue
 		cond.Reason = "InProcessProvider"
 		cond.Message = fmt.Sprintf("adapter %q is served in-process by the manager", ch.Spec.Adapter)
 	default:
-		if name, ready := r.readyAdapter(ctx, &ch); ready {
+		if adapter != nil && apimeta.IsStatusConditionTrue(adapter.Status.Conditions, ConditionReady) {
 			cond.Status = metav1.ConditionTrue
 			cond.Reason = "AdapterReady"
-			cond.Message = fmt.Sprintf("served by ChannelAdapter %q", name)
+			cond.Message = fmt.Sprintf("served by ChannelAdapter %q", adapter.Name)
 		} else if c := apimeta.FindStatusCondition(ch.Status.Conditions, "Ready"); c != nil && c.Status == metav1.ConditionTrue {
 			// a hand-deployed adapter (no CR) proved itself via the status
 			// contract — don't contradict it
@@ -56,27 +59,47 @@ func (r *ChannelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	if apimeta.IsStatusConditionPresentAndEqual(ch.Status.Conditions, ConditionServed, cond.Status) {
-		if existing := apimeta.FindStatusCondition(ch.Status.Conditions, ConditionServed); existing != nil && existing.Reason == cond.Reason {
-			return ctrl.Result{}, nil
-		}
+	// advisory: validates spec.config against whatever schema the adapter CR
+	// declares, and changes nothing else about serving
+	var configCond *metav1.Condition
+	if adapter != nil {
+		configCond = validateAgainstAdapter(adapter.Spec.ConfigSchema, ch.Spec.Config, adapter.Name)
+	}
+
+	if servedUnchanged(ch.Status.Conditions, cond) && configValidUnchanged(ch.Status.Conditions, configCond) {
+		return ctrl.Result{}, nil
 	}
 	patch := client.MergeFrom(ch.DeepCopy())
 	apimeta.SetStatusCondition(&ch.Status.Conditions, cond)
+	applyConfigValid(&ch.Status.Conditions, configCond)
 	return ctrl.Result{}, r.Status().Patch(ctx, &ch, patch)
 }
 
-// readyAdapter resolves the adapter the channel names in spec.type — the
-// adapter CR's NAME is the routing key.
-func (r *ChannelReconciler) readyAdapter(ctx context.Context, ch *agentopsv1alpha1.Channel) (string, bool) {
+// servedUnchanged reports whether the Served condition already says this.
+func servedUnchanged(conds []metav1.Condition, want metav1.Condition) bool {
+	existing := apimeta.FindStatusCondition(conds, ConditionServed)
+	return existing != nil && existing.Status == want.Status && existing.Reason == want.Reason
+}
+
+// configValidUnchanged reports whether ConfigValid already matches, including
+// the "should be absent" case.
+func configValidUnchanged(conds []metav1.Condition, want *metav1.Condition) bool {
+	existing := apimeta.FindStatusCondition(conds, ConditionConfigValid)
+	if want == nil {
+		return existing == nil
+	}
+	return existing != nil && existing.Status == want.Status &&
+		existing.Reason == want.Reason && existing.Message == want.Message
+}
+
+// adapter resolves the ChannelAdapter the channel names in spec.adapter — the
+// adapter CR's NAME is the routing key. nil when none exists.
+func (r *ChannelReconciler) adapter(ctx context.Context, ch *agentopsv1alpha1.Channel) *agentopsv1alpha1.ChannelAdapter {
 	var a agentopsv1alpha1.ChannelAdapter
 	if err := r.Get(ctx, types.NamespacedName{Namespace: ch.Namespace, Name: ch.Spec.Adapter}, &a); err != nil {
-		return "", false
+		return nil
 	}
-	if apimeta.IsStatusConditionTrue(a.Status.Conditions, ConditionReady) {
-		return a.Name, true
-	}
-	return "", false
+	return &a
 }
 
 // SetupWithManager wires the controller: Channels, plus ChannelAdapter events

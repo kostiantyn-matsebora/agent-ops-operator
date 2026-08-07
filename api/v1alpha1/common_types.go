@@ -60,3 +60,18 @@ type MCPSpec struct {
 	// +optional
 	SecretRef *ObjectRef `json:"secretRef,omitempty"`
 }
+
+// CredentialKeyDoc documents one Secret key an adapter implementation expects
+// in a served CR's credentialsSecretRef. It is DOCUMENTATION ONLY: the manager
+// reads no Secrets, so it can neither verify the key exists nor read its value
+// — it only makes the expectation discoverable from the adapter CR.
+type CredentialKeyDoc struct {
+	// Key is the Secret key (projected as env <credentialEnvPrefix><KEY>).
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
+	// Required marks a key the implementation cannot work without.
+	// +optional
+	Required bool `json:"required,omitempty"`
+	// +optional
+	Description string `json:"description,omitempty"`
+}

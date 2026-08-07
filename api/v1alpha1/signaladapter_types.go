@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // SignalAdapterSpec declares a signal-type IMPLEMENTATION — nothing more.
@@ -37,6 +38,22 @@ type SignalAdapterSpec struct {
 	Singleton *bool `json:"singleton,omitempty"`
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+	// ConfigSchema is a JSON Schema (draft 2020-12) describing spec.config on
+	// the Channels/SignalSources this adapter serves. OPTIONAL — declaring
+	// nothing behaves exactly as before. This is interface metadata, not
+	// configuration: it holds no config values, connectivity, or credentials,
+	// so the CR stays pure implementation. Because it lives on the spec it is
+	// readable by any cluster client (kubectl, docs tooling) the moment the CR
+	// is applied — no registration step, and the adapter binary plays no part.
+	// Authoring rule: bump the schema in the same diff as `image`.
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +optional
+	ConfigSchema *runtime.RawExtension `json:"configSchema,omitempty"`
+	// CredentialKeys documents the Secret keys the implementation expects in a
+	// served CR's credentialsSecretRef. Documentation ONLY — the manager reads
+	// no Secrets, so it can never verify these.
+	// +optional
+	CredentialKeys []CredentialKeyDoc `json:"credentialKeys,omitempty"`
 }
 
 // SignalAdapterStatus reports workload and serving state.

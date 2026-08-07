@@ -125,7 +125,25 @@ metadata:
   name: cron
   namespace: agent-ops
 spec:
-  image: kmatsebora/agentops-signal-cron:0.1.0
+  image: kmatsebora/agentops-signal-cron:0.2.0
+  # Optional config contract for SignalSources with `adapter: cron`. Declaring
+  # it makes `kubectl get signaladapter cron -o yaml` answer "what do I put in
+  # config?" without reading adapter source.
+  configSchema:
+    type: object
+    properties:
+      schedule:
+        type: string
+        description: Five-field cron expression (minute hour dom month dow).
+      input:
+        type: string
+        description: Task text handed to the agent on each tick.
+      title:
+        type: string
+        description: Conversation title override.
+    required:
+      - schedule
+      - input
 ---
 # VM Alertmanager webhook source — spec.adapter names the serving SignalAdapter
 # CR (the vm-bundle subchart renders one named vm-alertmanager; its reconciler

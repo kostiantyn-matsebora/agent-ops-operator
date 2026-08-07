@@ -15,6 +15,37 @@ metadata:
     app.kubernetes.io/name: agentops-channel-telegram
 spec:
   image: "{{ .Values.telegramAdapter.image.repository }}:{{ .Values.telegramAdapter.image.tag }}"
+  # The config contract for Channels with `adapter: telegram`, declared beside
+  # the image it describes so the two travel in one diff. Advisory: the manager
+  # reports ConfigValid, the adapter stays the authority.
+  configSchema:
+    type: object
+    properties:
+      chatId:
+        type: string
+        description: Telegram chat id the adapter posts to (forum supergroup).
+      feedThreadId:
+        type: integer
+        description: Topic id for the raw alerts feed.
+      approvers:
+        type: array
+        items:
+          type: integer
+        description: Telegram user ids allowed to approve actions.
+      pollingEnabled:
+        type: boolean
+        description: >-
+          Run getUpdates for this bot token. EXACTLY ONE consumer per token,
+          ever.
+    required:
+      - chatId
+  credentialKeys:
+    # documentation only — the manager never reads Secrets
+    - key: botToken
+      required: false
+      description: >-
+        Bot API token for this surface. Optional because the adapter also
+        accepts TELEGRAM_BOT_TOKEN from its environment.
   singleton: true
   resources:
 {{ toYaml .Values.telegramAdapter.resources | indent 4 }}

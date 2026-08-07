@@ -96,6 +96,22 @@ scope, so hand-deployed adapters work unchanged. No Kubernetes API access
 needed — the reference adapter [`channel-telegram/`](channel-telegram/) is
 dependency-free Go.
 
+**Discovering what `config` needs.** An adapter CR may optionally declare
+`spec.configSchema` (a JSON Schema for the `config` of the Channels/SignalSources
+it serves) and `spec.credentialKeys` (the Secret keys it expects). Because the
+declaration lives on the CR spec, `kubectl get channeladapter telegram -o yaml`
+answers "what do I write?" before the adapter pod has ever started — no
+registration step, and adapter binaries play no part. The reconciler
+compile-checks a declared schema and reports `SchemaValid` on the adapter CR;
+served Channels/SignalSources then carry `ConfigValid` (`SchemaValidated` /
+`SchemaViolation` naming the offending fields).
+
+Both are **advisory**: a violation never blocks serving, projection, or
+ingestion — the adapter's own Ready report stays authoritative, because a
+CR-declared schema can drift from the running image. Declaring nothing keeps
+behavior exactly as before, and no `ConfigValid` appears. Authoring rule: bump
+the schema in the same diff as `image`.
+
 A `Channel` whose adapter nothing serves (no in-process provider, no Ready
 `ChannelAdapter`, no adapter-reported readiness) carries a `Served=False`
 condition — typos fail visibly instead of queueing ops forever.

@@ -32,7 +32,10 @@ adapters) — the adapters dependency-free.
   + opaque `config` that only the serving adapter interprets.
   `status.threadId` is an opaque STRING.
 - **`ChannelAdapter` CR** = pure implementation (`image` + workload knobs,
-  NEVER configuration or credentials — no `type`, no `env`); its reconciler
+  NEVER configuration or credentials — no `type`, no `env`). Interface
+  METADATA is allowed and encouraged: optional `configSchema` (JSON Schema for
+  the served CRs' `config`) + `credentialKeys` (docs only — the manager reads
+  no Secrets). No config VALUES, connectivity, or credentials. Its reconciler
   owns the adapter Deployment. Credentials are per-surface on
   `Channel.credentialsSecretRef`, projected into the adapter pod as `envFrom`
   with prefix `AGENTOPS_CRED_<CHANNEL>_` (kubelet-resolved; the contract's
@@ -159,7 +162,10 @@ config/samples/          example CRs (the only config/ content — deployment-sp
   (replicas 1 + Recreate); the manager itself has no poller.
 - **Channel ops are at-least-once.** `spec.config` is opaque to the operator —
   never parse channel-type config manager-side; adapters validate their own
-  and report via the Channel Ready condition.
+  and report via the Channel Ready condition. The manager never *interprets*
+  config, but it MAY apply an adapter-declared `configSchema` mechanically
+  (`internal/configschema`, the one place config content is touched):
+  advisory-only `ConfigValid`, no type knowledge, adapter stays authoritative.
 - **No relay loops**: channel implementations (adapters AND in-process
   providers) must never re-ingest their own outbound posts as inbound —
   cross-channel relay depends on it.

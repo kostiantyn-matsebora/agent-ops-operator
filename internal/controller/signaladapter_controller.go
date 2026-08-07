@@ -110,8 +110,11 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	// status
+	// status. The declared schema is compile-checked here, where it was
+	// authored — a broken one is reported but never blocks the workload.
+	_, schemaCond := compileDeclaredSchema(adapter.Spec.ConfigSchema)
 	patch := client.MergeFrom(adapter.DeepCopy())
+	applySchemaCondition(&adapter.Status.Conditions, schemaCond)
 	adapter.Status.ServedSources = int32(served)
 	deployed := metav1.Condition{Type: ConditionDeployed, Status: metav1.ConditionTrue, Reason: "WorkloadRendered"}
 	if len(collisions) > 0 {
