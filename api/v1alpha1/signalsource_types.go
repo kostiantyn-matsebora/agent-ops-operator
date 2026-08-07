@@ -6,13 +6,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// SourceVMAlertmanager is the webhook signal type served by
-// signal-vmalertmanager/: the adapter hosts its own endpoint accepting the
-// standard Alertmanager webhook format (VMAlertmanager and any compatible
-// sender). The manager hosts NO signal transports of its own — every signal
-// type is adapter-served via the /signal/* contract.
-const SourceVMAlertmanager = "vmAlertmanagerWebhook"
-
 // GroupingSpec controls signature-based conversation grouping and dedupe.
 // This is deliberately typed, manager-side policy — it applies to every source
 // type, built-in or adapter-fed; adapters only normalize signals.

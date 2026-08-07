@@ -10,8 +10,9 @@ Pipeline claim drops its signals (Wired=False).
 
 VictoriaMetrics bundle — point your Alertmanager-compatible sender at:
 {{- if $vb.alertmanager.defaultSource.enabled }}
-  http://agentops-signal-{{ $vb.alertmanager.name }}.{{ .Release.Namespace }}.svc:{{ $vb.alertmanager.service.port }}/webhook/{{ $vb.alertmanager.defaultSource.name }}
+  http://agentops-signal-{{ $vb.alertmanager.name }}.{{ .Release.Namespace }}.svc:8080/webhook/{{ $vb.alertmanager.defaultSource.name }}
 {{- else }}
-  http://agentops-signal-{{ $vb.alertmanager.name }}.{{ .Release.Namespace }}.svc:{{ $vb.alertmanager.service.port }}/webhook/<your-signalsource-name>
+  http://agentops-signal-{{ $vb.alertmanager.name }}.{{ .Release.Namespace }}.svc:8080/webhook/<your-signalsource-name>
 {{- end }}
+(Service owned by the SignalAdapter reconciler — no chart-side connectivity.)
 {{- end }}

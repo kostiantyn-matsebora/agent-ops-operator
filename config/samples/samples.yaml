@@ -51,16 +51,17 @@ spec:
           name: agentops-ha
           key: token
 ---
-# ChannelAdapter: plugs the channel type "telegram" in as a CR — the reconciler
-# deploys and owns the adapter workload (zero-RBAC SA, derived contract token,
-# projected per-channel credentials). One active adapter per type.
+# ChannelAdapter: plugs the "telegram" implementation in as a CR — the CR's
+# NAME is the type key Channels select via spec.type. The reconciler deploys
+# and owns the adapter workload (zero-RBAC SA, derived contract token,
+# projected per-channel credentials). Pure implementation: no configuration
+# lives here.
 apiVersion: agentops.dev/v1alpha1
 kind: ChannelAdapter
 metadata:
   name: telegram
   namespace: agent-ops
 spec:
-  type: telegram
   image: kmatsebora/agentops-channel-telegram:0.2.0
   # singleton (default true): replicas 1 + Recreate — getUpdates allows exactly
   # one consumer per bot token
@@ -122,30 +123,32 @@ spec:
   profileRef:
     name: ha-engineer
 ---
-# SignalAdapter: plugs the signal type "cron" in as a CR — the reconciler
-# deploys and owns the adapter workload. One active adapter per type.
+# SignalAdapter: plugs the "cron" implementation in as a CR — the CR's NAME
+# is the type key SignalSources select via spec.type. The reconciler deploys
+# and owns the adapter workload. No spec.port: cron has no inbound surface,
+# so no Service is rendered.
 apiVersion: agentops.dev/v1alpha1
 kind: SignalAdapter
 metadata:
   name: cron
   namespace: agent-ops
 spec:
-  type: cron
   image: kmatsebora/agentops-signal-cron:0.1.0
 ---
-# VM Alertmanager webhook source (adapter-served; the vm-bundle subchart
-# deploys the adapter + Service). VMAlertmanager posts the standard
-# Alertmanager webhook format to
+# VM Alertmanager webhook source — spec.type names the serving SignalAdapter
+# CR (the vm-bundle subchart renders one named vm-alertmanager; its reconciler
+# owns the workload AND the webhook Service). VMAlertmanager posts the
+# standard Alertmanager webhook format to
 #   http://agentops-signal-vm-alertmanager.<ns>.svc:8080/webhook/vm-alerts
 # Open variant: no credentialsSecretRef — anonymous posts accepted
-# (ClusterIP-only posture, matching the built-in endpoint).
+# (ClusterIP-only posture).
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource
 metadata:
   name: vm-alerts
   namespace: agent-ops
 spec:
-  type: vmAlertmanagerWebhook
+  type: vm-alertmanager
   grouping:
     signatureLabels: ["alertgroup", "alertname", "namespace"]
 ---
@@ -159,7 +162,7 @@ metadata:
   name: vm-alerts-secure
   namespace: agent-ops
 spec:
-  type: vmAlertmanagerWebhook
+  type: vm-alertmanager
   credentialsSecretRef:
     name: vm-webhook-token   # Secret with key TOKEN
 ---

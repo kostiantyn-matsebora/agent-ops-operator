@@ -27,11 +27,12 @@ adapters) — the adapters dependency-free.
   metadata (`type`, `delivery`, `credentialsSecretRef` — NO wiring)
   + opaque `config` that only the serving adapter interprets.
   `status.threadId` is an opaque STRING.
-- **`ChannelAdapter` CR** = pure implementation (`type` + `image`, never
-  credentials); its reconciler owns the adapter Deployment. Credentials are
-  per-surface on `Channel.credentialsSecretRef`, projected into the adapter
-  pod as `envFrom` with prefix `AGENTOPS_CRED_<CHANNEL>_` (kubelet-resolved;
-  the contract's channel listing advertises `credentialEnvPrefix`).
+- **`ChannelAdapter` CR** = pure implementation (`image` + workload knobs,
+  NEVER configuration or credentials — no `type`, no `env`); its reconciler
+  owns the adapter Deployment. Credentials are per-surface on
+  `Channel.credentialsSecretRef`, projected into the adapter pod as `envFrom`
+  with prefix `AGENTOPS_CRED_<CHANNEL>_` (kubelet-resolved; the contract's
+  channel listing advertises `credentialEnvPrefix`).
 - **`SignalAdapter` CR / signal adapter** = same pattern for ingest, but
   inbound-only (no ops queue): adapters push normalized signals
   (`fingerprint`, `labels`, `title?`, `payload`, `kind: alert|job`) to
@@ -40,11 +41,16 @@ adapters) — the adapters dependency-free.
   Workload names `agentops-signal-<name>`; token derivation context
   `signal-adapter:<name>` (never interchangeable with channel tokens).
   There are NO built-in signal types — the manager hosts no signal
-  transports; every type needs a serving adapter.
-- On both adapter kinds, `spec.type` is the ROUTING KEY (drives the contract
-  listing, credential projection into the right pod, token scope, the
-  one-adapter-per-type guard, and Served); the CR NAME is identity only, so
-  adapters can be renamed/replaced without re-keying routing.
+  transports; every type needs a serving adapter. `SignalAdapter.spec.port`
+  (implementation property): when set, the reconciler owns the Service
+  `agentops-signal-<name>` and injects `LISTEN_ADDR` — charts ship NO
+  adapter connectivity.
+- On both adapter kinds, the CR NAME is the ROUTING KEY:
+  `Channel`/`SignalSource.spec.type` names the serving adapter (drives the
+  contract listing, credential projection, token scope, and Served) — one
+  adapter per implementation by construction; duplicate adapters for one
+  implementation are impossible. Adapter CRs carry no configuration —
+  connectivity/creds/config live ONLY on Channel/SignalSource.
 - API group `agentops.dev/v1alpha1` (provisional; rename possible pre-1.0).
 
 ## Build / test
@@ -128,8 +134,8 @@ config/samples/          example CRs (the only config/ content — deployment-sp
   re-derivation — nothing minted or stored). RBAC grants the manager no
   `secrets` verbs at all — keep it that way.
 - **Adapter pods have zero ambient authority**: dedicated SA with no RBAC,
-  `automountServiceAccountToken: false`. One ACTIVE ChannelAdapter per type
-  (newer claimant gets `TypeConflict`, is not deployed).
+  `automountServiceAccountToken: false`. Name-is-key makes one adapter per
+  implementation structural — there is no conflict machinery to maintain.
 - **Strictly serial per conversation** (one inflight unit); parallelism is
   across conversations, capped by `MAX_RUNTIMES` with idle-runtime eviction.
 - **HTTP API is NOT leader-gated** (`NeedLeaderElection()=false`) — webhooks

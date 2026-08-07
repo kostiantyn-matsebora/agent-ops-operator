@@ -7,18 +7,17 @@
 enabled: false
 
 alertmanager:
-  # The webhook-receiving signal source component: SignalAdapter CR + Service.
+  # The webhook-receiving signal adapter component: the SignalAdapter CR only.
+  # The operator's reconciler owns the workload AND the webhook Service
+  # (agentops-signal-<name>, port 8080) via the CR's spec.port.
   enabled: true
-  # SignalAdapter CR name; the reconciler's workload and the Service are
-  # named agentops-signal-<name>.
+  # SignalAdapter CR name — also the type key: the default SignalSource (and
+  # any hand-made one) selects this implementation with spec.type: <name>.
   name: vm-alertmanager
   image:
     repository: kmatsebora/agentops-signal-vmalertmanager
-    tag: 0.1.0
+    tag: 0.2.0
   resources: {}
-  service:
-    # Service port; targetPort is fixed 8080 (the adapter's LISTEN_ADDR default).
-    port: 8080
   # Optional turnkey source: a SignalSource PLUS the Pipeline claiming it
   # (wiring is pipeline-only — an unclaimed source drops signals). The
   # profile is operator-owned; the bundle ships none.

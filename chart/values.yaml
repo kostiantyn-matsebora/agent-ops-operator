@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.8.0
+  tag: 0.9.0
 
 # Concurrency cap: live agent runtime pods across all conversations.
 maxRuntimes: 8

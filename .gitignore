@@ -6,3 +6,4 @@ bin/
 # adapter build artifacts (never commit binaries)
 channel-telegram/channel-telegram
 signal-cron/signal-cron
+signal-vmalertmanager/signal-vmalertmanager

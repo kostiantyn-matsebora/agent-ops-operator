@@ -225,7 +225,7 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 // signalAuth guards /signal/* (constant-time): the master token has full
 // scope; a per-SignalAdapter token — derived with the signal-specific context
 // and validated by re-derivation against the SignalAdapter list (stateless,
-// zero Secret reads) — is scoped to that adapter's spec.type. ChannelAdapter
+// zero Secret reads) — is scoped to that adapter's name. ChannelAdapter
 // tokens validate against no SignalAdapter and get 401 here.
 func (s *Server) signalAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +243,7 @@ func (s *Server) signalAuth(next http.HandlerFunc) http.HandlerFunc {
 			for i := range adapters.Items {
 				want := chat.DeriveSignalAdapterToken(s.AdapterToken, adapters.Items[i].Name)
 				if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
-					ctx := context.WithValue(r.Context(), adapterScopeKey{}, adapters.Items[i].Spec.Type)
+					ctx := context.WithValue(r.Context(), adapterScopeKey{}, adapters.Items[i].Name)
 					next(w, r.WithContext(ctx))
 					return
 				}

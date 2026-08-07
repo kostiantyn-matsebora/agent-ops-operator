@@ -11,8 +11,11 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -22,7 +25,8 @@ import (
 
 // SignalAdapterDeploymentName names the reconciler-owned workload for a
 // SignalAdapter CR (distinct namespace from channel adapters so same-named
-// CRs never collide on workload objects).
+// CRs never collide on workload objects). The Service rendered for a ported
+// adapter shares this name.
 func SignalAdapterDeploymentName(adapterName string) string {
 	return "agentops-signal-" + adapterName
 }
@@ -30,7 +34,11 @@ func SignalAdapterDeploymentName(adapterName string) string {
 // SignalAdapterReconciler owns signal-adapter workloads — the SignalAdapter
 // sibling of ChannelAdapterReconciler, on the shared workload machinery:
 // per-adapter derived token (signal derivation context), SOURCE_TYPE env, and
-// credential projection from served SignalSources.
+// credential projection from served SignalSources. The adapter CR's NAME is
+// the routing key — SignalSources select it via spec.type. When spec.port is
+// declared the reconciler also owns a Service agentops-signal-<name> and
+// injects LISTEN_ADDR, so enabling a webhook-receiving adapter is a complete
+// appliance with no chart-side connectivity.
 type SignalAdapterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -50,23 +58,6 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// guard 1: credentials never live on the adapter
-	if name := secretShapedEnv(adapter.Spec.Env); name != "" {
-		return ctrl.Result{}, r.fail(ctx, &adapter, ConditionDeployed, "SecretEnvForbidden",
-			fmt.Sprintf("spec.env[%s] references a Secret — credentials belong on SignalSource.credentialsSecretRef, not on the adapter", name))
-	}
-
-	// guard 2: one active adapter per type (oldest wins; ties by name)
-	if older, err := r.olderClaimant(ctx, &adapter); err != nil {
-		return ctrl.Result{}, err
-	} else if older != "" {
-		if err := r.deleteWorkload(ctx, &adapter); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, r.fail(ctx, &adapter, ConditionTypeConflict, "TypeConflict",
-			fmt.Sprintf("type %q is already served by SignalAdapter %q — at most one active adapter per type", adapter.Spec.Type, older))
-	}
-
 	// served sources + credential projection (collisions reported, first wins)
 	var sources agentopsv1alpha1.SignalSourceList
 	if err := r.List(ctx, &sources, client.InNamespace(adapter.Namespace)); err != nil {
@@ -76,7 +67,7 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var creds []credentialItem
 	for i := range sources.Items {
 		src := &sources.Items[i]
-		if src.Spec.Type != adapter.Spec.Type {
+		if src.Spec.Type != adapter.Name {
 			continue
 		}
 		served++
@@ -88,12 +79,14 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	env := []corev1.EnvVar{
 		{Name: "MANAGER_URL", Value: r.ManagerURL},
-		{Name: "SOURCE_TYPE", Value: adapter.Spec.Type},
+		{Name: "SOURCE_TYPE", Value: adapter.Name},
 	}
 	if r.MasterToken != "" {
 		env = append(env, corev1.EnvVar{Name: "ADAPTER_TOKEN", Value: chat.DeriveSignalAdapterToken(r.MasterToken, adapter.Name)})
 	}
-	env = append(env, adapter.Spec.Env...)
+	if adapter.Spec.Port != nil {
+		env = append(env, corev1.EnvVar{Name: "LISTEN_ADDR", Value: fmt.Sprintf(":%d", *adapter.Spec.Port)})
+	}
 
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
 		Owner: &adapter,
@@ -101,7 +94,6 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		Labels: map[string]string{
 			"app.kubernetes.io/name":      "agentops-signal-adapter",
 			"agentops.dev/signal-adapter": adapter.Name,
-			"agentops.dev/signal-type":    adapter.Spec.Type,
 		},
 		SelectorKey: "agentops.dev/signal-adapter",
 		Image:       adapter.Spec.Image,
@@ -113,13 +105,13 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if err := r.ensureService(ctx, &adapter); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	// status
 	patch := client.MergeFrom(adapter.DeepCopy())
 	adapter.Status.ServedSources = int32(served)
-	apimeta.SetStatusCondition(&adapter.Status.Conditions, metav1.Condition{
-		Type: ConditionTypeConflict, Status: metav1.ConditionFalse, Reason: "NoConflict",
-	})
 	deployed := metav1.Condition{Type: ConditionDeployed, Status: metav1.ConditionTrue, Reason: "WorkloadRendered"}
 	if len(collisions) > 0 {
 		deployed.Reason = "CredentialCollision"
@@ -131,94 +123,63 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if deploy.Status.AvailableReplicas > 0 {
 		ready.Status = metav1.ConditionTrue
 		ready.Reason = "WorkloadAvailable"
-		ready.Message = fmt.Sprintf("serving %d source(s) of type %q", served, adapter.Spec.Type)
+		ready.Message = fmt.Sprintf("serving %d source(s)", served)
 	}
 	apimeta.SetStatusCondition(&adapter.Status.Conditions, ready)
 	return ctrl.Result{}, r.Status().Patch(ctx, &adapter, patch)
 }
 
-func (r *SignalAdapterReconciler) olderClaimant(ctx context.Context, adapter *agentopsv1alpha1.SignalAdapter) (string, error) {
-	var list agentopsv1alpha1.SignalAdapterList
-	if err := r.List(ctx, &list, client.InNamespace(adapter.Namespace)); err != nil {
-		return "", err
-	}
-	for i := range list.Items {
-		other := &list.Items[i]
-		if other.Name == adapter.Name || other.Spec.Type != adapter.Spec.Type {
-			continue
+// ensureService renders the adapter's inbound Service when spec.port is
+// declared and removes a previously reconciler-owned one when it is not.
+func (r *SignalAdapterReconciler) ensureService(ctx context.Context, adapter *agentopsv1alpha1.SignalAdapter) error {
+	name := SignalAdapterDeploymentName(adapter.Name)
+	if adapter.Spec.Port == nil {
+		var svc corev1.Service
+		err := r.Get(ctx, types.NamespacedName{Namespace: adapter.Namespace, Name: name}, &svc)
+		if apierrors.IsNotFound(err) {
+			return nil
 		}
-		if other.CreationTimestamp.Time.Before(adapter.CreationTimestamp.Time) ||
-			(other.CreationTimestamp.Time.Equal(adapter.CreationTimestamp.Time) && other.Name < adapter.Name) {
-			return other.Name, nil
+		if err != nil {
+			return err
 		}
+		// only remove what this reconciler owns — never a hand-made Service
+		if metav1.IsControlledBy(&svc, adapter) {
+			return client.IgnoreNotFound(r.Delete(ctx, &svc))
+		}
+		return nil
 	}
-	return "", nil
-}
-
-func (r *SignalAdapterReconciler) deleteWorkload(ctx context.Context, adapter *agentopsv1alpha1.SignalAdapter) error {
-	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
-		Name: SignalAdapterDeploymentName(adapter.Name), Namespace: adapter.Namespace,
-	}}
-	if err := r.Delete(ctx, deploy); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
-}
-
-func (r *SignalAdapterReconciler) fail(ctx context.Context, adapter *agentopsv1alpha1.SignalAdapter, condType, reason, message string) error {
-	patch := client.MergeFrom(adapter.DeepCopy())
-	status := metav1.ConditionFalse
-	if condType == ConditionTypeConflict {
-		status = metav1.ConditionTrue // conflict PRESENT
-	}
-	apimeta.SetStatusCondition(&adapter.Status.Conditions, metav1.Condition{
-		Type: condType, Status: status, Reason: reason, Message: message,
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: adapter.Namespace}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		svc.Labels = map[string]string{
+			"app.kubernetes.io/name":      "agentops-signal-adapter",
+			"agentops.dev/signal-adapter": adapter.Name,
+		}
+		svc.Spec.Selector = map[string]string{"agentops.dev/signal-adapter": adapter.Name}
+		svc.Spec.Ports = []corev1.ServicePort{{
+			Name:       "http",
+			Port:       *adapter.Spec.Port,
+			TargetPort: intstr.FromInt32(*adapter.Spec.Port),
+		}}
+		return controllerutil.SetControllerReference(adapter, svc, r.Scheme)
 	})
-	if condType != ConditionDeployed {
-		apimeta.SetStatusCondition(&adapter.Status.Conditions, metav1.Condition{
-			Type: ConditionDeployed, Status: metav1.ConditionFalse, Reason: reason,
-		})
-	}
-	apimeta.SetStatusCondition(&adapter.Status.Conditions, metav1.Condition{
-		Type: ConditionReady, Status: metav1.ConditionFalse, Reason: reason,
-	})
-	return r.Status().Patch(ctx, adapter, patch)
+	return err
 }
 
-// SetupWithManager wires the controller (mirrors ChannelAdapterReconciler).
+// SetupWithManager wires the controller (mirrors ChannelAdapterReconciler):
+// adapter CRs, their owned Deployments and Services, and SignalSource events
+// mapped straight to the adapter the source names in spec.type.
 func (r *SignalAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapSource := func(ctx context.Context, obj client.Object) []ctrl.Request {
 		src, ok := obj.(*agentopsv1alpha1.SignalSource)
-		if !ok {
+		if !ok || src.Spec.Type == "" {
 			return nil
 		}
-		return r.adaptersOfType(ctx, src.Namespace, src.Spec.Type)
-	}
-	mapAdapter := func(ctx context.Context, obj client.Object) []ctrl.Request {
-		a, ok := obj.(*agentopsv1alpha1.SignalAdapter)
-		if !ok {
-			return nil
-		}
-		return r.adaptersOfType(ctx, a.Namespace, a.Spec.Type)
+		return []ctrl.Request{{NamespacedName: types.NamespacedName{Namespace: src.Namespace, Name: src.Spec.Type}}}
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.SignalAdapter{}).
 		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
 		Watches(&agentopsv1alpha1.SignalSource{}, handler.EnqueueRequestsFromMapFunc(mapSource)).
-		Watches(&agentopsv1alpha1.SignalAdapter{}, handler.EnqueueRequestsFromMapFunc(mapAdapter)).
 		Complete(r)
-}
-
-func (r *SignalAdapterReconciler) adaptersOfType(ctx context.Context, namespace, sourceType string) []ctrl.Request {
-	var list agentopsv1alpha1.SignalAdapterList
-	if err := r.List(ctx, &list, client.InNamespace(namespace)); err != nil {
-		return nil
-	}
-	var reqs []ctrl.Request
-	for i := range list.Items {
-		if list.Items[i].Spec.Type == sourceType {
-			reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
-		}
-	}
-	return reqs
 }

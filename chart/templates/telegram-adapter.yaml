@@ -1,5 +1,6 @@
 {{- if .Values.telegramAdapter.enabled }}
-# Telegram reference adapter, plugged in as a ChannelAdapter CR — the operator's
+# Telegram reference adapter, plugged in as a ChannelAdapter CR — the CR's
+# NAME is the type key Channels select via spec.type: telegram. The operator's
 # reconciler owns the workload (replicas 1 + Recreate via singleton: getUpdates
 # allows exactly one consumer per bot token), injects the contract URL plus a
 # per-adapter derived token, and projects each served Channel's
@@ -13,7 +14,6 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-channel-telegram
 spec:
-  type: telegram
   image: "{{ .Values.telegramAdapter.image.repository }}:{{ .Values.telegramAdapter.image.tag }}"
   singleton: true
   resources:

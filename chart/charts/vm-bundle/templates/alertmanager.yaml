@@ -1,11 +1,14 @@
 {{- /*
-VM Alertmanager component: the webhook-receiving signal adapter (SignalAdapter
-CR — the operator's reconciler owns the workload) plus the Service exposing
-its webhook endpoint on the reconciler's deterministic pod label. Gated on the
+VM Alertmanager component: the webhook-receiving signal adapter. The chart
+renders the SignalAdapter CR ONLY — pure implementation. The operator's
+reconciler owns the workload AND the connectivity: spec.port makes it render
+the Service agentops-signal-<name> and inject LISTEN_ADDR. Gated on the
 bundle flag alone: demo mode never enables this bundle.
 */ -}}
 {{- if and .Values.enabled .Values.alertmanager.enabled }}
 {{- $name := .Values.alertmanager.name }}
+# Webhook entry point (Service owned by the SignalAdapter reconciler):
+#   http://agentops-signal-{{ $name }}.{{ .Release.Namespace }}.svc:8080/webhook/<source>
 apiVersion: agentops.dev/v1alpha1
 kind: SignalAdapter
 metadata:
@@ -14,32 +17,13 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-signal-vmalertmanager
 spec:
-  type: vmAlertmanagerWebhook
   image: "{{ .Values.alertmanager.image.repository }}:{{ .Values.alertmanager.image.tag }}"
+  port: 8080
   singleton: true
   {{- with .Values.alertmanager.resources }}
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
----
-# Webhook entry point: VMAlertmanager posts to
-#   http://agentops-signal-{{ $name }}.{{ .Release.Namespace }}.svc:{{ .Values.alertmanager.service.port }}/webhook/<source>
-apiVersion: v1
-kind: Service
-metadata:
-  name: agentops-signal-{{ $name }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-signal-vmalertmanager
-spec:
-  selector:
-    # deterministic pod label set by the SignalAdapter reconciler (contract
-    # pinned by integration test — do not rename)
-    agentops.dev/signal-adapter: {{ $name }}
-  ports:
-    - name: webhook
-      port: {{ .Values.alertmanager.service.port }}
-      targetPort: 8080
 {{- if .Values.alertmanager.defaultSource.enabled }}
 {{- $src := .Values.alertmanager.defaultSource }}
 {{- $profileRef := $src.profileRef }}
@@ -53,7 +37,8 @@ metadata:
   name: {{ $src.name }}
   namespace: {{ .Release.Namespace }}
 spec:
-  type: vmAlertmanagerWebhook
+  # the source names its implementation: the SignalAdapter CR above
+  type: {{ $name }}
   {{- with $src.grouping }}
   grouping:
 {{ toYaml . | indent 4 }}

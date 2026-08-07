@@ -37,11 +37,12 @@ func reconcileSignalAdapter(t *testing.T, name string) {
 	}
 }
 
-func mkSignalAdapter(t *testing.T, name, sourceType string) *agentopsv1alpha1.SignalAdapter {
+// mkSignalAdapter creates a SignalAdapter — its NAME is the type key
+// SignalSources select via spec.type.
+func mkSignalAdapter(t *testing.T, name string) *agentopsv1alpha1.SignalAdapter {
 	t.Helper()
 	a := &agentopsv1alpha1.SignalAdapter{}
 	a.Name, a.Namespace = name, ns
-	a.Spec.Type = sourceType
 	a.Spec.Image = "example/signal-adapter:1"
 	if err := k8sClient.Create(context.Background(), a); err != nil {
 		t.Fatal(err)
@@ -209,8 +210,8 @@ func TestSignalContractSurface(t *testing.T) {
 }
 
 func TestSignalAuthScoping(t *testing.T) {
-	mkSignalAdapter(t, "auth-sig", "auth-sig-type")
-	mkAdapter(t, "auth-chan", "auth-chan-type") // channel adapter for cross-surface checks
+	mkSignalAdapter(t, "auth-sig")
+	mkAdapter(t, "auth-chan") // channel adapter for cross-surface checks
 	h := apiServer().Handler()
 	get := func(path, token string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("GET", path, nil)
@@ -222,18 +223,18 @@ func TestSignalAuthScoping(t *testing.T) {
 	sigTok := chat.DeriveSignalAdapterToken(testMasterToken, "auth-sig")
 	chanTok := chat.DeriveAdapterToken(testMasterToken, "auth-chan")
 
-	// own type OK, cross-type 403
-	if rec := get("/signal/sources?type=auth-sig-type", sigTok); rec.Code != 200 {
+	// own key (the adapter's NAME) OK, cross-key 403
+	if rec := get("/signal/sources?type=auth-sig", sigTok); rec.Code != 200 {
 		t.Fatalf("own type: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := get("/signal/sources?type=other-type", sigTok); rec.Code != 403 {
 		t.Fatalf("cross type: %d", rec.Code)
 	}
 	// cross-surface tokens are strangers (distinct derivation contexts)
-	if rec := get("/signal/sources?type=auth-chan-type", chanTok); rec.Code != 401 {
+	if rec := get("/signal/sources?type=auth-chan", chanTok); rec.Code != 401 {
 		t.Fatalf("channel token on signal surface: %d", rec.Code)
 	}
-	if rec := get("/channel/ops?type=auth-sig-type&wait=0", sigTok); rec.Code != 401 {
+	if rec := get("/channel/ops?type=auth-sig&wait=0", sigTok); rec.Code != 401 {
 		t.Fatalf("signal token on channel surface: %d", rec.Code)
 	}
 	// same-name adapters on both surfaces never share a token
@@ -249,9 +250,9 @@ func TestSignalAuthScoping(t *testing.T) {
 func TestSignalAdapterLifecycle(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-siglife")
-	mkSignalSource(t, "life-src-a", "life-sig-t", "life-secret")
-	mkSignalSource(t, "life-src-b", "life-sig-t", "")
-	mkSignalAdapter(t, "life-sig", "life-sig-t")
+	mkSignalSource(t, "life-src-a", "life-sig", "life-secret")
+	mkSignalSource(t, "life-src-b", "life-sig", "")
+	mkSignalAdapter(t, "life-sig")
 	reconcileSignalAdapter(t, "life-sig")
 
 	var deploy appsv1.Deployment
@@ -276,8 +277,11 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	for _, e := range pod.Containers[0].Env {
 		env[e.Name] = e.Value
 	}
-	if env["SOURCE_TYPE"] != "life-sig-t" || env["MANAGER_URL"] == "" {
+	if env["SOURCE_TYPE"] != "life-sig" || env["MANAGER_URL"] == "" {
 		t.Fatalf("contract env: %+v", env)
+	}
+	if _, has := env["LISTEN_ADDR"]; has {
+		t.Fatal("LISTEN_ADDR must not be injected without spec.port")
 	}
 	if env["ADAPTER_TOKEN"] != chat.DeriveSignalAdapterToken(testMasterToken, "life-sig") {
 		t.Fatal("ADAPTER_TOKEN is not the signal-context derived token")
@@ -292,15 +296,13 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 		t.Fatalf("status: %+v", adapter.Status)
 	}
 
-	// conflict guard
-	second := mkSignalAdapter(t, "life-sig2", "life-sig-t")
-	reconcileSignalAdapter(t, "life-sig2")
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-sig2"}, second)
-	if !apimeta.IsStatusConditionTrue(second.Status.Conditions, controller.ConditionTypeConflict) {
-		t.Fatalf("TypeConflict missing: %+v", second.Status.Conditions)
+	// no inbound port declared → no reconciler-owned Service
+	var svc corev1.Service
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("life-sig")}, &svc); err == nil {
+		t.Fatal("Service must not be rendered without spec.port")
 	}
 
-	// Served condition: built-in type always served; adapter type flips on Ready
+	// Served condition flips when the named adapter reports Ready
 	srcRec := &controller.SignalSourceReconciler{Client: k8sClient}
 	reconcileSrc := func(name string) {
 		t.Helper()
@@ -336,5 +338,58 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-src-a"}, &src)
 	if c := apimeta.FindStatusCondition(src.Status.Conditions, controller.ConditionServed); c == nil || c.Status != "True" || c.Reason != "AdapterReady" {
 		t.Fatalf("Served should flip via ready adapter: %+v", src.Status.Conditions)
+	}
+}
+
+func TestSignalAdapterServiceOwnership(t *testing.T) {
+	ctx := context.Background()
+	a := &agentopsv1alpha1.SignalAdapter{}
+	a.Name, a.Namespace = "svc-sig", ns
+	a.Spec.Image = "example/signal-adapter:1"
+	port := int32(8080)
+	a.Spec.Port = &port
+	if err := k8sClient.Create(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSignalAdapter(t, "svc-sig")
+
+	// spec.port declared → reconciler owns the Service and injects LISTEN_ADDR
+	name := types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("svc-sig")}
+	var svc corev1.Service
+	if err := k8sClient.Get(ctx, name, &svc); err != nil {
+		t.Fatalf("Service not rendered for ported adapter: %v", err)
+	}
+	if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Port != 8080 {
+		t.Fatalf("service port wrong: %+v", svc.Spec.Ports)
+	}
+	if svc.Spec.Selector["agentops.dev/signal-adapter"] != "svc-sig" {
+		t.Fatalf("selector wrong: %+v", svc.Spec.Selector)
+	}
+	if len(svc.OwnerReferences) == 0 || svc.OwnerReferences[0].Kind != "SignalAdapter" {
+		t.Fatalf("ownerRef missing: %+v", svc.OwnerReferences)
+	}
+	var deploy appsv1.Deployment
+	if err := k8sClient.Get(ctx, name, &deploy); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{}
+	for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+		env[e.Name] = e.Value
+	}
+	if env["LISTEN_ADDR"] != ":8080" {
+		t.Fatalf("LISTEN_ADDR not injected: %+v", env)
+	}
+
+	// unsetting the port removes the reconciler-owned Service
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "svc-sig"}, a); err != nil {
+		t.Fatal(err)
+	}
+	a.Spec.Port = nil
+	if err := k8sClient.Update(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSignalAdapter(t, "svc-sig")
+	if err := k8sClient.Get(ctx, name, &svc); err == nil {
+		t.Fatal("Service should be removed when spec.port is unset")
 	}
 }
