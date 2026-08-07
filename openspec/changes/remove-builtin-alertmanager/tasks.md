@@ -14,4 +14,4 @@
 ## 3. Verify, ship, cut over
 
 - [x] 3.1 Full verification: all modules build/vet/test, envtest green, helm lint + template matrix; manager 0.8.0 + chart 1.6.0 built and pushed; commit
-- [ ] 3.2 LIVE (gated on operator repointing VMAlertmanager to the adapter Service and confirming arrivals on `vm-alerts`): upgrade to 0.8.0, retire the old `alertmanager` source + its `home-ops-pipeline` claim + `am-stub`, verify Served/Wired states and that `/ingest/alertmanager` is gone
+- [x] 3.2 LIVE (gated on operator repointing VMAlertmanager to the adapter Service and confirming arrivals on `vm-alerts`): upgrade to 0.8.0, retire the old `alertmanager` source + its `home-ops-pipeline` claim + `am-stub`, verify Served/Wired states and that `/ingest/alertmanager` is gone
