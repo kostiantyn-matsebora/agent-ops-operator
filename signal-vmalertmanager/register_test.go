@@ -71,8 +71,6 @@ func testRegisterSpec() *registerSpec {
 		RepeatInterval: "12h",
 		MaxAlerts:      10,
 	}
-	reg.VMAlertmanager.Name = "vmks"
-	reg.VMAlertmanager.Namespace = "monitoring"
 	return reg
 }
 
@@ -95,7 +93,6 @@ func TestDesiredVMACCarriesRouteTuning(t *testing.T) {
 
 	// omitted knobs stay absent rather than rendering zero values
 	bare := &registerSpec{}
-	bare.VMAlertmanager.Name, bare.VMAlertmanager.Namespace = "vmks", "monitoring"
 	spec = desiredVMAC("s", "monitoring", "http://svc/webhook/s", bare)["spec"].(map[string]any)
 	route = spec["route"].(map[string]any)
 	for _, k := range []string{"group_wait", "group_interval", "repeat_interval", "matchers"} {
@@ -116,9 +113,13 @@ func TestParseRegister(t *testing.T) {
 	if parseRegister(json.RawMessage(`{"other":1}`)) != nil {
 		t.Fatal("config without register must yield none")
 	}
-	reg := parseRegister(json.RawMessage(`{"register":{"vmalertmanager":{"name":"vmks","namespace":"mon"},"sendResolved":true}}`))
-	if reg == nil || reg.VMAlertmanager.Name != "vmks" || reg.VMAlertmanager.Namespace != "mon" || !reg.SendResolved {
+	reg := parseRegister(json.RawMessage(`{"register":{"namespace":"mon","sendResolved":true}}`))
+	if reg == nil || reg.Namespace != "mon" || !reg.SendResolved {
 		t.Fatalf("register parsed wrong: %+v", reg)
+	}
+	// namespace is optional — the adapter falls back to its own
+	if reg := parseRegister(json.RawMessage(`{"register":{}}`)); reg == nil || reg.Namespace != "" {
+		t.Fatalf("bare register block must parse with an empty namespace: %+v", reg)
 	}
 }
 
@@ -127,7 +128,7 @@ func TestEnsureRegistrationCreatesAndRepairs(t *testing.T) {
 	k := api.client(t)
 	url := "http://agentops-signal-vm-alertmanager.agent-ops.svc:8080/webhook/vm-alerts"
 
-	ref, err := k.ensureRegistration(context.Background(), "vm-alerts", url, testRegisterSpec())
+	ref, err := k.ensureRegistration(context.Background(), "vm-alerts", "monitoring", url, testRegisterSpec())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestEnsureRegistrationCreatesAndRepairs(t *testing.T) {
 
 	// idempotent: an unchanged object is not rewritten
 	writes := api.writes
-	if _, err := k.ensureRegistration(context.Background(), "vm-alerts", url, testRegisterSpec()); err != nil {
+	if _, err := k.ensureRegistration(context.Background(), "vm-alerts", "monitoring", url, testRegisterSpec()); err != nil {
 		t.Fatal(err)
 	}
 	if api.writes != writes {
@@ -156,7 +157,7 @@ func TestEnsureRegistrationCreatesAndRepairs(t *testing.T) {
 
 	// drift is repaired
 	recv["webhook_configs"].([]any)[0].(map[string]any)["url"] = "http://elsewhere/webhook/x"
-	if _, err := k.ensureRegistration(context.Background(), "vm-alerts", url, testRegisterSpec()); err != nil {
+	if _, err := k.ensureRegistration(context.Background(), "vm-alerts", "monitoring", url, testRegisterSpec()); err != nil {
 		t.Fatal(err)
 	}
 	got := api.objects["agentops-vm-alerts"]["spec"].(map[string]any)["receivers"].([]any)[0].(map[string]any)["webhook_configs"].([]any)[0].(map[string]any)["url"]
@@ -169,13 +170,13 @@ func TestEnsureRegistrationFailuresAreInstructive(t *testing.T) {
 	url := "http://svc/webhook/vm-alerts"
 
 	forbidden := &fakeAPI{forbid: true}
-	_, err := forbidden.client(t).ensureRegistration(context.Background(), "vm-alerts", url, testRegisterSpec())
+	_, err := forbidden.client(t).ensureRegistration(context.Background(), "vm-alerts", "monitoring", url, testRegisterSpec())
 	if err == nil || !strings.Contains(err.Error(), "vmalertmanagerconfigs") {
 		t.Fatalf("403 should name the permission to grant: %v", err)
 	}
 
 	missing := &fakeAPI{noCRD: true}
-	_, err = missing.client(t).ensureRegistration(context.Background(), "vm-alerts", url, testRegisterSpec())
+	_, err = missing.client(t).ensureRegistration(context.Background(), "vm-alerts", "monitoring", url, testRegisterSpec())
 	if err == nil || !strings.Contains(err.Error(), "CRD") {
 		t.Fatalf("missing CRD should be named: %v", err)
 	}
@@ -193,7 +194,7 @@ func TestReconcileRegistrationReportsInstructions(t *testing.T) {
 	}
 
 	// register block but no cluster access → served + manual instructions
-	cfg := json.RawMessage(`{"register":{"vmalertmanager":{"name":"vmks","namespace":"monitoring"}}}`)
+	cfg := json.RawMessage(`{"register":{"namespace":"monitoring"}}`)
 	a.kube, a.kubeReason = nil, "ServiceAccount token not mounted"
 	reason, msg = a.reconcileRegistration(context.Background(), SourceInfo{Name: "vm-alerts", Config: cfg})
 	if reason != "RegistrationManual" {
@@ -222,5 +223,24 @@ func TestWebhookURL(t *testing.T) {
 	}
 	if got := webhookURL("a", "ns", "", "s"); !strings.Contains(got, ":8080/") {
 		t.Fatalf("default port: %s", got)
+	}
+}
+
+// The whole point of defaulting: no namespace in config means the adapter
+// writes into its own namespace, which needs no cross-namespace grant.
+func TestRegistrationDefaultsToAdapterNamespace(t *testing.T) {
+	f := &fakeManager{}
+	a := testAdapter(t, f)
+	a.podNS, a.listen = "agent-ops", ":8080"
+	api := &fakeAPI{}
+	a.kube = api.client(t)
+
+	reason, msg := a.reconcileRegistration(context.Background(),
+		SourceInfo{Name: "vm-alerts", Config: json.RawMessage(`{"register":{}}`)})
+	if reason != "AdapterReady" || !strings.Contains(msg, "agent-ops/agentops-vm-alerts") {
+		t.Fatalf("expected registration in the adapter's own namespace: %s %s", reason, msg)
+	}
+	if ns := api.objects["agentops-vm-alerts"]["metadata"].(map[string]any)["namespace"]; ns != "agent-ops" {
+		t.Fatalf("object namespace: %v", ns)
 	}
 }

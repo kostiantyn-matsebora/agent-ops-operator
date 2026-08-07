@@ -16,24 +16,26 @@ alertmanager:
   name: vm-alertmanager
   image:
     repository: kmatsebora/agentops-signal-vmalertmanager
-    tag: 0.4.0
+    tag: 0.5.0
   resources: {}
-  # Sender self-registration: the adapter configures the in-cluster
-  # VMAlertmanager to push to its own webhook, so no alertmanager config is
-  # edited by hand. Renders the RBAC the adapter's ServiceAccount needs
-  # (Role+RoleBinding in the VMAlertmanager's namespace — the OPERATOR never
-  # grants adapters anything) and puts the target in the default source's
-  # config. When it can't register (RBAC missing, CRD absent) the source stays
-  # served and its Ready condition carries manual instructions.
+  # Sender self-registration: the adapter writes a VMAlertmanagerConfig
+  # pointing at its own webhook, so no alertmanager config is edited by hand.
+  # Renders the RBAC the adapter's ServiceAccount needs (Role+RoleBinding —
+  # the OPERATOR never grants adapters anything) and puts the routing in the
+  # default source's config. When it can't register (RBAC missing, CRD
+  # absent) the source stays served and its Ready condition carries manual
+  # instructions.
   # NOTE: vm-operator scopes VMAlertmanagerConfig routes to their own
   # namespace unless the VMAlertmanager sets spec.disableNamespaceMatcher —
   # set that flag on your stack for cluster-wide alert routing.
   registration:
     enabled: false
-    # REQUIRED when enabled: the VMAlertmanager CR to configure.
-    vmalertmanager:
-      name: ""
-      namespace: ""
+    # Namespace to write the VMAlertmanagerConfig into. Empty = the release
+    # namespace, which keeps the grant local (no cross-namespace RBAC). Set
+    # it only if your VMAlertmanager restricts which namespaces it selects
+    # configs from (configNamespaceSelector); with the common
+    # selectAllByDefault: true, leaving this empty is correct.
+    namespace: ""
     # The routing decision, owned here rather than in your alertmanager
     # config — enough to replace a hand-written receiver + route.
     # Matchers select which alerts reach this source (Alertmanager syntax),

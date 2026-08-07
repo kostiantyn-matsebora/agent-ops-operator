@@ -12,9 +12,8 @@ are rendered here — by the chart, never by the operator.
 {{- if and .Values.enabled .Values.alertmanager.enabled }}
 {{- $name := .Values.alertmanager.name }}
 {{- $reg := .Values.alertmanager.registration }}
-{{- if and $reg.enabled (or (not $reg.vmalertmanager.name) (not $reg.vmalertmanager.namespace)) }}
-{{- fail "vm-bundle: alertmanager.registration.vmalertmanager.{name,namespace} are required when registration.enabled=true (the adapter needs to know which VMAlertmanager to configure)" }}
-{{- end }}
+{{- /* default the registration namespace to the release's own: no cross-namespace grant */ -}}
+{{- $regNS := default .Release.Namespace $reg.namespace }}
 # Webhook entry point (Service owned by the SignalAdapter reconciler):
 #   http://agentops-signal-{{ $name }}.{{ .Release.Namespace }}.svc:8080/webhook/<source>
 apiVersion: agentops.dev/v1alpha1
@@ -40,12 +39,12 @@ spec:
 {{- if $reg.enabled }}
 ---
 # Least privilege for self-registration: VMAlertmanagerConfig only, in the
-# target VMAlertmanager's namespace, bound to the adapter's deterministic SA.
+# namespace the config is written to, bound to the adapter's deterministic SA.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: agentops-signal-{{ $name }}-register
-  namespace: {{ $reg.vmalertmanager.namespace }}
+  namespace: {{ $regNS }}
   labels:
     app.kubernetes.io/name: agentops-signal-vmalertmanager
 rules:
@@ -57,7 +56,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: agentops-signal-{{ $name }}-register
-  namespace: {{ $reg.vmalertmanager.namespace }}
+  namespace: {{ $regNS }}
   labels:
     app.kubernetes.io/name: agentops-signal-vmalertmanager
 roleRef:
@@ -90,13 +89,13 @@ spec:
 {{ toYaml . | indent 4 }}
   {{- end }}
   {{- if $reg.enabled }}
-  # opaque to the operator; the adapter reads `register` and configures the
-  # named VMAlertmanager to push here
+  # opaque to the operator; the adapter reads `register` and writes the
+  # VMAlertmanagerConfig that makes Alertmanager push here
   config:
     register:
-      vmalertmanager:
-        name: {{ $reg.vmalertmanager.name }}
-        namespace: {{ $reg.vmalertmanager.namespace }}
+      {{- with $reg.namespace }}
+      namespace: {{ . }}
+      {{- end }}
       {{- with $reg.matchers }}
       matchers:
 {{ toYaml . | indent 8 }}
