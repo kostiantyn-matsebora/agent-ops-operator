@@ -27,11 +27,19 @@ import (
 // registerSpec is the `register` block of a source's opaque config: the whole
 // sender-side routing decision for this source, so a SignalSource can fully
 // replace a hand-written receiver + route.
+//
+// There is no endpoint here on purpose. Alertmanager has no API for adding a
+// receiver — its config is assembled from VMAlertmanagerConfig objects by
+// vm-operator — so registering means WRITING an object, not calling an
+// address. The only endpoint involved points the other way (where alerts are
+// pushed) and the adapter derives it from its own identity.
 type registerSpec struct {
-	VMAlertmanager struct {
-		Name      string `json:"name"`
-		Namespace string `json:"namespace"`
-	} `json:"vmalertmanager"`
+	// Namespace to write the VMAlertmanagerConfig into; empty = the adapter's
+	// own namespace, which needs no cross-namespace permissions. Set it only
+	// when the target VMAlertmanager restricts which namespaces it selects
+	// configs from (`configNamespaceSelector`); with the common
+	// `selectAllByDefault: true` any namespace works.
+	Namespace string `json:"namespace,omitempty"`
 	// Matchers select which alerts reach this source (Alertmanager matcher
 	// syntax). Empty = everything that reaches the route.
 	Matchers []string `json:"matchers,omitempty"`
@@ -170,8 +178,7 @@ func desiredVMAC(source, namespace, webhookURL string, reg *registerSpec) map[st
 // ensureRegistration creates or repairs the VMAlertmanagerConfig for a
 // source. Returns the object reference on success; errors are pre-shaped for
 // the instruction path.
-func (k *kubeClient) ensureRegistration(ctx context.Context, source, webhookURL string, reg *registerSpec) (string, error) {
-	ns := reg.VMAlertmanager.Namespace
+func (k *kubeClient) ensureRegistration(ctx context.Context, source, ns, webhookURL string, reg *registerSpec) (string, error) {
 	name := registrationName(source)
 	ref := ns + "/" + name
 	desired := desiredVMAC(source, ns, webhookURL, reg)
@@ -227,7 +234,7 @@ func apiFailure(verb, ref string, code int, body []byte, err error) error {
 	}
 	switch code {
 	case 401, 403:
-		return fmt.Errorf("%s %s forbidden (grant the adapter ServiceAccount get/list/create/update/patch on vmalertmanagerconfigs.operator.victoriametrics.com in that namespace)", verb, ref)
+		return fmt.Errorf("%s %s forbidden (grant the adapter ServiceAccount get/list/create/update/patch on vmalertmanagerconfigs.operator.victoriametrics.com in %s)", verb, ref, strings.SplitN(ref, "/", 2)[0])
 	case 404:
 		return fmt.Errorf("%s %s: VMAlertmanagerConfig CRD or namespace not found (is the VictoriaMetrics operator installed?)", verb, ref)
 	default:

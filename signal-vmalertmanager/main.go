@@ -163,18 +163,23 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (s
 		// no registration asked for: name the path an operator should target
 		return "AdapterReady", fmt.Sprintf("served by signal-vmalertmanager — POST %s", a.endpoint(info.Name))
 	}
-	if reg.VMAlertmanager.Namespace == "" || reg.VMAlertmanager.Name == "" {
-		return "RegistrationManual", fmt.Sprintf(
-			"served, but config.register.vmalertmanager needs {name, namespace} — configure the sender by hand to POST %s",
-			a.endpoint(info.Name))
+	// default to our own namespace: vm-operator selects VMAlertmanagerConfigs
+	// from everywhere by default, so this needs no cross-namespace grant
+	ns := reg.Namespace
+	if ns == "" {
+		ns = a.podNS
 	}
 	url := a.endpoint(info.Name)
-	if a.kube == nil {
-		return "RegistrationManual", manualInstructions(info.Name, url, reg, a.kubeReason)
+	if a.kube == nil || ns == "" {
+		reason := a.kubeReason
+		if reason == "" {
+			reason = "namespace unknown (POD_NAMESPACE unset and config.register.namespace empty)"
+		}
+		return "RegistrationManual", manualInstructions(info.Name, ns, url, reason)
 	}
-	ref, err := a.kube.ensureRegistration(ctx, info.Name, url, reg)
+	ref, err := a.kube.ensureRegistration(ctx, info.Name, ns, url, reg)
 	if err != nil {
-		return "RegistrationManual", manualInstructions(info.Name, url, reg, err.Error())
+		return "RegistrationManual", manualInstructions(info.Name, ns, url, err.Error())
 	}
 	return "AdapterReady", fmt.Sprintf(
 		"served by signal-vmalertmanager — POST %s; sender registered in VMAlertmanagerConfig %s", url, ref)
@@ -182,12 +187,15 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (s
 
 // manualInstructions renders the degraded message: why registration could not
 // happen, and exactly what to do instead.
-func manualInstructions(source, url string, reg *registerSpec, cause string) string {
+func manualInstructions(source, namespace, url, cause string) string {
+	target := registrationName(source)
+	if namespace != "" {
+		target = namespace + "/" + target
+	}
 	return fmt.Sprintf(
 		"served, but could not register the sender automatically (%s). Configure it by hand: "+
-			"create VMAlertmanagerConfig %s/%s (or add a webhook receiver to VMAlertmanager %s/%s) posting to %s",
-		cause, reg.VMAlertmanager.Namespace, registrationName(source),
-		reg.VMAlertmanager.Namespace, reg.VMAlertmanager.Name, url)
+			"create VMAlertmanagerConfig %s (or add a webhook receiver to your Alertmanager) posting to %s",
+		cause, target, url)
 }
 
 // endpoint is this adapter's webhook URL for a source (in-cluster form when

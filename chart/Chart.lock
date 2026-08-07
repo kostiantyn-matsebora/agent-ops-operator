@@ -1,0 +1,6 @@
+dependencies:
+- name: vm-bundle
+  repository: ""
+  version: 0.1.0
+digest: sha256:c93a2cc2225f591f11b78799d831c390a07ea7372ccfd4837f994befe808eaf7
+generated: "2026-08-07T23:20:24.9030671+03:00"

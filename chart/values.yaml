@@ -72,7 +72,7 @@ telegramAdapter:
   enabled: false
   image:
     repository: kmatsebora/agentops-channel-telegram
-    tag: 0.2.0
+    tag: 0.3.0
   resources:
     requests:
       cpu: 10m
