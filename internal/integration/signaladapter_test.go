@@ -393,3 +393,35 @@ func TestSignalAdapterServiceOwnership(t *testing.T) {
 		t.Fatal("Service should be removed when spec.port is unset")
 	}
 }
+
+func TestSignalAdapterKubernetesAccess(t *testing.T) {
+	ctx := context.Background()
+	a := &agentopsv1alpha1.SignalAdapter{}
+	a.Name, a.Namespace = "k8s-sig", ns
+	a.Spec.Image = "example/signal-adapter:1"
+	yes := true
+	a.Spec.KubernetesAccess = &yes
+	if err := k8sClient.Create(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSignalAdapter(t, "k8s-sig")
+
+	var deploy appsv1.Deployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("k8s-sig")}, &deploy); err != nil {
+		t.Fatal(err)
+	}
+	pod := deploy.Spec.Template.Spec
+	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
+		t.Fatal("kubernetesAccess must mount the SA token")
+	}
+	found := false
+	for _, e := range pod.Containers[0].Env {
+		if e.Name == "POD_NAMESPACE" && e.ValueFrom != nil && e.ValueFrom.FieldRef != nil &&
+			e.ValueFrom.FieldRef.FieldPath == "metadata.namespace" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("POD_NAMESPACE downward-API env missing: %+v", pod.Containers[0].Env)
+	}
+}

@@ -8,11 +8,20 @@ Pipeline claim drops its signals (Wired=False).
 {{- $vb := index .Values "vm-bundle" }}
 {{- if and $vb $vb.enabled $vb.alertmanager.enabled }}
 
-VictoriaMetrics bundle — point your Alertmanager-compatible sender at:
-{{- if $vb.alertmanager.defaultSource.enabled }}
-  http://agentops-signal-{{ $vb.alertmanager.name }}.{{ .Release.Namespace }}.svc:8080/webhook/{{ $vb.alertmanager.defaultSource.name }}
+{{- $webhook := printf "http://agentops-signal-%s.%s.svc:8080/webhook/%s" $vb.alertmanager.name .Release.Namespace (ternary $vb.alertmanager.defaultSource.name "<your-signalsource-name>" $vb.alertmanager.defaultSource.enabled) }}
+{{- if $vb.alertmanager.registration.enabled }}
+VictoriaMetrics bundle — the adapter registers itself with VMAlertmanager
+{{ $vb.alertmanager.registration.vmalertmanager.namespace }}/{{ $vb.alertmanager.registration.vmalertmanager.name }} (VMAlertmanagerConfig agentops-<source>), pushing to:
+  {{ $webhook }}
+Watch it land:  kubectl -n {{ .Release.Namespace }} get signalsource -o wide
+If the Ready message says RegistrationManual, it names the cause and the
+manual step — the adapter retries every 15s, so fixing it needs no restart.
+Cluster-wide routing needs disableNamespaceMatcher on your VMAlertmanager.
 {{- else }}
-  http://agentops-signal-{{ $vb.alertmanager.name }}.{{ .Release.Namespace }}.svc:8080/webhook/<your-signalsource-name>
+VictoriaMetrics bundle — point your Alertmanager-compatible sender at:
+  {{ $webhook }}
+(Service owned by the SignalAdapter reconciler — no chart-side connectivity.
+Set vm-bundle.alertmanager.registration.enabled=true to have the adapter
+configure VMAlertmanager for you.)
 {{- end }}
-(Service owned by the SignalAdapter reconciler — no chart-side connectivity.)
 {{- end }}

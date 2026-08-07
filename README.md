@@ -152,7 +152,21 @@ Components (individually toggleable once `vm-bundle.enabled=true`):
   `signal-vmalertmanager/`, accepts the standard Alertmanager webhook format)
   with `port: 8080` — the reconciler owns both the workload and the webhook
   Service; the chart ships no connectivity. Sources select it with
-  `spec.type: vm-alertmanager`. Point VMAlertmanager at it:
+  `spec.type: vm-alertmanager`.
+
+  With `registration.enabled=true` (plus the target
+  `registration.vmalertmanager: {name, namespace}`) the **adapter configures
+  the sender itself**: it writes a `VMAlertmanagerConfig
+  agentops-<source>` — webhook receiver pointing at its own endpoint, route
+  with `continue: true` so existing receivers keep their alerts — and the
+  bundle renders the least-privilege Role/RoleBinding that makes it possible.
+  Registration failure never unserves the source: the webhook stays live and
+  the source's Ready condition names the cause plus the manual step, retried
+  every 15s so granting the permission heals it without a restart. Note that
+  vm-operator scopes `VMAlertmanagerConfig` routes to their own namespace
+  unless the VMAlertmanager sets `spec.disableNamespaceMatcher`.
+
+  Without registration, point VMAlertmanager at it yourself:
 
   ```yaml
   receivers:
@@ -298,6 +312,15 @@ into the `channel-telegram` adapter. For a live install:
 
 Rollback = reverse order: disable the adapter, restore the previous chart
 version and Channel CR shape.
+
+## Migrating to chart 1.8 (adapters can configure their senders)
+
+Additive. `SignalAdapter.spec.kubernetesAccess` (default false) mounts the
+adapter's ServiceAccount token and injects `POD_NAMESPACE` — **the operator
+still grants adapters no RBAC whatsoever**; permissions come from the chart
+or you, bound against the deterministic SA `agentops-signal-<name>`. The
+vm-bundle uses it for `alertmanager.registration`, which replaces the manual
+VMAlertmanager repoint. Existing adapters are untouched.
 
 ## Migrating to chart 1.7 (adapters are pure implementation) — BREAKING
 

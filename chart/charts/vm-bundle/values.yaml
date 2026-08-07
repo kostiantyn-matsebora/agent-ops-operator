@@ -16,8 +16,28 @@ alertmanager:
   name: vm-alertmanager
   image:
     repository: kmatsebora/agentops-signal-vmalertmanager
-    tag: 0.2.0
+    tag: 0.3.0
   resources: {}
+  # Sender self-registration: the adapter configures the in-cluster
+  # VMAlertmanager to push to its own webhook, so no alertmanager config is
+  # edited by hand. Renders the RBAC the adapter's ServiceAccount needs
+  # (Role+RoleBinding in the VMAlertmanager's namespace — the OPERATOR never
+  # grants adapters anything) and puts the target in the default source's
+  # config. When it can't register (RBAC missing, CRD absent) the source stays
+  # served and its Ready condition carries manual instructions.
+  # NOTE: vm-operator scopes VMAlertmanagerConfig routes to their own
+  # namespace unless the VMAlertmanager sets spec.disableNamespaceMatcher —
+  # set that flag on your stack for cluster-wide alert routing.
+  registration:
+    enabled: false
+    # REQUIRED when enabled: the VMAlertmanager CR to configure.
+    vmalertmanager:
+      name: ""
+      namespace: ""
+    # Optional Alertmanager matchers limiting what is routed to agentops,
+    # e.g. ['severity=~"warning|critical"'].
+    matchers: []
+    sendResolved: false
   # Optional turnkey source: a SignalSource PLUS the Pipeline claiming it
   # (wiring is pipeline-only — an unclaimed source drops signals). The
   # profile is operator-owned; the bundle ships none.

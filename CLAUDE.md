@@ -44,7 +44,11 @@ adapters) — the adapters dependency-free.
   transports; every type needs a serving adapter. `SignalAdapter.spec.port`
   (implementation property): when set, the reconciler owns the Service
   `agentops-signal-<name>` and injects `LISTEN_ADDR` — charts ship NO
-  adapter connectivity.
+  adapter connectivity. `spec.kubernetesAccess`: mounts the SA token +
+  `POD_NAMESPACE` for implementations that self-register with their SENDER
+  (push-model senders hold the "where to push" binding; the adapter writes it
+  from `SignalSource.spec.config.register`, degrading to instructions in the
+  Ready condition when it can't).
 - On both adapter kinds, the CR NAME is the ROUTING KEY:
   `Channel`/`SignalSource.spec.type` names the serving adapter (drives the
   contract listing, credential projection, token scope, and Served) — one
@@ -133,9 +137,13 @@ config/samples/          example CRs (the only config/ content — deployment-sp
   per-adapter tokens are DERIVED (HMAC of master + adapter name, validated by
   re-derivation — nothing minted or stored). RBAC grants the manager no
   `secrets` verbs at all — keep it that way.
-- **Adapter pods have zero ambient authority**: dedicated SA with no RBAC,
-  `automountServiceAccountToken: false`. Name-is-key makes one adapter per
-  implementation structural — there is no conflict machinery to maintain.
+- **The operator grants adapters NO Kubernetes permissions, ever**: dedicated
+  SA, no RBAC objects created or bound by any reconciler. Default posture is
+  `automountServiceAccountToken: false`; `SignalAdapter.spec.kubernetesAccess`
+  only mounts the token + injects `POD_NAMESPACE` — what it may DO is granted
+  externally (chart/user) against SA `agentops-signal-<name>`, so an adapter
+  CR can never escalate. Name-is-key makes one adapter per implementation
+  structural — there is no conflict machinery to maintain.
 - **Strictly serial per conversation** (one inflight unit); parallelism is
   across conversations, capped by `MAX_RUNTIMES` with idle-runtime eviction.
 - **HTTP API is NOT leader-gated** (`NeedLeaderElection()=false`) — webhooks
