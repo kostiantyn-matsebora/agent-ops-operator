@@ -9,8 +9,9 @@ set `kubernetesAccess: true` on the rendered SignalAdapter; render a Role
 scoped to `vmalertmanagerconfigs.operator.victoriametrics.com`
 (get/list/create/update/patch) plus a RoleBinding for the adapter's
 deterministic ServiceAccount (`agentops-signal-<name>`) into the
-VMAlertmanager's namespace; and put the `register` block (target, optional
-`matchers`/`sendResolved`) into the default source's opaque config — so one
+VMAlertmanager's namespace; and put the `register` block (target plus the
+optional routing knobs `matchers`, `groupWait`, `groupInterval`,
+`repeatInterval`, `maxAlerts`, `sendResolved`) into the default source's opaque config — so one
 flag yields an end-to-end path where the sender is configured by the
 adapter, with no manual alertmanager edits. Rendering SHALL fail loudly when
 `registration.enabled` is set without the target reference. Install notes

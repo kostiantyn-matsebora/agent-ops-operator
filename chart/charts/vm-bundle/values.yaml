@@ -16,7 +16,7 @@ alertmanager:
   name: vm-alertmanager
   image:
     repository: kmatsebora/agentops-signal-vmalertmanager
-    tag: 0.3.0
+    tag: 0.4.0
   resources: {}
   # Sender self-registration: the adapter configures the in-cluster
   # VMAlertmanager to push to its own webhook, so no alertmanager config is
@@ -34,9 +34,17 @@ alertmanager:
     vmalertmanager:
       name: ""
       namespace: ""
-    # Optional Alertmanager matchers limiting what is routed to agentops,
+    # The routing decision, owned here rather than in your alertmanager
+    # config — enough to replace a hand-written receiver + route.
+    # Matchers select which alerts reach this source (Alertmanager syntax),
     # e.g. ['severity=~"warning|critical"'].
     matchers: []
+    # Route timing (Alertmanager duration strings; empty = inherit).
+    groupWait: ""
+    groupInterval: ""
+    repeatInterval: ""
+    # Cap alerts per webhook post (0 = Alertmanager default).
+    maxAlerts: 0
     sendResolved: false
   # Optional turnkey source: a SignalSource PLUS the Pipeline claiming it
   # (wiring is pipeline-only — an unclaimed source drops signals). The

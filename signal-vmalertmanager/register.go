@@ -24,14 +24,24 @@ import (
 	"time"
 )
 
-// registerSpec is the `register` block of a source's opaque config.
+// registerSpec is the `register` block of a source's opaque config: the whole
+// sender-side routing decision for this source, so a SignalSource can fully
+// replace a hand-written receiver + route.
 type registerSpec struct {
 	VMAlertmanager struct {
 		Name      string `json:"name"`
 		Namespace string `json:"namespace"`
 	} `json:"vmalertmanager"`
-	Matchers     []string `json:"matchers,omitempty"`
-	SendResolved bool     `json:"sendResolved,omitempty"`
+	// Matchers select which alerts reach this source (Alertmanager matcher
+	// syntax). Empty = everything that reaches the route.
+	Matchers []string `json:"matchers,omitempty"`
+	// Route timing, passed through verbatim (Alertmanager duration strings).
+	GroupWait      string `json:"groupWait,omitempty"`
+	GroupInterval  string `json:"groupInterval,omitempty"`
+	RepeatInterval string `json:"repeatInterval,omitempty"`
+	// MaxAlerts caps alerts per webhook post (0 = Alertmanager's default).
+	MaxAlerts    int  `json:"maxAlerts,omitempty"`
+	SendResolved bool `json:"sendResolved,omitempty"`
 }
 
 // parseRegister extracts the register block ("" config or no block → nil).
@@ -123,6 +133,19 @@ func desiredVMAC(source, namespace, webhookURL string, reg *registerSpec) map[st
 	if len(reg.Matchers) > 0 {
 		route["matchers"] = reg.Matchers
 	}
+	for key, val := range map[string]string{
+		"group_wait":      reg.GroupWait,
+		"group_interval":  reg.GroupInterval,
+		"repeat_interval": reg.RepeatInterval,
+	} {
+		if val != "" {
+			route[key] = val
+		}
+	}
+	webhook := map[string]any{"url": webhookURL, "send_resolved": reg.SendResolved}
+	if reg.MaxAlerts > 0 {
+		webhook["max_alerts"] = reg.MaxAlerts
+	}
 	return map[string]any{
 		"apiVersion": "operator.victoriametrics.com/v1beta1",
 		"kind":       "VMAlertmanagerConfig",
@@ -137,11 +160,8 @@ func desiredVMAC(source, namespace, webhookURL string, reg *registerSpec) map[st
 		"spec": map[string]any{
 			"route": route,
 			"receivers": []any{map[string]any{
-				"name": name,
-				"webhook_configs": []any{map[string]any{
-					"url":           webhookURL,
-					"send_resolved": reg.SendResolved,
-				}},
+				"name":            name,
+				"webhook_configs": []any{webhook},
 			}},
 		},
 	}

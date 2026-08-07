@@ -160,11 +160,19 @@ Components (individually toggleable once `vm-bundle.enabled=true`):
   agentops-<source>` — webhook receiver pointing at its own endpoint, route
   with `continue: true` so existing receivers keep their alerts — and the
   bundle renders the least-privilege Role/RoleBinding that makes it possible.
+  The routing decision lives entirely in the source's `register` block
+  (`matchers`, `groupWait`, `groupInterval`, `repeatInterval`, `maxAlerts`,
+  `sendResolved`), so it can **replace** a hand-written receiver rather than
+  sit beside one. Two things decide whether the replacement actually
+  receives anything, and both live on the sender: vm-operator appends these
+  routes *after* the ones in your base config, so an earlier route matching
+  the same alerts needs `continue: true` or it terminates matching first;
+  and it scopes them to their own namespace unless the VMAlertmanager sets
+  `spec.disableNamespaceMatcher`.
+
   Registration failure never unserves the source: the webhook stays live and
   the source's Ready condition names the cause plus the manual step, retried
-  every 15s so granting the permission heals it without a restart. Note that
-  vm-operator scopes `VMAlertmanagerConfig` routes to their own namespace
-  unless the VMAlertmanager sets `spec.disableNamespaceMatcher`.
+  every 15s so granting the permission heals it without a restart.
 
   Without registration, point VMAlertmanager at it yourself:
 

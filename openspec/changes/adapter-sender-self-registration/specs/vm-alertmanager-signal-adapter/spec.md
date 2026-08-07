@@ -4,8 +4,12 @@
 
 ### Requirement: The adapter self-registers with the sender from source config
 For each served SignalSource whose opaque config carries a `register` block
-(`register.vmalertmanager: {name, namespace}` required; `matchers` and
-`sendResolved` optional), the adapter SHALL ensure a `VMAlertmanagerConfig`
+(`register.vmalertmanager: {name, namespace}` required; `matchers`,
+`groupWait`, `groupInterval`, `repeatInterval`, `maxAlerts` and
+`sendResolved` optional — together enough to express everything a
+hand-written receiver + route did, so a SignalSource can fully REPLACE one
+rather than sit alongside it; unset knobs are omitted from the rendered
+object rather than written as zero values), the adapter SHALL ensure a `VMAlertmanagerConfig`
 named `agentops-<source>` in the target namespace containing a webhook
 receiver pointing at its own endpoint
 (`http://agentops-signal-<adapter>.<POD_NAMESPACE>.svc:<port>/webhook/<source>`)
@@ -24,6 +28,10 @@ report `reason: AdapterReady` naming the registered object.
 #### Scenario: Drift is repaired
 - **WHEN** the registered object is edited to point elsewhere
 - **THEN** a subsequent poll restores the adapter's webhook URL
+
+#### Scenario: Source-owned routing replaces a hand-written receiver
+- **WHEN** a source's `register` block carries matchers plus `groupWait`, `repeatInterval` and `maxAlerts`
+- **THEN** the rendered route carries those matchers and timings and the webhook carries `max_alerts`, so the equivalent hand-written receiver and route can be deleted from the sender's own config
 
 #### Scenario: No register block, no registration
 - **WHEN** a served source's config carries no `register`
