@@ -20,4 +20,4 @@
 
 ## 5. Live (home-data-center)
 
-- [ ] 5.1 Deploy: CRDs, helm upgrade 1.8.0 with registration enabled (delete `vm-alerts` source first — immutable type change from the pending 0.9.0 cutover rides along); verify self-registration → VMAlertmanagerConfig exists → alerts flow via adapter; then retire old built-in source, its pipeline claim, and hand the user the one-line removal of the stale receiver from the vmks-owned config secret
+- [x] 5.1 Deploy: CRDs, helm upgrade 1.8.0 with registration enabled (delete `vm-alerts` source first — immutable type change from the pending 0.9.0 cutover rides along); verify self-registration → VMAlertmanagerConfig exists → alerts flow via adapter; then retire old built-in source, its pipeline claim, and hand the user the one-line removal of the stale receiver from the vmks-owned config secret

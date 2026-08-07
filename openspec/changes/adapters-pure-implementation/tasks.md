@@ -17,4 +17,4 @@
 
 ## 4. Live (rides the gated cutover with 0.8.0's)
 
-- [ ] 4.1 At cutover (after VMAlertmanager repoint): upgrade to 0.9.0, recreate `vm-alerts` with `type: vm-alertmanager` (immutable field) + re-claim in its Pipeline, verify reconciler-owned Service replaces the chart one, retire the old built-in source + `am-stub`
+- [x] 4.1 At cutover (after VMAlertmanager repoint): upgrade to 0.9.0, recreate `vm-alerts` with `type: vm-alertmanager` (immutable field) + re-claim in its Pipeline, verify reconciler-owned Service replaces the chart one, retire the old built-in source + `am-stub`
