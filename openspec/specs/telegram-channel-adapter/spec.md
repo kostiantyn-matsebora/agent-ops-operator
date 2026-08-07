@@ -7,10 +7,10 @@ The reference Telegram channel adapter: an external, dependency-free process ser
 ## Requirements
 
 ### Requirement: Telegram runs as an external reference adapter, not in the manager
-The manager SHALL contain no Telegram-specific code (no poller, no Bot API client, no bot-token reads). A reference adapter in `channel-telegram/` (own binary and image, precedent `runtime-claude/`) SHALL serve Channels with `type: telegram`, consuming the channel adapter contract: getUpdates long-polling, offset persistence, approver filtering by Telegram user id, topic creation via `createForumTopic`, and message sends with the existing HTML parse mode and general-topic fallback. Routing-visible behavior (commands, adoption, default profile, busy-acks) SHALL be unchanged from the in-process implementation.
+The manager SHALL contain no Telegram-specific code (no poller, no Bot API client, no bot-token reads). A reference adapter in `channel-telegram/` (own binary and image, precedent `runtime-claude/`) SHALL serve Channels with `adapter: telegram`, consuming the channel adapter contract: getUpdates long-polling, offset persistence, approver filtering by Telegram user id, topic creation via `createForumTopic`, and message sends with the existing HTML parse mode and general-topic fallback. Routing-visible behavior (commands, adoption, default profile, busy-acks) SHALL be unchanged from the in-process implementation.
 
 #### Scenario: End-to-end Telegram flow through the adapter
-- **WHEN** a Telegram user sends `/agents` to a bot whose adapter serves a `type: telegram` Channel
+- **WHEN** a Telegram user sends `/agents` to a bot whose adapter serves a `adapter: telegram` Channel
 - **THEN** the profile listing arrives in Telegram, produced by the shared router and delivered via the adapter's `send` op handling
 
 #### Scenario: Manager has no Telegram surface
@@ -33,7 +33,7 @@ The adapter SHALL resolve each served channel's bot token from the projected cre
 - **THEN** the adapter serves it with the fallback token exactly as before
 
 #### Scenario: Invalid config is surfaced on the Channel
-- **WHEN** a `type: telegram` Channel's `config` lacks a required field (e.g. chat id) or no token is resolvable
+- **WHEN** a `adapter: telegram` Channel's `config` lacks a required field (e.g. chat id) or no token is resolvable
 - **THEN** the adapter sets a not-ready condition with the reason on that Channel and continues serving other Channels
 
 ### Requirement: Single getUpdates consumer preserved
@@ -56,4 +56,4 @@ The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR (gated on `te
 
 #### Scenario: Enabled renders only a CR
 - **WHEN** `telegramAdapter.enabled=true`
-- **THEN** the rendered output contains a `ChannelAdapter` for `type: telegram` and no Deployment for it (the reconciler creates the workload)
+- **THEN** the rendered output contains a `ChannelAdapter` for `adapter: telegram` and no Deployment for it (the reconciler creates the workload)

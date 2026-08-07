@@ -7,7 +7,7 @@ The inbound-only HTTP contract between the manager and out-of-process signal ada
 ## Requirements
 
 ### Requirement: Normalized signals enter through one inbound endpoint
-The manager SHALL expose `POST /signal/inbound` (non-leader-gated) accepting `{source, signals: [{fingerprint, labels, title?, payload?, kind?}]}` where `kind` is `alert` (default) or `job`. For each signal the manager SHALL apply the source's grouping policy (cooldown by fingerprint, signature from `labels` × `signatureLabels`, window reuse, recurrence-on-session) through the same core as the built-in webhook; `kind: job` SHALL route as a job-lane input (task-style prompt), and `title` SHALL override the derived conversation title. **Conversation binding requires the source's Ready `Pipeline` claim (the pipeline's channels + profile); signals for an unwired source are dropped with an explicit reason in the response.** Payloads SHALL be stored out-of-line (`ConversationInput`) as today. Delivery is at-least-once; duplicate fingerprints within cooldown are safely absorbed.
+The manager SHALL expose `POST /signal/inbound` (non-leader-gated) accepting `{source, signals: [{fingerprint, labels, title?, payload?, kind?}]}` where `kind` is `alert` (default) or `job`. For each signal the manager SHALL apply the source's grouping policy (cooldown by fingerprint, signature from `labels` × `signatureLabels`, window reuse, recurrence-on-session) through its single ingest core — the manager hosts no signal transports of its own; every signal reaches it through this endpoint. `kind: job` SHALL route as a job-lane input (task-style prompt), and `title` SHALL override the derived conversation title. Conversation binding requires the source's Ready `Pipeline` claim (the pipeline's channels + profile); signals for an unwired source are dropped with an explicit reason in the response. Payloads SHALL be stored out-of-line (`ConversationInput`). Delivery is at-least-once; duplicate fingerprints within cooldown are safely absorbed.
 
 #### Scenario: Claimed source fans out per its pipeline
 - **WHEN** an adapter posts a signal for a source claimed by a Ready Pipeline binding two channels
@@ -26,11 +26,11 @@ The manager SHALL expose `POST /signal/inbound` (non-leader-gated) accepting `{s
 - **THEN** the manager responds 404 and creates nothing
 
 ### Requirement: Adapters need no Kubernetes access
-The contract SHALL carry everything a signal adapter needs: `GET /signal/sources?type=<t>` returns that type's sources with opaque `spec.config` and a `credentialEnvPrefix` locating projected credentials (Secret key `K` at env `<prefix>K`); `GET/PUT /signal/state/{source}/{key}` persists cursor state (manager-side, as SignalSource annotations) across restarts; `POST /signal/sources/{name}/status` sets the source's Ready condition. The prefix SHALL derive from projection metadata only — never Secret values or key enumeration.
+The contract SHALL carry everything a signal adapter needs: `GET /signal/sources?adapter=<t>` returns that type's sources with opaque `spec.config` and a `credentialEnvPrefix` locating projected credentials (Secret key `K` at env `<prefix>K`); `GET/PUT /signal/state/{source}/{key}` persists cursor state (manager-side, as SignalSource annotations) across restarts; `POST /signal/sources/{name}/status` sets the source's Ready condition. The prefix SHALL derive from projection metadata only — never Secret values or key enumeration.
 
 #### Scenario: Adapter reads its sources through the contract
-- **WHEN** an adapter lists `GET /signal/sources?type=cron`
-- **THEN** it receives each `type: cron` source's name, raw config, and credential prefix without Kubernetes API access
+- **WHEN** an adapter lists `GET /signal/sources?adapter=cron`
+- **THEN** it receives each `adapter: cron` source's name, raw config, and credential prefix without Kubernetes API access
 
 #### Scenario: Cursor survives adapter restart
 - **WHEN** an adapter PUTs state key `last-fire` and later restarts and GETs it
@@ -41,11 +41,7 @@ The contract SHALL carry everything a signal adapter needs: `GET /signal/sources
 - **THEN** the SignalSource's status carries a False Ready condition with that reason
 
 ### Requirement: Signal endpoints authenticated with type-scoped derived tokens
-All `/signal/*` endpoints SHALL require a bearer token: the master token (env-provided, full scope) or a per-SignalAdapter token derived with the distinct context `HMAC(masterKey, "signal-adapter:" + name)` — validated by stateless re-derivation against the SignalAdapter list and scoped to that adapter's `spec.type`. A ChannelAdapter and a SignalAdapter sharing a name SHALL NOT share a token, and a signal-adapter token SHALL NOT authorize `/channel/*` (nor vice versa). Missing/invalid → 401; out-of-scope type → 403; constant-time comparison; zero manager Secret reads.
-
-#### Scenario: Cross-type signal poll refused
-- **WHEN** the `cron` SignalAdapter's token calls `GET /signal/sources?type=pagerduty`
-- **THEN** the manager responds 403
+Signal endpoints SHALL authenticate with the master adapter token or a per-`SignalAdapter` derived token (distinct derivation context from channel adapters, so same-named adapters on the two surfaces never share a token), scoped to that adapter's NAME. Listing SHALL be requested as `GET /signal/sources?adapter=<name>` — the parameter names the adapter, matching `SignalSource.spec.adapter`, and the retired `?type=` SHALL fail with 400 naming the replacement instead of returning an empty list. A token scoped to one adapter SHALL receive 403 when addressing another adapter's sources.
 
 #### Scenario: Cross-surface token refused
 - **WHEN** a ChannelAdapter's derived token calls any `/signal/*` endpoint
@@ -54,3 +50,11 @@ All `/signal/*` endpoints SHALL require a bearer token: the master token (env-pr
 #### Scenario: Validation survives manager restart
 - **WHEN** the manager restarts and an adapter re-uses its previously issued token
 - **THEN** the token validates by re-derivation with no stored state
+
+#### Scenario: Own sources listed, others refused
+- **WHEN** an adapter authenticates with its derived token and requests `/signal/sources?adapter=<its own name>`
+- **THEN** the request succeeds, while the same token addressing another adapter's name is refused with 403
+
+#### Scenario: Retired parameter fails loudly
+- **WHEN** an adapter built against the old contract requests `/signal/sources?type=cron`
+- **THEN** the manager responds 400 naming `adapter` as the expected parameter

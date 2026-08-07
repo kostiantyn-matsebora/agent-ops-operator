@@ -22,11 +22,11 @@ A Helm subchart at `chart/charts/vm-bundle/` SHALL package the VictoriaMetrics e
 - **THEN** only the enabled MCPConfig CRs render, with no adapter or Service
 
 ### Requirement: The alertmanager component packages the adapter with its webhook Service
-When active, the `alertmanager` component SHALL render: the `SignalAdapter` CR (`type: vmAlertmanagerWebhook`, values-configured image, singleton); a `Service` named `agentops-signal-<name>` selecting the reconciler's deterministic pod label `agentops.dev/signal-adapter: <name>` with a values-configured port and numeric `targetPort`; and an optional default `SignalSource` **plus the `Pipeline` claiming it** (wiring is pipeline-only), gated on `defaultSource.enabled` plus a configured, non-empty `defaultSource.profileRef` rendered onto the Pipeline (the bundle ships no profile — the reference targets an operator-owned profile; `defaultSource.channels` optionally binds mirroring channels). No `SignalAdapterSpec` schema changes and no reconciler changes SHALL be required; the pod-label selector contract SHALL be pinned by an integration-test assertion.
+When active, the `alertmanager` component SHALL render the `SignalAdapter` CR only (values-configured image, `port: 8080`, singleton) — **the Service and `LISTEN_ADDR` are appliance owned by the SignalAdapter reconciler via `spec.port`; the chart ships no connectivity** — plus the optional default `SignalSource` and the `Pipeline` claiming it (gated on `defaultSource.enabled` with a strictly required `defaultSource.profileRef`). The default SignalSource's `spec.adapter` SHALL render from the adapter's name value, so configuration can never drift from the implementation it targets. The pod-label selector contract remains pinned by an integration-test assertion.
 
 #### Scenario: One flag exposes a working webhook URL
 - **WHEN** the chart is installed with `vm-bundle.enabled=true` and a served source exists
-- **THEN** `http://agentops-signal-<name>.<ns>.svc:<port>/webhook/<source>` accepts Alertmanager webhooks without building images or applying extra manifests
+- **THEN** `http://agentops-signal-<name>.<ns>.svc:8080/webhook/<source>` accepts Alertmanager webhooks — the Service comes from the reconciler, not the chart
 
 #### Scenario: Default source requires an explicit profile
 - **WHEN** `alertmanager.defaultSource.enabled=true` and `defaultSource.profileRef` is empty
@@ -36,8 +36,12 @@ When active, the `alertmanager` component SHALL render: the `SignalAdapter` CR (
 - **WHEN** the default source renders with a profileRef
 - **THEN** a Pipeline claiming the SignalSource renders alongside it, so the source shows `Wired=True` and its signals route to the configured profile (and channels, when set)
 
+#### Scenario: Source type follows the adapter name
+- **WHEN** the bundle renders with `alertmanager.name: vm-alertmanager` and the default source enabled
+- **THEN** the SignalSource carries `spec.adapter: vm-alertmanager` and the adapter serves it
+
 ### Requirement: MCP components ship vmlogs and vmmetrics as referencable MCPConfig CRs
-When active, the `mcp.vmlogs` and `mcp.vmmetrics` components SHALL each render an `MCPConfig` CR (default names `vm-logs` / `vm-metrics`, values-overridable) whose single server entry uses the FIXED server key `victorialogs` / `victoriametrics` respectively (the key is the `mcp__<key>__*` tool namespace in profile allowlists and SHALL NOT be values-configurable), `type: sse`, a values-configured URL, and values-passthrough `headers` supporting `valueFrom` secret references for authenticated endpoints (the manager reads no Secrets). An enabled MCP component with an empty URL SHALL fail rendering with a message naming the required value. Wiring the MCPConfigs into a profile (via `mcp.configRefs` and `allowedTools`) is the operator's step and SHALL be documented with a complete example, including using the same profile as `defaultSource.profileRef` so the alert-handling agent can query logs and metrics.
+When active, the `mcp.vmlogs` and `mcp.vmmetrics` components SHALL each render an `MCPConfig` CR (default names `vm-logs` / `vm-metrics`, values-overridable) whose single server entry uses the FIXED server key `victorialogs` / `victoriametrics` respectively (the key is the `mcp__<key>__*` tool namespace in profile allowlists and SHALL NOT be values-configurable), `adapter: sse`, a values-configured URL, and values-passthrough `headers` supporting `valueFrom` secret references for authenticated endpoints (the manager reads no Secrets). An enabled MCP component with an empty URL SHALL fail rendering with a message naming the required value. Wiring the MCPConfigs into a profile (via `mcp.configRefs` and `allowedTools`) is the operator's step and SHALL be documented with a complete example, including using the same profile as `defaultSource.profileRef` so the alert-handling agent can query logs and metrics.
 
 #### Scenario: MCPConfigs render for profiles to reference
 - **WHEN** the bundle is enabled with `mcp.vmlogs.url` and `mcp.vmmetrics.url` set and an AgentProfile lists both CRs in `mcp.configRefs` with the matching `mcp__victorialogs__*`/`mcp__victoriametrics__*` allowlist entries
@@ -76,3 +80,32 @@ The bundle SHALL NOT render an AgentProfile (user decision 2026-08-07, reverting
 #### Scenario: Default source always requires an explicit profile
 - **WHEN** `defaultSource.enabled=true` with an empty `profileRef`
 - **THEN** rendering fails naming the value — there is no bundled profile to fall back to
+
+### Requirement: The registration component wires the in-cluster VMAlertmanager declaratively
+When `alertmanager.registration.enabled=true` (default false) with a
+required `registration.vmalertmanager: {name, namespace}`, the bundle SHALL:
+set `kubernetesAccess: true` on the rendered SignalAdapter; render a Role
+scoped to `vmalertmanagerconfigs.operator.victoriametrics.com`
+(get/list/create/update/patch) plus a RoleBinding for the adapter's
+deterministic ServiceAccount (`agentops-signal-<name>`) into the
+VMAlertmanager's namespace; and put the `register` block (target plus the
+optional routing knobs `matchers`, `groupWait`, `groupInterval`,
+`repeatInterval`, `maxAlerts`, `sendResolved`) into the default source's opaque config — so one
+flag yields an end-to-end path where the sender is configured by the
+adapter, with no manual alertmanager edits. Rendering SHALL fail loudly when
+`registration.enabled` is set without the target reference. Install notes
+SHALL state whether registration is automatic or print the manual webhook
+URL. The documentation SHALL note the vm-operator namespace-matcher caveat
+(`VMAlertmanager.spec.disableNamespaceMatcher` for cluster-wide routing).
+
+#### Scenario: One flag wires the sender
+- **WHEN** the bundle renders with `registration.enabled=true` and a valid `vmalertmanager` reference alongside the default source
+- **THEN** the SignalAdapter carries `kubernetesAccess: true`, the Role+RoleBinding land in the target namespace bound to `agentops-signal-<adapter>`, and the SignalSource config carries the `register` block
+
+#### Scenario: Registration without a target fails at render time
+- **WHEN** `registration.enabled=true` but `registration.vmalertmanager` is empty
+- **THEN** rendering fails naming the missing value
+
+#### Scenario: Disabled registration changes nothing
+- **WHEN** the bundle renders with registration disabled
+- **THEN** no RBAC objects render, `kubernetesAccess` is unset, and the source config carries no `register` block
