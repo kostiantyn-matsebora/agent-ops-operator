@@ -101,6 +101,18 @@ spec:
       matchers:
 {{ toYaml . | indent 8 }}
       {{- end }}
+      {{- with $reg.groupWait }}
+      groupWait: {{ . | quote }}
+      {{- end }}
+      {{- with $reg.groupInterval }}
+      groupInterval: {{ . | quote }}
+      {{- end }}
+      {{- with $reg.repeatInterval }}
+      repeatInterval: {{ . | quote }}
+      {{- end }}
+      {{- if gt (int $reg.maxAlerts) 0 }}
+      maxAlerts: {{ int $reg.maxAlerts }}
+      {{- end }}
       sendResolved: {{ $reg.sendResolved }}
   {{- end }}
 ---

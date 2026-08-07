@@ -18,6 +18,11 @@
 - [x] 4.1 vm-bundle `alertmanager.registration` block: `kubernetesAccess` on the adapter, Role+RoleBinding in the target namespace, `register` in defaultSource config, render-fail without target, NOTES.txt; parent chart 1.8.0 / manager 0.10.0; README (registration + namespace-matcher caveat) + CLAUDE.md invariant refinement
 - [x] 4.2 Build + push manager 0.10.0 and signal-vmalertmanager 0.3.0; commit
 
-## 5. Live (gitops)
+## 5. Source-owned routing (replaces hand-written receivers)
 
-- [x] 5.1 Deploy: CRDs, helm upgrade 1.8.0 with registration enabled (delete `vm-alerts` source first — immutable type change from the pending 0.9.0 cutover rides along); verify self-registration → VMAlertmanagerConfig exists → alerts flow via adapter; then retire old built-in source, its pipeline claim, and hand the user the one-line removal of the stale receiver from the vmks-owned config secret
+- [x] 5.0 `register` carries the whole routing decision (`matchers`, `groupWait`, `groupInterval`, `repeatInterval`, `maxAlerts`, `sendResolved`), unset knobs omitted; chart values + template pass them through; adapter 0.4.0 / chart 1.9.0 built + pushed
+
+## 6. Live (gitops)
+
+- [x] 6.1 Deploy: CRDs, helm upgrade with registration enabled (delete `vm-alerts` source first — immutable type change from the 0.9.0 cutover rides along); verify self-registration → VMAlertmanagerConfig exists → alerts flow via adapter; retire the old built-in source and its pipeline claim
+- [x] 6.2 Hand routing to the source: `disableNamespaceMatcher: true` on the VMAlertmanager, source `register` carries the old receiver's matchers/timings, then DELETE the hand-written `claude-runner` receiver + route and add `continue: true` to the preceding `telegram` route (it matches the same alerts and would otherwise terminate matching before the appended source-owned route)

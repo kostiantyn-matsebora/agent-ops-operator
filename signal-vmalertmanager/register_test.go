@@ -65,10 +65,48 @@ func (f *fakeAPI) client(t *testing.T) *kubeClient {
 }
 
 func testRegisterSpec() *registerSpec {
-	reg := &registerSpec{Matchers: []string{`severity=~"critical"`}}
+	reg := &registerSpec{
+		Matchers:       []string{`severity=~"critical"`},
+		GroupWait:      "1m",
+		RepeatInterval: "12h",
+		MaxAlerts:      10,
+	}
 	reg.VMAlertmanager.Name = "vmks"
 	reg.VMAlertmanager.Namespace = "monitoring"
 	return reg
+}
+
+// A source's register block must be able to express everything a hand-written
+// receiver + route did, or it cannot replace one.
+func TestDesiredVMACCarriesRouteTuning(t *testing.T) {
+	obj := desiredVMAC("vm-alerts", "monitoring", "http://svc/webhook/vm-alerts", testRegisterSpec())
+	spec := obj["spec"].(map[string]any)
+	route := spec["route"].(map[string]any)
+	if route["group_wait"] != "1m" || route["repeat_interval"] != "12h" {
+		t.Fatalf("route timing not carried: %+v", route)
+	}
+	if route["continue"] != true {
+		t.Fatalf("route must not divert alerts from existing receivers: %+v", route)
+	}
+	webhook := spec["receivers"].([]any)[0].(map[string]any)["webhook_configs"].([]any)[0].(map[string]any)
+	if webhook["max_alerts"] != 10 {
+		t.Fatalf("max_alerts not carried: %+v", webhook)
+	}
+
+	// omitted knobs stay absent rather than rendering zero values
+	bare := &registerSpec{}
+	bare.VMAlertmanager.Name, bare.VMAlertmanager.Namespace = "vmks", "monitoring"
+	spec = desiredVMAC("s", "monitoring", "http://svc/webhook/s", bare)["spec"].(map[string]any)
+	route = spec["route"].(map[string]any)
+	for _, k := range []string{"group_wait", "group_interval", "repeat_interval", "matchers"} {
+		if _, present := route[k]; present {
+			t.Fatalf("unset %s must be omitted: %+v", k, route)
+		}
+	}
+	webhook = spec["receivers"].([]any)[0].(map[string]any)["webhook_configs"].([]any)[0].(map[string]any)
+	if _, present := webhook["max_alerts"]; present {
+		t.Fatalf("unset max_alerts must be omitted: %+v", webhook)
+	}
 }
 
 func TestParseRegister(t *testing.T) {
