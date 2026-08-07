@@ -49,6 +49,10 @@ spec:
             description: |-
               ChannelSpec configures one chat surface: type-agnostic metadata plus an
               opaque per-type config that only the channel implementation interprets.
+
+              A Channel describes WHERE output goes, never HOW it is sent: delivery is the
+              operator's job (it hands agent output to the serving adapter), so no agent
+              ever learns a transport and no runtime holds a surface's credentials.
             properties:
               config:
                 description: |-
@@ -58,6 +62,9 @@ spec:
                 x-kubernetes-preserve-unknown-fields: true
               credentialsSecretRef:
                 description: |-
+                  NOTE: the channel carries NO wiring — bare messages are answered by the
+                  profile of the oldest Ready Pipeline referencing this channel; channels
+                  in no pipeline answer bare messages with guidance only.
                   CredentialsSecretRef names the Secret holding this surface's transport
                   credentials (e.g. a bot token) — credentials are per-surface usage, never
                   per-implementation. The operator only writes the NAME into the serving
@@ -75,26 +82,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              delivery:
-                description: |-
-                  NOTE: the channel carries NO wiring — bare messages are answered by the
-                  profile of the oldest Ready Pipeline referencing this channel; channels
-                  in no pipeline answer bare messages with guidance only.
-                properties:
-                  agentInstructions:
-                    description: |-
-                      AgentInstructions is injected verbatim as the prompt's delivery section
-                      when Mode is "agent" (e.g. Bot API curl steps).
-                    type: string
-                  mode:
-                    default: result
-                    description: DeliveryMode selects how agent replies reach the
-                      channel.
-                    enum:
-                    - result
-                    - agent
-                    type: string
-                type: object
               type:
                 description: |-
                   Type names the channel implementation serving this channel (e.g.

@@ -31,27 +31,11 @@ func withFormat(tpl string) string {
 	return tpl + "\n\n---\n\n" + formatSpec
 }
 
-// Delivery tells the agent how its answer reaches the user; derived from the
-// conversation's Channel metadata (spec.delivery), never from channel-type
-// knowledge compiled into the operator.
-type Delivery struct {
-	// Mode "agent" injects AgentInstructions verbatim; anything else (incl.
-	// chat-less conversations) uses the default printed-answer wording.
-	Mode              string
-	AgentInstructions string
-}
-
-// resultDelivery is the default delivery section: the printed answer is the
-// deliverable, captured via POST /work/done.
-const resultDelivery = "Your final printed answer IS the deliverable — it is captured by the runtime's completion report and shown to the user by the channel (it also lands in the Conversation status and pod logs). Do not attempt to send chat messages yourself."
-
-// Instructions renders the delivery section injected into prompts.
-func (d Delivery) Instructions() string {
-	if d.Mode == "agent" && d.AgentInstructions != "" {
-		return d.AgentInstructions
-	}
-	return resultDelivery
-}
+// deliverySection is the delivery wording injected into every prompt. It is a
+// constant on purpose: agents produce output, the operator routes it to the
+// bound channels through their adapters. An agent never sends chat messages
+// itself, so it never needs transport knowledge or channel credentials.
+const deliverySection = "Your final printed answer IS the deliverable — it is captured by the runtime's completion report and delivered to every bound channel by the operator (it also lands in the Conversation status and pod logs). Do not attempt to send chat messages yourself."
 
 // WorkUnit is what a worker receives from GET /work.
 type WorkUnit struct {
@@ -69,9 +53,9 @@ type WorkUnit struct {
 // PayloadResolver returns the payload for an input (inline or via ConversationInput).
 type PayloadResolver func(item agentopsv1alpha1.InputItem) (string, error)
 
-// singleThread returns the thread id handed to the runtime: only
-// single-channel conversations expose one (agent-direct delivery needs it);
-// multi-channel conversations are manager-distributed and get none.
+// singleThread returns the thread id handed to the runtime as context: only
+// single-channel conversations expose one, since a mirrored conversation has
+// no single thread. The runtime never posts to it — the operator delivers.
 func singleThread(c *agentopsv1alpha1.Conversation) *string {
 	if len(c.Spec.ChannelRefs) == 1 {
 		return c.ThreadFor(c.Spec.ChannelRefs[0].Name)
@@ -110,7 +94,7 @@ func PendingInputs(c *agentopsv1alpha1.Conversation) []agentopsv1alpha1.InputIte
 // Next resolves the next work unit. Returns the unit and the consumed input
 // ids, or ok=false when there is nothing to dispatch (inflight or empty).
 func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile,
-	resolve PayloadResolver, delivery Delivery, now time.Time) (WorkUnit, []string, bool, error) {
+	resolve PayloadResolver, now time.Time) (WorkUnit, []string, bool, error) {
 
 	if c.Status.Inflight != nil {
 		return WorkUnit{}, nil, false, nil
@@ -132,7 +116,6 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 	if first.Agent != "" {
 		agentName = first.Agent
 	}
-	deliverySection := delivery.Instructions()
 
 	switch first.Type {
 	case agentopsv1alpha1.InputTask, agentopsv1alpha1.InputJob:

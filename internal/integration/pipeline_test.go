@@ -104,15 +104,7 @@ func TestPipelineValidationAndConflicts(t *testing.T) {
 func TestMultiChannelConversationMirroring(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-mc")
-	// channel A carries agent-direct delivery instructions — they must NOT
-	// reach multi-channel prompts (forced result mode)
-	chA := &agentopsv1alpha1.Channel{}
-	chA.Name, chA.Namespace = "mc-a", ns
-	chA.Spec.Type = "mc-ta"
-	chA.Spec.Delivery = &agentopsv1alpha1.DeliverySpec{Mode: agentopsv1alpha1.DeliveryAgent, AgentInstructions: "CURL-THE-BOT-API-SECRET-STEPS"}
-	if err := k8sClient.Create(ctx, chA); err != nil {
-		t.Fatal(err)
-	}
+	mkChannel(t, "mc-a", "mc-ta")
 	mkChannel(t, "mc-b", "mc-tb")
 	mkPipeline(t, "mc-pipe", nil, []string{"mc-a", "mc-b"}, "prof-mc")
 	reconcilePipeline(t, "mc-pipe")
@@ -175,15 +167,15 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 		PromptText string  `json:"promptText"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &unit)
-	// multi-channel: no runtime thread id, forced result delivery
+	// multi-channel: no runtime thread id; delivery is the operator's job
 	if unit.ThreadID != nil {
 		t.Fatalf("multi-channel unit must carry no thread id: %v", *unit.ThreadID)
 	}
-	if strings.Contains(unit.PromptText, "CURL-THE-BOT-API-SECRET-STEPS") {
-		t.Fatal("agent-direct instructions leaked into a multi-channel prompt")
-	}
 	if !strings.Contains(unit.PromptText, "printed answer IS the deliverable") {
 		t.Fatalf("result delivery wording missing: %.200s", unit.PromptText)
+	}
+	if !strings.Contains(unit.PromptText, "Do not attempt to send chat messages yourself") {
+		t.Fatalf("prompt must forbid agent-side posting: %.200s", unit.PromptText)
 	}
 
 	// channel B's topic lands late — binding still recorded
@@ -322,5 +314,80 @@ func TestBrokenChannelNeverDeadlocks(t *testing.T) {
 	if rec := adapterReq(srv, "POST", "/work/done",
 		map[string]any{"convo": "bk-conv", "runId": unit.RunID, "status": "succeeded", "result": "done"}, ""); rec.Code != 200 {
 		t.Fatalf("work done: %d", rec.Code)
+	}
+}
+
+// Delivery belongs to the operator for EVERY conversation, not just mirrored
+// ones. Before this, a single-channel conversation posted nothing on its own —
+// it relied on the agent curling the transport itself (Channel.delivery
+// mode:agent), which meant the agent knew the transport and the runtime held
+// the channel's credentials.
+func TestSingleChannelResultIsDeliveredByTheOperator(t *testing.T) {
+	ctx := context.Background()
+	mkProfile(t, "prof-sc")
+	mkChannel(t, "sc-chan", "sc-tg")
+	mkPipeline(t, "sc-pipe", nil, []string{"sc-chan"}, "prof-sc")
+	reconcilePipeline(t, "sc-pipe")
+	srv := apiServer()
+
+	rec := adapterReq(srv, "POST", "/channel/inbound",
+		map[string]any{"channel": "sc-chan", "text": "/prof-sc single surface"}, "test-adapter-token")
+	if rec.Code != 202 {
+		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
+	}
+	var list agentopsv1alpha1.ConversationList
+	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
+	var conv *agentopsv1alpha1.Conversation
+	for i := range list.Items {
+		if list.Items[i].BoundTo("sc-chan") {
+			conv = &list.Items[i]
+		}
+	}
+	if conv == nil {
+		t.Fatal("conversation not created")
+	}
+	t.Cleanup(func() { cleanupConversation(t, conv.Name) })
+
+	// reconcile enqueues the ensure-topic op; the adapter reports the thread
+	rc := reconcilerWithOps(srv.Ops)
+	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: conv.Name}}); err != nil {
+		t.Fatal(err)
+	}
+	rec = adapterReq(srv, "GET", "/channel/ops?type=sc-tg&wait=0", nil, "test-adapter-token")
+	var op chat.Op
+	_ = json.Unmarshal(rec.Body.Bytes(), &op)
+	if op.Kind != chat.OpEnsureTopic {
+		t.Fatalf("expected ensure-topic: %+v", op)
+	}
+	if rec := adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", op.ID),
+		map[string]any{"threadId": "555"}, "test-adapter-token"); rec.Code != 200 {
+		t.Fatalf("topic done: %d", rec.Code)
+	}
+
+	rec = adapterReq(srv, "GET", "/work?convo="+conv.Name+"&pod=p-sc&wait=0", nil, "")
+	if rec.Code != 200 {
+		t.Fatalf("dispatch: %d %s", rec.Code, rec.Body.String())
+	}
+	var unit struct {
+		RunID      string `json:"runId"`
+		PromptText string `json:"promptText"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &unit)
+	if !strings.Contains(unit.PromptText, "Do not attempt to send chat messages yourself") {
+		t.Fatalf("single-channel prompt must forbid agent-side posting: %.200s", unit.PromptText)
+	}
+
+	rec = adapterReq(srv, "POST", "/work/done",
+		map[string]any{"convo": conv.Name, "runId": unit.RunID, "status": "succeeded", "result": "the single answer"}, "")
+	if rec.Code != 200 {
+		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = adapterReq(srv, "GET", "/channel/ops?type=sc-tg&wait=0", nil, "test-adapter-token")
+	if rec.Code != 200 {
+		t.Fatalf("operator must post the result itself: %d", rec.Code)
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &op)
+	if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != "555" || !strings.Contains(op.Text, "the single answer") {
+		t.Fatalf("result send op: %+v", op)
 	}
 }

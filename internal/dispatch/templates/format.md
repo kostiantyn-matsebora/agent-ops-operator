@@ -6,7 +6,7 @@ nearest one and keep its section order.
 
 ## Global rules
 
-- Chat **HTML** subset only: `<b>`, `<i>`, `<code>`, `<pre>`, `<a href>`. No markdown (`**`, `#`, backticks). (Plain text when your delivery instructions say the printed answer is the deliverable.)
+- Chat **HTML** subset only: `<b>`, `<i>`, `<code>`, `<pre>`, `<a href>`. No markdown (`**`, `#`, backticks). Your printed answer is posted to chat verbatim by the operator, so write it as the chat message.
 - Total ≤ 3800 chars. A good report fits in ~1200.
 - **First line = status line**: emoji + bold subject. The reader must understand the state from line 1 alone.
 - Section labels in `<b>bold</b>`, blank line between sections. Bullets use `•`, one line each.
