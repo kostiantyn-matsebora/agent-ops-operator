@@ -20,8 +20,11 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .spec.profileRef.name
-      name: Profile
+    - jsonPath: .status.conditions[?(@.type=="Wired")].status
+      name: Wired
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Served")].status
+      name: Served
       type: string
     - jsonPath: .status.receivedTotal
       name: Received

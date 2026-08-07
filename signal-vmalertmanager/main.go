@@ -135,7 +135,10 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		done := a.reported[info.Name]
 		a.mu.Unlock()
 		if !done {
-			if err := a.mgr.ReportStatus(ctx, info.Name, true, "AdapterReady", "served by signal-vmalertmanager"); err == nil {
+			// name the webhook path so `kubectl get signalsource -o yaml`
+			// tells the operator exactly what to target
+			msg := fmt.Sprintf("served by signal-vmalertmanager — POST <service>/webhook/%s", info.Name)
+			if err := a.mgr.ReportStatus(ctx, info.Name, true, "AdapterReady", msg); err == nil {
 				a.mu.Lock()
 				a.reported[info.Name] = true
 				a.mu.Unlock()

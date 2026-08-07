@@ -36,26 +36,19 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// no built-in signal types: every type needs a serving adapter
 	cond := metav1.Condition{Type: ConditionServed, Status: metav1.ConditionFalse, Reason: "NoServingImplementation",
-		Message: fmt.Sprintf("no built-in implementation or Ready SignalAdapter serves type %q (hand-deployed adapters report per-source readiness on the Ready condition)", src.Spec.Type)}
-
-	switch {
-	case src.Spec.Type == agentopsv1alpha1.SourceAlertmanager:
+		Message: fmt.Sprintf("no Ready SignalAdapter serves type %q (hand-deployed adapters report per-source readiness on the Ready condition)", src.Spec.Type)}
+	if name, ready := r.readyAdapter(ctx, &src); ready {
 		cond.Status = metav1.ConditionTrue
-		cond.Reason = "InProcessProvider"
-		cond.Message = fmt.Sprintf("type %q is served in-process by the manager's webhook endpoint", src.Spec.Type)
-	default:
-		if name, ready := r.readyAdapter(ctx, &src); ready {
-			cond.Status = metav1.ConditionTrue
-			cond.Reason = "AdapterReady"
-			cond.Message = fmt.Sprintf("served by SignalAdapter %q", name)
-		} else if c := apimeta.FindStatusCondition(src.Status.Conditions, "Ready"); c != nil && c.Status == metav1.ConditionTrue {
-			// a hand-deployed adapter (no CR) proved itself via the status
-			// contract — don't contradict it
-			cond.Status = metav1.ConditionTrue
-			cond.Reason = "AdapterReported"
-			cond.Message = "an adapter reported this source Ready through the contract"
-		}
+		cond.Reason = "AdapterReady"
+		cond.Message = fmt.Sprintf("served by SignalAdapter %q", name)
+	} else if c := apimeta.FindStatusCondition(src.Status.Conditions, "Ready"); c != nil && c.Status == metav1.ConditionTrue {
+		// a hand-deployed adapter (no CR) proved itself via the status
+		// contract — don't contradict it
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = "AdapterReported"
+		cond.Message = "an adapter reported this source Ready through the contract"
 	}
 
 	// Wired: pipeline-only wiring — a source routes signals only while a Ready

@@ -6,16 +6,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// SourceAlertmanager is the built-in, in-process signal type (the manager
-// hosts its webhook endpoint). Every other type is served by an external
-// signal adapter via the /signal/* contract.
-const SourceAlertmanager = "alertmanagerWebhook"
-
-// SourceVMAlertmanager is the adapter-served webhook signal type
-// (signal-vmalertmanager/): the adapter hosts its own endpoint accepting the
+// SourceVMAlertmanager is the webhook signal type served by
+// signal-vmalertmanager/: the adapter hosts its own endpoint accepting the
 // standard Alertmanager webhook format (VMAlertmanager and any compatible
-// sender). The built-in SourceAlertmanager stays untouched — migration
-// between the two is per-source.
+// sender). The manager hosts NO signal transports of its own — every signal
+// type is adapter-served via the /signal/* contract.
 const SourceVMAlertmanager = "vmAlertmanagerWebhook"
 
 // GroupingSpec controls signature-based conversation grouping and dedupe.
@@ -78,7 +73,8 @@ type SignalSourceStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=sigsrc
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
-// +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profileRef.name`
+// +kubebuilder:printcolumn:name="Wired",type=string,JSONPath=`.status.conditions[?(@.type=="Wired")].status`
+// +kubebuilder:printcolumn:name="Served",type=string,JSONPath=`.status.conditions[?(@.type=="Served")].status`
 // +kubebuilder:printcolumn:name="Received",type=integer,JSONPath=`.status.receivedTotal`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

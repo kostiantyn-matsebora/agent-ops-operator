@@ -1,0 +1,17 @@
+agent-ops-operator {{ .Chart.Version }} deployed (manager {{ .Values.image.tag }}).
+
+Quick check:   kubectl -n {{ .Release.Namespace }} get pipelines,signalsources,channels,channeladapters,signaladapters
+Ask an agent:  POST http://agentops-manager.{{ .Release.Namespace }}.svc:{{ .Values.service.apiPort }}/task  {"profile":"<profile>","task":"..."}
+
+Remember: wiring lives ONLY on Pipelines — a SignalSource without a Ready
+Pipeline claim drops its signals (Wired=False).
+{{- $vb := index .Values "vm-bundle" }}
+{{- if and $vb $vb.enabled $vb.alertmanager.enabled }}
+
+VictoriaMetrics bundle — point your Alertmanager-compatible sender at:
+{{- if $vb.alertmanager.defaultSource.enabled }}
+  http://agentops-signal-{{ $vb.alertmanager.name }}.{{ .Release.Namespace }}.svc:{{ $vb.alertmanager.service.port }}/webhook/{{ $vb.alertmanager.defaultSource.name }}
+{{- else }}
+  http://agentops-signal-{{ $vb.alertmanager.name }}.{{ .Release.Namespace }}.svc:{{ $vb.alertmanager.service.port }}/webhook/<your-signalsource-name>
+{{- end }}
+{{- end }}

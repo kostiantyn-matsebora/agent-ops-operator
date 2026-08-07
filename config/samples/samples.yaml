@@ -104,22 +104,6 @@ spec:
   #     parse_mode=HTML, message_thread_id=$TG_THREAD_ID unless empty).
   #     Without credentials, your final printed answer IS the deliverable.
 ---
-# Built-in signal type: the manager itself hosts the Alertmanager webhook.
-# NO wiring here — which profile answers and which channels mirror comes from
-# the Pipeline claiming this source (home-ops-pipeline below); unclaimed
-# sources drop signals with Wired=False.
-apiVersion: agentops.dev/v1alpha1
-kind: SignalSource
-metadata:
-  name: alertmanager
-  namespace: agent-ops
-spec:
-  type: alertmanagerWebhook
-  grouping:
-    signatureLabels: ["alertgroup", "alertname", "namespace"]
-    windowDays: 7
-    cooldownHours: 6
----
 # Pipeline: the wiring object — every referenced source's signals become
 # conversations bound to ALL referenced channels (each channel mirrors the
 # whole conversation: threads everywhere, replies fanned out by the manager,
@@ -132,7 +116,6 @@ metadata:
   namespace: agent-ops
 spec:
   signalSourceRefs:
-    - name: alertmanager
     - name: daily-healthcheck
   channelRefs:
     - name: home-ops
