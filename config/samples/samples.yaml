@@ -30,6 +30,25 @@ spec:
     - "mcp__victorialogs__*"
     - "mcp__victoriametrics__*"
 ---
+# Built-in tools are toolsets too — the chart ships these three (see
+# global.builtinToolsets), split by risk so a route can observe without
+# executing. Shown here because a hand-rolled install may want its own split.
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: agentops-observe
+  namespace: agent-ops
+spec:
+  tools: [Read, Grep, Glob]
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: agentops-shell
+  namespace: agent-ops
+spec:
+  tools: [Bash]
+---
 apiVersion: agentops.dev/v1alpha1
 kind: AgentProfile
 metadata:
@@ -223,6 +242,63 @@ spec:
     mode: merge          # profile allowlist ∪ the toolset's tools
     refs:
       - name: vm-observability
+---
+# Cluster Events as a signal lane. The k8s-bundle subchart renders this trio
+# (adapter + source + pipeline) for you; shown here for a hand-rolled setup.
+# The adapter watches core v1 Events with its OWN ServiceAccount token —
+# kubernetesAccess mounts it, and the operator grants nothing, so the events
+# get/list/watch Role must be bound to agentops-signal-k8s-events out of band.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: k8s-events
+  namespace: agent-ops
+spec:
+  image: kmatsebora/agentops-signal-k8s-events:0.1.0
+  kubernetesAccess: true
+---
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: cluster-events
+  namespace: agent-ops
+spec:
+  adapter: k8s-events
+  # group by the failing OBJECT, so one crash-looping pod is one conversation
+  # however many times it repeats
+  grouping:
+    signatureLabels: ["namespace", "kind", "name"]
+  config:
+    # Normal events are the cluster's background hum — watching them would bury
+    # real problems and burn LLM credits.
+    severities: ["Warning"]
+    namespaces: []            # empty = every namespace the RBAC allows
+    excludeReasons: ["Unhealthy"]
+---
+# Without this Pipeline the source above is inert: wiring is pipeline-only, so
+# an unclaimed source reports Wired=False and DROPS every event.
+#
+# This route also demonstrates withholding shell: `overwrite` replaces the
+# profile's allowlist entirely, so conversations from cluster events can observe
+# but not run Bash — while the same ha-engineer profile keeps shell everywhere
+# else. Nothing about the profile changes; only this stanza. Use `merge` (the
+# default) to extend instead of replace.
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: cluster-events
+  namespace: agent-ops
+spec:
+  signalSourceRefs:
+    - name: cluster-events
+  channelRefs:
+    - name: home-ops
+  profileRef:
+    name: ha-engineer
+  toolsets:
+    mode: overwrite
+    refs:
+      - name: agentops-observe
 ---
 # Adapter-served signal source: opaque config interpreted only by signal-cron.
 # The grouping window makes consecutive runs land in ONE conversation, later

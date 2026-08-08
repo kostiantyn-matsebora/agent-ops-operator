@@ -39,7 +39,7 @@ approvable from your phone.
 | `SignalAdapter` | **A signal implementation, nothing more**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR whose **name is the type key** SignalSources select via `spec.adapter`, with the same posture (owned workload, zero-RBAC SA, singleton, derived name-scoped token, credential projection). Webhook-receiving implementations declare `spec.port` and the reconciler also owns a Service `agentops-signal-<name>` + injects `LISTEN_ADDR` — enabling the adapter is a complete appliance. A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
 | `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus optional **tool access** (`toolsets` / `mcpConfigs`, see [below](#tool-access-is-wiring)). Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed, channels get their default profile from their oldest Ready pipeline (`/profile` commands work everywhere regardless). One pipeline per source (older claimant wins); channels are shareable. |
 | `MCPConfig` | Reusable MCP server sets, shareable across profiles and bindable per wiring; secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
-| `MCPToolset` | A named, reusable **list of tool patterns** (`spec.tools`) — MCP namespaces like `mcp__victorialogs__*` or built-in tool names like `Bash`. It defines no servers (that stays `MCPConfig`'s job) and has no status: the patterns are opaque strings passed to the runtime. Pipelines bind it to grant a route its tools. |
+| `MCPToolset` | A named, reusable **list of tool patterns** (`spec.tools`) — MCP namespaces like `mcp__victorialogs__*` or built-in tool names like `Bash`. It defines no servers (that stays `MCPConfig`'s job) and has no status: the patterns are opaque strings passed to the runtime. Pipelines bind it to grant a route its tools; the chart ships the built-in vocabulary as three risk-split toolsets. |
 
 ## Behaviors that matter
 
@@ -86,6 +86,24 @@ while merging servers.
 | `toolsets` → allowlist | profile's `allowedTools` ∪ each toolset's `tools`, deduped, first occurrence keeps its position | the toolsets' tools alone — the profile's entries are dropped, **built-ins like `Read`/`Bash` included** (name them in the toolset if you want them) |
 | `mcpConfigs` → MCP servers | profile's compiled MCP overlaid by each config's servers, per server key, later ref wins | the bound configs alone; the profile's `mcp` is ignored entirely |
 
+### Built-in tools are toolsets too
+
+The chart ships the built-in vocabulary as `MCPToolset` CRs, split by risk
+(`global.builtinToolsets`): `agentops-observe` (`Read`, `Grep`, `Glob`),
+`agentops-shell` (`Bash`), `agentops-edit` (`Edit`, `Write`). Because a toolset
+may name built-ins, a Pipeline can withhold shell from one route without
+touching the profile every other route shares:
+
+```yaml
+kind: Pipeline
+spec:
+  profileRef: {name: ha-engineer}
+  toolsets: {mode: overwrite, refs: [{name: agentops-observe}]}   # no Bash here
+```
+
+`overwrite` is the instrument here: `merge` would union the profile's own
+`allowedTools` back in, re-granting exactly what you meant to withhold.
+
 Two rules worth knowing:
 
 - **Refs are snapshotted onto the conversation at creation; content is not.**
@@ -93,8 +111,10 @@ Two rules worth knowing:
   running under it (resolution happens per work unit — no pod restart), while
   re-wiring the pipeline affects only new conversations. This is exactly how
   `profileRef`/`channelRefs` already behave. Conversations with no originating
-  pipeline (`POST /task`, `/<profile>` commands) carry no bindings and use the
-  profile's own tooling unchanged.
+  pipeline (`POST /task` without one, `/<profile>` commands) carry no bindings
+  and use the profile's own tooling unchanged.
+  `POST /task {"pipeline": "..."}` carries that pipeline's tooling bindings
+  along with its channel set: having named a pipeline, you get its wiring.
 - **A raw-form profile MCP cannot merge.** If the profile mounts a hand-written
   `mcp.json` via `configMapRef`/`secretRef`, that document is opaque to the
   operator, so `mcpConfigs: {mode: merge}` fails with a `ToolingResolved=False`
@@ -317,7 +337,7 @@ no MCP setup. One credential, one flag:
 ```sh
 kubectl -n agent-ops create secret generic agentops-claude \
   --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
-helm install agent-ops ./chart -n agent-ops --create-namespace --set demo.enabled=true
+helm install agent-ops ./chart -n agent-ops --create-namespace --set global.demo.enabled=true
 
 # ask something
 kubectl -n agent-ops run q --rm -i --image=curlimages/curl --restart=Never -- \
@@ -330,11 +350,74 @@ kubectl -n agent-ops logs -f agentops-conv-<name>       # live agent transcript
 kubectl -n agent-ops get conversation <name> -o jsonpath='{.status.runs[0].result}'
 ```
 
-The demo binds only the built-in `view` ClusterRole (+ node/namespace reads) to
-the runtime SA — a pure advisor. Everything is gated by `demo.enabled` (default
-`false`) and removable by flipping it off. Graduating to the real thing =
-adding your own `AgentProfile`s (repos, MCP, chat) and declaring agent powers
-under `rbac.runtime` values.
+Demo mode is exactly **the k8s bundle with its defaults** (below) — nothing
+demo-specific exists any more. It binds only the built-in `view` ClusterRole
+(+ node/namespace/metrics reads) to the bundle's runtime SA: a pure advisor.
+Everything is gated by `global.demo.enabled` (default `false`) and removable by
+flipping it off. Graduating to the real thing = adding your own `AgentProfile`s
+(repos, MCP, chat) and declaring agent powers under `rbac.runtime` values.
+
+> **It also watches your cluster.** Unlike the pre-2.0 demo, this now ingests
+> `Warning` events and answers them on its own, which costs LLM credits on a
+> noisy cluster. Fingerprint cooldown (6h) and signature grouping bound the
+> volume — one crash-looping pod is one conversation, not one per event. For the
+> old ask-only behavior add `--set k8s-bundle.eventsAdapter.enabled=false`.
+
+## Kubernetes bundle (subchart)
+
+`chart/charts/k8s-bundle/` packages the whole "watch my cluster and let an agent
+act on what it sees" experience as three independently toggleable components.
+Off by default; `global.demo.enabled=true` and `k8s-bundle.enabled=true` are
+equivalent ways to turn it on.
+
+| Component | Flag | What it renders |
+|---|---|---|
+| Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), the `events get/list/watch` RBAC bound to its ServiceAccount, and — under `source.create` — a `SignalSource` **plus the `Pipeline` claiming it** |
+| Profile | `profile.enabled` | The `k8s-engineer` `AgentProfile`, its runtime `ServiceAccount` (`agentops-runtime-k8s`), and an `AgentRuntime` (named `default`, so profiles without a `runtimeRef` resolve to it) |
+| RBAC | `rbac.enabled` | Bindings for that ServiceAccount — see `rbac.mode` below |
+
+Two things worth knowing:
+
+- **The source and its Pipeline always render together.** Wiring is
+  pipeline-only, so a `SignalSource` nobody claims reports `Wired=False` and
+  drops every event. Shipping the source alone would look installed and do
+  nothing.
+- **`rbac.mode: full` is cluster-admin.** It binds unrestricted cluster control
+  to an LLM-driven agent. It is never a default and never what demo mode
+  selects. `readonly` (the default) plus targeted grants under the parent
+  chart's `rbac.runtime` block is almost always the better answer.
+- **Withholding shell is per-route**: bind
+  `toolsets: {mode: overwrite, refs: [{name: agentops-observe}]}` on one
+  Pipeline and only that route loses `Bash`, while every other route sharing
+  the profile keeps it.
+
+The events adapter (`signal-k8s-events/`) watches core `v1` Events through the
+in-cluster API with its own ServiceAccount token — the operator grants adapters
+nothing, so those permissions come from this chart, bound to the deterministic
+name `agentops-signal-<adapter>`. Its `severities` default to `["Warning"]`,
+and it normalizes only: fingerprints key on the involved **object and reason**,
+so Kubernetes recreating Event objects for a recurring problem still collapses
+into one conversation.
+
+### Migrating from chart 1.x (demo values) — BREAKING
+
+The demo block moved wholesale into the bundle. A subchart can read no parent
+scope except `global.`, which is why the toggle moved there.
+
+| Chart 1.x | Chart 2.x |
+|---|---|
+| `demo.enabled` | `global.demo.enabled` |
+| `demo.runtimeImage` | `k8s-bundle.profile.runtime.image` |
+| `demo.credentialsSecret.*` | `k8s-bundle.profile.runtime.credentialsSecret.*` |
+| `demo.readOnlyRbac: true` | `k8s-bundle.rbac.mode: readonly` (the default) |
+| `demo.readOnlyRbac: false` | `k8s-bundle.rbac.enabled: false` |
+| *(inherited `persistence`)* | `k8s-bundle.profile.runtime.homePvcRef` — **set this explicitly**, subcharts cannot see the parent's `persistence` block |
+| *(inherited `runtimeIdleTtlMinutes`)* | `k8s-bundle.profile.runtime.idleTtlMinutes` |
+
+The runtime ServiceAccount is renamed `agentops-runtime-demo` →
+`agentops-runtime-k8s`; `helm upgrade` removes the old objects with the deleted
+`demo.yaml` template. The `AgentRuntime` named `default` re-renders with
+identical semantics, so existing conversations keep resolving their runtime.
 
 ## Install (current state)
 

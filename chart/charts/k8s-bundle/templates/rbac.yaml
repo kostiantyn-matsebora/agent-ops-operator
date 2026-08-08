@@ -1,0 +1,77 @@
+{{- /*
+RBAC component: what the agent may actually do. Bound to the runtime
+ServiceAccount, because that SA's permissions ARE the agent's powers.
+
+readonly (default) reproduces the pre-bundle demo grants verbatim. full means
+cluster-admin — an LLM-driven agent with unrestricted control of the cluster. It
+is never a default and never what demo mode selects; if you find yourself
+reaching for it, targeted grants through the parent chart's rbac.runtime block
+are almost always the better answer.
+*/ -}}
+{{- if and (include "k8s-bundle.active" .) .Values.rbac.enabled .Values.profile.enabled }}
+{{- $sa := include "k8s-bundle.runtimeServiceAccount" . }}
+{{- if eq .Values.rbac.mode "readonly" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-view
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+# "view" omits cluster-scoped reads and metrics; an agent asked why a node is
+# unhealthy needs both.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $sa }}-cluster-ro
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-cluster-ro
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $sa }}-cluster-ro
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+{{- else if eq .Values.rbac.mode "full" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-cluster-admin
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- fail (printf "k8s-bundle: rbac.mode must be \"readonly\" or \"full\", got %q" .Values.rbac.mode) }}
+{{- end }}
+{{- end }}

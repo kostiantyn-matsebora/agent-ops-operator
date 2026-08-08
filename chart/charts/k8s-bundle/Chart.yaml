@@ -1,0 +1,9 @@
+apiVersion: v2
+name: k8s-bundle
+description: >-
+  Kubernetes agent bundle for the agent-ops operator: the cluster Events signal
+  source (adapter + RBAC + wired source), the k8s-engineer AgentProfile with its
+  runtime and ServiceAccount, and that ServiceAccount's cluster RBAC
+  (read-only by default). Demo mode is exactly this bundle with its defaults.
+type: application
+version: 0.1.0

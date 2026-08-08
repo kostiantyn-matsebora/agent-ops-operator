@@ -18,22 +18,26 @@ A Helm subchart at `chart/charts/k8s-bundle/` SHALL package the Kubernetes agent
 - **THEN** the same components render — demo mode is an enablement path, not a distinct feature set
 
 ### Requirement: Each component is individually toggleable
-Within an active bundle, `eventsAdapter.enabled`, `profile.enabled`, and `rbac.enabled` SHALL independently control their component's objects (all default `true`). Cross-component references SHALL be values-resolvable so partial enablement works: the events SignalSource's `profileRef` defaults to the bundle's profile name but is overridable; RBAC binds the values-named runtime ServiceAccount; a render-time failure with a clear message SHALL occur when `eventsAdapter.source.create` is on but no profile name resolves.
+Within an active bundle, `eventsAdapter.enabled`, `profile.enabled`, and `rbac.enabled` SHALL independently control their component's objects (all default `true`). Cross-component references SHALL be values-resolvable so partial enablement works: the rendered Pipeline's `profileRef` defaults to the bundle's profile name but is overridable; RBAC binds the values-named runtime ServiceAccount; a render-time failure with a clear message SHALL occur when `eventsAdapter.source.create` is on but no profile name resolves.
 
 #### Scenario: Events-only bundle
 - **WHEN** the bundle is enabled with `profile.enabled=false`, `rbac.enabled=false`, and `eventsAdapter.source.profileRef` pointing at an operator-provided profile
-- **THEN** only the SignalAdapter, its RBAC, and the SignalSource render, wired to that profile
+- **THEN** only the SignalAdapter, its RBAC, the SignalSource, and the Pipeline claiming it render, wired to that profile
 
 #### Scenario: Profile-only bundle
 - **WHEN** the bundle is enabled with `eventsAdapter.enabled=false`
 - **THEN** the profile, runtime, SA, and RBAC render and the agent is usable via `/task` with no event ingestion
 
 ### Requirement: The events component packages the adapter with its access
-When active, the `eventsAdapter` component SHALL render: the `SignalAdapter` CR (`type: k8sEvents`, values-configured image, `automountServiceAccountToken: true`, singleton); RBAC granting `events` `get`/`list`/`watch` to the adapter's deterministic ServiceAccount `agentops-signal-<name>` (ClusterRole by default, namespaced Role via `rbac.clusterWide: false`, none via `rbac.create: false`); and, when `source.create` is on, a `SignalSource` (`type: k8sEvents`) referencing the bundle profile with `severities` defaulting to `["Warning"]` and values-configurable `namespaces` and `grouping`. The manager SHALL NOT create or require any RBAC verbs on roles or rolebindings.
+When active, the `eventsAdapter` component SHALL render: the `SignalAdapter` CR (default name `k8s-events` — the routing key SignalSources select with `spec.adapter` — values-configured image, `kubernetesAccess: true`, singleton); RBAC granting `events` `get`/`list`/`watch` to the adapter's deterministic ServiceAccount `agentops-signal-<name>` (ClusterRole by default, namespaced Role via `rbac.clusterWide: false`, none via `rbac.create: false`); and, when `source.create` is on, a `SignalSource` naming that adapter with `severities` defaulting to `["Warning"]` and values-configurable `namespaces` and `grouping`, TOGETHER WITH the `Pipeline` claiming it. The Pipeline is not optional: wiring is pipeline-only, so an unclaimed source drops every event with `Wired=False`. The manager SHALL NOT create or require any RBAC verbs on roles or rolebindings.
 
 #### Scenario: One values flag yields flowing events
 - **WHEN** the bundle is enabled with defaults and the LLM credential Secret exists
 - **THEN** Warning events in the cluster produce conversations executed by the k8s-engineer profile without building images or applying extra manifests
+
+#### Scenario: The rendered source is always claimed
+- **WHEN** the events component renders a SignalSource
+- **THEN** a Pipeline referencing that source renders alongside it, so signals route instead of dropping with `Wired=False`
 
 #### Scenario: Namespace-scoped events RBAC
 - **WHEN** `eventsAdapter.rbac.clusterWide=false`

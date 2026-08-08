@@ -1,0 +1,31 @@
+{{- /*
+The built-in tool vocabulary, as named CRs instead of comma strings scattered
+across profiles.
+
+Split by RISK, not bundled into one list: the whole value is that a wiring can
+take observation without execution. A single `builtin-tools` toolset would be
+the comma string with extra steps.
+
+These are opaque string lists — no controller, no status, no reconcile cost —
+so they ship by default and double as live documentation
+(`kubectl get mcptoolset`).
+*/ -}}
+{{- if .Values.global.builtinToolsets.enabled }}
+{{- $bt := .Values.global.builtinToolsets }}
+{{- range $key := (list "observe" "shell" "edit") }}
+{{- $ts := index $bt $key }}
+{{- if $ts.tools }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: {{ $ts.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-builtin-toolsets
+spec:
+  tools:
+{{ toYaml $ts.tools | indent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

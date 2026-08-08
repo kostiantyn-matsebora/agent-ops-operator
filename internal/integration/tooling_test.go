@@ -452,3 +452,51 @@ func TestRawFormProfileRefusesMergeVisibly(t *testing.T) {
 		t.Fatalf("overwrite result: %v", keys)
 	}
 }
+
+// ---- task-API binding propagation --------------------------------------------
+
+// Naming a pipeline asks for its whole wiring, not half of it.
+func TestTaskAPIPropagatesPipelineBindings(t *testing.T) {
+	ctx := context.Background()
+	mkProfile(t, "prof-taskbind")
+	mkToolset(t, "taskbind-ts", "mcp__victorialogs__*")
+	mkMCPConfig(t, "taskbind-cfg", "victorialogs", "http://vl/sse")
+	mkToolPipeline(t, "taskbind-pipe", nil, nil, "prof-taskbind",
+		bind(agentopsv1alpha1.ToolingMerge, "taskbind-ts"), bind(agentopsv1alpha1.ToolingMerge, "taskbind-cfg"))
+	reconcilePipeline(t, "taskbind-pipe")
+
+	srv := apiServer()
+	rec := adapterReq(srv, "POST", "/task",
+		map[string]any{"profile": "prof-taskbind", "task": "with wiring", "pipeline": "taskbind-pipe"}, "")
+	if rec.Code != 202 {
+		t.Fatalf("task: %d %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Conversation string `json:"conversation"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	t.Cleanup(func() { cleanupConversation(t, created.Conversation) })
+
+	var conv agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: created.Conversation}, &conv); err != nil {
+		t.Fatal(err)
+	}
+	if conv.Spec.Toolsets == nil || conv.Spec.Toolsets.Refs[0].Name != "taskbind-ts" {
+		t.Fatalf("named pipeline's toolsets must propagate: %+v", conv.Spec.Toolsets)
+	}
+	if conv.Spec.MCPConfigs == nil || conv.Spec.MCPConfigs.Refs[0].Name != "taskbind-cfg" {
+		t.Fatalf("named pipeline's mcpConfigs must propagate: %+v", conv.Spec.MCPConfigs)
+	}
+
+	// and without a pipeline, still binding-less
+	rec = adapterReq(srv, "POST", "/task", map[string]any{"profile": "prof-taskbind", "task": "no wiring"}, "")
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	t.Cleanup(func() { cleanupConversation(t, created.Conversation) })
+	var bare agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: created.Conversation}, &bare); err != nil {
+		t.Fatal(err)
+	}
+	if bare.Spec.Toolsets != nil || bare.Spec.MCPConfigs != nil {
+		t.Fatalf("no pipeline named means no bindings: %+v %+v", bare.Spec.Toolsets, bare.Spec.MCPConfigs)
+	}
+}

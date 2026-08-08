@@ -1,0 +1,159 @@
+{{- /*
+Events component: the adapter implementation, the Events permissions its
+ServiceAccount needs, and (optionally) the turnkey lane — a SignalSource AND the
+Pipeline claiming it.
+
+The source and the Pipeline are rendered together on purpose. Wiring is
+pipeline-only: a SignalSource nobody claims reports Wired=False and DROPS every
+signal, so shipping the source alone would look installed and quietly do
+nothing.
+*/ -}}
+{{- if and (include "k8s-bundle.active" .) .Values.eventsAdapter.enabled }}
+{{- $ea := .Values.eventsAdapter }}
+{{- $adapterSA := include "k8s-bundle.adapterServiceAccount" . }}
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: {{ $ea.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+spec:
+  image: {{ printf "%s:%s" $ea.image.repository (toString $ea.image.tag) | quote }}
+  # This adapter's DATA SOURCE is the Kubernetes API, so it mounts its own SA
+  # token. That grants nothing by itself — the RBAC below does, bound by this
+  # chart to the adapter's deterministic SA name.
+  kubernetesAccess: true
+  # Two watchers would post every event twice.
+  singleton: true
+  {{- with $ea.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  # Interface metadata: makes `kubectl get signaladapter` answer "what goes in
+  # spec.config?" without reading adapter source.
+  configSchema:
+    type: object
+    properties:
+      severities:
+        type: array
+        description: 'Event type values to act on (default ["Warning"]).'
+        items:
+          type: string
+          enum: ["Normal", "Warning"]
+      namespaces:
+        type: array
+        description: Namespaces to watch; empty = all the RBAC allows.
+        items:
+          type: string
+      includeReasons:
+        type: array
+        description: When non-empty, only these Event reasons produce signals.
+        items:
+          type: string
+      excludeReasons:
+        type: array
+        description: Event reasons to drop, applied after includeReasons.
+        items:
+          type: string
+{{- if $ea.rbac.create }}
+---
+{{- if $ea.rbac.clusterWide }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $adapterSA }}-events
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $adapterSA }}-events
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $adapterSA }}-events
+subjects:
+  - kind: ServiceAccount
+    name: {{ $adapterSA }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $adapterSA }}-events
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $adapterSA }}-events
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $adapterSA }}-events
+subjects:
+  - kind: ServiceAccount
+    name: {{ $adapterSA }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- if $ea.source.create }}
+{{- $src := $ea.source }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: {{ $src.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+spec:
+  # a REFERENCE to the SignalAdapter CR above — its implementation defines the
+  # schema of the config below
+  adapter: {{ $ea.name }}
+  {{- with $src.grouping }}
+  grouping:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  {{- /* Built as a map so an all-empty config omits the key entirely: emitting
+  a bare `config:` would set spec.config to null rather than leave it unset. */}}
+  {{- $cfg := dict }}
+  {{- with $src.severities }}{{ $_ := set $cfg "severities" . }}{{ end }}
+  {{- with $src.namespaces }}{{ $_ := set $cfg "namespaces" . }}{{ end }}
+  {{- with $src.includeReasons }}{{ $_ := set $cfg "includeReasons" . }}{{ end }}
+  {{- with $src.excludeReasons }}{{ $_ := set $cfg "excludeReasons" . }}{{ end }}
+  {{- if $cfg }}
+  config:
+{{ toYaml $cfg | indent 4 }}
+  {{- end }}
+---
+# THE wiring. Without it the source above is inert.
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: {{ $src.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+spec:
+  signalSourceRefs:
+    - name: {{ $src.name }}
+  {{- with $src.channels }}
+  channelRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  profileRef:
+    name: {{ include "k8s-bundle.profileRef" . }}
+{{- end }}
+{{- end }}
