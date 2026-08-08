@@ -5,7 +5,7 @@
 ### Requirement: The profile component ships the k8s-engineer identity chain
 When active, the `profile` component SHALL render: the `k8s-engineer` AgentProfile (values-configurable name, `maxTurns` 40, no repository, and NO capabilities); a dedicated runtime ServiceAccount (default `agentops-runtime-k8s`); and, when `runtime.create` is on, an `AgentRuntime` (name defaulting to `default`, values-configured image and LLM credential Secret ref projected as env via `valueFrom` — the manager reads no Secrets) whose `serviceAccountName` is that SA. `runtime.create: false` SHALL support operators wiring the profile to an existing runtime via `runtimeRef` values.
 
-It SHALL also render an ADDRESSABLE Pipeline for the shipped agent, declaring the chart's built-in toolsets, so the task API has a route to name — under demo mode and behind a values flag so a production install can opt out or supply its own. This replaces the capability-only baseline Pipeline: it is an ordinary route that declares capabilities, not a per-profile default.
+It SHALL also render an ADDRESSABLE Pipeline for the shipped agent, declaring the chart's built-in toolsets, so the task API has a route to name — under demo mode and behind a values flag so a production install can opt out or supply its own. It is an ordinary route that declares its own capabilities — the addressable Pipeline that `POST /task` and chat commands name, not a per-profile default.
 
 #### Scenario: Profile executes under the bundle SA
 - **WHEN** the bundle renders with defaults and a task addresses the agent's Pipeline
@@ -41,3 +41,25 @@ When active, the `eventsAdapter` component SHALL render: the `SignalAdapter` CR 
 #### Scenario: Namespace-scoped events RBAC
 - **WHEN** `eventsAdapter.rbac.clusterWide=false`
 - **THEN** only a namespaced Role/RoleBinding renders and the adapter can watch events only in the release namespace
+
+### Requirement: The k8s bundle ships as a self-gated subchart, off by default and on in demo mode
+A Helm subchart at `chart/charts/k8s-bundle/` SHALL package the Kubernetes agent experience as three components — events signal source, k8s-engineer profile, and its RBAC. Every bundle template SHALL gate on `enabled OR global.demo.enabled` (self-gating, not a Helm `condition:`), with `k8s-bundle.enabled` defaulting to `false`. The parent chart's demo toggle SHALL move to `global.demo.enabled` (**BREAKING** rename from `demo.enabled`) and `chart/templates/demo.yaml` SHALL be removed — demo mode means exactly "the bundle with its defaults", which includes read-only RBAC. Explicit `k8s-bundle.*` values SHALL still apply when enabled via demo.
+
+#### Scenario: Default install renders nothing from the bundle
+- **WHEN** the chart is installed with default values
+- **THEN** no SignalAdapter, SignalSource, AgentProfile, AgentRuntime, ServiceAccount, Pipeline, or RBAC object from the bundle is rendered
+
+#### Scenario: Demo mode enables the bundle read-only
+- **WHEN** the chart is installed with `global.demo.enabled=true` and nothing else
+- **THEN** all three components render with read-only RBAC, an AgentRuntime named `default` with the configured LLM credential env, and the bundle's addressable Pipeline is askable via `POST /task` — a task names that Pipeline, never the profile
+
+#### Scenario: Bundle without demo
+- **WHEN** the chart is installed with `k8s-bundle.enabled=true` and `global.demo.enabled=false`
+- **THEN** the same components render — demo mode is an enablement path, not a distinct feature set
+
+### Requirement: Demo values migrate to bundle paths
+The pre-bundle demo values SHALL move: `demo.enabled` → `global.demo.enabled`, `demo.runtimeImage` → `k8s-bundle.profile.runtime.image`, `demo.credentialsSecret.*` → `k8s-bundle.profile.runtime.credentialsSecret.*`, `demo.readOnlyRbac` → `k8s-bundle.rbac.mode` (true ≙ `readonly`). The chart major version SHALL be bumped and the README SHALL carry the migration table. Upgrading a demo-enabled release SHALL preserve semantics: the AgentRuntime `default` re-renders equivalently (existing conversations keep resolving their runtime) while demo-named SA/RBAC objects are replaced by bundle-named ones.
+
+#### Scenario: Upgraded demo release keeps working
+- **WHEN** a release running chart 1.x with `demo.enabled=true` upgrades and adopts the new values paths
+- **THEN** the demo advisor flow works — now addressed as `POST /task` naming the bundle's Pipeline — and old demo-suffixed SA/RBAC objects are removed by the upgrade

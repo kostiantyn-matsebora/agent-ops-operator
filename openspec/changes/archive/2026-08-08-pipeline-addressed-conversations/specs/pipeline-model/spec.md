@@ -32,3 +32,26 @@ The `Pipeline` CRD SHALL bind N `signalSourceRefs` and M `channelRefs` to one `p
 #### Scenario: Dangling tooling ref surfaces on Ready
 - **WHEN** a Pipeline's `toolsets.refs` or `mcpConfigs.refs` names a CR that does not exist
 - **THEN** the Pipeline reports `Ready=False` naming the missing reference
+
+### Requirement: Pipeline-only resolution
+Routing SHALL resolve wiring exclusively through Ready Pipelines: a source's signals route via the pipeline that claims it (unclaimed sources drop signals with a visible reason and a `Wired=False` condition); a channel's default profile for bare messages is its oldest Ready Pipeline's profile (channels in no pipeline answer bare messages with guidance). A `/<name> <task>` chat command SHALL address a PIPELINE by name — the Pipeline originates the conversation, so it supplies the profile AND the capabilities; addressing a profile would name something with no wiring and therefore nothing to grant. The agent listing SHALL enumerate Ready Pipelines rather than profiles, so it advertises only names a user can actually address. Thread replies continue to work regardless of wiring. No CR other than `Pipeline` carries standing wiring; `Conversation` fields are materialized per-conversation state, not wiring.
+
+#### Scenario: Unclaimed source routes nothing
+- **WHEN** a signal arrives for a source no Ready Pipeline references
+- **THEN** no conversation is created, the response says so, and the source shows `Wired=False`
+
+#### Scenario: A command addresses a pipeline and gets its capabilities
+- **WHEN** a user sends `/some-pipeline do it` on a channel
+- **THEN** the conversation uses that Pipeline's profile and carries its toolsets and mcpConfigs, rather than being created with none
+
+#### Scenario: Commands work on unwired channels
+- **WHEN** a user sends `/some-pipeline do it` on a channel referenced by no Pipeline
+- **THEN** a conversation is created for that Pipeline, bound to the originating channel
+
+#### Scenario: The listing advertises only addressable names
+- **WHEN** a user asks for the agent listing
+- **THEN** it names Ready Pipelines, not AgentProfiles — a profile name cannot be addressed
+
+#### Scenario: Bare message on a pipeline channel
+- **WHEN** a non-command message arrives on a channel referenced by a Ready Pipeline
+- **THEN** the conversation uses the pipeline's profile and is bound to all the pipeline's channels

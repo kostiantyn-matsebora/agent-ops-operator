@@ -11,11 +11,11 @@ A Helm subchart at `chart/charts/k8s-bundle/` SHALL package the Kubernetes agent
 
 #### Scenario: Default install renders nothing from the bundle
 - **WHEN** the chart is installed with default values
-- **THEN** no SignalAdapter, SignalSource, AgentProfile, AgentRuntime, ServiceAccount, or RBAC object from the bundle is rendered
+- **THEN** no SignalAdapter, SignalSource, AgentProfile, AgentRuntime, ServiceAccount, Pipeline, or RBAC object from the bundle is rendered
 
 #### Scenario: Demo mode enables the bundle read-only
 - **WHEN** the chart is installed with `global.demo.enabled=true` and nothing else
-- **THEN** all three components render with read-only RBAC, an AgentRuntime named `default` with the configured LLM credential env, and the `k8s-engineer` profile is askable via `POST /task` exactly as the pre-bundle demo was
+- **THEN** all three components render with read-only RBAC, an AgentRuntime named `default` with the configured LLM credential env, and the bundle's addressable Pipeline is askable via `POST /task` — a task names that Pipeline, never the profile
 
 #### Scenario: Bundle without demo
 - **WHEN** the chart is installed with `k8s-bundle.enabled=true` and `global.demo.enabled=false`
@@ -33,7 +33,7 @@ Within an active bundle, `eventsAdapter.enabled`, `profile.enabled`, and `rbac.e
 - **THEN** the profile, runtime, SA, and RBAC render and the agent is usable via `/task` with no event ingestion
 
 ### Requirement: The events component packages the adapter with its access
-When active, the `eventsAdapter` component SHALL render: the `SignalAdapter` CR (default name `k8s-events` — the routing key SignalSources select with `spec.adapter` — values-configured image, `kubernetesAccess: true`, singleton); RBAC granting `events` `get`/`list`/`watch` to the adapter's deterministic ServiceAccount `agentops-signal-<name>` (ClusterRole by default, namespaced Role via `rbac.clusterWide: false`, none via `rbac.create: false`); and, when `source.create` is on, a `SignalSource` naming that adapter with `severities` defaulting to `["Warning"]` and values-configurable `namespaces` and `grouping`, TOGETHER WITH the `Pipeline` claiming it. The Pipeline is not optional: wiring is pipeline-only, so an unclaimed source drops every event with `Wired=False`. The manager SHALL NOT create or require any RBAC verbs on roles or rolebindings.
+When active, the `eventsAdapter` component SHALL render: the `SignalAdapter` CR (default name `k8s-events` — the routing key SignalSources select with `spec.adapter` — values-configured image, `kubernetesAccess: true`, singleton); RBAC granting `events` `get`/`list`/`watch` to the adapter's deterministic ServiceAccount `agentops-signal-<name>` (ClusterRole by default, namespaced Role via `rbac.clusterWide: false`, none via `rbac.create: false`); and, when `source.create` is on, a `SignalSource` naming that adapter with `severities` defaulting to `["Warning"]` and values-configurable `namespaces` and `grouping`, TOGETHER WITH the `Pipeline` claiming it. That Pipeline SHALL declare its capabilities explicitly: there is no default to inherit, so a Pipeline declaring none would hand every event-driven conversation an empty allowlist. The manager SHALL NOT create or require any RBAC verbs on roles or rolebindings.
 
 #### Scenario: One values flag yields flowing events
 - **WHEN** the bundle is enabled with defaults and the LLM credential Secret exists
@@ -43,30 +43,34 @@ When active, the `eventsAdapter` component SHALL render: the `SignalAdapter` CR 
 - **WHEN** the events component renders a SignalSource
 - **THEN** a Pipeline referencing that source renders alongside it, so signals route instead of dropping with `Wired=False`
 
+#### Scenario: Event-driven conversations are equipped
+- **WHEN** an event routes through the bundle's rendered Pipeline
+- **THEN** the resulting work unit carries a non-empty allowlist, because that Pipeline declares its own toolsets
+
 #### Scenario: Namespace-scoped events RBAC
 - **WHEN** `eventsAdapter.rbac.clusterWide=false`
 - **THEN** only a namespaced Role/RoleBinding renders and the adapter can watch events only in the release namespace
 
 ### Requirement: The profile component ships the k8s-engineer identity chain
-When active, the `profile` component SHALL render: the `k8s-engineer` AgentProfile (values-configurable name, `maxTurns` 40, no repository — and NO capabilities, since AgentProfiles declare none); a dedicated runtime ServiceAccount (default `agentops-runtime-k8s`); and, when `runtime.create` is on, an `AgentRuntime` (name defaulting to `default`, values-configured image and LLM credential Secret ref projected as env via `valueFrom` — the manager reads no Secrets) whose `serviceAccountName` is that SA. `runtime.create: false` SHALL support operators wiring the profile to an existing runtime via `runtimeRef` values.
+When active, the `profile` component SHALL render: the `k8s-engineer` AgentProfile (values-configurable name, `maxTurns` 40, no repository, and NO capabilities); a dedicated runtime ServiceAccount (default `agentops-runtime-k8s`); and, when `runtime.create` is on, an `AgentRuntime` (name defaulting to `default`, values-configured image and LLM credential Secret ref projected as env via `valueFrom` — the manager reads no Secrets) whose `serviceAccountName` is that SA. `runtime.create: false` SHALL support operators wiring the profile to an existing runtime via `runtimeRef` values.
 
-When `profile.baseline.create` is on, the component SHALL also render that profile's **capability-only Pipeline** — no sources, no channels — binding the chart's built-in toolsets, with `baseline.grantShell` controlling whether execution is among them. Without it a bare `POST /task` would reach an agent with no tools at all, which is exactly what the documented five-minute demo does.
+It SHALL also render an ADDRESSABLE Pipeline for the shipped agent, declaring the chart's built-in toolsets, so the task API has a route to name — under demo mode and behind a values flag so a production install can opt out or supply its own. It is an ordinary route that declares its own capabilities — the addressable Pipeline that `POST /task` and chat commands name, not a per-profile default.
 
 #### Scenario: Profile executes under the bundle SA
-- **WHEN** the bundle renders with defaults and a task addresses `k8s-engineer`
+- **WHEN** the bundle renders with defaults and a task addresses the agent's Pipeline
 - **THEN** the conversation's runtime pod runs under the bundle's ServiceAccount, so the agent's in-cluster power is exactly what the bundle's RBAC component granted
 
 #### Scenario: Bring-your-own runtime
 - **WHEN** `profile.runtime.create=false` and `profile.runtimeRef` names an existing AgentRuntime
 - **THEN** the AgentProfile renders with that `runtimeRef` and no AgentRuntime or SA is created by the bundle
 
-#### Scenario: The demo stays usable without any routing wiring
-- **WHEN** the bundle renders with defaults and a task is posted to `POST /task` with no pipeline named
-- **THEN** the baseline Pipeline supplies the agent's tools, and the rendered AgentProfile declares none
+#### Scenario: The demo addresses a Pipeline
+- **WHEN** the bundle renders with defaults and a task is posted naming the shipped Pipeline
+- **THEN** the work unit carries that Pipeline's tools, and the rendered AgentProfile declares none
 
 #### Scenario: An observe-only agent
-- **WHEN** `profile.baseline.grantShell=false`
-- **THEN** the baseline binds the observation toolset only, so the agent reads the cluster but runs nothing through the pipeline-less paths
+- **WHEN** the shipped Pipeline's shell grant is disabled in values
+- **THEN** it binds the observation toolset only, so the agent reads the cluster but runs nothing
 
 ### Requirement: RBAC is read-only by default with an explicit full mode
 When active, the `rbac` component SHALL bind roles to the profile's runtime ServiceAccount according to `rbac.mode`: `readonly` (default) binds the built-in `view` ClusterRole plus a bundle ClusterRole granting `get`/`list`/`watch` on `nodes` and `namespaces` and `get`/`list` on `metrics.k8s.io` nodes/pods (the pre-bundle demo grants, verbatim); `full` binds the built-in `cluster-admin` ClusterRole. `mode: full` SHALL never be a default anywhere (including demo mode) and SHALL be documented as granting the agent unrestricted cluster control. `rbac.enabled: false` SHALL render no bindings, leaving the SA powerless.
@@ -87,5 +91,5 @@ When active, the `rbac` component SHALL bind roles to the profile's runtime Serv
 The pre-bundle demo values SHALL move: `demo.enabled` → `global.demo.enabled`, `demo.runtimeImage` → `k8s-bundle.profile.runtime.image`, `demo.credentialsSecret.*` → `k8s-bundle.profile.runtime.credentialsSecret.*`, `demo.readOnlyRbac` → `k8s-bundle.rbac.mode` (true ≙ `readonly`). The chart major version SHALL be bumped and the README SHALL carry the migration table. Upgrading a demo-enabled release SHALL preserve semantics: the AgentRuntime `default` re-renders equivalently (existing conversations keep resolving their runtime) while demo-named SA/RBAC objects are replaced by bundle-named ones.
 
 #### Scenario: Upgraded demo release keeps working
-- **WHEN** a release running chart 1.x with `demo.enabled=true` upgrades to 2.x with `global.demo.enabled=true`
-- **THEN** the demo advisor flow (`POST /task` with profile `k8s-engineer`) works unchanged and old demo-suffixed SA/RBAC objects are removed by the upgrade
+- **WHEN** a release running chart 1.x with `demo.enabled=true` upgrades and adopts the new values paths
+- **THEN** the demo advisor flow works — now addressed as `POST /task` naming the bundle's Pipeline — and old demo-suffixed SA/RBAC objects are removed by the upgrade
