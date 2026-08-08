@@ -37,15 +37,23 @@ The adapter SHALL resolve each served channel's bot token from the projected cre
 - **THEN** the adapter sets a not-ready condition with the reason on that Channel and continues serving other Channels
 
 ### Requirement: Single getUpdates consumer preserved
-Exactly one getUpdates consumer per **bot token** SHALL hold at all times: the adapter SHALL run one polling loop per distinct token across its served channels (channels sharing a token share a loop), the adapter workload SHALL run single-instance (`singleton` via ChannelAdapter: replicas 1, Recreate), and the documented migration SHALL sequence old-workload shutdown before the reconciler-owned workload starts so two consumers of one token are never live simultaneously.
+Exactly one getUpdates consumer per **bot token** SHALL hold at all times. The polling loop SHALL live in the telegram ROUTER component, not in the channel adapter: the router SHALL run one loop per distinct token, its workload SHALL run single-instance (replicas 1, Recreate), and the channel adapter SHALL NOT poll at all — it receives topic messages forwarded by the router and continues posting them to `/channel/inbound`. The documented migration SHALL sequence shutdown of the previously-polling adapter before the router starts, so two consumers of one token are never live simultaneously.
 
 #### Scenario: Two bots poll independently, once each
-- **WHEN** the adapter serves two channels with distinct projected tokens
+- **WHEN** the router serves two channels with distinct projected tokens
 - **THEN** it runs exactly two getUpdates loops — one per token — inside the single pod
 
+#### Scenario: The channel adapter never polls
+- **WHEN** the split stack is running
+- **THEN** the channel adapter makes no getUpdates call, and its only Telegram API calls are sends and topic creation
+
 #### Scenario: Upgrade never double-polls
-- **WHEN** an install migrates from the helm-deployed adapter to the ChannelAdapter-managed one following the documented steps
+- **WHEN** an install migrates from the polling channel adapter to the router-fronted stack following the documented steps
 - **THEN** at no point do two getUpdates consumers use the same bot token
+
+#### Scenario: Offset survives the split
+- **WHEN** the migration completes
+- **THEN** the router resumes from the offset the previous adapter persisted, rather than re-reading old updates
 
 ### Requirement: Chart deploys the adapter opt-in
 The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR (gated on `telegramAdapter.enabled`, default **false**) instead of a bespoke Deployment template; the chart SHALL contain no channel-type-specific workload templates. The `ChannelAdapter` reconciler owns the workload, auth injection, and credential projection; the chart's remaining role is the CRD and the gated CR.

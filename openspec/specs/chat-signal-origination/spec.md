@@ -1,0 +1,101 @@
+# chat-signal-origination
+
+## Purpose
+
+Conversations are born one way only: from a signal routed against a
+`SignalSource` some Ready `Pipeline` claims. A message on a channel's general
+surface is such a signal — normalized, claim-checked and observable like an
+alert or a cron job — so who answers is DECLARED by a claim rather than
+inferred from which pipeline happens to reference the channel. This capability
+covers the chat signal shape, the chat-appropriate grouping defaults, and
+command input that produces a reply without a conversation.
+
+## Requirements
+
+### Requirement: Conversations originate only from claimed signal sources
+
+A Conversation SHALL be created only from a signal routed against a
+`SignalSource` claimed by a Ready `Pipeline`. A message arriving on a channel's
+general surface (no thread id) SHALL be delivered as a normalized signal from a
+chat `SignalSource`, not created directly by the channel router. No channel
+SHALL supply a default profile, and resolution SHALL NOT fall back to any
+creation-timestamp ordering among pipelines.
+
+#### Scenario: Bare chat message opens a conversation through the signal path
+
+- **WHEN** a user sends `check the disk` on a channel's general surface and a
+  Ready Pipeline claims the paired chat `SignalSource`
+- **THEN** the signal core creates the conversation with that Pipeline's profile
+  and channel set, and the source's `receivedTotal` increments
+
+#### Scenario: Unclaimed chat source drops with a reason
+
+- **WHEN** a general-surface message arrives for a chat source no Ready Pipeline
+  claims
+- **THEN** no conversation is created, the source reports `Wired=False`, and the
+  user receives the drop reason on the originating surface
+
+#### Scenario: No timestamp tiebreak remains
+
+- **WHEN** two Ready Pipelines reference the same channel and a general-surface
+  message arrives
+- **THEN** the answering profile comes from whichever Pipeline claims the chat
+  source, independent of pipeline creation order
+
+#### Scenario: Topic messages are not originations
+
+- **WHEN** a message arrives in a topic the manager does not recognize
+- **THEN** no conversation is adopted or created
+
+### Requirement: Chat signals carry their originating surface
+
+A chat signal SHALL carry `kind: chat` and the reserved labels
+`agentops.dev/channel` (the originating `Channel` name) and optionally
+`agentops.dev/sender`. The manager SHALL reject a `chat` signal without
+`agentops.dev/channel` rather than accept one it cannot answer.
+
+#### Scenario: Reply lands on the originating surface
+
+- **WHEN** a chat signal opens a conversation
+- **THEN** acks and output reach the originating channel and every other channel
+  bound by the claiming Pipeline
+
+#### Scenario: Unaddressable chat signal is refused
+
+- **WHEN** a `chat` signal arrives without `agentops.dev/channel`
+- **THEN** `/signal/inbound` rejects it naming the missing label
+
+### Requirement: Commands are answered without creating a conversation
+
+Chat input that is a command producing only a response — `/agents`, `/help`,
+an unknown agent, or a usage error — SHALL emit a `send` operation to the
+originating channel and SHALL NOT create a Conversation. `/<profile> <task>`
+SHALL create a conversation for the named profile through the signal path.
+
+#### Scenario: Agent listing
+
+- **WHEN** a user sends `/agents` on the general surface
+- **THEN** the profile listing is posted to that channel and no Conversation
+  exists for it
+
+#### Scenario: Addressed profile still opens a conversation
+
+- **WHEN** a user sends `/k8s-engineer check nodes`
+- **THEN** a task conversation is created for `k8s-engineer` exactly as before
+
+### Requirement: Chat grouping defaults preserve human behavior
+
+A chat `SignalSource` SHALL default to `cooldownHours: 0` and SHALL NOT apply
+signature grouping unless explicitly configured, so each general-surface message
+opens its own conversation.
+
+#### Scenario: Repeating yourself is not dedup
+
+- **WHEN** a user sends the same text twice
+- **THEN** two conversations are created, not one suppressed by cooldown
+
+#### Scenario: Chat takes the task lane
+
+- **WHEN** a chat signal opens a conversation
+- **THEN** it uses the task-lane prompt, and a later message does not resume the
+  earlier session as a recurrence
