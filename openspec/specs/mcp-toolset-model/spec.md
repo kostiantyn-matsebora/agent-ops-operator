@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Wiring-level tool access: the `MCPToolset` CRD (a reusable, server-definition-free list of tool patterns), the two independently moded Pipeline bindings (`toolsets` for the allowlist, `mcpConfigs` for MCP servers), their materialization onto the Conversation with lazy content resolution, and how compilation and dispatch apply the effective tooling.
+Wiring-level tool access: the `MCPToolset` CRD (a reusable, server-definition-free list of tool patterns), the two mode-less Pipeline bindings (`toolsets` for the allowlist, `mcpConfigs` for MCP servers), their materialization onto the Conversation with lazy content resolution, and how compilation and dispatch apply the effective tooling.
 
 ## Requirements
 
@@ -17,31 +17,31 @@ An `MCPToolset` CRD SHALL declare a named LIST of tool patterns (`spec.tools`): 
 - **WHEN** an `MCPToolset` lists `tools: [Read, Grep, mcp__victorialogs__*]`
 - **THEN** all three entries participate in allowlist resolution — the toolset is not restricted to MCP namespaces
 
-### Requirement: Wiring-level tool access resolves per binding mode
-A conversation's tool access SHALL resolve from the profile plus its two materialized bindings, each independently moded. **Allowlist** (from `toolsets` refs `T1..Tn` in order): `merge` = the profile's `allowedTools` entries (comma-split) unioned with each toolset's `tools` (dedup, first occurrence keeps position); `overwrite` = the toolsets' tools alone, ignoring the profile's allowlist including built-ins. **MCP servers** (from `mcpConfigs` refs `C1..Cn` in order): `merge` = the profile's compiled MCP map overlaid by each config's servers (per-server-key, later wins — bound configs override the profile on collision); `overwrite` = the bound configs alone, ignoring the profile's `mcp` entirely. A profile whose `mcp` uses raw `configMapRef`/`secretRef` SHALL be an error under `mcpConfigs` `merge` (surfaced as a visible conversation condition naming the incompatibility, never a silent partial merge); `overwrite` SHALL work over such profiles. The two bindings are independent — either may be present, absent, or differently moded.
+### Requirement: Wiring-level tool access resolves from the bound refs
+A conversation's tool access SHALL come from its materialized bindings ALONE — the profile contributes nothing, having no capability fields. **Allowlist**: the concatenation of the `toolsets` refs' `tools` in ref order, deduped, first occurrence keeping its position. **MCP servers**: the `mcpConfigs` refs' servers merged in ref order, per server key, later ref winning on collision. Neither binding carries a mode: with one source of capabilities there is nothing to compose against, so `merge` and `overwrite` would name the same behavior. A conversation with no bindings has no tools and no MCP servers. A bound `MCPConfig` in raw form (`configMapRef`/`secretRef`) SHALL be exclusive — combining it with any other config SHALL surface a condition naming the conflict, since a hand-written `mcp.json` cannot be composed.
 
-#### Scenario: Merge adds wiring tools to the profile
-- **WHEN** a profile with `allowedTools: "Read,Bash"` and one MCP server runs under a pipeline binding `mcpConfigs: {refs: [vm-logs]}` and `toolsets: {refs: [vm-observability]}` in merge mode
-- **THEN** conversations get the profile's server plus `vm-logs`' servers, and the allowlist contains `Read`, `Bash`, and the toolset's entries exactly once each
+#### Scenario: Bound toolsets are the whole allowlist
+- **WHEN** a pipeline binds two toolsets to a conversation
+- **THEN** the work unit's `allowedTools` is exactly those toolsets' tools, deduped in ref order
 
-#### Scenario: Overwrite replaces the profile's tools
-- **WHEN** the same profile runs under a pipeline whose two bindings use `overwrite` mode
-- **THEN** conversations get only the bound configs' servers and the toolsets' allowlist — the profile's own `Read,Bash` and server are absent
+#### Scenario: Bound configs are the whole MCP
+- **WHEN** a pipeline binds two MCPConfigs whose servers share a key
+- **THEN** the compiled `mcp.json` contains the union, the later ref winning the shared key
 
-#### Scenario: Independent modes compose
-- **WHEN** a pipeline binds `toolsets` in `merge` mode and `mcpConfigs` in `overwrite` mode
-- **THEN** the allowlist extends the profile's while the MCP servers come from the bound configs alone
+#### Scenario: No binding means no capability
+- **WHEN** a conversation carries no `toolsets` and no `mcpConfigs` binding
+- **THEN** its work unit carries an empty allowlist and its runtime gets an empty `mcp.json`
 
-#### Scenario: Raw-form profile refuses to merge servers
-- **WHEN** a `merge`-mode `mcpConfigs` binding routes to a profile whose MCP is a raw `configMapRef`
-- **THEN** the conversation surfaces a condition naming the incompatibility instead of mounting a half-merged config
+#### Scenario: Raw configs refuse to combine
+- **WHEN** a binding names a raw-form MCPConfig alongside another config
+- **THEN** the conversation surfaces a condition naming the conflict instead of mounting a partial result
 
 ### Requirement: Bindings materialize on the Conversation with lazy content resolution
-Conversations originated by a Pipeline SHALL snapshot both tooling bindings (mode + refs each) into the Conversation spec at creation — materialized per-conversation state, following the profileRef/channelRefs pattern; no `pipelineRef` is introduced. Toolset and MCPConfig CONTENT SHALL be re-resolved at each use (MCP compilation, work-unit dispatch), so content edits reach existing conversations while pipeline re-wiring affects only new ones. A conversation created through `POST /task` naming a pipeline SHALL carry that pipeline's tooling bindings alongside its channel set — having named the pipeline, the caller gets its wiring, not half of it. Conversations with no originating pipeline (`POST /task` without one, `/profile` commands on unwired channels) SHALL carry no bindings and use the profile's own tooling unchanged.
+Conversations originated by a Pipeline SHALL snapshot both tooling bindings (their ref lists) into the Conversation spec at creation — materialized per-conversation state, following the profileRef/channelRefs pattern; no `pipelineRef` is introduced. Toolset and MCPConfig CONTENT SHALL be re-resolved at each use (MCP compilation, work-unit dispatch), so content edits reach existing conversations while pipeline re-wiring affects only new ones. A conversation created through `POST /task` naming a pipeline SHALL carry that pipeline's tooling bindings alongside its channel set — having named the pipeline, the caller gets its wiring, not half of it. Conversations with NO routing pipeline (`POST /task` without one, `/<profile>` commands) SHALL resolve the named profile's capability-only Pipeline — its baseline — and snapshot those bindings; where no baseline exists they carry none and therefore have no capabilities, since the profile itself declares none.
 
 #### Scenario: Pipeline bindings follow the signal
-- **WHEN** a signal routes through a pipeline with `toolsets: {mode: merge, refs: [vm-observability]}` and `mcpConfigs: {refs: [vm-logs]}`
-- **THEN** the created conversation's spec records both bindings' modes and ref sets
+- **WHEN** a signal routes through a pipeline with `toolsets: {refs: [vm-observability]}` and `mcpConfigs: {refs: [vm-logs]}`
+- **THEN** the created conversation's spec records both ref sets
 
 #### Scenario: Content edits heal running conversations
 - **WHEN** a bound MCPConfig's server URL is corrected while conversations referencing it exist
@@ -51,20 +51,20 @@ Conversations originated by a Pipeline SHALL snapshot both tooling bindings (mod
 - **WHEN** `POST /task` names a pipeline that binds toolsets and mcpConfigs
 - **THEN** the created conversation carries that pipeline's channel set AND both tooling bindings
 
-#### Scenario: Task API without a pipeline stays binding-less
-- **WHEN** a conversation is created via `POST /task` with no pipeline named
-- **THEN** it carries no bindings and behaves exactly as before this change
+#### Scenario: Task API without a pipeline resolves the baseline
+- **WHEN** a conversation is created via `POST /task` with no pipeline named, against a profile that has a capability-only Pipeline
+- **THEN** it carries that baseline's bindings, so the agent is equipped without any routing wiring
 
 ### Requirement: Compilation and dispatch apply the effective tooling
-Conversations WITHOUT an `mcpConfigs` binding SHALL keep the existing shared, profile-owned ConfigMap `agentops-mcp-<profile>` byte-identical (existing tests pin it) — a toolsets-only binding changes nothing MCP-side. Conversations WITH an `mcpConfigs` binding SHALL compile their effective MCP into a conversation-owned ConfigMap `agentops-mcp-conv-<conversation>` (ownerRef → Conversation, GC'd with it) mounted in place of the profile CM, with secret-backed header values still compiling to `valueFrom` env placeholders (the manager reads no Secrets). Work-unit dispatch SHALL compute the effective `allowedTools` per the `toolsets` binding at dispatch time (allowlist changes need no pod restart). A binding ref that fails to resolve at use time SHALL fail visibly (conversation condition), never degrade silently to profile-only tooling.
+Every conversation with an `mcpConfigs` binding SHALL compile into a conversation-owned ConfigMap `agentops-mcp-conv-<conversation>` (ownerRef → Conversation, GC'd with it); the profile-keyed `agentops-mcp-<profile>` ConfigMap SHALL NOT be created, since profiles declare no MCP. Secret-backed header values SHALL still compile to `valueFrom` env placeholders — the manager reads no Secrets. Work-unit dispatch SHALL compute the allowlist from the bound toolsets at dispatch time, so toolset edits apply from the next work unit with no pod restart. A binding ref that fails to resolve SHALL fail visibly (conversation condition), never degrade silently to reduced tooling.
 
-#### Scenario: Binding-less path is byte-identical
-- **WHEN** the envtest suite renders MCP ConfigMaps and work units for conversations without bindings after this change
-- **THEN** names, owners, content, and `WorkUnit.allowedTools` are unchanged
+#### Scenario: Every MCP-bound conversation owns its ConfigMap
+- **WHEN** two pipelines with different `mcpConfigs` bindings route to one profile and each creates a conversation
+- **THEN** each mounts its own `agentops-mcp-conv-<name>` and no profile-keyed ConfigMap exists
 
-#### Scenario: Config-bound conversations get their own ConfigMap
-- **WHEN** two pipelines with different `mcpConfigs` bindings route to the same profile and each creates a conversation
-- **THEN** each conversation mounts its own `agentops-mcp-conv-<name>` and neither touches `agentops-mcp-<profile>`
+#### Scenario: Toolset content edits reach running conversations
+- **WHEN** a bound MCPToolset gains a tool while conversations referencing it exist
+- **THEN** their next work unit carries it, with no runtime pod restart
 
 #### Scenario: Missing binding ref fails the work visibly
 - **WHEN** a conversation's bound MCPToolset or MCPConfig is deleted and a new work unit is dispatched
