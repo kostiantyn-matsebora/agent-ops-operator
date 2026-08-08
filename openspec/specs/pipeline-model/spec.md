@@ -38,27 +38,43 @@ The `Pipeline` CRD SHALL bind N `signalSourceRefs` and M `channelRefs` to one `p
 - **THEN** the Pipeline reports `Ready=False` naming the missing reference
 
 ### Requirement: Pipeline-only resolution
-Routing SHALL resolve wiring exclusively through Ready Pipelines: a source's signals route via the pipeline that claims it (unclaimed sources drop signals with a visible reason and a `Wired=False` condition); a channel's default profile for bare messages is its oldest Ready Pipeline's profile (channels in no pipeline answer bare messages with guidance). A `/<name> <task>` chat command SHALL address a PIPELINE by name — the Pipeline originates the conversation, so it supplies the profile AND the capabilities; addressing a profile would name something with no wiring and therefore nothing to grant. The agent listing SHALL enumerate Ready Pipelines rather than profiles, so it advertises only names a user can actually address. Thread replies continue to work regardless of wiring. No CR other than `Pipeline` carries standing wiring; `Conversation` fields are materialized per-conversation state, not wiring.
+Routing SHALL resolve wiring exclusively through Ready Pipelines: a source's signals route via the pipeline that claims it (unclaimed sources drop signals with a visible reason and a `Wired=False` condition). This applies uniformly to every source kind, INCLUDING chat sources — a conversation originated by a general-surface chat message resolves through the Pipeline claiming that chat `SignalSource`, exactly as an alert resolves through the Pipeline claiming its alert source.
+
+A `Channel` SHALL NOT supply a default profile, and inbound resolution SHALL NOT fall back to pipeline creation order: the previous "oldest Ready Pipeline referencing this channel" tiebreak is REMOVED, because origination no longer happens on a channel. Channels remain shareable across Pipelines for delivery and mirroring, unaffected. Thread replies continue to resolve through the conversation's own thread binding, independent of any pipeline lookup.
+
+A `/<name> <task>` chat command SHALL address a PIPELINE by name — the Pipeline originates the conversation, so it supplies the profile AND the capabilities; addressing a profile would name something with no wiring and therefore nothing to grant. The agent listing SHALL enumerate Ready Pipelines rather than profiles, so it advertises only names a user can actually address. No CR other than `Pipeline` carries standing wiring; `Conversation` fields are materialized per-conversation state, not wiring.
 
 #### Scenario: Unclaimed source routes nothing
 - **WHEN** a signal arrives for a source no Ready Pipeline references
 - **THEN** no conversation is created, the response says so, and the source shows `Wired=False`
 
+#### Scenario: Unclaimed chat source routes nothing
+- **WHEN** a general-surface chat message arrives for a chat source no Ready Pipeline claims
+- **THEN** no conversation is created, the source shows `Wired=False`, and the drop reason reaches the originating surface
+
 #### Scenario: A command addresses a pipeline and gets its capabilities
 - **WHEN** a user sends `/some-pipeline do it` on a channel
 - **THEN** the conversation uses that Pipeline's profile and carries its toolsets and mcpConfigs, rather than being created with none
 
-#### Scenario: Commands work on unwired channels
-- **WHEN** a user sends `/some-pipeline do it` on a channel referenced by no Pipeline
-- **THEN** a conversation is created for that Pipeline, bound to the originating channel
+#### Scenario: Commands work through the chat source
+- **WHEN** a user sends `/some-pipeline do it` on a channel whose chat source is claimed
+- **THEN** a conversation is created for that Pipeline through the signal path, bound to the originating channel
 
 #### Scenario: The listing advertises only addressable names
 - **WHEN** a user asks for the agent listing
 - **THEN** it names Ready Pipelines, not AgentProfiles — a profile name cannot be addressed
 
-#### Scenario: Bare message on a pipeline channel
-- **WHEN** a non-command message arrives on a channel referenced by a Ready Pipeline
-- **THEN** the conversation uses the pipeline's profile and is bound to all the pipeline's channels
+#### Scenario: Bare message resolves through the claiming pipeline
+- **WHEN** a non-command message arrives on a channel's general surface
+- **THEN** the conversation uses the profile of the Pipeline claiming the chat source and is bound to all that Pipeline's channels
+
+#### Scenario: Shared channels need no tiebreak
+- **WHEN** two Ready Pipelines both reference channel `web` for delivery
+- **THEN** neither ordering nor creation timestamps affect inbound resolution, because neither claims origination on it
+
+#### Scenario: Replies bypass pipeline resolution entirely
+- **WHEN** a user replies inside an existing thread
+- **THEN** the input is appended to that thread's conversation with no pipeline lookup
 
 ### Requirement: One pipeline per source
 A SignalSource SHALL be claimed by at most one Pipeline: when a second Pipeline references an already-claimed source, the newer Pipeline SHALL report `SourceConflict=True` naming the contested source and the older claim SHALL keep routing. Channels MAY be referenced by multiple Pipelines; a conversation's binding set comes from the pipeline that originates it, and inbound on a multi-pipeline channel originates via the oldest Ready claimant (deterministic).

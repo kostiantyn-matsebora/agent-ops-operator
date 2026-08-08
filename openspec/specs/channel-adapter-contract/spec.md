@@ -37,15 +37,25 @@ The manager SHALL expose `POST /channel/ops/{id}/done` accepting the operation r
 - **THEN** the failure is observable on the Conversation (condition or event) and the operation is eligible for regeneration
 
 ### Requirement: Inbound messages enter through the shared router
-The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId?, text, sender?}` and route it through the same transport-neutral router as built-in channels: thread id present → reply input on the matching conversation (busy-ack preserved); absent → command parsing / default-profile task-conversation creation. Resulting acks SHALL flow back to the adapter as `send` operations. In-process (registry) providers SHALL use the same operation pipeline so routing behavior is identical for built-in and external types.
+The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, text, sender?}` as the CONTINUATION path only: `threadId` is REQUIRED, and the message SHALL be routed through the transport-neutral router as a reply input on the matching conversation (busy-ack preserved). Resulting acks SHALL flow back to the adapter as `send` operations, and the message SHALL be relayed to the conversation's sibling channels as attributed text. In-process (registry) providers SHALL use the same operation pipeline so routing behavior is identical for built-in and external types.
 
-#### Scenario: External adapter message creates a conversation
-- **WHEN** an adapter posts an inbound message with no thread id and text `/k8s-engineer check nodes` for its Channel
-- **THEN** a task Conversation is created exactly as it would be for a built-in channel, and the adapter subsequently receives the ack as a `send` op
+The ORIGINATION branch is removed: command parsing and default-profile conversation creation no longer occur here, and a message in an unrecognized thread is no longer adopted as a new conversation. A request without `threadId` SHALL be rejected with a message naming the signal path as the origination route. Channel implementations MAY omit inbound entirely when a separate component handles their ingest.
 
 #### Scenario: Threaded reply is queued serially
 - **WHEN** an adapter posts an inbound message whose thread id matches a conversation with an inflight unit
 - **THEN** a reply input is appended (not dispatched concurrently) and a busy-ack `send` op is emitted
+
+#### Scenario: Missing thread id is refused, not originated
+- **WHEN** an adapter posts an inbound message with no thread id
+- **THEN** the request is rejected with a message naming the signal path, and no Conversation is created
+
+#### Scenario: Unknown thread is not adopted
+- **WHEN** an adapter posts an inbound message whose thread id matches no conversation
+- **THEN** no conversation is created or adopted
+
+#### Scenario: Reply still mirrors to sibling channels
+- **WHEN** a reply arrives on one channel of a multi-channel conversation
+- **THEN** it is relayed to the sibling channels as attributed text, unchanged from before
 
 ### Requirement: Adapters need no Kubernetes access
 The contract SHALL carry everything an adapter needs beyond ops and inbound: `GET /channel/channels?adapter=<t>` returns the channels of that type with their opaque `spec.config` **and a `credentialEnvPrefix` locating each channel's projected credentials in the adapter's own environment (Secret key `K` is env `<prefix>K`)**; `GET/PUT /channel/state/{channel}/{key}` persists adapter cursor state (manager-side, as Channel annotations) across adapter restarts; `POST /channel/channels/{name}/status` sets the Channel's Ready condition (adapters report their own config validation results there). The prefix SHALL be derived from projection metadata (the Channel name), never from Secret values or key enumeration.
