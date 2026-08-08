@@ -37,7 +37,7 @@ A conversation's tool access SHALL resolve from the profile plus its two materia
 - **THEN** the conversation surfaces a condition naming the incompatibility instead of mounting a half-merged config
 
 ### Requirement: Bindings materialize on the Conversation with lazy content resolution
-Conversations originated by a Pipeline SHALL snapshot both tooling bindings (mode + refs each) into the Conversation spec at creation — materialized per-conversation state, following the profileRef/channelRefs pattern; no `pipelineRef` is introduced. Toolset and MCPConfig CONTENT SHALL be re-resolved at each use (MCP compilation, work-unit dispatch), so content edits reach existing conversations while pipeline re-wiring affects only new ones. Conversations with no originating pipeline (`POST /task`, `/profile` commands on unwired channels) SHALL carry no bindings and use the profile's own tools and MCP unchanged.
+Conversations originated by a Pipeline SHALL snapshot both tooling bindings (mode + refs each) into the Conversation spec at creation — materialized per-conversation state, following the profileRef/channelRefs pattern; no `pipelineRef` is introduced. Toolset and MCPConfig CONTENT SHALL be re-resolved at each use (MCP compilation, work-unit dispatch), so content edits reach existing conversations while pipeline re-wiring affects only new ones. A conversation created through `POST /task` naming a pipeline SHALL carry that pipeline's tooling bindings alongside its channel set — having named the pipeline, the caller gets its wiring, not half of it. Conversations with no originating pipeline (`POST /task` without one, `/profile` commands on unwired channels) SHALL carry no bindings and use the profile's own tooling unchanged.
 
 #### Scenario: Pipeline bindings follow the signal
 - **WHEN** a signal routes through a pipeline with `toolsets: {mode: merge, refs: [vm-observability]}` and `mcpConfigs: {refs: [vm-logs]}`
@@ -47,9 +47,13 @@ Conversations originated by a Pipeline SHALL snapshot both tooling bindings (mod
 - **WHEN** a bound MCPConfig's server URL is corrected while conversations referencing it exist
 - **THEN** subsequent MCP compilation for those conversations uses the corrected URL
 
-#### Scenario: Task-API conversations are unaffected
-- **WHEN** a conversation is created via `POST /task`
-- **THEN** it has no bindings and behaves exactly as before this change
+#### Scenario: Task API with a pipeline carries its whole wiring
+- **WHEN** `POST /task` names a pipeline that binds toolsets and mcpConfigs
+- **THEN** the created conversation carries that pipeline's channel set AND both tooling bindings
+
+#### Scenario: Task API without a pipeline stays binding-less
+- **WHEN** a conversation is created via `POST /task` with no pipeline named
+- **THEN** it carries no bindings and behaves exactly as before this change
 
 ### Requirement: Compilation and dispatch apply the effective tooling
 Conversations WITHOUT an `mcpConfigs` binding SHALL keep the existing shared, profile-owned ConfigMap `agentops-mcp-<profile>` byte-identical (existing tests pin it) — a toolsets-only binding changes nothing MCP-side. Conversations WITH an `mcpConfigs` binding SHALL compile their effective MCP into a conversation-owned ConfigMap `agentops-mcp-conv-<conversation>` (ownerRef → Conversation, GC'd with it) mounted in place of the profile CM, with secret-backed header values still compiling to `valueFrom` env placeholders (the manager reads no Secrets). Work-unit dispatch SHALL compute the effective `allowedTools` per the `toolsets` binding at dispatch time (allowlist changes need no pod restart). A binding ref that fails to resolve at use time SHALL fail visibly (conversation condition), never degrade silently to profile-only tooling.
