@@ -15,6 +15,21 @@ spec:
       type: sse
       url: http://mcp-victoriametrics.internal.komatoo.net/sse
 ---
+# MCPToolset: a named tool allowlist, nothing else. Servers live in MCPConfig
+# CRs; this says which tools a wiring may CALL. Pipelines bind the two together
+# (spec.toolsets / spec.mcpConfigs), so one profile can serve differently-tooled
+# routes without being cloned. Entries are opaque to the operator — MCP
+# namespaces or built-in tool names alike.
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: vm-observability
+  namespace: agent-ops
+spec:
+  tools:
+    - "mcp__victorialogs__*"
+    - "mcp__victoriametrics__*"
+---
 apiVersion: agentops.dev/v1alpha1
 kind: AgentProfile
 metadata:
@@ -177,14 +192,15 @@ spec:
     name: vm-webhook-token   # Secret with key TOKEN
 ---
 # Remember: wiring is pipeline-only — claim the source or its signals drop
-# (Wired=False). Profile wiring for VM investigation: give the claiming
-# profile the vm-bundle MCPConfigs and matching allowlist entries, e.g.
-#   spec:
-#     allowedTools: "Read,Grep,Glob,Bash,mcp__victorialogs__*,mcp__victoriametrics__*"
-#     mcp:
-#       configRefs:
-#         - name: vm-logs
-#         - name: vm-metrics
+# (Wired=False). Tool access is wiring too: this pipeline gives ha-engineer the
+# VM tools for VM alerts only, without touching the profile other pipelines
+# share. Both halves are needed — mcpConfigs supply the servers, toolsets grant
+# permission to call them. Each stanza takes an independent
+# `mode: merge|overwrite` (default merge = extend the profile; overwrite
+# replaces it wholesale, built-in tools included). Refs are snapshotted onto
+# each conversation at creation; the referenced CRs' CONTENT is re-read at every
+# use, so fixing a server URL or extending a toolset heals running conversations
+# while re-wiring the pipeline only affects new ones.
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
 metadata:
@@ -198,6 +214,15 @@ spec:
     - name: home-ops
   profileRef:
     name: ha-engineer
+  mcpConfigs:
+    mode: merge          # the profile's own MCP servers stay, these are added
+    refs:
+      - name: vm-logs
+      - name: vm-metrics
+  toolsets:
+    mode: merge          # profile allowlist ∪ the toolset's tools
+    refs:
+      - name: vm-observability
 ---
 # Adapter-served signal source: opaque config interpreted only by signal-cron.
 # The grouping window makes consecutive runs land in ONE conversation, later

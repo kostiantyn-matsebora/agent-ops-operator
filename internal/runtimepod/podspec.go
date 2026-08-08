@@ -69,8 +69,11 @@ func FromRuntime(rt *agentopsv1alpha1.AgentRuntimeSpec, fallback Config) Config 
 func PodName(convName string) string { return "agentops-conv-" + convName }
 
 // Build renders the runtime pod (namespace + ownerRef are set by the caller).
+// mcpCM names the ConfigMap holding the compiled mcp.json — the shared
+// profile-keyed one, or the conversation's own when its wiring binds MCPConfigs
+// (raw refs in mcp override it).
 func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile,
-	mcp mcpcompile.Result, cfg Config) *corev1.Pod {
+	mcp mcpcompile.Result, mcpCM string, cfg Config) *corev1.Pod {
 
 	env := []corev1.EnvVar{
 		{Name: "ROLE", Value: "worker"},
@@ -125,8 +128,7 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 		}
 	}
 
-	// MCP: rendered ConfigMap (agentops-mcp-<profile>) or raw ref
-	mcpCM := "agentops-mcp-" + profile.Name
+	// MCP: rendered ConfigMap (profile- or conversation-keyed) or raw ref
 	switch {
 	case mcp.RawConfigMap != "":
 		mcpCM = mcp.RawConfigMap

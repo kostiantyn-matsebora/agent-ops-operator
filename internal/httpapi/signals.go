@@ -173,6 +173,8 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		conv.Spec = agentopsv1alpha1.ConversationSpec{
 			ProfileRef:  pipeline.Spec.ProfileRef,
 			ChannelRefs: append([]agentopsv1alpha1.ObjectRef{}, pipeline.Spec.ChannelRefs...),
+			Toolsets:    pipeline.Spec.Toolsets.DeepCopy(),
+			MCPConfigs:  pipeline.Spec.MCPConfigs.DeepCopy(),
 			Title:       title,
 			Signature:   signature,
 		}

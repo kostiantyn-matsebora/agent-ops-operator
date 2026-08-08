@@ -90,9 +90,23 @@ mcp:
     # MCP server SSE URL; same rules as vmlogs.url.
     url: ""
     headers: []
+  # The allowlist half: an MCPToolset granting the tool namespaces of whichever
+  # components above are enabled. Rendered whenever either one is.
+  toolset:
+    name: vm-observability
 
 # NOTE: the bundle ships NO AgentProfile. Point defaultSource.profileRef at
-# your own profile and give it the MCP tools with one edit:
+# your own profile; the tools attach to the WIRING, so the profile itself needs
+# no edit — add one stanza to the Pipeline routing these alerts:
+#   spec:
+#     mcpConfigs: {refs: [{name: vm-logs}, {name: vm-metrics}]}
+#     toolsets:   {refs: [{name: vm-observability}]}
+# Both halves matter: mcpConfigs give the agent the servers, toolsets give it
+# permission to call them. Each takes an optional `mode: merge|overwrite`
+# (default merge, i.e. extend the profile's own tools rather than replace them).
+#
+# Editing the profile directly remains supported, and is the way to go if you
+# want the tools on EVERY pipeline using that profile:
 #   spec:
 #     allowedTools: "...,mcp__victorialogs__*,mcp__victoriametrics__*"
 #     mcp:

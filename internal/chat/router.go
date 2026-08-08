@@ -81,22 +81,20 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if cmd, ok := addressing.Parse(text); ok {
 		return r.handleCommand(ctx, ch, cmd)
 	}
-	if profile := r.defaultProfile(ctx, ch); profile != "" {
-		_, err := r.CreateTaskConversation(ctx, ch, profile, "", text)
+	if p := r.defaultPipeline(ctx, ch); p != nil {
+		_, err := r.CreateTaskConversation(ctx, ch, p.Spec.ProfileRef.Name, "", text, p)
 		return err
 	}
 	r.Ops.EnqueueSend(ctx, ch, nil, "⚠️ No default profile on this channel — use /&lt;profile&gt; &lt;task&gt; (see /agents).")
 	return nil
 }
 
-// defaultProfile resolves the profile for bare messages — pipeline-only
-// wiring: the oldest Ready Pipeline referencing this channel supplies it;
-// channels in no pipeline have no default ("" → guidance message).
-func (r *Router) defaultProfile(ctx context.Context, ch *agentopsv1alpha1.Channel) string {
-	if p := PipelineForChannel(ctx, r.Client, r.Namespace, ch.Name); p != nil {
-		return p.Spec.ProfileRef.Name
-	}
-	return ""
+// defaultPipeline resolves the wiring for bare messages — pipeline-only: the
+// oldest Ready Pipeline referencing this channel supplies both the default
+// profile and the tooling bindings; channels in no pipeline have no default
+// (nil → guidance message).
+func (r *Router) defaultPipeline(ctx context.Context, ch *agentopsv1alpha1.Channel) *agentopsv1alpha1.Pipeline {
+	return PipelineForChannel(ctx, r.Client, r.Namespace, ch.Name)
 }
 
 // boundChannels resolves the channel set a new conversation originating on ch
@@ -146,13 +144,19 @@ func (r *Router) handleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		r.Ops.EnqueueSend(ctx, ch, nil, fmt.Sprintf("⚠️ Usage: /%s &lt;task&gt;", cmd.Profile))
 		return nil
 	}
-	_, err := r.CreateTaskConversation(ctx, ch, cmd.Profile, cmd.Agent, cmd.Rest)
+	// explicitly addressed profile: the pipeline supplies the mirrored channel
+	// set but NOT its tooling — the named profile is not the pipeline's, so the
+	// pipeline's toolsets would grant tools meant for a different agent.
+	_, err := r.CreateTaskConversation(ctx, ch, cmd.Profile, cmd.Agent, cmd.Rest, nil)
 	return err
 }
 
 // CreateTaskConversation starts a task conversation originating on a channel,
 // bound to the channel's resolved set (pipeline channels or just the origin).
-func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, agentOverride, task string) (*agentopsv1alpha1.Conversation, error) {
+// A non-nil origin pipeline also snapshots its tooling bindings onto the
+// conversation; nil leaves the conversation on the profile's own tooling.
+func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, agentOverride, task string,
+	origin *agentopsv1alpha1.Pipeline) (*agentopsv1alpha1.Conversation, error) {
 	title := "🛠 " + strings.Join(strings.Fields(task), " ")
 	if agentOverride != "" || profile != "" {
 		title = "🤖 " + profile + ": " + strings.Join(strings.Fields(task), " ")
@@ -172,6 +176,10 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 			Payload: task, Agent: agentOverride, ReceivedAt: metav1.Now(),
 		}},
 	}
+	if origin != nil {
+		conv.Spec.Toolsets = origin.Spec.Toolsets.DeepCopy()
+		conv.Spec.MCPConfigs = origin.Spec.MCPConfigs.DeepCopy()
+	}
 	return conv, r.Client.Create(ctx, conv)
 }
 
@@ -181,8 +189,8 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 // patch, then the full channel set is attached (sibling topics are ensured by
 // the controller from there).
 func (r *Router) adoptThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID, text string) error {
-	profile := r.defaultProfile(ctx, ch)
-	if profile == "" {
+	p := r.defaultPipeline(ctx, ch)
+	if p == nil {
 		r.Ops.EnqueueSend(ctx, ch, &threadID, "⚠️ No default profile configured — I can't adopt this topic.")
 		return nil
 	}
@@ -190,7 +198,9 @@ func (r *Router) adoptThread(ctx context.Context, ch *agentopsv1alpha1.Channel, 
 	conv.Namespace = r.Namespace
 	conv.GenerateName = "adopted-"
 	conv.Spec = agentopsv1alpha1.ConversationSpec{
-		ProfileRef: agentopsv1alpha1.ObjectRef{Name: profile},
+		ProfileRef: p.Spec.ProfileRef,
+		Toolsets:   p.Spec.Toolsets.DeepCopy(),
+		MCPConfigs: p.Spec.MCPConfigs.DeepCopy(),
 		Title:      "🛠 " + strings.Join(strings.Fields(text), " "),
 		Inputs: []agentopsv1alpha1.InputItem{{
 			ID: newInputID(), Type: agentopsv1alpha1.InputTask, Payload: text, ReceivedAt: metav1.Now(),

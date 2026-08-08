@@ -11,6 +11,32 @@ type ObjectRef struct {
 	Name string `json:"name"`
 }
 
+// ToolingBinding binds tool access to a wiring: a set of refs plus how they
+// combine with the profile's own tooling. Content lives entirely in the
+// referenced CRs (MCPToolset / MCPConfig) — the binding carries refs and mode
+// only.
+type ToolingBinding struct {
+	// Mode selects how the referenced CRs combine with the profile's own
+	// tooling: merge extends it, overwrite replaces it entirely.
+	// +kubebuilder:validation:Enum=merge;overwrite
+	// +kubebuilder:default=merge
+	// +optional
+	Mode string `json:"mode,omitempty"`
+	// Refs are applied in order (later wins on collision).
+	// +kubebuilder:validation:MinItems=1
+	Refs []ObjectRef `json:"refs"`
+}
+
+// Merges reports whether the binding extends the profile's tooling rather than
+// replacing it. A nil binding merges nothing but still merges (no-op).
+func (b *ToolingBinding) Merges() bool { return b == nil || b.Mode != ToolingOverwrite }
+
+// Tooling binding modes.
+const (
+	ToolingMerge     = "merge"
+	ToolingOverwrite = "overwrite"
+)
+
 // NamedValue is a name/value pair where the value may come from a Secret or
 // ConfigMap key (the env valueFrom idiom). Used for MCP server headers etc.
 type NamedValue struct {

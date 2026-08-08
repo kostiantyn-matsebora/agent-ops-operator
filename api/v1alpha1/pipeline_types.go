@@ -23,6 +23,16 @@ type PipelineSpec struct {
 	// ProfileRef: the agent answering this pipeline's conversations (also the
 	// default profile for bare messages on the pipeline's channels).
 	ProfileRef ObjectRef `json:"profileRef"`
+	// Toolsets binds MCPToolset CRs governing the allowlist of this wiring's
+	// conversations: merge unions their tools onto the profile's allowedTools,
+	// overwrite replaces it (built-ins included — name them in the toolset).
+	// +optional
+	Toolsets *ToolingBinding `json:"toolsets,omitempty"`
+	// MCPConfigs binds MCPConfig CRs extending this wiring's MCP servers:
+	// merge overlays them onto the profile's compiled MCP (per server key,
+	// later wins), overwrite ignores the profile's mcp entirely.
+	// +optional
+	MCPConfigs *ToolingBinding `json:"mcpConfigs,omitempty"`
 }
 
 // PipelineStatus reports wiring validity.

@@ -167,6 +167,42 @@ func (s *Server) handleWork(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// effectiveAllowedTools reads the conversation's bound MCPToolsets and folds
+// them into the profile's allowlist. A ref that no longer resolves fails the
+// dispatch and is recorded on the conversation — never degraded to
+// profile-only tooling, which would look like a working agent quietly missing
+// the tools its wiring promised.
+func (s *Server) effectiveAllowedTools(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+	profile *agentopsv1alpha1.AgentProfile) (string, error) {
+
+	binding := conv.Spec.Toolsets
+	if binding == nil {
+		return profile.Spec.AllowedTools, nil
+	}
+	byRef := make([][]string, 0, len(binding.Refs))
+	for _, ref := range binding.Refs {
+		var ts agentopsv1alpha1.MCPToolset
+		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ts); err != nil {
+			err = fmt.Errorf("bound MCPToolset %q: %w", ref.Name, err)
+			s.setToolingCondition(ctx, conv, "ToolsetUnresolved", err.Error())
+			return "", err
+		}
+		byRef = append(byRef, ts.Spec.Tools)
+	}
+	return dispatch.EffectiveAllowedTools(profile.Spec.AllowedTools, binding, byRef), nil
+}
+
+// setToolingCondition surfaces a binding failure on the conversation so it is
+// visible in `kubectl describe` rather than only in manager logs.
+func (s *Server) setToolingCondition(ctx context.Context, conv *agentopsv1alpha1.Conversation, reason, message string) {
+	patch := client.MergeFrom(conv.DeepCopy())
+	apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
+		Type: controller.ConditionToolingResolved, Status: metav1.ConditionFalse,
+		Reason: reason, Message: message,
+	})
+	_ = s.Client.Status().Patch(ctx, conv, patch)
+}
+
 func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (dispatch.WorkUnit, bool, error) {
 	var conv agentopsv1alpha1.Conversation
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: convoName}, &conv); err != nil {
@@ -194,7 +230,11 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
-	unit, ids, ok, err := dispatch.Next(&conv, &profile, s.resolvePayload(ctx, s.Namespace), time.Now())
+	allowedTools, err := s.effectiveAllowedTools(ctx, &conv, &profile)
+	if err != nil {
+		return dispatch.WorkUnit{}, false, err
+	}
+	unit, ids, ok, err := dispatch.Next(&conv, &profile, allowedTools, s.resolvePayload(ctx, s.Namespace), time.Now())
 	if err != nil || !ok {
 		return dispatch.WorkUnit{}, false, err
 	}
