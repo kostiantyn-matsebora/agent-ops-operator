@@ -79,7 +79,10 @@ profile:
     # Default name preserves the pre-bundle demo behavior: profiles with no
     # runtimeRef fall back to the AgentRuntime named "default".
     name: default
-    image: kmatsebora/agentops-runtime-claude:0.1.1
+    # 0.2.0+ composes the allowlist with the agent definition's own `tools:`
+    # and passes it verbatim — no substituted `Read` when nothing is declared.
+    # Pinning an older tag keeps that substitution and ignores toolsets.mode.
+    image: kmatsebora/agentops-runtime-claude:0.2.0
     # The agent's security identity — its RBAC IS its power (see the rbac block).
     serviceAccountName: agentops-runtime-k8s
     idleTtlMinutes: 10

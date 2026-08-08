@@ -11,19 +11,54 @@ type ObjectRef struct {
 	Name string `json:"name"`
 }
 
-// ToolingBinding binds capabilities to a wiring: an ordered set of refs.
-// Content lives entirely in the referenced CRs (MCPToolset / MCPConfig) — the
-// binding carries refs only.
+// ToolingBinding binds MCP configs to a wiring: an ordered set of refs.
+// Content lives entirely in the referenced CRs (MCPConfig) — the binding
+// carries refs only.
 //
-// There is deliberately no mode. Capabilities live ONLY on the Pipeline, so
-// there is no profile-side tooling to merge with or overwrite; a mode field
-// would be a control whose two values did the same thing.
+// There is deliberately no mode here. MCP SERVERS reach a run only through the
+// compiled mcp.json, and an agent definition has no field that declares one —
+// so there is nothing on the other side for a mode to compose against, and its
+// two values would do the same thing. (Tools are different: see
+// ToolsetBinding.)
 type ToolingBinding struct {
-	// Refs are applied in order: tool lists concatenate with dedup, MCP server
-	// keys are overlaid with the later ref winning a collision.
+	// Refs are applied in order: MCP server keys are overlaid with the later
+	// ref winning a collision.
 	// +kubebuilder:validation:MinItems=1
 	Refs []ObjectRef `json:"refs"`
 }
+
+// ToolsetBinding binds MCPToolset CRs to a wiring, plus the MODE that says how
+// their tools compose with the ones the AGENT'S OWN DEFINITION declares — the
+// `tools:` frontmatter of .claude/agents/<agent>.md in the profile's
+// repository. The counterpart is the agent definition, never the profile: the
+// profile carries no capabilities at all, and mistaking it for the counterpart
+// is what deleted this field once already.
+//
+// The composition happens in the RUNTIME, which is the only component with the
+// repository checked out. What the manager computes from Refs is the wiring's
+// CONTRIBUTION, not the final allowlist.
+type ToolsetBinding struct {
+	// Mode composes this binding's tools with the agent definition's:
+	// merge unions them (the agent keeps what it declared, the wiring adds),
+	// overwrite passes the wiring's alone (the agent's declaration does not
+	// apply to this route). Built-ins included — name them in the toolset.
+	// +kubebuilder:validation:Enum=merge;overwrite
+	// +kubebuilder:default=merge
+	// +optional
+	Mode string `json:"mode,omitempty"`
+	// Refs are applied in order: tool lists concatenate with dedup, the first
+	// occurrence keeping its position.
+	// +kubebuilder:validation:MinItems=1
+	Refs []ObjectRef `json:"refs"`
+}
+
+// Tooling composition modes for ToolsetBinding.Mode.
+const (
+	// ToolsModeMerge unions the wiring's tools with the agent definition's.
+	ToolsModeMerge = "merge"
+	// ToolsModeOverwrite passes the wiring's tools alone.
+	ToolsModeOverwrite = "overwrite"
+)
 
 // NamedValue is a name/value pair where the value may come from a Secret or
 // ConfigMap key (the env valueFrom idiom). Used for MCP server headers etc.

@@ -14,7 +14,7 @@ RUN curl -fsSL -o /usr/local/bin/kubectl \
       "https://dl.k8s.io/release/v1.34.3/bin/linux/amd64/kubectl" && \
     chmod 0755 /usr/local/bin/kubectl
 
-COPY runtime.js /srv/runtime.js
+COPY runtime.js tools.js /srv/
 
 ENV HOME=/data/home
 USER node

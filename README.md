@@ -83,9 +83,38 @@ Both halves matter and are independent: `mcpConfigs` without matching
 versa. Refs are applied in order — tool lists concatenate with dedup, MCP
 server keys are overlaid with the later ref winning a collision.
 
-There is no merge/overwrite mode. With one source of capabilities there is
-nothing to compose against, so a Pipeline's bindings simply *are* its
-conversations' capabilities.
+#### `toolsets.mode` — what the route composes against
+
+The `toolsets` stanza carries a `mode`, and the thing it composes against is
+the **agent's own definition**: the `tools:` frontmatter of
+`.claude/agents/<agent>.md` in the profile's repository. Not the profile — the
+profile carries no capabilities at all.
+
+```yaml
+  toolsets:
+    mode: merge        # default: the route ADDS to what the agent declares
+    refs: [{name: agentops-shell}]
+```
+
+| mode | allowlist the runtime passes |
+|------|------------------------------|
+| `merge` (default) | the agent's declared tools **∪** the route's, deduped, the agent's keeping their position |
+| `overwrite` | the route's tools alone — the agent's declaration does not apply here |
+
+`merge` is the default because it is additive: granting a toolset extends the
+agent rather than silently stripping what it declared for itself. An agent
+definition that declares no `tools:`, or a profile with no repository,
+contributes nothing, so `merge` degrades to the route's tools alone.
+
+The composition happens in the **runtime**, not the manager — the runtime is
+the only component with the repository checked out. The manager resolves the
+route's half and states the mode; `allowedTools` on the work unit is that half,
+not the final answer.
+
+`mcpConfigs` has no mode, deliberately. An agent definition has no field that
+declares an MCP *server* — servers reach a run only through the compiled
+`mcp.json` — so there is nothing on the other side to compose against, and the
+two values would do the same thing.
 
 The chart ships the built-in tool vocabulary as `MCPToolset` CRs, split by risk
 (`global.builtinToolsets`): `agentops-observe` (`Read`, `Grep`, `Glob`),
@@ -119,6 +148,52 @@ Two more rules worth knowing:
 
 Conversations that bind `mcpConfigs` compile into their own ConfigMap
 (`agentops-mcp-conv-<conversation>`, garbage-collected with the conversation).
+
+### Migrating to chart 3.2 (toolsets compose with the agent definition) — BREAKING
+
+**The runtime no longer invents a tool.** `runtime-claude` used to pass
+`--allowedTools Read` whenever a work unit carried no allowlist — a grant
+nobody declared. From image `0.2.0` it passes exactly what was composed, empty
+included, and runs with `--permission-mode dontAsk` so an unlisted tool is
+denied rather than prompted for (a prompt in a pod hangs until the idle TTL).
+
+**Who is affected:** any conversation whose route binds no `toolsets` *and*
+whose agent definition declares no `tools:`. It used to get `Read`; now it gets
+nothing, starts, finds it can do nothing, and says so. That is the point — but
+check before upgrading:
+
+```sh
+# Pipelines that grant no tools; their routes now depend entirely on the
+# agent definition's own `tools:` frontmatter.
+kubectl get pipelines -A -o json | jq -r \
+  '.items[] | select(.spec.toolsets == null)
+   | "\(.metadata.namespace)/\(.metadata.name) -> profile \(.spec.profileRef.name)"'
+```
+
+Fix either side: bind a toolset on the Pipeline, or declare `tools:` in the
+repo's `.claude/agents/<agent>.md`. Both work, and under the default `merge`
+they add up.
+
+**`toolsets.mode` is back, with a different counterpart.** It composes against
+the **agent definition's** `tools:` frontmatter, never against the profile
+(profiles carry no capabilities — that misreading is why the field was removed
+in 3.0). `merge` is the default and additive; `overwrite` passes the route's
+tools alone. `mcpConfigs` has no mode. Existing Pipelines need no edit: the CRD
+defaults `mode: merge`, which reproduces today's behavior wherever the agent
+definition declares nothing.
+
+The work unit gained `toolsMode` and `agent` alongside `allowedTools`. Custom
+runtimes that ignore them keep working — `allowedTools` alone is what `merge`
+degrades to when nothing is declared repo-side.
+
+Steps:
+
+1. Upgrade the operator (manager `0.18.0`) — additive, existing Pipelines
+   default to `merge`.
+2. Update the runtime image to `agentops-runtime-claude:0.2.0`
+   (`k8s-bundle.profile.runtime.image`, or the `AgentRuntime` CRs you manage).
+   Staying on `0.1.1` keeps the `Read` substitution and ignores the mode.
+3. Run the `jq` check above and grant what each route actually needs.
 
 ### Migrating to chart 3.1 (chat originates as a signal) — BREAKING
 
@@ -440,6 +515,20 @@ An `AgentRuntime` image must:
    when continuing — streaming progress to **stdout**
 3. `POST $CONTROL_URL/work/done {convo, runId, status, sessionId, result}`
 4. Exit `0` after `RUNTIME_IDLE_TTL_M` minutes without work
+
+**`allowedTools` is the route's half of the allowlist, not the whole of it.**
+The unit also carries `toolsMode` (`merge` | `overwrite`) and `agent`. A runtime
+holding the repository is expected to read `.claude/agents/<agent>.md`, take its
+`tools:` frontmatter as the agent's own declaration, and compose the two:
+`merge` unions them (the agent's keeping position), `overwrite` passes
+`allowedTools` alone. A runtime that cannot see a repository can use
+`allowedTools` as-is — that is what `merge` degrades to.
+
+**An empty allowlist means empty.** Substituting a tool nobody declared is a
+grant the operator did not write down. `runtime-claude` passes the composed
+list verbatim, even when it is empty, and runs with `--permission-mode dontAsk`
+so an unlisted tool is denied outright: in a pod there is nobody to answer a
+permission prompt, so prompting would hang the run until its idle TTL.
 
 Reference implementation: [`runtime-claude/`](runtime-claude/) (Node.js + claude-code, ~200 lines).
 The same bring-your-own pattern applies to chat transports — see the channel

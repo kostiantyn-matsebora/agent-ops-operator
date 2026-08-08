@@ -235,6 +235,13 @@ spec:
   # Declared here or nowhere: no profile default, no inheritance. Omitting this
   # is legal and means the route's conversations get no tools at all.
   toolsets:
+    # merge (the default) composes against the AGENT DEFINITION — the `tools:`
+    # frontmatter of .claude/agents/ha-engineer.md in the profile's repo, NOT
+    # the profile, which declares no capabilities. Whatever ha-engineer.md
+    # declares for itself stays, and these are added on top. An agent with no
+    # `tools:` (or a profile with no repo) contributes nothing, so this
+    # degrades to exactly the two toolsets below.
+    mode: merge
     refs:
       - name: agentops-observe
       - name: agentops-shell
@@ -323,10 +330,16 @@ spec:
   profileRef:
     name: ha-engineer
   mcpConfigs:
+    # No mode here, ever: an agent definition declares no MCP SERVERS, so
+    # there is nothing on the other side to merge with or overwrite.
     refs:
       - name: vm-logs
       - name: vm-metrics
   toolsets:
+    # overwrite ignores what ha-engineer.md declares and grants exactly this.
+    # Same profile as the chat route above, deliberately narrower: alert triage
+    # gets observability and nothing else, however the agent describes itself.
+    mode: overwrite
     refs:
       - name: vm-observability
 ---

@@ -38,6 +38,12 @@ func withFormat(tpl string) string {
 const deliverySection = "Your final printed answer IS the deliverable — it is captured by the runtime's completion report and delivered to every bound channel by the operator (it also lands in the Conversation status and pod logs). Do not attempt to send chat messages yourself."
 
 // WorkUnit is what a worker receives from GET /work.
+//
+// AllowedTools and ToolsMode together are the WIRING'S HALF of the allowlist,
+// not the final one: the runtime composes them with what the agent's own
+// definition declares (see EffectiveAllowedTools). Agent names which definition
+// that is — the runtime is the only component holding the repository, so it
+// needs the name to find the file.
 type WorkUnit struct {
 	RunID           string            `json:"runId"`
 	Convo           string            `json:"convo"`
@@ -46,21 +52,30 @@ type WorkUnit struct {
 	PromptFile      string            `json:"promptFile,omitempty"` // repo-relative; worker renders PromptVars
 	PromptText      string            `json:"promptText,omitempty"` // fully rendered by the manager
 	PromptVars      map[string]string `json:"promptVars,omitempty"`
+	Agent           string            `json:"agent,omitempty"`
 	AllowedTools    string            `json:"allowedTools,omitempty"`
+	ToolsMode       string            `json:"toolsMode,omitempty"`
 	MaxTurns        int32             `json:"maxTurns,omitempty"`
 }
 
 // PayloadResolver returns the payload for an input (inline or via ConversationInput).
 type PayloadResolver func(item agentopsv1alpha1.InputItem) (string, error)
 
-// EffectiveAllowedTools resolves a conversation's allowlist from the toolsets
-// its wiring bound, whose tool lists arrive in ref order — concatenated with
-// dedup, first occurrence keeping its position.
+// EffectiveAllowedTools resolves THE WIRING'S CONTRIBUTION to a conversation's
+// allowlist from the toolsets its wiring bound, whose tool lists arrive in ref
+// order — concatenated with dedup, first occurrence keeping its position.
+//
+// This is NOT the final allowlist. The other contributor is the agent's own
+// definition (`tools:` in .claude/agents/<agent>.md), which only the runtime
+// can read, and the work unit's ToolsMode says how the two compose: merge
+// unions them, overwrite passes this result alone. The manager computes one
+// half and states which composition applies; the runtime decides the rest.
 //
 // The profile contributes nothing: capabilities live only on the Pipeline, so
-// a conversation whose wiring binds no toolsets gets an empty allowlist. That
-// is the intended result, not a degradation — an agent nobody wired has no
-// tools, the same way an unclaimed signal source has no route.
+// a conversation whose wiring binds no toolsets contributes an empty string
+// here. That is the intended result, not a degradation — under overwrite it
+// means the route grants nothing, the same way an unclaimed signal source has
+// no route.
 //
 // Resolution happens per work unit, so editing a toolset takes effect on the
 // next dispatch without restarting the runtime pod.
@@ -118,12 +133,29 @@ func PendingInputs(c *agentopsv1alpha1.Conversation) []agentopsv1alpha1.InputIte
 	return out
 }
 
+// Tooling is the wiring's half of a work unit's tool access: the resolved
+// contribution of the bound toolsets and the mode composing it with the agent
+// definition's own declaration. The caller holds the client that reads the
+// bound toolsets; see EffectiveAllowedTools.
+type Tooling struct {
+	AllowedTools string
+	Mode         string
+}
+
+// ToolsModeOf returns the binding's mode, defaulting to merge. The CRD defaults
+// it too, but a Conversation built in memory (tests, older stored objects) can
+// still arrive without one, and an unset mode must never read as overwrite —
+// that would silently strip what the agent declared.
+func ToolsModeOf(b *agentopsv1alpha1.ToolsetBinding) string {
+	if b == nil || b.Mode == "" {
+		return agentopsv1alpha1.ToolsModeMerge
+	}
+	return b.Mode
+}
+
 // Next resolves the next work unit. Returns the unit and the consumed input
 // ids, or ok=false when there is nothing to dispatch (inflight or empty).
-// allowedTools is the already-resolved effective allowlist (see
-// EffectiveAllowedTools) — the caller holds the client that reads the bound
-// toolsets.
-func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile, allowedTools string,
+func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile, tools Tooling,
 	resolve PayloadResolver, now time.Time) (WorkUnit, []string, bool, error) {
 
 	if c.Status.Inflight != nil {
@@ -139,13 +171,18 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 	unit := WorkUnit{
 		Convo:        c.Name,
 		ThreadID:     singleThread(c),
-		AllowedTools: allowedTools,
+		AllowedTools: tools.AllowedTools,
+		ToolsMode:    tools.Mode,
 		MaxTurns:     profile.Spec.MaxTurns,
 	}
 	agentName := profile.Spec.Agent
 	if first.Agent != "" {
 		agentName = first.Agent
 	}
+	// The runtime resolves .claude/agents/<agent>.md from this — the same name
+	// the lane templates put in front of the model, so the definition it reads
+	// and the definition its tools come from are always the same file.
+	unit.Agent = agentName
 
 	switch first.Type {
 	case agentopsv1alpha1.InputTask, agentopsv1alpha1.InputJob:

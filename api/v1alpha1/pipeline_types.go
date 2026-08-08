@@ -24,14 +24,14 @@ type PipelineSpec struct {
 	// originates — those from the signal sources it CLAIMS, and those a task
 	// or chat command addresses to it by name. Channels supply no default.
 	ProfileRef ObjectRef `json:"profileRef"`
-	// Toolsets binds MCPToolset CRs governing the allowlist of this wiring's
-	// conversations: merge unions their tools onto the profile's allowedTools,
-	// overwrite replaces it (built-ins included — name them in the toolset).
+	// Toolsets binds MCPToolset CRs contributing to the allowlist of this
+	// wiring's conversations, plus the mode composing them with what the
+	// AGENT'S OWN DEFINITION declares (merge unions, overwrite replaces).
 	// +optional
-	Toolsets *ToolingBinding `json:"toolsets,omitempty"`
-	// MCPConfigs binds MCPConfig CRs extending this wiring's MCP servers:
-	// merge overlays them onto the profile's compiled MCP (per server key,
-	// later wins), overwrite ignores the profile's mcp entirely.
+	Toolsets *ToolsetBinding `json:"toolsets,omitempty"`
+	// MCPConfigs binds MCPConfig CRs supplying this wiring's MCP servers,
+	// overlaid per server key in ref order (later wins). No mode: an agent
+	// definition declares no servers, so there is nothing to compose against.
 	// +optional
 	MCPConfigs *ToolingBinding `json:"mcpConfigs,omitempty"`
 }
