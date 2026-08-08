@@ -37,8 +37,11 @@ type RepositorySpec struct {
 	Auth *RepoAuth `json:"auth,omitempty"`
 }
 
-// AgentProfileSpec is a self-contained, addressable agent definition:
-// repository + agent role + MCP config + credentials + limits.
+// AgentProfileSpec is an addressable agent IDENTITY: repository + agent role
+// + prompts + credentials + limits. It carries NO capabilities — what an agent
+// may DO (its tool allowlist and MCP servers) comes exclusively from the
+// Pipeline routing its conversation, so one profile serves routes with
+// genuinely different capabilities without being cloned or edited.
 type AgentProfileSpec struct {
 	// +optional
 	Repository RepositorySpec `json:"repository,omitempty"`
@@ -61,18 +64,14 @@ type AgentProfileSpec struct {
 	// +optional
 	RuntimeRef *ObjectRef `json:"runtimeRef,omitempty"`
 
-	// MCP configuration (tri-form: inline / MCPConfig refs / raw ConfigMap or Secret).
-	// +optional
-	MCP *MCPSpec `json:"mcp,omitempty"`
-
 	// Env: extra environment for the agent process; values may use valueFrom
-	// (secretKeyRef / configMapKeyRef) for credentials the agent needs.
+	// (secretKeyRef / configMapKeyRef) for credentials the agent needs. This
+	// stays on the profile deliberately: these are the AGENT's own credentials
+	// (an API token it was built around), not the route's capabilities, and
+	// moving them would put secret references into the wiring object.
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
-	// AllowedTools passed to the agent runtime.
-	// +optional
-	AllowedTools string `json:"allowedTools,omitempty"`
 	// +kubebuilder:default=60
 	// +optional
 	MaxTurns int32 `json:"maxTurns,omitempty"`

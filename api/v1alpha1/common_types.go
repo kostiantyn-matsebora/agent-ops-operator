@@ -11,31 +11,19 @@ type ObjectRef struct {
 	Name string `json:"name"`
 }
 
-// ToolingBinding binds tool access to a wiring: a set of refs plus how they
-// combine with the profile's own tooling. Content lives entirely in the
-// referenced CRs (MCPToolset / MCPConfig) — the binding carries refs and mode
-// only.
+// ToolingBinding binds capabilities to a wiring: an ordered set of refs.
+// Content lives entirely in the referenced CRs (MCPToolset / MCPConfig) — the
+// binding carries refs only.
+//
+// There is deliberately no mode. Capabilities live ONLY on the Pipeline, so
+// there is no profile-side tooling to merge with or overwrite; a mode field
+// would be a control whose two values did the same thing.
 type ToolingBinding struct {
-	// Mode selects how the referenced CRs combine with the profile's own
-	// tooling: merge extends it, overwrite replaces it entirely.
-	// +kubebuilder:validation:Enum=merge;overwrite
-	// +kubebuilder:default=merge
-	// +optional
-	Mode string `json:"mode,omitempty"`
-	// Refs are applied in order (later wins on collision).
+	// Refs are applied in order: tool lists concatenate with dedup, MCP server
+	// keys are overlaid with the later ref winning a collision.
 	// +kubebuilder:validation:MinItems=1
 	Refs []ObjectRef `json:"refs"`
 }
-
-// Merges reports whether the binding extends the profile's tooling rather than
-// replacing it. A nil binding merges nothing but still merges (no-op).
-func (b *ToolingBinding) Merges() bool { return b == nil || b.Mode != ToolingOverwrite }
-
-// Tooling binding modes.
-const (
-	ToolingMerge     = "merge"
-	ToolingOverwrite = "overwrite"
-)
 
 // NamedValue is a name/value pair where the value may come from a Secret or
 // ConfigMap key (the env valueFrom idiom). Used for MCP server headers etc.
@@ -67,24 +55,6 @@ type MCPServer struct {
 	// Env for stdio servers.
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
-}
-
-// MCPSpec is the tri-form MCP configuration:
-// inline servers, refs to MCPConfig CRs, or a raw ConfigMap/Secret holding mcp.json.
-// Forms may be combined; merge order: configMap/secret raw < configRefs (in order) < inline.
-type MCPSpec struct {
-	// Inline server definitions.
-	// +optional
-	Servers map[string]MCPServer `json:"servers,omitempty"`
-	// References to MCPConfig objects, merged in order.
-	// +optional
-	ConfigRefs []ObjectRef `json:"configRefs,omitempty"`
-	// Raw complete mcp.json in a ConfigMap (key mcp.json).
-	// +optional
-	ConfigMapRef *ObjectRef `json:"configMapRef,omitempty"`
-	// Raw complete mcp.json in a Secret (key mcp.json).
-	// +optional
-	SecretRef *ObjectRef `json:"secretRef,omitempty"`
 }
 
 // CredentialKeyDoc documents one Secret key an adapter implementation expects

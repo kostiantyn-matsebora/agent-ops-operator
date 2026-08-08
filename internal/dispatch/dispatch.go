@@ -53,37 +53,28 @@ type WorkUnit struct {
 // PayloadResolver returns the payload for an input (inline or via ConversationInput).
 type PayloadResolver func(item agentopsv1alpha1.InputItem) (string, error)
 
-// EffectiveAllowedTools resolves a conversation's allowlist from the profile's
-// own string and the toolsets its wiring bound, whose tool lists arrive in ref
-// order. merge unions them onto the profile's entries (dedup, first occurrence
-// keeps its position); overwrite drops the profile's entirely — built-ins
-// included, which is why toolsets may name built-ins.
+// EffectiveAllowedTools resolves a conversation's allowlist from the toolsets
+// its wiring bound, whose tool lists arrive in ref order — concatenated with
+// dedup, first occurrence keeping its position.
+//
+// The profile contributes nothing: capabilities live only on the Pipeline, so
+// a conversation whose wiring binds no toolsets gets an empty allowlist. That
+// is the intended result, not a degradation — an agent nobody wired has no
+// tools, the same way an unclaimed signal source has no route.
 //
 // Resolution happens per work unit, so editing a toolset takes effect on the
-// next dispatch without restarting the runtime pod. A binding-less
-// conversation gets the profile's string back verbatim.
-func EffectiveAllowedTools(base string, binding *agentopsv1alpha1.ToolingBinding, byRef [][]string) string {
-	if binding == nil {
-		return base
-	}
+// next dispatch without restarting the runtime pod.
+func EffectiveAllowedTools(byRef [][]string) string {
 	var out []string
 	seen := map[string]bool{}
-	add := func(tool string) {
-		tool = strings.TrimSpace(tool)
-		if tool == "" || seen[tool] {
-			return
-		}
-		seen[tool] = true
-		out = append(out, tool)
-	}
-	if binding.Merges() {
-		for _, t := range strings.Split(base, ",") {
-			add(t)
-		}
-	}
 	for _, tools := range byRef {
 		for _, t := range tools {
-			add(t)
+			t = strings.TrimSpace(t)
+			if t == "" || seen[t] {
+				continue
+			}
+			seen[t] = true
+			out = append(out, t)
 		}
 	}
 	return strings.Join(out, ",")

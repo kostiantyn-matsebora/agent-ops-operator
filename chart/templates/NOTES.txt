@@ -4,7 +4,20 @@ Quick check:   kubectl -n {{ .Release.Namespace }} get pipelines,signalsources,c
 Ask an agent:  POST http://agentops-manager.{{ .Release.Namespace }}.svc:{{ .Values.service.apiPort }}/task  {"profile":"<profile>","task":"..."}
 
 Remember: wiring lives ONLY on Pipelines — a SignalSource without a Ready
-Pipeline claim drops its signals (Wired=False).
+Pipeline claim drops its signals (Wired=False). Capabilities are wiring too:
+AgentProfiles carry no tools and no MCP, so an agent's abilities come from the
+Pipeline routing it. A Pipeline with no sources and no channels declares a
+profile's BASELINE — what it may do via POST /task and /<profile> commands.
+
+UPGRADING FROM CHART < 3.0? Profiles no longer have spec.allowedTools or
+spec.mcp; those fields are pruned on the next write. Any profile that still
+relied on them is now toolless. Find them in a pre-upgrade backup, or check
+which profiles have no Pipeline granting them anything:
+  kubectl -n {{ .Release.Namespace }} get agentprofile -o name | while read p; do
+    n=$(basename $p)
+    kubectl -n {{ .Release.Namespace }} get pipeline -o jsonpath="{range .items[?(@.spec.profileRef.name=='$n')]}{.metadata.name} {end}" | grep -q . \
+      || echo "no Pipeline grants capabilities to profile/$n"
+  done
 {{- $vb := index .Values "vm-bundle" }}
 {{- if and $vb $vb.enabled $vb.alertmanager.enabled }}
 

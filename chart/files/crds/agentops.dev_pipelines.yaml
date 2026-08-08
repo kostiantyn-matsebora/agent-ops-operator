@@ -78,17 +78,10 @@ spec:
                   merge overlays them onto the profile's compiled MCP (per server key,
                   later wins), overwrite ignores the profile's mcp entirely.
                 properties:
-                  mode:
-                    default: merge
-                    description: |-
-                      Mode selects how the referenced CRs combine with the profile's own
-                      tooling: merge extends it, overwrite replaces it entirely.
-                    enum:
-                    - merge
-                    - overwrite
-                    type: string
                   refs:
-                    description: Refs are applied in order (later wins on collision).
+                    description: |-
+                      Refs are applied in order: tool lists concatenate with dedup, MCP server
+                      keys are overlaid with the later ref winning a collision.
                     items:
                       description: ObjectRef references another object by name (same
                         namespace).
@@ -139,17 +132,10 @@ spec:
                   conversations: merge unions their tools onto the profile's allowedTools,
                   overwrite replaces it (built-ins included — name them in the toolset).
                 properties:
-                  mode:
-                    default: merge
-                    description: |-
-                      Mode selects how the referenced CRs combine with the profile's own
-                      tooling: merge extends it, overwrite replaces it entirely.
-                    enum:
-                    - merge
-                    - overwrite
-                    type: string
                   refs:
-                    description: Refs are applied in order (later wins on collision).
+                    description: |-
+                      Refs are applied in order: tool lists concatenate with dedup, MCP server
+                      keys are overlaid with the later ref winning a collision.
                     items:
                       description: ObjectRef references another object by name (same
                         namespace).

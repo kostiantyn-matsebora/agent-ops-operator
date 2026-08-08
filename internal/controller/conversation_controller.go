@@ -38,9 +38,9 @@ const LabelSignatureHash = "agentops.dev/signature-hash"
 const ConditionToolingResolved = "ToolingResolved"
 
 // MCPConfigMapName returns the ConfigMap holding a conversation's compiled
-// mcp.json: the shared profile-keyed one, or a conversation-owned one when the
-// wiring binds its own MCPConfigs.
-func MCPConfigMapName(profile string) string { return "agentops-mcp-" + profile }
+// mcp.json. Always conversation-keyed: capabilities come from the wiring, so
+// there is no shared profile-owned document to collide over.
+func MCPConfigMapName(conv string) string { return convMCPConfigMapName(conv) }
 
 func convMCPConfigMapName(conv string) string { return "agentops-mcp-conv-" + conv }
 
@@ -277,15 +277,14 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
 		return false, err
 	}
-	mcpRes, mcpCM, err := r.ensureMCPConfigMap(ctx, conv, &profile)
+	mcpRes, mcpCM, err := r.ensureMCPConfigMap(ctx, conv)
 	if err != nil {
-		// A binding that cannot resolve is never degraded to profile-only
-		// tooling: it stays visible on the conversation and the pod is not
-		// created with silently reduced capability.
+		// A binding that cannot resolve stays visible on the conversation and
+		// the pod is not created with silently reduced capability.
 		reason := "MCPResolutionFailed"
-		var rawMerge *mcpcompile.RawMergeError
-		if errors.As(err, &rawMerge) {
-			reason = "IncompatibleMCPForm"
+		var rawExclusive *mcpcompile.RawExclusiveError
+		if errors.As(err, &rawExclusive) {
+			reason = "RawConfigNotExclusive"
 		}
 		r.setToolingCondition(ctx, conv, metav1.ConditionFalse, reason, err.Error())
 		return false, err
@@ -323,58 +322,37 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 	return true, r.Status().Patch(ctx, conv, patch)
 }
 
-// ensureMCPConfigMap renders the conversation's effective MCP and returns the
-// ConfigMap the runtime pod should mount.
+// ensureMCPConfigMap renders the conversation's MCP from the configs its wiring
+// bound, into a conversation-OWNED agentops-mcp-conv-<conversation> that GCs
+// with it. There is no profile branch and no shared profile-keyed ConfigMap:
+// capabilities come only from the Pipeline, so two pipelines binding different
+// configs to one profile cannot collide by construction.
 //
-// Without an mcpConfigs binding this is exactly the pre-binding behavior: the
-// profile's own tri-form spec compiled into the shared, profile-OWNED
-// agentops-mcp-<profile>. With a binding the result is per-wiring, so it
-// compiles into a conversation-OWNED agentops-mcp-conv-<conversation> that GCs
-// with the conversation — two pipelines binding different configs to one
-// profile must never clobber a shared ConfigMap.
-func (r *ConversationReconciler) ensureMCPConfigMap(ctx context.Context, conv *agentopsv1alpha1.Conversation,
-	profile *agentopsv1alpha1.AgentProfile) (mcpcompile.Result, string, error) {
+// A conversation with no binding compiles to an empty document — no servers,
+// which is what an unwired conversation should get.
+func (r *ConversationReconciler) ensureMCPConfigMap(ctx context.Context,
+	conv *agentopsv1alpha1.Conversation) (mcpcompile.Result, string, error) {
 
-	binding := conv.Spec.MCPConfigs
-	// The profile's own configRefs matter only while the profile's MCP is part
-	// of the result — under overwrite it is ignored, dangling refs included.
-	refs := map[string]agentopsv1alpha1.MCPConfigSpec{}
-	if profile.Spec.MCP != nil && binding.Merges() {
-		for _, ref := range profile.Spec.MCP.ConfigRefs {
+	var (
+		configs []agentopsv1alpha1.MCPConfigSpec
+		names   []string
+	)
+	if binding := conv.Spec.MCPConfigs; binding != nil {
+		for _, ref := range binding.Refs {
 			var mc agentopsv1alpha1.MCPConfig
-			if err := r.Get(ctx, types.NamespacedName{Namespace: profile.Namespace, Name: ref.Name}, &mc); err != nil {
-				return mcpcompile.Result{}, "", err
+			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &mc); err != nil {
+				return mcpcompile.Result{}, "", fmt.Errorf("bound MCPConfig %q: %w", ref.Name, err)
 			}
-			refs[ref.Name] = mc.Spec
+			configs = append(configs, mc.Spec)
+			names = append(names, ref.Name)
 		}
 	}
-
-	if binding == nil {
-		res, err := mcpcompile.Compile(profile.Spec.MCP, refs)
-		if err != nil || res.JSON == "" { // raw ref is mounted directly
-			return res, MCPConfigMapName(profile.Name), err
-		}
-		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
-			Name: MCPConfigMapName(profile.Name), Namespace: profile.Namespace,
-		}}
-		_, err = controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
-			cm.Data = map[string]string{"mcp.json": res.JSON}
-			return controllerutil.SetControllerReference(profile, cm, r.Scheme)
-		})
-		return res, cm.Name, err
-	}
-
-	overlays := make([]agentopsv1alpha1.MCPConfigSpec, 0, len(binding.Refs))
-	for _, ref := range binding.Refs {
-		var mc agentopsv1alpha1.MCPConfig
-		if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &mc); err != nil {
-			return mcpcompile.Result{}, "", fmt.Errorf("bound MCPConfig %q: %w", ref.Name, err)
-		}
-		overlays = append(overlays, mc.Spec)
-	}
-	res, err := mcpcompile.CompileOverlaid(profile.Spec.MCP, refs, overlays, binding.Mode)
+	res, err := mcpcompile.Compile(configs, names)
 	if err != nil {
 		return mcpcompile.Result{}, "", err
+	}
+	if res.JSON == "" { // raw ref is mounted directly
+		return res, "", nil
 	}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
 		Name: convMCPConfigMapName(conv.Name), Namespace: conv.Namespace,

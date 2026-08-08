@@ -167,19 +167,16 @@ func (s *Server) handleWork(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// effectiveAllowedTools reads the conversation's bound MCPToolsets and folds
-// them into the profile's allowlist. A ref that no longer resolves fails the
-// dispatch and is recorded on the conversation — never degraded to
-// profile-only tooling, which would look like a working agent quietly missing
-// the tools its wiring promised.
-func (s *Server) effectiveAllowedTools(ctx context.Context, conv *agentopsv1alpha1.Conversation,
-	profile *agentopsv1alpha1.AgentProfile) (string, error) {
-
+// effectiveAllowedTools resolves the conversation's allowlist from the
+// MCPToolsets its wiring bound. The profile contributes nothing — capabilities
+// live only on the Pipeline. A ref that no longer resolves fails the dispatch
+// and is recorded on the conversation, never degraded to partial tooling.
+func (s *Server) effectiveAllowedTools(ctx context.Context, conv *agentopsv1alpha1.Conversation) (string, error) {
 	byRef, err := s.resolveToolsets(ctx, conv, conv.Spec.Toolsets)
 	if err != nil {
 		return "", err
 	}
-	return dispatch.EffectiveAllowedTools(profile.Spec.AllowedTools, conv.Spec.Toolsets, byRef), nil
+	return dispatch.EffectiveAllowedTools(byRef), nil
 }
 
 // resolveToolsets reads a binding's MCPToolsets in ref order.
@@ -240,7 +237,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
-	allowedTools, err := s.effectiveAllowedTools(ctx, &conv, &profile)
+	allowedTools, err := s.effectiveAllowedTools(ctx, &conv)
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -395,6 +392,13 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		conv.Spec.ChannelRefs = append(conv.Spec.ChannelRefs, p.Spec.ChannelRefs...)
 		conv.Spec.Toolsets = p.Spec.Toolsets.DeepCopy()
 		conv.Spec.MCPConfigs = p.Spec.MCPConfigs.DeepCopy()
+	} else if base := chat.CapabilityPipelineForProfile(ctx, s.Client, s.Namespace, t.Profile); base != nil {
+		// No pipeline named: fall back to the profile's declared baseline, so a
+		// bare /task still reaches a capable agent. Without a baseline the
+		// conversation stays capability-less — an agent nobody wired can do
+		// nothing, the same way an unclaimed source routes nothing.
+		conv.Spec.Toolsets = base.Spec.Toolsets.DeepCopy()
+		conv.Spec.MCPConfigs = base.Spec.MCPConfigs.DeepCopy()
 	}
 	if t.Channel != "" {
 		already := false

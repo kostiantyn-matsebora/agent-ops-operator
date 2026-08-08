@@ -20,17 +20,17 @@ func conv(inputs ...agentopsv1alpha1.InputItem) *agentopsv1alpha1.Conversation {
 func profile() *agentopsv1alpha1.AgentProfile {
 	p := &agentopsv1alpha1.AgentProfile{}
 	p.Spec.Agent = "ha-engineer"
-	p.Spec.AllowedTools = "Read,Bash"
 	p.Spec.MaxTurns = 60
 	return p
 }
 
 var now = time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 
-// dispatchNext is the binding-less path: the effective allowlist is the
-// profile's own string, exactly as before wiring-level toolsets existed.
+// dispatchNext runs a work unit with a fixed allowlist. Capability resolution
+// is the caller's job now (it holds the client that reads the bound toolsets),
+// so these tests pin prompt/lane behavior only.
 func dispatchNext(c *agentopsv1alpha1.Conversation, p *agentopsv1alpha1.AgentProfile) (WorkUnit, []string, bool, error) {
-	return Next(c, p, p.Spec.AllowedTools, inlineResolver, now)
+	return Next(c, p, "Read,Bash", inlineResolver, now)
 }
 
 func TestTaskUsesBuiltinTemplate(t *testing.T) {

@@ -108,6 +108,8 @@ Rollback is a chart downgrade plus re-adding the profile fields from the audit o
 
 ## Open Questions
 
-- **D1 needs sign-off before implementation.** Capability-only Pipelines are the proposal; (b) and (c) are recorded with their reasons. This decides whether a bare `POST /task` still works.
-- Keep or drop the raw `mcp.json` escape hatch (D4). Leaning keep-and-relocate, since removing two things in one breaking change makes the migration harder to reason about.
-- Whether to ship a deprecation release before removal (D5). Leaning yes if a release is imminent, no if the API group is still pre-1.0 and users are few — the `agentops.dev/v1alpha1` version already signals instability.
+All three resolved at sign-off (2026-08-08), before implementation started:
+
+- **D1 → (a), capability-only Pipelines.** (b) and (c) are recorded above with the reasons they lost.
+- **D4 → keep and relocate.** The raw `mcp.json` escape hatch moves to `MCPConfig` with the exclusivity rule; removing two things in one breaking change would make the migration harder to reason about.
+- **D5 → remove now, no deprecation release.** `agentops.dev/v1alpha1` already signals instability and the user base is small. The pre-upgrade audit recipe and the `NOTES.txt` check carry the mitigation.

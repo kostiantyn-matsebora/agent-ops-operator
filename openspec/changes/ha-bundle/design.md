@@ -1,5 +1,14 @@
 # Design: ha-bundle
 
+
+> **Superseded by `capabilities-are-wiring` (applied 2026-08-08).** The profile
+> sketched below declares `allowedTools` and `mcp.configRefs`; both fields are
+> gone from `AgentProfile`. Move them onto the Pipeline routing this bundle's
+> source (`toolsets` / `mcpConfigs` refs), and add a capability-only Pipeline —
+> one naming the profile with no sources and no channels — if the profile is
+> also reachable via `POST /task` or `/<profile>` commands. `ToolingBinding`
+> has no `mode` any more, so drop any `mode:` key.
+
 ## Context
 
 - The reference content exists twice: live on gitops (kubectl-applied `AgentProfile ha-engineer`, `MCPConfig home-observability`, `SignalSource alertmanager`) and as `config/samples/samples.yaml`. The bundle turns that shape into values-driven templates.

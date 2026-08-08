@@ -58,12 +58,17 @@ eventsAdapter:
 profile:
   enabled: true
   name: k8s-engineer
-  # No repository and no MCP — a pure advisor over the cluster API.
-  #
-  # NOTE: this inline string is the status quo. Tool access is moving to wiring
-  # (Pipelines bind MCPToolsets); a Pipeline can already withhold shell from one
-  # route today with `toolsets: {mode: overwrite, refs: [{name: agentops-observe}]}`.
-  allowedTools: "Read,Grep,Glob,Bash"
+  # Identity only. Capabilities come from the Pipelines routing this profile —
+  # the events lane above, and the baseline below for conversations that have
+  # no routing pipeline (POST /task, /<profile> commands).
+  baseline:
+    # The capability-only Pipeline: no sources, no channels, so it routes
+    # nothing. Without it a bare POST /task reaches an agent with no tools,
+    # which is what the five-minute demo does.
+    create: true
+    name: k8s-engineer-baseline
+    # false = an agent that reads the cluster but runs nothing.
+    grantShell: true
   maxTurns: 40
   # Names an existing AgentRuntime when runtime.create is false.
   runtimeRef: ""

@@ -283,12 +283,15 @@ before shipping, so **there is no profile-side binding to inline** — D7's scop
 is unchanged on that front. What it did ship is a chart-supplied catalog of
 built-in `MCPToolset` CRs, which are ordinary referencable objects.
 
-`capabilities-are-wiring` is the one that matters: it removes
-`AgentProfile.spec.allowedTools` and `spec.mcp` entirely, and — relevant here —
-**removes `ToolingBinding.mode`**, since with the Pipeline as the sole source of
+`capabilities-are-wiring` **has since been applied**. It removed
+`AgentProfile.spec.allowedTools` and `spec.mcp` entirely and — relevant here —
+removed `ToolingBinding.mode`, since with the Pipeline as the sole source of
 capabilities there is nothing left to merge against. This change's inline
-`spec.toolsets.inline[]` / `spec.mcpConfigs.inline[]` entries assume that field
-exists.
+`spec.toolsets.inline[]` / `spec.mcpConfigs.inline[]` entries must therefore
+carry no `mode` key.
 
-Sequence `capabilities-are-wiring` first and drop `mode` from the inline shapes
-here; reconciling afterwards means editing the same templates and tests twice.
+It also added a meaning this change should account for: a Pipeline with NO
+sources and NO channels is a profile's capability BASELINE, resolved by
+conversations that have no routing pipeline. Inlining must not make such a
+Pipeline accidentally non-baseline (e.g. by materialising an empty
+`channels[]`), or a bare `POST /task` silently loses its tools.

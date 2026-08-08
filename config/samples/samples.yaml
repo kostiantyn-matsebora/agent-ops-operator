@@ -17,9 +17,9 @@ spec:
 ---
 # MCPToolset: a named tool allowlist, nothing else. Servers live in MCPConfig
 # CRs; this says which tools a wiring may CALL. Pipelines bind the two together
-# (spec.toolsets / spec.mcpConfigs), so one profile can serve differently-tooled
-# routes without being cloned. Entries are opaque to the operator — MCP
-# namespaces or built-in tool names alike.
+# (spec.toolsets / spec.mcpConfigs) — the ONLY place capabilities are declared,
+# since profiles carry none. Entries are opaque to the operator: MCP namespaces
+# or built-in tool names alike.
 apiVersion: agentops.dev/v1alpha1
 kind: MCPToolset
 metadata:
@@ -63,27 +63,38 @@ spec:
       secretRef:
         name: agentops-repo-key
   agent: ha-engineer
-  allowedTools: "Read,Grep,Glob,Bash,Skill,mcp__victorialogs__*,mcp__victoriametrics__*,mcp__homeassistant__*"
+  # Identity only: no allowedTools, no mcp. What this agent MAY DO comes from
+  # the Pipelines routing it — see the capability Pipeline below for its
+  # baseline, and the per-route Pipelines further down.
   maxTurns: 60
-  mcp:
-    configRefs:
-      - name: home-observability
-    servers:
-      homeassistant:
-        type: sse
-        url: http://192.0.2.3:8123/mcp_server/sse
-        headers:
-          - name: Authorization
-            valueFrom:
-              secretKeyRef:
-                name: agentops-ha
-                key: bearerHeader
   env:
     - name: HA_CLAUDE_TOKEN
       valueFrom:
         secretKeyRef:
           name: agentops-ha
           key: token
+---
+# The profile's BASELINE: a Pipeline with no sources and no channels routes
+# nothing — it declares what ha-engineer may do when a conversation reaches it
+# with no routing pipeline of its own (POST /task without a pipeline,
+# /ha-engineer commands in chat). Exactly one per profile; a second makes both
+# report BaselineConflict and neither applies.
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: ha-engineer-baseline
+  namespace: agent-ops
+spec:
+  profileRef:
+    name: ha-engineer
+  toolsets:
+    refs:
+      - name: agentops-observe
+      - name: agentops-shell
+      - name: vm-observability
+  mcpConfigs:
+    refs:
+      - name: home-observability
 ---
 # ChannelAdapter: plugs the "telegram" implementation in as a CR — the CR's
 # NAME is the key Channels select via spec.adapter. The reconciler deploys
@@ -211,15 +222,14 @@ spec:
     name: vm-webhook-token   # Secret with key TOKEN
 ---
 # Remember: wiring is pipeline-only — claim the source or its signals drop
-# (Wired=False). Tool access is wiring too: this pipeline gives ha-engineer the
-# VM tools for VM alerts only, without touching the profile other pipelines
-# share. Both halves are needed — mcpConfigs supply the servers, toolsets grant
-# permission to call them. Each stanza takes an independent
-# `mode: merge|overwrite` (default merge = extend the profile; overwrite
-# replaces it wholesale, built-in tools included). Refs are snapshotted onto
-# each conversation at creation; the referenced CRs' CONTENT is re-read at every
-# use, so fixing a server URL or extending a toolset heals running conversations
-# while re-wiring the pipeline only affects new ones.
+# (Wired=False). Capabilities are wiring too: this pipeline is the ONLY thing
+# saying what ha-engineer may do on the VM-alert route, and it replaces the
+# baseline for conversations it originates rather than adding to it. Both halves
+# are needed — mcpConfigs supply the servers, toolsets grant permission to call
+# them. Refs are snapshotted onto each conversation at creation; the referenced
+# CRs' CONTENT is re-read at every use, so fixing a server URL or extending a
+# toolset heals running conversations while re-wiring the pipeline only affects
+# new ones.
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
 metadata:
@@ -234,12 +244,10 @@ spec:
   profileRef:
     name: ha-engineer
   mcpConfigs:
-    mode: merge          # the profile's own MCP servers stay, these are added
     refs:
       - name: vm-logs
       - name: vm-metrics
   toolsets:
-    mode: merge          # profile allowlist ∪ the toolset's tools
     refs:
       - name: vm-observability
 ---
@@ -296,7 +304,6 @@ spec:
   profileRef:
     name: ha-engineer
   toolsets:
-    mode: overwrite
     refs:
       - name: agentops-observe
 ---

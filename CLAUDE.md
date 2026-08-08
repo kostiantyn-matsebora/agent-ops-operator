@@ -10,7 +10,10 @@ channel adapter), and `signal-cron/`, `signal-vmalertmanager/`,
 
 - **Agent runtime**, never "worker": CRD `AgentRuntime`, SA `agentops-runtime`,
   env `RUNTIME_*`, pkg `runtimepod`, pods `agentops-conv-<conversation>`.
-- `AgentProfile` = who the agent is; `AgentRuntime` = what executes it;
+- `AgentProfile` = who the agent is — identity ONLY (repo, role, prompts, env,
+  limits). It carries NO capabilities: no `allowedTools`, no `mcp`. What an
+  agent MAY DO comes exclusively from the Pipeline routing it.
+  `AgentRuntime` = what executes it;
   `Conversation` = session + serial input queue + one thread PER bound channel
   (`spec.channelRefs[]` / `status.threads[]{channel,threadId}`).
   `Conversation.spec.toolsets`/`.mcpConfigs` mirror the originating Pipeline's
@@ -24,19 +27,19 @@ channel adapter), and `signal-cron/`, `signal-vmalertmanager/`,
   DROP signals (`Wired=False` + response reason), unwired channels answer bare
   messages with guidance only. One pipeline per source (older claimant wins),
   channels shareable, Ready pipelines only.
-  **Tool access is wiring**: two independent optional stanzas, each
-  `{mode: merge|overwrite (default merge), refs[]}` —  `spec.toolsets`
-  (→ `MCPToolset`, governs `allowedTools`) and `spec.mcpConfigs`
-  (→ `MCPConfig`, governs MCP servers). BINDING only (refs + mode); all
-  content stays in the referenced CRs, so the Pipeline still carries no
-  credentials, no server/tool definitions, no runtime selection. Ready
-  validates both ref sets (`MissingReferences`).
-  Resolution: allowlist merge = profile ∪ toolsets (dedup, first occurrence
-  keeps position), overwrite = toolsets alone (built-ins dropped — name them);
-  servers merge = profile's compiled map ⊕ configs per server key (later
-  wins), overwrite = configs alone. A raw-form profile MCP
-  (`configMapRef`/`secretRef`) CANNOT merge → `*mcpcompile.RawMergeError` →
-  `ToolingResolved=False` on the conversation, never a half-merged config.
+  **Capabilities are wiring, exclusively**: two optional stanzas of ordered
+  refs — `spec.toolsets` (→ `MCPToolset`, the allowlist) and `spec.mcpConfigs`
+  (→ `MCPConfig`, the MCP servers). NO mode: with nothing profile-side to
+  compose against, merge/overwrite would be one behavior wearing two names.
+  Refs in order: tools concatenate with dedup, server keys overlay (later wins).
+  Content stays in the referenced CRs; Ready validates both ref sets.
+  **A Pipeline with NO sources and NO channels is a profile's BASELINE** — what
+  it may do when a conversation has no routing pipeline (`POST /task` without
+  one, `/<profile>` commands). Exactly one per profile: a second sets
+  `BaselineConflict` on BOTH and neither applies (no oldest-wins — guessing
+  which baseline was meant is worse than granting nothing). No baseline = an
+  unwired profile = no tools, same posture as an unclaimed source.
+  `POST /task {"pipeline": X}` carries X's channels AND capabilities.
   Consequence: runtimes are generic — one `AgentRuntime` per vendor × trust
   level (the SA stays runtime-level on purpose; a Pipeline choosing an SA
   would make pipeline-edit rights a privilege escalation).
@@ -131,9 +134,9 @@ api/v1alpha1/            CRD types (+ generated deepcopy); CRD YAML in chart/fil
 cmd/manager/main.go      wiring: reconciler, httpapi, chat registry/ops/router, env config
 internal/
   controller/            Conversation reconciler: topic op enqueue (async), MCP
-                         ConfigMap (profile-owned agentops-mcp-<profile>, or
-                         conversation-owned agentops-mcp-conv-<name> when the
-                         wiring binds mcpConfigs), runtime-pod pool (cap + idle eviction),
+                         ConfigMap (always conversation-owned
+                         agentops-mcp-conv-<name>; profiles declare no MCP, so
+                         there is nothing to collide over), runtime-pod pool (cap + idle eviction),
                          ownerRef GC, input pruning; ChannelAdapter +
                          SignalAdapter reconcilers on shared workload machinery
                          (adapterworkload.go: ownership, credential projection,
@@ -148,10 +151,12 @@ internal/
                          at-least-once), Router (transport-neutral inbound)
   dispatch/              input → work-unit resolution + built-in lane templates
                          (templates/format.md = mandatory message format spec);
-                         EffectiveAllowedTools (profile ± toolsets, per unit)
+                         EffectiveAllowedTools = the bound toolsets, per unit
+                         (no profile base, no mode)
   ingest/                signature grouping, fingerprint cooldown
-  mcpcompile/            tri-form MCP → mcp.json + valueFrom env; CompileOverlaid
-                         = base ± ordered MCPConfig overlays by mode (wiring)
+  mcpcompile/            bound MCPConfigs → mcp.json + valueFrom env; ONE entry
+                         (Compile over an ordered list). A raw hand-written
+                         mcp.json is EXCLUSIVE — bound with others = error
   runtimepod/            runtime pod builder (AgentRuntime CR over bootstrap Config)
   addressing/            /<profile>[:<agent>] parsing
   integration/           envtest suite (real API server, fake chat, no kubelet)

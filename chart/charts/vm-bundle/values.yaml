@@ -66,13 +66,13 @@ alertmanager:
     grouping: {}
 
 mcp:
-  # MCPConfig CRs for AgentProfiles to reference via spec.mcp.configRefs.
+  # MCPConfig CRs, bound to a wiring via Pipeline spec.mcpConfigs.
   # Server keys are FIXED (victorialogs / victoriametrics) because they are
   # the tool namespaces (mcp__victorialogs__*, mcp__victoriametrics__*) baked
   # into profile allowlists.
   vmlogs:
     enabled: true
-    # MCPConfig CR name (what profiles put in configRefs).
+    # MCPConfig CR name (what Pipelines put in mcpConfigs.refs).
     name: vm-logs
     # MCP server SSE URL, e.g. http://mcp-victorialogs.<ns>.svc/sse.
     # REQUIRED when enabled — unless the mcpServers component below deploys
@@ -95,22 +95,19 @@ mcp:
   toolset:
     name: vm-observability
 
-# NOTE: the bundle ships NO AgentProfile. Point defaultSource.profileRef at
-# your own profile; the tools attach to the WIRING, so the profile itself needs
-# no edit — add one stanza to the Pipeline routing these alerts:
+# NOTE: the bundle ships NO AgentProfile. Point defaultSource.profileRef at your
+# own profile; profiles carry no capabilities at all, so there is nothing to
+# edit there. Attach the tools by adding one stanza to the Pipeline routing
+# these alerts:
 #   spec:
 #     mcpConfigs: {refs: [{name: vm-logs}, {name: vm-metrics}]}
 #     toolsets:   {refs: [{name: vm-observability}]}
 # Both halves matter: mcpConfigs give the agent the servers, toolsets give it
-# permission to call them. Each takes an optional `mode: merge|overwrite`
-# (default merge, i.e. extend the profile's own tools rather than replace them).
+# permission to call them.
 #
-# Editing the profile directly remains supported, and is the way to go if you
-# want the tools on EVERY pipeline using that profile:
-#   spec:
-#     allowedTools: "...,mcp__victorialogs__*,mcp__victoriametrics__*"
-#     mcp:
-#       configRefs: [{name: vm-logs}, {name: vm-metrics}]
+# To grant these tools on EVERY route to that profile, put the same stanza on
+# the profile's capability Pipeline (one with no sources and no channels) —
+# that is its baseline.
 
 # The MCP server WORKLOADS themselves — a separate bundle component (sibling
 # of `mcp`, which only renders the MCPConfig CRs): deploy the upstream
