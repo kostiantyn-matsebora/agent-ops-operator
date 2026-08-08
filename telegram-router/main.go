@@ -11,241 +11,120 @@
 // one process must read the stream and fan it out.
 //
 // Its whole job is that fan-out. It classifies on is_topic_message, which
-// rides on the update itself, so the decision is LOCAL — no manager round-trip
-// and no shared state. It forwards updates verbatim and holds no channel
-// configuration: chat-id matching and approver filtering stay in the receiving
-// adapters, each against its own contract listing.
+// rides on the update itself, so the decision is LOCAL. It forwards updates
+// verbatim and holds no channel configuration: chat-id matching and approver
+// filtering stay in the receiving adapters, each against its own contract
+// listing.
 //
-// It reads ONE thing from the manager, at startup and on refresh: its own
-// SignalSource, for the forwarding targets and the env prefix its bot token
-// was projected under. Adapter CRs carry no configuration by design, so a
-// served CR's config is the only channel per-deployment settings can travel.
+// This is PLUMBING, not an adapter. It produces no signals, so it is not a
+// SignalAdapter and has no served CR: the chart that renders the two real
+// adapters also renders this Deployment and injects the two Service URLs it
+// forwards to, because that chart is what knows them. It never contacts the
+// manager — no contract client, no adapter token, no trust domain to be in.
 //
 // It persists nothing. The offset value is the router's (it makes the call),
 // but storage is delegated downstream to channel-telegram, which already
 // speaks the adapter state API. The router therefore needs no ServiceAccount
 // token and no RBAC.
 //
-// Run single-instance (replicas 1 / Recreate — the SignalAdapter reconciler's
-// singleton mode does exactly that). Two routers on one token is the failure
-// that costs the most debugging.
+// Run single-instance (replicas 1 / Recreate). One Deployment per bot token
+// makes that structural rather than bookkeeping: two routers on one token is
+// the failure that costs the most debugging.
 //
-// Environment: MANAGER_URL, ADAPTER_TOKEN, ADAPTER_NAME (default
-// "telegram-router"), TELEGRAM_BOT_TOKEN (optional fallback), and the
-// projected AGENTOPS_CRED_* vars.
+// Environment (all required except where noted):
+//
+//	TELEGRAM_BOT_TOKEN  the bot to poll; or AGENTOPS_CRED_<PREFIX>botToken
+//	SIGNAL_TARGET       base URL of signal-telegram  (originations)
+//	CHANNEL_TARGET      base URL of channel-telegram (continuations + offset)
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
-	"sort"
 	"strconv"
-	"sync"
+	"strings"
 	"syscall"
 	"time"
 )
 
-// routerConfig is this adapter's interpretation of its SignalSource
-// spec.config. Only forwarding targets — no chat id, no approvers, nothing
-// about any particular chat surface.
-type routerConfig struct {
+// config is everything this process needs, and it all arrives as env. There is
+// no CR to read: forwarding targets are in-cluster Service URLs the chart
+// renders, and the bot token is projected from the same Secret the Channel
+// sends with.
+type config struct {
 	// SignalTarget receives general-surface updates (originations).
-	SignalTarget string `json:"signalTarget"`
+	SignalTarget string
 	// ChannelTarget receives topic updates (continuations) and persists the
 	// offset on the router's behalf.
-	ChannelTarget string `json:"channelTarget"`
-}
-
-// servedSource is one validated source with its resolved bot token.
-type servedSource struct {
-	cfg   routerConfig
-	token string
+	ChannelTarget string
+	// Token is the bot whose stream this process owns, exclusively.
+	Token string
 }
 
 type router struct {
-	mgr        *Manager
-	down       *Downstream
-	sourceType string
-	fallback   string
-
-	mu       sync.Mutex
-	sources  map[string]servedSource
-	reported map[string]string
-	clients  map[string]*Telegram
-	loops    map[string]context.CancelFunc
-	loopWG   sync.WaitGroup
+	cfg  config
+	down *Downstream
+	tg   *Telegram
 }
 
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		log.Fatalf("missing required env %s", key)
+// loadConfig reads the environment and fails loudly. A missing value is a
+// misconfiguration that can never fix itself, so the process exits rather than
+// idling: a crash-looping pod names the problem in `kubectl describe`, where an
+// operator will actually see it.
+func loadConfig() config {
+	c := config{
+		SignalTarget:  strings.TrimSuffix(os.Getenv("SIGNAL_TARGET"), "/"),
+		ChannelTarget: strings.TrimSuffix(os.Getenv("CHANNEL_TARGET"), "/"),
+		Token:         os.Getenv("TELEGRAM_BOT_TOKEN"),
 	}
-	return v
-}
-
-func main() {
-	sourceType := os.Getenv("ADAPTER_NAME")
-	if sourceType == "" {
-		sourceType = "telegram-router"
-	}
-	r := &router{
-		mgr:        NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
-		down:       NewDownstream(),
-		sourceType: sourceType,
-		fallback:   os.Getenv("TELEGRAM_BOT_TOKEN"),
-		sources:    map[string]servedSource{},
-		reported:   map[string]string{},
-		clients:    map[string]*Telegram{},
-		loops:      map[string]context.CancelFunc{},
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	log.Printf("telegram-router starting (adapter=%s)", sourceType)
-
-	r.pollManager(ctx)
-	r.loopWG.Wait()
-}
-
-// refreshSources re-reads served sources, validates config, resolves each
-// bot token (projected credentials via credentialEnvPrefix, key botToken;
-// TELEGRAM_BOT_TOKEN fallback), and reports validity changes as the source's
-// Ready condition.
-func (r *router) refreshSources(ctx context.Context) {
-	infos, err := r.mgr.Sources(ctx, r.sourceType)
-	if err != nil {
-		log.Printf("list sources: %v", err)
-		return
-	}
-	next := map[string]servedSource{}
-	for _, info := range infos {
-		var cfg routerConfig
-		problem := ""
-		token := ""
-		if info.CredentialEnvPrefix != "" {
-			token = os.Getenv(info.CredentialEnvPrefix + "botToken")
-		}
-		if token == "" {
-			token = r.fallback
-		}
-		if len(info.Config) == 0 {
-			problem = "spec.config is missing"
-		} else if err := json.Unmarshal(info.Config, &cfg); err != nil {
-			problem = "spec.config is not valid JSON for the telegram router: " + err.Error()
-		} else if cfg.SignalTarget == "" {
-			problem = "spec.config.signalTarget is required (base URL of the telegram signal adapter)"
-		} else if cfg.ChannelTarget == "" {
-			problem = "spec.config.channelTarget is required (base URL of the telegram channel adapter)"
-		} else if token == "" {
-			problem = "no bot token: set SignalSource.credentialsSecretRef (Secret key botToken) — the same Secret the Channel uses — or provide a TELEGRAM_BOT_TOKEN fallback"
-		}
-		r.mu.Lock()
-		last := r.reported[info.Name]
-		r.mu.Unlock()
-		if problem != "" {
-			if last != problem {
-				_ = r.mgr.ReportStatus(ctx, info.Name, false, "InvalidConfig", problem)
-				r.mu.Lock()
-				r.reported[info.Name] = problem
-				r.mu.Unlock()
+	// The chart projects the bot Secret with a prefix; accept either the plain
+	// name or exactly one projected AGENTOPS_CRED_*botToken.
+	if c.Token == "" {
+		for _, kv := range os.Environ() {
+			k, v, ok := strings.Cut(kv, "=")
+			if ok && strings.HasPrefix(k, "AGENTOPS_CRED_") && strings.HasSuffix(k, "botToken") && v != "" {
+				c.Token = v
+				break
 			}
-			continue // keep serving the other sources
 		}
-		if last != "ok" {
-			_ = r.mgr.ReportStatus(ctx, info.Name, true, "AdapterReady", "polled by telegram-router")
-			r.mu.Lock()
-			r.reported[info.Name] = "ok"
-			r.mu.Unlock()
-		}
-		next[info.Name] = servedSource{cfg: cfg, token: token}
 	}
-	r.mu.Lock()
-	r.sources = next
-	r.mu.Unlock()
-}
-
-// client returns (caching) the Bot API client for a token.
-func (r *router) client(token string) *Telegram {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if c := r.clients[token]; c != nil {
-		return c
+	var missing []string
+	if c.Token == "" {
+		missing = append(missing, "TELEGRAM_BOT_TOKEN (or a projected AGENTOPS_CRED_*botToken)")
 	}
-	c := NewTelegram(token)
-	r.clients[token] = c
+	if c.SignalTarget == "" {
+		missing = append(missing, "SIGNAL_TARGET (base URL of the telegram signal adapter)")
+	}
+	if c.ChannelTarget == "" {
+		missing = append(missing, "CHANNEL_TARGET (base URL of the telegram channel adapter)")
+	}
+	if len(missing) > 0 {
+		log.Fatalf("telegram-router is misconfigured, missing: %s", strings.Join(missing, ", "))
+	}
 	return c
 }
 
-// pollManager keeps exactly one polling goroutine alive per distinct bot token
-// among served sources. Sources sharing a token share a loop — the
-// single-consumer rule holds per TOKEN, not per CR.
-func (r *router) pollManager(ctx context.Context) {
-	for ctx.Err() == nil {
-		r.refreshSources(ctx)
+func main() {
+	cfg := loadConfig()
+	r := &router{cfg: cfg, down: NewDownstream(), tg: NewTelegram(cfg.Token)}
 
-		want := map[string]bool{}
-		r.mu.Lock()
-		for _, ss := range r.sources {
-			want[ss.token] = true
-		}
-		for token, cancel := range r.loops {
-			if !want[token] {
-				cancel()
-				delete(r.loops, token)
-			}
-		}
-		for token := range want {
-			if _, running := r.loops[token]; running {
-				continue
-			}
-			loopCtx, cancel := context.WithCancel(ctx)
-			r.loops[token] = cancel
-			r.loopWG.Add(1)
-			go func(token string) {
-				defer r.loopWG.Done()
-				r.pollToken(loopCtx, token)
-			}(token)
-		}
-		r.mu.Unlock()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	log.Printf("telegram-router starting (signal=%s channel=%s)", cfg.SignalTarget, cfg.ChannelTarget)
 
-		sleepCtx(ctx, 30*time.Second)
-	}
+	r.poll(ctx)
 }
 
-// leader returns the served source that owns a token's cursor and targets:
-// the lexicographically first, so the choice is stable across restarts.
-func (r *router) leader(token string) (servedSource, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var names []string
-	for name, ss := range r.sources {
-		if ss.token == token {
-			names = append(names, name)
-		}
-	}
-	if len(names) == 0 {
-		return servedSource{}, false
-	}
-	sort.Strings(names)
-	return r.sources[names[0]], true
-}
-
-// pollToken is the single getUpdates consumer for one bot token: read the
+// poll is the single getUpdates consumer for this bot token: read the
 // persisted offset once, then poll → classify → forward → report the confirmed
 // offset downstream.
-func (r *router) pollToken(ctx context.Context, token string) {
-	tg := r.client(token)
+func (r *router) poll(ctx context.Context) {
 	offset := int64(-1) // -1 = not yet obtained
 	for ctx.Err() == nil {
-		lead, ok := r.leader(token)
-		if !ok {
-			return // pollManager cancels us; be safe anyway
-		}
 		if offset < 0 {
-			raw, err := r.down.GetOffset(ctx, lead.cfg.ChannelTarget)
+			raw, err := r.down.GetOffset(ctx, r.cfg.ChannelTarget)
 			if err != nil {
 				if ctx.Err() == nil {
 					log.Printf("offset read: %v", err)
@@ -255,7 +134,7 @@ func (r *router) pollToken(ctx context.Context, token string) {
 			}
 			offset, _ = strconv.ParseInt(raw, 10, 64)
 		}
-		updates, err := tg.GetUpdates(ctx, offset)
+		updates, err := r.tg.GetUpdates(ctx, offset)
 		if err != nil {
 			if ctx.Err() == nil {
 				log.Printf("getUpdates: %v", err)
@@ -264,13 +143,13 @@ func (r *router) pollToken(ctx context.Context, token string) {
 			continue
 		}
 		for _, upd := range updates {
-			r.route(ctx, lead.cfg, upd)
+			r.route(ctx, upd)
 			offset = upd.UpdateID + 1
 			// Report AFTER forwarding: a crash in between replays the batch,
 			// which is harmless (signals collapse on fingerprint, and a
 			// duplicate topic message is the same exposure the single-container
 			// adapter had on restart). Losing an update would not be.
-			if err := r.down.PutOffset(ctx, lead.cfg.ChannelTarget, strconv.FormatInt(offset, 10)); err != nil {
+			if err := r.down.PutOffset(ctx, r.cfg.ChannelTarget, strconv.FormatInt(offset, 10)); err != nil {
 				if ctx.Err() == nil {
 					log.Printf("offset report: %v", err)
 				}
@@ -282,10 +161,10 @@ func (r *router) pollToken(ctx context.Context, token string) {
 
 // route is the entire routing rule: topic → continuation → channel adapter;
 // general surface → origination → signal adapter. The update goes on verbatim.
-func (r *router) route(ctx context.Context, cfg routerConfig, upd update) {
-	target := cfg.SignalTarget
+func (r *router) route(ctx context.Context, upd update) {
+	target := r.cfg.SignalTarget
 	if upd.IsTopicMessage {
-		target = cfg.ChannelTarget
+		target = r.cfg.ChannelTarget
 	}
 	if err := r.down.Forward(ctx, target, upd.Raw); err != nil {
 		log.Printf("forward update %d: %v", upd.UpdateID, err)

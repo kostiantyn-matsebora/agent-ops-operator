@@ -58,6 +58,19 @@ type AgentProfileSpec struct {
 	// +optional
 	ReplyPrompt string `json:"replyPrompt,omitempty"`
 
+	// SystemPrompt is INLINE role text appended to the agent's system prompt,
+	// for profiles with no repository — where `agent` can name no
+	// `.claude/agents/<agent>.md` because nothing is checked out. It is
+	// identity, not capability: it shapes how the agent behaves, never what it
+	// may call (that is the Pipeline's toolsets, always).
+	//
+	// Appended, never replacing: the runtime keeps its own system prompt and
+	// adds this. A profile WITH a repository should carry its role in the
+	// definition file instead, which is version-controlled and can declare
+	// tools; this exists so a repo-less profile is not silently personality-free.
+	// +optional
+	SystemPrompt string `json:"systemPrompt,omitempty"`
+
 	// RuntimeRef selects the AgentRuntime (execution backend) for this
 	// profile. Falls back to the AgentRuntime named "default", then to the
 	// manager's bootstrap configuration.

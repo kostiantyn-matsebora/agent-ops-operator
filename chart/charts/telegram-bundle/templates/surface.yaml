@@ -1,6 +1,6 @@
 {{- /*
 The chat surface: the bot Secret (when this bundle owns it), the Channel, the
-chat SignalSource, and the router's credential-carrying SignalSource.
+chat SignalSource, and the bot Secret.
 
 Opt-in via surface.enabled, which makes chatId and a credential REQUIRED — the
 helper fails the render naming whatever is missing, rather than installing a
@@ -19,7 +19,7 @@ notes print the Pipeline to apply.
 {{- $secretName := include "telegram-bundle.secretName" . }}
 {{- if include "telegram-bundle.createSecret" . }}
 # Created because surface.credentials.botToken was supplied. Both the Channel
-# and the router reference it by NAME only — nothing in the operator reads it.
+# and the router Deployment reference it by NAME only — nothing in the operator reads it.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -89,26 +89,4 @@ spec:
     signatureLabels:
 {{ toYaml . | indent 6 }}
     {{- end }}
-{{- if .Values.router.source.create }}
----
-# The router's SignalSource carries the SHARED bot credential and the
-# forwarding targets into the router pod: adapter CRs hold no configuration or
-# credentials, so a served CR is the only way either can travel. It emits no
-# signals — claim it too, purely to keep it off Wired=False.
-apiVersion: agentops.dev/v1alpha1
-kind: SignalSource
-metadata:
-  name: {{ .Values.router.source.name }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-telegram-bundle
-spec:
-  adapter: {{ .Values.router.name }}
-  # the SAME Secret the Channel uses: the router polls the bot it sends as
-  credentialsSecretRef:
-    name: {{ $secretName }}
-  config:
-    signalTarget: {{ include "telegram-bundle.signalTarget" . | quote }}
-    channelTarget: {{ include "telegram-bundle.channelTarget" . | quote }}
-{{- end }}
 {{- end }}

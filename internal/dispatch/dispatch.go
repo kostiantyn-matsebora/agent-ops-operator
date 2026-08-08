@@ -53,6 +53,9 @@ type WorkUnit struct {
 	PromptText      string            `json:"promptText,omitempty"` // fully rendered by the manager
 	PromptVars      map[string]string `json:"promptVars,omitempty"`
 	Agent           string            `json:"agent,omitempty"`
+	// SystemPrompt is inline role text the runtime APPENDS to the agent's
+	// system prompt. Identity only — it never affects the allowlist.
+	SystemPrompt    string            `json:"systemPrompt,omitempty"`
 	AllowedTools    string            `json:"allowedTools,omitempty"`
 	ToolsMode       string            `json:"toolsMode,omitempty"`
 	MaxTurns        int32             `json:"maxTurns,omitempty"`
@@ -174,6 +177,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 		AllowedTools: tools.AllowedTools,
 		ToolsMode:    tools.Mode,
 		MaxTurns:     profile.Spec.MaxTurns,
+		SystemPrompt: profile.Spec.SystemPrompt,
 	}
 	agentName := profile.Spec.Agent
 	if first.Agent != "" {

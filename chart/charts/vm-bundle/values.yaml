@@ -48,28 +48,13 @@ alertmanager:
     # Cap alerts per webhook post (0 = Alertmanager default).
     maxAlerts: 0
     sendResolved: false
-  # Optional turnkey source: a SignalSource PLUS the Pipeline claiming it
-  # (wiring is pipeline-only — an unclaimed source drops signals). The
-  # profile is operator-owned; the bundle ships none.
+  # The alert source. INERT until a Pipeline claims it — no bundle ships
+  # wiring; declare it under the parent chart's `pipelines:`.
   defaultSource:
     enabled: false
-    # SignalSource + Pipeline CR name; also the {source} segment of the
-    # webhook URL: /webhook/<name>
+    # SignalSource CR name; also the {source} segment of the webhook URL:
+    # /webhook/<name>
     name: vm-alerts
-    # REQUIRED when enabled: the operator-owned AgentProfile answering these
-    # alerts (rendered onto the Pipeline). Wire the MCP tools into it — see
-    # the note above the mcpServers block.
-    profileRef: ""
-    # Extra MCPToolset names appended to the rendered Pipeline's toolsets,
-    # for tools this bundle knows nothing about (repo skills, a home-automation
-    # namespace). The bundle contributes the built-ins plus its own
-    # vm-observability; anything else the alert lane needs goes here, because
-    # nothing is inherited.
-    extraToolsets: []
-    # Extra MCPConfig names appended likewise.
-    extraMCPConfigs: []
-    # Optional Channel names the Pipeline mirrors conversations to.
-    channels: []
     # SignalSource grouping policy (manager-side; defaults apply when empty).
     grouping: {}
 
@@ -103,19 +88,10 @@ mcp:
   toolset:
     name: vm-observability
 
-# NOTE: the bundle ships NO AgentProfile. Point defaultSource.profileRef at your
-# own profile; profiles carry no capabilities at all, so there is nothing to
-# edit there. Attach the tools by adding one stanza to the Pipeline routing
-# these alerts:
-#   spec:
-#     mcpConfigs: {refs: [{name: vm-logs}, {name: vm-metrics}]}
-#     toolsets:   {refs: [{name: vm-observability}]}
-# Both halves matter: mcpConfigs give the agent the servers, toolsets give it
-# permission to call them.
-#
-# To grant these tools on EVERY route to that profile, put the same stanza on
-# the profile's capability Pipeline (one with no sources and no channels) —
-# that is its baseline.
+# NOTE: the bundle ships NO AgentProfile and NO Pipeline. Name the source, the
+# MCPConfigs and the vm-observability toolset from a parent-chart `pipelines:`
+# entry — both halves matter: mcpConfigs give the agent the servers, toolsets
+# give it permission to call them.
 
 # The MCP server WORKLOADS themselves — a separate bundle component (sibling
 # of `mcp`, which only renders the MCPConfig CRs): deploy the upstream

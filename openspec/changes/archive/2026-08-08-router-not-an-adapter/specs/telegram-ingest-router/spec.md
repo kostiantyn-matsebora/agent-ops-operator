@@ -1,51 +1,6 @@
-# telegram-ingest-router
+# telegram-ingest-router — delta
 
-## Purpose
-
-Telegram serves exactly one update stream per bot token: a second concurrent
-`getUpdates` returns `409`, and passing an offset destructively confirms
-updates for every reader. Origination and continuation therefore cannot each
-poll for themselves. This capability covers the three-component split — one
-router owning the poll loop and classifying each update locally by topic
-presence, two receiving adapters that never poll — the delegation of offset
-storage, the `ChannelAdapter` port parity that lets an adapter be pushed to,
-and the chart bundle that ships it all.
-## Requirements
-### Requirement: One process reads a bot token's update stream
-Exactly one component SHALL call `getUpdates` for a given bot token at any time.
-Telegram ingest SHALL be split into a router that owns the polling loop and two
-receiving adapters that never poll. The router SHALL classify each update
-locally by topic presence and forward it in-cluster: no topic id → the signal
-adapter; topic id present → the channel adapter. Classification SHALL require no
-manager round-trip.
-
-The single-consumer rule SHALL be enforced STRUCTURALLY: one router workload per
-bot token, single-instance with a recreate rollout, rather than by one process
-multiplexing several tokens. A router SHALL serve exactly one token.
-
-#### Scenario: Only the router polls
-- **WHEN** the telegram stack is running
-- **THEN** exactly one `getUpdates` loop exists per distinct bot token, in the
-  router, and neither adapter polls
-
-#### Scenario: General-surface message is an origination
-- **WHEN** an update arrives with no topic id
-- **THEN** the router forwards it to the signal adapter, which normalizes it and
-  posts `/signal/inbound`
-
-#### Scenario: Topic message is a continuation
-- **WHEN** an update arrives with a topic id
-- **THEN** the router forwards it to the channel adapter, which posts
-  `/channel/inbound` with that thread id exactly as today
-
-#### Scenario: A rollout never overlaps two pollers
-- **WHEN** the router workload is updated
-- **THEN** the old instance is stopped before the new one starts
-
-#### Scenario: Migration never double-polls
-- **WHEN** an install migrates from an adapter-modelled router to the
-  chart-owned workload following the documented steps
-- **THEN** at no point do two consumers of one bot token run simultaneously
+## MODIFIED Requirements
 
 ### Requirement: The router holds no channel configuration
 The router SHALL forward updates verbatim and SHALL NOT read `Channel`
@@ -87,17 +42,41 @@ rather than leaving the process idle.
 - **THEN** the process exits naming the missing values, so the pod crash-loops
   with the reason visible rather than running and doing nothing
 
-### Requirement: Channel adapters can receive pushed updates
+### Requirement: One process reads a bot token's update stream
+Exactly one component SHALL call `getUpdates` for a given bot token at any time.
+Telegram ingest SHALL be split into a router that owns the polling loop and two
+receiving adapters that never poll. The router SHALL classify each update
+locally by topic presence and forward it in-cluster: no topic id → the signal
+adapter; topic id present → the channel adapter. Classification SHALL require no
+manager round-trip.
 
-`ChannelAdapter` SHALL support `spec.port` with the same semantics
-`SignalAdapter` already has: when set, the reconciler owns the Service and
-injects the listen address into the workload.
+The single-consumer rule SHALL be enforced STRUCTURALLY: one router workload per
+bot token, single-instance with a recreate rollout, rather than by one process
+multiplexing several tokens. A router SHALL serve exactly one token.
 
-#### Scenario: Reconciler owns the channel adapter Service
+#### Scenario: Only the router polls
+- **WHEN** the telegram stack is running
+- **THEN** exactly one `getUpdates` loop exists per distinct bot token, in the
+  router, and neither adapter polls
 
-- **WHEN** a `ChannelAdapter` declares `spec.port`
-- **THEN** the reconciler creates and owns the Service and injects the listen
-  address, and the chart ships no Service for it
+#### Scenario: General-surface message is an origination
+- **WHEN** an update arrives with no topic id
+- **THEN** the router forwards it to the signal adapter, which normalizes it and
+  posts `/signal/inbound`
+
+#### Scenario: Topic message is a continuation
+- **WHEN** an update arrives with a topic id
+- **THEN** the router forwards it to the channel adapter, which posts
+  `/channel/inbound` with that thread id exactly as today
+
+#### Scenario: A rollout never overlaps two pollers
+- **WHEN** the router workload is updated
+- **THEN** the old instance is stopped before the new one starts
+
+#### Scenario: Migration never double-polls
+- **WHEN** an install migrates from an adapter-modelled router to the
+  chart-owned workload following the documented steps
+- **THEN** at no point do two consumers of one bot token run simultaneously
 
 ### Requirement: The chart delivers the whole stack as one bundle
 The chart SHALL package Telegram as an embedded `telegram-bundle` subchart,
@@ -157,6 +136,20 @@ The bundle SHALL NOT render a `Pipeline`.
 - **THEN** it disables ServiceAccount token automounting and no Role,
   RoleBinding or adapter token is created for it
 
+## REMOVED Requirements
+
+### Requirement: Offset persistence is delegated to a receiving adapter
+**Reason**: Not removed as behavior — offset delegation is unchanged and still
+required. This requirement is restated below because its final sentence ("The
+router SHALL require no Kubernetes permissions and no ServiceAccount token") is
+now carried by the bundle requirement above, where the workload is actually
+declared.
+
+**Migration**: The delegation itself is preserved verbatim in the requirement
+below; only its home moves.
+
+## ADDED Requirements
+
 ### Requirement: Offset persistence is delegated downstream
 The router SHALL own the in-flight offset value but SHALL NOT own its storage:
 it SHALL obtain the offset at startup and report each confirmed offset
@@ -177,4 +170,3 @@ lose the cursor.
 - **WHEN** the router moves from an adapter CR to a chart-owned Deployment
 - **THEN** the new workload resumes from the same persisted offset, because the
   offset lives in the channel adapter and was never the router's to hold
-

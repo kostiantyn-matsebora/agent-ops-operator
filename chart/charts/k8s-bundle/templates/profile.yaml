@@ -30,6 +30,10 @@ spec:
   # the agent's security identity — its RBAC IS its power
   serviceAccountName: {{ include "k8s-bundle.runtimeServiceAccount" . }}
   idleTtlMinutes: {{ $rt.idleTtlMinutes }}
+  {{- with $rt.nodeSelector }}
+  nodeSelector:
+{{ toYaml . | indent 4 }}
+  {{- end }}
   {{- with $rt.homePvcRef }}
   home:
     pvcRef:
@@ -60,6 +64,12 @@ spec:
   # conversations, and the capability Pipeline below for everything else
   # (POST /task, /<profile> commands).
   maxTurns: {{ $p.maxTurns }}
+  {{- with $p.systemPrompt }}
+  # Inline role, because this profile has no repository to hold a definition
+  # file. Appended to the runtime's system prompt; it grants nothing.
+  systemPrompt: |
+{{ . | trim | indent 4 }}
+  {{- end }}
   {{- if $p.runtimeRef }}
   runtimeRef:
     name: {{ $p.runtimeRef }}
@@ -67,31 +77,4 @@ spec:
   runtimeRef:
     name: {{ $rt.name }}
   {{- end }}
-{{- if $p.addressable.create }}
-{{- $bt := (.Values.global | default dict).builtinToolsets | default dict }}
-{{- if not $bt.enabled }}
-{{- fail "k8s-bundle: profile.addressable.create needs global.builtinToolsets, which is disabled — enable it, or set profile.addressable.create=false and write your own Pipeline" }}
-{{- end }}
----
-# An ADDRESSABLE Pipeline for the shipped agent: the task API names a Pipeline,
-# so the demo needs one to name. It routes nothing (no sources, no channels) and
-# carries no special meaning — it is an ordinary route that declares what its
-# conversations may do, like every other Pipeline.
-apiVersion: agentops.dev/v1alpha1
-kind: Pipeline
-metadata:
-  name: {{ $p.addressable.name }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-k8s-bundle
-spec:
-  profileRef:
-    name: {{ $p.name }}
-  toolsets:
-    refs:
-      - name: {{ $bt.observe.name }}
-      {{- if $p.addressable.grantShell }}
-      - name: {{ $bt.shell.name }}
-      {{- end }}
-{{- end }}
 {{- end }}

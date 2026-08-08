@@ -1,0 +1,67 @@
+{{- /*
+Wiring — the ONLY place this chart renders Pipelines.
+
+No bundle ships one, deliberately. A Pipeline names a profile, signal sources
+and channels that routinely come from DIFFERENT bundles: the cluster Events
+source from k8s-bundle, the chat surface from telegram-bundle, the alert source
+from vm-bundle, all answered by one agent. A subchart can only see its own
+half, so a bundle that shipped wiring could only ever wire itself — which is
+how an install ends up with one Pipeline per lane instead of one route.
+
+The parent chart is the only scope that sees every bundle, so wiring lives
+here, declared by the install.
+*/ -}}
+{{- range $i, $p := .Values.pipelines }}
+{{- if not $p.name }}
+{{- fail (printf "pipelines[%d]: every entry needs a name" $i) }}
+{{- end }}
+{{- if not $p.profile }}
+{{- fail (printf "pipelines[%s]: profile is required — a Pipeline with no profile has no agent to run" $p.name) }}
+{{- end }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops
+spec:
+  profileRef:
+    name: {{ $p.profile }}
+  {{- with $p.signalSources }}
+  # Wiring is pipeline-only: a source no Pipeline claims reports Wired=False
+  # and DROPS every signal. One Pipeline may claim many.
+  signalSourceRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $p.channels }}
+  channelRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $p.toolsets }}
+  # Declared, not inherited: nothing supplies a default, so a Pipeline without
+  # this stanza hands its conversations an empty allowlist.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+    {{- with $p.toolsetsMode }}
+    # merge (default) composes with the agent definition's own `tools:`;
+    # overwrite replaces them.
+    mode: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $p.mcpConfigs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}

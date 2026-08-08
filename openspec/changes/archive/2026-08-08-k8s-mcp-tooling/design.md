@@ -38,8 +38,10 @@ mcp:
     name: k8s-observability
 mcpServers:
   enabled: false                # deploy the server workload itself
-  image: {repository: <TBD>, tag: <TBD>}
+  image: {repository: ghcr.io/containers/kubernetes-mcp-server, tag: v0.0.66}
   port: 8080
+  readOnly: true                # --read-only; filters at REGISTRATION (see D4)
+  toolsets: [core, config]      # upstream default adds `helm`; dropped here
   serviceAccountName: agentops-mcp-k8s
   rbac:
     create: true
@@ -87,6 +89,41 @@ The values above leave `image` as `<TBD>` on purpose. Selection criteria, to be 
 
 If no server satisfies these, the honest outcome is to ship the `MCPConfig` + `MCPToolset` halves (useful for operators running their own server) and leave `mcpServers.enabled` unimplemented rather than defaulting to something unsuitable. Recorded so that outcome is a decision, not a silent descope.
 
+**Resolved (2026-08-08): `ghcr.io/containers/kubernetes-mcp-server:v0.0.66`.**
+
+Against the four criteria:
+
+- **Transport** — `--port <n>` puts it in HTTP mode serving streamable HTTP at `/mcp` and SSE at `/sse`; `--bind-address` defaults to `0.0.0.0`. The bundle defaults to `type: http` on `/mcp` (streamable HTTP is the current MCP transport; SSE is the legacy one), with a `mcp.transport` value for operators whose own server only speaks SSE.
+- **Pod identity** — it talks to the API directly (no kubectl shell-out) and resolves in-cluster config when `--kubeconfig` is absent, so the pod's ServiceAccount IS the credential. D2's second identity is real, not a mounted kubeconfig.
+- **Read-only** — `--read-only` drops every tool whose `ReadOnlyHint` is not true, and `--disable-destructive` drops `DestructiveHint` tools. Critically, the filter (`Configuration.isToolApplicable`) runs in `collectApplicableTools`, which decides what gets **registered** with the MCP server — not what a `tools/list` response shows. An unregistered tool is uncallable, which is the distinction the rejected Node server got wrong (below).
+- **Maintenance / pinning** — v0.0.66 released 2026-07-31, multi-arch tags published per release under `ghcr.io/containers/kubernetes-mcp-server` (`v0.0.63`…`v0.0.66` all present). No `latest` in the values default.
+
+Upstream's default toolsets are `core, config, helm`. The bundle defaults to `core, config`: `--read-only` would already drop `helm_install`/`helm_uninstall`, but a Kubernetes *observability* toolset has no reason to carry a Helm client at all, and dropping the toolset is one less thing depending on the annotation filter being right.
+
+**Rejected:**
+
+- `Flux159/mcp-server-kubernetes` (Node) — requires `kubectl`/`helm` binaries in the image, so the pod SA reaches the cluster through a shell-out rather than a client; SSE transport is gated behind an env var upstream names *unsafe*; and CVE-2026-46519 (fixed v3.6.0) was exactly the failure this criterion exists to catch — its restriction env vars, read-only among them, were enforced at the discovery layer but not at execution, so a client that already knew a tool name could call it anyway.
+- `Azure/mcp-kubernetes` — closest runner-up: three transports, and `--access-level readonly` is its default with filtering at registration. Rejected for shelling out to `kubectl` (plus optional `helm`/`cilium`/`hubble`), which reintroduces inside the MCP server exactly the binary dependency `runtime-drop-kubectl` is trying to remove from the runtime, and for being an Azure-flavored distribution of a cluster-generic job.
+- `openshift/openshift-mcp-server` — the same codebase downstream with OpenShift additions; `containers/` is the vendor-neutral upstream.
+- ToolHive / Stacklok's Kubernetes MCP guide — a platform for *running* MCP servers, not a server. Adopting it means a second operator in the cluster to solve a problem one Deployment solves.
+
+### D5: The toolset's tool list, and what read-only actually means here
+
+Task 1.3's question — narrow `mcp__kubernetes__*` to enumerated names? — resolves to **no, by default**, with the enumeration recorded so narrowing is a values edit (`mcp.toolset.tools`).
+
+With `--read-only` the server registers only these, so the wildcard and the enumeration grant the same thing:
+
+| toolset | tools surviving `--read-only` |
+| --- | --- |
+| `core` | `pods_list`, `pods_list_in_namespace`, `pods_get`, `pods_log`, `pods_top`, `resources_list`, `resources_get`, `events_list`, `namespaces_list`, `projects_list`, `nodes_log`, `nodes_stats_summary`, `nodes_top` |
+| `config` | `configuration_contexts_list`, `configuration_view`, `targets_list` |
+
+Dropped by the filter: `pods_delete`, `pods_exec`, `pods_run`, `resources_create_or_update`, `resources_delete`, `resources_scale` (and the whole `helm` toolset, unshipped).
+
+The wildcard is the default because the allowlist is the *second* wall, not the only one: the first is the server's own registration filter, the third is the server SA's RBAC. It matters most when an operator points `mcp.url` at a server this chart did not deploy — there the wildcard grants whatever that server exposes, which is why `mcp.toolset.tools` is values-overridable and the table above exists.
+
+Note on RBAC coverage: `nodes_log` and `nodes_stats_summary` read through `nodes/proxy`, which `rbac.mode: readonly` deliberately does NOT grant — `view` plus node/namespace/metrics reads is the same grant shape the bundle's runtime RBAC uses, and `nodes/proxy` is a large privilege to hand a server by default. Those two tools are registered and will fail with a Forbidden the agent can read; widening is a deliberate operator grant.
+
 ## Risks / Trade-offs
 
 - [The chosen server becomes a supply-chain dependency of the bundle] → `mcpServers` stays OFF by default, exactly as vm-bundle's does; the `MCPConfig` half works against an operator's own deployment. The image is tag-pinned and named in values.
@@ -101,5 +138,5 @@ Purely additive: new values blocks default to a state that renders two inert CRs
 
 ## Open Questions
 
-- Which server image (D4) — blocking for the values defaults, not for the rest of the design.
-- Whether `mcp.enabled` should default to `true` while `mcp.url` is empty. Leaning yes with the render-time guard only firing when a URL is genuinely required, so the toolset and config are discoverable in a default install; the alternative hides the pattern until an operator goes looking.
+- ~~Which server image (D4)~~ — settled in D4: `ghcr.io/containers/kubernetes-mcp-server:v0.0.66`.
+- ~~Whether `mcp.enabled` should default to `true` while `mcp.url` is empty.~~ — settled **no**. The leaning recorded here ("yes, with the guard only firing when a URL is genuinely required") does not survive contact with the guard: with `mcpServers` off by default there is no Service to default the URL onto, so `mcp.enabled: true` + empty `url` is precisely the case the guard must fail. A component that fails every default render is not "discoverable", it is broken. So `mcp.enabled` defaults to **false**, and discoverability is carried by the values comments and the README instead. Turning the component on is one flag plus the URL it genuinely needs — or one flag plus `mcpServers.enabled`, which supplies the URL itself.
