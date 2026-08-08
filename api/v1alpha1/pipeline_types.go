@@ -20,8 +20,9 @@ type PipelineSpec struct {
 	// these surfaces. Channels may appear in several pipelines.
 	// +optional
 	ChannelRefs []ObjectRef `json:"channelRefs,omitempty"`
-	// ProfileRef: the agent answering this pipeline's conversations (also the
-	// default profile for bare messages on the pipeline's channels).
+	// ProfileRef: the agent answering the conversations this pipeline
+	// originates — those from the signal sources it CLAIMS, and those a task
+	// or chat command addresses to it by name. Channels supply no default.
 	ProfileRef ObjectRef `json:"profileRef"`
 	// Toolsets binds MCPToolset CRs governing the allowlist of this wiring's
 	// conversations: merge unions their tools onto the profile's allowedTools,

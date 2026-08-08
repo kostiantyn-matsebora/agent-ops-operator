@@ -4,8 +4,8 @@ description: >-
   Kubernetes operator for agents you can address — monitoring signals and chat
   tasks become Conversations executed by per-conversation agent runtime pods.
 type: application
-version: 3.0.0
-appVersion: "0.16.1"
+version: 3.1.0
+appVersion: "0.17.0"
 dependencies:
   # embedded subchart (chart/charts/vm-bundle); templates are additionally
   # self-gated on vm-bundle.enabled
@@ -20,3 +20,9 @@ dependencies:
   - name: k8s-bundle
     version: 0.1.0
     repository: ""
+  # embedded subchart (chart/charts/telegram-bundle); templates are
+  # additionally self-gated on telegram-bundle.enabled
+  - name: telegram-bundle
+    version: 0.1.0
+    repository: ""
+    condition: telegram-bundle.enabled

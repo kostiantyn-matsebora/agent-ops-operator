@@ -98,6 +98,33 @@ same exposure the current adapter has on restart.
 forwarded updates. This is parity, not a new concept, and it reuses
 `adapterworkload.go` machinery wholesale.
 
+### D4b. The router is its own container; the bot credential is shared with the channel
+
+**Settled (requester decision).** The router stays a separate component and a
+separate container. Its only job is deciding where a user's update goes —
+topic present → `channel-telegram`, absent → `signal-telegram` — forwarding the
+raw update either way.
+
+The bot credential is a **shared Secret**: the same Secret backs both the
+router's vehicle and the `Channel`, because both talk to Telegram (the router
+calls `getUpdates`, the channel adapter calls `sendMessage`/`createForumTopic`).
+`signal-telegram` holds **no credentials at all** — it never contacts Telegram,
+it only normalizes forwarded updates and posts `/signal/inbound`.
+
+Vehicle, given that credentials reach a pod only by projection from a served CR:
+a `SignalAdapter telegram-router` serving a credential-carrying `SignalSource`
+whose `credentialsSecretRef` names the same Secret as the `Channel`. That source
+emits no signals; it is the projection anchor. The sample Pipeline claims it
+alongside the chat source so it does not sit at `Wired=False` forever.
+
+Rejected: collapsing the router into `signal-telegram` (the router is its own
+component); giving `signal-telegram` the token (it needs none); putting a
+credential field on an adapter CR (breaches "adapter CRs carry no credentials").
+
+Consequence for D3: unchanged — the router posts no content contract and needs
+no manager token of its own, so offset persistence stays delegated to
+`channel-telegram`.
+
 ### D5. The manager's chat signal carries its originating surface in reserved labels
 
 `signal-telegram` posts a normalized signal with:
@@ -187,16 +214,10 @@ rollback boundary. Conversations already created are unaffected either way.
 
 ## Open Questions
 
-- **The router's deployment vehicle is unresolved.** It needs the bot token,
-  and credentials only reach an adapter pod by projection from a *served* CR.
-  A pure router serves neither a Channel nor a SignalSource. Candidates:
-  (a) a `SignalAdapter` plus a credential-carrying `SignalSource` that no
-  Pipeline claims — legal but reports `Wired=False` forever;
-  (b) collapse the router into `signal-telegram`, which does serve the chat
-  source — two containers instead of three, contradicting the chosen shape;
-  (c) let an adapter CR declare a credential source directly — smallest change
-  to the model but breaches "adapter CRs carry no credentials".
-  This decides an invariant and should be settled before implementation.
+- ~~The router's deployment vehicle~~ — **settled, see D4b**: separate
+  container, `SignalAdapter` vehicle with a credential-carrying `SignalSource`
+  sharing the `Channel`'s Secret, `signal-telegram` credential-free. No
+  invariant moves.
 - Whether `POST /task` also becomes a signal origination. It is the last path
   that creates a Conversation without a source, and `capabilities-are-wiring`
   is already reasoning about it from the capability side.

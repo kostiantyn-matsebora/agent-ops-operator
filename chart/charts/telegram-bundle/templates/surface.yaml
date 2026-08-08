@@ -1,0 +1,114 @@
+{{- /*
+The chat surface: the bot Secret (when this bundle owns it), the Channel, the
+chat SignalSource, and the router's credential-carrying SignalSource.
+
+Opt-in via surface.enabled, which makes chatId and a credential REQUIRED — the
+helper fails the render naming whatever is missing, rather than installing a
+surface that cannot work.
+
+NO Pipeline is rendered here. Wiring would drag a profile, a runtime and its
+credentials into a transport bundle, so it stays the installer's. The
+consequence is real and deliberate: until a Ready Pipeline CLAIMS these
+sources they answer nobody — every message drops with Wired=False, and the
+person typing is told so on their own surface. The parent chart's post-install
+notes print the Pipeline to apply.
+*/ -}}
+{{- if and (include "telegram-bundle.active" .) (include "telegram-bundle.surfaceEnabled" .) }}
+{{- $s := .Values.surface }}
+{{- $sourceName := include "telegram-bundle.sourceName" . }}
+{{- $secretName := include "telegram-bundle.secretName" . }}
+{{- if include "telegram-bundle.createSecret" . }}
+# Created because surface.credentials.botToken was supplied. Both the Channel
+# and the router reference it by NAME only — nothing in the operator reads it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram-bundle
+type: Opaque
+stringData:
+  botToken: {{ $s.credentials.botToken | quote }}
+---
+{{- end }}
+# The Channel CARRIES conversations — it never starts one. No wiring lives
+# here: who answers is declared by whichever Pipeline claims the chat source.
+apiVersion: agentops.dev/v1alpha1
+kind: Channel
+metadata:
+  name: {{ $s.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram-bundle
+spec:
+  # names the ChannelAdapter serving this surface; that adapter's
+  # implementation is what defines and validates `config` below
+  adapter: {{ .Values.channelAdapter.name }}
+  # projected into the adapter pod as env by the reconciler, kubelet-resolved —
+  # nothing reads the Secret through the API
+  credentialsSecretRef:
+    name: {{ $secretName }}
+  # opaque to the operator; this shape is what channel-telegram parses
+  config:
+    chatId: {{ $s.chatId | quote }}
+    {{- with $s.feedThreadId }}
+    feedThreadId: {{ . }}
+    {{- end }}
+    {{- with $s.approvers }}
+    approvers:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+---
+# Chat ORIGINATION: this chat's general surface, as a signal source.
+# CLAIM THIS in a Pipeline or it answers nobody.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: {{ $sourceName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram-bundle
+spec:
+  adapter: {{ .Values.signalAdapter.name }}
+  # No credentialsSecretRef: signal-telegram never contacts Telegram.
+  config:
+    chatId: {{ $s.chatId | quote }}
+    # the Channel this chat is the general surface OF — replies, acks and
+    # command answers go back to it
+    channel: {{ $s.name }}
+    {{- with $s.approvers }}
+    approvers:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+  grouping:
+    # Chat defaults cooldown OFF: a person repeating a request means it twice,
+    # and fingerprint dedup would swallow the second ask.
+    cooldownHours: {{ $s.source.cooldownHours }}
+    {{- with $s.source.signatureLabels }}
+    signatureLabels:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+{{- if .Values.router.source.create }}
+---
+# The router's SignalSource carries the SHARED bot credential and the
+# forwarding targets into the router pod: adapter CRs hold no configuration or
+# credentials, so a served CR is the only way either can travel. It emits no
+# signals — claim it too, purely to keep it off Wired=False.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: {{ .Values.router.source.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram-bundle
+spec:
+  adapter: {{ .Values.router.name }}
+  # the SAME Secret the Channel uses: the router polls the bot it sends as
+  credentialsSecretRef:
+    name: {{ $secretName }}
+  config:
+    signalTarget: {{ include "telegram-bundle.signalTarget" . | quote }}
+    channelTarget: {{ include "telegram-bundle.channelTarget" . | quote }}
+{{- end }}
+{{- end }}

@@ -316,3 +316,86 @@ func TestRetiredTypeParameterIsRefused(t *testing.T) {
 		t.Fatalf("missing adapter: want 400, got %d", rec.Code)
 	}
 }
+
+// TestChannelAdapterServiceOwnership pins spec.port parity with SignalAdapter:
+// a channel adapter that is PUSHED to (an ingest router forwarding updates)
+// gets a reconciler-owned Service and LISTEN_ADDR, and one that polls stays
+// serviceless. Both kinds run the same machinery — keep this the mirror of
+// TestSignalAdapterServiceOwnership so the shared path cannot drift.
+func TestChannelAdapterServiceOwnership(t *testing.T) {
+	ctx := context.Background()
+	a := &agentopsv1alpha1.ChannelAdapter{}
+	a.Name, a.Namespace = "svc-chan", ns
+	a.Spec.Image = "example/adapter:1"
+	port := int32(8080)
+	a.Spec.Port = &port
+	if err := k8sClient.Create(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	reconcileAdapter(t, "svc-chan")
+
+	name := types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("svc-chan")}
+	var svc corev1.Service
+	if err := k8sClient.Get(ctx, name, &svc); err != nil {
+		t.Fatalf("Service not rendered for ported adapter: %v", err)
+	}
+	if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Port != 8080 {
+		t.Fatalf("service port wrong: %+v", svc.Spec.Ports)
+	}
+	if svc.Spec.Selector["agentops.dev/adapter"] != "svc-chan" {
+		t.Fatalf("selector wrong: %+v", svc.Spec.Selector)
+	}
+	if len(svc.OwnerReferences) == 0 || svc.OwnerReferences[0].Kind != "ChannelAdapter" {
+		t.Fatalf("ownerRef missing: %+v", svc.OwnerReferences)
+	}
+	var deploy appsv1.Deployment
+	if err := k8sClient.Get(ctx, name, &deploy); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{}
+	for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+		env[e.Name] = e.Value
+	}
+	if env["LISTEN_ADDR"] != ":8080" {
+		t.Fatalf("LISTEN_ADDR not injected: %+v", env)
+	}
+
+	// unsetting the port removes the reconciler-owned Service
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "svc-chan"}, a); err != nil {
+		t.Fatal(err)
+	}
+	a.Spec.Port = nil
+	if err := k8sClient.Update(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	reconcileAdapter(t, "svc-chan")
+	if err := k8sClient.Get(ctx, name, &svc); err == nil {
+		t.Fatal("Service should be removed when spec.port is unset")
+	}
+}
+
+// TestChannelAdapterWithoutPortHasNoService: the polling adapter (the default)
+// declares no port and must stay serviceless.
+func TestChannelAdapterWithoutPortHasNoService(t *testing.T) {
+	ctx := context.Background()
+	mkAdapter(t, "noport-chan")
+	reconcileAdapter(t, "noport-chan")
+	var svc corev1.Service
+	err := k8sClient.Get(ctx, types.NamespacedName{
+		Namespace: ns, Name: controller.AdapterDeploymentName("noport-chan"),
+	}, &svc)
+	if err == nil {
+		t.Fatal("Service must not be rendered without spec.port")
+	}
+	var deploy appsv1.Deployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{
+		Namespace: ns, Name: controller.AdapterDeploymentName("noport-chan"),
+	}, &deploy); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "LISTEN_ADDR" {
+			t.Fatal("LISTEN_ADDR injected without spec.port")
+		}
+	}
+}

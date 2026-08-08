@@ -8,9 +8,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -173,6 +176,52 @@ func ensureAdapterWorkload(ctx context.Context, c client.Client, scheme *runtime
 		return controllerutil.SetControllerReference(w.Owner, deploy, scheme)
 	})
 	return deploy, err
+}
+
+// adapterService describes the inbound Service for an adapter that declares
+// spec.port. Both adapter kinds render it identically — the Service shares the
+// Deployment's name and selector, so a ported adapter is reachable in-cluster
+// at <workload-name>:<port> with nothing chart-side.
+type adapterService struct {
+	Owner       client.Object // the adapter CR (ownerRef → GC + ownership check)
+	Name        string        // same as the Deployment name
+	Labels      map[string]string
+	SelectorKey string
+	Port        *int32 // nil = no inbound surface
+}
+
+// ensureAdapterService renders the adapter's inbound Service when spec.port is
+// declared, and removes a previously reconciler-owned one when it is not.
+//
+// Removal is ownership-gated: a Service this reconciler does not control (a
+// hand-made one under the same name) is left alone rather than deleted.
+func ensureAdapterService(ctx context.Context, c client.Client, scheme *runtime.Scheme, s adapterService) error {
+	if s.Port == nil {
+		var svc corev1.Service
+		err := c.Get(ctx, types.NamespacedName{Namespace: s.Owner.GetNamespace(), Name: s.Name}, &svc)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if metav1.IsControlledBy(&svc, s.Owner) {
+			return client.IgnoreNotFound(c.Delete(ctx, &svc))
+		}
+		return nil
+	}
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: s.Name, Namespace: s.Owner.GetNamespace()}}
+	_, err := controllerutil.CreateOrUpdate(ctx, c, svc, func() error {
+		svc.Labels = s.Labels
+		svc.Spec.Selector = map[string]string{s.SelectorKey: s.Owner.GetName()}
+		svc.Spec.Ports = []corev1.ServicePort{{
+			Name:       "http",
+			Port:       *s.Port,
+			TargetPort: intstr.FromInt32(*s.Port),
+		}}
+		return controllerutil.SetControllerReference(s.Owner, svc, scheme)
+	})
+	return err
 }
 
 // compileDeclaredSchema compiles an adapter CR's optional spec.configSchema

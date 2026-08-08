@@ -10,13 +10,19 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 )
 
-// Pipeline resolution: pipeline-first with fallback. Both entry points
-// (signal routing and chat inbound) resolve against READY pipelines only —
-// a broken pipeline never silently swallows routing; its sources/channels
-// behave as unclaimed until it is fixed.
+// Pipeline resolution. EVERY origination resolves the same way: by the
+// pipeline that CLAIMS the signal source, against READY pipelines only — a
+// broken pipeline never silently swallows routing; its sources behave as
+// unclaimed until it is fixed.
+//
+// There is deliberately no PipelineForChannel. Channels are shareable across
+// pipelines on purpose, so "which pipeline answers for this channel" has no
+// defensible answer — the oldest-Ready tiebreak that used to supply one is
+// gone along with channel origination itself. A channel carries conversations;
+// a claimed source starts them.
 
 // readyPipelines lists Ready pipelines oldest-first (name tiebreak) — the
-// deterministic claim order everywhere.
+// deterministic claim order for a source with more than one claimant.
 func readyPipelines(ctx context.Context, c client.Reader, namespace string) []agentopsv1alpha1.Pipeline {
 	var list agentopsv1alpha1.PipelineList
 	if err := c.List(ctx, &list, client.InNamespace(namespace)); err != nil {
@@ -43,20 +49,6 @@ func PipelineForSource(ctx context.Context, c client.Reader, namespace, source s
 	for _, p := range readyPipelines(ctx, c, namespace) {
 		for _, ref := range p.Spec.SignalSourceRefs {
 			if ref.Name == source {
-				cp := p
-				return &cp
-			}
-		}
-	}
-	return nil
-}
-
-// PipelineForChannel returns the oldest Ready pipeline referencing a channel
-// (the deterministic originator for inbound on multi-pipeline channels), or nil.
-func PipelineForChannel(ctx context.Context, c client.Reader, namespace, channel string) *agentopsv1alpha1.Pipeline {
-	for _, p := range readyPipelines(ctx, c, namespace) {
-		for _, ref := range p.Spec.ChannelRefs {
-			if ref.Name == channel {
 				cp := p
 				return &cp
 			}

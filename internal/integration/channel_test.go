@@ -65,16 +65,18 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-inb")
 	mkChannel(t, "chan-inb", "tg-inb")
+	mkChatSource(t, "src-inb", "chan-inb")
 	// a command addresses a PIPELINE — it originates the conversation, so it
-	// supplies both the profile and the capabilities
-	mkPipeline(t, "inb-pipe", nil, []string{"chan-inb"}, "prof-inb")
+	// supplies both the profile and the capabilities. Origination arrives on
+	// the SIGNAL path now: the channel carries conversations, it never starts
+	// one.
+	mkPipeline(t, "inb-pipe", []string{"src-inb"}, []string{"chan-inb"}, "prof-inb")
 	reconcilePipeline(t, "inb-pipe")
 	srv := apiServer()
 
 	// command naming a known pipeline -> task conversation
-	rec := adapterReq(srv, "POST", "/channel/inbound",
-		map[string]any{"channel": "chan-inb", "text": "/inb-pipe check the nodes"}, "test-adapter-token")
-	if rec.Code != 202 {
+	rec := chatSignal(t, srv, "src-inb", "chan-inb", "/inb-pipe check the nodes")
+	if rec.Code != 200 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
 	var list agentopsv1alpha1.ConversationList
@@ -96,9 +98,8 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	}
 
 	// /agents listing comes back as a send op on the adapter queue
-	rec = adapterReq(srv, "POST", "/channel/inbound",
-		map[string]any{"channel": "chan-inb", "text": "/agents"}, "test-adapter-token")
-	if rec.Code != 202 {
+	rec = chatSignal(t, srv, "src-inb", "chan-inb", "/agents")
+	if rec.Code != 200 {
 		t.Fatalf("agents inbound: %d", rec.Code)
 	}
 	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-inb&wait=0", nil, "test-adapter-token")

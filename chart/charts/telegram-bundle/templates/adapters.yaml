@@ -1,0 +1,138 @@
+{{- /*
+The three implementations. Adapter CRs are pure implementation — image and
+workload knobs, nothing else — so these render whether or not a chat surface is
+configured. The reconcilers own every Deployment and Service.
+*/ -}}
+{{- if include "telegram-bundle.active" . }}
+{{- $ca := .Values.channelAdapter }}
+# CONTINUATION and delivery. Does NOT poll: telegram-router owns the single
+# getUpdates loop and pushes topic updates here.
+apiVersion: agentops.dev/v1alpha1
+kind: ChannelAdapter
+metadata:
+  name: {{ $ca.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram-bundle
+spec:
+  image: {{ printf "%s:%s" $ca.image.repository (toString $ca.image.tag) | quote }}
+  # Receives forwarded topic updates: the reconciler owns Service
+  # agentops-adapter-<name> and injects LISTEN_ADDR.
+  port: {{ $ca.port }}
+  singleton: true
+  {{- with $ca.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  # Interface metadata: makes `kubectl get channeladapter` answer "what goes in
+  # spec.config?" without reading adapter source. Advisory — the manager
+  # reports ConfigValid, the adapter stays the authority.
+  configSchema:
+    type: object
+    properties:
+      chatId:
+        type: string
+        description: Telegram chat id the adapter posts to (forum supergroup).
+      feedThreadId:
+        type: integer
+        description: Topic id for the raw alerts feed.
+      approvers:
+        type: array
+        items:
+          type: integer
+        description: Telegram user ids allowed to talk to the agent.
+    required:
+      - chatId
+  credentialKeys:
+    # documentation only — the manager never reads Secrets
+    - key: botToken
+      required: false
+      description: >-
+        Bot API token for this surface, used to SEND. The same Secret backs the
+        router, which uses it to poll. Optional because the adapter also
+        accepts TELEGRAM_BOT_TOKEN from its environment.
+---
+{{- $sa := .Values.signalAdapter }}
+# ORIGINATION. A message on a chat's general surface is a signal like any
+# other, so it gets the same claim check, cooldown and observability as an
+# alert — instead of a channel starting a conversation on its own and needing a
+# tiebreak to decide who answers. Holds NO credentials.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: {{ $sa.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram-bundle
+spec:
+  image: {{ printf "%s:%s" $sa.image.repository (toString $sa.image.tag) | quote }}
+  # Receives forwarded general-surface updates.
+  port: {{ $sa.port }}
+  # Stateless receiver: no poll loop to double-fire.
+  singleton: false
+  {{- with $sa.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  configSchema:
+    type: object
+    properties:
+      chatId:
+        type: string
+        description: Telegram chat id whose GENERAL SURFACE originates here.
+      channel:
+        type: string
+        description: >-
+          Name of the Channel this chat is the general surface of. Replies,
+          acks and command answers go back to it, so a chat signal without it
+          is unanswerable.
+      approvers:
+        type: array
+        items:
+          type: integer
+        description: Telegram user ids allowed to originate (empty = anyone).
+    required:
+      - chatId
+      - channel
+---
+{{- $r := .Values.router }}
+# The SINGLE getUpdates consumer. singleton is not a preference here: two
+# routers on one bot token means 409s and stolen updates.
+#
+# Its vehicle is a SignalAdapter because credentials reach an adapter pod only
+# by projection from a CR it SERVES. It pushes no signals and persists nothing
+# — the channel adapter stores its offset — so it needs no Kubernetes access.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: {{ $r.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram-bundle
+spec:
+  image: {{ printf "%s:%s" $r.image.repository (toString $r.image.tag) | quote }}
+  singleton: true
+  {{- with $r.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  configSchema:
+    type: object
+    properties:
+      signalTarget:
+        type: string
+        description: Base URL of the telegram signal adapter (general-surface updates).
+      channelTarget:
+        type: string
+        description: >-
+          Base URL of the telegram channel adapter (topic updates, and offset
+          persistence on the router's behalf).
+    required:
+      - signalTarget
+      - channelTarget
+  credentialKeys:
+    - key: botToken
+      required: false
+      description: >-
+        Bot API token, used to POLL. The SAME Secret the Channel uses to send.
+{{- end }}

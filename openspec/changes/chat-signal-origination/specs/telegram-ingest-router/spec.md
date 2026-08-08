@@ -35,9 +35,16 @@ manager round-trip.
 
 ### Requirement: The router holds no channel configuration
 
-The router SHALL forward raw updates and SHALL NOT read channel or source
+The router SHALL forward updates verbatim and SHALL NOT read `Channel`
 configuration. Chat-id matching and approver filtering SHALL remain in the
 receiving adapters, each against its own contract listing.
+
+The router MAY read its OWN served `SignalSource` — and nothing else — for its
+forwarding targets and the env prefix its bot token is projected under, since
+adapter CRs carry no configuration or env by invariant and a served CR's
+`config` is therefore the only path per-deployment settings can travel.
+Classification SHALL NOT depend on that read: no per-message manager
+round-trip.
 
 #### Scenario: Non-approved sender is filtered downstream
 
@@ -45,10 +52,17 @@ receiving adapters, each against its own contract listing.
 - **THEN** the receiving adapter drops it silently, and the router is unaware of
   the policy
 
-#### Scenario: Router needs no contract listing
+#### Scenario: Router reads no channel policy
 
 - **WHEN** the router runs
-- **THEN** it reads no channel or source configuration from the manager
+- **THEN** it reads no `Channel` configuration and no chat id or approver list
+  from the manager, and classifies every update without contacting it
+
+#### Scenario: Updates are forwarded byte for byte
+
+- **WHEN** the router forwards an update
+- **THEN** the receiving adapter gets the Telegram update verbatim, so no field
+  is lost to re-encoding on the way through
 
 ### Requirement: Offset persistence is delegated to a receiving adapter
 
@@ -87,20 +101,63 @@ injects the listen address into the workload.
 - **THEN** the reconciler creates and owns the Service and injects the listen
   address, and the chart ships no Service for it
 
-### Requirement: The chart delivers the whole stack under one flag
+### Requirement: The chart delivers the whole stack as one bundle
 
-The chart SHALL render the router, the signal adapter, and the channel adapter
-as adapter CRs gated on the existing `telegramAdapter.enabled` flag, default
-false, together with a sample Pipeline pairing the chat `SignalSource` with its
-`Channel`. The chart SHALL contain no channel-type workload templates.
+The chart SHALL package Telegram as an embedded `telegram-bundle` subchart,
+default off, matching the existing bundle subcharts. Enabling it SHALL render
+the router, the signal adapter, and the channel adapter as adapter CRs and no
+channel-type workload templates.
+
+The bundle SHALL render the chat surface — the `Channel`, the chat
+`SignalSource`, and the router's credential-carrying `SignalSource` — under an
+explicit `surface.enabled` flag. Enabling it SHALL make every value the chart
+cannot guess REQUIRED, failing the render and naming what is missing rather
+than installing a surface that cannot work.
+
+The bot credential SHALL be expressible two ways, exactly one at a time: a
+reference to an existing Secret, or a supplied token from which the bundle
+creates the Secret. Both forms SHALL be referenced by the sending `Channel` and
+the polling router alike.
+
+The bundle SHALL NOT render a `Pipeline`: wiring names a profile and a runtime,
+which belong to the install rather than to a transport bundle. Because an
+unclaimed source answers nobody, the chart SHALL tell the operator what to
+apply.
 
 #### Scenario: Disabled by default
 
 - **WHEN** the chart renders with default values
 - **THEN** no telegram resources are produced
 
-#### Scenario: Enabling renders CRs only
+#### Scenario: Enabling renders implementations only
 
-- **WHEN** `telegramAdapter.enabled=true`
+- **WHEN** `telegram-bundle.enabled=true` with `surface.enabled` false
 - **THEN** the output contains the three adapter CRs and no Deployment or
-  Service for any of them — the reconcilers create those
+  Service for any of them — the reconcilers create those — and no `Channel`,
+  `SignalSource` or `Secret`
+
+#### Scenario: An enabled surface renders its objects
+
+- **WHEN** `surface.enabled=true` with a chat id and a credential
+- **THEN** the output also contains the `Channel`, the chat `SignalSource` and
+  the router's credential source, with one Secret name referenced by both the
+  sending Channel and the polling router — and still no `Pipeline`
+
+#### Scenario: An incomplete surface is refused
+
+- **WHEN** `surface.enabled=true` and the chat id is missing, or no credential
+  is given, or both credential forms are given at once
+- **THEN** the render fails naming exactly which value is wrong, instead of
+  installing a surface that could never answer
+
+#### Scenario: The bundle can own the Secret
+
+- **WHEN** the credential is supplied as a token rather than a Secret reference
+- **THEN** the bundle creates the Secret with key `botToken`, and both the
+  Channel and the router reference it by name
+
+#### Scenario: The unclaimed sources are announced
+
+- **WHEN** the surface renders
+- **THEN** the post-install notes state that nothing answers yet and print the
+  `Pipeline` to apply, pre-filled with the rendered source and channel names

@@ -7,15 +7,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -88,13 +85,14 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		env = append(env, corev1.EnvVar{Name: "LISTEN_ADDR", Value: fmt.Sprintf(":%d", *adapter.Spec.Port)})
 	}
 
+	labels := map[string]string{
+		"app.kubernetes.io/name":      "agentops-signal-adapter",
+		"agentops.dev/signal-adapter": adapter.Name,
+	}
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
-		Owner: &adapter,
-		Name:  SignalAdapterDeploymentName(adapter.Name),
-		Labels: map[string]string{
-			"app.kubernetes.io/name":      "agentops-signal-adapter",
-			"agentops.dev/signal-adapter": adapter.Name,
-		},
+		Owner:            &adapter,
+		Name:             SignalAdapterDeploymentName(adapter.Name),
+		Labels:           labels,
 		SelectorKey:      "agentops.dev/signal-adapter",
 		Image:            adapter.Spec.Image,
 		Env:              env,
@@ -106,7 +104,13 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.ensureService(ctx, &adapter); err != nil {
+	if err := ensureAdapterService(ctx, r.Client, r.Scheme, adapterService{
+		Owner:       &adapter,
+		Name:        SignalAdapterDeploymentName(adapter.Name),
+		Labels:      labels,
+		SelectorKey: "agentops.dev/signal-adapter",
+		Port:        adapter.Spec.Port,
+	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -131,42 +135,6 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	apimeta.SetStatusCondition(&adapter.Status.Conditions, ready)
 	return ctrl.Result{}, r.Status().Patch(ctx, &adapter, patch)
-}
-
-// ensureService renders the adapter's inbound Service when spec.port is
-// declared and removes a previously reconciler-owned one when it is not.
-func (r *SignalAdapterReconciler) ensureService(ctx context.Context, adapter *agentopsv1alpha1.SignalAdapter) error {
-	name := SignalAdapterDeploymentName(adapter.Name)
-	if adapter.Spec.Port == nil {
-		var svc corev1.Service
-		err := r.Get(ctx, types.NamespacedName{Namespace: adapter.Namespace, Name: name}, &svc)
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		// only remove what this reconciler owns — never a hand-made Service
-		if metav1.IsControlledBy(&svc, adapter) {
-			return client.IgnoreNotFound(r.Delete(ctx, &svc))
-		}
-		return nil
-	}
-	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: adapter.Namespace}}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
-		svc.Labels = map[string]string{
-			"app.kubernetes.io/name":      "agentops-signal-adapter",
-			"agentops.dev/signal-adapter": adapter.Name,
-		}
-		svc.Spec.Selector = map[string]string{"agentops.dev/signal-adapter": adapter.Name}
-		svc.Spec.Ports = []corev1.ServicePort{{
-			Name:       "http",
-			Port:       *adapter.Spec.Port,
-			TargetPort: intstr.FromInt32(*adapter.Spec.Port),
-		}}
-		return controllerutil.SetControllerReference(adapter, svc, r.Scheme)
-	})
-	return err
 }
 
 // SetupWithManager wires the controller (mirrors ChannelAdapterReconciler):

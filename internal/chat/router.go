@@ -2,17 +2,27 @@
 // adapters via POST /channel/inbound, built-ins via their own surfaces):
 //
 //	message inside a known thread  -> reply input on that conversation
-//	/agents | /help                -> AgentProfile listing
-//	/<profile>[:<agent>] <task>    -> new task conversation (own thread)
-//	plain text, no thread          -> default-profile conversation
-//	message in an unknown thread   -> adopted as a conversation in that thread
+//	message in an unknown thread   -> dropped (nothing to continue)
 //
-// Conversations are bound to a SET of channels (the originating channel's
-// Ready Pipeline's channels, or just the originating channel): every bound
-// channel mirrors the whole conversation — acks fan out to all of them and a
-// user message on one channel is relayed to the siblings as attributed text.
-// Transport-specific concerns (update parsing, offsets, approver filtering)
-// stay in the adapter. Outbound flows back as send ops on the OpQueue.
+// CHANNELS DO NOT ORIGINATE. A Conversation is born only from a signal routed
+// against a SignalSource some Ready Pipeline claims, so who answers is
+// DECLARED by that claim rather than inferred. Chat is no exception: a message
+// on a channel's general surface reaches the manager as a chat signal from a
+// chat source (see internal/httpapi/signals.go), through the same claim check,
+// cooldown, grouping and observability as an alert or a cron job.
+//
+// That is why there is no adoptThread, no bare-text branch, and no
+// PipelineForChannel here any more. Each was a way for a channel to start a
+// conversation with nothing having claimed it for the purpose — which forced
+// "whichever Ready pipeline was created first" to stand in for an answer, a
+// tiebreak this package refuses to make anywhere else.
+//
+// Conversations are bound to a SET of channels (the originating Pipeline's
+// channels): every bound channel mirrors the whole conversation — acks fan out
+// to all of them and a user message on one channel is relayed to the siblings
+// as attributed text. Transport-specific concerns (update parsing, offsets,
+// approver filtering) stay in the adapter. Outbound flows back as send ops on
+// the OpQueue.
 package chat
 
 import (
@@ -52,73 +62,56 @@ type Router struct {
 	Ops       *OpQueue
 }
 
-// HandleMessage routes one inbound message arriving on a channel.
+// HandleMessage routes one inbound message arriving on a channel. Reply-only:
+// a message continues the conversation bound to its thread, or it is dropped.
+//
+// ThreadID is required by POST /channel/inbound — a nil one cannot reach here
+// through the contract. An UNKNOWN thread is dropped rather than adopted:
+// adoption was origination wearing a different name.
 func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel, msg InboundMessage) error {
 	text := strings.TrimSpace(msg.Text)
-	if text == "" {
+	if text == "" || msg.ThreadID == nil {
 		return nil
 	}
-	if msg.ThreadID != nil {
-		if conv := r.convByThread(ctx, ch, *msg.ThreadID); conv != nil {
-			busy := conv.Status.Inflight != nil || len(conv.Spec.Inputs) > 0
-			if err := r.appendInput(ctx, conv, agentopsv1alpha1.InputItem{
-				ID: newInputID(), Type: agentopsv1alpha1.InputReply, Payload: text, ReceivedAt: metav1.Now(),
-			}); err != nil {
-				return err
-			}
-			ack := "🔧 On it…"
-			if busy {
-				ack = "⏳ Noted — I'll pick this up as soon as the current step finishes."
-			}
-			r.relayToSiblings(ctx, conv, ch.Name, msg.Sender, text)
-			r.FanOutSend(ctx, conv, ack)
-			return nil
-		}
-		// unknown thread: adopt as a conversation pinned to it
-		return r.adoptThread(ctx, ch, *msg.ThreadID, text)
+	conv := r.convByThread(ctx, ch, *msg.ThreadID)
+	if conv == nil {
+		return nil // no conversation in this thread — nothing to continue
 	}
-
-	// general surface
-	if cmd, ok := addressing.Parse(text); ok {
-		return r.handleCommand(ctx, ch, cmd)
-	}
-	if p := r.defaultPipeline(ctx, ch); p != nil {
-		_, err := r.CreateTaskConversation(ctx, ch, p.Spec.ProfileRef.Name, "", text, p)
+	busy := conv.Status.Inflight != nil || len(conv.Spec.Inputs) > 0
+	if err := r.appendInput(ctx, conv, agentopsv1alpha1.InputItem{
+		ID: newInputID(), Type: agentopsv1alpha1.InputReply, Payload: text, ReceivedAt: metav1.Now(),
+	}); err != nil {
 		return err
 	}
-	r.Ops.EnqueueSend(ctx, ch, nil, "⚠️ No default profile on this channel — use /&lt;profile&gt; &lt;task&gt; (see /agents).")
+	ack := "🔧 On it…"
+	if busy {
+		ack = "⏳ Noted — I'll pick this up as soon as the current step finishes."
+	}
+	r.relayToSiblings(ctx, conv, ch.Name, msg.Sender, text)
+	r.FanOutSend(ctx, conv, ack)
 	return nil
 }
 
-// defaultPipeline resolves the wiring for bare messages — pipeline-only: the
-// oldest Ready Pipeline referencing this channel supplies both the default
-// profile and the tooling bindings; channels in no pipeline have no default
-// (nil → guidance message).
-func (r *Router) defaultPipeline(ctx context.Context, ch *agentopsv1alpha1.Channel) *agentopsv1alpha1.Pipeline {
-	return PipelineForChannel(ctx, r.Client, r.Namespace, ch.Name)
-}
-
-// boundChannels resolves the channel set a new conversation originating on ch
-// binds to: the channel's Ready Pipeline's channels (origin guaranteed
-// included), or just the origin.
-func (r *Router) boundChannels(ctx context.Context, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
-	if p := PipelineForChannel(ctx, r.Client, r.Namespace, ch.Name); p != nil {
-		refs := append([]agentopsv1alpha1.ObjectRef{}, p.Spec.ChannelRefs...)
-		found := false
-		for _, ref := range refs {
-			if ref.Name == ch.Name {
-				found = true
-			}
-		}
-		if !found {
-			refs = append(refs, agentopsv1alpha1.ObjectRef{Name: ch.Name})
-		}
-		return refs
+// boundChannels resolves the channel set a new conversation binds to: the
+// originating Pipeline's channels, with the originating channel guaranteed
+// included (it is where the user is looking).
+func (r *Router) boundChannels(origin *agentopsv1alpha1.Pipeline, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
+	if origin == nil {
+		return []agentopsv1alpha1.ObjectRef{{Name: ch.Name}}
 	}
-	return []agentopsv1alpha1.ObjectRef{{Name: ch.Name}}
+	refs := append([]agentopsv1alpha1.ObjectRef{}, origin.Spec.ChannelRefs...)
+	for _, ref := range refs {
+		if ref.Name == ch.Name {
+			return refs
+		}
+	}
+	return append(refs, agentopsv1alpha1.ObjectRef{Name: ch.Name})
 }
 
-func (r *Router) handleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command) error {
+// HandleCommand answers chat input that addresses a pipeline. Called from the
+// CHAT SIGNAL path, which is where origination lives — commands that only
+// produce a response emit a send op and create no Conversation.
+func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command) error {
 	if cmd.Profile == "agents" || cmd.Profile == "help" || cmd.Profile == "start" {
 		// List PIPELINES: they are what a message addresses, and what carries
 		// the capabilities the resulting conversation will have. Listing
@@ -158,9 +151,9 @@ func (r *Router) handleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 }
 
 // CreateTaskConversation starts a task conversation originating on a channel,
-// bound to the channel's resolved set (pipeline channels or just the origin).
-// A non-nil origin pipeline also snapshots its tooling bindings onto the
-// conversation; nil leaves the conversation on the profile's own tooling.
+// bound to the origin Pipeline's channel set. The origin also snapshots its
+// tooling bindings onto the conversation — capabilities come from the wiring
+// that originated it, never from the profile.
 func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, agentOverride, task string,
 	origin *agentopsv1alpha1.Pipeline) (*agentopsv1alpha1.Conversation, error) {
 	title := "🛠 " + strings.Join(strings.Fields(task), " ")
@@ -174,7 +167,7 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 	conv.Namespace = r.Namespace
 	conv.GenerateName = "task-"
 	conv.Spec = agentopsv1alpha1.ConversationSpec{
-		ChannelRefs: r.boundChannels(ctx, ch),
+		ChannelRefs: r.boundChannels(origin, ch),
 		ProfileRef:  agentopsv1alpha1.ObjectRef{Name: profile},
 		Title:       title,
 		Inputs: []agentopsv1alpha1.InputItem{{
@@ -187,46 +180,6 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		conv.Spec.MCPConfigs = origin.Spec.MCPConfigs.DeepCopy()
 	}
 	return conv, r.Client.Create(ctx, conv)
-}
-
-// adoptThread: user wrote in a thread we don't know — bind a new conversation
-// to it. Created without channelRefs first so the controller can't race a
-// topic creation on the origin; the origin's thread binding lands via status
-// patch, then the full channel set is attached (sibling topics are ensured by
-// the controller from there).
-func (r *Router) adoptThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID, text string) error {
-	p := r.defaultPipeline(ctx, ch)
-	if p == nil {
-		r.Ops.EnqueueSend(ctx, ch, &threadID, "⚠️ No default profile configured — I can't adopt this topic.")
-		return nil
-	}
-	conv := &agentopsv1alpha1.Conversation{}
-	conv.Namespace = r.Namespace
-	conv.GenerateName = "adopted-"
-	conv.Spec = agentopsv1alpha1.ConversationSpec{
-		ProfileRef: p.Spec.ProfileRef,
-		Toolsets:   p.Spec.Toolsets.DeepCopy(),
-		MCPConfigs: p.Spec.MCPConfigs.DeepCopy(),
-		Title:      "🛠 " + strings.Join(strings.Fields(text), " "),
-		Inputs: []agentopsv1alpha1.InputItem{{
-			ID: newInputID(), Type: agentopsv1alpha1.InputTask, Payload: text, ReceivedAt: metav1.Now(),
-		}},
-	}
-	if err := r.Client.Create(ctx, conv); err != nil {
-		return err
-	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: ch.Name, ThreadID: threadID}}
-	if err := r.Client.Status().Patch(ctx, conv, patch); err != nil {
-		return err
-	}
-	spec := client.MergeFrom(conv.DeepCopy())
-	conv.Spec.ChannelRefs = r.boundChannels(ctx, ch)
-	if err := r.Client.Patch(ctx, conv, spec); err != nil {
-		return err
-	}
-	r.Ops.EnqueueSend(ctx, ch, &threadID, "🆕 New conversation adopted — working on it…")
-	return nil
 }
 
 // convByThread resolves a (channel, thread) pair to its conversation. Thread
