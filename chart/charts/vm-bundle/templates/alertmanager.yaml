@@ -188,6 +188,7 @@ spec:
   {{- if or .Values.mcp.vmlogs.enabled .Values.mcp.vmmetrics.enabled }}
   {{- $tools = append $tools .Values.mcp.toolset.name }}
   {{- end }}
+  {{- range $src.extraToolsets }}{{ $tools = append $tools . }}{{ end }}
   {{- if $tools }}
   toolsets:
     refs:
@@ -198,6 +199,7 @@ spec:
   {{- $cfgs := list }}
   {{- if .Values.mcp.vmlogs.enabled }}{{ $cfgs = append $cfgs .Values.mcp.vmlogs.name }}{{ end }}
   {{- if .Values.mcp.vmmetrics.enabled }}{{ $cfgs = append $cfgs .Values.mcp.vmmetrics.name }}{{ end }}
+  {{- range $src.extraMCPConfigs }}{{ $cfgs = append $cfgs . }}{{ end }}
   {{- if $cfgs }}
   mcpConfigs:
     refs:

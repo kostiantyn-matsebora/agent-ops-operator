@@ -112,7 +112,7 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	srv := apiServer()
 	// inbound command on channel A → conversation bound to BOTH channels
 	rec := adapterReq(srv, "POST", "/channel/inbound",
-		map[string]any{"channel": "mc-a", "text": "/prof-mc mirror me"}, "test-adapter-token")
+		map[string]any{"channel": "mc-a", "text": "/mc-pipe mirror me"}, "test-adapter-token")
 	if rec.Code != 202 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
@@ -331,7 +331,7 @@ func TestSingleChannelResultIsDeliveredByTheOperator(t *testing.T) {
 	srv := apiServer()
 
 	rec := adapterReq(srv, "POST", "/channel/inbound",
-		map[string]any{"channel": "sc-chan", "text": "/prof-sc single surface"}, "test-adapter-token")
+		map[string]any{"channel": "sc-chan", "text": "/sc-pipe single surface"}, "test-adapter-token")
 	if rec.Code != 202 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}

@@ -65,11 +65,15 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-inb")
 	mkChannel(t, "chan-inb", "tg-inb")
+	// a command addresses a PIPELINE — it originates the conversation, so it
+	// supplies both the profile and the capabilities
+	mkPipeline(t, "inb-pipe", nil, []string{"chan-inb"}, "prof-inb")
+	reconcilePipeline(t, "inb-pipe")
 	srv := apiServer()
 
-	// command for a known profile -> task conversation
+	// command naming a known pipeline -> task conversation
 	rec := adapterReq(srv, "POST", "/channel/inbound",
-		map[string]any{"channel": "chan-inb", "text": "/prof-inb check the nodes"}, "test-adapter-token")
+		map[string]any{"channel": "chan-inb", "text": "/inb-pipe check the nodes"}, "test-adapter-token")
 	if rec.Code != 202 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
@@ -103,8 +107,14 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	}
 	var op chat.Op
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
-	if op.Kind != chat.OpSend || !strings.Contains(op.Text, "/prof-inb") {
-		t.Fatalf("agents send op: %+v", op)
+	// the listing names PIPELINES: they are what a message can address, and
+	// what carries the capabilities the conversation will get. Listing profiles
+	// would advertise names a user cannot actually address.
+	if op.Kind != chat.OpSend || !strings.Contains(op.Text, "/inb-pipe") {
+		t.Fatalf("agents send op must list addressable pipelines: %+v", op)
+	}
+	if strings.Contains(op.Text, "/prof-inb") {
+		t.Fatalf("listing must not advertise profile names: %q", op.Text)
 	}
 }
 

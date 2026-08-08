@@ -24,6 +24,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -119,21 +120,29 @@ func (r *Router) boundChannels(ctx context.Context, ch *agentopsv1alpha1.Channel
 
 func (r *Router) handleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command) error {
 	if cmd.Profile == "agents" || cmd.Profile == "help" || cmd.Profile == "start" {
-		var profiles agentopsv1alpha1.AgentProfileList
-		if err := r.Reader.List(ctx, &profiles, client.InNamespace(r.Namespace)); err != nil {
+		// List PIPELINES: they are what a message addresses, and what carries
+		// the capabilities the resulting conversation will have. Listing
+		// profiles would name things a user cannot actually address.
+		var pipelines agentopsv1alpha1.PipelineList
+		if err := r.Reader.List(ctx, &pipelines, client.InNamespace(r.Namespace)); err != nil {
 			return err
 		}
-		names := make([]string, 0, len(profiles.Items))
-		for _, pr := range profiles.Items {
-			names = append(names, "/"+pr.Name)
+		names := make([]string, 0, len(pipelines.Items))
+		for i := range pipelines.Items {
+			if apimeta.IsStatusConditionTrue(pipelines.Items[i].Status.Conditions, "Ready") {
+				names = append(names, "/"+pipelines.Items[i].Name)
+			}
 		}
 		sort.Strings(names)
 		r.Ops.EnqueueSend(ctx, ch, nil, "🤖 <b>Agents</b>: "+strings.Join(names, "  ")+
 			"\nUsage: /&lt;agent&gt; &lt;task&gt; — each call gets its own topic. /&lt;agent&gt;:&lt;role&gt; picks a role inside the agent's repo.")
 		return nil
 	}
-	var profile agentopsv1alpha1.AgentProfile
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Profile}, &profile); err != nil {
+	// A command addresses a PIPELINE: it originates the conversation, so it
+	// supplies the profile AND the capabilities. Addressing a profile would
+	// name something with no wiring, and therefore nothing to grant.
+	var pipe agentopsv1alpha1.Pipeline
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Profile}, &pipe); err != nil {
 		if apierrors.IsNotFound(err) {
 			r.Ops.EnqueueSend(ctx, ch, nil, fmt.Sprintf("⚠️ Unknown agent <b>%s</b> — see /agents.", cmd.Profile))
 			return nil
@@ -144,11 +153,7 @@ func (r *Router) handleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		r.Ops.EnqueueSend(ctx, ch, nil, fmt.Sprintf("⚠️ Usage: /%s &lt;task&gt;", cmd.Profile))
 		return nil
 	}
-	// Explicitly addressed profile: the channel's pipeline supplies the mirrored
-	// channel set but NOT its capabilities — the named profile is not that
-	// pipeline's, so its toolsets would grant tools meant for a different agent.
-	// The named profile's own baseline supplies them instead.
-	_, err := r.CreateTaskConversation(ctx, ch, cmd.Profile, cmd.Agent, cmd.Rest, nil)
+	_, err := r.CreateTaskConversation(ctx, ch, pipe.Spec.ProfileRef.Name, cmd.Agent, cmd.Rest, &pipe)
 	return err
 }
 
