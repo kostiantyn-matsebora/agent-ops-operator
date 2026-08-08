@@ -520,11 +520,22 @@ type inboundReq struct {
 	Sender   string  `json:"sender,omitempty"`
 }
 
+// handleChannelInbound is REPLY-ONLY. A channel carries conversations; it does
+// not start them, so every inbound message must name the thread it continues.
+// Origination goes through the signal path: a general-surface message is a
+// chat signal from a chat SignalSource, claimed by a Pipeline that declares who
+// answers — instead of a channel picking whichever pipeline was created first.
 func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var in inboundReq
 	if err := json.Unmarshal(body, &in); err != nil || in.Channel == "" || in.Text == "" {
-		writeJSON(w, 400, map[string]string{"error": `need {"channel","text"}`})
+		writeJSON(w, 400, map[string]string{"error": `need {"channel","text","threadId"}`})
+		return
+	}
+	if in.ThreadID == nil || *in.ThreadID == "" {
+		writeJSON(w, 400, map[string]string{"error": "threadId is required: /channel/inbound continues an existing " +
+			"conversation thread and never starts one. A message on the channel's general surface is an ORIGINATION — " +
+			"post it as a chat signal to POST /signal/inbound from a chat SignalSource a Ready Pipeline claims"})
 		return
 	}
 	ctx := r.Context()

@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/addressing"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/ingest"
@@ -41,8 +42,34 @@ type NormalizedSignal struct {
 	// line as a ConversationInput).
 	Payload string `json:"payload,omitempty"`
 	// Kind selects the input lane: "alert" (default; read-only investigation
-	// prompt) or "job" (task-lane prompt).
+	// prompt), "job" (task-lane prompt), or "chat" (task lane, from a human on
+	// a chat surface).
 	Kind string `json:"kind,omitempty"`
+}
+
+// KindChat marks a signal that is a person talking on a chat surface rather
+// than a machine reporting. It takes the task lane like a job, but NOT job's
+// recurrence-on-session semantics — a second question is a second
+// conversation, not a resumption of the first.
+const KindChat = "chat"
+
+// Reserved labels a chat signal carries. LabelChatChannel is what lets the
+// manager answer on the surface the message came from — without it a chat
+// signal is unanswerable, so /signal/inbound refuses it rather than accept one
+// whose reply would go nowhere.
+const (
+	LabelChatChannel = "agentops.dev/channel"
+	LabelChatSender  = "agentops.dev/sender"
+)
+
+// isChat reports whether a batch is chat input.
+func isChat(signals []NormalizedSignal) bool {
+	for _, sig := range signals {
+		if sig.Kind == KindChat {
+			return true
+		}
+	}
+	return false
 }
 
 // combineFunc renders one input payload for a signature group of fresh
@@ -80,6 +107,13 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 		hours := source.Spec.Grouping.CooldownHours
 		if hours <= 0 {
 			hours = 6
+			if isChat(signals) {
+				// Chat defaults cooldown OFF. Fingerprint dedup exists so a
+				// flapping alert opens one investigation; a person asking the
+				// same thing twice means it twice, and swallowing the second
+				// ask would be a bug wearing dedup's clothes.
+				hours = 0
+			}
 		}
 		cd = ingest.NewCooldown(time.Duration(hours) * time.Hour)
 		s.cooldowns[source.Name] = cd
@@ -99,6 +133,14 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 	for _, fp := range fresh {
 		sig := byFP[fp]
 		key := ingest.Signature(sig.Labels, source.Spec.Grouping.SignatureLabels)
+		if sig.Kind == KindChat && len(source.Spec.Grouping.SignatureLabels) == 0 {
+			// No grouping for chat unless the source explicitly asks for it.
+			// The default signature labels are alert vocabulary a chat message
+			// never carries, so every message would hash to the same key and
+			// pile into one conversation. Per-fingerprint keys give each
+			// message its own — today's behavior, preserved.
+			key = sig.Fingerprint
+		}
 		groups[key] = append(groups[key], sig)
 	}
 
@@ -110,12 +152,102 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 		touched++
 	}
 
+	s.bumpReceived(ctx, source, len(fresh))
+	return len(fresh), touched, "", nil
+}
+
+// bumpReceived records ingest on the source (the single place lastReceived /
+// receivedTotal move).
+func (s *Server) bumpReceived(ctx context.Context, source *agentopsv1alpha1.SignalSource, n int) {
+	if n == 0 {
+		return
+	}
 	patch := client.MergeFrom(source.DeepCopy())
 	now := metav1.Now()
 	source.Status.LastReceived = &now
-	source.Status.ReceivedTotal += int64(len(fresh))
+	source.Status.ReceivedTotal += int64(n)
 	_ = s.Client.Status().Patch(ctx, source, patch)
-	return len(fresh), touched, "", nil
+}
+
+// ---- chat lane --------------------------------------------------------------
+
+// routeChatSignals handles input from a person on a chat surface.
+//
+// Two things make it different from an alert or a job. First, some chat input
+// is a COMMAND whose whole result is a reply — a listing, an unknown agent, a
+// usage error — and answering it by opening a Conversation would leave a
+// stub conversation behind for every typo. Those emit a send op and nothing
+// else. Second, when nothing is wired the user is owed an answer: an alert
+// dropping silently is a condition for the operator to find, but a person who
+// just typed into a chat is waiting.
+//
+// Everything else goes down the ordinary signal path, so chat gets the same
+// claim check, window reuse and observability as every other source.
+func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal) (int, int, string, error) {
+	if pipeline := chat.PipelineForSource(ctx, s.Client, s.Namespace, source.Name); pipeline == nil {
+		reason := "source not claimed by a Ready pipeline (Wired=False) — signals dropped"
+		s.tellOriginatingSurfaces(ctx, signals, fmt.Sprintf(
+			"⚠️ Nothing here is wired to answer. No Ready Pipeline claims the chat source <b>%s</b>, "+
+				"so this message was dropped. Add it to a Pipeline's sources to give it an agent.", source.Name))
+		return 0, 0, reason, nil
+	}
+
+	answered := 0
+	var rest []NormalizedSignal
+	for _, sig := range signals {
+		ch := s.chatChannel(ctx, sig)
+		if ch == nil {
+			continue // unknown channel: nowhere to answer, nothing to create
+		}
+		cmd, ok := addressing.Parse(strings.TrimSpace(sig.Payload))
+		if !ok {
+			rest = append(rest, sig)
+			continue
+		}
+		// Addressed input: /agents and friends answer in place;
+		// /<pipeline> <task> still opens a conversation, on the pipeline it
+		// names rather than the one claiming the source.
+		if err := s.Router.HandleCommand(ctx, ch, cmd); err != nil {
+			return 0, 0, "", err
+		}
+		answered++
+	}
+	s.bumpReceived(ctx, source, answered)
+
+	if len(rest) == 0 {
+		return answered, 0, "", nil
+	}
+	queued, touched, reason, err := s.routeSignals(ctx, source, rest, combineJoined)
+	return queued + answered, touched, reason, err
+}
+
+// chatChannel resolves the Channel a chat signal came from.
+func (s *Server) chatChannel(ctx context.Context, sig NormalizedSignal) *agentopsv1alpha1.Channel {
+	name := sig.Labels[LabelChatChannel]
+	if name == "" {
+		return nil
+	}
+	var ch agentopsv1alpha1.Channel
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &ch); err != nil {
+		return nil
+	}
+	return &ch
+}
+
+// tellOriginatingSurfaces posts one message to each distinct chat surface a
+// batch came from, so a drop is visible where the user is looking.
+func (s *Server) tellOriginatingSurfaces(ctx context.Context, signals []NormalizedSignal, text string) {
+	told := map[string]bool{}
+	for _, sig := range signals {
+		name := sig.Labels[LabelChatChannel]
+		if name == "" || told[name] {
+			continue
+		}
+		told[name] = true
+		if ch := s.chatChannel(ctx, sig); ch != nil {
+			s.Ops.EnqueueSend(ctx, ch, nil, text)
+		}
+	}
 }
 
 // routeSignalGroup lands one signature group as an input on the matching
@@ -148,9 +280,15 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	// input lane: base kind for new work, recurrence once a session exists
 	inputType := agentopsv1alpha1.InputAlert
 	jobName := ""
-	if group[0].Kind == "job" {
+	switch group[0].Kind {
+	case "job":
 		inputType = agentopsv1alpha1.InputJob
 		jobName = source.Name
+	case KindChat:
+		// Task lane, and deliberately NOT the job lane: job carries
+		// recurrence-on-session, which would make a second question resume
+		// the first question's session.
+		inputType = agentopsv1alpha1.InputTask
 	}
 	if conv == nil {
 		title := ""
@@ -166,8 +304,11 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		conv = &agentopsv1alpha1.Conversation{}
 		conv.Namespace = s.Namespace
 		conv.GenerateName = "alert-"
-		if inputType == agentopsv1alpha1.InputJob {
+		switch inputType {
+		case agentopsv1alpha1.InputJob:
 			conv.GenerateName = "job-"
+		case agentopsv1alpha1.InputTask:
+			conv.GenerateName = "chat-"
 		}
 		conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
 		conv.Spec = agentopsv1alpha1.ConversationSpec{
@@ -272,12 +413,25 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]string{"error": "every signal needs a fingerprint"})
 			return
 		}
+		// A chat signal names the surface it came from, or it is unanswerable.
+		// Refuse it here rather than accept it and silently drop the reply.
+		if sig.Kind == KindChat && sig.Labels[LabelChatChannel] == "" {
+			writeJSON(w, 400, map[string]string{"error": "a chat signal must carry the label " +
+				LabelChatChannel + " naming the Channel it arrived on — the reply has nowhere to go without it"})
+			return
+		}
 	}
 	source := s.signalSource(r, w, in.Source)
 	if source == nil {
 		return
 	}
-	queued, touched, reason, err := s.routeSignals(r.Context(), source, in.Signals, combineJoined)
+	route := s.routeSignals
+	if isChat(in.Signals) {
+		route = func(ctx context.Context, src *agentopsv1alpha1.SignalSource, sigs []NormalizedSignal, _ combineFunc) (int, int, string, error) {
+			return s.routeChatSignals(ctx, src, sigs)
+		}
+	}
+	queued, touched, reason, err := route(r.Context(), source, in.Signals, combineJoined)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return

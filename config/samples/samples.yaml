@@ -106,9 +106,12 @@ metadata:
   name: telegram
   namespace: agent-ops
 spec:
-  image: kmatsebora/agentops-channel-telegram:0.2.0
-  # singleton (default true): replicas 1 + Recreate — getUpdates allows exactly
-  # one consumer per bot token
+  image: kmatsebora/agentops-channel-telegram:0.5.0
+  # This adapter does NOT poll. telegram-router owns the single getUpdates loop
+  # and pushes topic updates here, so the reconciler owns Service
+  # agentops-adapter-telegram and injects LISTEN_ADDR.
+  port: 8080
+  # singleton (default true): replicas 1 + Recreate
   resources:
     requests:
       cpu: 10m
@@ -132,14 +135,77 @@ spec:
   # Secrets to run several bots through one adapter.
   credentialsSecretRef:
     name: agentops-telegram
-  # NO wiring here: bare messages are answered by the profile of the Pipeline
-  # referencing this channel (home-ops-pipeline below)
+  # NO wiring here, and no origination either: a Channel CARRIES conversations.
+  # A message on this chat's general surface arrives as a chat SIGNAL from the
+  # home-ops-chat source below, and the Pipeline claiming that source decides
+  # who answers.
   # opaque to the operator; the shape below is what channel-telegram parses
   config:
     chatId: "-1004369687194"
     feedThreadId: 2
-    pollingEnabled: false   # MUST stay false while another consumer polls this bot
     # approvers: [123456789]
+---
+# The Telegram ingest split. One poller, two receivers:
+#
+#   getUpdates -> telegram-router --+-- no topic -> signal-telegram  (ORIGINATION)
+#                                   +-- topic    -> channel-telegram (CONTINUATION)
+#
+# EXACTLY ONE process may read a bot token's stream, ever. Scale any older
+# polling adapter to zero before starting the router.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: telegram
+  namespace: agent-ops
+spec:
+  image: kmatsebora/agentops-signal-telegram:0.1.0
+  port: 8080   # receives general-surface updates from the router
+---
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: home-ops-chat
+  namespace: agent-ops
+spec:
+  adapter: telegram
+  # No credentials: signal-telegram never contacts Telegram.
+  config:
+    chatId: "-1004369687194"
+    # the Channel this chat is the general surface OF — replies go back here
+    channel: home-ops
+    # approvers: [123456789]
+  grouping:
+    # Chat defaults cooldown OFF and skips signature grouping: a person
+    # repeating a request means it twice. Set signatureLabels to opt in.
+    cooldownHours: 0
+---
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: telegram-router
+  namespace: agent-ops
+spec:
+  image: kmatsebora/agentops-telegram-router:0.1.0
+  # singleton (default true) — two routers on one bot token means 409s and
+  # stolen updates
+---
+# The router's SignalSource carries the shared bot Secret and the forwarding
+# targets into the router pod: adapter CRs hold no configuration or
+# credentials, so a served CR is the only way either can travel. It emits no
+# signals — it is claimed below only so it does not sit at Wired=False.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: telegram-router
+  namespace: agent-ops
+spec:
+  adapter: telegram-router
+  # the SAME Secret the Channel uses: the router polls the bot it sends as
+  credentialsSecretRef:
+    name: agentops-telegram
+  config:
+    signalTarget: "http://agentops-signal-telegram.agent-ops.svc:8080"
+    channelTarget: "http://agentops-adapter-telegram.agent-ops.svc:8080"
 ---
 # Pipeline: the wiring object — every referenced source's signals become
 # conversations bound to ALL referenced channels (each channel mirrors the
@@ -154,6 +220,14 @@ metadata:
 spec:
   signalSourceRefs:
     - name: daily-healthcheck
+    # Chat origination: claiming this source is what declares who answers a
+    # message on the chat's general surface. Without a claimant the message
+    # drops (and the user is told) — there is no channel default and no
+    # oldest-pipeline tiebreak.
+    - name: home-ops-chat
+    # The router's credential carrier. It emits nothing; claiming it just
+    # keeps it off Wired=False.
+    - name: telegram-router
   channelRefs:
     - name: home-ops
   profileRef:

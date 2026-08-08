@@ -106,14 +106,14 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	mkProfile(t, "prof-mc")
 	mkChannel(t, "mc-a", "mc-ta")
 	mkChannel(t, "mc-b", "mc-tb")
-	mkPipeline(t, "mc-pipe", nil, []string{"mc-a", "mc-b"}, "prof-mc")
+	mkChatSource(t, "mc-src", "mc-a")
+	mkPipeline(t, "mc-pipe", []string{"mc-src"}, []string{"mc-a", "mc-b"}, "prof-mc")
 	reconcilePipeline(t, "mc-pipe")
 
 	srv := apiServer()
-	// inbound command on channel A → conversation bound to BOTH channels
-	rec := adapterReq(srv, "POST", "/channel/inbound",
-		map[string]any{"channel": "mc-a", "text": "/mc-pipe mirror me"}, "test-adapter-token")
-	if rec.Code != 202 {
+	// chat originating on channel A → conversation bound to BOTH channels
+	rec := chatSignal(t, srv, "mc-src", "mc-a", "/mc-pipe mirror me")
+	if rec.Code != 200 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
 	var list agentopsv1alpha1.ConversationList
@@ -326,13 +326,13 @@ func TestSingleChannelResultIsDeliveredByTheOperator(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-sc")
 	mkChannel(t, "sc-chan", "sc-tg")
-	mkPipeline(t, "sc-pipe", nil, []string{"sc-chan"}, "prof-sc")
+	mkChatSource(t, "sc-src", "sc-chan")
+	mkPipeline(t, "sc-pipe", []string{"sc-src"}, []string{"sc-chan"}, "prof-sc")
 	reconcilePipeline(t, "sc-pipe")
 	srv := apiServer()
 
-	rec := adapterReq(srv, "POST", "/channel/inbound",
-		map[string]any{"channel": "sc-chan", "text": "/sc-pipe single surface"}, "test-adapter-token")
-	if rec.Code != 202 {
+	rec := chatSignal(t, srv, "sc-src", "sc-chan", "/sc-pipe single surface")
+	if rec.Code != 200 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
 	var list agentopsv1alpha1.ConversationList

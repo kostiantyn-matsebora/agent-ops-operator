@@ -4,28 +4,40 @@
 // for other transports (Slack, Teams, …).
 //
 //	outbound: long-poll GET /channel/ops?adapter=telegram  ->  Bot API calls
-//	inbound:  one getUpdates loop per DISTINCT bot token -> POST /channel/inbound
+//	inbound:  POST /updates (from telegram-router)         ->  POST /channel/inbound
+//	offset:   GET/PUT /offset (for the router)             ->  adapter state API
+//
+// This adapter DOES NOT POLL. Telegram serves exactly one update stream per
+// bot token, so telegram-router owns the single getUpdates loop and forwards
+// each update to whichever component it belongs to: a forum-topic message
+// CONTINUES a conversation and comes here; a general-surface message
+// ORIGINATES one and goes to signal-telegram instead. Conversations are born
+// on the signal path only — this adapter carries them, it never starts one.
+//
+// It still persists the router's offset, because it is the component holding
+// a Channel to annotate: the router reports each confirmed offset through
+// GET/PUT /offset and this adapter writes it to the contract's state API, so
+// restarts never replay updates and the router needs no RBAC of its own.
 //
 // Credentials are per channel: each served Channel's credentialsSecretRef is
 // projected into this pod's environment and located via the channel listing's
 // credentialEnvPrefix (key botToken); TELEGRAM_BOT_TOKEN remains the fallback
-// for channels without projected credentials (hand-deployed deployments).
-// Channels sharing a token share one getUpdates loop — the single-consumer
-// rule holds per TOKEN. Run single-instance (replicas 1 / Recreate; the
-// ChannelAdapter reconciler's singleton mode does exactly that).
-//
-// The getUpdates offset persists through the contract's state API (a Channel
-// annotation on the manager side), so restarts never replay updates.
+// for channels without projected credentials (hand-deployed deployments). The
+// SAME Secret backs the router, which needs the token to poll.
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_BOT_TOKEN (optional
-// fallback), ADAPTER_NAME (default "telegram"), projected AGENTOPS_CRED_* vars.
+// fallback), ADAPTER_NAME (default "telegram"), LISTEN_ADDR (default ":8080" —
+// in-cluster the reconciler injects it from ChannelAdapter.spec.port),
+// projected AGENTOPS_CRED_* vars.
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"sort"
@@ -36,11 +48,14 @@ import (
 )
 
 // channelConfig is this adapter's interpretation of Channel spec.config.
+//
+// There is no pollingEnabled any more: this adapter never polls, so a channel
+// cannot opt into a loop that no longer exists here. Ingest is enabled by
+// running telegram-router against the bot token.
 type channelConfig struct {
-	ChatID         string  `json:"chatId"`
-	FeedThreadID   *int64  `json:"feedThreadId,omitempty"`
-	Approvers      []int64 `json:"approvers,omitempty"`
-	PollingEnabled bool    `json:"pollingEnabled,omitempty"`
+	ChatID       string  `json:"chatId"`
+	FeedThreadID *int64  `json:"feedThreadId,omitempty"`
+	Approvers    []int64 `json:"approvers,omitempty"`
 }
 
 // servedChannel is one validated channel with its resolved credentials.
@@ -53,13 +68,12 @@ type adapter struct {
 	mgr           *Manager
 	channelType   string
 	fallbackToken string
+	listen        string
 
 	mu       sync.Mutex
 	channels map[string]servedChannel // validated, by channel name
 	reported map[string]string        // last status message per channel (avoid spam)
 	clients  map[string]*Telegram     // bot client per token
-	loops    map[string]context.CancelFunc
-	loopWG   sync.WaitGroup
 }
 
 func mustEnv(key string) string {
@@ -75,25 +89,46 @@ func main() {
 	if channelType == "" {
 		channelType = "telegram"
 	}
+	listen := os.Getenv("LISTEN_ADDR")
+	if listen == "" {
+		listen = ":8080"
+	}
 	a := &adapter{
 		mgr:           NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
 		channelType:   channelType,
 		fallbackToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+		listen:        listen,
 		channels:      map[string]servedChannel{},
 		reported:      map[string]string{},
 		clients:       map[string]*Telegram{},
-		loops:         map[string]context.CancelFunc{},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("channel-telegram adapter starting (adapter=%s)", channelType)
+	log.Printf("channel-telegram adapter starting (adapter=%s, listen=%s)", channelType, listen)
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); a.opsLoop(ctx) }()
-	go func() { defer wg.Done(); a.pollManager(ctx) }()
-	wg.Wait()
-	a.loopWG.Wait()
+	go a.opsLoop(ctx)
+
+	srv := &http.Server{Addr: listen, Handler: a.handler()}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("update server: %v", err)
+	}
+}
+
+func (a *adapter) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("POST /updates", a.handleUpdate)
+	mux.HandleFunc("GET /offset", a.handleOffsetGet)
+	mux.HandleFunc("PUT /offset", a.handleOffsetPut)
+	return mux
 }
 
 // refreshChannels re-reads served channels, validates config, resolves each
@@ -224,122 +259,48 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 	return "", "unknown op kind " + op.Kind
 }
 
-// ---- inbound: one getUpdates loop per distinct token ------------------------
+// ---- inbound: topic updates forwarded by the router -------------------------
 
-// pollManager keeps exactly one polling goroutine alive per distinct bot token
-// among polling-enabled channels (channels sharing a token share a loop — the
-// getUpdates single-consumer rule holds per token).
-func (a *adapter) pollManager(ctx context.Context) {
-	for ctx.Err() == nil {
-		a.refreshChannels(ctx)
-
-		want := map[string]bool{}
-		a.mu.Lock()
-		for _, sc := range a.channels {
-			if sc.cfg.PollingEnabled {
-				want[sc.token] = true
-			}
-		}
-		// stop loops for gone tokens, start loops for new ones
-		for token, cancel := range a.loops {
-			if !want[token] {
-				cancel()
-				delete(a.loops, token)
-			}
-		}
-		for token := range want {
-			if _, running := a.loops[token]; running {
-				continue
-			}
-			loopCtx, cancel := context.WithCancel(ctx)
-			a.loops[token] = cancel
-			a.loopWG.Add(1)
-			go func(token string) {
-				defer a.loopWG.Done()
-				a.pollToken(loopCtx, token)
-			}(token)
-		}
-		a.mu.Unlock()
-
-		sleepCtx(ctx, 30*time.Second)
+// handleUpdate takes one raw update the router classified as a CONTINUATION.
+//
+// Always 204, even when filtered: the router is a dumb pipe and a non-2xx
+// would only make it log. Whether a message is policy-eligible is this
+// adapter's business, not the router's.
+func (a *adapter) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "read body", http.StatusBadRequest)
+		return
 	}
+	var upd tgUpdate
+	if err := json.Unmarshal(body, &upd); err != nil {
+		http.Error(w, "not a telegram update", http.StatusBadRequest)
+		return
+	}
+	a.dispatch(r.Context(), upd)
+	w.WriteHeader(http.StatusNoContent)
 }
 
-// tokenGroup returns the polling-enabled channels using a token, sorted by
-// name (the first is the group leader holding the shared offset cursor).
-func (a *adapter) tokenGroup(token string) []string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	var names []string
-	for name, sc := range a.channels {
-		if sc.token == token && sc.cfg.PollingEnabled {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
-}
-
-// pollToken is the single getUpdates consumer for one bot token. The offset
-// cursor persists per channel through the state API: written to the group
-// leader, read as the max across the group (safe on leader change — getUpdates
-// never replays updates already confirmed by a higher-offset request).
-func (a *adapter) pollToken(ctx context.Context, token string) {
-	tg := a.client(token)
-	for ctx.Err() == nil {
-		group := a.tokenGroup(token)
-		if len(group) == 0 {
-			return // pollManager cancels us; be safe anyway
-		}
-		offset := int64(0)
-		for _, name := range group {
-			raw, err := a.mgr.GetState(ctx, name, "telegram-offset")
-			if err != nil {
-				if ctx.Err() == nil {
-					log.Printf("offset read %s: %v", name, err)
-					sleepCtx(ctx, 5*time.Second)
-				}
-				offset = -1
-				break
-			}
-			if n, _ := strconv.ParseInt(raw, 10, 64); n > offset {
-				offset = n
-			}
-		}
-		if offset < 0 {
-			continue
-		}
-		updates, err := tg.GetUpdates(ctx, offset)
-		if err != nil {
-			if ctx.Err() == nil {
-				log.Printf("getUpdates (%d channel(s)): %v", len(group), err)
-				sleepCtx(ctx, 5*time.Second)
-			}
-			continue
-		}
-		leader := group[0]
-		for _, upd := range updates {
-			offset = upd.UpdateID + 1
-			// persist BEFORE handling: a poison message must not replay forever
-			if err := a.mgr.PutState(ctx, leader, "telegram-offset", strconv.FormatInt(offset, 10)); err != nil {
-				if ctx.Err() == nil {
-					log.Printf("offset write %s: %v", leader, err)
-				}
-				break
-			}
-			a.dispatch(ctx, group, upd)
-		}
-	}
-}
-
-// dispatch routes one update to the group channel whose chatId matches.
-func (a *adapter) dispatch(ctx context.Context, group []string, upd tgUpdate) {
+// dispatch routes one forwarded update to the channel whose chatId matches.
+//
+// Chat-id matching and approver filtering live here, and the SAME two rules
+// live in signal-telegram for the origination side. The duplication is
+// deliberate — it is what lets the router stay configuration-free — so both
+// sides carry the same test table.
+func (a *adapter) dispatch(ctx context.Context, upd tgUpdate) {
 	m := upd.Message
 	if m == nil || m.Chat == nil || m.Text == "" {
 		return
 	}
+	// A general-surface message must never arrive here — that is the router's
+	// origination branch, and adopting it would recreate the very path this
+	// design removed: a conversation born on a channel, answered by whichever
+	// pipeline happened to be oldest.
+	if !m.IsTopicMessage {
+		return
+	}
 	chatID := strconv.FormatInt(m.Chat.ID, 10)
-	for _, name := range group {
+	for _, name := range a.channelNames() {
 		sc, ok := a.channel(name)
 		if !ok || sc.cfg.ChatID != chatID {
 			continue
@@ -347,16 +308,83 @@ func (a *adapter) dispatch(ctx context.Context, group []string, upd tgUpdate) {
 		if len(sc.cfg.Approvers) > 0 && (m.From == nil || !containsID(sc.cfg.Approvers, m.From.ID)) {
 			return // not an approved user — ignore silently
 		}
-		var threadID *string
-		if m.IsTopicMessage {
-			t := strconv.FormatInt(m.MessageThreadID, 10)
-			threadID = &t
-		}
-		if err := a.mgr.Inbound(ctx, name, threadID, m.Text); err != nil {
+		threadID := strconv.FormatInt(m.MessageThreadID, 10)
+		if err := a.mgr.Inbound(ctx, name, &threadID, m.Text); err != nil {
 			log.Printf("inbound %s: %v", name, err)
 		}
 		return // first matching channel wins
 	}
+}
+
+// channelNames lists served channels sorted by name, so the pick among
+// channels sharing a chat id is stable.
+func (a *adapter) channelNames() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	names := make([]string, 0, len(a.channels))
+	for name := range a.channels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// ---- offset: persistence delegated FROM the router --------------------------
+
+// offsetChannel picks the channel whose annotation carries the cursor: the
+// first served channel by name. Stable across restarts, and safe if it
+// changes — getUpdates never replays updates already confirmed by a
+// higher-offset request.
+func (a *adapter) offsetChannel() (string, bool) {
+	names := a.channelNames()
+	if len(names) == 0 {
+		return "", false
+	}
+	return names[0], true
+}
+
+func (a *adapter) handleOffsetGet(w http.ResponseWriter, r *http.Request) {
+	name, ok := a.offsetChannel()
+	if !ok {
+		a.refreshChannels(r.Context())
+		if name, ok = a.offsetChannel(); !ok {
+			http.Error(w, "no channel served yet — cannot hold an offset", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	value, err := a.mgr.GetState(r.Context(), name, "telegram-offset")
+	if err != nil {
+		log.Printf("offset read %s: %v", name, err)
+		http.Error(w, "offset read failed", http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]string{"value": value})
+}
+
+func (a *adapter) handleOffsetPut(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&in); err != nil {
+		http.Error(w, "need {\"value\":\"<offset>\"}", http.StatusBadRequest)
+		return
+	}
+	name, ok := a.offsetChannel()
+	if !ok {
+		http.Error(w, "no channel served yet — cannot hold an offset", http.StatusServiceUnavailable)
+		return
+	}
+	if err := a.mgr.PutState(r.Context(), name, "telegram-offset", in.Value); err != nil {
+		log.Printf("offset write %s: %v", name, err)
+		http.Error(w, "offset write failed", http.StatusBadGateway)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func containsID(list []int64, id int64) bool {

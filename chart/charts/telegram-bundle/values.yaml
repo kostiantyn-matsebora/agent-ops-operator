@@ -1,0 +1,120 @@
+# Telegram bundle: the ingest stack, and optionally a ready-to-talk chat
+# surface. Off by default. Override under the `telegram-bundle:` key of the
+# parent chart's values.
+#
+# The stack is THREE components, because Telegram serves exactly one update
+# stream per bot token (a second concurrent getUpdates gets 409, and confirming
+# an offset destructively consumes updates for every reader):
+#
+#   getUpdates ─▶ telegram-router ─┬─ no topic ─▶ signal-telegram  (ORIGINATION)
+#                 (the only poller) └─ topic    ─▶ channel-telegram (CONTINUATION)
+#
+# All three are adapter CRs: the operator's reconcilers own the Deployments and
+# Services. This chart ships neither, and no adapter connectivity.
+enabled: false
+
+# ---- implementations --------------------------------------------------------
+# Adapter CRs are PURE IMPLEMENTATION: an image and workload knobs. No
+# credentials, no connectivity, no chat configuration — those live on the
+# served Channel/SignalSource under `surface` below.
+
+# Continuation and delivery: sends messages, creates topics, receives topic
+# updates pushed by the router. Does NOT poll.
+channelAdapter:
+  # ChannelAdapter CR name — also the ROUTING KEY: Channels select this
+  # implementation with spec.adapter: <name>.
+  name: telegram
+  image:
+    repository: kmatsebora/agentops-channel-telegram
+    tag: 0.5.0
+  # Port the router pushes topic updates to. The reconciler owns Service
+  # agentops-adapter-<name> and injects LISTEN_ADDR.
+  port: 8080
+  resources: {}
+
+# Origination: normalizes general-surface messages into chat signals. Holds no
+# credentials — it never contacts Telegram.
+signalAdapter:
+  # SignalAdapter CR name — the routing key chat SignalSources select.
+  name: telegram
+  image:
+    repository: kmatsebora/agentops-signal-telegram
+    tag: 0.1.0
+  # Port the router pushes general-surface updates to.
+  port: 8080
+  resources: {}
+
+# The single getUpdates consumer. Classifies each update by topic presence and
+# forwards it verbatim; holds no channel configuration and persists nothing.
+router:
+  name: telegram-router
+  image:
+    repository: kmatsebora/agentops-telegram-router
+    tag: 0.1.0
+  resources: {}
+  # The router's own SignalSource. It emits no signals — it exists because
+  # credentials and config only reach an adapter pod by projection from a CR it
+  # SERVES, and adapter CRs carry neither. It carries the shared bot credential
+  # and the forwarding targets.
+  #
+  # Rendered with the surface: without a bot token there is nothing to poll.
+  source:
+    create: true
+    name: telegram-router
+
+# ---- the chat surface -------------------------------------------------------
+# Channel + chat SignalSource + the router's credential source.
+#
+# OPT-IN AND EXPLICIT: set enabled: true and the fields that cannot be guessed
+# become REQUIRED — a missing one fails the render, naming what to set. With it
+# off, this bundle ships the three implementations and wires nothing, which is
+# the right shape when you manage your Channels yourself.
+surface:
+  enabled: false
+
+  # Channel CR name. The chat SignalSource defaults to <name>-chat.
+  name: telegram-ops
+
+  # REQUIRED when enabled. Telegram chat id (a forum supergroup, so
+  # conversations get topics). Its GENERAL SURFACE originates conversations;
+  # its TOPICS continue them.
+  chatId: ""
+
+  # REQUIRED when enabled — one of the two forms below. The bot credential is
+  # referenced by BOTH the Channel (which sends) and the router's SignalSource
+  # (which polls): the same bot, so one Secret. The manager never reads it —
+  # the reconcilers project it into the pods and the kubelet resolves it.
+  credentials:
+    # (a) Point at a Secret you already manage. It must hold key `botToken`.
+    #     Prefer this when the token comes from an external secret manager.
+    existingSecret: ""
+
+    # (b) Or supply the token and let the bundle create the Secret. Convenient,
+    #     but the value then lives in your values file AND in the Helm release
+    #     stored in-cluster — use (a) if that matters to you.
+    botToken: ""
+    # Name for the created Secret; empty = <surface.name>-telegram.
+    # Ignored when existingSecret is set.
+    secretName: ""
+
+  # Optional topic id for the raw alerts feed.
+  feedThreadId: null
+  # Telegram user ids allowed to talk to the agent; empty = anyone in the chat.
+  # Applied by both adapters (origination and continuation).
+  approvers: []
+
+  # The chat SignalSource: general-surface messages become chat signals.
+  #
+  # NOTE: this bundle ships NO Pipeline — wiring pulls in a profile, a runtime
+  # and its credentials, which belong to your install rather than to a
+  # transport bundle. Until some Ready Pipeline CLAIMS the sources below, they
+  # answer nobody: every message drops with Wired=False (and the person typing
+  # is told so). See the post-install notes for the Pipeline to apply.
+  source:
+    # Empty = <surface.name>-chat.
+    name: ""
+    # Chat defaults: cooldown OFF and no signature grouping, so each message
+    # opens its own conversation — a person repeating a request means it twice.
+    # Set signatureLabels to opt into grouping.
+    cooldownHours: 0
+    signatureLabels: []

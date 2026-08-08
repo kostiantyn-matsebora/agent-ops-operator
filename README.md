@@ -43,6 +43,11 @@ approvable from your phone.
 
 ## Behaviors that matter
 
+- **One workflow: a signal originates, a channel carries.** Every Conversation
+  starts from a signal routed against a `SignalSource` some Ready `Pipeline`
+  claims — an alert, a cron job, or a person typing on a chat surface, all
+  through the same path. Channels never start conversations; they carry them.
+  So "who answers this?" is always declared by a claim, never inferred.
 - **Conversation = topic = session.** Replying in a topic resumes the same agent
   session; new problems get new topics; the same alert signature within its
   window reuses the existing conversation instead of spamming duplicates.
@@ -115,6 +120,102 @@ Two more rules worth knowing:
 Conversations that bind `mcpConfigs` compile into their own ConfigMap
 (`agentops-mcp-conv-<conversation>`, garbage-collected with the conversation).
 
+### Migrating to chart 3.1 (chat originates as a signal) — BREAKING
+
+Two breaking changes land together.
+
+**1. `/channel/inbound` is reply-only.** `threadId` is now REQUIRED and an
+unknown thread is no longer adopted. Third-party adapters that posted bare
+messages to originate a conversation get a `400` naming the signal path.
+`PipelineForChannel` — and with it the "oldest Ready pipeline referencing this
+channel answers" tiebreak — is gone, as is any channel default profile.
+
+**2. Telegram ingest is three components.** Telegram serves one update stream
+per bot token, so origination and continuation cannot each poll:
+
+```
+getUpdates ─▶ telegram-router ─┬─ no topic ─▶ signal-telegram  ─▶ /signal/inbound
+              (the only poller) └─ topic    ─▶ channel-telegram ─▶ /channel/inbound
+```
+
+`channel-telegram` no longer polls; `Channel.spec.config.pollingEnabled` is
+removed. Ingest is on when the router runs.
+
+Steps — **step 3 is the one where ordering matters**:
+
+1. **Upgrade the operator first.** `ChannelAdapter.spec.port` and the
+   reconciler's Service parity are inert until used.
+2. **Add the chat `SignalSource` and claim it**, plus the router's
+   credential-carrying source. Nothing changes behaviorally yet — the old
+   adapter is still polling.
+
+   ```yaml
+   apiVersion: agentops.dev/v1alpha1
+   kind: SignalSource
+   metadata: {name: home-ops-chat, namespace: agent-ops}
+   spec:
+     adapter: telegram          # signal-telegram; no credentials needed
+     config:
+       chatId: "-1004369687194"
+       channel: home-ops        # the Channel this chat is the general surface of
+     grouping: {cooldownHours: 0}
+   ```
+
+   Then add `home-ops-chat` (and `telegram-router`) to your Pipeline's
+   `signalSourceRefs`. **A chat source no Pipeline claims answers nobody** —
+   the user is told so on the surface, but nothing runs.
+3. **Scale the old adapter to zero and CONFIRM no `getUpdates` consumer
+   remains** before enabling the new stack. Two consumers of one token means
+   409s and stolen updates — this is the failure that costs the most debugging.
+
+   ```sh
+   kubectl scale deploy/agentops-adapter-telegram -n agent-ops --replicas=0
+   kubectl get pods -n agent-ops | grep telegram   # expect none
+   ```
+4. **Carry the offset across.** The cursor lives in the
+   `agentops.dev/adapter-state-telegram-offset` annotation on the Channel the
+   old adapter wrote to. The new stack reads it from the FIRST served channel
+   by name, so if your old leader differs, copy the value over:
+
+   ```sh
+   kubectl get channel home-ops -n agent-ops \
+     -o jsonpath='{.metadata.annotations.agentops\.dev/adapter-state-telegram-offset}'
+   ```
+5. **Enable the bundle.** Telegram now ships as the embedded `telegram-bundle`
+   subchart, so the flat `telegramAdapter` values are gone:
+
+   ```yaml
+   telegram-bundle:
+     enabled: true
+     surface:
+       enabled: true
+       chatId: "-1004369687194"
+       credentials:
+         existingSecret: agentops-telegram   # key: botToken
+   ```
+
+   `enabled` alone ships the three IMPLEMENTATIONS and wires nothing — the
+   right shape if you manage Channels yourself. `surface.enabled` also ships
+   the Channel and the chat `SignalSource`, and then requires everything it
+   cannot guess. The router's credential is the SAME one the Channel uses — it
+   polls the bot the channel sends as.
+
+6. **Claim the sources in a Pipeline.** Your existing Pipeline keeps its
+   channels; add the new sources to its `signalSourceRefs`:
+
+   ```yaml
+   signalSourceRefs:
+     - name: telegram-ops-chat   # the chat surface
+     - name: telegram-router     # emits nothing; claimed so it is not Wired=False
+   ```
+
+   Until this lands, chat messages drop with `Wired=False` and the user is told
+   so. The post-install notes print this block with your names filled in.
+
+Rollback is steps 3 and 5 together: re-enable the old single-container adapter
+AND revert the operator, since the origination paths must come back with it.
+Conversations already created are unaffected either way.
+
 ### Migrating from chart 2.x — BREAKING
 
 `AgentProfile.spec.allowedTools` and `spec.mcp` are removed. **Removing a CRD
@@ -154,9 +255,17 @@ credentials never leave the adapter:
 2. Complete each op with `POST /channel/ops/{id}/done` — `{"threadId":"…"}`
    for `ensure-topic` (an opaque string in your id space), `{"error":"…"}` on
    failure (surfaced as a Conversation condition and regenerated).
-3. Push user messages with `POST /channel/inbound
-   {"channel","threadId"?,"text"}` — command parsing, conversation
-   creation/adoption, busy-acks all happen manager-side in the shared router.
+3. Push user REPLIES with `POST /channel/inbound
+   {"channel","threadId","text"}` — `threadId` is REQUIRED. This endpoint
+   continues an existing conversation and never starts one; a message in a
+   thread the manager does not know is dropped, not adopted. Relay to sibling
+   channels and busy-acks happen manager-side in the shared router.
+   To ORIGINATE, your transport's general surface belongs to a chat
+   `SignalSource`: post `{"kind":"chat","fingerprint":…,"payload":…,"labels":
+   {"agentops.dev/channel":…,"agentops.dev/sender":…}}` to `/signal/inbound`
+   (see `signal-telegram/`). The Pipeline claiming that source decides who
+   answers, and command parsing (`/agents`, `/<pipeline> <task>`) happens
+   there.
 4. Read your channels + opaque `spec.config` from `GET /channel/channels?adapter=`,
    persist cursors (e.g. poll offsets) via `GET/PUT /channel/state/{channel}/{key}`,
    report config problems via `POST /channel/channels/{name}/status`.
@@ -427,6 +536,75 @@ The runtime ServiceAccount is renamed `agentops-runtime-demo` →
 `demo.yaml` template. The `AgentRuntime` named `default` re-renders with
 identical semantics, so existing conversations keep resolving their runtime.
 
+## Telegram bundle (subchart)
+
+`chart/charts/telegram-bundle/` packages the Telegram experience — off by
+default. It ships in two layers, because the implementations are guessable and
+the surface is not.
+
+**Layer 1 — the implementations** (`telegram-bundle.enabled=true` alone). Three
+adapter CRs, because Telegram serves exactly one update stream per bot token: a
+second concurrent `getUpdates` gets `409`, and confirming an offset
+destructively consumes updates for every reader. So origination and
+continuation cannot each poll for themselves — one process reads the stream and
+fans it out:
+
+```
+getUpdates ─▶ telegram-router ─┬─ no topic ─▶ signal-telegram  ─▶ /signal/inbound
+              (the only poller) └─ topic    ─▶ channel-telegram ─▶ /channel/inbound
+```
+
+- **`telegram-router`** classifies on `is_topic_message` — a field that rides
+  on the update, so the decision is local with no manager round-trip — and
+  forwards updates **verbatim**. It holds no channel configuration (chat-id
+  matching and approver filtering stay in the receiving adapters), persists
+  nothing, and needs no Kubernetes access.
+- **`signal-telegram`** turns general-surface messages into `kind: chat`
+  signals. It never contacts Telegram, so it holds no credentials.
+- **`channel-telegram`** sends, creates topics, and receives forwarded topic
+  updates on `spec.port`. It also persists the router's offset, being the
+  component with a Channel to annotate.
+
+This layer wires nothing — the right shape when you manage Channels yourself.
+
+**Layer 2 — the chat surface**, opt-in and explicit. `surface.enabled: true`
+makes everything unguessable REQUIRED, so a missing field fails the render
+naming what to set, instead of quietly installing half a surface:
+
+```yaml
+telegram-bundle:
+  enabled: true
+  surface:
+    enabled: true
+    chatId: "-1004369687194"              # REQUIRED, a forum supergroup
+    credentials:
+      existingSecret: agentops-telegram   # REQUIRED — this, or botToken below
+    approvers: [123456789]
+```
+
+That renders the `Channel`, the chat `SignalSource`, and the router's
+credential-carrying source.
+
+The credential comes in either form, and exactly one of them:
+
+| | |
+|---|---|
+| `credentials.existingSecret` | a Secret you already manage, holding key `botToken` — prefer this when the token comes from an external secret manager |
+| `credentials.botToken` | the token itself; the bundle creates the Secret (`<surface.name>-telegram`, override with `credentials.secretName`). Convenient, but the value then lives in your values file *and* in the release stored in-cluster |
+
+One Secret serves the whole surface either way: the `Channel` references it to
+**send**, the router's `SignalSource` to **poll** — the same bot. Neither the
+manager nor any reconciler reads it; both are projected into their pods and
+resolved by the kubelet.
+
+**The bundle ships no `Pipeline`, so nothing answers yet.** Wiring would pull a
+profile, a runtime and its credentials into what is otherwise a transport
+bundle, so it stays yours. The consequence is real and worth stating plainly:
+wiring lives only on Pipelines, so until a Ready one CLAIMS these sources,
+every message drops with `Wired=False` — the person typing is told so on their
+own surface, but nothing runs. The post-install notes print the exact Pipeline
+to apply, pre-filled with your names.
+
 ## Install (current state)
 
 ```sh
@@ -481,7 +659,9 @@ into the `channel-telegram` adapter. For a live install:
    `spec.credentialsSecretRef` on the Channel (see below).
 3. **Upgrade**: `helm upgrade … --set telegramAdapter.enabled=true`. The new
    CRD applies, the manager restarts without Telegram code, the adapter starts
-   as the sole getUpdates consumer (replicas 1, Recreate).
+   as the sole getUpdates consumer (replicas 1, Recreate). *(On chart 3.1+ this
+   flag is `telegram-bundle.enabled`, and the sole consumer is the router — see
+   Migrating to chart 3.1.)*
 4. `status.threadId` is now a **string** (existing numeric ids remain valid as
    decimal strings) — update anything that parsed it as a number.
 
@@ -576,6 +756,11 @@ deleting the Pipeline reverts new conversations to source-level routing.
 Chart 1.1 replaces the chart's Telegram adapter Deployment with a
 `ChannelAdapter` CR — the reconciler owns the workload. For a live install
 running the chart-1.0 adapter:
+
+> **On chart 3.1+, `telegramAdapter.*` no longer exists** — Telegram moved into
+> the `telegram-bundle` subchart and the adapter stopped polling. Read the
+> steps below for the shape of the change, but use `telegram-bundle.enabled`
+> and follow *Migrating to chart 3.1* above.
 
 1. **Upgrade with the adapter disabled** (`telegramAdapter.enabled=false`, the
    default): helm removes the old Deployment — the bot token's single

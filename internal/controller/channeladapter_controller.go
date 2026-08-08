@@ -76,14 +76,18 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if r.MasterToken != "" {
 		env = append(env, corev1.EnvVar{Name: "ADAPTER_TOKEN", Value: chat.DeriveAdapterToken(r.MasterToken, adapter.Name)})
 	}
+	if adapter.Spec.Port != nil {
+		env = append(env, corev1.EnvVar{Name: "LISTEN_ADDR", Value: fmt.Sprintf(":%d", *adapter.Spec.Port)})
+	}
 
+	labels := map[string]string{
+		"app.kubernetes.io/name": "agentops-adapter",
+		"agentops.dev/adapter":   adapter.Name,
+	}
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
-		Owner: &adapter,
-		Name:  AdapterDeploymentName(adapter.Name),
-		Labels: map[string]string{
-			"app.kubernetes.io/name": "agentops-adapter",
-			"agentops.dev/adapter":   adapter.Name,
-		},
+		Owner:       &adapter,
+		Name:        AdapterDeploymentName(adapter.Name),
+		Labels:      labels,
 		SelectorKey: "agentops.dev/adapter",
 		Image:       adapter.Spec.Image,
 		Env:         env,
@@ -92,6 +96,15 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		Resources:   adapter.Spec.Resources,
 	})
 	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := ensureAdapterService(ctx, r.Client, r.Scheme, adapterService{
+		Owner:       &adapter,
+		Name:        AdapterDeploymentName(adapter.Name),
+		Labels:      labels,
+		SelectorKey: "agentops.dev/adapter",
+		Port:        adapter.Spec.Port,
+	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -118,9 +131,9 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, r.Status().Patch(ctx, &adapter, patch)
 }
 
-// SetupWithManager wires the controller: adapter CRs, their owned Deployments,
-// and Channel events (projection inputs) mapped straight to the adapter the
-// channel names in spec.type.
+// SetupWithManager wires the controller: adapter CRs, their owned Deployments
+// and Services, and Channel events (projection inputs) mapped straight to the
+// adapter the channel names in spec.type.
 func (r *ChannelAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapChannel := func(ctx context.Context, obj client.Object) []ctrl.Request {
 		ch, ok := obj.(*agentopsv1alpha1.Channel)
@@ -132,6 +145,7 @@ func (r *ChannelAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.ChannelAdapter{}).
 		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
 		Watches(&agentopsv1alpha1.Channel{}, handler.EnqueueRequestsFromMapFunc(mapChannel)).
 		Complete(r)
 }

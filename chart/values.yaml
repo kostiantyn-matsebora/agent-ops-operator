@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.16.1
+  tag: 0.17.0
 
 # Concurrency cap: live agent runtime pods across all conversations.
 maxRuntimes: 8
@@ -87,27 +87,35 @@ adapterAuth:
   # Use an existing Secret (key: token) instead of generating one.
   existingSecret: ""
 
-# Reference channel adapter: serves Channels with spec.type=telegram, shipped
-# as a ChannelAdapter CR — the operator's reconciler owns the workload
-# (replicas 1 + Recreate: Telegram getUpdates allows exactly ONE consumer per
-# bot token, ever). Bot tokens live on each Channel via
-# spec.credentialsSecretRef (Secret key botToken), projected into the adapter
-# pod by the reconciler — several Channels with different Secrets run several
-# bots through this one adapter. When migrating from a chart-managed adapter
-# Deployment (chart <= 1.0), upgrade with this DISABLED first so helm removes
-# the old Deployment, then enable it.
-telegramAdapter:
+# Telegram — shipped as the embedded `telegram-bundle` subchart
+# (chart/charts/telegram-bundle), the same shape as vm-bundle and k8s-bundle.
+# Off by default. Its full values live in that subchart's values.yaml; set them
+# under this key.
+#
+# Enabling it alone ships the three IMPLEMENTATIONS (router + signal adapter +
+# channel adapter) and wires nothing. `surface.enabled` also ships the Channel
+# and the chat SignalSource — and then REQUIRES everything that cannot be
+# guessed, failing the render rather than half-installing:
+#
+#   telegram-bundle:
+#     enabled: true
+#     surface:
+#       enabled: true
+#       chatId: "-1004369687194"
+#       credentials:
+#         existingSecret: agentops-telegram   # key: botToken
+#         # ...or supply botToken directly and the bundle creates the Secret
+#
+# The bundle ships NO Pipeline (that would pull a profile and a runtime into a
+# transport bundle), so claim the sources yourself — until you do, messages
+# drop with Wired=False. The post-install notes print the Pipeline to apply.
+#
+# MIGRATION from the flat `telegramAdapter` values: the old single-container
+# adapter POLLED. Scale it to zero and confirm no getUpdates consumer remains
+# BEFORE enabling this bundle — two consumers of one bot token means 409s and
+# stolen updates.
+telegram-bundle:
   enabled: false
-  image:
-    repository: kmatsebora/agentops-channel-telegram
-    tag: 0.4.0
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 200m
-      memory: 128Mi
 
 # Agent session persistence (the "home" volume runtime pods mount at /data/home).
 # Without it, sessions live in emptyDir and die with each runtime pod — replies

@@ -88,6 +88,11 @@ func (t *Telegram) Send(ctx context.Context, chatID string, threadID *int64, htm
 	return nil
 }
 
+// tgUpdate is the slice of the Telegram update shape this adapter reads from
+// updates the ROUTER forwards. There is no GetUpdates here on purpose:
+// Telegram serves one update stream per bot token, so telegram-router is the
+// only process that may call it. Adding a poll loop back to this file is the
+// mistake that produces 409s and stolen updates.
 type tgUpdate struct {
 	UpdateID int64 `json:"update_id"`
 	Message  *struct {
@@ -101,19 +106,4 @@ type tgUpdate struct {
 		IsTopicMessage  bool  `json:"is_topic_message"`
 		MessageThreadID int64 `json:"message_thread_id"`
 	} `json:"message"`
-}
-
-// GetUpdates long-polls for message updates from the given offset.
-func (t *Telegram) GetUpdates(ctx context.Context, offset int64) ([]tgUpdate, error) {
-	res, err := t.API(ctx, "getUpdates", map[string]any{
-		"timeout": 20, "offset": offset, "allowed_updates": []string{"message"},
-	})
-	if err != nil {
-		return nil, err
-	}
-	var updates []tgUpdate
-	if err := json.Unmarshal(res, &updates); err != nil {
-		return nil, err
-	}
-	return updates, nil
 }

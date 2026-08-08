@@ -2,9 +2,10 @@
 
 Go/controller-runtime Kubernetes operator (see README.md for the product view).
 Self-contained modules — no dependencies outside this directory; keep it that
-way. Five Go modules: the operator (root), `channel-telegram/` (reference
-channel adapter), and `signal-cron/`, `signal-vmalertmanager/`,
-`signal-k8s-events/` (signal adapters) — the adapters dependency-free.
+way. Seven Go modules: the operator (root), `channel-telegram/` (reference
+channel adapter), `telegram-router/` (the single getUpdates consumer), and
+`signal-cron/`, `signal-vmalertmanager/`, `signal-k8s-events/`,
+`signal-telegram/` (signal adapters) — the adapters dependency-free.
 
 ## Terminology (binding)
 
@@ -20,13 +21,18 @@ channel adapter), and `signal-cron/`, `signal-vmalertmanager/`,
   bindings — MATERIALIZED state like `profileRef`/`channelRefs`, never hand-set,
   no `pipelineRef` exists. REFS are snapshotted, CONTENT is not: every use
   re-reads the CRs, so edits heal running conversations while re-wiring affects
-  only new ones. `POST /task` and `/profile`-command conversations carry none.
+  only new ones. EVERY origination now has a Pipeline to mirror: signals from
+  the claiming one, `POST /task` from the one it names, and a `/<pipeline>
+  <task>` chat command from the one it addresses. Nothing creates a
+  Conversation without wiring behind it.
 - **`Pipeline`** = THE wiring, exclusively: sources[] × channels[] + profile
   + TOOL ACCESS. No other CR carries wiring (SignalSource has no
   profile/channel refs, Channel has no default profile) — unclaimed sources
-  DROP signals (`Wired=False` + response reason), unwired channels answer bare
-  messages with guidance only. One pipeline per source (older claimant wins),
-  channels shareable, Ready pipelines only.
+  DROP signals (`Wired=False` + response reason; for a CHAT source the reason
+  also goes back to the surface the person typed on, because they are waiting).
+  Channels originate NOTHING, so there is no "unwired channel" behavior to
+  define: an unclaimed chat source is the unwired case. One pipeline per source
+  (older claimant wins), channels shareable, Ready pipelines only.
   **Capabilities are wiring, exclusively**: two optional stanzas of ordered
   refs — `spec.toolsets` (→ `MCPToolset`, the allowlist) and `spec.mcpConfigs`
   (→ `MCPConfig`, the MCP servers). NO mode: with nothing profile-side to
@@ -102,7 +108,8 @@ channel adapter), and `signal-cron/`, `signal-vmalertmanager/`,
 
 ```sh
 go build ./... && go vet ./...
-for m in channel-telegram signal-cron signal-vmalertmanager signal-k8s-events; do
+for m in channel-telegram telegram-router signal-telegram signal-cron \
+         signal-vmalertmanager signal-k8s-events; do
   (cd $m && go build ./... && go vet ./... && go test ./...)
 done
 # regen after editing api/v1alpha1/ (deepcopy + CRDs):
@@ -118,6 +125,8 @@ Images (bump the tag on every change — never overwrite a pushed tag):
 docker build --platform linux/amd64 -t <registry>/agentops-manager:<tag> .
 docker build --platform linux/amd64 -t <registry>/agentops-runtime-claude:<tag> ./runtime-claude/
 docker build --platform linux/amd64 -t <registry>/agentops-channel-telegram:<tag> ./channel-telegram/
+docker build --platform linux/amd64 -t <registry>/agentops-telegram-router:<tag> ./telegram-router/
+docker build --platform linux/amd64 -t <registry>/agentops-signal-telegram:<tag> ./signal-telegram/
 docker build --platform linux/amd64 -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
 docker build --platform linux/amd64 -t <registry>/agentops-signal-vmalertmanager:<tag> ./signal-vmalertmanager/
 docker build --platform linux/amd64 -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
@@ -161,7 +170,24 @@ internal/
   integration/           envtest suite (real API server, fake chat, no kubelet)
 runtime-claude/          reference AgentRuntime (Node + claude-code) — /work contract
 channel-telegram/        reference channel adapter (own module, no deps) —
-                         /channel contract; getUpdates poller + Bot API live HERE
+                         /channel contract; Bot API sending lives HERE. Does
+                         NOT poll: receives topic updates pushed by the router
+                         (POST /updates, ChannelAdapter spec.port) and persists
+                         the router's offset (GET/PUT /offset -> state API)
+telegram-router/         the ONLY getUpdates consumer (own module, no deps) —
+                         classifies each update on is_topic_message and
+                         forwards it VERBATIM: no topic -> signal-telegram
+                         (origination), topic -> channel-telegram
+                         (continuation). Holds no channel config, persists
+                         nothing, needs no RBAC. Reads ONE thing: its own
+                         SignalSource, for forwarding targets + the shared bot
+                         Secret's env prefix
+signal-telegram/         chat ORIGINATION adapter (own module, no deps) —
+                         normalizes general-surface updates to
+                         {kind: chat, fingerprint: tg-<update_id>, labels:
+                         agentops.dev/channel + /sender} and posts
+                         /signal/inbound. Holds NO credentials — it never
+                         contacts Telegram
 signal-cron/             reference signal adapter (own module, no deps) —
                          /signal contract; five-field cron parser + scheduler
 signal-vmalertmanager/   webhook-receiving signal adapter (own module, no
@@ -182,6 +208,21 @@ chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
                          SA, and that SA's RBAC (readonly | full=cluster-admin).
                          Self-gated on `enabled OR global.demo.enabled`; demo
                          mode IS this bundle (chart/templates/demo.yaml is gone)
+chart/charts/telegram-bundle/
+                         subchart: the three-component Telegram stack (router +
+                         signal adapter + channel adapter) as adapter CRs, and
+                         — under `surface.enabled` — the Channel, the chat
+                         SignalSource, and the router's credential source.
+                         surface.enabled makes the unguessable fields REQUIRED:
+                         missing chatId, missing credential, or BOTH credential
+                         forms at once FAIL the render. Credentials either way:
+                         `credentials.existingSecret` OR `credentials.botToken`
+                         (bundle creates the Secret). One Secret serves both —
+                         the Channel sends with it, the router's source polls.
+                         Ships NO Pipeline on purpose (wiring drags in a profile
+                         + runtime + creds): the sources sit unclaimed until the
+                         installer wires them, so NOTES.txt prints the exact
+                         Pipeline to apply
 chart/                   Helm chart: manager Deployment/RBAC/Service + CRDs as gated
                          templates (crds.enabled, crds.keep -> helm.sh/resource-policy:
                          keep so uninstall never cascade-deletes CRs); CRD source of
@@ -209,11 +250,27 @@ config/samples/          example CRs (the only config/ content — deployment-sp
   structural — there is no conflict machinery to maintain.
 - **Strictly serial per conversation** (one inflight unit); parallelism is
   across conversations, capped by `MAX_RUNTIMES` with idle-runtime eviction.
+- **CONVERSATIONS ORIGINATE ONLY FROM CLAIMED SIGNAL SOURCES.** A channel
+  CARRIES conversations; it never starts one. `/channel/inbound` is
+  reply-only — `threadId` REQUIRED, unknown threads dropped, no adoption. A
+  message on a chat's general surface arrives as a `kind: chat` signal from a
+  chat `SignalSource`, so who answers is DECLARED by the Pipeline claiming it.
+  There is no channel default profile and no `PipelineForChannel` — channels
+  are shareable on purpose, so "which pipeline answers for this channel" has no
+  defensible answer, and the oldest-Ready tiebreak that used to supply one is
+  gone. Chat lane: task inputs (never `job` — that resumes sessions), cooldown
+  OFF by default, and NO signature grouping unless `signatureLabels` is set
+  (chat keys on the fingerprint; the default alert labels would hash every
+  message alike into one conversation). Commands whose whole result is a reply
+  (`/agents`, unknown agent, usage error) emit a send op and create nothing.
+  A chat signal MUST carry `agentops.dev/channel` — `/signal/inbound` refuses
+  one it could not answer.
 - **HTTP API is NOT leader-gated** (`NeedLeaderElection()=false`) — webhooks
   must serve during rollouts. **Exactly one getUpdates consumer per bot token,
-  ever** — the telegram adapter runs ONE poll loop per distinct token (channels
-  sharing a token share it), single-instance via ChannelAdapter `singleton`
-  (replicas 1 + Recreate); the manager itself has no poller.
+  ever** — that consumer is `telegram-router`, ONE poll loop per distinct token,
+  single-instance via SignalAdapter `singleton` (replicas 1 + Recreate).
+  Neither adapter polls and the manager has no poller. Adding a poll loop back
+  to `channel-telegram` is the mistake that produces 409s and stolen updates.
 - **Channel ops are at-least-once.** `spec.config` is opaque to the operator —
   never parse channel-type config manager-side; adapters validate their own
   and report via the Channel Ready condition. The manager never *interprets*
@@ -241,9 +298,15 @@ config/samples/          example CRs (the only config/ content — deployment-sp
 - envtest needs `KUBEBUILDER_ASSETS`; `kubectl auth can-i` misparses the
   `pods/eviction` slash form — use `--subresource=eviction`.
 - Never run two getUpdates consumers against one Telegram bot token (409s and
-  stolen updates) — when migrating from another system, stop its poller before
-  setting `pollingEnabled: true` (now in Channel `spec.config`) / enabling the
-  telegram adapter.
+  stolen updates) — when migrating from another system, or from the old
+  single-container adapter, stop its poller and CONFIRM none remains before
+  starting `telegram-router`. `Channel.spec.config.pollingEnabled` is gone;
+  ingest is on when the router runs.
+- The router's bot Secret is the SAME one the Channel uses (it polls the bot
+  the channel sends as), reached by projection from the router's own
+  `SignalSource` — adapter CRs carry no credentials, so a credential-bearing
+  served CR is the only path. Claim that source in a Pipeline or it reports
+  `Wired=False` forever despite working fine.
 
 ## After changes
 

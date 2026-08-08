@@ -16,6 +16,14 @@ type ChannelAdapterSpec struct {
 	// Image implementing the adapter contract.
 	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
+	// Port the image's own HTTP surface listens on (implementations that are
+	// PUSHED to rather than polling — e.g. a channel adapter receiving updates
+	// forwarded by an ingest router). When set, the reconciler owns a Service
+	// agentops-adapter-<name> targeting it and injects LISTEN_ADDR, so enabling
+	// the adapter is a complete appliance and the chart ships no connectivity.
+	// Unset = no inbound surface. Identical semantics to SignalAdapter.port.
+	// +optional
+	Port *int32 `json:"port,omitempty"`
 	// Singleton runs the workload as replicas 1 + strategy Recreate so no
 	// rollout ever runs two instances side by side (required for pull-based
 	// transports like Telegram getUpdates).
