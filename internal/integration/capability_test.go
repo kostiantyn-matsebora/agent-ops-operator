@@ -1,137 +1,24 @@
 // Capability resolution after capabilities left the AgentProfile: what an agent
-// may do comes only from the Pipeline routing it, and — for conversations with
-// no routing pipeline — from the profile's capability-only baseline (design D1).
+// may do comes only from the Pipeline that originated its conversation. There
+// is no profile default and no fallback — a Pipeline that declares nothing
+// grants nothing, which is a configuration, not a defect.
 package integration
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
 )
 
-// postTask fires a task and returns the created conversation's name, cleaning
-// it up afterwards.
-func postTask(t *testing.T, body map[string]any) string {
-	t.Helper()
-	rec := adapterReq(apiServer(), "POST", "/task", body, "")
-	if rec.Code != 202 {
-		t.Fatalf("task: %d %s", rec.Code, rec.Body.String())
-	}
-	var created struct {
-		Conversation string `json:"conversation"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cleanupConversation(t, created.Conversation) })
-	return created.Conversation
-}
-
-func convSpec(t *testing.T, name string) agentopsv1alpha1.ConversationSpec {
-	t.Helper()
-	var conv agentopsv1alpha1.Conversation
-	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &conv); err != nil {
-		t.Fatal(err)
-	}
-	return conv.Spec
-}
-
-// The five-minute demo is a bare POST /task with no pipeline. Without the
-// baseline that agent would have no tools at all, so this is the assertion that
-// keeps the README's onboarding flow honest.
-func TestBareTaskResolvesTheProfileBaseline(t *testing.T) {
-	mkIdentityProfile(t, "prof-baseline")
-	mkToolset(t, "baseline-ts", "Read", "Bash")
-	mkMCPConfig(t, "baseline-cfg", "victorialogs", "http://vl/sse")
-	mkCapabilityPipeline(t, "baseline-pipe", "prof-baseline", bind("baseline-ts"), bind("baseline-cfg"))
-
-	name := postTask(t, map[string]any{"profile": "prof-baseline", "task": "why is pod X crashlooping?"})
-	spec := convSpec(t, name)
-	if spec.Toolsets == nil || spec.Toolsets.Refs[0].Name != "baseline-ts" {
-		t.Fatalf("bare /task must pick up the baseline toolsets: %+v", spec.Toolsets)
-	}
-	if spec.MCPConfigs == nil || spec.MCPConfigs.Refs[0].Name != "baseline-cfg" {
-		t.Fatalf("bare /task must pick up the baseline mcpConfigs: %+v", spec.MCPConfigs)
-	}
-	if got := dispatchedAllowedTools(t, name); got != "Read,Bash" {
-		t.Fatalf("baseline tools must reach the work unit: %q", got)
-	}
-}
-
-// A profile nobody declared a baseline for is genuinely unwired: it gets
-// nothing, exactly as an unclaimed signal source routes nothing.
-func TestBareTaskWithoutBaselineHasNoCapabilities(t *testing.T) {
-	mkIdentityProfile(t, "prof-nobaseline")
-
-	name := postTask(t, map[string]any{"profile": "prof-nobaseline", "task": "anything"})
-	spec := convSpec(t, name)
-	if spec.Toolsets != nil || spec.MCPConfigs != nil {
-		t.Fatalf("no baseline means no bindings: %+v %+v", spec.Toolsets, spec.MCPConfigs)
-	}
-	if got := dispatchedAllowedTools(t, name); got != "" {
-		t.Fatalf("an unwired profile must grant nothing, got %q", got)
-	}
-}
-
-// A routing pipeline wins when named, and is NEVER picked up implicitly — that
-// ambiguity is exactly why resolving the oldest routing pipeline was rejected.
-func TestRoutingPipelineOverridesBaselineAndIsNeverImplicit(t *testing.T) {
-	mkIdentityProfile(t, "prof-override")
-	mkToolset(t, "ovr-base-ts", "Read")
-	mkToolset(t, "ovr-route-ts", "Bash")
-	mkCapabilityPipeline(t, "ovr-baseline", "prof-override", bind("ovr-base-ts"), nil)
-	// The routing pipeline is distinguished by a SOURCE, not a channel: a
-	// channel-bound conversation waits for a thread binding before dispatching,
-	// and a pipeline with neither sources nor channels would itself be a second
-	// baseline.
-	mkSignalSource(t, "ovr-src", "ovr-sig", "")
-	mkToolPipeline(t, "ovr-route", []string{"ovr-src"}, nil, "prof-override", bind("ovr-route-ts"), nil)
-	reconcilePipeline(t, "ovr-route")
-
-	routed := postTask(t, map[string]any{"profile": "prof-override", "task": "routed", "pipeline": "ovr-route"})
-	if got := dispatchedAllowedTools(t, routed); got != "Bash" {
-		t.Fatalf("a named routing pipeline must win: %q", got)
-	}
-
-	bare := postTask(t, map[string]any{"profile": "prof-override", "task": "bare"})
-	if got := dispatchedAllowedTools(t, bare); got != "Read" {
-		t.Fatalf("bare /task must take the baseline, never a routing pipeline: %q", got)
-	}
-}
-
-// Two baselines for one profile: neither applies and both say why. Guessing
-// which the operator meant is worse than granting nothing.
-func TestDuplicateBaselinesRefuseRatherThanGuess(t *testing.T) {
-	mkIdentityProfile(t, "prof-dup")
-	mkToolset(t, "dup-a", "Read")
-	mkToolset(t, "dup-b", "Bash")
-	mkCapabilityPipeline(t, "dup-one", "prof-dup", bind("dup-a"), nil)
-	mkCapabilityPipeline(t, "dup-two", "prof-dup", bind("dup-b"), nil)
-
-	for _, name := range []string{"dup-one", "dup-two"} {
-		p := reconcilePipeline(t, name)
-		cond := apimeta.FindStatusCondition(p.Status.Conditions, controller.ConditionBaselineConflict)
-		if cond == nil || cond.Status != "True" || !strings.Contains(cond.Message, "prof-dup") {
-			t.Fatalf("%s must report the duplicate baseline: %+v", name, p.Status.Conditions)
-		}
-	}
-
-	name := postTask(t, map[string]any{"profile": "prof-dup", "task": "x"})
-	if got := dispatchedAllowedTools(t, name); got != "" {
-		t.Fatalf("an ambiguous baseline must grant nothing, got %q", got)
-	}
-}
-
-// Every MCP-bound conversation owns its ConfigMap; no profile-keyed document
-// exists to collide over, because profiles declare no MCP.
+// A conversation whose Pipeline declared a binding carries exactly that.
 func TestBoundConversationOwnsItsConfigMap(t *testing.T) {
 	ctx := context.Background()
 	mkIdentityProfile(t, "prof-cm")
@@ -230,5 +117,53 @@ func TestMissingToolsetRefFailsVisibly(t *testing.T) {
 	cond := apimeta.FindStatusCondition(conv.Status.Conditions, controller.ConditionToolingResolved)
 	if cond == nil || cond.Status != "False" {
 		t.Fatalf("failure must be visible on the conversation: %+v", conv.Status.Conditions)
+	}
+}
+
+// The regression this change fixes: the chart's own routing Pipelines declared
+// no capabilities, so every signal-driven conversation — an alert arriving and
+// an agent investigating it, the product's headline flow — dispatched an empty
+// allowlist. Nothing asserted the signal path's tools end to end, which is why
+// it shipped.
+//
+// This builds the bundle's shape as the chart emits it: a source, a Pipeline
+// claiming it that declares its toolsets, and a signal arriving.
+func TestSignalDrivenConversationIsEquipped(t *testing.T) {
+	ctx := context.Background()
+	mkIdentityProfile(t, "prof-sigdriven")
+	mkToolset(t, "sigdriven-observe", "Read", "Grep")
+	mkToolset(t, "sigdriven-shell", "Bash")
+	mkSignalSource(t, "sigdriven-src", "sigdriven-sig", "")
+	mkToolPipeline(t, "sigdriven-pipe", []string{"sigdriven-src"}, nil, "prof-sigdriven",
+		bind("sigdriven-observe", "sigdriven-shell"), nil)
+	if p := reconcilePipeline(t, "sigdriven-pipe"); !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
+		t.Fatalf("pipeline not Ready: %+v", p.Status.Conditions)
+	}
+
+	rec := postSignal(t, apiServer().Handler(), testMasterToken, "sigdriven-src", []map[string]any{{
+		"fingerprint": "sig-1", "labels": map[string]string{"alertname": "BackOff"}, "payload": "boom",
+	}})
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
+		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
+	}
+	var list agentopsv1alpha1.ConversationList
+	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
+	var name string
+	for i := range list.Items {
+		if list.Items[i].Spec.ProfileRef.Name == "prof-sigdriven" {
+			name = list.Items[i].Name
+		}
+	}
+	if name == "" {
+		t.Fatal("signal conversation not created")
+	}
+	t.Cleanup(func() { cleanupConversation(t, name) })
+
+	got := dispatchedAllowedTools(t, name)
+	if got == "" {
+		t.Fatal("a signal-driven conversation dispatched an EMPTY allowlist — the agent can do nothing")
+	}
+	if got != "Read,Grep,Bash" {
+		t.Fatalf("allowlist must be the Pipeline's declared toolsets: %q", got)
 	}
 }

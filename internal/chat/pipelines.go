@@ -64,37 +64,3 @@ func PipelineForChannel(ctx context.Context, c client.Reader, namespace, channel
 	}
 	return nil
 }
-
-// CapabilityPipelineForProfile returns the Ready Pipeline that declares a
-// profile's BASELINE capabilities: one naming this profile with no sources and
-// no channels. Such a Pipeline routes nothing — it exists to say what this
-// agent may do when a conversation reaches it through a path that has no
-// routing pipeline of its own (POST /task without one, /<profile> commands).
-//
-// Routing pipelines are deliberately NOT eligible. Picking one of them would
-// have to choose among routes that exist precisely because they grant DIFFERENT
-// capabilities, and "whichever was created first" is not a defensible answer.
-//
-// Exactly one may apply: two baselines for one profile return nil, so the
-// ambiguity surfaces as missing capabilities plus a condition on both Pipelines
-// rather than a silent winner.
-func CapabilityPipelineForProfile(ctx context.Context, c client.Reader, namespace, profile string) *agentopsv1alpha1.Pipeline {
-	var found *agentopsv1alpha1.Pipeline
-	for _, p := range readyPipelines(ctx, c, namespace) {
-		if !IsCapabilityPipeline(&p) || p.Spec.ProfileRef.Name != profile {
-			continue
-		}
-		if found != nil {
-			return nil // ambiguous — the reconciler reports it on both
-		}
-		cp := p
-		found = &cp
-	}
-	return found
-}
-
-// IsCapabilityPipeline reports whether a Pipeline declares a baseline rather
-// than routing anything: no sources, no channels.
-func IsCapabilityPipeline(p *agentopsv1alpha1.Pipeline) bool {
-	return len(p.Spec.SignalSourceRefs) == 0 && len(p.Spec.ChannelRefs) == 0
-}

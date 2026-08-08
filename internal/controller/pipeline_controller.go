@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -14,7 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
 )
 
 // Pipeline condition types.
@@ -22,11 +20,6 @@ const (
 	// ConditionSourceConflict: an older pipeline already claims a referenced
 	// signal source (one pipeline per source; oldest claimant wins).
 	ConditionSourceConflict = "SourceConflict"
-	// ConditionBaselineConflict: another capability-only pipeline (no sources,
-	// no channels) already declares this profile's baseline. Unlike a source
-	// conflict there is no "oldest wins" — neither applies, because guessing
-	// which baseline an operator meant is worse than granting nothing.
-	ConditionBaselineConflict = "BaselineConflict"
 )
 
 // PipelineReconciler validates pipeline wiring and keeps its conditions
@@ -83,10 +76,6 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	baselineRivals, err := r.baselineConflicts(ctx, &p)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
 
 	patch := client.MergeFrom(p.DeepCopy())
 	conflictCond := metav1.Condition{Type: ConditionSourceConflict, Status: metav1.ConditionFalse, Reason: "NoConflict"}
@@ -96,16 +85,6 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		conflictCond.Message = "sources already claimed by older pipelines: " + strings.Join(conflicts, "; ")
 	}
 	apimeta.SetStatusCondition(&p.Status.Conditions, conflictCond)
-
-	baselineCond := metav1.Condition{Type: ConditionBaselineConflict, Status: metav1.ConditionFalse, Reason: "NoConflict"}
-	if len(baselineRivals) > 0 {
-		baselineCond.Status = metav1.ConditionTrue
-		baselineCond.Reason = "DuplicateBaseline"
-		baselineCond.Message = fmt.Sprintf(
-			"profile %q already has a capability baseline declared by: %s — neither applies until one is removed",
-			p.Spec.ProfileRef.Name, strings.Join(baselineRivals, ", "))
-	}
-	apimeta.SetStatusCondition(&p.Status.Conditions, baselineCond)
 
 	ready := metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "WiringValid"}
 	switch {
@@ -120,33 +99,6 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	apimeta.SetStatusCondition(&p.Status.Conditions, ready)
 	return ctrl.Result{}, r.Status().Patch(ctx, &p, patch)
-}
-
-// baselineConflicts lists OTHER capability-only pipelines declaring the same
-// profile's baseline. Deliberately symmetric — every rival is reported on every
-// side, with no oldest-wins rule — because a baseline is what an agent may do
-// when nothing else says, and silently picking one of two answers to that is
-// worse than granting nothing until the operator resolves it.
-func (r *PipelineReconciler) baselineConflicts(ctx context.Context, p *agentopsv1alpha1.Pipeline) ([]string, error) {
-	if !chat.IsCapabilityPipeline(p) {
-		return nil, nil
-	}
-	var list agentopsv1alpha1.PipelineList
-	if err := r.List(ctx, &list, client.InNamespace(p.Namespace)); err != nil {
-		return nil, err
-	}
-	var rivals []string
-	for i := range list.Items {
-		other := &list.Items[i]
-		if other.Name == p.Name || !chat.IsCapabilityPipeline(other) {
-			continue
-		}
-		if other.Spec.ProfileRef.Name == p.Spec.ProfileRef.Name {
-			rivals = append(rivals, other.Name)
-		}
-	}
-	sort.Strings(rivals)
-	return rivals, nil
 }
 
 // sourceConflicts lists sources of this pipeline already claimed by an OLDER

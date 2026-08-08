@@ -250,8 +250,9 @@ func TestPipelineBindingsMaterializeOnConversations(t *testing.T) {
 		t.Fatalf("mcpConfigs binding not materialized: %+v", conv.Spec.MCPConfigs)
 	}
 
-	// POST /task has no originating pipeline — it keeps pure profile behavior
-	rec = adapterReq(srv, "POST", "/task", map[string]any{"profile": "prof-mat", "task": "no wiring here"}, "")
+	// POST /task addresses the SAME Pipeline and gets its whole wiring —
+	// profile, channels, and capabilities from one lookup.
+	rec = adapterReq(srv, "POST", "/task", map[string]any{"pipeline": "mat-pipe", "task": "addressed"}, "")
 	if rec.Code != 202 {
 		t.Fatalf("task: %d %s", rec.Code, rec.Body.String())
 	}
@@ -264,7 +265,19 @@ func TestPipelineBindingsMaterializeOnConversations(t *testing.T) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: created.Conversation}, &taskConv); err != nil {
 		t.Fatal(err)
 	}
-	if taskConv.Spec.Toolsets != nil || taskConv.Spec.MCPConfigs != nil {
-		t.Fatalf("task-API conversations must carry no bindings: %+v %+v", taskConv.Spec.Toolsets, taskConv.Spec.MCPConfigs)
+	if taskConv.Spec.ProfileRef.Name != "prof-mat" {
+		t.Fatalf("profile must come from the addressed pipeline: %+v", taskConv.Spec.ProfileRef)
+	}
+	if taskConv.Spec.Toolsets == nil || taskConv.Spec.Toolsets.Refs[0].Name != "mat-ts" {
+		t.Fatalf("addressed pipeline's toolsets must carry: %+v", taskConv.Spec.Toolsets)
+	}
+
+	// addressing nothing, or something unknown, is refused rather than
+	// producing a conversation nobody wired
+	if rec := adapterReq(srv, "POST", "/task", map[string]any{"task": "no pipeline"}, ""); rec.Code != 400 {
+		t.Fatalf("a task naming no pipeline must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := adapterReq(srv, "POST", "/task", map[string]any{"pipeline": "nope", "task": "x"}, ""); rec.Code != 404 {
+		t.Fatalf("an unknown pipeline must 404: %d", rec.Code)
 	}
 }

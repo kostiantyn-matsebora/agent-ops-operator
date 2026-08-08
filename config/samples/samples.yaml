@@ -64,8 +64,8 @@ spec:
         name: agentops-repo-key
   agent: ha-engineer
   # Identity only: no allowedTools, no mcp. What this agent MAY DO comes from
-  # the Pipelines routing it — see the capability Pipeline below for its
-  # baseline, and the per-route Pipelines further down.
+  # whichever Pipeline originates the conversation — the addressable one below,
+  # or the per-route Pipelines further down.
   maxTurns: 60
   env:
     - name: HA_CLAUDE_TOKEN
@@ -74,15 +74,14 @@ spec:
           name: agentops-ha
           key: token
 ---
-# The profile's BASELINE: a Pipeline with no sources and no channels routes
-# nothing — it declares what ha-engineer may do when a conversation reaches it
-# with no routing pipeline of its own (POST /task without a pipeline,
-# /ha-engineer commands in chat). Exactly one per profile; a second makes both
-# report BaselineConflict and neither applies.
+# An ADDRESSABLE Pipeline: `POST /task {"pipeline":"ha-engineer-direct",...}`
+# names this one. It routes nothing (no sources, no channels) and carries no
+# special meaning — it exists to be addressed, and like every Pipeline it
+# declares what its conversations may do. Nothing supplies a default.
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
 metadata:
-  name: ha-engineer-baseline
+  name: ha-engineer-direct
   namespace: agent-ops
 spec:
   profileRef:
@@ -159,6 +158,12 @@ spec:
     - name: home-ops
   profileRef:
     name: ha-engineer
+  # Declared here or nowhere: no profile default, no inheritance. Omitting this
+  # is legal and means the route's conversations get no tools at all.
+  toolsets:
+    refs:
+      - name: agentops-observe
+      - name: agentops-shell
 ---
 # SignalAdapter: plugs the "cron" implementation in as a CR — the CR's NAME
 # is the key SignalSources select via spec.adapter. The reconciler deploys

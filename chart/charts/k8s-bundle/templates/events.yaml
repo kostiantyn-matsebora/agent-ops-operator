@@ -155,5 +155,17 @@ spec:
   {{- end }}
   profileRef:
     name: {{ include "k8s-bundle.profileRef" . }}
+  {{- $bt := (.Values.global | default dict).builtinToolsets | default dict }}
+  {{- if not $bt.enabled }}
+  {{- fail "k8s-bundle: the events Pipeline takes its tools from global.builtinToolsets, which is disabled — enable it, or set eventsAdapter.source.create=false and write your own Pipeline" }}
+  {{- end }}
+  # Declared, not inherited: nothing supplies a default, so a Pipeline without
+  # this stanza would hand every event-driven conversation an empty allowlist.
+  toolsets:
+    refs:
+      - name: {{ $bt.observe.name }}
+      {{- if $src.grantShell }}
+      - name: {{ $bt.shell.name }}
+      {{- end }}
 {{- end }}
 {{- end }}
