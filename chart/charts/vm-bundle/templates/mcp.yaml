@@ -1,8 +1,8 @@
 {{- /*
-MCP components: MCPConfig CRs profiles reference via spec.mcp.configRefs.
+MCP components: MCPConfig CRs a Pipeline binds via spec.mcpConfigs.
 Server keys are FIXED — they are the tool namespaces (mcp__victorialogs__*,
-mcp__victoriametrics__*) in profile allowlists; making them configurable
-would silently break allowlists. An enabled component needs a URL — either
+mcp__victoriametrics__*) named by toolsets; making them configurable would
+silently break every allowlist referencing them. An enabled component needs a URL — either
 explicit, or defaulted to the component's own deployed MCP server (deploy
 sub-block); otherwise the render fails: an MCPConfig pointing nowhere just
 silently costs agents their tools.

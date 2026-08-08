@@ -1,5 +1,5 @@
-// Package mcpcompile renders an AgentProfile's tri-form MCP configuration into
-// an mcp.json document plus the pod env vars that resolve its secrets.
+// Package mcpcompile renders a conversation's bound MCPConfigs into an
+// mcp.json document plus the pod env vars that resolve its secrets.
 //
 // The manager NEVER reads secret material: header values with valueFrom become
 // "${ENV_NAME}" placeholders in mcp.json, and the matching env var (with the
@@ -27,7 +27,7 @@ func envName(server, header string) string {
 
 // Result of a compilation.
 type Result struct {
-	// JSON is the rendered mcp.json ("" when the profile mounts a raw ref).
+	// JSON is the rendered mcp.json ("" when a raw config is mounted).
 	JSON string
 	// Env are pod env vars carrying the secret-backed values.
 	Env []corev1.EnvVar
@@ -36,90 +36,60 @@ type Result struct {
 	RawSecret    string
 }
 
-// RawMergeError reports a profile whose MCP is a raw ConfigMap/Secret ref
-// being asked to merge wiring-level configs onto it. The raw document is
-// opaque to the manager, so there is nothing to merge into — surfaced rather
-// than silently half-applied.
-type RawMergeError struct {
-	// Kind is "configMapRef" or "secretRef"; Name is the referenced object.
-	Kind, Name string
+// RawExclusiveError reports a hand-written mcp.json bound alongside other
+// configs. That document is opaque to the operator, so there is nothing to
+// compose it with — surfaced rather than silently dropping one side.
+type RawExclusiveError struct {
+	// Name is the raw config; Others counts the configs bound alongside it.
+	Name   string
+	Others int
 }
 
-func (e *RawMergeError) Error() string {
-	return fmt.Sprintf("profile MCP is a raw %s (%s): its content is opaque to the operator, "+
-		"so wiring-level mcpConfigs cannot merge onto it — use mode: overwrite, or move the "+
-		"servers into inline/configRefs form", e.Kind, e.Name)
+func (e *RawExclusiveError) Error() string {
+	return fmt.Sprintf("MCPConfig %q mounts a hand-written mcp.json, which is opaque to the operator "+
+		"and cannot be combined with the %d other config(s) bound alongside it — bind it alone, "+
+		"or move its servers into the inline `servers` form", e.Name, e.Others)
 }
 
-// Compile merges the tri-form spec. Merge order: configRefs (in order) then
-// inline servers override by name. A raw ConfigMap/Secret ref is exclusive —
-// it wins entirely and is mounted as-is (escape hatch).
-func Compile(spec *agentopsv1alpha1.MCPSpec, refs map[string]agentopsv1alpha1.MCPConfigSpec) (Result, error) {
-	if spec == nil {
+// Compile renders the bound configs, in ref order, into one mcp.json: server
+// keys are overlaid so a later config wins a collision. names parallels configs
+// by index and is used only for error messages.
+//
+// A raw config (configMapRef/secretRef) is mounted as-is and must be the only
+// one bound; anything else returns *RawExclusiveError. No bindings at all
+// compiles to an empty document — a conversation whose wiring grants no MCP
+// gets no servers, which is the point.
+func Compile(configs []agentopsv1alpha1.MCPConfigSpec, names []string) (Result, error) {
+	if len(configs) == 0 {
 		return Result{JSON: `{"mcpServers":{}}`}, nil
 	}
-	if spec.ConfigMapRef != nil {
-		return Result{RawConfigMap: spec.ConfigMapRef.Name}, nil
+	for i := range configs {
+		if !configs[i].IsRaw() {
+			continue
+		}
+		if len(configs) > 1 {
+			return Result{}, &RawExclusiveError{Name: nameAt(names, i), Others: len(configs) - 1}
+		}
+		if configs[i].ConfigMapRef != nil {
+			return Result{RawConfigMap: configs[i].ConfigMapRef.Name}, nil
+		}
+		return Result{RawSecret: configs[i].SecretRef.Name}, nil
 	}
-	if spec.SecretRef != nil {
-		return Result{RawSecret: spec.SecretRef.Name}, nil
-	}
-	merged, err := mergeSpec(spec, refs)
-	if err != nil {
-		return Result{}, err
-	}
-	return render(merged)
-}
-
-// CompileOverlaid renders the effective MCP of a wiring-bound conversation:
-// the profile's own spec (merge mode) or nothing (overwrite mode), overlaid by
-// the bound MCPConfigs in ref order — per server key, later wins.
-//
-// Overlays are passed as specs (already resolved by the caller, which holds
-// the client) so this package stays free of API reads. A raw-form base under
-// merge mode returns *RawMergeError; overwrite works over such profiles since
-// the base is ignored entirely.
-func CompileOverlaid(base *agentopsv1alpha1.MCPSpec, refs map[string]agentopsv1alpha1.MCPConfigSpec,
-	overlays []agentopsv1alpha1.MCPConfigSpec, mode string) (Result, error) {
 
 	merged := map[string]agentopsv1alpha1.MCPServer{}
-	if mode != agentopsv1alpha1.ToolingOverwrite && base != nil {
-		switch {
-		case base.ConfigMapRef != nil:
-			return Result{}, &RawMergeError{Kind: "configMapRef", Name: base.ConfigMapRef.Name}
-		case base.SecretRef != nil:
-			return Result{}, &RawMergeError{Kind: "secretRef", Name: base.SecretRef.Name}
-		}
-		var err error
-		if merged, err = mergeSpec(base, refs); err != nil {
-			return Result{}, err
-		}
-	}
-	for _, ov := range overlays {
-		for name, srv := range ov.Servers {
+	for i := range configs {
+		for name, srv := range configs[i].Servers {
 			merged[name] = srv
 		}
 	}
 	return render(merged)
 }
 
-// mergeSpec resolves the non-raw forms of a spec into one server map:
-// configRefs in order, then inline servers override by name.
-func mergeSpec(spec *agentopsv1alpha1.MCPSpec, refs map[string]agentopsv1alpha1.MCPConfigSpec) (map[string]agentopsv1alpha1.MCPServer, error) {
-	merged := map[string]agentopsv1alpha1.MCPServer{}
-	for _, ref := range spec.ConfigRefs {
-		cfg, ok := refs[ref.Name]
-		if !ok {
-			return nil, fmt.Errorf("MCPConfig %q not found", ref.Name)
-		}
-		for name, srv := range cfg.Servers {
-			merged[name] = srv
-		}
+func nameAt(names []string, i int) string {
+	if i < len(names) {
+		return names[i]
 	}
-	for name, srv := range spec.Servers {
-		merged[name] = srv
-	}
-	return merged, nil
+	return "<unnamed>"
 }
 
 // render turns a resolved server map into mcp.json plus the env vars carrying

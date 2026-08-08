@@ -46,9 +46,34 @@ spec:
           metadata:
             type: object
           spec:
-            description: MCPConfigSpec is a reusable, shareable set of MCP server
-              definitions.
+            description: |-
+              MCPConfigSpec is a reusable, shareable set of MCP server definitions, or —
+              as an escape hatch — a reference to a hand-written mcp.json.
             properties:
+              configMapRef:
+                description: |-
+                  ConfigMapRef / SecretRef mount a complete hand-written mcp.json (key
+                  mcp.json) instead of compiling one. Such a config is EXCLUSIVE: a
+                  document the operator maintains by hand is opaque to us, so binding it
+                  alongside any other config is an error rather than a partial result.
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              secretRef:
+                description: ObjectRef references another object by name (same namespace).
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               servers:
                 additionalProperties:
                   description: MCPServer describes a single MCP server a worker connects
@@ -305,9 +330,9 @@ spec:
                   required:
                   - type
                   type: object
+                description: Servers defined inline. Mutually exclusive with the raw
+                  forms below.
                 type: object
-            required:
-            - servers
             type: object
           status:
             description: MCPConfigStatus reports validation state.

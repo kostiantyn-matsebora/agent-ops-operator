@@ -127,22 +127,18 @@ spec:
                 type: array
               mcpConfigs:
                 description: |-
-                  ToolingBinding binds tool access to a wiring: a set of refs plus how they
-                  combine with the profile's own tooling. Content lives entirely in the
-                  referenced CRs (MCPToolset / MCPConfig) — the binding carries refs and mode
-                  only.
+                  ToolingBinding binds capabilities to a wiring: an ordered set of refs.
+                  Content lives entirely in the referenced CRs (MCPToolset / MCPConfig) — the
+                  binding carries refs only.
+
+                  There is deliberately no mode. Capabilities live ONLY on the Pipeline, so
+                  there is no profile-side tooling to merge with or overwrite; a mode field
+                  would be a control whose two values did the same thing.
                 properties:
-                  mode:
-                    default: merge
-                    description: |-
-                      Mode selects how the referenced CRs combine with the profile's own
-                      tooling: merge extends it, overwrite replaces it entirely.
-                    enum:
-                    - merge
-                    - overwrite
-                    type: string
                   refs:
-                    description: Refs are applied in order (later wins on collision).
+                    description: |-
+                      Refs are applied in order: tool lists concatenate with dedup, MCP server
+                      keys are overlaid with the later ref winning a collision.
                     items:
                       description: ObjectRef references another object by name (same
                         namespace).
@@ -187,17 +183,10 @@ spec:
                   with no originating pipeline (POST /task, /profile commands on unwired
                   channels) carry neither and use the profile's own tooling.
                 properties:
-                  mode:
-                    default: merge
-                    description: |-
-                      Mode selects how the referenced CRs combine with the profile's own
-                      tooling: merge extends it, overwrite replaces it entirely.
-                    enum:
-                    - merge
-                    - overwrite
-                    type: string
                   refs:
-                    description: Refs are applied in order (later wins on collision).
+                    description: |-
+                      Refs are applied in order: tool lists concatenate with dedup, MCP server
+                      keys are overlaid with the later ref winning a collision.
                     items:
                       description: ObjectRef references another object by name (same
                         namespace).

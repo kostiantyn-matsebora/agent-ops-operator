@@ -144,10 +144,12 @@ func (r *Router) handleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		r.Ops.EnqueueSend(ctx, ch, nil, fmt.Sprintf("⚠️ Usage: /%s &lt;task&gt;", cmd.Profile))
 		return nil
 	}
-	// explicitly addressed profile: the pipeline supplies the mirrored channel
-	// set but NOT its tooling — the named profile is not the pipeline's, so the
-	// pipeline's toolsets would grant tools meant for a different agent.
-	_, err := r.CreateTaskConversation(ctx, ch, cmd.Profile, cmd.Agent, cmd.Rest, nil)
+	// Explicitly addressed profile: the channel's pipeline supplies the mirrored
+	// channel set but NOT its capabilities — the named profile is not that
+	// pipeline's, so its toolsets would grant tools meant for a different agent.
+	// The named profile's own baseline supplies them instead.
+	origin := CapabilityPipelineForProfile(ctx, r.Client, r.Namespace, cmd.Profile)
+	_, err := r.CreateTaskConversation(ctx, ch, cmd.Profile, cmd.Agent, cmd.Rest, origin)
 	return err
 }
 

@@ -97,7 +97,6 @@ func mkProfile(t *testing.T, name string) {
 	p.Name, p.Namespace = name, ns
 	p.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/repo.git", Ref: "main"}
 	p.Spec.Agent = "tester"
-	p.Spec.AllowedTools = "Read"
 	p.Spec.MaxTurns = 5
 	if err := k8sClient.Create(context.Background(), p); err != nil {
 		t.Fatal(err)

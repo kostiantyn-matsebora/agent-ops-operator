@@ -55,8 +55,10 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-k8s-bundle
 spec:
-  # no repository, no MCP — a pure advisor over the cluster API
-  allowedTools: {{ $p.allowedTools | quote }}
+  # Identity only — no repository, and no capabilities. What this agent may DO
+  # comes from the Pipelines routing it: the events Pipeline for event-driven
+  # conversations, and the capability Pipeline below for everything else
+  # (POST /task, /<profile> commands).
   maxTurns: {{ $p.maxTurns }}
   {{- if $p.runtimeRef }}
   runtimeRef:
@@ -65,4 +67,32 @@ spec:
   runtimeRef:
     name: {{ $rt.name }}
   {{- end }}
+{{- if $p.baseline.create }}
+{{- $bt := (.Values.global | default dict).builtinToolsets | default dict }}
+{{- if not $bt.enabled }}
+{{- fail "k8s-bundle: profile.baseline.create needs global.builtinToolsets, which is disabled — enable it, or set profile.baseline.create=false and declare your own capability Pipeline" }}
+{{- end }}
+---
+# The profile's BASELINE capabilities: a Pipeline with no sources and no
+# channels routes nothing — it exists to declare what this agent may do when a
+# conversation reaches it with no routing pipeline of its own. Without it the
+# five-minute demo (a bare POST /task) would reach an agent with no tools at
+# all, because profiles no longer carry any.
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: {{ $p.baseline.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+spec:
+  profileRef:
+    name: {{ $p.name }}
+  toolsets:
+    refs:
+      - name: {{ $bt.observe.name }}
+      {{- if $p.baseline.grantShell }}
+      - name: {{ $bt.shell.name }}
+      {{- end }}
+{{- end }}
 {{- end }}

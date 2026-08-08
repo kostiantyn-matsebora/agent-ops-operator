@@ -4,10 +4,25 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// MCPConfigSpec is a reusable, shareable set of MCP server definitions.
+// MCPConfigSpec is a reusable, shareable set of MCP server definitions, or —
+// as an escape hatch — a reference to a hand-written mcp.json.
 type MCPConfigSpec struct {
-	Servers map[string]MCPServer `json:"servers"`
+	// Servers defined inline. Mutually exclusive with the raw forms below.
+	// +optional
+	Servers map[string]MCPServer `json:"servers,omitempty"`
+	// ConfigMapRef / SecretRef mount a complete hand-written mcp.json (key
+	// mcp.json) instead of compiling one. Such a config is EXCLUSIVE: a
+	// document the operator maintains by hand is opaque to us, so binding it
+	// alongside any other config is an error rather than a partial result.
+	// +optional
+	ConfigMapRef *ObjectRef `json:"configMapRef,omitempty"`
+	// +optional
+	SecretRef *ObjectRef `json:"secretRef,omitempty"`
 }
+
+// IsRaw reports whether this config mounts a hand-written mcp.json rather than
+// compiling one from Servers.
+func (s *MCPConfigSpec) IsRaw() bool { return s.ConfigMapRef != nil || s.SecretRef != nil }
 
 // MCPConfigStatus reports validation state.
 type MCPConfigStatus struct {

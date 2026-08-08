@@ -55,11 +55,10 @@ global:
   #       mode: overwrite                # merge would re-add what you withheld
   #       refs: [{name: agentops-observe}]
   #
-  # binds observation only, dropping shell for THAT route while other pipelines
-  # sharing the profile keep it. Profiles can reference them the same way
-  # (AgentProfile.spec.toolsets), which is how a profile stops carrying
-  # allowedTools at all — profile-level toolsets resolve on every path, including
-  # POST /task and /<profile> commands, where wiring bindings do not.
+  # binds observation only for THAT route, while other pipelines sharing the
+  # profile keep shell. Profiles carry no tools at all — a Pipeline with no
+  # sources and no channels declares a profile's BASELINE, which is what
+  # conversations with no routing pipeline (POST /task, /<profile>) resolve.
   #
   # Extend a list here rather than creating a CR: adding "Skill" or "WebFetch" to
   # observe.tools reaches every binding that references it, at the next work unit.
@@ -183,9 +182,8 @@ resources:
 #     enabled: true
 #     vmlogs:    { backend: http://<victorialogs>:9428 }
 #     vmmetrics: { backend: http://<victoriametrics>:8429 }
-#   # No bundled profile: add configRefs [vm-logs, vm-metrics] + the
-#   # mcp__victorialogs__*/mcp__victoriametrics__* allowlist entries to YOUR
-#   # profile (see README).
+#   # No bundled profile: bind mcpConfigs [vm-logs, vm-metrics] + toolsets
+#   # [vm-observability] on the Pipeline routing these alerts (see README).
 
 # CRD management (cert-manager pattern): templated, so upgrades work.
 crds:
