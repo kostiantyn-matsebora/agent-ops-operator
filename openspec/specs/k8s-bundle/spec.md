@@ -48,7 +48,9 @@ When active, the `eventsAdapter` component SHALL render: the `SignalAdapter` CR 
 - **THEN** only a namespaced Role/RoleBinding renders and the adapter can watch events only in the release namespace
 
 ### Requirement: The profile component ships the k8s-engineer identity chain
-When active, the `profile` component SHALL render: the `k8s-engineer` AgentProfile (values-configurable name, `allowedTools` defaulting to `Read,Grep,Glob,Bash`, `maxTurns` 40, no repository/MCP); a dedicated runtime ServiceAccount (default `agentops-runtime-k8s`); and, when `runtime.create` is on, an `AgentRuntime` (name defaulting to `default`, values-configured image and LLM credential Secret ref projected as env via `valueFrom` — the manager reads no Secrets) whose `serviceAccountName` is that SA. `runtime.create: false` SHALL support operators wiring the profile to an existing runtime via `runtimeRef` values.
+When active, the `profile` component SHALL render: the `k8s-engineer` AgentProfile (values-configurable name, `maxTurns` 40, no repository — and NO capabilities, since AgentProfiles declare none); a dedicated runtime ServiceAccount (default `agentops-runtime-k8s`); and, when `runtime.create` is on, an `AgentRuntime` (name defaulting to `default`, values-configured image and LLM credential Secret ref projected as env via `valueFrom` — the manager reads no Secrets) whose `serviceAccountName` is that SA. `runtime.create: false` SHALL support operators wiring the profile to an existing runtime via `runtimeRef` values.
+
+When `profile.baseline.create` is on, the component SHALL also render that profile's **capability-only Pipeline** — no sources, no channels — binding the chart's built-in toolsets, with `baseline.grantShell` controlling whether execution is among them. Without it a bare `POST /task` would reach an agent with no tools at all, which is exactly what the documented five-minute demo does.
 
 #### Scenario: Profile executes under the bundle SA
 - **WHEN** the bundle renders with defaults and a task addresses `k8s-engineer`
@@ -57,6 +59,14 @@ When active, the `profile` component SHALL render: the `k8s-engineer` AgentProfi
 #### Scenario: Bring-your-own runtime
 - **WHEN** `profile.runtime.create=false` and `profile.runtimeRef` names an existing AgentRuntime
 - **THEN** the AgentProfile renders with that `runtimeRef` and no AgentRuntime or SA is created by the bundle
+
+#### Scenario: The demo stays usable without any routing wiring
+- **WHEN** the bundle renders with defaults and a task is posted to `POST /task` with no pipeline named
+- **THEN** the baseline Pipeline supplies the agent's tools, and the rendered AgentProfile declares none
+
+#### Scenario: An observe-only agent
+- **WHEN** `profile.baseline.grantShell=false`
+- **THEN** the baseline binds the observation toolset only, so the agent reads the cluster but runs nothing through the pipeline-less paths
 
 ### Requirement: RBAC is read-only by default with an explicit full mode
 When active, the `rbac` component SHALL bind roles to the profile's runtime ServiceAccount according to `rbac.mode`: `readonly` (default) binds the built-in `view` ClusterRole plus a bundle ClusterRole granting `get`/`list`/`watch` on `nodes` and `namespaces` and `get`/`list` on `metrics.k8s.io` nodes/pods (the pre-bundle demo grants, verbatim); `full` binds the built-in `cluster-admin` ClusterRole. `mode: full` SHALL never be a default anywhere (including demo mode) and SHALL be documented as granting the agent unrestricted cluster control. `rbac.enabled: false` SHALL render no bindings, leaving the SA powerless.

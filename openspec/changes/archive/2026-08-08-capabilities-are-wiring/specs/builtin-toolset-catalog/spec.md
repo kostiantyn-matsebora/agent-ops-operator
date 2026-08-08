@@ -1,10 +1,6 @@
-# builtin-toolset-catalog
+# builtin-toolset-catalog — delta
 
-## Purpose
-
-The chart-shipped `MCPToolset` CRs covering the runtime's built-in tools, split by risk — observation, execution, workspace mutation — so a Pipeline can bind them to widen or narrow a route's tool access with no AgentProfile involved at all — profiles carry no capabilities.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: The chart ships built-in tools as risk-split toolsets
 The chart SHALL render `MCPToolset` CRs covering the runtime's built-in tools, split by risk rather than as one list: observation (`Read`, `Grep`, `Glob`), execution (`Bash`), and workspace mutation (`Edit`, `Write`). Default names SHALL be values-overridable and each tool list values-extendable, so adding a built-in the runtime gains needs no new CR kind and no chart change. Rendering SHALL be gated on a values flag defaulting to on; the toolsets carry no status and no controller, so shipping them costs nothing beyond the objects themselves. They are referencable from `Pipeline.spec.toolsets` only — AgentProfiles declare no capabilities.
