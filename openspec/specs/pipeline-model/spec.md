@@ -2,12 +2,10 @@
 
 ## Purpose
 
-The Pipeline CRD: a credential-free wiring layer binding N signal sources and M channels to one profile, and the SOLE source of its conversations' capabilities (mode-less `toolsets`/`mcpConfigs` refs) — with pipeline-only routing resolution, and at-most-one-pipeline-per-source claiming.
-
+The Pipeline CRD: a credential-free wiring layer binding N signal sources and M channels to one profile, and the SOLE source of its conversations' capabilities (`toolsets` refs plus their composition mode, and mode-less `mcpConfigs` refs) — with pipeline-only routing resolution, and at-most-one-pipeline-per-source claiming.
 ## Requirements
-
 ### Requirement: Pipeline CRD declares the wiring between sources, channels, and a profile
-The `Pipeline` CRD SHALL bind N `signalSourceRefs` and M `channelRefs` to one `profileRef`: signals from every referenced source SHALL become conversations bound to ALL referenced channels with the pipeline's profile, and conversations originated from any referenced channel SHALL be bound to all referenced channels. The Pipeline SHALL also be the SOLE source of its conversations' capabilities, via two optional stanzas of ordered refs: `spec.toolsets` (→ `MCPToolset` CRs, the allowlist) and `spec.mcpConfigs` (→ `MCPConfig` CRs, the MCP servers). Neither carries a mode and neither has a default — a Pipeline that declares no bindings gives its conversations no capabilities, and nothing supplies them elsewhere. A Pipeline SHALL be ADDRESSABLE by name: the task API creates a conversation against a named Pipeline, taking its profile, channel set, and capabilities from it. A Pipeline with neither sources nor channels carries no special meaning; it is simply a route nothing feeds. The Pipeline SHALL carry no credentials, no server or tool definitions, and no runtime selection (runtime stays `profile.runtimeRef → "default"`). A reconciler SHALL maintain a `Ready` condition (all references resolve, including toolset and mcpConfig refs) without creating any workload.
+The `Pipeline` CRD SHALL bind N `signalSourceRefs` and M `channelRefs` to one `profileRef`: signals from every referenced source SHALL become conversations bound to ALL referenced channels with the pipeline's profile, and conversations originated from any referenced channel SHALL be bound to all referenced channels. The Pipeline SHALL also be the SOLE source of its conversations' capabilities, via two optional stanzas of ordered refs: `spec.toolsets` (→ `MCPToolset` CRs, the allowlist) and `spec.mcpConfigs` (→ `MCPConfig` CRs, the MCP servers). `spec.toolsets` SHALL carry a `mode` (`merge` | `overwrite`, default `merge`) declaring how its tools compose with those the AGENT'S OWN DEFINITION declares — `merge` extends them, `overwrite` replaces them. `spec.mcpConfigs` SHALL carry no mode: an agent definition declares no MCP servers, so there is nothing there to compose against. Neither stanza has a default — a Pipeline that declares no bindings gives its conversations no wiring-level capabilities, and nothing supplies them elsewhere. A Pipeline SHALL be ADDRESSABLE by name: the task API creates a conversation against a named Pipeline, taking its profile, channel set, and capabilities from it. A Pipeline with neither sources nor channels carries no special meaning; it is simply a route nothing feeds. The Pipeline SHALL carry no credentials, no server or tool definitions, and no runtime selection (runtime stays `profile.runtimeRef → "default"`). A reconciler SHALL maintain a `Ready` condition (all references resolve, including toolset and mcpConfig refs) without creating any workload.
 
 #### Scenario: Signals fan out to every pipeline channel
 - **WHEN** a Pipeline binds source `alertmanager` to channels `home-ops` and `web` and an alert fires
@@ -24,6 +22,14 @@ The `Pipeline` CRD SHALL bind N `signalSourceRefs` and M `channelRefs` to one `p
 #### Scenario: Capabilities bind per route
 - **WHEN** two Ready Pipelines route to the same profile with different `toolsets`
 - **THEN** conversations from each carry exactly that Pipeline's tools, and the profile declares none
+
+#### Scenario: A mode declares how the route composes with the agent
+- **WHEN** a Pipeline binds `toolsets` in `overwrite` mode to a profile whose agent definition declares its own tools
+- **THEN** conversations from that route use the Pipeline's tools alone, while a `merge`-mode Pipeline to the same profile extends the agent's
+
+#### Scenario: An absent mode is merge
+- **WHEN** a Pipeline binds `toolsets` without naming a mode
+- **THEN** it composes as `merge`, so the route adds to what the agent declares rather than replacing it
 
 #### Scenario: A Pipeline is addressable by name
 - **WHEN** the task API names a Ready Pipeline
@@ -86,3 +92,4 @@ A SignalSource SHALL be claimed by at most one Pipeline: when a second Pipeline 
 #### Scenario: Channel shared by two pipelines stays valid
 - **WHEN** two Ready Pipelines both reference channel `web`
 - **THEN** neither reports a conflict, and each pipeline's sources produce conversations bound per their own pipeline
+
