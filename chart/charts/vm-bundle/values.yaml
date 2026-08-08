@@ -60,6 +60,14 @@ alertmanager:
     # alerts (rendered onto the Pipeline). Wire the MCP tools into it — see
     # the note above the mcpServers block.
     profileRef: ""
+    # Extra MCPToolset names appended to the rendered Pipeline's toolsets,
+    # for tools this bundle knows nothing about (repo skills, a home-automation
+    # namespace). The bundle contributes the built-ins plus its own
+    # vm-observability; anything else the alert lane needs goes here, because
+    # nothing is inherited.
+    extraToolsets: []
+    # Extra MCPConfig names appended likewise.
+    extraMCPConfigs: []
     # Optional Channel names the Pipeline mirrors conversations to.
     channels: []
     # SignalSource grouping policy (manager-side; defaults apply when empty).
