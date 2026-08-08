@@ -67,21 +67,20 @@ spec:
   runtimeRef:
     name: {{ $rt.name }}
   {{- end }}
-{{- if $p.baseline.create }}
+{{- if $p.addressable.create }}
 {{- $bt := (.Values.global | default dict).builtinToolsets | default dict }}
 {{- if not $bt.enabled }}
-{{- fail "k8s-bundle: profile.baseline.create needs global.builtinToolsets, which is disabled — enable it, or set profile.baseline.create=false and declare your own capability Pipeline" }}
+{{- fail "k8s-bundle: profile.addressable.create needs global.builtinToolsets, which is disabled — enable it, or set profile.addressable.create=false and write your own Pipeline" }}
 {{- end }}
 ---
-# The profile's BASELINE capabilities: a Pipeline with no sources and no
-# channels routes nothing — it exists to declare what this agent may do when a
-# conversation reaches it with no routing pipeline of its own. Without it the
-# five-minute demo (a bare POST /task) would reach an agent with no tools at
-# all, because profiles no longer carry any.
+# An ADDRESSABLE Pipeline for the shipped agent: the task API names a Pipeline,
+# so the demo needs one to name. It routes nothing (no sources, no channels) and
+# carries no special meaning — it is an ordinary route that declares what its
+# conversations may do, like every other Pipeline.
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
 metadata:
-  name: {{ $p.baseline.name }}
+  name: {{ $p.addressable.name }}
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-k8s-bundle
@@ -91,7 +90,7 @@ spec:
   toolsets:
     refs:
       - name: {{ $bt.observe.name }}
-      {{- if $p.baseline.grantShell }}
+      {{- if $p.addressable.grantShell }}
       - name: {{ $bt.shell.name }}
       {{- end }}
 {{- end }}

@@ -175,5 +175,35 @@ spec:
   {{- end }}
   profileRef:
     name: {{ $profileRef }}
+  {{- /* Declared, not inherited: nothing supplies a default, so a Pipeline
+  without these stanzas hands every alert conversation an empty allowlist. The
+  built-ins come from the parent chart (global. is the only scope a subchart
+  reads); the vm tools come from this bundle's own components. */}}
+  {{- $bt := (.Values.global | default dict).builtinToolsets | default dict }}
+  {{- $tools := list }}
+  {{- if $bt.enabled }}
+  {{- $tools = append $tools $bt.observe.name }}
+  {{- $tools = append $tools $bt.shell.name }}
+  {{- end }}
+  {{- if or .Values.mcp.vmlogs.enabled .Values.mcp.vmmetrics.enabled }}
+  {{- $tools = append $tools .Values.mcp.toolset.name }}
+  {{- end }}
+  {{- if $tools }}
+  toolsets:
+    refs:
+      {{- range $tools }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- $cfgs := list }}
+  {{- if .Values.mcp.vmlogs.enabled }}{{ $cfgs = append $cfgs .Values.mcp.vmlogs.name }}{{ end }}
+  {{- if .Values.mcp.vmmetrics.enabled }}{{ $cfgs = append $cfgs .Values.mcp.vmmetrics.name }}{{ end }}
+  {{- if $cfgs }}
+  mcpConfigs:
+    refs:
+      {{- range $cfgs }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
 {{- end }}
 {{- end }}

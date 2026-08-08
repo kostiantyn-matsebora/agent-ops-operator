@@ -29,7 +29,7 @@ approvable from your phone.
 
 | Kind | What it defines |
 |---|---|
-| `AgentProfile` | **Who the agent is**: git repository (private OK — SSH key / HTTPS PAT via secretRef), agent role file in that repo (`.claude/agents/<name>.md`), credentials as `env[]` with `valueFrom`, prompts, limits. Carries **no capabilities** — tools and MCP servers come from the Pipeline routing it ([below](#capabilities-are-wiring)). Addressable in chat: `/<profile> <task>`, `/<profile>:<agent>` to pick a role in the repo. |
+| `AgentProfile` | **Who the agent is**: git repository (private OK — SSH key / HTTPS PAT via secretRef), agent role file in that repo (`.claude/agents/<name>.md`), credentials as `env[]` with `valueFrom`, prompts, limits. Carries **no capabilities** — tools and MCP servers come from the Pipeline routing it ([below](#capabilities-are-wiring)). Not addressed directly: conversations address the Pipeline that originates them. |
 | `AgentRuntime` | **What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, home volume (session persistence), service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env. |
 | `Conversation` | One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. |
 | `ConversationInput` | Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd. |
@@ -37,7 +37,7 @@ approvable from your phone.
 | `ChannelAdapter` | **A channel implementation, nothing more**: a container image implementing the adapter contract, plugged in as a CR whose **name is the type key** — Channels select it with `spec.adapter: <adapter name>`, so one adapter per implementation holds by construction. The reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). **All configuration lives on the served Channels** (connectivity, credentials, opaque `config`) — the adapter CR carries none. Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
 | `SignalSource` | Ingest lane, split like `Channel`: **implementation-agnostic metadata** (`adapter`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports. |
 | `SignalAdapter` | **A signal implementation, nothing more**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR whose **name is the type key** SignalSources select via `spec.adapter`, with the same posture (owned workload, zero-RBAC SA, singleton, derived name-scoped token, credential projection). Webhook-receiving implementations declare `spec.port` and the reconciler also owns a Service `agentops-signal-<name>` + injects `LISTEN_ADDR` — enabling the adapter is a complete appliance. A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
-| `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. A Pipeline with neither sources nor channels declares a profile's baseline. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed, channels get their default profile from their oldest Ready pipeline (`/profile` commands work everywhere regardless). One pipeline per source (older claimant wins); channels are shareable. |
+| `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is ADDRESSABLE by name — `POST /task` names a Pipeline, not a profile. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed, channels get their default profile from their oldest Ready pipeline (`/profile` commands work everywhere regardless). One pipeline per source (older claimant wins); channels are shareable. |
 | `MCPConfig` | Reusable MCP server sets bound per wiring (or a hand-written `mcp.json` via `configMapRef`/`secretRef`, which must be bound alone); secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
 | `MCPToolset` | A named, reusable **list of tool patterns** (`spec.tools`) — MCP namespaces like `mcp__victorialogs__*` or built-in tool names like `Bash`. It defines no servers (that stays `MCPConfig`'s job) and has no status: the patterns are opaque strings passed to the runtime. Pipelines bind it to grant a route its tools; the chart ships the built-in vocabulary as three risk-split toolsets. |
 
@@ -88,28 +88,18 @@ The chart ships the built-in tool vocabulary as `MCPToolset` CRs, split by risk
 therefore serve a route that observes and a route that executes, with no
 profile edit and no cloning.
 
-**A profile's baseline.** Some conversations have no routing pipeline: a bare
-`POST /task`, and `/<profile>` commands in chat. A `Pipeline` naming a
-`profileRef` with **no sources and no channels** routes nothing — it exists to
-declare that profile's baseline capabilities, which those conversations
-resolve:
+**A task addresses a Pipeline.** `POST /task {"pipeline":"...","task":"..."}` —
+the Pipeline originates the conversation, so it supplies the profile, the
+mirrored channel set, and the capabilities. There is no profile-addressed form:
+a request that named only a profile would have no wiring, and therefore nothing
+to grant. The chart ships an addressable Pipeline per agent so the demo has one
+to name.
 
-```yaml
-kind: Pipeline
-metadata: {name: ha-engineer-baseline}
-spec:
-  profileRef: {name: ha-engineer}
-  toolsets: {refs: [{name: agentops-observe}, {name: agentops-shell}]}
-```
-
-Exactly one baseline per profile. A second makes both report
-`BaselineConflict` and neither applies — guessing which one an operator meant
-is worse than granting nothing. A profile with no baseline is genuinely
-unwired: conversations reaching it that way get no tools, the same way an
-unclaimed signal source routes nothing.
-
-`POST /task {"pipeline": "..."}` carries that pipeline's capabilities and
-channel set both — having named a pipeline, you get its wiring.
+**Capabilities are declared, never inferred.** A Pipeline that declares no
+`toolsets` gives its conversations none — no default, no inheritance, and no
+warning, because an agent that may do nothing is a configuration an operator is
+entitled to choose. The corollary is that every Pipeline you write declares what
+its route may do, including the ones the chart ships.
 
 Two more rules worth knowing:
 
@@ -146,8 +136,8 @@ For each profile that lists anything, move it before you upgrade:
 | `mcp.servers: {...}` | an `MCPConfig`, then referenced as above |
 | `mcp.configMapRef` / `secretRef` | an `MCPConfig` with the same field (bound alone) |
 
-If the profile is reachable via `POST /task` or `/<profile>` commands, give it
-a baseline Pipeline as well — otherwise those conversations get no tools.
+If the profile should be reachable via `POST /task`, give it a Pipeline to
+address — that is what a task names.
 `ToolingBinding.mode` is gone; drop `mode:` from any existing stanza.
 
 
@@ -327,9 +317,9 @@ share it are unaffected:
     toolsets:   {refs: [{name: vm-observability}]}
   ```
 
-To grant these tools on *every* route to that profile, put the same stanza on
-its baseline Pipeline (the one with no sources and no channels) instead. There
-is no profile-side alternative: profiles carry no capabilities.
+Every route that should have these tools declares them. There is no
+profile-side alternative and no default: profiles carry no capabilities, and a
+Pipeline that declares none grants none.
 
 ## The work contract
 
@@ -360,7 +350,7 @@ helm install agent-ops ./chart -n agent-ops --create-namespace --set global.demo
 kubectl -n agent-ops run q --rm -i --image=curlimages/curl --restart=Never -- \
   curl -s -X POST http://agentops-manager.agent-ops.svc:8080/task \
   -H 'Content-Type: application/json' \
-  -d '{"profile":"k8s-engineer","task":"any pods crashlooping? what should I look at first?"}'
+  -d '{"pipeline":"k8s-engineer","task":"any pods crashlooping? what should I look at first?"}'
 
 kubectl -n agent-ops get conversations                  # watch it work
 kubectl -n agent-ops logs -f agentops-conv-<name>       # live agent transcript
@@ -390,7 +380,7 @@ equivalent ways to turn it on.
 | Component | Flag | What it renders |
 |---|---|---|
 | Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), the `events get/list/watch` RBAC bound to its ServiceAccount, and — under `source.create` — a `SignalSource` **plus the `Pipeline` claiming it** |
-| Profile | `profile.enabled` | The `k8s-engineer` `AgentProfile` (identity only), its runtime `ServiceAccount` (`agentops-runtime-k8s`), an `AgentRuntime` (named `default`), and — under `profile.baseline.create` — the capability Pipeline that makes a bare `POST /task` reach a tooled agent |
+| Profile | `profile.enabled` | The `k8s-engineer` `AgentProfile` (identity only), its runtime `ServiceAccount` (`agentops-runtime-k8s`), an `AgentRuntime` (named `default`), and — under `profile.addressable.create` — an addressable Pipeline for the demo to name |
 | RBAC | `rbac.enabled` | Bindings for that ServiceAccount — see `rbac.mode` below |
 
 Two things worth knowing:
@@ -406,7 +396,8 @@ Two things worth knowing:
 - **Withholding shell is per-route**: bind
   `toolsets: {refs: [{name: agentops-observe}]}` on one Pipeline and only that
   route loses `Bash`, while every other route sharing the profile keeps it.
-  `profile.baseline.grantShell: false` does the same for the baseline.
+  `profile.addressable.grantShell: false` does the same for the shipped
+  addressable Pipeline.
 
 The events adapter (`signal-k8s-events/`) watches core `v1` Events through the
 in-cluster API with its own ServiceAccount token — the operator grants adapters

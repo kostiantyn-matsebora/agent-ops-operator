@@ -33,13 +33,12 @@ channel adapter), and `signal-cron/`, `signal-vmalertmanager/`,
   compose against, merge/overwrite would be one behavior wearing two names.
   Refs in order: tools concatenate with dedup, server keys overlay (later wins).
   Content stays in the referenced CRs; Ready validates both ref sets.
-  **A Pipeline with NO sources and NO channels is a profile's BASELINE** — what
-  it may do when a conversation has no routing pipeline (`POST /task` without
-  one, `/<profile>` commands). Exactly one per profile: a second sets
-  `BaselineConflict` on BOTH and neither applies (no oldest-wins — guessing
-  which baseline was meant is worse than granting nothing). No baseline = an
-  unwired profile = no tools, same posture as an unclaimed source.
-  `POST /task {"pipeline": X}` carries X's channels AND capabilities.
+  **ADDRESSABLE**: `POST /task {"pipeline": X, "task": ...}` names a Pipeline and
+  takes its profile, channels, and capabilities from it. There is no
+  profile-addressed form and no per-profile default — a Pipeline declaring no
+  bindings grants nothing, and that is a configuration, not a defect to warn
+  about. Every Pipeline the CHART ships must therefore declare its own tools;
+  forgetting that is what made every signal-driven conversation toolless once.
   Consequence: runtimes are generic — one `AgentRuntime` per vendor × trust
   level (the SA stays runtime-level on purpose; a Pipeline choosing an SA
   would make pipeline-edit rights a privilege escalation).

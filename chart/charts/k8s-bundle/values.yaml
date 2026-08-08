@@ -46,6 +46,9 @@ eventsAdapter:
     # Optional exact-match reason filters.
     includeReasons: []
     excludeReasons: []
+    # What conversations from this lane may do. Declared here because nothing
+    # supplies a default — a Pipeline that grants nothing has nothing.
+    grantShell: true
     # SignalSource grouping policy (manager-side; defaults apply when empty).
     # Grouping by object keeps one crash-looping pod in ONE conversation.
     grouping:
@@ -61,12 +64,11 @@ profile:
   # Identity only. Capabilities come from the Pipelines routing this profile —
   # the events lane above, and the baseline below for conversations that have
   # no routing pipeline (POST /task, /<profile> commands).
-  baseline:
-    # The capability-only Pipeline: no sources, no channels, so it routes
-    # nothing. Without it a bare POST /task reaches an agent with no tools,
-    # which is what the five-minute demo does.
+  addressable:
+    # The task API addresses a Pipeline, so the bundle ships one to address.
+    # It routes nothing; it exists to be named and to declare capabilities.
     create: true
-    name: k8s-engineer-baseline
+    name: k8s-engineer
     # false = an agent that reads the cluster but runs nothing.
     grantShell: true
   maxTurns: 40

@@ -148,8 +148,7 @@ func (r *Router) handleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 	// channel set but NOT its capabilities — the named profile is not that
 	// pipeline's, so its toolsets would grant tools meant for a different agent.
 	// The named profile's own baseline supplies them instead.
-	origin := CapabilityPipelineForProfile(ctx, r.Client, r.Namespace, cmd.Profile)
-	_, err := r.CreateTaskConversation(ctx, ch, cmd.Profile, cmd.Agent, cmd.Rest, origin)
+	_, err := r.CreateTaskConversation(ctx, ch, cmd.Profile, cmd.Agent, cmd.Rest, nil)
 	return err
 }
 

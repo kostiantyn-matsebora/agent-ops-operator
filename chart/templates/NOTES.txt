@@ -1,13 +1,14 @@
 agent-ops-operator {{ .Chart.Version }} deployed (manager {{ .Values.image.tag }}).
 
 Quick check:   kubectl -n {{ .Release.Namespace }} get pipelines,signalsources,channels,channeladapters,signaladapters
-Ask an agent:  POST http://agentops-manager.{{ .Release.Namespace }}.svc:{{ .Values.service.apiPort }}/task  {"profile":"<profile>","task":"..."}
+Ask an agent:  POST http://agentops-manager.{{ .Release.Namespace }}.svc:{{ .Values.service.apiPort }}/task  {"pipeline":"<pipeline>","task":"..."}
 
 Remember: wiring lives ONLY on Pipelines — a SignalSource without a Ready
 Pipeline claim drops its signals (Wired=False). Capabilities are wiring too:
 AgentProfiles carry no tools and no MCP, so an agent's abilities come from the
-Pipeline routing it. A Pipeline with no sources and no channels declares a
-profile's BASELINE — what it may do via POST /task and /<profile> commands.
+Pipeline that originated its conversation — declared there, never inherited. A
+task addresses a Pipeline by name; a Pipeline that declares no toolsets gives
+its conversations none.
 
 UPGRADING FROM CHART < 3.0? Profiles no longer have spec.allowedTools or
 spec.mcp; those fields are pruned on the next write. Any profile that still

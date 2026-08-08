@@ -3,7 +3,7 @@
 //	GET  /healthz
 //	GET  /work?convo=&wait=&pod=   worker long-poll dispatch
 //	POST /work/done                worker completion report
-//	POST /task                     {"profile","agent"?,"task","channel"?}
+//	POST /task                     {"pipeline","task","agent"?,"channel"?}
 //
 // The manager hosts NO signal transports — alert/webhook ingestion lives in
 // signal adapters feeding POST /signal/inbound.
@@ -339,27 +339,31 @@ func bound(s []string, n int) []string {
 // ---- task lane --------------------------------------------------------------
 
 type taskReq struct {
-	Profile string `json:"profile"`
-	Agent   string `json:"agent,omitempty"`
-	Task    string `json:"task"`
+	// Pipeline is what a task addresses: the Pipeline originates the
+	// conversation, so it supplies the profile, the mirrored channel set, and
+	// the capabilities. Required — there is nothing else to derive them from.
+	Pipeline string `json:"pipeline"`
+	Task     string `json:"task"`
+	// Agent overrides the profile's default role for this task.
+	Agent string `json:"agent,omitempty"`
+	// Channel adds a surface beyond the pipeline's own.
 	Channel string `json:"channel,omitempty"`
-	// Pipeline binds the conversation to the named Pipeline's channel set
-	// (mirrored surfaces). Mutually additive with Channel.
-	Pipeline string `json:"pipeline,omitempty"`
-	Title    string `json:"title,omitempty"`
+	Title   string `json:"title,omitempty"`
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var t taskReq
-	if err := json.Unmarshal(body, &t); err != nil || t.Task == "" || t.Profile == "" {
-		writeJSON(w, 400, map[string]string{"error": `need {"profile","task"}`})
+	if err := json.Unmarshal(body, &t); err != nil || t.Task == "" || t.Pipeline == "" {
+		writeJSON(w, 400, map[string]string{"error": `need {"pipeline","task"}`})
 		return
 	}
 	ctx := r.Context()
-	var profile agentopsv1alpha1.AgentProfile
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: t.Profile}, &profile); err != nil {
-		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown profile %q", t.Profile)})
+	// One lookup, one source: the Pipeline that will originate this conversation
+	// carries the profile, the surfaces, and what the agent may do.
+	var p agentopsv1alpha1.Pipeline
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: t.Pipeline}, &p); err != nil {
+		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown pipeline %q", t.Pipeline)})
 		return
 	}
 	title := t.Title
@@ -373,32 +377,15 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	conv.Namespace = s.Namespace
 	conv.GenerateName = "task-"
 	conv.Spec = agentopsv1alpha1.ConversationSpec{
-		ProfileRef: agentopsv1alpha1.ObjectRef{Name: t.Profile},
-		Title:      title,
+		ProfileRef:  p.Spec.ProfileRef,
+		ChannelRefs: append([]agentopsv1alpha1.ObjectRef{}, p.Spec.ChannelRefs...),
+		Toolsets:    p.Spec.Toolsets.DeepCopy(),
+		MCPConfigs:  p.Spec.MCPConfigs.DeepCopy(),
+		Title:       title,
 		Inputs: []agentopsv1alpha1.InputItem{{
 			ID: "in-" + strconv.FormatInt(time.Now().UnixNano(), 36), Type: agentopsv1alpha1.InputTask,
 			Payload: t.Task, Agent: t.Agent, ReceivedAt: metav1.Now(),
 		}},
-	}
-	if t.Pipeline != "" {
-		var p agentopsv1alpha1.Pipeline
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: t.Pipeline}, &p); err != nil {
-			writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown pipeline %q", t.Pipeline)})
-			return
-		}
-		// Naming a pipeline asks for that pipeline's wiring — all of it. Copying
-		// the channel set but not the tooling would give the caller a
-		// conversation on the right surfaces with the wrong tools.
-		conv.Spec.ChannelRefs = append(conv.Spec.ChannelRefs, p.Spec.ChannelRefs...)
-		conv.Spec.Toolsets = p.Spec.Toolsets.DeepCopy()
-		conv.Spec.MCPConfigs = p.Spec.MCPConfigs.DeepCopy()
-	} else if base := chat.CapabilityPipelineForProfile(ctx, s.Client, s.Namespace, t.Profile); base != nil {
-		// No pipeline named: fall back to the profile's declared baseline, so a
-		// bare /task still reaches a capable agent. Without a baseline the
-		// conversation stays capability-less — an agent nobody wired can do
-		// nothing, the same way an unclaimed source routes nothing.
-		conv.Spec.Toolsets = base.Spec.Toolsets.DeepCopy()
-		conv.Spec.MCPConfigs = base.Spec.MCPConfigs.DeepCopy()
 	}
 	if t.Channel != "" {
 		already := false
