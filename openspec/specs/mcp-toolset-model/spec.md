@@ -37,7 +37,7 @@ A conversation's tool access SHALL come from its materialized bindings ALONE —
 - **THEN** the conversation surfaces a condition naming the conflict instead of mounting a partial result
 
 ### Requirement: Bindings materialize on the Conversation with lazy content resolution
-Conversations originated by a Pipeline SHALL snapshot both tooling bindings (their ref lists) into the Conversation spec at creation — materialized per-conversation state, following the profileRef/channelRefs pattern; no `pipelineRef` is introduced. Toolset and MCPConfig CONTENT SHALL be re-resolved at each use (MCP compilation, work-unit dispatch), so content edits reach existing conversations while pipeline re-wiring affects only new ones. A conversation created through `POST /task` naming a pipeline SHALL carry that pipeline's tooling bindings alongside its channel set — having named the pipeline, the caller gets its wiring, not half of it. Conversations with NO routing pipeline (`POST /task` without one, `/<profile>` commands) SHALL resolve the named profile's capability-only Pipeline — its baseline — and snapshot those bindings; where no baseline exists they carry none and therefore have no capabilities, since the profile itself declares none.
+Conversations SHALL snapshot both tooling bindings (their ref lists) from the ORIGINATING PIPELINE into the Conversation spec at creation — materialized per-conversation state, following the profileRef/channelRefs pattern; no `pipelineRef` is introduced. That Pipeline is the only source: no profile default, no baseline, no inheritance. A conversation whose Pipeline declared a binding carries it; one whose Pipeline did not carries none. Toolset and MCPConfig CONTENT SHALL be re-resolved at each use (MCP compilation, work-unit dispatch), so content edits reach existing conversations while re-wiring affects only new ones.
 
 #### Scenario: Pipeline bindings follow the signal
 - **WHEN** a signal routes through a pipeline with `toolsets: {refs: [vm-observability]}` and `mcpConfigs: {refs: [vm-logs]}`
@@ -47,13 +47,13 @@ Conversations originated by a Pipeline SHALL snapshot both tooling bindings (the
 - **WHEN** a bound MCPConfig's server URL is corrected while conversations referencing it exist
 - **THEN** subsequent MCP compilation for those conversations uses the corrected URL
 
-#### Scenario: Task API with a pipeline carries its whole wiring
-- **WHEN** `POST /task` names a pipeline that binds toolsets and mcpConfigs
-- **THEN** the created conversation carries that pipeline's channel set AND both tooling bindings
+#### Scenario: The task API addresses a Pipeline and carries its wiring
+- **WHEN** `POST /task` names a Pipeline that binds toolsets and mcpConfigs
+- **THEN** the created conversation carries that Pipeline's profile, channel set, and both tooling bindings
 
-#### Scenario: Task API without a pipeline resolves the baseline
-- **WHEN** a conversation is created via `POST /task` with no pipeline named, against a profile that has a capability-only Pipeline
-- **THEN** it carries that baseline's bindings, so the agent is equipped without any routing wiring
+#### Scenario: A Pipeline declaring nothing yields no bindings
+- **WHEN** a conversation originates from a Pipeline with neither binding declared
+- **THEN** it carries no bindings and dispatches with an empty allowlist, with nothing supplying a default
 
 ### Requirement: Compilation and dispatch apply the effective tooling
 Every conversation with an `mcpConfigs` binding SHALL compile into a conversation-owned ConfigMap `agentops-mcp-conv-<conversation>` (ownerRef → Conversation, GC'd with it); the profile-keyed `agentops-mcp-<profile>` ConfigMap SHALL NOT be created, since profiles declare no MCP. Secret-backed header values SHALL still compile to `valueFrom` env placeholders — the manager reads no Secrets. Work-unit dispatch SHALL compute the allowlist from the bound toolsets at dispatch time, so toolset edits apply from the next work unit with no pod restart. A binding ref that fails to resolve SHALL fail visibly (conversation condition), never degrade silently to reduced tooling.

@@ -82,7 +82,7 @@ When any MCP component is active, the bundle SHALL render an `MCPToolset` (defau
 - **THEN** that pipeline's conversations can query VictoriaLogs/VictoriaMetrics via MCP, and the AgentProfile is untouched because it never carried tooling
 
 ### Requirement: The bundle ships no profile — tool wiring targets the operator's own Pipeline
-The bundle SHALL NOT render an AgentProfile (user decision 2026-08-07: the alert-handling profile is operator-owned and typically already exists). `defaultSource.profileRef` is strictly required when the default source is enabled. The documentation SHALL present the Pipeline tooling stanza (`mcpConfigs: {refs: [vm-logs, vm-metrics]}` + `toolsets: {refs: [vm-observability]}`) as the one manual wiring step. There is no profile-editing alternative: capabilities live only on Pipelines. To grant these tools on EVERY route to a profile rather than one, the documentation SHALL direct the operator to that profile's capability-only Pipeline — its baseline.
+The bundle SHALL NOT render an AgentProfile (the alert-handling profile is operator-owned and typically already exists). `defaultSource.profileRef` is strictly required when the default source is enabled. When the bundle renders its default-source Pipeline it SHALL declare that Pipeline's capabilities — the bundle's `MCPConfig`s and `MCPToolset` when those components are active — because capabilities are declared per route and nothing supplies them otherwise. For a Pipeline the operator writes themselves, the documented step is the same stanza on that Pipeline.
 
 #### Scenario: No profile objects from the bundle
 - **WHEN** the bundle renders fully enabled
@@ -92,9 +92,9 @@ The bundle SHALL NOT render an AgentProfile (user decision 2026-08-07: the alert
 - **WHEN** `defaultSource.enabled=true` with an empty `profileRef`
 - **THEN** rendering fails naming the value — there is no bundled profile to fall back to
 
-#### Scenario: Granting the tools everywhere goes through the baseline
-- **WHEN** an operator wants the VM tools on every route to their profile, not just the alert route
-- **THEN** the documented step is to add the same stanza to that profile's capability-only Pipeline, since the profile itself can carry nothing
+#### Scenario: The rendered Pipeline declares what it grants
+- **WHEN** the default source and the MCP components are both active
+- **THEN** the rendered Pipeline binds the bundle's MCPConfigs and toolset, so alert conversations can query VictoriaLogs/VictoriaMetrics without the operator adding a stanza
 
 ### Requirement: The registration component wires the in-cluster VMAlertmanager declaratively
 When `alertmanager.registration.enabled=true` (default false) with a

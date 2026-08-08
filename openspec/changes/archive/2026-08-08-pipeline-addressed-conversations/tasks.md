@@ -17,6 +17,7 @@
 
 - [x] 2.1 `internal/httpapi/server.go`: `handleTask` takes `{"pipeline","task","agent"?,"title"?}`; drop the `profile` field; resolve profile, channelRefs, toolsets, and mcpConfigs from the named Pipeline; 400 when `pipeline` is missing, 404 when unknown
 - [x] 2.2 Update the package doc comment on `internal/httpapi` describing `POST /task`
+- [x] 2.3a `internal/chat/router.go`: `/<name>` commands resolve a Pipeline (profile + capabilities from it); `/agents` lists Ready Pipelines. Deferring this left chat-addressed agents capability-less on a live cluster
 - [x] 2.3 Integration tests: a task against a Pipeline carries its profile, channels, and capabilities; a missing `pipeline` is 400; an unknown one is 404
 
 ## 3. Bundles declare what they grant
