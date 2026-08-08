@@ -9,8 +9,9 @@
 #   getUpdates ─▶ telegram-router ─┬─ no topic ─▶ signal-telegram  (ORIGINATION)
 #                 (the only poller) └─ topic    ─▶ channel-telegram (CONTINUATION)
 #
-# All three are adapter CRs: the operator's reconcilers own the Deployments and
-# Services. This chart ships neither, and no adapter connectivity.
+# The two RECEIVING ends are adapter CRs, and the operator's reconcilers own
+# their Deployments and Services. The router is not: it produces no signals and
+# serves no CR, so this chart owns its Deployment.
 enabled: false
 
 # ---- implementations --------------------------------------------------------
@@ -46,21 +47,17 @@ signalAdapter:
 
 # The single getUpdates consumer. Classifies each update by topic presence and
 # forwards it verbatim; holds no channel configuration and persists nothing.
+# The single getUpdates consumer. NOT an adapter CR: it produces no signals, so
+# this chart owns its Deployment directly and injects the two forwarding URLs as
+# env. It reaches the Kubernetes API not at all.
 router:
-  name: telegram-router
   image:
     repository: kmatsebora/agentops-telegram-router
-    tag: 0.1.0
+    tag: 0.2.0
+  # Extra env passthrough (appended after SIGNAL_TARGET, CHANNEL_TARGET and the
+  # projected bot token).
+  env: []
   resources: {}
-  # The router's own SignalSource. It emits no signals — it exists because
-  # credentials and config only reach an adapter pod by projection from a CR it
-  # SERVES, and adapter CRs carry neither. It carries the shared bot credential
-  # and the forwarding targets.
-  #
-  # Rendered with the surface: without a bot token there is nothing to poll.
-  source:
-    create: true
-    name: telegram-router
 
 # ---- the chat surface -------------------------------------------------------
 # Channel + chat SignalSource + the router's credential source.
@@ -72,8 +69,9 @@ router:
 surface:
   enabled: false
 
-  # Channel CR name. The chat SignalSource defaults to <name>-chat.
-  name: telegram-ops
+  # Channel CR name. The chat SignalSource takes the SAME name by default, and
+  # the Pipeline claiming it usually does too — one name for one surface.
+  name: k8s-ops
 
   # REQUIRED when enabled. Telegram chat id (a forum supergroup, so
   # conversations get topics). Its GENERAL SURFACE originates conversations;
@@ -111,7 +109,7 @@ surface:
   # answer nobody: every message drops with Wired=False (and the person typing
   # is told so). See the post-install notes for the Pipeline to apply.
   source:
-    # Empty = <surface.name>-chat.
+    # Empty = the surface name itself.
     name: ""
     # Chat defaults: cooldown OFF and no signature grouping, so each message
     # opens its own conversation — a person repeating a request means it twice.

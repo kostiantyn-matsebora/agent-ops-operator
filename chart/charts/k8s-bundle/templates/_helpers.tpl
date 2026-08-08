@@ -17,21 +17,37 @@ reconciler. The chart binds permissions to this name; the operator grants none. 
 agentops-signal-{{ .Values.eventsAdapter.name }}
 {{- end -}}
 
-{{- /* The profile the events Pipeline routes to: an explicit override, else the
-bundle's own profile. Failing at render time beats shipping a Pipeline that can
-never be Ready. */ -}}
-{{- define "k8s-bundle.profileRef" -}}
-{{- $ref := .Values.eventsAdapter.source.profileRef -}}
-{{- if and (not $ref) .Values.profile.enabled -}}
-{{- $ref = .Values.profile.name -}}
-{{- end -}}
-{{- if not $ref -}}
-{{- fail "k8s-bundle: eventsAdapter.source.create is on but no profile resolves — set k8s-bundle.eventsAdapter.source.profileRef to an existing AgentProfile, or enable k8s-bundle.profile" -}}
-{{- end -}}
-{{- $ref -}}
-{{- end -}}
-
 {{- /* The runtime ServiceAccount whose RBAC is the agent's power. */ -}}
 {{- define "k8s-bundle.runtimeServiceAccount" -}}
 {{ .Values.profile.runtime.serviceAccountName }}
+{{- end -}}
+
+{{- /* Deployment + Service name of the in-cluster MCP server. Fixed, because
+mcp.yaml defaults an empty MCPConfig URL onto this Service. */ -}}
+{{- define "k8s-bundle.mcpServerName" -}}
+agentops-mcp-k8s
+{{- end -}}
+
+{{- /* The endpoint path for the declared transport. containers/kubernetes-mcp-server
+serves streamable HTTP on /mcp and SSE on /sse from the same --port. */ -}}
+{{- define "k8s-bundle.mcpPath" -}}
+{{- if eq .Values.mcp.transport "sse" -}}/sse{{- else -}}/mcp{{- end -}}
+{{- end -}}
+
+{{- /* The MCP SERVER's ServiceAccount — deliberately NOT the runtime's. Its RBAC
+is what MCP tools can reach, reviewable independently of the agent's own. */ -}}
+{{- define "k8s-bundle.mcpServerServiceAccount" -}}
+{{ .Values.mcpServers.serviceAccountName }}
+{{- end -}}
+
+{{- /* Whether the mutating toolset exists. Explicit values win; otherwise it
+follows the deployed server, because granting tool names a --read-only server
+never registers is how an allowlist rots into fiction. */ -}}
+{{- define "k8s-bundle.mcpAdminEnabled" -}}
+{{- $admin := .Values.mcp.toolsets.admin -}}
+{{- if kindIs "bool" $admin.enabled -}}
+{{- if $admin.enabled }}true{{ end -}}
+{{- else if and .Values.mcpServers.enabled (not .Values.mcpServers.readOnly) -}}
+true
+{{- end -}}
 {{- end -}}

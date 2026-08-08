@@ -30,6 +30,60 @@ spec:
     - "mcp__victorialogs__*"
     - "mcp__victoriametrics__*"
 ---
+# The cluster itself as MCP tools — the k8s-bundle chart renders this pair
+# (`k8s-bundle.mcp`), shown here for hand-rolled installs. The server key
+# `kubernetes` IS the mcp__kubernetes__* namespace the toolset below grants:
+# rename one without the other and the agent silently loses its tools.
+#
+# The endpoint is a Kubernetes MCP server run with --read-only; it authenticates
+# to the API as ITS OWN pod ServiceAccount, so what these tools can reach is that
+# SA's RBAC — reviewable independently of the runtime SA that Bash + kubectl
+# authenticate as.
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: k8s-api
+  namespace: agent-ops
+spec:
+  servers:
+    kubernetes:
+      type: http
+      url: http://agentops-mcp-k8s.agent-ops.svc:8080/mcp
+---
+# Reads and mutations are SEPARATE toolsets, enumerated rather than
+# mcp__kubernetes__* — a wildcard spans both halves and defeats the split.
+# Bind k8s-observability alone for a route that explains but cannot touch.
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: k8s-observability
+  namespace: agent-ops
+spec:
+  tools:
+    - "mcp__kubernetes__events_list"
+    - "mcp__kubernetes__namespaces_list"
+    - "mcp__kubernetes__nodes_top"
+    - "mcp__kubernetes__pods_list"
+    - "mcp__kubernetes__pods_get"
+    - "mcp__kubernetes__pods_log"
+    - "mcp__kubernetes__pods_top"
+    - "mcp__kubernetes__resources_list"
+    - "mcp__kubernetes__resources_get"
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: k8s-admin
+  namespace: agent-ops
+spec:
+  tools:
+    - "mcp__kubernetes__resources_create_or_update"
+    - "mcp__kubernetes__resources_delete"
+    - "mcp__kubernetes__resources_scale"
+    - "mcp__kubernetes__pods_delete"
+    - "mcp__kubernetes__pods_exec"
+    - "mcp__kubernetes__pods_run"
+---
 # Built-in tools are toolsets too — the chart ships these three (see
 # global.builtinToolsets), split by risk so a route can observe without
 # executing. Shown here because a hand-rolled install may want its own split.
@@ -91,9 +145,13 @@ spec:
       - name: agentops-observe
       - name: agentops-shell
       - name: vm-observability
+      # Both halves or neither: the toolset is permission to call the servers
+      # the mcpConfigs below supply.
+      - name: k8s-observability
   mcpConfigs:
     refs:
       - name: home-observability
+      - name: k8s-api
 ---
 # ChannelAdapter: plugs the "telegram" implementation in as a CR — the CR's
 # NAME is the key Channels select via spec.adapter. The reconciler deploys
@@ -179,34 +237,11 @@ spec:
     # repeating a request means it twice. Set signatureLabels to opt in.
     cooldownHours: 0
 ---
-apiVersion: agentops.dev/v1alpha1
-kind: SignalAdapter
-metadata:
-  name: telegram-router
-  namespace: agent-ops
-spec:
-  image: kmatsebora/agentops-telegram-router:0.1.0
-  # singleton (default true) — two routers on one bot token means 409s and
-  # stolen updates
----
-# The router's SignalSource carries the shared bot Secret and the forwarding
-# targets into the router pod: adapter CRs hold no configuration or
-# credentials, so a served CR is the only way either can travel. It emits no
-# signals — it is claimed below only so it does not sit at Wired=False.
-apiVersion: agentops.dev/v1alpha1
-kind: SignalSource
-metadata:
-  name: telegram-router
-  namespace: agent-ops
-spec:
-  adapter: telegram-router
-  # the SAME Secret the Channel uses: the router polls the bot it sends as
-  credentialsSecretRef:
-    name: agentops-telegram
-  config:
-    signalTarget: "http://agentops-signal-telegram.agent-ops.svc:8080"
-    channelTarget: "http://agentops-adapter-telegram.agent-ops.svc:8080"
----
+# NOTE: telegram-router has NO CR. It produces no signals, so it is not an
+# adapter: the telegram-bundle chart owns its Deployment and injects
+# SIGNAL_TARGET, CHANNEL_TARGET and the bot token as env. Modelling it as a
+# SignalAdapter used to require a signal-free SignalSource purely to carry the
+# credential, which then had to be claimed to keep it off Wired=False.
 # Pipeline: the wiring object — every referenced source's signals become
 # conversations bound to ALL referenced channels (each channel mirrors the
 # whole conversation: threads everywhere, replies fanned out by the manager,
@@ -225,9 +260,6 @@ spec:
     # drops (and the user is told) — there is no channel default and no
     # oldest-pipeline tiebreak.
     - name: home-ops-chat
-    # The router's credential carrier. It emits nothing; claiming it just
-    # keeps it off Wired=False.
-    - name: telegram-router
   channelRefs:
     - name: home-ops
   profileRef:

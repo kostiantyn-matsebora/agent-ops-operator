@@ -1,0 +1,64 @@
+{{- /*
+The single getUpdates consumer — a plain Deployment this chart owns.
+
+It is NOT an adapter. It produces no signals and serves no CR: it reads the bot
+token and forwards each update to whichever of the two real adapters should
+handle it. Modelling it as a SignalAdapter would mean inventing a SignalSource
+that emits nothing, purely as an envelope for credentials — and that source
+would then sit at Wired=False until some Pipeline claimed a lane it can never
+feed. The chart renders both target adapters, so the chart already knows both
+Service URLs; injecting them as env is the whole configuration problem solved.
+
+singleton is structural here: one Deployment per bot token, replicas 1 with
+Recreate, so a rollout never briefly runs two pollers. Two routers on one token
+means 409s and stolen updates.
+
+Rendered with the surface, because without a bot token there is nothing to poll.
+*/ -}}
+{{- if and (include "telegram-bundle.active" .) (include "telegram-bundle.surfaceEnabled" .) }}
+{{- $r := .Values.router }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentops-telegram-router
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram-router
+spec:
+  replicas: 1
+  strategy:
+    # never two pollers, not even for a moment during a rollout
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentops-telegram-router
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentops-telegram-router
+    spec:
+      # It talks to Telegram and to two in-cluster Services. It has no reason
+      # to reach the Kubernetes API, and no ServiceAccount token to do it with.
+      automountServiceAccountToken: false
+      containers:
+        - name: router
+          image: {{ printf "%s:%s" $r.image.repository (toString $r.image.tag) | quote }}
+          env:
+            - name: SIGNAL_TARGET
+              value: {{ include "telegram-bundle.signalTarget" . | quote }}
+            - name: CHANNEL_TARGET
+              value: {{ include "telegram-bundle.channelTarget" . | quote }}
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  # the SAME Secret the Channel sends with: one bot, one token
+                  name: {{ include "telegram-bundle.secretName" . }}
+                  key: botToken
+            {{- with $r.env }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          {{- with $r.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+{{- end }}

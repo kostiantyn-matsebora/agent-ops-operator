@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.18.0
+  tag: 0.19.0
 
 # Concurrency cap: live agent runtime pods across all conversations.
 maxRuntimes: 8
@@ -73,6 +73,24 @@ global:
     edit:
       name: agentops-edit
       tools: [Edit, Write]
+
+# Wiring — the ONLY place Pipelines are declared. No bundle ships one: a
+# Pipeline names a profile, sources and channels that routinely come from
+# DIFFERENT bundles, so wiring belongs to the install rather than to any
+# component of it. A source no Pipeline claims drops every signal.
+#
+#   pipelines:
+#     - name: k8s-ops                 # Pipeline CR name
+#       profile: k8s-engineer         # REQUIRED
+#       signalSources: [cluster-events, k8s-ops-chat, telegram-router]
+#       channels: [k8s-ops]
+#       toolsets: [agentops-observe, agentops-shell, k8s-observability]
+#       toolsetsMode: merge           # optional: merge (default) | overwrite
+#       mcpConfigs: [k8s-api]
+#
+# One entry can claim every source in the install, which is usually what you
+# want: one route, one set of capabilities, however a conversation started.
+pipelines: []
 
 service:
   apiPort: 8080

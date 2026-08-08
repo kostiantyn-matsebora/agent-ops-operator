@@ -194,9 +194,13 @@ telegram-router/         the ONLY getUpdates consumer (own module, no deps) —
                          forwards it VERBATIM: no topic -> signal-telegram
                          (origination), topic -> channel-telegram
                          (continuation). Holds no channel config, persists
-                         nothing, needs no RBAC. Reads ONE thing: its own
-                         SignalSource, for forwarding targets + the shared bot
-                         Secret's env prefix
+                         nothing, needs no RBAC. NOT AN ADAPTER: it emits no
+                         signals, so it has no SignalAdapter CR and no served
+                         CR — the telegram-bundle chart owns its Deployment and
+                         injects SIGNAL_TARGET / CHANNEL_TARGET / the bot token
+                         as env. It never contacts the manager. One Deployment
+                         per bot token makes the single-consumer rule
+                         structural; a missing env var exits at startup
 signal-telegram/         chat ORIGINATION adapter (own module, no deps) —
                          normalizes general-surface updates to
                          {kind: chat, fingerprint: tg-<update_id>, labels:
@@ -218,11 +222,32 @@ signal-k8s-events/       cluster Events signal adapter (own module, no deps) —
                          Fingerprint keys on involved OBJECT+reason, never the
                          Event object — k8s recreates those per recurrence
 chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
-                         SignalSource AND its claiming Pipeline — never one
-                         without the other), k8s-engineer profile + runtime +
-                         SA, and that SA's RBAC (readonly | full=cluster-admin).
+                         SignalSource — the CLAIM lives in the parent chart's
+                         `pipelines:`, since NO bundle ships wiring),
+                         k8s-engineer profile + runtime + SA, and that SA's RBAC
+                         (readonly | full=cluster-admin). The profile has no
+                         repository, so it carries an inline `systemPrompt`
+                         role — otherwise an event wakes a personality-free
+                         agent.
                          Self-gated on `enabled OR global.demo.enabled`; demo
-                         mode IS this bundle (chart/templates/demo.yaml is gone)
+                         mode IS this bundle (chart/templates/demo.yaml is gone).
+                         Plus the `mcp` component: MCPConfig `k8s-api` (server
+                         key FIXED at `kubernetes`) + TWO MCPToolsets split by
+                         risk — `k8s-observability` (16 read tools) and
+                         `k8s-admin` (6 mutating), ENUMERATED not wildcarded
+                         because `mcp__kubernetes__*` spans both halves and
+                         defeats the split. `k8s-admin` renders only when a
+                         server that REGISTERS those tools exists. OFF by
+                         default (alone among the
+                         components): with `mcpServers` off there is no endpoint
+                         to default the URL onto, so default-on would fail its
+                         own guard on every render. `mcpServers` optionally runs
+                         containers/kubernetes-mcp-server (`--read-only`,
+                         filters at REGISTRATION not listing) under a SECOND SA
+                         `agentops-mcp-k8s` — never the runtime SA (render
+                         fails if equal). That second identity IS the component's
+                         reason to exist: MCP reach = server SA's RBAC ∩ toolset,
+                         two walls, where kubectl+Bash has only the runtime SA's
 chart/charts/telegram-bundle/
                          subchart: the three-component Telegram stack (router +
                          signal adapter + channel adapter) as adapter CRs, and
@@ -282,8 +307,8 @@ config/samples/          example CRs (the only config/ content — deployment-sp
   one it could not answer.
 - **HTTP API is NOT leader-gated** (`NeedLeaderElection()=false`) — webhooks
   must serve during rollouts. **Exactly one getUpdates consumer per bot token,
-  ever** — that consumer is `telegram-router`, ONE poll loop per distinct token,
-  single-instance via SignalAdapter `singleton` (replicas 1 + Recreate).
+  ever** — that consumer is `telegram-router`, ONE poll loop per Deployment and
+  ONE Deployment per token (replicas 1 + Recreate, chart-owned).
   Neither adapter polls and the manager has no poller. Adding a poll loop back
   to `channel-telegram` is the mistake that produces 409s and stolen updates.
 - **Channel ops are at-least-once.** `spec.config` is opaque to the operator —
@@ -318,10 +343,16 @@ config/samples/          example CRs (the only config/ content — deployment-sp
   starting `telegram-router`. `Channel.spec.config.pollingEnabled` is gone;
   ingest is on when the router runs.
 - The router's bot Secret is the SAME one the Channel uses (it polls the bot
-  the channel sends as), reached by projection from the router's own
-  `SignalSource` — adapter CRs carry no credentials, so a credential-bearing
-  served CR is the only path. Claim that source in a Pipeline or it reports
-  `Wired=False` forever despite working fine.
+  the channel sends as), injected by the chart as `TELEGRAM_BOT_TOKEN`. It used
+  to be an adapter with a signal-free `SignalSource` purely to carry that
+  credential — which then sat at `Wired=False` until some Pipeline faked a
+  claim. Modelling plumbing as an adapter is what produced that whole chain.
+- **NO bundle ships a Pipeline.** Wiring names a profile, sources and channels
+  that come from DIFFERENT bundles, so only the parent chart sees all of it:
+  declare routes in the top-level `pipelines:` values. A Channel is shareable
+  across pipelines (one bot, one group, many purposes) but a SignalSource is
+  claimed by exactly ONE pipeline — name pipelines for their JOB, not for the
+  channel they answer on.
 
 ## After changes
 

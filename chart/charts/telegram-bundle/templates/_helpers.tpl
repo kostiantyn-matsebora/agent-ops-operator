@@ -54,14 +54,17 @@ true
 {{- end -}}
 {{- end -}}
 
-{{- /* Chat SignalSource name: explicit, else <channel>-chat. */ -}}
+{{- /* Chat SignalSource name: explicit, else the surface name itself. The
+Channel, the chat SignalSource and the Pipeline claiming it are all one surface,
+so they share one name — different kinds never collide, and "home-ops" then
+means the whole thing rather than three near-misses. */ -}}
 {{- define "telegram-bundle.sourceName" -}}
-{{- .Values.surface.source.name | default (printf "%s-chat" .Values.surface.name) -}}
+{{- .Values.surface.source.name | default .Values.surface.name -}}
 {{- end -}}
 
 {{- /* In-cluster base URLs of the two receiving adapters. The reconcilers own
-these Services under deterministic names, so the router needs no chart-supplied
-connectivity beyond its own config. */ -}}
+these Services under deterministic names, and the chart injects both into the
+router's Deployment as env — the router reads no CR. */ -}}
 {{- define "telegram-bundle.signalTarget" -}}
 http://agentops-signal-{{ .Values.signalAdapter.name }}.{{ .Release.Namespace }}.svc:{{ .Values.signalAdapter.port }}
 {{- end -}}

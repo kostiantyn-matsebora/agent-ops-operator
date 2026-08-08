@@ -137,8 +137,12 @@ function runClaude(unit) {
     // would re-apply the definition's list as an availability intersection,
     // which silently defeats overwrite and drops any merged tool the agent did
     // not declare. The lane templates name the agent in the prompt instead.
+    // Inline role text from a repo-less profile. APPENDED, so the runtime's own
+    // system prompt survives — and it says nothing about tools: the allowlist
+    // above is the only permission authority.
     const args = [
       ...(unit.resumeSessionId ? ['--resume', unit.resumeSessionId] : []),
+      ...(unit.systemPrompt ? ['--append-system-prompt', unit.systemPrompt] : []),
       '-p', prompt,
       '--allowedTools', allowed.join(','),
       '--permission-mode', 'dontAsk',
@@ -150,6 +154,7 @@ function runClaude(unit) {
     ];
     console.log(`\n[runtime] run ${unit.runId}${unit.resumeSessionId ? ' resume=' + unit.resumeSessionId : ''} thread=${unit.threadId ?? 'general'}`);
     console.log(`[runtime] tools agent=${unit.agent || '-'} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${unit.toolsMode || 'merge'} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
+    if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
     const p = spawn('claude', args, {
       cwd: WORKSPACE,
       env: { ...process.env, RUN_ID: unit.runId, TG_THREAD_ID: unit.threadId != null ? String(unit.threadId) : '' },

@@ -80,12 +80,12 @@ func TestRouteSendsToTheRightTarget(t *testing.T) {
 	}))
 	defer channelSrv.Close()
 
-	r := &router{down: NewDownstream()}
-	cfg := routerConfig{SignalTarget: signalSrv.URL, ChannelTarget: channelSrv.URL}
+	cfg := config{SignalTarget: signalSrv.URL, ChannelTarget: channelSrv.URL}
+	r := &router{cfg: cfg, down: NewDownstream()}
 
 	general := `{"update_id":1,"message":{"text":"hello","chat":{"id":-100}}}`
 	u, _ := classifyUpdate(json.RawMessage(general))
-	r.route(context.Background(), cfg, u)
+	r.route(context.Background(), u)
 	if signalGot != general {
 		t.Fatalf("general-surface update did not reach the signal adapter verbatim: %q", signalGot)
 	}
@@ -96,7 +96,7 @@ func TestRouteSendsToTheRightTarget(t *testing.T) {
 	signalGot, channelGot = "", ""
 	topic := `{"update_id":2,"message":{"text":"more","is_topic_message":true,"message_thread_id":7}}`
 	u, _ = classifyUpdate(json.RawMessage(topic))
-	r.route(context.Background(), cfg, u)
+	r.route(context.Background(), u)
 	if channelGot != topic {
 		t.Fatalf("topic update did not reach the channel adapter verbatim: %q", channelGot)
 	}

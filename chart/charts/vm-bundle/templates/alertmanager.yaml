@@ -113,10 +113,6 @@ subjects:
 {{- end }}
 {{- if .Values.alertmanager.defaultSource.enabled }}
 {{- $src := .Values.alertmanager.defaultSource }}
-{{- $profileRef := $src.profileRef }}
-{{- if not $profileRef }}
-{{- fail "vm-bundle: alertmanager.defaultSource.profileRef is required when defaultSource.enabled=true (the Pipeline claiming the source needs an operator-owned profile — unwired sources drop signals)" }}
-{{- end }}
 ---
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource
@@ -155,57 +151,6 @@ spec:
       maxAlerts: {{ int $reg.maxAlerts }}
       {{- end }}
       sendResolved: {{ $reg.sendResolved }}
-  {{- end }}
----
-# Wiring is pipeline-only: this Pipeline claims the source so its signals
-# route (Wired=True) to the configured profile and channels.
-apiVersion: agentops.dev/v1alpha1
-kind: Pipeline
-metadata:
-  name: {{ $src.name }}
-  namespace: {{ .Release.Namespace }}
-spec:
-  signalSourceRefs:
-    - name: {{ $src.name }}
-  {{- with $src.channels }}
-  channelRefs:
-    {{- range . }}
-    - name: {{ . }}
-    {{- end }}
-  {{- end }}
-  profileRef:
-    name: {{ $profileRef }}
-  {{- /* Declared, not inherited: nothing supplies a default, so a Pipeline
-  without these stanzas hands every alert conversation an empty allowlist. The
-  built-ins come from the parent chart (global. is the only scope a subchart
-  reads); the vm tools come from this bundle's own components. */}}
-  {{- $bt := (.Values.global | default dict).builtinToolsets | default dict }}
-  {{- $tools := list }}
-  {{- if $bt.enabled }}
-  {{- $tools = append $tools $bt.observe.name }}
-  {{- $tools = append $tools $bt.shell.name }}
-  {{- end }}
-  {{- if or .Values.mcp.vmlogs.enabled .Values.mcp.vmmetrics.enabled }}
-  {{- $tools = append $tools .Values.mcp.toolset.name }}
-  {{- end }}
-  {{- range $src.extraToolsets }}{{ $tools = append $tools . }}{{ end }}
-  {{- if $tools }}
-  toolsets:
-    refs:
-      {{- range $tools }}
-      - name: {{ . }}
-      {{- end }}
-  {{- end }}
-  {{- $cfgs := list }}
-  {{- if .Values.mcp.vmlogs.enabled }}{{ $cfgs = append $cfgs .Values.mcp.vmlogs.name }}{{ end }}
-  {{- if .Values.mcp.vmmetrics.enabled }}{{ $cfgs = append $cfgs .Values.mcp.vmmetrics.name }}{{ end }}
-  {{- range $src.extraMCPConfigs }}{{ $cfgs = append $cfgs . }}{{ end }}
-  {{- if $cfgs }}
-  mcpConfigs:
-    refs:
-      {{- range $cfgs }}
-      - name: {{ . }}
-      {{- end }}
   {{- end }}
 {{- end }}
 {{- end }}

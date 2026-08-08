@@ -37,7 +37,7 @@ approvable from your phone.
 | `ChannelAdapter` | **A channel implementation, nothing more**: a container image implementing the adapter contract, plugged in as a CR whose **name is the type key** — Channels select it with `spec.adapter: <adapter name>`, so one adapter per implementation holds by construction. The reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). **All configuration lives on the served Channels** (connectivity, credentials, opaque `config`) — the adapter CR carries none. Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference. |
 | `SignalSource` | Ingest lane, split like `Channel`: **implementation-agnostic metadata** (`adapter`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports. |
 | `SignalAdapter` | **A signal implementation, nothing more**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](#the-signal-adapter-contract), plugged in as a CR whose **name is the type key** SignalSources select via `spec.adapter`, with the same posture (owned workload, zero-RBAC SA, singleton, derived name-scoped token, credential projection). Webhook-receiving implementations declare `spec.port` and the reconciler also owns a Service `agentops-signal-<name>` + injects `LISTEN_ADDR` — enabling the adapter is a complete appliance. A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference. |
-| `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is ADDRESSABLE by name — `POST /task` names a Pipeline, not a profile. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed, channels get their default profile from their oldest Ready pipeline (`/profile` commands work everywhere regardless). One pipeline per source (older claimant wins); channels are shareable. |
+| `Pipeline` | **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is ADDRESSABLE by name — `POST /task` names a Pipeline, not a profile. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed. One pipeline per source (older claimant wins); channels are shareable — one chat surface carries many jobs, so name a Pipeline for its PURPOSE, never for the channel it answers on. **No chart bundle ships a Pipeline**: wiring spans bundles, so the chart declares it once at the top, under `pipelines:`. |
 | `MCPConfig` | Reusable MCP server sets bound per wiring (or a hand-written `mcp.json` via `configMapRef`/`secretRef`, which must be bound alone); secret values via `valueFrom` compile to env placeholders — **the manager never reads agent secrets**. |
 | `MCPToolset` | A named, reusable **list of tool patterns** (`spec.tools`) — MCP namespaces like `mcp__victorialogs__*` or built-in tool names like `Bash`. It defines no servers (that stays `MCPConfig`'s job) and has no status: the patterns are opaque strings passed to the runtime. Pipelines bind it to grant a route its tools; the chart ships the built-in vocabulary as three risk-split toolsets. |
 
@@ -571,19 +571,22 @@ flipping it off. Graduating to the real thing = adding your own `AgentProfile`s
 ## Kubernetes bundle (subchart)
 
 `chart/charts/k8s-bundle/` packages the whole "watch my cluster and let an agent
-act on what it sees" experience as three independently toggleable components.
+act on what it sees" experience as four independently toggleable components.
 Off by default; `global.demo.enabled=true` and `k8s-bundle.enabled=true` are
 equivalent ways to turn it on.
 
 | Component | Flag | What it renders |
 |---|---|---|
-| Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), the `events get/list/watch` RBAC bound to its ServiceAccount, and — under `source.create` — a `SignalSource` **plus the `Pipeline` claiming it** |
-| Profile | `profile.enabled` | The `k8s-engineer` `AgentProfile` (identity only), its runtime `ServiceAccount` (`agentops-runtime-k8s`), an `AgentRuntime` (named `default`), and — under `profile.addressable.create` — an addressable Pipeline for the demo to name |
+| Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), the `events get/list/watch` RBAC bound to its ServiceAccount, and — under `source.create` — a `SignalSource`. **Not the Pipeline**: claim it under `pipelines:` |
+| Profile | `profile.enabled` | The `k8s-engineer` `AgentProfile` (identity only, with an inline `systemPrompt` role), its runtime `ServiceAccount` (`agentops-runtime-k8s`), and an `AgentRuntime` (named `default`) |
 | RBAC | `rbac.enabled` | Bindings for that ServiceAccount — see `rbac.mode` below |
+| MCP tooling | `mcp.enabled` | An `MCPConfig` (`k8s-api`, server key `kubernetes`) and an `MCPToolset` (`k8s-observability`), both bound automatically by the Pipelines above — see below |
+| MCP server | `mcpServers.enabled` | The MCP server workload itself: `Deployment` + `Service` (`agentops-mcp-k8s`), **its own `ServiceAccount`**, and that SA's RBAC |
 
 Two things worth knowing:
 
-- **The source and its Pipeline always render together.** Wiring is
+- **The source renders without wiring.** Claim it under the parent chart's
+  `pipelines:`, or it reports `Wired=False` and drops every event. Wiring is
   pipeline-only, so a `SignalSource` nobody claims reports `Wired=False` and
   drops every event. Shipping the source alone would look installed and do
   nothing.
@@ -596,6 +599,84 @@ Two things worth knowing:
   route loses `Bash`, while every other route sharing the profile keeps it.
   `profile.addressable.grantShell: false` does the same for the shipped
   addressable Pipeline.
+
+### Kubernetes as MCP tools (`mcp` / `mcpServers`)
+
+Same two halves `vm-bundle` ships for VictoriaMetrics, for the cluster itself:
+an `MCPConfig` (the server the agent connects to) and an `MCPToolset`
+(permission to call it). Both halves matter — a config without the toolset gives
+the agent a server it may not call.
+
+Unlike the other components this one is **off by default**, because an
+`MCPConfig` needs an endpoint and the bundle has none until you supply a URL or
+enable `mcpServers`. Either turns it on:
+
+```sh
+# point at a server you already run
+--set k8s-bundle.mcp.enabled=true --set k8s-bundle.mcp.url=http://my-k8s-mcp.svc:8080/mcp
+# or let the bundle run one
+--set k8s-bundle.mcp.enabled=true --set k8s-bundle.mcpServers.enabled=true
+```
+
+**Name both halves from your wiring.** The bundle renders the CRs; the route
+that uses them is declared under the parent chart's `pipelines:`:
+
+```yaml
+pipelines:
+  - name: k8s-ops
+    profile: k8s-engineer
+    signalSources: [cluster-events, home-ops]
+    channels: [home-ops]
+    toolsets: [agentops-observe, agentops-shell, k8s-observability, k8s-admin]
+    mcpConfigs: [k8s-api]
+```
+
+Tooling lives on wiring, so a conversation reaching the same profile through a
+Pipeline that binds neither gets no MCP. That is the design, not a gap.
+
+**Reads and mutations are separate toolsets.** `k8s-observability` grants the 16
+read tools, `k8s-admin` the 6 mutating ones (`resources_create_or_update`,
+`resources_delete`, `resources_scale`, `pods_delete`, `pods_exec`, `pods_run`).
+They are enumerated rather than `mcp__kubernetes__*` on purpose: a wildcard spans
+both halves and defeats the split. Bind the read set alone and the route can
+explain the cluster without touching it. `k8s-admin` only renders when a server
+that actually registers those tools exists — `mcpServers.readOnly: false`, which
+you should pair with `mcpServers.rbac.mode: full` or every mutation just returns
+a Forbidden.
+
+**MCP does not replace kubectl.** The served tools have no patch semantics, no
+rollout, drain, wait or port-forward, and no text processing — so a route that
+grants MCP writes usually still wants `agentops-shell` for what they cannot
+express.
+
+**Two identities, and why the server component exists.** The `mcpServers`
+workload runs as `agentops-mcp-k8s`, *never* the runtime SA (the chart fails the
+render if you set them equal):
+
+| Path | Who authenticates | Walls between the agent and the API |
+|---|---|---|
+| `Bash` + `kubectl` | the runtime SA (`agentops-runtime-k8s`) | one: that SA's RBAC, which `Bash` hands over whole |
+| `mcp__kubernetes__*` | the MCP server's own SA (`agentops-mcp-k8s`) | three: the server's `--read-only` tool registration, the toolset allowlist, and that SA's RBAC |
+
+Revoking `agentops-mcp-k8s`'s grants removes the agent's MCP reach without
+touching the runtime SA, and vice versa. Both default to the same shape (`view`
+plus node/namespace/metrics reads), so turning the component on widens nothing.
+
+**kubectl remains the fallback.** This changes nothing about the runtime image
+or the profile — with `mcp.enabled=false` the agent reaches the cluster exactly
+as it did before, and with it on it simply has both paths.
+
+The shipped server is `ghcr.io/containers/kubernetes-mcp-server` (pinned in
+values), run with `--read-only` and toolsets `core,config`. `--read-only` filters
+at tool *registration*, so mutating tools are uncallable rather than merely
+unlisted. `mcp.transport` selects streamable HTTP (`/mcp`, the default) or legacy
+SSE (`/sse`); `mcp.toolset.tools` is overridable if you want to enumerate
+individual tool names instead of the `mcp__kubernetes__*` wildcard — which is
+worth doing when `mcp.url` points at a server this chart did not deploy.
+
+Two tools (`nodes_log`, `nodes_stats_summary`) read through `nodes/proxy`, which
+`mcpServers.rbac.mode: readonly` deliberately does not grant; they fail with a
+Forbidden the agent can read, and widening is a deliberate grant.
 
 The events adapter (`signal-k8s-events/`) watches core `v1` Events through the
 in-cluster API with its own ServiceAccount token — the operator grants adapters
@@ -671,8 +752,16 @@ telegram-bundle:
     approvers: [123456789]
 ```
 
-That renders the `Channel`, the chat `SignalSource`, and the router's
-credential-carrying source.
+That renders the `Channel`, the chat `SignalSource` (same name as the Channel —
+one name for the whole surface), the bot `Secret`, and the **router Deployment**.
+
+The router is the odd one out of the three components: it is the only
+`getUpdates` consumer, but it produces no signals, so it is **not an adapter**.
+It has no `SignalAdapter` CR and no served CR — the bundle owns its Deployment
+and injects the two forwarding URLs and the bot token as env, and it never
+contacts the manager. One Deployment per bot token makes "exactly one poller"
+structural rather than bookkeeping; the trade is that one router serves one bot,
+so a second surface means a second router.
 
 The credential comes in either form, and exactly one of them:
 
@@ -686,7 +775,8 @@ One Secret serves the whole surface either way: the `Channel` references it to
 manager nor any reconciler reads it; both are projected into their pods and
 resolved by the kubelet.
 
-**The bundle ships no `Pipeline`, so nothing answers yet.** Wiring would pull a
+**No bundle ships a `Pipeline`, so nothing answers yet** — declare the route
+under the parent chart's `pipelines:`. Wiring would pull a
 profile, a runtime and its credentials into what is otherwise a transport
 bundle, so it stays yours. The consequence is real and worth stating plainly:
 wiring lives only on Pipelines, so until a Ready one CLAIMS these sources,

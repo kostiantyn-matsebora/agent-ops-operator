@@ -46,11 +46,12 @@ Telegram bundle — telegram-router is now the ONLY getUpdates consumer for this
 bot token. If anything else still polls it (an older single-container adapter,
 another system), stop it now: two consumers means 409s and stolen updates.
 {{- if $tb.surface.enabled }}
-{{- $src := $tb.surface.source.name | default (printf "%s-chat" $tb.surface.name) }}
+{{- $src := $tb.surface.source.name | default $tb.surface.name }}
 
-ONE STEP LEFT — nothing answers yet. This bundle ships no Pipeline, and wiring
+ONE STEP LEFT — nothing answers yet. No bundle ships a Pipeline, and wiring
 lives ONLY on Pipelines, so the chat source drops every message (Wired=False)
-until you claim it. Apply this, with your own profile:
+until you claim it. Declare it under the parent chart's `pipelines:` values, or
+apply this directly:
 
   apiVersion: agentops.dev/v1alpha1
   kind: Pipeline
@@ -60,9 +61,6 @@ until you claim it. Apply this, with your own profile:
   spec:
     signalSourceRefs:
       - name: {{ $src }}
-{{- if $tb.router.source.create }}
-      - name: {{ $tb.router.source.name }}   # emits nothing; claimed so it is not Wired=False
-{{- end }}
     channelRefs:
       - name: {{ $tb.surface.name }}
     profileRef:
@@ -74,7 +72,8 @@ until you claim it. Apply this, with your own profile:
 Then check:  kubectl -n {{ .Release.Namespace }} get signalsource {{ $src }} -o wide
 {{- else }}
 
-The three implementations are installed and nothing is wired. Set
+The two adapters are installed (the router comes with the surface, since
+without a bot token there is nothing to poll) and nothing is wired. Set
 telegram-bundle.surface.enabled=true (with surface.chatId and a credential) to
 have the bundle create the Channel and chat SignalSource, or apply your own.
 {{- end }}
