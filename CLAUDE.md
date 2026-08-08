@@ -1,6 +1,7 @@
 # Claude context — agent-ops-operator
 
-Go/controller-runtime Kubernetes operator (see README.md for the product view).
+Go/controller-runtime Kubernetes operator (README.md for the product view,
+docs/concepts.md for the CRD detail).
 Self-contained modules — no dependencies outside this directory; keep it that
 way. Seven Go modules: the operator (root), `channel-telegram/` (reference
 channel adapter), `telegram-router/` (the single getUpdates consumer), and
@@ -269,6 +270,11 @@ chart/                   Helm chart: manager Deployment/RBAC/Service + CRDs as g
                          truth = chart/files/crds/ (controller-gen output)
 config/samples/          example CRs (the only config/ content — deployment-specific
                          config belongs with the deployment, never in this module)
+docs/                    reference pages: concepts.md (CRDs + capability
+                         resolution), contracts.md (work + adapter contracts +
+                         HTTP API), and one page per bundle subchart
+CHANGELOG.md             every chart-version migration guide, newest first —
+                         the ONLY place upgrade steps live
 ```
 
 ## Invariants (do not break)
@@ -356,5 +362,21 @@ config/samples/          example CRs (the only config/ content — deployment-sp
 
 ## After changes
 
-Update README.md when concepts/behavior change; keep commits scoped to this
-directory.
+Keep commits scoped to this directory, and write documentation to the file that
+OWNS that kind of content. "Update README.md" is what grew it to 969 lines —
+three documents wearing one filename — so the routing is explicit:
+
+| What changed | Where it goes |
+|---|---|
+| CRD fields, semantics, how capabilities resolve | `docs/concepts.md` |
+| Work contract, adapter contracts, HTTP endpoints | `docs/contracts.md` |
+| A subchart's components or values | `docs/<bundle>.md` |
+| Breaking change + upgrade steps | `CHANGELOG.md`, newest first |
+| Terminology, invariants, hard-won gotchas | this file |
+| The pitch, the kind list, the demo, the install command | `README.md` |
+
+**README.md has a budget: 150 lines** (`wc -l README.md`). It holds the pitch and
+diagram, one line per CRD kind, the behaviors that matter, the demo, install, the
+Documentation index, development and status — nothing else. Reference material
+and migration guides do not belong in it; if it is over budget, something is in
+the wrong file.

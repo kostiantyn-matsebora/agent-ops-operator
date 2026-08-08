@@ -209,7 +209,7 @@ resources:
 #     vmlogs:    { backend: http://<victorialogs>:9428 }
 #     vmmetrics: { backend: http://<victoriametrics>:8429 }
 #   # No bundled profile: bind mcpConfigs [vm-logs, vm-metrics] + toolsets
-#   # [vm-observability] on the Pipeline routing these alerts (see README).
+#   # [vm-observability] on the Pipeline routing these alerts (see docs/vm-bundle.md).
 
 # CRD management (cert-manager pattern): templated, so upgrades work.
 crds:

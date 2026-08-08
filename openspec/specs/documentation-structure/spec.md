@@ -1,5 +1,8 @@
-## ADDED Requirements
+# documentation-structure Specification
 
+## Purpose
+TBD - created by archiving change organize-docs. Update Purpose after archive.
+## Requirements
 ### Requirement: README is a bounded one-page overview
 
 `README.md` SHALL contain only the product pitch and architecture diagram, a
@@ -48,11 +51,16 @@ section.
 
 ### Requirement: Reference material lives in docs/ pages split by audience
 
-The repository SHALL provide `docs/concepts.md` (CRD reference and tool-access
+The repository SHALL provide `docs/concepts.md` (CRD reference and capability
 resolution), `docs/contracts.md` (work contract, channel adapter contract,
-signal adapter contract, HTTP API), and `docs/vm-bundle.md` (the
-VictoriaMetrics subchart). Each page SHALL be reachable from the README's
+signal adapter contract, HTTP API), and ONE PAGE PER BUNDLE SUBCHART
+(`docs/<bundle>.md`). Each page SHALL be reachable from the README's
 Documentation index in one hop.
+
+A page per bundle rather than one shared page: each subchart is optional, off by
+default, and irrelevant to anyone not running it, so they have disjoint
+audiences — and a new bundle then adds a file and an index line instead of
+growing a shared one.
 
 #### Scenario: Adapter author needs the contract
 
@@ -60,6 +68,11 @@ Documentation index in one hop.
   README's Documentation index
 - **THEN** `docs/contracts.md` contains the full long-poll/push/state/auth
   contract for both adapter kinds and the runtime work contract
+
+#### Scenario: A new bundle subchart ships
+- **WHEN** a chart gains another optional bundle
+- **THEN** its documentation is a new `docs/<bundle>.md` with one line in the
+  README's Documentation index, and no existing page grows
 
 #### Scenario: Reader needs CRD detail beyond the README table
 
@@ -101,3 +114,4 @@ number.
 - **WHEN** a contributor consults `CLAUDE.md` for what to document after a change
 - **THEN** the routing rule names the destination file for that kind of content
 - **AND** the README line budget is stated numerically so overrun is checkable
+
