@@ -80,7 +80,7 @@ func TestToolsetEditsReachRunningConversations(t *testing.T) {
 	ctx := context.Background()
 	mkIdentityProfile(t, "prof-edit")
 	mkToolset(t, "edit-ts", "Grep")
-	mkConv(t, "edit-conv", "prof-edit", bind("edit-ts"), nil)
+	mkConv(t, "edit-conv", "prof-edit", bindTools("edit-ts"), nil)
 
 	if got := dispatchedAllowedTools(t, "edit-conv"); got != "Grep" {
 		t.Fatalf("initial allowlist: %q", got)
@@ -104,7 +104,7 @@ func TestToolsetEditsReachRunningConversations(t *testing.T) {
 func TestMissingToolsetRefFailsVisibly(t *testing.T) {
 	ctx := context.Background()
 	mkIdentityProfile(t, "prof-gone")
-	mkConv(t, "gone-conv", "prof-gone", bind("never-existed"), nil)
+	mkConv(t, "gone-conv", "prof-gone", bindTools("never-existed"), nil)
 
 	rec := adapterReq(apiServer(), "GET", "/work?convo=gone-conv&wait=0", nil, "")
 	if rec.Code != 500 || !strings.Contains(rec.Body.String(), "never-existed") {
@@ -135,7 +135,7 @@ func TestSignalDrivenConversationIsEquipped(t *testing.T) {
 	mkToolset(t, "sigdriven-shell", "Bash")
 	mkSignalSource(t, "sigdriven-src", "sigdriven-sig", "")
 	mkToolPipeline(t, "sigdriven-pipe", []string{"sigdriven-src"}, nil, "prof-sigdriven",
-		bind("sigdriven-observe", "sigdriven-shell"), nil)
+		bindTools("sigdriven-observe", "sigdriven-shell"), nil)
 	if p := reconcilePipeline(t, "sigdriven-pipe"); !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
 		t.Fatalf("pipeline not Ready: %+v", p.Status.Conditions)
 	}

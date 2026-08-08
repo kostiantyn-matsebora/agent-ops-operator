@@ -167,21 +167,26 @@ func (s *Server) handleWork(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// effectiveAllowedTools resolves the conversation's allowlist from the
-// MCPToolsets its wiring bound. The profile contributes nothing — capabilities
-// live only on the Pipeline. A ref that no longer resolves fails the dispatch
-// and is recorded on the conversation, never degraded to partial tooling.
-func (s *Server) effectiveAllowedTools(ctx context.Context, conv *agentopsv1alpha1.Conversation) (string, error) {
+// effectiveTooling resolves the wiring's half of the conversation's tool
+// access from the MCPToolsets it bound, together with the mode that composes it
+// with the agent definition's own tools in the runtime. The profile contributes
+// nothing — capabilities live only on the Pipeline. A ref that no longer
+// resolves fails the dispatch and is recorded on the conversation, never
+// degraded to partial tooling.
+func (s *Server) effectiveTooling(ctx context.Context, conv *agentopsv1alpha1.Conversation) (dispatch.Tooling, error) {
 	byRef, err := s.resolveToolsets(ctx, conv, conv.Spec.Toolsets)
 	if err != nil {
-		return "", err
+		return dispatch.Tooling{}, err
 	}
-	return dispatch.EffectiveAllowedTools(byRef), nil
+	return dispatch.Tooling{
+		AllowedTools: dispatch.EffectiveAllowedTools(byRef),
+		Mode:         dispatch.ToolsModeOf(conv.Spec.Toolsets),
+	}, nil
 }
 
 // resolveToolsets reads a binding's MCPToolsets in ref order.
 func (s *Server) resolveToolsets(ctx context.Context, conv *agentopsv1alpha1.Conversation,
-	binding *agentopsv1alpha1.ToolingBinding) ([][]string, error) {
+	binding *agentopsv1alpha1.ToolsetBinding) ([][]string, error) {
 
 	if binding == nil {
 		return nil, nil
@@ -237,11 +242,11 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
-	allowedTools, err := s.effectiveAllowedTools(ctx, &conv)
+	tools, err := s.effectiveTooling(ctx, &conv)
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
-	unit, ids, ok, err := dispatch.Next(&conv, &profile, allowedTools, s.resolvePayload(ctx, s.Namespace), time.Now())
+	unit, ids, ok, err := dispatch.Next(&conv, &profile, tools, s.resolvePayload(ctx, s.Namespace), time.Now())
 	if err != nil || !ok {
 		return dispatch.WorkUnit{}, false, err
 	}

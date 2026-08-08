@@ -35,8 +35,14 @@ channel adapter), `telegram-router/` (the single getUpdates consumer), and
   (older claimant wins), channels shareable, Ready pipelines only.
   **Capabilities are wiring, exclusively**: two optional stanzas of ordered
   refs — `spec.toolsets` (→ `MCPToolset`, the allowlist) and `spec.mcpConfigs`
-  (→ `MCPConfig`, the MCP servers). NO mode: with nothing profile-side to
-  compose against, merge/overwrite would be one behavior wearing two names.
+  (→ `MCPConfig`, the MCP servers).
+  `spec.toolsets.mode` (`merge` | `overwrite`, default `merge`) composes against
+  the **AGENT DEFINITION** — the `tools:` frontmatter of
+  `.claude/agents/<agent>.md` in the profile's REPO — never against the profile,
+  which carries no capabilities. Mistaking the profile for the counterpart is
+  what deleted this field once already. `spec.mcpConfigs` has NO mode: a
+  definition declares no MCP servers, so there merge/overwrite really would be
+  one behavior wearing two names.
   Refs in order: tools concatenate with dedup, server keys overlay (later wins).
   Content stays in the referenced CRs; Ready validates both ref sets.
   **ADDRESSABLE**: `POST /task {"pipeline": X, "task": ...}` names a Pipeline and
@@ -52,7 +58,16 @@ channel adapter), `telegram-router/` (the single getUpdates consumer), and
   no status — patterns are opaque, passed through like `allowedTools`. Servers
   live ONLY in `MCPConfig`. Manager RBAC on it is read-only.
   Bound from `Pipeline.spec.toolsets` ONLY — capabilities are wiring, never
-  profile fields. The chart ships the built-in vocabulary risk-split under
+  profile fields. What the pipeline binds is HALF the allowlist: the RUNTIME
+  composes it with the agent definition's own `tools:` per the unit's
+  `toolsMode` (it alone holds the checkout). Verified against the CLI:
+  `--allowedTools` is the sole permission authority and a definition's `tools:`
+  neither widens nor narrows the main session — so the union must be built
+  here or it does not happen. Never pass `--agent <name>`: that re-applies the
+  definition as an availability INTERSECTION and silently defeats `overwrite`.
+  No `|| 'Read'` fallback — empty is passed as empty with
+  `--permission-mode dontAsk` (a permission prompt in a pod is a hang).
+  The chart ships the built-in vocabulary risk-split under
   `global.builtinToolsets` (`agentops-observe` / `-shell` / `-edit`); `global.`
   because subcharts read no other parent scope.
   `POST /task {"pipeline": X}` carries X's bindings — channels AND tooling both;

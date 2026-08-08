@@ -14,6 +14,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { agentDeclaredTools, composeAllowedTools } = require('./tools');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
@@ -121,10 +122,26 @@ function runClaude(unit) {
     }
     if (!prompt) return resolve({ status: 'failed', exitCode: -1, result: 'empty prompt' });
 
+    // The work unit carries the WIRING's tools and the mode; the agent's own
+    // definition carries the rest, and only this process can read it.
+    const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(m));
+    const allowed = composeAllowedTools(declared, unit.allowedTools, unit.toolsMode);
+
+    // --allowedTools is passed ALWAYS, even empty: nothing is substituted for
+    // an allowlist nobody declared. --permission-mode dontAsk makes an
+    // unlisted tool a denial the model is told about, instead of a permission
+    // prompt — in a pod there is nobody to answer one, so it would hang until
+    // the idle TTL and report nothing.
+    //
+    // Note the composition happens HERE and not via --agent: passing --agent
+    // would re-apply the definition's list as an availability intersection,
+    // which silently defeats overwrite and drops any merged tool the agent did
+    // not declare. The lane templates name the agent in the prompt instead.
     const args = [
       ...(unit.resumeSessionId ? ['--resume', unit.resumeSessionId] : []),
       '-p', prompt,
-      '--allowedTools', unit.allowedTools || 'Read',
+      '--allowedTools', allowed.join(','),
+      '--permission-mode', 'dontAsk',
       '--max-turns', String(unit.maxTurns || 60),
       '--output-format', 'stream-json',
       '--verbose',
@@ -132,6 +149,7 @@ function runClaude(unit) {
       '--mcp-config', MCP_CONFIG,
     ];
     console.log(`\n[runtime] run ${unit.runId}${unit.resumeSessionId ? ' resume=' + unit.resumeSessionId : ''} thread=${unit.threadId ?? 'general'}`);
+    console.log(`[runtime] tools agent=${unit.agent || '-'} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${unit.toolsMode || 'merge'} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
     const p = spawn('claude', args, {
       cwd: WORKSPACE,
       env: { ...process.env, RUN_ID: unit.runId, TG_THREAD_ID: unit.threadId != null ? String(unit.threadId) : '' },

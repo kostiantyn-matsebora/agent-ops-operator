@@ -74,14 +74,14 @@ spec:
                 type: array
               mcpConfigs:
                 description: |-
-                  MCPConfigs binds MCPConfig CRs extending this wiring's MCP servers:
-                  merge overlays them onto the profile's compiled MCP (per server key,
-                  later wins), overwrite ignores the profile's mcp entirely.
+                  MCPConfigs binds MCPConfig CRs supplying this wiring's MCP servers,
+                  overlaid per server key in ref order (later wins). No mode: an agent
+                  definition declares no servers, so there is nothing to compose against.
                 properties:
                   refs:
                     description: |-
-                      Refs are applied in order: tool lists concatenate with dedup, MCP server
-                      keys are overlaid with the later ref winning a collision.
+                      Refs are applied in order: MCP server keys are overlaid with the later
+                      ref winning a collision.
                     items:
                       description: ObjectRef references another object by name (same
                         namespace).
@@ -129,14 +129,25 @@ spec:
                 type: array
               toolsets:
                 description: |-
-                  Toolsets binds MCPToolset CRs governing the allowlist of this wiring's
-                  conversations: merge unions their tools onto the profile's allowedTools,
-                  overwrite replaces it (built-ins included — name them in the toolset).
+                  Toolsets binds MCPToolset CRs contributing to the allowlist of this
+                  wiring's conversations, plus the mode composing them with what the
+                  AGENT'S OWN DEFINITION declares (merge unions, overwrite replaces).
                 properties:
+                  mode:
+                    default: merge
+                    description: |-
+                      Mode composes this binding's tools with the agent definition's:
+                      merge unions them (the agent keeps what it declared, the wiring adds),
+                      overwrite passes the wiring's alone (the agent's declaration does not
+                      apply to this route). Built-ins included — name them in the toolset.
+                    enum:
+                    - merge
+                    - overwrite
+                    type: string
                   refs:
                     description: |-
-                      Refs are applied in order: tool lists concatenate with dedup, MCP server
-                      keys are overlaid with the later ref winning a collision.
+                      Refs are applied in order: tool lists concatenate with dedup, the first
+                      occurrence keeping its position.
                     items:
                       description: ObjectRef references another object by name (same
                         namespace).

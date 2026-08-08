@@ -61,7 +61,7 @@ type ConversationSpec struct {
 	// with no originating pipeline (POST /task, /profile commands on unwired
 	// channels) carry neither and use the profile's own tooling.
 	// +optional
-	Toolsets *ToolingBinding `json:"toolsets,omitempty"`
+	Toolsets *ToolsetBinding `json:"toolsets,omitempty"`
 	// +optional
 	MCPConfigs *ToolingBinding `json:"mcpConfigs,omitempty"`
 	// +optional

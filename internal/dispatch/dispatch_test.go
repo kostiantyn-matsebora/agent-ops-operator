@@ -30,7 +30,7 @@ var now = time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 // is the caller's job now (it holds the client that reads the bound toolsets),
 // so these tests pin prompt/lane behavior only.
 func dispatchNext(c *agentopsv1alpha1.Conversation, p *agentopsv1alpha1.AgentProfile) (WorkUnit, []string, bool, error) {
-	return Next(c, p, "Read,Bash", inlineResolver, now)
+	return Next(c, p, Tooling{AllowedTools: "Read,Bash", Mode: agentopsv1alpha1.ToolsModeMerge}, inlineResolver, now)
 }
 
 func TestTaskUsesBuiltinTemplate(t *testing.T) {
@@ -153,5 +153,56 @@ func TestAlertUsesInvestigateTemplate(t *testing.T) {
 	u, _, ok, _ := dispatchNext(c, profile())
 	if !ok || !strings.Contains(u.PromptText, "READ-ONLY triage") || !strings.Contains(u.PromptText, `{"alerts":[]}`) {
 		t.Fatalf("investigate template: %+v", u)
+	}
+}
+
+// ---- toolsets mode ----------------------------------------------------------
+
+func TestToolsModeDefaultsToMergeWhenUnset(t *testing.T) {
+	if got := ToolsModeOf(nil); got != agentopsv1alpha1.ToolsModeMerge {
+		t.Fatalf("nil binding: want merge, got %q", got)
+	}
+	if got := ToolsModeOf(&agentopsv1alpha1.ToolsetBinding{}); got != agentopsv1alpha1.ToolsModeMerge {
+		t.Fatalf("empty mode: want merge, got %q", got)
+	}
+}
+
+func TestToolsModeIsCarriedThrough(t *testing.T) {
+	b := &agentopsv1alpha1.ToolsetBinding{Mode: agentopsv1alpha1.ToolsModeOverwrite}
+	if got := ToolsModeOf(b); got != agentopsv1alpha1.ToolsModeOverwrite {
+		t.Fatalf("want overwrite, got %q", got)
+	}
+}
+
+// The runtime composes the wiring's tools with the agent definition's, so the
+// unit must carry BOTH the mode and the agent whose definition it applies to.
+func TestWorkUnitCarriesToolsModeAndAgent(t *testing.T) {
+	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	u, _, ok, err := Next(c, profile(),
+		Tooling{AllowedTools: "Bash", Mode: agentopsv1alpha1.ToolsModeOverwrite}, inlineResolver, now)
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if u.ToolsMode != agentopsv1alpha1.ToolsModeOverwrite {
+		t.Fatalf("toolsMode: want overwrite, got %q", u.ToolsMode)
+	}
+	if u.AllowedTools != "Bash" {
+		t.Fatalf("allowedTools: want Bash, got %q", u.AllowedTools)
+	}
+	if u.Agent != "ha-engineer" {
+		t.Fatalf("agent: want ha-engineer (the profile's), got %q", u.Agent)
+	}
+}
+
+// A per-input agent override must reach the runtime too, or it would read the
+// wrong definition's tools while being told to act as a different agent.
+func TestWorkUnitAgentFollowsInputOverride(t *testing.T) {
+	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x", Agent: "k8s-engineer"})
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if u.Agent != "k8s-engineer" {
+		t.Fatalf("agent: want k8s-engineer, got %q", u.Agent)
 	}
 }

@@ -49,6 +49,23 @@ func bind(refs ...string) *agentopsv1alpha1.ToolingBinding {
 	return b
 }
 
+// bindTools is bind for the toolsets stanza, which additionally carries the
+// mode composing its tools with the agent definition's.
+func bindTools(refs ...string) *agentopsv1alpha1.ToolsetBinding {
+	b := &agentopsv1alpha1.ToolsetBinding{}
+	for _, r := range refs {
+		b.Refs = append(b.Refs, agentopsv1alpha1.ObjectRef{Name: r})
+	}
+	return b
+}
+
+// bindToolsMode is bindTools with an explicit composition mode.
+func bindToolsMode(mode string, refs ...string) *agentopsv1alpha1.ToolsetBinding {
+	b := bindTools(refs...)
+	b.Mode = mode
+	return b
+}
+
 // mkRawMCPConfig creates the escape-hatch form: a hand-written mcp.json.
 func mkRawMCPConfig(t *testing.T, name, configMap string) {
 	t.Helper()
@@ -61,7 +78,7 @@ func mkRawMCPConfig(t *testing.T, name, configMap string) {
 }
 
 // mkCapabilityPipeline declares a profile's BASELINE: no sources, no channels.
-func mkCapabilityPipeline(t *testing.T, name, profile string, toolsets, mcpConfigs *agentopsv1alpha1.ToolingBinding) {
+func mkCapabilityPipeline(t *testing.T, name, profile string, toolsets *agentopsv1alpha1.ToolsetBinding, mcpConfigs *agentopsv1alpha1.ToolingBinding) {
 	t.Helper()
 	mkToolPipeline(t, name, nil, nil, profile, toolsets, mcpConfigs)
 	reconcilePipeline(t, name)
@@ -69,7 +86,7 @@ func mkCapabilityPipeline(t *testing.T, name, profile string, toolsets, mcpConfi
 
 // mkToolPipeline creates a Pipeline carrying tooling bindings.
 func mkToolPipeline(t *testing.T, name string, sources, channels []string, profile string,
-	toolsets, mcpConfigs *agentopsv1alpha1.ToolingBinding) {
+	toolsets *agentopsv1alpha1.ToolsetBinding, mcpConfigs *agentopsv1alpha1.ToolingBinding) {
 	t.Helper()
 	mkPipeline(t, name, sources, channels, profile)
 	var p agentopsv1alpha1.Pipeline
@@ -114,7 +131,7 @@ func clearRuntimePods(t *testing.T) {
 
 // mkConv creates a channel-less conversation with one task input, cleaned up
 // (pod included) so the shared MaxRuntimes pool stays predictable.
-func mkConv(t *testing.T, name, profile string, toolsets, mcpConfigs *agentopsv1alpha1.ToolingBinding) *agentopsv1alpha1.Conversation {
+func mkConv(t *testing.T, name, profile string, toolsets *agentopsv1alpha1.ToolsetBinding, mcpConfigs *agentopsv1alpha1.ToolingBinding) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	clearRuntimePods(t)
 	conv := &agentopsv1alpha1.Conversation{}
@@ -193,7 +210,7 @@ func TestPipelineToolingRefsValidation(t *testing.T) {
 
 	// dangling tooling refs are as fatal to Ready as a dangling channel
 	mkToolPipeline(t, "toolref-pipe", nil, nil, "prof-toolref",
-		bind("ts-late"), bind("cfg-late"))
+		bindTools("ts-late"), bind("cfg-late"))
 	p := reconcilePipeline(t, "toolref-pipe")
 	ready := apimeta.FindStatusCondition(p.Status.Conditions, "Ready")
 	if ready == nil || ready.Status != "False" || ready.Reason != "MissingReferences" {
@@ -218,7 +235,7 @@ func TestPipelineBindingsMaterializeOnConversations(t *testing.T) {
 	mkMCPConfig(t, "mat-cfg", "victorialogs", "http://vl/sse")
 	mkSignalSource(t, "mat-src", "mat-sig", "")
 	mkToolPipeline(t, "mat-pipe", []string{"mat-src"}, nil, "prof-mat",
-		bind("mat-ts"), bind("mat-cfg"))
+		bindTools("mat-ts"), bind("mat-cfg"))
 	if p := reconcilePipeline(t, "mat-pipe"); !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
 		t.Fatalf("pipeline not Ready: %+v", p.Status.Conditions)
 	}
@@ -279,5 +296,104 @@ func TestPipelineBindingsMaterializeOnConversations(t *testing.T) {
 	}
 	if rec := adapterReq(srv, "POST", "/task", map[string]any{"pipeline": "nope", "task": "x"}, ""); rec.Code != 404 {
 		t.Fatalf("an unknown pipeline must 404: %d", rec.Code)
+	}
+}
+
+// ---- 5. Toolsets composition mode -------------------------------------------
+
+// dispatchedTooling runs one /work dispatch and returns the fields the runtime
+// composes with: the wiring's tools, the mode, and the agent whose definition
+// supplies the other half.
+func dispatchedTooling(t *testing.T, convName string) (tools, mode, agent string) {
+	t.Helper()
+	rec := adapterReq(apiServer(), "GET", "/work?convo="+convName+"&wait=0", nil, "")
+	if rec.Code != 200 {
+		t.Fatalf("dispatch %s: %d %s", convName, rec.Code, rec.Body.String())
+	}
+	var unit struct {
+		AllowedTools string `json:"allowedTools"`
+		ToolsMode    string `json:"toolsMode"`
+		Agent        string `json:"agent"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &unit)
+	return unit.AllowedTools, unit.ToolsMode, unit.Agent
+}
+
+// The mode is wiring, so it must survive the whole path: Pipeline -> the
+// conversation it originates -> the work unit the runtime composes from.
+func TestToolsModeRoundTripsFromPipelineToWorkUnit(t *testing.T) {
+	ctx := context.Background()
+	mkIdentityProfile(t, "prof-mode")
+	mkToolset(t, "mode-ts", "Bash")
+	mkSignalSource(t, "mode-src", "mode-sig", "")
+	mkToolPipeline(t, "mode-pipe", []string{"mode-src"}, nil, "prof-mode",
+		bindToolsMode(agentopsv1alpha1.ToolsModeOverwrite, "mode-ts"), nil)
+	if p := reconcilePipeline(t, "mode-pipe"); !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
+		t.Fatalf("pipeline not Ready: %+v", p.Status.Conditions)
+	}
+
+	rec := postSignal(t, apiServer().Handler(), testMasterToken, "mode-src", []map[string]any{{
+		"fingerprint": "mode-1", "labels": map[string]string{"alertname": "ModeAlert"}, "payload": "boom",
+	}})
+	if rec.Code != 200 {
+		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
+	}
+	var list agentopsv1alpha1.ConversationList
+	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
+	var conv *agentopsv1alpha1.Conversation
+	for i := range list.Items {
+		if list.Items[i].Spec.ProfileRef.Name == "prof-mode" {
+			conv = &list.Items[i]
+		}
+	}
+	if conv == nil {
+		t.Fatal("signal conversation not created")
+	}
+	t.Cleanup(func() { cleanupConversation(t, conv.Name) })
+
+	if conv.Spec.Toolsets == nil || conv.Spec.Toolsets.Mode != agentopsv1alpha1.ToolsModeOverwrite {
+		t.Fatalf("mode not materialized onto the conversation: %+v", conv.Spec.Toolsets)
+	}
+	tools, mode, agent := dispatchedTooling(t, conv.Name)
+	if tools != "Bash" {
+		t.Fatalf("wiring contribution: want Bash, got %q", tools)
+	}
+	if mode != agentopsv1alpha1.ToolsModeOverwrite {
+		t.Fatalf("work unit mode: want overwrite, got %q", mode)
+	}
+	// Without the agent name the runtime cannot find the definition whose
+	// tools the mode composes against.
+	if agent != "tester" {
+		t.Fatalf("work unit agent: want tester (the profile's), got %q", agent)
+	}
+}
+
+// A binding stored without a mode — an older object, or a Pipeline applied
+// before the field existed — must dispatch as merge. Reading it as overwrite
+// would silently strip whatever the agent declared for itself.
+func TestAbsentToolsModeDispatchesAsMerge(t *testing.T) {
+	mkIdentityProfile(t, "prof-nomode")
+	mkToolset(t, "nomode-ts", "Grep")
+	mkConv(t, "nomode-conv", "prof-nomode", bindTools("nomode-ts"), nil)
+
+	_, mode, _ := dispatchedTooling(t, "nomode-conv")
+	if mode != agentopsv1alpha1.ToolsModeMerge {
+		t.Fatalf("absent mode must dispatch as merge, got %q", mode)
+	}
+}
+
+// A conversation with no toolsets binding at all still states a mode: the
+// runtime always composes, and "no wiring tools, merge" is what lets an agent
+// definition's own declaration stand on its own.
+func TestNoBindingStillCarriesMergeMode(t *testing.T) {
+	mkIdentityProfile(t, "prof-nobind")
+	mkConv(t, "nobind-conv", "prof-nobind", nil, nil)
+
+	tools, mode, _ := dispatchedTooling(t, "nobind-conv")
+	if tools != "" {
+		t.Fatalf("unbound conversation must contribute no tools, got %q", tools)
+	}
+	if mode != agentopsv1alpha1.ToolsModeMerge {
+		t.Fatalf("want merge, got %q", mode)
 	}
 }
