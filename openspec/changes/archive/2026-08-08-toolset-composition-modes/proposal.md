@@ -10,7 +10,7 @@ Separately, `runtime-claude` substitutes `--allowedTools Read` whenever the work
 
 ## What Changes
 
-- **`ToolingBinding.mode` returns** (`merge` | `overwrite`, default `merge`) on `Pipeline.spec.toolsets` and `spec.mcpConfigs`, with its real meaning: how the wiring's refs compose with what the **agent definition** declares.
+- **A `mode` returns** (`merge` | `overwrite`, default `merge`) on `Pipeline.spec.toolsets` ONLY, with its real meaning: how the wiring's refs compose with what the **agent definition** declares. `spec.mcpConfigs` stays mode-less — the definition has no field for MCP servers, so there is nothing there to compose against (design D5). The binding type therefore splits: `ToolsetBinding` (mode + refs) for `toolsets`, `ToolingBinding` (refs) for `mcpConfigs`.
 - **The WorkUnit carries the mode**, so the runtime — the only component that can see the repository — performs the composition.
 - **`runtime-claude` reads the agent definition's frontmatter** and composes: `overwrite` passes the wiring's tools alone; `merge` passes the union of the agent's declared tools and the wiring's.
 - **The `|| 'Read'` fallback is removed.** An empty allowlist is passed through as empty, together with `--permission-mode dontAsk` so unlisted tools are denied rather than triggering permission prompts that would hang a headless run. Declaring nothing means having nothing — it must not silently mean `Read`.
@@ -24,12 +24,12 @@ Separately, `runtime-claude` substitutes `--allowedTools Read` whenever the work
 
 ### Modified Capabilities
 
-- `mcp-toolset-model`: bindings carry a mode again, composing against the agent definition rather than against any profile field; the allowlist the manager computes becomes the wiring's contribution, not the final answer.
-- `pipeline-model`: `spec.toolsets` and `spec.mcpConfigs` each carry an independent `mode`.
+- `mcp-toolset-model`: the `toolsets` binding carries a mode again, composing against the agent definition rather than against any profile field; the allowlist the manager computes becomes the wiring's contribution, not the final answer.
+- `pipeline-model`: `spec.toolsets` carries a `mode`; `spec.mcpConfigs` does not.
 
 ## Impact
 
-- **API**: `ToolingBinding.Mode` restored (optional, defaulted); deepcopy + CRD regen. Additive — existing Pipelines default to `merge`.
+- **API**: `ToolsetBinding` gains `Mode` (optional, defaulted); deepcopy + CRD regen. Additive — existing Pipelines default to `merge`.
 - **Dispatch**: `WorkUnit` gains the mode; `internal/dispatch` stops presenting its output as the final allowlist.
 - **Runtime**: `runtime-claude/runtime.js` parses the agent definition's frontmatter, composes per mode, drops the invented default, adds `--permission-mode dontAsk`. New image tag.
 - **Docs**: README capabilities section, CLAUDE.md, the work-contract description of `allowedTools`.

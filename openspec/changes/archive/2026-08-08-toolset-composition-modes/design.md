@@ -79,6 +79,57 @@ This is a behavior change for any existing deployment relying on the `Read` defa
 - [`dontAsk` changes the permission posture for every runtime] → It is the correct posture for a headless pod, where a prompt is a hang. Making it explicit removes an implicit dependency on the default mode.
 - [Mode is per-binding, so `toolsets` and `mcpConfigs` can disagree] → Intended; they compose against different things and an operator may reasonably extend servers while replacing tools.
 
-## Open Questions
+## Evidence (D1 resolved — task 1.1)
 
-- Whether `mcpConfigs` needs a mode at all. MCP servers come from the compiled `mcp.json`, which the agent definition does not contribute to — so `merge` and `overwrite` may be indistinguishable there, exactly the reason the field was dropped. Resolve during D1: if the agent definition cannot contribute servers, `mcpConfigs` should stay mode-less and only `toolsets` regains one.
+Six runs of the real binary (`claude 2.1.226`, `-p --output-format stream-json`,
+`--setting-sources project`) against a checkout containing
+`.claude/agents/probe*.md`. The probe tool is `Write`, not `Bash`: a read-only
+`Bash` command like `echo` is auto-approved by the sandbox heuristics regardless
+of the allowlist, which makes it useless as a probe — the first two runs looked
+like "`--allowedTools` does nothing" until `Write` showed otherwise.
+
+| # | flags | definition declares | outcome |
+|---|-------|---------------------|---------|
+| a | `--allowedTools Bash,Read` + `dontAsk` | `Read, Glob` | `Bash` ran (inconclusive — `echo` is auto-approved) |
+| f | `--allowedTools Read,Write` + `dontAsk`, no `--agent` | narrower / other | `Write` **succeeded** — the definition does NOT narrow the main session |
+| d | `--allowedTools Read` + `dontAsk` | `Read, Write` | `Write` **denied** — the definition does NOT widen the main session |
+| W-b | `--allowedTools Read`, default mode | — | `Write` denied ("haven't granted it yet"); the run **completed**, no hang |
+| c | no `--allowedTools`, `--permission-mode dontAsk` | — | `Write` denied ("running in don't ask mode"); run completed |
+| e | `--agent probe-write --allowedTools Read` + `dontAsk` | `Read, Write` | init `tools` = 2 (Read, Write) but `Write` **denied** |
+
+Four conclusions:
+
+1. **`--allowedTools` is the sole permission authority for the main session.**
+   A definition's `tools:` neither widens (d) nor narrows (f) it. Without
+   `--agent`, the file only registers a subagent — it appeared in the init
+   event's `agents` list in every run and governed nothing else.
+2. **`--agent <name>` intersects availability, and cannot grant.** Run e cut the
+   session's tool set to the two the definition names, yet `Write` was still
+   denied because the allowlist omitted it. So availability and permission are
+   separate gates and both must pass.
+3. **`merge` therefore needs the runtime-side union** — nothing in the CLI folds
+   the definition's declaration into the session's permissions. D3 stands as
+   designed: the runtime parses the frontmatter and passes the union via
+   `--allowedTools`.
+4. **`dontAsk` denies and returns.** It does not prompt and does not hang; the
+   process exits with a result the manager can report. D4 stands. (The default
+   mode also denies rather than hangs under `-p`, but `dontAsk` makes the
+   posture explicit and hands the model an unambiguous denial message.)
+
+**Constraint this adds:** the runtime must NOT pass `--agent <name>` while it
+composes. Doing so re-imposes the definition's list as an availability
+intersection, which would silently defeat `overwrite` and drop any `merge` tool
+the definition did not declare. The lane templates adopt the role as prose and
+pass no `--agent` — that is now load-bearing, not incidental.
+
+### D5: `mcpConfigs` stays mode-less (task 1.2)
+
+The agent-definition schema has no field for MCP *servers* — a `tools:` entry
+may name `mcp__server__tool`, but servers reach the session only through
+`--mcp-config`. There is nothing on the definition side for `mcpConfigs` to
+compose against, so `merge` and `overwrite` would again be one behavior wearing
+two names — the original reason the field was dropped, which holds here even
+though it did not hold for `toolsets`. **Only `spec.toolsets` regains a mode.**
+
+Task 1.3 does not apply: the frontmatter does not govern the main session on its
+own, so the change proceeds in full rather than narrowing to section 4.

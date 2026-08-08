@@ -22,7 +22,7 @@ The chart SHALL render `MCPToolset` CRs covering the runtime's built-in tools, s
 - **THEN** no toolset objects render, and any Pipeline whose bindings referenced them reports `Ready=False` naming the missing refs
 
 ### Requirement: A route can observe without executing
-Binding only the observation toolset on a Pipeline SHALL yield conversations whose allowlist contains the observation tools and NOT the execution tools. Because a Pipeline's bindings ARE its conversations' capabilities — profiles contribute nothing, and nothing supplies a default — this needs no mode and no profile edit: a profile serving several routes grants shell on one and withholds it on another purely by what each Pipeline binds. This holds for every route uniformly, including the Pipelines a task or a chat command addresses directly.
+Binding only the observation toolset on a Pipeline SHALL yield conversations whose allowlist contains the observation tools and NOT the execution tools. Because a Pipeline's bindings ARE its conversations' capabilities — profiles contribute nothing, and nothing supplies a default — this needs no profile edit and no change of composition mode: a profile serving several routes grants shell on one and withholds it on another purely by what each Pipeline binds. This holds for every route uniformly, including the Pipelines a task or a chat command addresses directly.
 
 #### Scenario: One profile, two routes, different shell access
 - **WHEN** two Pipelines route to one profile, one binding the observation toolset and one binding observation plus execution
