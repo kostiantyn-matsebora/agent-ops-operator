@@ -53,6 +53,42 @@ type WorkUnit struct {
 // PayloadResolver returns the payload for an input (inline or via ConversationInput).
 type PayloadResolver func(item agentopsv1alpha1.InputItem) (string, error)
 
+// EffectiveAllowedTools resolves a conversation's allowlist from the profile's
+// own string and the toolsets its wiring bound, whose tool lists arrive in ref
+// order. merge unions them onto the profile's entries (dedup, first occurrence
+// keeps its position); overwrite drops the profile's entirely — built-ins
+// included, which is why toolsets may name built-ins.
+//
+// Resolution happens per work unit, so editing a toolset takes effect on the
+// next dispatch without restarting the runtime pod. A binding-less
+// conversation gets the profile's string back verbatim.
+func EffectiveAllowedTools(profileAllowed string, binding *agentopsv1alpha1.ToolingBinding, byRef [][]string) string {
+	if binding == nil {
+		return profileAllowed
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(tool string) {
+		tool = strings.TrimSpace(tool)
+		if tool == "" || seen[tool] {
+			return
+		}
+		seen[tool] = true
+		out = append(out, tool)
+	}
+	if binding.Merges() {
+		for _, t := range strings.Split(profileAllowed, ",") {
+			add(t)
+		}
+	}
+	for _, tools := range byRef {
+		for _, t := range tools {
+			add(t)
+		}
+	}
+	return strings.Join(out, ",")
+}
+
 // singleThread returns the thread id handed to the runtime as context: only
 // single-channel conversations expose one, since a mirrored conversation has
 // no single thread. The runtime never posts to it — the operator delivers.
@@ -93,7 +129,10 @@ func PendingInputs(c *agentopsv1alpha1.Conversation) []agentopsv1alpha1.InputIte
 
 // Next resolves the next work unit. Returns the unit and the consumed input
 // ids, or ok=false when there is nothing to dispatch (inflight or empty).
-func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile,
+// allowedTools is the already-resolved effective allowlist (see
+// EffectiveAllowedTools) — the caller holds the client that reads the bound
+// toolsets.
+func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile, allowedTools string,
 	resolve PayloadResolver, now time.Time) (WorkUnit, []string, bool, error) {
 
 	if c.Status.Inflight != nil {
@@ -109,7 +148,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 	unit := WorkUnit{
 		Convo:        c.Name,
 		ThreadID:     singleThread(c),
-		AllowedTools: profile.Spec.AllowedTools,
+		AllowedTools: allowedTools,
 		MaxTurns:     profile.Spec.MaxTurns,
 	}
 	agentName := profile.Spec.Agent

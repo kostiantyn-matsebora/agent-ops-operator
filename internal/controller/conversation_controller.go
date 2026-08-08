@@ -4,11 +4,14 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sort"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,6 +30,19 @@ import (
 
 // LabelSignatureHash indexes conversations by grouping signature.
 const LabelSignatureHash = "agentops.dev/signature-hash"
+
+// ConditionToolingResolved reports whether a conversation's wiring-level
+// tooling bindings (mcpConfigs / toolsets) could be resolved. Only set on
+// conversations that carry a binding — binding-less conversations have nothing
+// to resolve and stay condition-free.
+const ConditionToolingResolved = "ToolingResolved"
+
+// MCPConfigMapName returns the ConfigMap holding a conversation's compiled
+// mcp.json: the shared profile-keyed one, or a conversation-owned one when the
+// wiring binds its own MCPConfigs.
+func MCPConfigMapName(profile string) string { return "agentops-mcp-" + profile }
+
+func convMCPConfigMapName(conv string) string { return "agentops-mcp-conv-" + conv }
 
 // ConversationReconciler reconciles Conversation objects.
 type ConversationReconciler struct {
@@ -261,10 +277,20 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
 		return false, err
 	}
-	mcpRes, err := r.ensureMCPConfigMap(ctx, &profile)
+	mcpRes, mcpCM, err := r.ensureMCPConfigMap(ctx, conv, &profile)
 	if err != nil {
+		// A binding that cannot resolve is never degraded to profile-only
+		// tooling: it stays visible on the conversation and the pod is not
+		// created with silently reduced capability.
+		reason := "MCPResolutionFailed"
+		var rawMerge *mcpcompile.RawMergeError
+		if errors.As(err, &rawMerge) {
+			reason = "IncompatibleMCPForm"
+		}
+		r.setToolingCondition(ctx, conv, metav1.ConditionFalse, reason, err.Error())
 		return false, err
 	}
+	r.setToolingCondition(ctx, conv, metav1.ConditionTrue, "Resolved", "")
 
 	// resolve the execution backend: profile.runtimeRef -> "default" CR -> bootstrap config
 	cfg := r.Runtime
@@ -281,7 +307,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 		return false, err // named runtime must exist
 	}
 
-	pod := runtimepod.Build(conv, &profile, mcpRes, cfg)
+	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, cfg)
 	pod.Namespace = conv.Namespace
 	if err := controllerutil.SetControllerReference(conv, pod, r.Scheme); err != nil {
 		return false, err
@@ -297,32 +323,84 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 	return true, r.Status().Patch(ctx, conv, patch)
 }
 
-func (r *ConversationReconciler) ensureMCPConfigMap(ctx context.Context, profile *agentopsv1alpha1.AgentProfile) (mcpcompile.Result, error) {
+// ensureMCPConfigMap renders the conversation's effective MCP and returns the
+// ConfigMap the runtime pod should mount.
+//
+// Without an mcpConfigs binding this is exactly the pre-binding behavior: the
+// profile's own tri-form spec compiled into the shared, profile-OWNED
+// agentops-mcp-<profile>. With a binding the result is per-wiring, so it
+// compiles into a conversation-OWNED agentops-mcp-conv-<conversation> that GCs
+// with the conversation — two pipelines binding different configs to one
+// profile must never clobber a shared ConfigMap.
+func (r *ConversationReconciler) ensureMCPConfigMap(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+	profile *agentopsv1alpha1.AgentProfile) (mcpcompile.Result, string, error) {
+
+	binding := conv.Spec.MCPConfigs
+	// The profile's own configRefs matter only while the profile's MCP is part
+	// of the result — under overwrite it is ignored, dangling refs included.
 	refs := map[string]agentopsv1alpha1.MCPConfigSpec{}
-	if profile.Spec.MCP != nil {
+	if profile.Spec.MCP != nil && binding.Merges() {
 		for _, ref := range profile.Spec.MCP.ConfigRefs {
 			var mc agentopsv1alpha1.MCPConfig
 			if err := r.Get(ctx, types.NamespacedName{Namespace: profile.Namespace, Name: ref.Name}, &mc); err != nil {
-				return mcpcompile.Result{}, err
+				return mcpcompile.Result{}, "", err
 			}
 			refs[ref.Name] = mc.Spec
 		}
 	}
-	res, err := mcpcompile.Compile(profile.Spec.MCP, refs)
-	if err != nil {
-		return res, err
+
+	if binding == nil {
+		res, err := mcpcompile.Compile(profile.Spec.MCP, refs)
+		if err != nil || res.JSON == "" { // raw ref is mounted directly
+			return res, MCPConfigMapName(profile.Name), err
+		}
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name: MCPConfigMapName(profile.Name), Namespace: profile.Namespace,
+		}}
+		_, err = controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
+			cm.Data = map[string]string{"mcp.json": res.JSON}
+			return controllerutil.SetControllerReference(profile, cm, r.Scheme)
+		})
+		return res, cm.Name, err
 	}
-	if res.JSON == "" { // raw ref mounted directly
-		return res, nil
+
+	overlays := make([]agentopsv1alpha1.MCPConfigSpec, 0, len(binding.Refs))
+	for _, ref := range binding.Refs {
+		var mc agentopsv1alpha1.MCPConfig
+		if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &mc); err != nil {
+			return mcpcompile.Result{}, "", fmt.Errorf("bound MCPConfig %q: %w", ref.Name, err)
+		}
+		overlays = append(overlays, mc.Spec)
+	}
+	res, err := mcpcompile.CompileOverlaid(profile.Spec.MCP, refs, overlays, binding.Mode)
+	if err != nil {
+		return mcpcompile.Result{}, "", err
 	}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
-		Name: "agentops-mcp-" + profile.Name, Namespace: profile.Namespace,
+		Name: convMCPConfigMapName(conv.Name), Namespace: conv.Namespace,
 	}}
 	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
 		cm.Data = map[string]string{"mcp.json": res.JSON}
-		return controllerutil.SetControllerReference(profile, cm, r.Scheme)
+		return controllerutil.SetControllerReference(conv, cm, r.Scheme)
 	})
-	return res, err
+	return res, cm.Name, err
+}
+
+// setToolingCondition surfaces binding resolution on the conversation.
+// Conversations without bindings carry no such condition.
+func (r *ConversationReconciler) setToolingCondition(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+	status metav1.ConditionStatus, reason, message string) {
+
+	if conv.Spec.MCPConfigs == nil && conv.Spec.Toolsets == nil {
+		return
+	}
+	patch := client.MergeFrom(conv.DeepCopy())
+	apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
+		Type: ConditionToolingResolved, Status: status, Reason: reason, Message: message,
+	})
+	if err := r.Status().Patch(ctx, conv, patch); err != nil {
+		log.FromContext(ctx).Error(err, "patching ToolingResolved condition", "conversation", conv.Name)
+	}
 }
 
 // SetupWithManager wires the controller.

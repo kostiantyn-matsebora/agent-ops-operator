@@ -13,12 +13,36 @@ adapters) — the adapters dependency-free.
 - `AgentProfile` = who the agent is; `AgentRuntime` = what executes it;
   `Conversation` = session + serial input queue + one thread PER bound channel
   (`spec.channelRefs[]` / `status.threads[]{channel,threadId}`).
-- **`Pipeline`** = THE wiring, exclusively: sources[] × channels[] + profile.
-  No other CR carries wiring (SignalSource has no profile/channel refs,
-  Channel has no default profile) — unclaimed sources DROP signals
-  (`Wired=False` + response reason), unwired channels answer bare messages
-  with guidance only. One pipeline per source (older claimant wins), channels
-  shareable, Ready pipelines only.
+  `Conversation.spec.toolsets`/`.mcpConfigs` mirror the originating Pipeline's
+  bindings — MATERIALIZED state like `profileRef`/`channelRefs`, never hand-set,
+  no `pipelineRef` exists. REFS are snapshotted, CONTENT is not: every use
+  re-reads the CRs, so edits heal running conversations while re-wiring affects
+  only new ones. `POST /task` and `/profile`-command conversations carry none.
+- **`Pipeline`** = THE wiring, exclusively: sources[] × channels[] + profile
+  + TOOL ACCESS. No other CR carries wiring (SignalSource has no
+  profile/channel refs, Channel has no default profile) — unclaimed sources
+  DROP signals (`Wired=False` + response reason), unwired channels answer bare
+  messages with guidance only. One pipeline per source (older claimant wins),
+  channels shareable, Ready pipelines only.
+  **Tool access is wiring**: two independent optional stanzas, each
+  `{mode: merge|overwrite (default merge), refs[]}` —  `spec.toolsets`
+  (→ `MCPToolset`, governs `allowedTools`) and `spec.mcpConfigs`
+  (→ `MCPConfig`, governs MCP servers). BINDING only (refs + mode); all
+  content stays in the referenced CRs, so the Pipeline still carries no
+  credentials, no server/tool definitions, no runtime selection. Ready
+  validates both ref sets (`MissingReferences`).
+  Resolution: allowlist merge = profile ∪ toolsets (dedup, first occurrence
+  keeps position), overwrite = toolsets alone (built-ins dropped — name them);
+  servers merge = profile's compiled map ⊕ configs per server key (later
+  wins), overwrite = configs alone. A raw-form profile MCP
+  (`configMapRef`/`secretRef`) CANNOT merge → `*mcpcompile.RawMergeError` →
+  `ToolingResolved=False` on the conversation, never a half-merged config.
+  Consequence: runtimes are generic — one `AgentRuntime` per vendor × trust
+  level (the SA stays runtime-level on purpose; a Pipeline choosing an SA
+  would make pipeline-edit rights a privilege escalation).
+- **`MCPToolset`** = a pure LIST of tool patterns (`spec.tools`), no servers,
+  no status — patterns are opaque, passed through like `allowedTools`. Servers
+  live ONLY in `MCPConfig`. Manager RBAC on it is read-only.
   Multi-channel conversations: manager fans replies/acks to every bound
   thread, relays user messages to sibling channels as attributed text, and
   dispatches once ≥1 thread binding exists.
@@ -98,7 +122,9 @@ api/v1alpha1/            CRD types (+ generated deepcopy); CRD YAML in chart/fil
 cmd/manager/main.go      wiring: reconciler, httpapi, chat registry/ops/router, env config
 internal/
   controller/            Conversation reconciler: topic op enqueue (async), MCP
-                         ConfigMap, runtime-pod pool (cap + idle eviction),
+                         ConfigMap (profile-owned agentops-mcp-<profile>, or
+                         conversation-owned agentops-mcp-conv-<name> when the
+                         wiring binds mcpConfigs), runtime-pod pool (cap + idle eviction),
                          ownerRef GC, input pruning; ChannelAdapter +
                          SignalAdapter reconcilers on shared workload machinery
                          (adapterworkload.go: ownership, credential projection,
@@ -112,9 +138,11 @@ internal/
                          (in-process built-ins), OpQueue (outbound ops,
                          at-least-once), Router (transport-neutral inbound)
   dispatch/              input → work-unit resolution + built-in lane templates
-                         (templates/format.md = mandatory message format spec)
+                         (templates/format.md = mandatory message format spec);
+                         EffectiveAllowedTools (profile ± toolsets, per unit)
   ingest/                signature grouping, fingerprint cooldown
-  mcpcompile/            tri-form MCP → mcp.json + valueFrom env
+  mcpcompile/            tri-form MCP → mcp.json + valueFrom env; CompileOverlaid
+                         = base ± ordered MCPConfig overlays by mode (wiring)
   runtimepod/            runtime pod builder (AgentRuntime CR over bootstrap Config)
   addressing/            /<profile>[:<agent>] parsing
   integration/           envtest suite (real API server, fake chat, no kubelet)

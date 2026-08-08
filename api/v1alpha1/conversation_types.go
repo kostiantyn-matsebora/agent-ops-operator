@@ -52,6 +52,18 @@ type ConversationSpec struct {
 	// (e.g. alertgroup/alertname/namespace, job:<name>).
 	// +optional
 	Signature string `json:"signature,omitempty"`
+	// Toolsets / MCPConfigs are the originating Pipeline's tooling bindings,
+	// snapshotted at creation like ChannelRefs and ProfileRef: materialized
+	// per-conversation state, NOT wiring — nothing sets them by hand, and
+	// re-wiring the pipeline affects only new conversations. Only the refs are
+	// snapshotted; the referenced CRs' CONTENT is re-read at every use, so
+	// editing a toolset or config reaches running conversations. Conversations
+	// with no originating pipeline (POST /task, /profile commands on unwired
+	// channels) carry neither and use the profile's own tooling.
+	// +optional
+	Toolsets *ToolingBinding `json:"toolsets,omitempty"`
+	// +optional
+	MCPConfigs *ToolingBinding `json:"mcpConfigs,omitempty"`
 	// +optional
 	Inputs []InputItem `json:"inputs,omitempty"`
 }

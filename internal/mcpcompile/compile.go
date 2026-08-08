@@ -36,6 +36,21 @@ type Result struct {
 	RawSecret    string
 }
 
+// RawMergeError reports a profile whose MCP is a raw ConfigMap/Secret ref
+// being asked to merge wiring-level configs onto it. The raw document is
+// opaque to the manager, so there is nothing to merge into — surfaced rather
+// than silently half-applied.
+type RawMergeError struct {
+	// Kind is "configMapRef" or "secretRef"; Name is the referenced object.
+	Kind, Name string
+}
+
+func (e *RawMergeError) Error() string {
+	return fmt.Sprintf("profile MCP is a raw %s (%s): its content is opaque to the operator, "+
+		"so wiring-level mcpConfigs cannot merge onto it — use mode: overwrite, or move the "+
+		"servers into inline/configRefs form", e.Kind, e.Name)
+}
+
 // Compile merges the tri-form spec. Merge order: configRefs (in order) then
 // inline servers override by name. A raw ConfigMap/Secret ref is exclusive —
 // it wins entirely and is mounted as-is (escape hatch).
@@ -49,12 +64,53 @@ func Compile(spec *agentopsv1alpha1.MCPSpec, refs map[string]agentopsv1alpha1.MC
 	if spec.SecretRef != nil {
 		return Result{RawSecret: spec.SecretRef.Name}, nil
 	}
+	merged, err := mergeSpec(spec, refs)
+	if err != nil {
+		return Result{}, err
+	}
+	return render(merged)
+}
 
+// CompileOverlaid renders the effective MCP of a wiring-bound conversation:
+// the profile's own spec (merge mode) or nothing (overwrite mode), overlaid by
+// the bound MCPConfigs in ref order — per server key, later wins.
+//
+// Overlays are passed as specs (already resolved by the caller, which holds
+// the client) so this package stays free of API reads. A raw-form base under
+// merge mode returns *RawMergeError; overwrite works over such profiles since
+// the base is ignored entirely.
+func CompileOverlaid(base *agentopsv1alpha1.MCPSpec, refs map[string]agentopsv1alpha1.MCPConfigSpec,
+	overlays []agentopsv1alpha1.MCPConfigSpec, mode string) (Result, error) {
+
+	merged := map[string]agentopsv1alpha1.MCPServer{}
+	if mode != agentopsv1alpha1.ToolingOverwrite && base != nil {
+		switch {
+		case base.ConfigMapRef != nil:
+			return Result{}, &RawMergeError{Kind: "configMapRef", Name: base.ConfigMapRef.Name}
+		case base.SecretRef != nil:
+			return Result{}, &RawMergeError{Kind: "secretRef", Name: base.SecretRef.Name}
+		}
+		var err error
+		if merged, err = mergeSpec(base, refs); err != nil {
+			return Result{}, err
+		}
+	}
+	for _, ov := range overlays {
+		for name, srv := range ov.Servers {
+			merged[name] = srv
+		}
+	}
+	return render(merged)
+}
+
+// mergeSpec resolves the non-raw forms of a spec into one server map:
+// configRefs in order, then inline servers override by name.
+func mergeSpec(spec *agentopsv1alpha1.MCPSpec, refs map[string]agentopsv1alpha1.MCPConfigSpec) (map[string]agentopsv1alpha1.MCPServer, error) {
 	merged := map[string]agentopsv1alpha1.MCPServer{}
 	for _, ref := range spec.ConfigRefs {
 		cfg, ok := refs[ref.Name]
 		if !ok {
-			return Result{}, fmt.Errorf("MCPConfig %q not found", ref.Name)
+			return nil, fmt.Errorf("MCPConfig %q not found", ref.Name)
 		}
 		for name, srv := range cfg.Servers {
 			merged[name] = srv
@@ -63,7 +119,12 @@ func Compile(spec *agentopsv1alpha1.MCPSpec, refs map[string]agentopsv1alpha1.MC
 	for name, srv := range spec.Servers {
 		merged[name] = srv
 	}
+	return merged, nil
+}
 
+// render turns a resolved server map into mcp.json plus the env vars carrying
+// its secret-backed values.
+func render(merged map[string]agentopsv1alpha1.MCPServer) (Result, error) {
 	type jsonServer struct {
 		Type    string            `json:"type,omitempty"`
 		URL     string            `json:"url,omitempty"`

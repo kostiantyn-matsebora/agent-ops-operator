@@ -60,3 +60,33 @@ spec:
 {{ toYaml . | indent 8 }}
       {{- end }}
 {{- end }}
+{{- /*
+The allowlist half of the bundle's tooling. Servers alone give an agent
+nothing — the runtime still needs the matching mcp__<key>__* entries — so the
+bundle ships both halves and attaching them is one Pipeline stanza:
+
+  spec:
+    mcpConfigs: {refs: [{name: vm-logs}, {name: vm-metrics}]}
+    toolsets:   {refs: [{name: vm-observability}]}
+
+The tool list tracks the ENABLED components: a toolset granting a namespace
+whose MCPConfig was never rendered would point at a server that does not exist.
+*/ -}}
+{{- if and .Values.enabled (or .Values.mcp.vmlogs.enabled .Values.mcp.vmmetrics.enabled) }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: {{ .Values.mcp.toolset.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-vm-bundle
+spec:
+  tools:
+    {{- if .Values.mcp.vmlogs.enabled }}
+    - "mcp__victorialogs__*"
+    {{- end }}
+    {{- if .Values.mcp.vmmetrics.enabled }}
+    - "mcp__victoriametrics__*"
+    {{- end }}
+{{- end }}

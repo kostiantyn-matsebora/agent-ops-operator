@@ -21,6 +21,10 @@ rules:
   - apiGroups: ["agentops.dev"]
     resources: ["conversations", "conversationinputs", "agentprofiles", "mcpconfigs", "channels", "signalsources", "agentruntimes", "channeladapters", "signaladapters", "pipelines"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # MCPToolset is read-only to the manager: no status to write, nothing owned.
+  - apiGroups: ["agentops.dev"]
+    resources: ["mcptoolsets"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["agentops.dev"]
     resources: ["conversations/status", "conversationinputs/status", "agentprofiles/status", "mcpconfigs/status", "channels/status", "signalsources/status", "agentruntimes/status", "channeladapters/status", "signaladapters/status", "pipelines/status"]
     verbs: ["get", "update", "patch"]

@@ -125,6 +125,40 @@ spec:
                   - type
                   type: object
                 type: array
+              mcpConfigs:
+                description: |-
+                  ToolingBinding binds tool access to a wiring: a set of refs plus how they
+                  combine with the profile's own tooling. Content lives entirely in the
+                  referenced CRs (MCPToolset / MCPConfig) — the binding carries refs and mode
+                  only.
+                properties:
+                  mode:
+                    default: merge
+                    description: |-
+                      Mode selects how the referenced CRs combine with the profile's own
+                      tooling: merge extends it, overwrite replaces it entirely.
+                    enum:
+                    - merge
+                    - overwrite
+                    type: string
+                  refs:
+                    description: Refs are applied in order (later wins on collision).
+                    items:
+                      description: ObjectRef references another object by name (same
+                        namespace).
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                required:
+                - refs
+                type: object
               profileRef:
                 description: ObjectRef references another object by name (same namespace).
                 properties:
@@ -142,6 +176,44 @@ spec:
                 type: string
               title:
                 type: string
+              toolsets:
+                description: |-
+                  Toolsets / MCPConfigs are the originating Pipeline's tooling bindings,
+                  snapshotted at creation like ChannelRefs and ProfileRef: materialized
+                  per-conversation state, NOT wiring — nothing sets them by hand, and
+                  re-wiring the pipeline affects only new conversations. Only the refs are
+                  snapshotted; the referenced CRs' CONTENT is re-read at every use, so
+                  editing a toolset or config reaches running conversations. Conversations
+                  with no originating pipeline (POST /task, /profile commands on unwired
+                  channels) carry neither and use the profile's own tooling.
+                properties:
+                  mode:
+                    default: merge
+                    description: |-
+                      Mode selects how the referenced CRs combine with the profile's own
+                      tooling: merge extends it, overwrite replaces it entirely.
+                    enum:
+                    - merge
+                    - overwrite
+                    type: string
+                  refs:
+                    description: Refs are applied in order (later wins on collision).
+                    items:
+                      description: ObjectRef references another object by name (same
+                        namespace).
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                required:
+                - refs
+                type: object
             required:
             - profileRef
             type: object

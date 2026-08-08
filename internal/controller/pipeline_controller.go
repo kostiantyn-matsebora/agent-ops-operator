@@ -53,6 +53,24 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: p.Spec.ProfileRef.Name}, &profile); err != nil {
 		missing = append(missing, "agentprofile/"+p.Spec.ProfileRef.Name)
 	}
+	// tooling bindings: refs only — the CRs' content is resolved at use time,
+	// so Ready checks existence, nothing else.
+	if p.Spec.Toolsets != nil {
+		for _, ref := range p.Spec.Toolsets.Refs {
+			var ts agentopsv1alpha1.MCPToolset
+			if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: ref.Name}, &ts); err != nil {
+				missing = append(missing, "mcptoolset/"+ref.Name)
+			}
+		}
+	}
+	if p.Spec.MCPConfigs != nil {
+		for _, ref := range p.Spec.MCPConfigs.Refs {
+			var mc agentopsv1alpha1.MCPConfig
+			if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: ref.Name}, &mc); err != nil {
+				missing = append(missing, "mcpconfig/"+ref.Name)
+			}
+		}
+	}
 
 	conflicts, err := r.sourceConflicts(ctx, &p)
 	if err != nil {
@@ -137,6 +155,8 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&agentopsv1alpha1.SignalSource{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.Channel{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.AgentProfile{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
+		Watches(&agentopsv1alpha1.MCPToolset{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
+		Watches(&agentopsv1alpha1.MCPConfig{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.Pipeline{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Complete(r)
 }

@@ -72,6 +72,39 @@ spec:
                   - name
                   type: object
                 type: array
+              mcpConfigs:
+                description: |-
+                  MCPConfigs binds MCPConfig CRs extending this wiring's MCP servers:
+                  merge overlays them onto the profile's compiled MCP (per server key,
+                  later wins), overwrite ignores the profile's mcp entirely.
+                properties:
+                  mode:
+                    default: merge
+                    description: |-
+                      Mode selects how the referenced CRs combine with the profile's own
+                      tooling: merge extends it, overwrite replaces it entirely.
+                    enum:
+                    - merge
+                    - overwrite
+                    type: string
+                  refs:
+                    description: Refs are applied in order (later wins on collision).
+                    items:
+                      description: ObjectRef references another object by name (same
+                        namespace).
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                required:
+                - refs
+                type: object
               profileRef:
                 description: |-
                   ProfileRef: the agent answering this pipeline's conversations (also the
@@ -100,6 +133,39 @@ spec:
                   - name
                   type: object
                 type: array
+              toolsets:
+                description: |-
+                  Toolsets binds MCPToolset CRs governing the allowlist of this wiring's
+                  conversations: merge unions their tools onto the profile's allowedTools,
+                  overwrite replaces it (built-ins included — name them in the toolset).
+                properties:
+                  mode:
+                    default: merge
+                    description: |-
+                      Mode selects how the referenced CRs combine with the profile's own
+                      tooling: merge extends it, overwrite replaces it entirely.
+                    enum:
+                    - merge
+                    - overwrite
+                    type: string
+                  refs:
+                    description: Refs are applied in order (later wins on collision).
+                    items:
+                      description: ObjectRef references another object by name (same
+                        namespace).
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                required:
+                - refs
+                type: object
             required:
             - profileRef
             type: object
