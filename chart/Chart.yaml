@@ -4,7 +4,7 @@ description: >-
   Kubernetes operator for agents you can address — monitoring signals and chat
   tasks become Conversations executed by per-conversation agent runtime pods.
 type: application
-version: 1.14.0
+version: 2.0.0
 appVersion: "0.13.1"
 dependencies:
   # embedded subchart (chart/charts/vm-bundle); templates are additionally
@@ -13,3 +13,10 @@ dependencies:
     version: 0.1.0
     repository: ""
     condition: vm-bundle.enabled
+  # embedded subchart (chart/charts/k8s-bundle). NO condition: the bundle turns
+  # on via `enabled` OR `global.demo.enabled`, and a Helm condition evaluates
+  # only the first existing path — it could never express the OR. Every template
+  # self-gates instead.
+  - name: k8s-bundle
+    version: 0.1.0
+    repository: ""

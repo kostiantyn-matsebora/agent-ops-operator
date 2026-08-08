@@ -2,9 +2,9 @@
 
 Go/controller-runtime Kubernetes operator (see README.md for the product view).
 Self-contained modules — no dependencies outside this directory; keep it that
-way. Four Go modules: the operator (root), `channel-telegram/` (reference
-channel adapter), `signal-cron/` and `signal-vmalertmanager/` (signal
-adapters) — the adapters dependency-free.
+way. Five Go modules: the operator (root), `channel-telegram/` (reference
+channel adapter), and `signal-cron/`, `signal-vmalertmanager/`,
+`signal-k8s-events/` (signal adapters) — the adapters dependency-free.
 
 ## Terminology (binding)
 
@@ -43,6 +43,12 @@ adapters) — the adapters dependency-free.
 - **`MCPToolset`** = a pure LIST of tool patterns (`spec.tools`), no servers,
   no status — patterns are opaque, passed through like `allowedTools`. Servers
   live ONLY in `MCPConfig`. Manager RBAC on it is read-only.
+  Bound from `Pipeline.spec.toolsets` ONLY — capabilities are wiring, never
+  profile fields. The chart ships the built-in vocabulary risk-split under
+  `global.builtinToolsets` (`agentops-observe` / `-shell` / `-edit`); `global.`
+  because subcharts read no other parent scope.
+  `POST /task {"pipeline": X}` carries X's bindings — channels AND tooling both;
+  naming a pipeline asks for its wiring, not half of it.
   Multi-channel conversations: manager fans replies/acks to every bound
   thread, relays user messages to sibling channels as attributed text, and
   dispatches once ≥1 thread binding exists.
@@ -94,7 +100,9 @@ adapters) — the adapters dependency-free.
 
 ```sh
 go build ./... && go vet ./...
-(cd channel-telegram && go build ./... && go vet ./...)
+for m in channel-telegram signal-cron signal-vmalertmanager signal-k8s-events; do
+  (cd $m && go build ./... && go vet ./... && go test ./...)
+done
 # regen after editing api/v1alpha1/ (deepcopy + CRDs):
 go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 object paths=./api/...
 go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/... output:crd:artifacts:config=chart/files/crds
@@ -110,6 +118,7 @@ docker build --platform linux/amd64 -t <registry>/agentops-runtime-claude:<tag> 
 docker build --platform linux/amd64 -t <registry>/agentops-channel-telegram:<tag> ./channel-telegram/
 docker build --platform linux/amd64 -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
 docker build --platform linux/amd64 -t <registry>/agentops-signal-vmalertmanager:<tag> ./signal-vmalertmanager/
+docker build --platform linux/amd64 -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
 # then update the image refs (chart values for the manager, AgentRuntime CRs for
 # runtimes), helm upgrade, and verify with a live task:
 #   POST /task {"profile":"stub","task":"..."}   (stub runtime = no LLM cost)
@@ -156,6 +165,19 @@ signal-vmalertmanager/   webhook-receiving signal adapter (own module, no
                          format posts; vm-bundle subchart ships it + Service
                          (pod label agentops.dev/signal-adapter is a CHART
                          CONTRACT, pinned by integration test)
+signal-k8s-events/       cluster Events signal adapter (own module, no deps) —
+                         in-cluster API over net/http (no client-go): SA token
+                         re-read, list+watch per namespace scope, 410 relist.
+                         Needs kubernetesAccess: true; the CHART binds its
+                         events RBAC (the operator grants adapters nothing).
+                         Fingerprint keys on involved OBJECT+reason, never the
+                         Event object — k8s recreates those per recurrence
+chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
+                         SignalSource AND its claiming Pipeline — never one
+                         without the other), k8s-engineer profile + runtime +
+                         SA, and that SA's RBAC (readonly | full=cluster-admin).
+                         Self-gated on `enabled OR global.demo.enabled`; demo
+                         mode IS this bundle (chart/templates/demo.yaml is gone)
 chart/                   Helm chart: manager Deployment/RBAC/Service + CRDs as gated
                          templates (crds.enabled, crds.keep -> helm.sh/resource-policy:
                          keep so uninstall never cascade-deletes CRs); CRD source of

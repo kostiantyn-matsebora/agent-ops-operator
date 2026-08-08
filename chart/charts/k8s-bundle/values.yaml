@@ -1,0 +1,100 @@
+# Kubernetes agent bundle: cluster Events → conversations, plus the agent that
+# answers them and the RBAC it answers with. Three independently toggleable
+# components. The WHOLE bundle is off by default and is turned on either
+# directly (`enabled: true`) or by demo mode (`global.demo.enabled: true`) —
+# demo mode means exactly "this bundle with its defaults", nothing more.
+# Override under the `k8s-bundle:` key of the parent chart's values.
+enabled: false
+
+# The cluster Events ingest lane: adapter implementation + the RBAC its
+# ServiceAccount needs + the source and the Pipeline that routes it.
+eventsAdapter:
+  enabled: true
+  # SignalAdapter CR name — also the ROUTING KEY: SignalSources select this
+  # implementation with spec.adapter: <name>.
+  name: k8s-events
+  image:
+    repository: kmatsebora/agentops-signal-k8s-events
+    tag: 0.1.0
+  resources: {}
+  # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
+  # The OPERATOR never grants adapters anything — this is the chart binding
+  # permissions to a deterministic name, out of band.
+  rbac:
+    create: true
+    # false = a namespaced Role instead, limiting the adapter to events in the
+    # release namespace.
+    clusterWide: true
+  # The turnkey lane: a SignalSource PLUS the Pipeline claiming it. Both or
+  # neither — wiring is pipeline-only, so an unclaimed source drops every event
+  # with Wired=False.
+  source:
+    create: true
+    # SignalSource + Pipeline CR name.
+    name: cluster-events
+    # AgentProfile answering these events. Empty = the bundle's own profile
+    # (below). Required when profile.enabled is false.
+    profileRef: ""
+    # Optional Channel names the Pipeline mirrors conversations to.
+    channels: []
+    # Event `type` values to act on. Normal events are the cluster's background
+    # hum; watching them would bury real problems and burn LLM credits.
+    severities:
+      - Warning
+    # Namespaces to watch; empty = every namespace the RBAC above allows.
+    namespaces: []
+    # Optional exact-match reason filters.
+    includeReasons: []
+    excludeReasons: []
+    # SignalSource grouping policy (manager-side; defaults apply when empty).
+    # Grouping by object keeps one crash-looping pod in ONE conversation.
+    grouping:
+      signatureLabels:
+        - namespace
+        - kind
+        - name
+
+# The agent that answers: profile + its execution identity.
+profile:
+  enabled: true
+  name: k8s-engineer
+  # No repository and no MCP — a pure advisor over the cluster API.
+  #
+  # NOTE: this inline string is the status quo. Tool access is moving to wiring
+  # (Pipelines bind MCPToolsets); a Pipeline can already withhold shell from one
+  # route today with `toolsets: {mode: overwrite, refs: [{name: agentops-observe}]}`.
+  allowedTools: "Read,Grep,Glob,Bash"
+  maxTurns: 40
+  # Names an existing AgentRuntime when runtime.create is false.
+  runtimeRef: ""
+  runtime:
+    create: true
+    # Default name preserves the pre-bundle demo behavior: profiles with no
+    # runtimeRef fall back to the AgentRuntime named "default".
+    name: default
+    image: kmatsebora/agentops-runtime-claude:0.1.1
+    # The agent's security identity — its RBAC IS its power (see the rbac block).
+    serviceAccountName: agentops-runtime-k8s
+    idleTtlMinutes: 10
+    # Agent session persistence. The parent chart's `persistence` block is not
+    # visible to a subchart, so name its claim here to keep sessions alive
+    # across runtime pods; empty = emptyDir (sessions die with the pod).
+    homePvcRef: ""
+    # ONE secret with a Claude credential (claude setup-token output or an
+    # Anthropic API key). Projected as env via valueFrom — the manager reads no
+    # Secrets.
+    credentialsSecret:
+      name: agentops-claude
+      key: oauthToken
+      envName: CLAUDE_CODE_OAUTH_TOKEN
+    resources: {}
+
+# What the agent may do in the cluster, bound to profile.runtime.serviceAccountName.
+rbac:
+  enabled: true
+  # readonly — the built-in "view" ClusterRole plus node/namespace/metrics reads.
+  # full     — cluster-admin. An LLM-driven agent with unrestricted control of
+  #            your cluster: never a default, never demo, and worth a second
+  #            thought before you set it. Prefer readonly plus targeted grants
+  #            through the parent chart's rbac.runtime block.
+  mode: readonly

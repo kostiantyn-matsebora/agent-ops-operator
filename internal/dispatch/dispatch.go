@@ -62,9 +62,9 @@ type PayloadResolver func(item agentopsv1alpha1.InputItem) (string, error)
 // Resolution happens per work unit, so editing a toolset takes effect on the
 // next dispatch without restarting the runtime pod. A binding-less
 // conversation gets the profile's string back verbatim.
-func EffectiveAllowedTools(profileAllowed string, binding *agentopsv1alpha1.ToolingBinding, byRef [][]string) string {
+func EffectiveAllowedTools(base string, binding *agentopsv1alpha1.ToolingBinding, byRef [][]string) string {
 	if binding == nil {
-		return profileAllowed
+		return base
 	}
 	var out []string
 	seen := map[string]bool{}
@@ -77,7 +77,7 @@ func EffectiveAllowedTools(profileAllowed string, binding *agentopsv1alpha1.Tool
 		out = append(out, tool)
 	}
 	if binding.Merges() {
-		for _, t := range strings.Split(profileAllowed, ",") {
+		for _, t := range strings.Split(base, ",") {
 			add(t)
 		}
 	}

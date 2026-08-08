@@ -175,9 +175,19 @@ func (s *Server) handleWork(w http.ResponseWriter, r *http.Request) {
 func (s *Server) effectiveAllowedTools(ctx context.Context, conv *agentopsv1alpha1.Conversation,
 	profile *agentopsv1alpha1.AgentProfile) (string, error) {
 
-	binding := conv.Spec.Toolsets
+	byRef, err := s.resolveToolsets(ctx, conv, conv.Spec.Toolsets)
+	if err != nil {
+		return "", err
+	}
+	return dispatch.EffectiveAllowedTools(profile.Spec.AllowedTools, conv.Spec.Toolsets, byRef), nil
+}
+
+// resolveToolsets reads a binding's MCPToolsets in ref order.
+func (s *Server) resolveToolsets(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+	binding *agentopsv1alpha1.ToolingBinding) ([][]string, error) {
+
 	if binding == nil {
-		return profile.Spec.AllowedTools, nil
+		return nil, nil
 	}
 	byRef := make([][]string, 0, len(binding.Refs))
 	for _, ref := range binding.Refs {
@@ -185,11 +195,11 @@ func (s *Server) effectiveAllowedTools(ctx context.Context, conv *agentopsv1alph
 		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ts); err != nil {
 			err = fmt.Errorf("bound MCPToolset %q: %w", ref.Name, err)
 			s.setToolingCondition(ctx, conv, "ToolsetUnresolved", err.Error())
-			return "", err
+			return nil, err
 		}
 		byRef = append(byRef, ts.Spec.Tools)
 	}
-	return dispatch.EffectiveAllowedTools(profile.Spec.AllowedTools, binding, byRef), nil
+	return byRef, nil
 }
 
 // setToolingCondition surfaces a binding failure on the conversation so it is
@@ -379,7 +389,12 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown pipeline %q", t.Pipeline)})
 			return
 		}
+		// Naming a pipeline asks for that pipeline's wiring — all of it. Copying
+		// the channel set but not the tooling would give the caller a
+		// conversation on the right surfaces with the wrong tools.
 		conv.Spec.ChannelRefs = append(conv.Spec.ChannelRefs, p.Spec.ChannelRefs...)
+		conv.Spec.Toolsets = p.Spec.Toolsets.DeepCopy()
+		conv.Spec.MCPConfigs = p.Spec.MCPConfigs.DeepCopy()
 	}
 	if t.Channel != "" {
 		already := false

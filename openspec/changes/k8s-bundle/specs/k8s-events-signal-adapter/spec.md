@@ -3,10 +3,10 @@
 ## ADDED Requirements
 
 ### Requirement: Kubernetes events run as a signal adapter
-A signal adapter in `signal-k8s-events/` (own dependency-free Go module and image, precedents `signal-cron/` and `channel-telegram/`) SHALL serve SignalSources with `spec.type: k8sEvents` through the signal adapter contract, watching core `v1` Events via the in-cluster Kubernetes API using its own ServiceAccount token (no client-go). Per-source `config` SHALL support `severities` (Event `type` values, default `["Warning"]`), `namespaces` (empty or absent = all namespaces the granted RBAC allows), and optional `includeReasons`/`excludeReasons` exact-match filters. Invalid config (unknown severity value or malformed shape) SHALL be reported as a False Ready condition on that source via the contract status API while other sources keep being served. A `SourceK8sEvents = "k8sEvents"` constant SHALL name the type in `api/v1alpha1`; the type is adapter-served, not in-process.
+A signal adapter in `signal-k8s-events/` (own dependency-free Go module and image, precedents `signal-cron/` and `channel-telegram/`) SHALL serve SignalSources whose `spec.adapter` names its `SignalAdapter` CR (default name `k8s-events`) through the signal adapter contract, watching core `v1` Events via the in-cluster Kubernetes API using its own ServiceAccount token (no client-go). Per-source `config` SHALL support `severities` (Event `type` values, default `["Warning"]`), `namespaces` (empty or absent = all namespaces the granted RBAC allows), and optional `includeReasons`/`excludeReasons` exact-match filters. Invalid config (unknown severity value or malformed shape) SHALL be reported as a False Ready condition on that source via the contract status API while other sources keep being served. No signal-type constant SHALL be added to `api/v1alpha1`: the adapter CR's NAME is the routing key, and there are no built-in signal types.
 
 #### Scenario: Warning events flow once the adapter serves a source
-- **WHEN** a `type: k8sEvents` SignalSource with empty `config` is served and a pod in the cluster emits a `Warning` event (e.g. `BackOff`)
+- **WHEN** a SignalSource whose `adapter` names the k8s-events adapter is served with empty `config` and a pod in the cluster emits a `Warning` event (e.g. `BackOff`)
 - **THEN** a normalized signal for that event is posted to `/signal/inbound` and a conversation is created through the manager's ingest pipeline
 
 #### Scenario: Severity filter honors configuration
@@ -18,7 +18,7 @@ A signal adapter in `signal-k8s-events/` (own dependency-free Go module and imag
 - **THEN** the adapter sets a False Ready condition naming the problem and other sources keep producing signals
 
 ### Requirement: Events normalize with stable fingerprints for manager-side grouping
-The adapter SHALL emit `kind: alert` signals with a deterministic fingerprint `<source>@<namespace>/<involvedObject.kind>/<involvedObject.name>/<reason>` (stable across restarts and event-object recreation) and labels covering at least `alertgroup: k8sEvents`, `alertname: <reason>`, `namespace`, `kind`, `name`, and `severity`, so `SignalSource.spec.grouping` can group by object, reason, or namespace. The adapter SHALL NOT deduplicate, group, or apply cooldown beyond its restart cursor — repetition collapses manager-side.
+The adapter SHALL emit `kind: alert` signals with a deterministic fingerprint `<source>@<namespace>/<involvedObject.kind>/<involvedObject.name>/<reason>` (stable across restarts and event-object recreation) and labels covering at least `alertgroup: k8s-events`, `alertname: <reason>`, `namespace`, `kind`, `name`, and `severity`, so `SignalSource.spec.grouping` can group by object, reason, or namespace. The adapter SHALL NOT deduplicate, group, or apply cooldown beyond its restart cursor — repetition collapses manager-side.
 
 #### Scenario: Crash-loop repeats collapse into one conversation
 - **WHEN** the same pod emits repeated `BackOff` warning events within the source's cooldown and grouping window

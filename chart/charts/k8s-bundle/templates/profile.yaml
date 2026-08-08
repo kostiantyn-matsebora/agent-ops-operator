@@ -1,0 +1,68 @@
+{{- /*
+Profile component: who the agent is, and what executes it.
+
+The identity chain the RBAC component rides on:
+  AgentProfile.runtimeRef -> AgentRuntime.serviceAccountName -> that SA's RBAC
+and a profile with no runtimeRef falls back to the AgentRuntime named "default",
+which is why runtime.name defaults to it.
+*/ -}}
+{{- if and (include "k8s-bundle.active" .) .Values.profile.enabled }}
+{{- $p := .Values.profile }}
+{{- $rt := $p.runtime }}
+{{- if $rt.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "k8s-bundle.runtimeServiceAccount" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+---
+apiVersion: agentops.dev/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ $rt.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+spec:
+  image: {{ $rt.image | quote }}
+  # the agent's security identity — its RBAC IS its power
+  serviceAccountName: {{ include "k8s-bundle.runtimeServiceAccount" . }}
+  idleTtlMinutes: {{ $rt.idleTtlMinutes }}
+  {{- with $rt.homePvcRef }}
+  home:
+    pvcRef:
+      name: {{ . }}
+  {{- end }}
+  {{- with $rt.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  env:
+    - name: {{ $rt.credentialsSecret.envName }}
+      valueFrom:
+        secretKeyRef:
+          name: {{ $rt.credentialsSecret.name }}
+          key: {{ $rt.credentialsSecret.key }}
+---
+{{- end }}
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+spec:
+  # no repository, no MCP — a pure advisor over the cluster API
+  allowedTools: {{ $p.allowedTools | quote }}
+  maxTurns: {{ $p.maxTurns }}
+  {{- if $p.runtimeRef }}
+  runtimeRef:
+    name: {{ $p.runtimeRef }}
+  {{- else if and $rt.create (ne $rt.name "default") }}
+  runtimeRef:
+    name: {{ $rt.name }}
+  {{- end }}
+{{- end }}
