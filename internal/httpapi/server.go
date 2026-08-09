@@ -20,6 +20,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -61,7 +62,25 @@ type Server struct {
 	Router       *chat.Router
 	AdapterToken string
 
+	// MaxQueuedConversations bounds the PENDING backlog. An unbounded queue
+	// reproduces the capacity complaint one level down — no pods, but unbounded
+	// Conversation CRs — so ingest declines to create beyond it. This is the one
+	// capacity check that cannot live in the reconciler: the point is not to
+	// create the object at all. It is a count, not a scheduling decision, so a
+	// stale read at worst admits one over the bound. <=0 means the default.
+	MaxQueuedConversations int
+
 	cooldowns map[string]*ingest.Cooldown
+}
+
+// defaultMaxQueuedConversations is the pending-backlog bound when unset.
+const defaultMaxQueuedConversations = 50
+
+func (s *Server) maxQueued() int {
+	if s.MaxQueuedConversations > 0 {
+		return s.MaxQueuedConversations
+	}
+	return defaultMaxQueuedConversations
 }
 
 // Handler builds the HTTP mux (shared by Start and tests).
@@ -509,9 +528,13 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleChannelOpDone(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var res chat.OpResult
-	if err := json.Unmarshal(body, &res); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
-		return
+	// An EMPTY body is a valid completion: it is how close-topic reports
+	// success, and how any op says "done, nothing to report".
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &res); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+			return
+		}
 	}
 	// duplicate completions are legal (at-least-once) — always 200
 	s.Ops.Complete(r.Context(), r.PathValue("id"), res)

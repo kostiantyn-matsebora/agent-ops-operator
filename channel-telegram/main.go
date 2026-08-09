@@ -255,6 +255,21 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			return "", err.Error()
 		}
 		return "", ""
+	case "close-topic":
+		// The conversation is gone; archive its topic. A failure is REPORTED,
+		// never retried here — the manager treats a failed close-topic as
+		// terminal, so retrying would only delay a deletion that proceeds anyway.
+		if op.ThreadID == nil {
+			return "", "close-topic without a threadId"
+		}
+		tid, err := strconv.ParseInt(*op.ThreadID, 10, 64)
+		if err != nil {
+			return "", "close-topic threadId is not a telegram topic id: " + *op.ThreadID
+		}
+		if err := tg.CloseTopic(ctx, sc.cfg.ChatID, tid); err != nil {
+			return "", err.Error()
+		}
+		return "", ""
 	}
 	return "", "unknown op kind " + op.Kind
 }

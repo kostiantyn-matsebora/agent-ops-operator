@@ -15,8 +15,9 @@ import (
 // repeats without bound. Nothing downstream catches it: the fingerprint is
 // fresh (new pod name), the workload is fresh (the owner is the Conversation
 // CR), and even a correct liveness re-check passes it through because the pod
-// really is still broken. MAX_RUNTIMES caps concurrent pods, not Conversation
-// creation, so the runaway fills etcd while the pod pool thrashes.
+// really is still broken. The conversation cap bounds concurrent pods and the
+// queued-conversation bound throttles the backlog, but neither BREAKS the
+// cycle — the runaway still fills etcd, only more slowly.
 //
 // agent-ops' own health is STATUS, not SIGNAL: the reconciler already holds the
 // pod's failure. Routing that knowledge back through the ingest pipeline to

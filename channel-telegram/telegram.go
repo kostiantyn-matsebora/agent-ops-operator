@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -69,6 +70,29 @@ func (t *Telegram) CreateTopic(ctx context.Context, chatID, title string) (int64
 		return 0, err
 	}
 	return topic.MessageThreadID, nil
+}
+
+// CloseTopic archives a forum topic. An already-closed topic is NOT an error:
+// close-topic ops are at-least-once, so a redelivered one must succeed.
+//
+// Telegram spells "already closed" as TOPIC_NOT_MODIFIED — confirmed against
+// the live Bot API, which is the only place to learn it; TOPIC_CLOSED is what
+// it returns for *posting* into a closed topic. Match both, because getting
+// this wrong turns every redelivery into a reported failure.
+func (t *Telegram) CloseTopic(ctx context.Context, chatID string, threadID int64) error {
+	_, err := t.API(ctx, "closeForumTopic",
+		map[string]any{"chat_id": chatID, "message_thread_id": threadID})
+	if err == nil || alreadyClosed(err) {
+		return nil
+	}
+	return err
+}
+
+// alreadyClosed reports whether a closeForumTopic error means the topic was
+// already archived.
+func alreadyClosed(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "topic_not_modified") || strings.Contains(msg, "topic_closed")
 }
 
 // Send posts an HTML message; falls back to General when the topic is gone.

@@ -26,6 +26,17 @@ const (
 	OpEnsureTopic OpKind = "ensure-topic"
 	// OpSend asks the channel implementation to post a message.
 	OpSend OpKind = "send"
+	// OpCloseTopic asks the channel implementation to archive/close a
+	// conversation's thread; completed with an empty body.
+	//
+	// Unlike every other op, the CR it belongs to is on its way out. That is
+	// why the deleting Conversation holds a finalizer while this op is
+	// outstanding: it keeps "every op is derivable from CR state" true across a
+	// manager restart. Failure is TERMINAL — logged, never written as a
+	// condition (there is no object left to carry one) and never regenerated
+	// after the finalizer's grace expires. An adapter that ignores the kind
+	// leaves an open topic behind, which a person can close by hand.
+	OpCloseTopic OpKind = "close-topic"
 )
 
 // ConditionTopicReady reports the outcome of the latest ensure-topic op.
@@ -97,6 +108,32 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 	})
 }
 
+// EnqueueCloseTopic queues archiving of one conversation thread. The id is
+// stable per conversation×channel, so the reconciler re-enqueuing it on every
+// pass while the finalizer holds dedups instead of piling up.
+func (q *OpQueue) EnqueueCloseTopic(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID, conversation string) {
+	tid := threadID
+	q.enqueue(ctx, &Op{
+		ID: CloseTopicOpID(conversation, ch.Name), Channel: ch.Name, Conversation: conversation,
+		Kind: OpCloseTopic, ThreadID: &tid, channelType: ch.Spec.Adapter,
+	})
+}
+
+// CloseTopicOpID is the stable id of a conversation's close-topic op on one
+// channel. Exported because the finalizer asks whether it is still outstanding.
+func CloseTopicOpID(conversation, channel string) string {
+	return "close:" + conversation + ":" + channel
+}
+
+// Settled reports whether an op id has already completed within the dedup
+// window. Used by the close finalizer to tell "archived" from "never enqueued".
+func (q *OpQueue) Settled(id string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.init()
+	return q.recent[id]
+}
+
 // EnqueueSend queues a message post (acks, notices). Fire-and-forget.
 func (q *OpQueue) EnqueueSend(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID *string, text string) {
 	q.enqueue(ctx, &Op{
@@ -108,9 +145,13 @@ func (q *OpQueue) EnqueueSend(ctx context.Context, ch *agentopsv1alpha1.Channel,
 func (q *OpQueue) enqueue(ctx context.Context, op *Op) {
 	q.mu.Lock()
 	q.init()
-	if q.ops[op.ID] != nil || (op.Kind == OpEnsureTopic && q.recent[op.ID]) {
+	// Dedup by id for the derived kinds: already pending, a completed
+	// ensure-topic racing its status patch, or a close-topic the finalizer
+	// re-derives on every pass until it lets go. Sends carry a fresh id each
+	// time and are never suppressed.
+	if q.ops[op.ID] != nil || (op.Kind != OpSend && q.recent[op.ID]) {
 		q.mu.Unlock()
-		return // already pending, or a completed ensure-topic racing its status patch
+		return
 	}
 	q.ops[op.ID] = op
 	q.order[op.channelType] = append(q.order[op.channelType], op.ID)
@@ -147,6 +188,10 @@ func (q *OpQueue) runInProcess(ctx context.Context, channelType string, f Provid
 			res.ThreadID, err = p.EnsureTopic(ctx, op.Title)
 		case OpSend:
 			err = p.Send(ctx, op.ThreadID, op.Text)
+		case OpCloseTopic:
+			if closer, ok := p.(TopicCloser); ok && op.ThreadID != nil {
+				err = closer.CloseTopic(ctx, *op.ThreadID)
+			}
 		}
 	}
 	if err != nil {
@@ -202,7 +247,8 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 	}
 	q.mu.Unlock()
 
-	if op.Kind == OpEnsureTopic {
+	switch {
+	case op.Kind == OpEnsureTopic:
 		if err := q.finishEnsureTopic(ctx, op, res); err != nil {
 			log.FromContext(ctx).Error(err, "complete ensure-topic", "conversation", op.Conversation)
 			// drop the dedup entry so reconciliation can regenerate the op
@@ -210,7 +256,16 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 			delete(q.recent, id)
 			q.mu.Unlock()
 		}
-	} else if res.Error != "" {
+	case op.Kind == OpCloseTopic:
+		// Terminal either way: an empty body means archived, an error means the
+		// thread stays open. No condition is written — the Conversation is being
+		// deleted, so there is no object left to carry one — and the op is NOT
+		// regenerated. The finalizer releases regardless.
+		if res.Error != "" {
+			log.FromContext(ctx).Info("close-topic op failed; leaving the thread open",
+				"channel", op.Channel, "conversation", op.Conversation, "error", res.Error)
+		}
+	case res.Error != "":
 		log.FromContext(ctx).Info("send op failed", "channel", op.Channel, "error", res.Error)
 	}
 }

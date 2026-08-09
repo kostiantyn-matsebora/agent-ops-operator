@@ -14,7 +14,7 @@ The full CRD reference, and how an agent's capabilities are resolved.
 
 ### Conversation
 
-One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live.
+One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. Phases: `Pending` (waiting for a capacity slot — nothing provisioned, see [below](#capacity-how-many-run-at-once)), `Queued` (admitted, work waiting its turn), `Working`, `Idle`. Ends with `/close` in its thread, or `kubectl delete` — both archive the chat threads first.
 
 ### ConversationInput
 
@@ -135,3 +135,68 @@ Two more rules worth knowing:
 
 Conversations that bind `mcpConfigs` compile into their own ConfigMap
 (`agentops-mcp-conv-<conversation>`, garbage-collected with the conversation).
+
+## Capacity: how many run at once
+
+A conversation is **active** while a runtime pod exists for it. That is the only
+thing the cap counts — `maxActiveConversations` (env `MAX_ACTIVE_CONVERSATIONS`,
+default **5**), measured from the live pod list rather than from conversation
+status, so a pod stuck unschedulable or a status patch lost to a conflict cannot
+invent capacity. A conversation that finished and let its pod exit is `Idle`: it
+costs nothing and does not count, which is what makes a small default safe.
+
+`maxRuntimes` / `MAX_RUNTIMES` is the deprecated spelling, honored for one
+release when the new key is unset (the manager logs it at startup).
+
+**Over-cap work queues, it is not dropped.** A conversation that cannot be
+admitted gets phase `Pending`: no runtime pod, no chat topic, no MCP ConfigMap,
+no dispatch. Suppressing the *topic* is the point — it is what stops a thousand
+signals becoming a thousand chat threads before anyone has read the first one.
+Its inputs, signature label and pipeline wiring snapshot are kept, so signature
+grouping and window reuse treat it exactly like an admitted conversation, and
+because the Conversation CR *is* the queue, the backlog survives a manager
+restart with no extra CRD.
+
+Admission is **FIFO by creation time**: a pending conversation takes a slot only
+when one is free and no older waiter needs it. No priority, no fairness classes
+between pipelines. A freed slot is filled at once — the reconciler watches
+runtime pod deletions — with a periodic requeue as the backstop. On admission
+the conversation proceeds normally: topic, MCP, pod, dispatch.
+
+Since a pending conversation has no thread, one notice goes to the originating
+channel's general surface when it enters `Pending`, and only then.
+
+Two bounds keep this honest:
+
+- **`maxQueuedConversations`** (`MAX_QUEUED_CONVERSATIONS`, default **50**)
+  caps the backlog itself; beyond it `/signal/inbound` declines to create a
+  conversation and reports the batch dropped for capacity — chat senders are
+  told on the surface they typed on, alert and job origins are logged. Window
+  reuse is unaffected: the bound gates new objects, not new inputs.
+- **`runtimeIdleTtlMinutes`** (`RUNTIME_IDLE_TTL_M`) defaults to **1**, so a
+  finished conversation returns its slot within a minute instead of holding it
+  for ten. `AgentRuntime.spec.idleTTLMinutes` still overrides it per runtime.
+  The trade is latency, not memory: the session lives in `/data/home` and
+  resumes with its context. An idle pod may also be evicted early to admit
+  waiting work — that deletes the pod only; the conversation resumes on its
+  next input.
+
+## Ending a conversation
+
+`/close` in a conversation's thread ends it. The manager intercepts the command
+on the reply path (before it could become an input for the agent), posts a
+farewell to **every** bound thread, and deletes the `Conversation`. Any sender
+who can post in the thread may use it — no surface in this system authorizes
+individual senders, and inventing that here would be the only such check.
+`/close` is honored mid-run: the runtime pod goes and the farewell says the
+in-progress work was abandoned, because an agent that has gone off the rails is
+exactly when the command is wanted. On a channel's general surface, where there
+is no conversation to end, it answers with usage and creates nothing.
+
+Deletion does the rest through machinery that already exists: owner references
+GC the runtime pod and the `agentops-mcp-conv-<name>` ConfigMap, and the freed
+slot goes to whatever is waiting. Chat threads are archived first, by the
+`agentops.dev/close-topics` finalizer: it enqueues one `close-topic` op per
+bound thread and lets go once they complete, or after a bounded 2-minute grace
+so an adapter that is down can never wedge a deletion. `kubectl delete
+conversation` takes the same path.

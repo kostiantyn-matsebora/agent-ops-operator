@@ -209,6 +209,15 @@ func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		}
 		a.transcripts.AppendOp(op.ID, thread, op.Text)
 		return "", ""
+	case "close-topic":
+		// The Conversation is being deleted and its CR is about to vanish from
+		// the watch cache. The transcript is NOT: it stays for this console
+		// session, marked archived, so whoever was reading the thread when it
+		// ended can still see how it ended.
+		if op.ThreadID != nil {
+			a.transcripts.Archive(*op.ThreadID)
+		}
+		return "", ""
 	}
 	return "", "unknown op kind " + op.Kind
 }

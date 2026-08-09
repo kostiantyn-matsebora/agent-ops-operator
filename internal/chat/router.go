@@ -77,6 +77,12 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if conv == nil {
 		return nil // no conversation in this thread — nothing to continue
 	}
+	// /close ends the conversation. Intercepted BEFORE the text becomes a reply
+	// input: handing it to the agent would both dispatch a work unit for a
+	// command and leave the conversation open.
+	if isCloseCommand(text) {
+		return r.CloseConversation(ctx, conv)
+	}
 	busy := conv.Status.Inflight != nil || len(conv.Spec.Inputs) > 0
 	if err := r.appendInput(ctx, conv, agentopsv1alpha1.InputItem{
 		ID: newInputID(), Type: agentopsv1alpha1.InputReply, Payload: text, ReceivedAt: metav1.Now(),
@@ -90,6 +96,37 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	r.relayToSiblings(ctx, conv, ch.Name, msg.Sender, text)
 	r.FanOutSend(ctx, conv, ack)
 	return nil
+}
+
+// CloseCommand is the name /close parses to — a "pipeline" that ends a
+// conversation rather than starting one.
+const CloseCommand = "close"
+
+// isCloseCommand recognises /close and its bot-suffixed form (/close@SomeBot).
+// Deliberately strict about trailing text: "/close the incident once you have
+// filed it" is an instruction for the agent, not a command for the manager.
+func isCloseCommand(text string) bool {
+	cmd, ok := addressing.Parse(text)
+	return ok && cmd.Profile == CloseCommand && cmd.Agent == "" && cmd.Rest == ""
+}
+
+// CloseConversation says goodbye on every bound thread and deletes the
+// Conversation. Deletion does the rest through machinery that already exists:
+// ownerRefs GC the runtime pod and the MCP ConfigMap, the close-topics
+// finalizer archives the threads, and input pruning cleans the payload objects.
+//
+// No authorization check: no surface in this system authorizes individual
+// senders, and inventing one here would be the only such check in it.
+func (r *Router) CloseConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	text := "👋 Conversation closed. This thread is archived."
+	if conv.Status.Inflight != nil {
+		// Honored mid-run on purpose: /close is most wanted for an agent that
+		// has gone off the rails, and refusing then would make it useless.
+		text = "👋 Conversation closed while a run was in progress — " +
+			conv.Status.Inflight.RunID + " was abandoned. This thread is archived."
+	}
+	r.FanOutSend(ctx, conv, text)
+	return client.IgnoreNotFound(r.Client.Delete(ctx, conv))
 }
 
 // boundChannels resolves the channel set a new conversation binds to: the
@@ -129,6 +166,14 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		sort.Strings(names)
 		r.Ops.EnqueueSend(ctx, ch, nil, "🤖 <b>Agents</b>: "+strings.Join(names, "  ")+
 			"\nUsage: /&lt;agent&gt; &lt;task&gt; — each call gets its own topic. /&lt;agent&gt;:&lt;role&gt; picks a role inside the agent's repo.")
+		return nil
+	}
+	if cmd.Profile == CloseCommand {
+		// /close reaches HandleCommand only from a general surface, where there
+		// is no conversation to end. Answer with usage rather than "unknown
+		// agent": typing it here is an obvious mistake, not a typo'd pipeline.
+		r.Ops.EnqueueSend(ctx, ch, nil, "⚠️ /close ends a conversation — send it inside that "+
+			"conversation's own thread. Nothing was closed.")
 		return nil
 	}
 	// A command addresses a PIPELINE: it originates the conversation, so it

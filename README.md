@@ -49,27 +49,30 @@ Eleven kinds. One line each here; the full reference is in
 - **One workflow: a signal originates, a channel carries.** Every Conversation
   starts from a signal routed against a `SignalSource` some Ready `Pipeline`
   claims — an alert, a cron job, or a person typing on a chat surface, all
-  through the same path. Channels never start conversations; they carry them.
-  So "who answers this?" is always declared by a claim, never inferred.
+  through one path. Channels never start conversations; they carry them, so
+  "who answers this?" is always declared by a claim, never inferred.
 - **Conversation = topic = session.** Replying in a topic resumes the same agent
-  session; new problems get new topics; the same alert signature within its
-  window reuses the existing conversation instead of spamming duplicates.
+  session; new problems get new topics; a repeat alert signature within its
+  window reuses the conversation instead of spamming duplicates.
 - **Per-conversation pods, on demand.** A runtime pod spawns when work arrives,
-  stays warm across turns, exits after its idle TTL, respawns with full context
-  (sessions live on a shared volume). `kubectl logs agentops-conv-<name> -f`
-  streams the live agent transcript. Pool cap with idle-eviction.
+  stays warm across turns, exits after its idle TTL (default 1 min), respawns
+  with full context (sessions live on a shared volume). `kubectl logs
+  agentops-conv-<name> -f` streams the live agent transcript.
+- **[Bounded concurrency, queued not dropped](docs/concepts.md#capacity-how-many-run-at-once).**
+  At most `maxActiveConversations` (default 5) conversations hold a pod at once;
+  over-cap work waits in phase `Pending` — nothing provisioned, not even the chat
+  topic — and is admitted oldest-first as slots free. `/close` in a thread ends a
+  conversation: the CR is deleted, every bound thread archived, the slot reused.
 - **Least privilege by construction.** The manager holds no cluster powers
   beyond its own CRDs + pod lifecycle in its namespace, and never touches agent
-  credentials (all `valueFrom`, resolved by the kubelet). Agent powers are
-  exactly the runtime service account's RBAC.
+  credentials (all `valueFrom`). Agent powers are the runtime SA's RBAC.
 - **See it, and answer it, on one screen.** The optional
   [console](docs/console.md) (`console.enabled`) draws the wiring as a graph
   coloured by the conditions the reconcilers already write, plus live runs — and
   is itself a channel, so a pipeline listing it lets you reply from the run you
-  are watching. Read-only SA; its token sees everything that SA can read.
+  are watching. Read-only SA; its token sees all that SA can read.
 - **Structured chat.** Built-in lane prompts embed a six-template message format
-  spec (investigation / answer / action report / recurrence / clarification) —
-  no stream-of-consciousness walls. Profiles with custom prompts control their own format.
+  spec — no stream-of-consciousness walls. Custom prompts set their own.
 
 ## Try it in five minutes (demo advisor)
 
@@ -99,10 +102,9 @@ Everything is gated by `global.demo.enabled` (default `false`) and removable by
 flipping it off. Graduating to the real thing = adding your own `AgentProfile`s
 (repos, MCP, chat) and declaring agent powers under `rbac.runtime` values.
 
-> **It also watches your cluster.** Unlike the pre-2.0 demo, this now ingests
-> `Warning` events and answers them on its own, which costs LLM credits on a
-> noisy cluster. Fingerprint cooldown (6h) and signature grouping bound the
-> volume — one crash-looping pod is one conversation, not one per event. For the
+> **It also watches your cluster.** Unlike the pre-2.0 demo, this ingests
+> `Warning` events and answers them itself, which costs LLM credits on a noisy
+> cluster. Cooldown, grouping and the conversation cap bound the volume; for the
 > old ask-only behavior add `--set k8s-bundle.eventsAdapter.enabled=false`.
 
 ## Install (current state)

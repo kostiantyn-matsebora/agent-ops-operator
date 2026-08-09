@@ -168,7 +168,10 @@ internal/
   controller/            Conversation reconciler: topic op enqueue (async), MCP
                          ConfigMap (always conversation-owned
                          agentops-mcp-conv-<name>; profiles declare no MCP, so
-                         there is nothing to collide over), runtime-pod pool (cap + idle eviction),
+                         there is nothing to collide over), the ADMISSION GATE
+                         (conversation cap -> Pending, FIFO promotion driven by
+                         a runtime-pod DELETE watch, idle eviction), the
+                         close-topics finalizer,
                          ownerRef GC, input pruning; ChannelAdapter +
                          SignalAdapter reconcilers on shared workload machinery
                          (adapterworkload.go: ownership, credential projection,
@@ -177,10 +180,13 @@ internal/
                          (wiring validation, source-conflict guard)
   httpapi/               /work long-poll dispatch, /work/done, /task,
                          /channel/* + /signal/* adapter contracts
-                         (bearer auth via ADAPTER_TOKEN env)
+                         (bearer auth via ADAPTER_TOKEN env); the pending-backlog
+                         bound lives here, in signals.go
   chat/                  channel-type-agnostic core: Provider+Registry
                          (in-process built-ins), OpQueue (outbound ops,
-                         at-least-once), Router (transport-neutral inbound)
+                         at-least-once: ensure-topic | send | close-topic),
+                         Router (transport-neutral inbound; /close intercepted
+                         on the reply path)
   dispatch/              input → work-unit resolution + built-in lane templates
                          (templates/format.md = mandatory message format spec);
                          EffectiveAllowedTools = the bound toolsets, per unit
@@ -317,7 +323,32 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   CR can never escalate. Name-is-key makes one adapter per implementation
   structural — there is no conflict machinery to maintain.
 - **Strictly serial per conversation** (one inflight unit); parallelism is
-  across conversations, capped by `MAX_RUNTIMES` with idle-runtime eviction.
+  across conversations, capped by `MAX_ACTIVE_CONVERSATIONS` (default 5;
+  `MAX_RUNTIMES` is the deprecated alias, honored one release) with
+  idle-runtime eviction.
+- **THE CAP IS DECIDED BEFORE ANYTHING IS PROVISIONED.** "Active" means
+  POD-BACKED and is counted from the live pod list, never from status — a pod
+  stuck unschedulable or a lost status patch must not invent capacity. A
+  conversation that cannot be admitted gets phase `Pending`: no runtime pod, no
+  MCP ConfigMap and — the point of the phase — **no `ensure-topic`**, because
+  suppressing the topic is what stops a burst becoming a thousand chat threads.
+  `Queued` keeps its old meaning (ADMITTED, waiting behind the serial rule) and
+  is never used for capacity waiting; conflating them is the mistake to avoid.
+  Admission is FIFO by creation time over a waiting set defined by PODS, not
+  phase — keying on phase lets a brand-new conversation reconciled first jump an
+  older one. The backlog itself is bounded by `MAX_QUEUED_CONVERSATIONS`
+  (default 50), checked in INGEST rather than the reconciler because the point
+  is not to create the object at all; it gates CREATION only, so window reuse
+  keeps appending to a pending conversation.
+- **`/close` deletes the Conversation; the `agentops.dev/close-topics`
+  finalizer archives the threads first.** One `close-topic` op per bound thread,
+  released once they complete or after a 2-minute grace — a down adapter can
+  never wedge a deletion. `close-topic` is the ONE op whose failure is logged
+  rather than written as a condition and is never regenerated: the CR carrying
+  the condition is on its way out. The finalizer is what keeps "every op is
+  derivable from CR state" true while one is outstanding. `/close` is
+  intercepted on the REPLY path before the text could become an input, and
+  answers with usage on a general surface (no conversation there to end).
 - **CONVERSATIONS ORIGINATE ONLY FROM CLAIMED SIGNAL SOURCES.** A channel
   CARRIES conversations; it never starts one. `/channel/inbound` is
   reply-only — `threadId` REQUIRED, unknown threads dropped, no adoption. A
@@ -355,7 +386,8 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   under a NEW name, forever. Nothing downstream catches it — the fingerprint is
   fresh (new pod name), the workload is fresh (owner is the Conversation CR),
   and even a correct liveness re-check passes it because the pod really is
-  broken; `MAX_RUNTIMES` caps pods, not Conversation creation, so it fills etcd.
+  broken; `MAX_ACTIVE_CONVERSATIONS` caps pods and `MAX_QUEUED_CONVERSATIONS`
+  caps the backlog, but neither stops the LOOP — it just fills etcd more slowly.
   `signal-k8s-events/selfexclude.go` implements THREE independent mechanisms
   (name prefix — needs no API read, so it holds with a cold cache; owner/label;
   own-namespace). Only the third is configurable: a deny-list is editable, and

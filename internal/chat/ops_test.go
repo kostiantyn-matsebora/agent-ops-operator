@@ -100,6 +100,65 @@ func TestCompleteIsIdempotentForSends(t *testing.T) {
 	}
 }
 
+func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry()}
+	ctx := context.Background()
+	slack := testChannel("c1", "slack")
+	teams := testChannel("c2", "teams")
+
+	q.EnqueueCloseTopic(ctx, slack, "9876", "conv-1")
+	q.EnqueueCloseTopic(ctx, teams, "T-42", "conv-1")
+	// the finalizer re-derives the op on every pass until it lets go
+	q.EnqueueCloseTopic(ctx, slack, "9876", "conv-1")
+
+	op := q.Claim("slack")
+	if op == nil || op.ID != CloseTopicOpID("conv-1", "c1") || op.Kind != OpCloseTopic {
+		t.Fatalf("close-topic claim: %+v", op)
+	}
+	if op.ThreadID == nil || *op.ThreadID != "9876" || op.Conversation != "conv-1" {
+		t.Fatalf("close-topic payload: %+v", op)
+	}
+	if dup := q.Claim("slack"); dup != nil {
+		t.Fatalf("re-enqueue while pending must dedup: %+v", dup)
+	}
+	// delivery is by adapter name: the sibling channel's op is its own
+	if other := q.Claim("teams"); other == nil || other.ID != CloseTopicOpID("conv-1", "c2") {
+		t.Fatalf("sibling channel op: %+v", other)
+	}
+
+	// empty completion body == archived
+	q.Complete(ctx, op.ID, OpResult{})
+	if q.Pending(op.ID) {
+		t.Fatal("close-topic still pending after completion")
+	}
+	if !q.Settled(op.ID) {
+		t.Fatal("completed close-topic must report settled — the finalizer reads this")
+	}
+	// and it is NOT regenerated: a completed close-topic stays completed
+	q.EnqueueCloseTopic(ctx, slack, "9876", "conv-1")
+	if again := q.Claim("slack"); again != nil {
+		t.Fatalf("completed close-topic was regenerated: %+v", again)
+	}
+}
+
+func TestFailedCloseTopicIsTerminal(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+	q.EnqueueCloseTopic(ctx, ch, "9876", "conv-1")
+	op := q.Claim("slack")
+	// an adapter that cannot archive reports it; deletion must still proceed,
+	// so the op is not eligible for regeneration the way ensure-topic is
+	q.Complete(ctx, op.ID, OpResult{Error: "closeForumTopic: chat not found"})
+	if q.Pending(op.ID) {
+		t.Fatal("failed close-topic must not stay pending")
+	}
+	q.EnqueueCloseTopic(ctx, ch, "9876", "conv-1")
+	if again := q.Claim("slack"); again != nil {
+		t.Fatalf("failed close-topic was regenerated: %+v", again)
+	}
+}
+
 type fakeProvider struct {
 	mu    sync.Mutex
 	sends []string

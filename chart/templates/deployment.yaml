@@ -28,8 +28,16 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: MAX_ACTIVE_CONVERSATIONS
+              value: {{ .Values.maxActiveConversations | quote }}
+            - name: MAX_QUEUED_CONVERSATIONS
+              value: {{ .Values.maxQueuedConversations | quote }}
+            {{- if .Values.maxRuntimes }}
+            # deprecated alias; the manager prefers MAX_ACTIVE_CONVERSATIONS and
+            # logs that this one is on its way out
             - name: MAX_RUNTIMES
               value: {{ .Values.maxRuntimes | quote }}
+            {{- end }}
             - name: RUNTIME_IDLE_TTL_M
               value: {{ .Values.runtimeIdleTtlMinutes | quote }}
             - name: RUNTIME_SA

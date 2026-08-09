@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -159,5 +160,30 @@ func TestOffsetRoundTripsThroughTheStateAPI(t *testing.T) {
 	}
 	if putPath != "/channel/state/telegram-ops/telegram-offset" {
 		t.Fatalf("persisted to %q", putPath)
+	}
+}
+
+// TestAlreadyClosedTopicIsNotAFailure pins what the LIVE Bot API returns for a
+// redelivered close-topic op. Telegram answers "Bad Request:
+// TOPIC_NOT_MODIFIED" when the topic is already archived — TOPIC_CLOSED is a
+// different case (posting into a closed topic). Treating either as a failure
+// would make every at-least-once redelivery look broken.
+func TestAlreadyClosedTopicIsNotAFailure(t *testing.T) {
+	tolerated := []string{
+		"telegram closeForumTopic: Bad Request: TOPIC_NOT_MODIFIED",
+		"telegram closeForumTopic: Bad Request: TOPIC_CLOSED",
+	}
+	for _, msg := range tolerated {
+		if !alreadyClosed(errors.New(msg)) {
+			t.Errorf("must tolerate %q", msg)
+		}
+	}
+	for _, msg := range []string{
+		"telegram closeForumTopic: Bad Request: chat not found",
+		"telegram closeForumTopic: Forbidden: bot is not a member",
+	} {
+		if alreadyClosed(errors.New(msg)) {
+			t.Errorf("must report %q as a failure", msg)
+		}
 	}
 }

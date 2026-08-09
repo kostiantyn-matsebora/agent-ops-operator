@@ -3,9 +3,7 @@
 ## Purpose
 
 Conversations bound to any number of channels with per-channel thread bindings: every bound channel fully mirrors the conversation (fanned-out replies and acks, attributed cross-channel relay of user messages), and multi-channel conversations force manager-owned result delivery so no surface mistakes silence for success.
-
 ## Requirements
-
 ### Requirement: Conversations bind to any number of channels with per-channel threads
 `Conversation.spec.channelRefs` SHALL be a list of channel references and `status.threads` a list of `{channel, threadId}` bindings (**BREAKING**: replaces the single `channelRef`/`threadId`; migration documented). Topic creation SHALL be ensured per bound channel (stable op id per conversation×channel; completion writes that channel's binding); inbound thread resolution SHALL match `(channel, threadId)` pairs; a conversation SHALL dispatch its first unit once at least one binding exists (a broken channel never deadlocks the conversation, its topic catches up later). Single-entry `channelRefs` SHALL behave exactly as the old single-channel model.
 
@@ -42,3 +40,23 @@ For conversations bound to one or more channels, `POST /work/done` SHALL fan the
 #### Scenario: Failure is visible on every surface
 - **WHEN** a run finishes with status failed and no result
 - **THEN** every bound channel receives a short failure notice in the thread
+
+### Requirement: Closing a conversation ends it on every bound channel
+Closing a conversation SHALL apply to the whole conversation, not to the channel
+the command arrived on: the farewell message SHALL be fanned out to every bound
+thread and one `close-topic` operation SHALL be enqueued per bound thread, each
+addressed to that channel's serving adapter. A bound channel that never obtained
+a thread SHALL be skipped without blocking the others.
+
+#### Scenario: All bound threads are archived
+- **WHEN** `/close` is sent in one thread of a conversation bound to three channels
+- **THEN** all three threads receive the farewell message and a `close-topic` operation
+
+#### Scenario: Unbound channel is skipped
+- **WHEN** a conversation is closed while one of its bound channels has no thread id yet
+- **THEN** no `close-topic` operation is enqueued for that channel and the other channels are still archived
+
+#### Scenario: A stalled channel does not hold the others
+- **WHEN** one channel's adapter never completes its `close-topic` operation
+- **THEN** the other channels are archived and the conversation is deleted after the grace period
+

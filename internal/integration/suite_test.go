@@ -68,15 +68,27 @@ func reconciler() *controller.ConversationReconciler {
 	return reconcilerWithOps(nil) // chat disabled in lifecycle tests
 }
 
+// reconcilerWithOps: the shared reconciler for tests that are NOT about
+// capacity. Its cap is deliberately far above anything they create — envtest
+// runs no kubelet, so every pod an earlier test left behind is still Pending
+// and still counts as live, and a small shared cap would silently park an
+// unrelated test's conversation in Pending with no topic and no pod. Capacity
+// behavior gets its own reconciler with an explicit cap (capacity_test.go).
 func reconcilerWithOps(ops *chat.OpQueue) *controller.ConversationReconciler {
+	return reconcilerWithCap(ops, 100)
+}
+
+func reconcilerWithCap(ops *chat.OpQueue, cap int) *controller.ConversationReconciler {
 	return &controller.ConversationReconciler{
-		Client:      k8sClient,
-		Scheme:      scheme,
-		MaxRuntimes: 2,
-		Ops:         ops,
+		Client:                 k8sClient,
+		Scheme:                 scheme,
+		MaxActiveConversations: cap,
+		Ops:                    ops,
 		Runtime: runtimepod.Config{
 			Image: "busybox:stub", ServiceAccount: "default",
-			ControlURL: "http://manager:8080", IdleTTLMinutes: 10,
+			// left at the manager's default so the pod-env assertion below
+			// pins the shipped value rather than a test-only one
+			ControlURL: "http://manager:8080", IdleTTLMinutes: 1,
 		},
 	}
 }

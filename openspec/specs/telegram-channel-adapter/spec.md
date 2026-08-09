@@ -3,9 +3,7 @@
 ## Purpose
 
 The reference Telegram channel adapter: an external, dependency-free process serving type=telegram via the adapter contract.
-
 ## Requirements
-
 ### Requirement: Telegram runs as an external reference adapter, not in the manager
 The manager SHALL contain no Telegram-specific code (no poller, no Bot API client, no bot-token reads). A reference adapter in `channel-telegram/` (own binary and image, precedent `runtime-claude/`) SHALL serve Channels with `adapter: telegram`, consuming the channel adapter contract: getUpdates long-polling, offset persistence, approver filtering by Telegram user id, topic creation via `createForumTopic`, and message sends with the existing HTML parse mode and general-topic fallback. Routing-visible behavior (commands, adoption, default profile, busy-acks) SHALL be whatever the shared router implements — the adapter adds no routing rules of its own, so a command naming a Pipeline reaches Telegram users through exactly the same path as any other surface.
 
@@ -80,3 +78,24 @@ The chart's gated telegram `ChannelAdapter` CR SHALL declare the config contract
 #### Scenario: Adapter binary unchanged
 - **WHEN** the telegram adapter image runs against a ChannelAdapter with or without the declaration
 - **THEN** its behavior is identical — it neither reads nor publishes any schema
+
+### Requirement: Adapter closes forum topics on close-topic operations
+The Telegram channel adapter SHALL serve the `close-topic` operation by closing
+the corresponding forum topic through the Bot API (`closeForumTopic`) for the
+chat the Channel's config names, then completing the operation with an empty
+result. A Bot API failure SHALL be reported as the operation's error and SHALL
+NOT be retried by the adapter — the manager treats a failed `close-topic` as
+terminal.
+
+#### Scenario: Forum topic is closed
+- **WHEN** the adapter receives a `close-topic` operation for thread id `9876`
+- **THEN** it calls `closeForumTopic` for that message thread and completes the operation with an empty result
+
+#### Scenario: Bot API failure is reported, not retried
+- **WHEN** `closeForumTopic` returns an error
+- **THEN** the adapter completes the operation with that error and does not retry it
+
+#### Scenario: Duplicate close is tolerated
+- **WHEN** the same `close-topic` operation id is delivered twice
+- **THEN** the adapter completes it without treating an already-closed topic as a failure
+

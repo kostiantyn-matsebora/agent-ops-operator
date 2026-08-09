@@ -23,6 +23,14 @@ type Provider interface {
 	Send(ctx context.Context, threadID *string, text string) error
 }
 
+// TopicCloser is the optional half of Provider: an in-process implementation
+// that can archive a thread. A provider without it completes close-topic as a
+// no-op — the same outcome as an external adapter that ignores the kind, and
+// for the same reason: a conversation being deleted must never wedge on it.
+type TopicCloser interface {
+	CloseTopic(ctx context.Context, threadID string) error
+}
+
 // ProviderFactory builds a Provider for one Channel of a registered type.
 type ProviderFactory func(ctx context.Context, channelName string) (Provider, error)
 

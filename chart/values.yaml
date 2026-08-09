@@ -1,12 +1,39 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.20.0
+  tag: 0.21.0
 
-# Concurrency cap: live agent runtime pods across all conversations.
-maxRuntimes: 8
+# How many conversations may be ACTIVE at once. A conversation is active while
+# it holds a runtime pod; one that finished and let its pod exit costs nothing
+# and does not count. Over-cap work is not dropped — it waits in phase Pending
+# (no pod, no chat topic, no MCP ConfigMap) and is admitted FIFO by creation
+# time as slots free.
+#
+# UPGRADE-VISIBLE: was `maxRuntimes: 8`. The default is now 5, so an install
+# that never set the old key gets less throughput and more queueing; raise this
+# to restore it. Nothing is lost, only delayed (up to maxQueuedConversations).
+maxActiveConversations: 5
+
+# Bound on the PENDING backlog. Beyond it /signal/inbound declines to create a
+# conversation and reports the batch as dropped for capacity — chat senders are
+# told on the surface they typed on, alerts are logged and counted.
+maxQueuedConversations: 50
+
+# DEPRECATED alias for maxActiveConversations, honored for one release when the
+# new key is unset (the manager logs a deprecation line). Named after pods
+# rather than conversations, which is what made `maxRuntimes: 5` read as a limit
+# on AgentRuntime kinds. Unset by default — setting it emits MAX_RUNTIMES.
+maxRuntimes: ""
+
 # Idle minutes before a runtime pod exits (respawned on demand); AgentRuntime
-# CRs may override per runtime.
-runtimeIdleTtlMinutes: 10
+# CRs may override per runtime with spec.idleTTLMinutes.
+#
+# UPGRADE-VISIBLE: was 10. At 1 a finished conversation releases its slot within
+# a minute instead of holding it for ten, which is what makes a small
+# maxActiveConversations workable. The trade is latency, not memory: a follow-up
+# a few minutes later pays pod startup again, but the session survives in
+# /data/home and resumes with its context. Raise it for runtimes with expensive
+# startup, or for a chatty human you want to keep a warm pod for.
+runtimeIdleTtlMinutes: 1
 
 serviceAccounts:
   # the manager (CRDs + pod lifecycle in its namespace only)
@@ -131,7 +158,7 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.1.2
+    tag: 0.2.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   auth:

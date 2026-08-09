@@ -10,12 +10,27 @@ same pattern as runtimes, so NetworkPolicies stay simple and transport
 credentials never leave the adapter:
 
 1. Long-poll `GET /channel/ops?adapter=<your-adapter>&wait=25` for outbound
-   operations: `ensure-topic` (create a thread for a conversation) and `send`
-   (post a message; chat HTML subset). Delivery is at-least-once — dedup by
-   `op.id`.
+   operations: `ensure-topic` (create a thread for a conversation), `send`
+   (post a message; chat HTML subset) and `close-topic` (archive the thread in
+   `op.threadId` — its conversation has ended). Delivery is at-least-once —
+   dedup by `op.id`.
 2. Complete each op with `POST /channel/ops/{id}/done` — `{"threadId":"…"}`
-   for `ensure-topic` (an opaque string in your id space), `{"error":"…"}` on
-   failure (surfaced as a Conversation condition and regenerated).
+   for `ensure-topic` (an opaque string in your id space), an **empty body**
+   for `close-topic`, `{"error":"…"}` on failure (surfaced as a Conversation
+   condition and regenerated).
+
+   **`close-topic` is the exception to that last clause, in both halves.** Its
+   conversation is being deleted, so a failure is *logged* rather than written
+   as a condition — there will be no object left to carry one — and the op is
+   never regenerated. An adapter that does not implement the kind may complete
+   it with an error or ignore it entirely; the visible consequence is one open
+   thread for a conversation that no longer exists, closable by hand. Deletion
+   itself never waits longer than a 2-minute grace, so a down adapter cannot
+   wedge it. Treat an already-closed thread as success: redelivery is normal.
+
+   While a `close-topic` op is outstanding the deleting Conversation is held by
+   the `agentops.dev/close-topics` finalizer, which is what keeps every op
+   derivable from CR state across a manager restart.
 3. Push user REPLIES with `POST /channel/inbound
    {"channel","threadId","text"}` — `threadId` is REQUIRED. This endpoint
    continues an existing conversation and never starts one; a message in a

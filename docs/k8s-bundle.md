@@ -174,7 +174,8 @@ Conversation → runtime pod → pod cannot start → Warning event
 Nothing downstream catches that cycle — the fingerprint is fresh (new pod
 name), the workload is fresh (the owner is the Conversation CR), and even a
 correct liveness re-check passes it because the pod really is broken.
-`MAX_RUNTIMES` caps pods, not Conversation creation.
+`maxActiveConversations` caps pods and `maxQueuedConversations` caps the pending
+backlog, but neither stops the cycle — they only slow how fast it fills etcd.
 
 Three independent mechanisms: **name prefix** (needs no API read, so it holds
 before the cache is warm), **owner/label**, and **own namespace**. Only the

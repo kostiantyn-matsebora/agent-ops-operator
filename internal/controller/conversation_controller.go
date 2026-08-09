@@ -16,9 +16,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
@@ -47,12 +52,19 @@ func convMCPConfigMapName(conv string) string { return "agentops-mcp-conv-" + co
 // ConversationReconciler reconciles Conversation objects.
 type ConversationReconciler struct {
 	client.Client
-	Scheme      *runtime.Scheme
-	Runtime     runtimepod.Config
-	MaxRuntimes int
+	Scheme  *runtime.Scheme
+	Runtime runtimepod.Config
+	// MaxActiveConversations caps simultaneously ACTIVE conversations — a
+	// conversation is active while a runtime pod exists for it. Counted from
+	// live pods, never from status: a pod stuck Pending on an unschedulable
+	// node, or a status patch lost to a conflict, must not inflate capacity.
+	MaxActiveConversations int
 	// Ops carries outbound channel operations (topic creation) to the serving
 	// channel implementation; nil disables chat entirely (tests).
 	Ops *chat.OpQueue
+	// CloseTopicGrace overrides how long deletion waits on close-topic ops;
+	// zero means DefaultCloseTopicGrace.
+	CloseTopicGrace time.Duration
 }
 
 // Reconcile implements the reconciliation loop.
@@ -62,6 +74,19 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var conv agentopsv1alpha1.Conversation
 	if err := r.Get(ctx, req.NamespacedName, &conv); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// A conversation on its way out archives its threads first — by /close or by
+	// `kubectl delete conversation`, both take this path.
+	if !conv.DeletionTimestamp.IsZero() {
+		return r.finalizeClose(ctx, &conv)
+	}
+	if !controllerutil.ContainsFinalizer(&conv, FinalizerCloseTopics) {
+		patch := client.MergeFrom(conv.DeepCopy())
+		controllerutil.AddFinalizer(&conv, FinalizerCloseTopics)
+		if err := r.Patch(ctx, &conv, patch); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// signature label for grouping lookups
@@ -79,19 +104,6 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	// chat topics: enqueue asynchronously, one ensure-topic per bound channel
-	// still missing its thread binding; ids land via op completion (status
-	// patch), which re-triggers reconciliation. Requeue as a fallback — op ids
-	// are stable per conversation×channel, so re-enqueues dedup.
-	topicPending := false
-	if r.Ops != nil {
-		pending, err := r.ensureTopics(ctx, &conv)
-		if err != nil {
-			logger.Error(err, "ensureTopics enqueue (continuing chat-less)")
-		}
-		topicPending = pending
-	}
-
 	// input pruning: drop processed inputs from spec, GC consumed payload objects
 	if err := r.pruneProcessed(ctx, &conv); err != nil {
 		return ctrl.Result{}, err
@@ -100,7 +112,8 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	pending := dispatch.PendingInputs(&conv)
 	needsWorker := len(pending) > 0 || conv.Status.Inflight != nil
 
-	// runtime pod state
+	// runtime pod state. Reaping an exited pod comes FIRST: it is what stops
+	// the conversation counting against the cap.
 	var pod corev1.Pod
 	podName := runtimepod.PodName(conv.Name)
 	podErr := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: podName}, &pod)
@@ -122,13 +135,42 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
+	// CAPACITY FIRST — before anything is provisioned. A conversation that
+	// cannot be admitted gets no chat topic, no MCP ConfigMap, no pod and no
+	// dispatch: suppressing the TOPIC is the point of the Pending phase, since
+	// it is what stops a thousand signals from becoming a thousand chat threads
+	// before anyone has looked at the first one. A conversation needing no
+	// worker skips the gate entirely — it costs nothing and waits for nothing.
+	if needsWorker && !podExists {
+		admitted, err := r.admit(ctx, &conv)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !admitted {
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.enterPending(ctx, &conv)
+		}
+	}
+
+	// chat topics: enqueue asynchronously, one ensure-topic per bound channel
+	// still missing its thread binding; ids land via op completion (status
+	// patch), which re-triggers reconciliation. Requeue as a fallback — op ids
+	// are stable per conversation×channel, so re-enqueues dedup.
+	topicPending := false
+	if r.Ops != nil {
+		waiting, err := r.ensureTopics(ctx, &conv)
+		if err != nil {
+			logger.Error(err, "ensureTopics enqueue (continuing chat-less)")
+		}
+		topicPending = waiting
+	}
+
 	if needsWorker && !podExists {
 		created, err := r.createRuntimePod(ctx, &conv)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		if !created { // pool full, all busy — retry later
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.setPhase(ctx, &conv, agentopsv1alpha1.ConversationQueued)
+		if !created { // cap re-checked against a fresh list and lost the race
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.enterPending(ctx, &conv)
 		}
 	}
 
@@ -150,6 +192,212 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 	return ctrl.Result{}, nil
+}
+
+// FinalizerCloseTopics holds a deleting conversation just long enough to
+// archive its chat threads.
+const FinalizerCloseTopics = "agentops.dev/close-topics"
+
+// DefaultCloseTopicGrace bounds how long deletion may wait on close-topic ops.
+// An adapter that is down, or one that does not implement the kind, must never
+// wedge a deletion — after this the finalizer is released and the thread is
+// left open, which a person can fix by hand.
+const DefaultCloseTopicGrace = 2 * time.Minute
+
+func (r *ConversationReconciler) closeGrace() time.Duration {
+	if r.CloseTopicGrace > 0 {
+		return r.CloseTopicGrace
+	}
+	return DefaultCloseTopicGrace
+}
+
+// finalizeClose archives the threads of a deleting conversation, then lets go.
+//
+// The finalizer is what keeps "every op is derivable from CR state" true for
+// close-topic: while it holds, the CR is still there to regenerate the op from
+// after a manager restart. Enqueueing on every pass is safe — the op id is
+// stable per conversation×channel, so it dedups against both the pending op and
+// the completed one.
+func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if !controllerutil.ContainsFinalizer(conv, FinalizerCloseTopics) {
+		return ctrl.Result{}, nil
+	}
+
+	// Free the slot now rather than at the end of the grace: /close on a
+	// working conversation abandons the run, and a pod nobody is waiting on
+	// must not hold capacity for two more minutes.
+	pod := &corev1.Pod{}
+	pod.Namespace, pod.Name = conv.Namespace, runtimepod.PodName(conv.Name)
+	// Grace 0: the run is abandoned and nobody is waiting for its output, so a
+	// graceful shutdown would only hold the slot longer.
+	if err := r.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+
+	outstanding := false
+	if r.Ops != nil {
+		for _, t := range conv.Status.Threads {
+			var ch agentopsv1alpha1.Channel
+			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil {
+				continue // channel gone: nothing left to archive on it
+			}
+			if ch.Spec.Adapter == "" {
+				continue
+			}
+			r.Ops.EnqueueCloseTopic(ctx, &ch, t.ThreadID, conv.Name)
+			if r.Ops.Pending(chat.CloseTopicOpID(conv.Name, t.Channel)) {
+				outstanding = true
+			}
+		}
+	}
+	if outstanding && time.Since(conv.DeletionTimestamp.Time) < r.closeGrace() {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+	if outstanding {
+		logger.Info("close-topic grace expired; releasing the conversation with threads still open",
+			"conversation", conv.Name)
+	}
+	patch := client.MergeFrom(conv.DeepCopy())
+	controllerutil.RemoveFinalizer(conv, FinalizerCloseTopics)
+	return ctrl.Result{}, client.IgnoreNotFound(r.Patch(ctx, conv, patch))
+}
+
+// liveRuntimePods lists the runtime pods that consume capacity: Running or
+// Pending. A pod that has exited holds nothing.
+func (r *ConversationReconciler) liveRuntimePods(ctx context.Context, ns string) ([]corev1.Pod, error) {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(ns),
+		client.MatchingLabels{runtimepod.LabelApp: runtimepod.LabelAppValue}); err != nil {
+		return nil, err
+	}
+	var live []corev1.Pod
+	for _, p := range pods.Items {
+		if p.Status.Phase == corev1.PodRunning || p.Status.Phase == corev1.PodPending {
+			live = append(live, p)
+		}
+	}
+	return live, nil
+}
+
+// needsWorker reports whether a conversation has work that requires a runtime
+// pod. It is the same question everywhere: something queued, or something
+// already dispatched.
+func needsWorker(c *agentopsv1alpha1.Conversation) bool {
+	return len(dispatch.PendingInputs(c)) > 0 || c.Status.Inflight != nil
+}
+
+// admit decides whether this conversation may take a capacity slot now.
+//
+// Both halves come from the same two lists every conversation reads — the live
+// runtime pods and the conversations waiting for one — so admission order is
+// stable across reconciles without a leader-elected scheduler or a queue
+// object. Order is FIFO by creation time, full stop: no priority, no fairness
+// classes between pipelines.
+//
+// A slot counts as free when the cap is not reached, or when a live pod is
+// EVICTABLE (its conversation has nothing inflight and nothing queued) —
+// createRuntimePod does the eviction, and admitting on that basis is what keeps
+// a burst from blocking behind a worker that is doing nothing.
+func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alpha1.Conversation) (bool, error) {
+	live, err := r.liveRuntimePods(ctx, conv.Namespace)
+	if err != nil {
+		return false, err
+	}
+	hasPod := map[string]bool{}
+	for _, p := range live {
+		hasPod[p.Labels[runtimepod.LabelConversation]] = true
+	}
+
+	free := r.MaxActiveConversations - len(live)
+	if free <= 0 {
+		free = r.evictableCount(ctx, conv.Namespace, live)
+	}
+	if free <= 0 {
+		return false, nil
+	}
+
+	var list agentopsv1alpha1.ConversationList
+	if err := r.List(ctx, &list, client.InNamespace(conv.Namespace)); err != nil {
+		return false, err
+	}
+	// The waiting set is defined by PODS, not by phase: a conversation that
+	// needs a worker and holds none is waiting, whether it has been marked
+	// Pending yet or has only just been created. Keying on phase would let a
+	// brand-new conversation reconciled first jump an older one.
+	var waiting []agentopsv1alpha1.Conversation
+	for i := range list.Items {
+		c := &list.Items[i]
+		if !c.DeletionTimestamp.IsZero() || hasPod[c.Name] || !needsWorker(c) {
+			continue
+		}
+		waiting = append(waiting, *c)
+	}
+	sort.Slice(waiting, func(i, j int) bool {
+		if !waiting[i].CreationTimestamp.Equal(&waiting[j].CreationTimestamp) {
+			return waiting[i].CreationTimestamp.Before(&waiting[j].CreationTimestamp)
+		}
+		return waiting[i].Name < waiting[j].Name // stable tiebreak within a second
+	})
+	for i := range waiting {
+		if waiting[i].Name == conv.Name {
+			return i < free, nil
+		}
+	}
+	// Not in the list (a stale cache read of our own inputs) — the fresh
+	// re-check in createRuntimePod is the backstop.
+	return len(waiting) < free, nil
+}
+
+// evictableCount reports how many live pods could be freed for waiting work:
+// those whose conversation has nothing inflight and nothing queued. Eviction
+// deletes only the pod — the conversation and its session survive and it gets a
+// fresh pod on its next input.
+func (r *ConversationReconciler) evictableCount(ctx context.Context, ns string, live []corev1.Pod) int {
+	n := 0
+	for _, p := range live {
+		var c agentopsv1alpha1.Conversation
+		if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: p.Labels[runtimepod.LabelConversation]}, &c); err != nil {
+			continue
+		}
+		if !needsWorker(&c) {
+			n++
+		}
+	}
+	return n
+}
+
+// enterPending parks an unadmitted conversation and tells the person waiting,
+// ONCE. The phase is patched before the notice so a reconcile storm cannot
+// produce a second one; a notice lost to a crash in that window is preferable
+// to a channel repeating itself every 30 seconds.
+func (r *ConversationReconciler) enterPending(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	if conv.Status.Phase == agentopsv1alpha1.ConversationPending {
+		return nil
+	}
+	if err := r.setPhase(ctx, conv, agentopsv1alpha1.ConversationPending); err != nil {
+		return err
+	}
+	r.notifyQueued(ctx, conv)
+	return nil
+}
+
+// notifyQueued posts one "waiting for capacity" notice for a conversation that
+// just entered Pending. A pending conversation usually has NO thread — that is
+// what the phase suppresses — so the notice goes to the originating channel's
+// general surface; a conversation that already earned a thread on an earlier
+// admission is told there instead, where the person is looking.
+func (r *ConversationReconciler) notifyQueued(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
+	if r.Ops == nil || len(conv.Spec.ChannelRefs) == 0 {
+		return
+	}
+	ref := conv.Spec.ChannelRefs[0]
+	var ch agentopsv1alpha1.Channel
+	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil || ch.Spec.Adapter == "" {
+		return
+	}
+	r.Ops.EnqueueSend(ctx, &ch, conv.ThreadFor(ref.Name),
+		"⏳ Queued for capacity — every agent slot is busy. This starts as soon as one frees up.")
 }
 
 func (r *ConversationReconciler) setPhase(ctx context.Context, conv *agentopsv1alpha1.Conversation, phase agentopsv1alpha1.ConversationPhase) error {
@@ -225,23 +473,18 @@ func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *agent
 	return nil
 }
 
-// createRuntimePod enforces the pool cap with idle eviction; returns created=false
-// when the pool is full of busy workers.
+// createRuntimePod re-checks the conversation cap against a FRESH pod list —
+// admission decided against a possibly stale cache, so this is the last word —
+// and evicts an idle worker when that is what a slot costs. Returns
+// created=false when every slot is held by a busy conversation.
 func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *agentopsv1alpha1.Conversation) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	var pods corev1.PodList
-	if err := r.List(ctx, &pods, client.InNamespace(conv.Namespace),
-		client.MatchingLabels{runtimepod.LabelApp: runtimepod.LabelAppValue}); err != nil {
+	live, err := r.liveRuntimePods(ctx, conv.Namespace)
+	if err != nil {
 		return false, err
 	}
-	var live []corev1.Pod
-	for _, p := range pods.Items {
-		if p.Status.Phase == corev1.PodRunning || p.Status.Phase == corev1.PodPending {
-			live = append(live, p)
-		}
-	}
-	if len(live) >= r.MaxRuntimes {
+	if len(live) >= r.MaxActiveConversations {
 		// evict the longest-idle worker whose conversation has nothing queued
 		type cand struct {
 			pod  corev1.Pod
@@ -254,7 +497,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: cn}, &c); err != nil {
 				continue
 			}
-			if c.Status.Inflight == nil && len(dispatch.PendingInputs(&c)) == 0 {
+			if !needsWorker(&c) {
 				last := c.CreationTimestamp.Time
 				if c.Status.LastActivity != nil {
 					last = c.Status.LastActivity.Time
@@ -263,7 +506,8 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 			}
 		}
 		if len(cands) == 0 {
-			logger.Info("worker pool full, all busy — queued", "conversation", conv.Name)
+			logger.Info("at the active-conversation cap, all busy — pending",
+				"conversation", conv.Name, "cap", r.MaxActiveConversations)
 			return false, nil
 		}
 		sort.Slice(cands, func(i, j int) bool { return cands[i].last.Before(cands[j].last) })
@@ -381,10 +625,64 @@ func (r *ConversationReconciler) setToolingCondition(ctx context.Context, conv *
 	}
 }
 
+// MapRuntimePodToPending maps a freed capacity slot to the conversations that
+// might take it: the oldest Pending ones, up to the cap.
+//
+// Owns(&corev1.Pod{}) cannot do this — it routes a pod event to the pod's OWN
+// conversation, which is precisely the conversation that no longer needs the
+// slot. Without this watch a freed slot waits on the 30 s requeue backstop.
+func (r *ConversationReconciler) MapRuntimePodToPending(ctx context.Context, _ client.Object) []reconcile.Request {
+	var list agentopsv1alpha1.ConversationList
+	if err := r.List(ctx, &list); err != nil {
+		return nil
+	}
+	var pending []agentopsv1alpha1.Conversation
+	for i := range list.Items {
+		if list.Items[i].Status.Phase == agentopsv1alpha1.ConversationPending && list.Items[i].DeletionTimestamp.IsZero() {
+			pending = append(pending, list.Items[i])
+		}
+	}
+	sort.Slice(pending, func(i, j int) bool {
+		if !pending[i].CreationTimestamp.Equal(&pending[j].CreationTimestamp) {
+			return pending[i].CreationTimestamp.Before(&pending[j].CreationTimestamp)
+		}
+		return pending[i].Name < pending[j].Name
+	})
+	// One deletion frees one slot, but waking a few costs a no-op reconcile
+	// each and covers the case where several exited at once. Each still makes
+	// its own FIFO decision, so waking a younger one cannot let it jump ahead.
+	n := r.MaxActiveConversations
+	if n < 1 {
+		n = 1
+	}
+	if len(pending) > n {
+		pending = pending[:n]
+	}
+	out := make([]reconcile.Request, 0, len(pending))
+	for i := range pending {
+		out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{
+			Namespace: pending[i].Namespace, Name: pending[i].Name,
+		}})
+	}
+	return out
+}
+
+// isRuntimePod: the watch above is about capacity, so only runtime pods count.
+func isRuntimePod(obj client.Object) bool {
+	return obj.GetLabels()[runtimepod.LabelApp] == runtimepod.LabelAppValue
+}
+
 // SetupWithManager wires the controller.
 func (r *ConversationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.Conversation{}).
 		Owns(&corev1.Pod{}).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.MapRuntimePodToPending),
+			builder.WithPredicates(predicate.Funcs{
+				CreateFunc:  func(event.CreateEvent) bool { return false },
+				UpdateFunc:  func(event.UpdateEvent) bool { return false },
+				GenericFunc: func(event.GenericEvent) bool { return false },
+				DeleteFunc:  func(e event.DeleteEvent) bool { return isRuntimePod(e.Object) },
+			})).
 		Complete(r)
 }
