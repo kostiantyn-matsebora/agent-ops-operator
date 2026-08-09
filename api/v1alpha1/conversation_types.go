@@ -57,9 +57,11 @@ type ConversationSpec struct {
 	// per-conversation state, NOT wiring — nothing sets them by hand, and
 	// re-wiring the pipeline affects only new conversations. Only the refs are
 	// snapshotted; the referenced CRs' CONTENT is re-read at every use, so
-	// editing a toolset or config reaches running conversations. Conversations
-	// with no originating pipeline (POST /task, /profile commands on unwired
-	// channels) carry neither and use the profile's own tooling.
+	// editing a toolset or config reaches running conversations. Every
+	// origination has a Pipeline behind it — a signal of any kind through a
+	// claimed source, or a chat command naming one — and a conversation whose
+	// Pipeline declared no bindings carries none, because nothing else supplies
+	// them: profiles carry no capabilities at all.
 	// +optional
 	Toolsets *ToolsetBinding `json:"toolsets,omitempty"`
 	// +optional

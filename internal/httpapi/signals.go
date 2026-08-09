@@ -44,8 +44,9 @@ type NormalizedSignal struct {
 	// line as a ConversationInput).
 	Payload string `json:"payload,omitempty"`
 	// Kind selects the input lane: "alert" (default; read-only investigation
-	// prompt), "job" (task-lane prompt), or "chat" (task lane, from a human on
-	// a chat surface).
+	// prompt), "job" (task-lane prompt for a recurring job), "task" (task lane,
+	// a one-off ask from a machine), or "chat" (task lane, from a human on a
+	// chat surface).
 	Kind string `json:"kind,omitempty"`
 }
 
@@ -54,6 +55,31 @@ type NormalizedSignal struct {
 // recurrence-on-session semantics — a second question is a second
 // conversation, not a resumption of the first.
 const KindChat = "chat"
+
+// KindTask is a one-off ask posted by a machine — the programmatic origination
+// path, and the only one there is now that no endpoint names a Pipeline.
+//
+// It differs from "job" in both halves of the job lane: it carries NO jobName
+// (a one-off ask is not a standing job named for its source) and it does not
+// resume a session as a recurrence (a second post is a second request). It
+// differs from "chat" in exactly one way: no channel label is required, because
+// replies go to the claiming Pipeline's channelRefs rather than back to the
+// surface somebody typed on.
+const KindTask = "task"
+
+// KindJob is the recurring-job lane: task-style prompt, jobName set from the
+// source, and recurrence-on-session so later ticks resume the agent.
+const KindJob = "job"
+
+// KindAlert is the default lane: read-only investigation prompt, grouped by the
+// source's signature labels.
+const KindAlert = "alert"
+
+// oneShot reports whether a kind is a one-shot lane — a later signal is a
+// SEPARATE request rather than more news about a standing subject. Chat and
+// task are one-shot; alert and job are recurring-subject lanes that group and
+// resume. This is the distinction the signature fallback keys on.
+func oneShot(kind string) bool { return kind == KindChat || kind == KindTask }
 
 // Reserved labels a chat signal carries. LabelChatChannel is what lets the
 // manager answer on the surface the message came from — without it a chat
@@ -64,15 +90,16 @@ const (
 	LabelChatSender  = "agentops.dev/sender"
 )
 
-// titleFromText renders a conversation title from what a person actually typed:
+// titleFromText renders a conversation title from the request itself:
 // whitespace collapsed, bounded to fit a chat topic name and a table column.
-// Empty for empty input, so the caller keeps its own fallback.
-func titleFromText(text string) string {
+// Empty for empty input, so the caller keeps its own fallback. The icon says
+// which lane asked — 💬 somebody typed it, 🛠 a machine posted it.
+func titleFromText(icon, text string) string {
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
 		return ""
 	}
-	title := "💬 " + strings.Join(fields, " ")
+	title := icon + " " + strings.Join(fields, " ")
 	// Rune-safe: a byte slice would cut a multi-byte character in half, and chat
 	// input is exactly where non-ASCII shows up.
 	if runes := []rune(title); len(runes) > 60 {
@@ -174,12 +201,28 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 	for _, fp := range fresh {
 		sig := byFP[fp]
 		key := ingest.Signature(sig.Labels, source.Spec.Grouping.SignatureLabels)
-		if sig.Kind == KindChat && len(source.Spec.Grouping.SignatureLabels) == 0 {
-			// No grouping for chat unless the source explicitly asks for it.
-			// The default signature labels are alert vocabulary a chat message
-			// never carries, so every message would hash to the same key and
-			// pile into one conversation. Per-fingerprint keys give each
-			// message its own — today's behavior, preserved.
+		if oneShot(sig.Kind) && len(source.Spec.Grouping.SignatureLabels) == 0 {
+			// The fallback splits on what the LANE is about, not on whether
+			// labels happen to be present:
+			//
+			//   alert / job  — recurring-subject lanes. The second signal is
+			//                  more news about the same thing, so the default
+			//                  alert labels (alertgroup/alertname/namespace)
+			//                  fold it into the open conversation and resume the
+			//                  session. vm-bundle ships `grouping: {}` and
+			//                  depends on this; signal-cron fires a DISTINCT
+			//                  fingerprint per tick and depends on the empty
+			//                  signature collapsing them into one conversation.
+			//   chat / task  — one-shot lanes. The second signal is a second
+			//                  request, and the default labels are alert
+			//                  vocabulary neither one carries, so every request
+			//                  would hash to the same empty signature and pile
+			//                  into a single conversation.
+			//
+			// Do NOT "simplify" this to a blanket per-fingerprint rule: that
+			// regresses alert grouping and gives every cron tick its own
+			// conversation. A source that DOES declare signatureLabels is
+			// unaffected in every lane — asking for grouping gets it.
 			key = sig.Fingerprint
 		}
 		groups[key] = append(groups[key], sig)
@@ -363,16 +406,18 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	}
 
 	// input lane: base kind for new work, recurrence once a session exists
+	kind := group[0].Kind
 	inputType := agentopsv1alpha1.InputAlert
 	jobName := ""
-	switch group[0].Kind {
-	case "job":
+	switch kind {
+	case KindJob:
 		inputType = agentopsv1alpha1.InputJob
 		jobName = source.Name
-	case KindChat:
+	case KindChat, KindTask:
 		// Task lane, and deliberately NOT the job lane: job carries
-		// recurrence-on-session, which would make a second question resume
-		// the first question's session.
+		// recurrence-on-session and a jobName, which would make a second
+		// question — or a second posted task — resume the first one's session
+		// as news about a standing job.
 		inputType = agentopsv1alpha1.InputTask
 	}
 	if conv == nil {
@@ -391,14 +436,18 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			}
 		}
 		if title == "" {
-			// A CHAT signal is somebody asking something, so the question makes
-			// the title. Falling back to the source name gave every conversation
-			// from one surface the SAME name ("🔍 console", "🔍 home-ops"),
-			// which makes a list of them unreadable and a search useless. An
-			// alert keeps the source name: its payload is a machine document,
-			// and the source is the useful label there.
-			if inputType == agentopsv1alpha1.InputTask {
-				title = titleFromText(group[0].Payload)
+			// A one-shot signal IS the request, so the request makes the title.
+			// Falling back to the source name gave every conversation from one
+			// surface the SAME name ("🔍 console", "🔍 home-ops"), which makes a
+			// list of them unreadable and a search useless. An alert keeps the
+			// source name: its payload is a machine document, and the source is
+			// the useful label there.
+			if oneShot(kind) {
+				icon := "💬"
+				if kind == KindTask {
+					icon = "🛠"
+				}
+				title = titleFromText(icon, group[0].Payload)
 			}
 			if title == "" {
 				title = "🔍 " + source.Name
@@ -406,12 +455,16 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		}
 		conv = &agentopsv1alpha1.Conversation{}
 		conv.Namespace = s.Namespace
+		// The name prefix follows the KIND, not the input lane: chat and task
+		// share the task lane but are told apart at a glance in `kubectl get`.
 		conv.GenerateName = "alert-"
-		switch inputType {
-		case agentopsv1alpha1.InputJob:
+		switch kind {
+		case KindJob:
 			conv.GenerateName = "job-"
-		case agentopsv1alpha1.InputTask:
+		case KindChat:
 			conv.GenerateName = "chat-"
+		case KindTask:
+			conv.GenerateName = "task-"
 		}
 		conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
 		conv.Spec = agentopsv1alpha1.ConversationSpec{

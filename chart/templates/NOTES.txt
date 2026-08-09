@@ -1,14 +1,18 @@
 agent-ops-operator {{ .Chart.Version }} deployed (manager {{ .Values.image.tag }}).
 
 Quick check:   kubectl -n {{ .Release.Namespace }} get pipelines,signalsources,channels,channeladapters,signaladapters
-Ask an agent:  POST http://agentops-manager.{{ .Release.Namespace }}.svc:{{ .Values.service.apiPort }}/task  {"pipeline":"<pipeline>","task":"..."}
+Ask an agent:  a task is an ordinary signal — post it to a SignalSource a Ready
+               Pipeline claims (there is no endpoint that names a Pipeline):
+  TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ .Values.adapterAuth.existingSecret | default .Values.adapterAuth.secretName }} -o jsonpath='{.data.token}' | base64 -d)
+  curl -s -X POST http://agentops-manager.{{ .Release.Namespace }}.svc:{{ .Values.service.apiPort }}/signal/inbound -H "Authorization: Bearer $TOKEN" \
+    -d '{"source":"<signalsource>","signals":[{"fingerprint":"ask-1","kind":"task","payload":"..."}]}'
 
 Remember: wiring lives ONLY on Pipelines — a SignalSource without a Ready
 Pipeline claim drops its signals (Wired=False). Capabilities are wiring too:
 AgentProfiles carry no tools and no MCP, so an agent's abilities come from the
 Pipeline that originated its conversation — declared there, never inherited. A
-task addresses a Pipeline by name; a Pipeline that declares no toolsets gives
-its conversations none.
+task addresses a SOURCE and the Pipeline claiming it answers; a Pipeline that
+declares no toolsets gives its conversations none.
 
 UPGRADING FROM CHART < 3.0? Profiles no longer have spec.allowedTools or
 spec.mcp; those fields are pruned on the next write. Any profile that still

@@ -179,18 +179,20 @@ Detail is tabbed:
 ## Starting a conversation
 
 **The console originates the way everything else does: by emitting a chat signal
-from a claimed `SignalSource`.** Not through `POST /task`.
+from a claimed `SignalSource`.** There is no pipeline-addressed endpoint to use
+instead — the manager exposes none, and this is why it needs none.
 
 Four things fall out of that:
 
 1. The origination invariant holds literally — no side door to defend.
-2. **Who answers is declared, not chosen by the caller.** With `/task` the caller
-   names the pipeline. With a claimed source, the wiring decides, which is the
-   rule's actual point. The console cannot reach an agent no wiring points at.
-3. **Origination becomes visible traffic.** A `/task` conversation materializes
-   from nowhere, leaving a hole in the graph exactly where the operator acted. A
-   console source is a node with an edge: pressing "start" lights up the graph the
-   console is showing.
+2. **Who answers is declared, not chosen by the caller.** Naming a pipeline in a
+   request body would let the caller pick the agent. With a claimed source, the
+   wiring decides, which is the rule's actual point. The console cannot reach an
+   agent no wiring points at.
+3. **Origination becomes visible traffic.** A conversation conjured by a direct
+   call materializes from nowhere, leaving a hole in the graph exactly where the
+   operator acted. A console source is a node with an edge: pressing "start"
+   lights up the graph the console is showing.
 4. **Self-started conversations join themselves** — the claiming pipeline's
    channel set includes the console Channel, so the result already has a console
    thread. No pipeline edit, no copy-paste patch.

@@ -8,8 +8,70 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
-**BREAKING — the console is on by default, and it can now start conversations.**
-Chart **5.0.0**, manager **0.22.0**, console **0.3.1**.
+**BREAKING — `POST /task` is removed, and the console is on by default.**
+Chart **5.0.0**, manager **0.24.0**, console **0.3.1**.
+
+### BREAKING — a task is a signal; `POST /task` is gone
+
+The endpoint, its handler and its request type are deleted. There is now no HTTP
+route that names a `Pipeline`. Programmatic origination is an ordinary signal
+posted to a `SignalSource` that a Ready Pipeline claims, so which agent answers,
+on which channels, with which capabilities is decided by declared wiring rather
+than chosen by the caller — the same rule every other origination already
+followed.
+
+**Before:**
+
+```sh
+curl -sX POST http://agentops-manager.<ns>.svc:8080/task \
+  -H 'Content-Type: application/json' \
+  -d '{"pipeline":"k8s-engineer","task":"why is pod X crashlooping?"}'
+```
+
+**After:**
+
+```sh
+TOKEN=$(kubectl -n <ns> get secret agentops-adapter-token \
+  -o jsonpath='{.data.token}' | base64 -d)
+curl -sX POST http://agentops-manager.<ns>.svc:8080/signal/inbound \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"source":"cluster-events","signals":[{"fingerprint":"ask-1",
+       "kind":"task","payload":"why is pod X crashlooping?"}]}'
+```
+
+Three things change in the call: a different URL, a bearer token
+(`ADAPTER_TOKEN`, the same one adapters use), and a **source** name where a
+pipeline name used to go. Pick a source the Pipeline you want already claims —
+`kubectl get pipeline <name> -o jsonpath='{.spec.signalSourceRefs}'`. The
+`fingerprint` is yours to choose and is what cooldown dedups on; a build id or a
+timestamp is the usual answer.
+
+**No deprecation shim is offered.** A 410 would preserve exactly the doorway
+this change closes, and the API group is provisional pre-1.0.
+
+**Dropped without replacement:** the `agent` override (per-call role selection
+remains available through the chat form `/<pipeline>:<agent>`) and the `channel`
+field, which let a caller add a surface — that is wiring, and wiring is declared
+on the Pipeline.
+
+**New signal kind `task`.** Alongside `alert`, `job` and `chat`: task-lane
+prompt, no `jobName`, no recurrence-on-session, and — unlike `chat` — no
+`agentops.dev/channel` label required, because replies go to the claiming
+Pipeline's channels.
+
+**Signature keying now splits on the lane** when a source declares no
+`signatureLabels`. `alert` and `job` keep the default
+`alertgroup`/`alertname`/`namespace` labels, so alert grouping and cron-tick
+folding are unchanged; `task` and `chat` key on the signal's own fingerprint, so
+each request opens its own conversation. A source that DOES declare
+`signatureLabels` groups by them in every lane — which means **a posted task
+inherits the target source's grouping**. Posting tasks to a source with
+`signatureLabels` (k8s-bundle's `cluster-events` uses `namespace`/`workload`)
+groups tasks that share those label values, including tasks carrying none of
+them. Create your own source if you want an isolated ask lane.
+
+No rendered chart object changes, no CRD schema field is added or removed, and
+no stored object changes shape.
 
 ### What changes on upgrade
 
@@ -493,8 +555,10 @@ For each profile that lists anything, move it before you upgrade:
 | `mcp.servers: {...}` | an `MCPConfig`, then referenced as above |
 | `mcp.configMapRef` / `secretRef` | an `MCPConfig` with the same field (bound alone) |
 
-If the profile should be reachable via `POST /task`, give it a Pipeline to
-address — that is what a task names.
+If the profile should be reachable, give it a Pipeline — that is what routes to
+it. (At chart 3.0 a task named that Pipeline via `POST /task`; the endpoint is
+removed as of chart 5.0 and a task now names a source instead — see the entry at
+the top.)
 `ToolingBinding.mode` is gone; drop `mode:` from any existing stanza.
 
 

@@ -128,10 +128,13 @@ spec:
           name: agentops-ha
           key: token
 ---
-# An ADDRESSABLE Pipeline: `POST /task {"pipeline":"ha-engineer-direct",...}`
-# names this one. It routes nothing (no sources, no channels) and carries no
-# special meaning — it exists to be addressed, and like every Pipeline it
-# declares what its conversations may do. Nothing supplies a default.
+# A COMMAND-ONLY Pipeline: `/ha-engineer-direct <task>` typed on a wired chat
+# surface names this one. It routes nothing (no sources, no channels) and
+# carries no special meaning — nothing resolves to it, because nothing claims a
+# source for it. Give it a `signalSourceRefs` entry to make it postable:
+# programmatic work is a `kind: task` signal to a source, never a named
+# Pipeline. Like every Pipeline it declares what its conversations may do, and
+# nothing supplies a default.
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
 metadata:

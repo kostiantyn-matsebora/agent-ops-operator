@@ -10,19 +10,20 @@ import (
 // Origination: the console starts a conversation THE WAY EVERYTHING ELSE DOES —
 // by emitting a chat signal from a claimed SignalSource.
 //
-// Not through POST /task. Four things follow from that, and each is the reason
-// this file is not a thin wrapper around a simpler endpoint:
+// There is no pipeline-addressed endpoint to use instead — the manager exposes
+// none, and this file is why it needs none. Four things follow, and each is the
+// reason this is not a thin wrapper around a simpler call:
 //
 //  1. The invariant holds literally. "Conversations originate only from claimed
 //     signal sources" stops being a rule with a side door.
-//  2. WHO ANSWERS IS DECLARED, NOT CHOSEN BY THE CALLER. /task takes a pipeline
-//     name in the body — the caller picks the agent. A claimed source means the
-//     wiring decides, which is the rule's actual point. The console cannot reach
-//     an agent no wiring points at.
-//  3. Origination becomes visible traffic. A /task conversation materializes
-//     from nowhere, leaving a hole in the graph exactly where the operator
-//     acted; a console source is a node with an edge, so pressing "start" lights
-//     up the graph the console is rendering.
+//  2. WHO ANSWERS IS DECLARED, NOT CHOSEN BY THE CALLER. Naming a pipeline in a
+//     request body would let the caller pick the agent. A claimed source means
+//     the wiring decides, which is the rule's actual point. The console cannot
+//     reach an agent no wiring points at.
+//  3. Origination becomes visible traffic. A conversation conjured by a direct
+//     call materializes from nowhere, leaving a hole in the graph exactly where
+//     the operator acted; a console source is a node with an edge, so pressing
+//     "start" lights up the graph the console is rendering.
 //  4. Self-started conversations join themselves. The claiming pipeline's
 //     channel set includes the console Channel, so the conversation arrives with
 //     a console thread — no pipeline edit, no copy-paste patch.

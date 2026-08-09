@@ -15,7 +15,7 @@ The bundle SHALL NOT render the agent's execution substrate. The `AgentRuntime`,
 
 #### Scenario: Demo mode enables the bundle read-only
 - **WHEN** the chart is installed with `global.demo.enabled=true` and nothing else
-- **THEN** the bundle's components render, the parent's `AgentRuntime` named `default` carries the configured LLM credential env, the runtime SA holds read-only bindings, and the bundle's addressable Pipeline is askable via `POST /task` — a task names that Pipeline, never the profile
+- **THEN** the bundle's components render, the parent's `AgentRuntime` named `default` carries the configured LLM credential env, the runtime SA holds read-only bindings, and the install's Pipeline claiming the bundle's events source answers work posted to that source — the source is what a caller names, never the Pipeline and never the profile
 
 #### Scenario: Bundle without demo
 - **WHEN** the chart is installed with `k8s-bundle.enabled=true` and `global.demo.enabled=false`
@@ -110,8 +110,8 @@ Because the profile has NO repository, no agent definition file can be resolved 
 - **WHEN** the bundle renders with the MCP component active
 - **THEN** the `MCPConfig` is referenced by the install's wiring and the AgentProfile itself declares no `mcp` block and no tools, so profiles stay reusable across differently-tooled routes
 
-#### Scenario: The demo addresses a Pipeline
-- **WHEN** a task is posted naming the install's Pipeline for this profile
+#### Scenario: The demo reaches a Pipeline through the source it claims
+- **WHEN** a `kind: task` signal is posted to a source claimed by the install's Pipeline for this profile
 - **THEN** the work unit carries that Pipeline's tools, and the rendered AgentProfile declares none — the bundle ships no Pipeline of its own, so the route is the one the install declared
 
 #### Scenario: An observe-only agent
@@ -131,7 +131,7 @@ Upgrading SHALL preserve semantics: the `AgentRuntime` named `default` re-render
 
 #### Scenario: Upgraded demo release keeps working
 - **WHEN** a release running chart 3.x with the bundle enabled upgrades and adopts the new values paths
-- **THEN** the agent flow works unchanged, the `default` runtime re-renders from the parent, and the bundle-named ServiceAccount and its bindings are removed by the upgrade
+- **THEN** the agent flow works unchanged — now reached by posting a `kind: task` signal to the bundle's events source, which the install's Pipeline claims — the `default` runtime re-renders from the parent, and the bundle-named ServiceAccount and its bindings are removed by the upgrade
 
 #### Scenario: Both migration hops are findable
 - **WHEN** an operator looks up a value they set at `k8s-bundle.profile.runtime.*`
