@@ -8,6 +8,59 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+**Cluster events get suppression, workload grouping, and a loop breaker.**
+`signal-k8s-events` 0.2.0. Two breaking-ish defaults and one new RBAC grant.
+
+*Why this exists:* the events lane created **hundreds of conversations** on a
+healthy cluster, and on an unhealthy one it fed itself — a runtime pod that
+could not start emitted a Warning event, which became a signal, which opened a
+Conversation, which created another runtime pod under a new name, forever.
+
+**Upgrade steps**
+
+1. **The adapter needs new permissions.** The events component now grants
+   read-only `pods` and `replicasets` (`list`/`watch`) alongside `events`. If
+   you render the bundle's RBAC (`eventsAdapter.rbac.create: true`, the
+   default) this happens for you. If you bind that RBAC yourself, add it — the
+   adapter reports `Ready=False` naming the missing permission rather than
+   degrading silently.
+2. **`grouping.signatureLabels` defaults to `[namespace, workload]`**
+   (was `[namespace, kind, name]`). **BREAKING for existing conversations:**
+   they keep their old per-pod signature hash and go orphaned. No action is
+   needed — they age out of the 7-day reuse window on their own, and new
+   conversations group per workload. Override the values path if you need the
+   old behavior back.
+3. **Default `rules` now ship.** A default install suppresses rollout churn out
+   of the box. If you had built your own `excludeReasons` list it still works
+   (it translates into leading drop rules), but review it against the new
+   defaults — you probably need less of it.
+
+**Worth knowing**
+
+- Reason matching is now **anchored**: `excludeReasons: [Failed]` no longer
+  also drops `FailedMount`. If you were relying on the accidental prefix match,
+  widen it to a rule with an explicit regex.
+- The self-exclusion invariant is **not configurable** for its first two
+  mechanisms (name prefix, owner/label). `source.includeOwnNamespace: true`
+  relaxes only the coarse namespace rule, for installs that co-locate their own
+  workloads with the operator.
+
+**Stopgap for anyone still on 0.1.x:** the conversation explosion is a values
+edit away from stopping, with no new image —
+
+```yaml
+k8s-bundle:
+  eventsAdapter:
+    source:
+      excludeReasons: [Unhealthy, FailedScheduling, SandboxChanged, Preempting]
+      grouping:
+        signatureLabels: [namespace, alertname]
+```
+
+This bounds conversations by namespaces × reasons instead of pods × rollouts.
+Agent *runs* do not drop (cooldown is still per object+reason), and it does not
+break the self-reference loop — only 0.2.0 does that.
+
 **The agent-ops console — additive, opt-in, no upgrade steps.** A browser view
 of the whole install (CR inventory, wiring graph, live conversation runs) that
 is also a channel: conversations on pipelines listing its Channel bind a

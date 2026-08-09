@@ -195,19 +195,45 @@ func eventsPath(namespace string) string {
 	return "/api/v1/namespaces/" + url.PathEscape(namespace) + "/events"
 }
 
+// ListInto lists any collection into out (which must have the standard
+// {metadata:{resourceVersion}, items:[...]} shape) and returns the
+// resourceVersion to start watching from. Generic so the pod and replicaset
+// caches reuse this transport rather than duplicating it.
+func (k *Kube) ListInto(ctx context.Context, path string, out any) (string, error) {
+	resp, err := k.get(ctx, path+"?limit=500", 30*time.Second)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	var meta struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &meta); err != nil {
+		return "", fmt.Errorf("decoding list metadata from %s: %w", path, err)
+	}
+	if out != nil {
+		if err := json.Unmarshal(body, out); err != nil {
+			return "", fmt.Errorf("decoding list from %s: %w", path, err)
+		}
+	}
+	return meta.Metadata.ResourceVersion, nil
+}
+
 // ListEvents returns the current events in a scope ("" = all namespaces) and
 // the resourceVersion to start watching from.
 func (k *Kube) ListEvents(ctx context.Context, namespace string) ([]Event, string, error) {
-	resp, err := k.get(ctx, eventsPath(namespace)+"?limit=500", 30*time.Second)
+	var list eventList
+	rv, err := k.ListInto(ctx, eventsPath(namespace), &list)
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
-	var list eventList
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, "", fmt.Errorf("decoding event list: %w", err)
-	}
-	return list.Items, list.Metadata.ResourceVersion, nil
+	return list.Items, rv, nil
 }
 
 // watchFrame is one line of a streaming watch response.
@@ -225,13 +251,33 @@ var ErrWatchExpired = fmt.Errorf("watch expired, relist required")
 // the watch expires (ErrWatchExpired). DELETED frames are ignored: an event
 // object aging out is not a signal.
 func (k *Kube) WatchEvents(ctx context.Context, namespace, resourceVersion string, fn func(Event)) error {
+	return k.WatchFrames(ctx, eventsPath(namespace), resourceVersion, func(frameType string, obj json.RawMessage) {
+		// DELETED frames are ignored here: an event object aging out is not a
+		// signal. Caches that track object lifetime handle DELETED themselves.
+		if frameType != "ADDED" && frameType != "MODIFIED" {
+			return
+		}
+		var ev Event
+		if err := json.Unmarshal(obj, &ev); err != nil {
+			return // a frame we cannot parse is not worth dropping the stream for
+		}
+		fn(ev)
+	})
+}
+
+// WatchFrames streams a watch on any collection path, calling fn for every
+// frame with its type ("ADDED", "MODIFIED", "DELETED"). It returns when the
+// stream ends, the context is cancelled, or the watch expires
+// (ErrWatchExpired). This is the single place the 410-Gone-means-relist rule
+// lives, so every cache inherits it rather than reimplementing it.
+func (k *Kube) WatchFrames(ctx context.Context, path, resourceVersion string, fn func(string, json.RawMessage)) error {
 	q := "?watch=1&allowWatchBookmarks=true&timeoutSeconds=300"
 	if resourceVersion != "" {
 		q += "&resourceVersion=" + url.QueryEscape(resourceVersion)
 	}
 	// no client timeout: a watch is a long-lived stream, bounded by
 	// timeoutSeconds server-side and by ctx here
-	resp, err := k.get(ctx, eventsPath(namespace)+q, 0)
+	resp, err := k.get(ctx, path+q, 0)
 	if err != nil {
 		var apiErr *apiError
 		if errors.As(err, &apiErr) && apiErr.Code == http.StatusGone {
@@ -254,12 +300,8 @@ func (k *Kube) WatchEvents(ctx context.Context, namespace, resourceVersion strin
 			return fmt.Errorf("decoding watch stream: %w", err)
 		}
 		switch frame.Type {
-		case "ADDED", "MODIFIED":
-			var ev Event
-			if err := json.Unmarshal(frame.Object, &ev); err != nil {
-				continue // a frame we cannot parse is not worth dropping the stream for
-			}
-			fn(ev)
+		case "ADDED", "MODIFIED", "DELETED":
+			fn(frame.Type, frame.Object)
 		case "ERROR":
 			var status struct {
 				Code   int32  `json:"code"`
@@ -272,4 +314,12 @@ func (k *Kube) WatchEvents(ctx context.Context, namespace, resourceVersion strin
 			return fmt.Errorf("watch error frame: %s (%d)", status.Reason, status.Code)
 		}
 	}
+}
+
+// IsForbidden reports whether an error is the API server refusing for lack of
+// RBAC — the one failure this adapter must name rather than retry silently,
+// since the operator grants adapters nothing and the grant is always external.
+func IsForbidden(err error) bool {
+	var apiErr *apiError
+	return errors.As(err, &apiErr) && apiErr.Code == http.StatusForbidden
 }

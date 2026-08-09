@@ -10,7 +10,7 @@ equivalent ways to turn it on.
 
 | Component | Flag | What it renders |
 |---|---|---|
-| Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), the `events get/list/watch` RBAC bound to its ServiceAccount, and — under `source.create` — a `SignalSource`. **Not the Pipeline**: claim it under `pipelines:` |
+| Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), RBAC bound to its ServiceAccount (`events get/list/watch` plus read-only `pods`/`replicasets`), and — under `source.create` — a `SignalSource`. **Not the Pipeline**: claim it under `pipelines:` |
 | Profile | `profile.enabled` | The `k8s-engineer` `AgentProfile` (identity only, with an inline `systemPrompt` role), its runtime `ServiceAccount` (`agentops-runtime-k8s`), and an `AgentRuntime` (named `default`) |
 | RBAC | `rbac.enabled` | Bindings for that ServiceAccount — see `rbac.mode` below |
 | MCP tooling | `mcp.enabled` | An `MCPConfig` (`k8s-api`, server key `kubernetes`) and an `MCPToolset` (`k8s-observability`), both bound automatically by the Pipelines above — see below |
@@ -45,6 +45,142 @@ Two things worth knowing:
   route loses `Bash`, while every other route sharing the profile keeps it.
   `profile.addressable.grantShell: false` does the same for the shipped
   addressable Pipeline.
+
+## Event suppression (`eventsAdapter.source.rules`)
+
+A Kubernetes Event is a point-in-time **fact** about an object whose lifecycle
+is churn by design. Ordinary rollout noise — a readiness probe failing on a pod
+twenty seconds from Ready, a `FailedScheduling` the next scheduler pass fixes,
+a terminating pod on its way out — is indistinguishable from an outage unless
+you ask again later. `rules` is how you ask again.
+
+The config has two halves, named after the systems they come from:
+
+| stanza | from | what it decides |
+|---|---|---|
+| `rules` | Prometheus | what counts as a problem, and how long it must hold (`for`) |
+| `route.inhibitRules` | Alertmanager | which consequences to suppress when their cause is already reported |
+
+Dwell is **not** spelled `group_wait`. Alertmanager's `group_wait` batches a
+group before its first notification; it is not `for:`, which does not exist in
+Alertmanager at all.
+
+### What `for` actually does
+
+```
+event matches a rule ──► hold `for` ──► re-check the involved object
+                                            │
+                          gone ─────────────┤ the terminating pod of a rollout
+                          recovered ────────┤ the new pod became Ready
+                                            │        → DROP
+                          still unhealthy ──┴──────► EMIT once, with evidence
+```
+
+Verification is a three-rung ladder. **Pod** has a real health predicate
+(phase, `Ready`, container waiting reasons). Every other kind has none, and
+falls to **"did the event recur during the window"** — a controller with a live
+problem keeps re-emitting, a resolved one goes quiet. Only when existence
+itself cannot be determined does it **fail open and emit**.
+
+Existence alone is never treated as confirmation. An autoscaler whose metric
+lookup flapped once still exists.
+
+### Two rules that keep the defaults honest
+
+**Past-tense reasons must carry `for: 0`.** `OOMKilling`, `Evicted`,
+`BackoffLimitExceeded`, `DeadlineExceeded` describe something that already
+happened. A dwell would find the healthy *replacement* and delete the evidence.
+This is the easiest way to build a rule set that looks careful and loses the
+incidents that matter most.
+
+**The last rule must be a catch-all with a dwell, not a drop.** That is the
+"do not miss issues" guarantee: a reason nobody anticipated — a third-party
+controller's warning, a reason added in a future Kubernetes release — is
+verified and reported rather than discarded.
+
+Both are pinned by test in `internal/integration/charttemplate_test.go`, so the
+tuning numbers stay editable without anyone having to re-derive the shape.
+
+### Cookbook
+
+```yaml
+eventsAdapter:
+  source:
+    rules:
+      # drop noise outright
+      - matchers: ['reason=~"ProbeWarning|SandboxChanged"']
+        action: drop
+
+      # a flappy reason: wait it out, but do not hide an outage
+      - matchers: ['reason="Unhealthy"']
+        for: 10m
+        escalateAfterObjects: 3   # 3 pods of one workload → emit now
+
+      # urgent: never wait
+      - matchers: ['reason=~"NodeNotReady|OOMKilling"']
+        for: "0"
+
+      # scope by pod label — pod labels are copied onto the signal
+      - matchers: ['app.kubernetes.io/part-of="scratch"']
+        action: drop
+
+      # everything else
+      - matchers: []
+        for: 3m
+
+    route:
+      inhibitRules:
+        # a down node makes all its pods look broken; report the node
+        - sourceMatchers: ['reason="NodeNotReady"']
+          targetMatchers: ['reason=~"Unhealthy|FailedScheduling"']
+          equal: [node]
+```
+
+Matchers use Alertmanager syntax (`=`, `!=`, `=~`, `!~`) over the signal's
+labels, and regexes are **anchored** — `reason=~"Failed"` does not also match
+`FailedMount`. `reason` is a readable alias for the `alertname` label.
+
+Legacy `includeReasons`/`excludeReasons` still work; they translate into
+leading drop rules, so there is one evaluation path.
+
+`escalateAfterObjects` (default 3) exists because a long dwell is right for one
+flapping pod and wrong for an outage: the premise it rests on — one object
+misbehaving is churn — stops holding when several do at once.
+
+## Grouping: by workload, not by pod
+
+`eventsAdapter.source.grouping.signatureLabels` defaults to
+`[namespace, workload]`. `workload` is the owning controller
+(`Deployment/api`), resolved through **owner references** — Pod → ReplicaSet →
+Deployment — never by parsing the pod's name, which breaks on StatefulSets
+(`api-0`), DaemonSets (`api-xk2p9`) and bare pods.
+
+This is what the pods/replicasets RBAC grant is for, and why grouping survives
+a rollout: a pod name is unique per replica and regenerated every deploy, so
+the old `[namespace, kind, name]` default made conversation count scale with
+**pods × rollouts** and the manager's 7-day window reuse could never fire.
+
+## Self-exclusion: agent-ops never signals on itself
+
+The adapter drops every event about agent-ops' own machinery. This is an
+invariant, not a filter, because the failure it prevents is unbounded:
+
+```
+Conversation → runtime pod → pod cannot start → Warning event
+     ↑                                              │
+     └──────────── signal ──── new Conversation ◄───┘
+```
+
+Nothing downstream catches that cycle — the fingerprint is fresh (new pod
+name), the workload is fresh (the owner is the Conversation CR), and even a
+correct liveness re-check passes it because the pod really is broken.
+`MAX_RUNTIMES` caps pods, not Conversation creation.
+
+Three independent mechanisms: **name prefix** (needs no API read, so it holds
+before the cache is warm), **owner/label**, and **own namespace**. Only the
+third is configurable, via `source.includeOwnNamespace: true` for installs that
+co-locate their own workloads with the operator — and it relaxes *only* that
+one. No configuration can re-admit agent-ops' own pods.
 
 ## Kubernetes as MCP tools (`mcp` / `mcpServers`)
 

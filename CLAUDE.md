@@ -348,12 +348,45 @@ CHANGELOG.md             every chart-version migration guide, newest first —
 - **No relay loops**: channel implementations (adapters AND in-process
   providers) must never re-ingest their own outbound posts as inbound —
   cross-channel relay depends on it.
+- **No signal loops** (the same rule one lane over): an observing signal
+  adapter must NEVER emit a signal about agent-ops' own machinery. A runtime
+  pod that cannot start emits a Warning event; that event becomes a signal, the
+  signal opens a Conversation, the Conversation creates another runtime pod
+  under a NEW name, forever. Nothing downstream catches it — the fingerprint is
+  fresh (new pod name), the workload is fresh (owner is the Conversation CR),
+  and even a correct liveness re-check passes it because the pod really is
+  broken; `MAX_RUNTIMES` caps pods, not Conversation creation, so it fills etcd.
+  `signal-k8s-events/selfexclude.go` implements THREE independent mechanisms
+  (name prefix — needs no API read, so it holds with a cold cache; owner/label;
+  own-namespace). Only the third is configurable: a deny-list is editable, and
+  an editable loop breaker is not one. A nil excluder still applies mechanism 1
+  on purpose. **agent-ops' own health is STATUS, not SIGNAL** — the reconciler
+  already holds the failure; routing it back through ingest to wake an agent is
+  the architectural error, not merely a noisy one.
 - Runtime pods: ownerRef → Conversation (GC); repo checkout at
   **`/data/workspace`** (claude-code sessions are keyed by cwd — moving this
   path breaks session resume); `/data/workspace` and `/data/home` are mount
   points — **clear contents, never rmdir**.
 - Dispatch/ingest semantics are pinned by test fixtures — change behavior by
   changing tests deliberately, not incidentally.
+- **`for:` is Prometheus, `group_wait` is Alertmanager, and they are NOT the
+  same thing.** `signal-k8s-events` config is deliberately two halves: `rules`
+  (Prometheus — what counts as a problem and how long it must hold) and `route`
+  (Alertmanager — inhibition). Alertmanager's `group_wait` batches a group
+  before its FIRST notification; `for:` does not exist in Alertmanager at all.
+  Spelling dwell as `group_wait` would be an Alertmanager term meaning
+  something Alertmanager does not mean. Two further rules the defaults depend
+  on: reasons describing a COMPLETED event (`OOMKilling`, `Evicted`,
+  `BackoffLimitExceeded`) must carry `for: 0` — a dwell finds the healthy
+  replacement and erases the incident; and the LAST rule must be a catch-all
+  with a dwell, never a drop, so an unanticipated reason is verified rather
+  than discarded. Both are pinned in `internal/integration/charttemplate_test.go`.
+- Event grouping is by **workload** (`[namespace, workload]`), resolved through
+  OWNER REFERENCES (Pod → ReplicaSet → Deployment) and never by parsing a pod
+  name — that breaks on StatefulSets (`api-0`), DaemonSets and bare pods. Pod
+  names are unique per replica and regenerated every rollout, so the old
+  `[namespace, kind, name]` default made conversations scale with pods ×
+  rollouts and the 7-day window reuse could never fire.
 
 ## Gotchas (paid for in debugging)
 

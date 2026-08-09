@@ -73,23 +73,63 @@ func TestFilterSeverityAndNamespace(t *testing.T) {
 	}
 }
 
+// emits runs the whole selection path for one event: scope, then rules.
+// Legacy reason filters are translated into rules, so this is the only way to
+// ask "would this event produce a signal".
+func emits(f *filter, e Event) bool {
+	if !f.Matches(&e) {
+		return false
+	}
+	sig := normalize("src", &e, enrichment{})
+	r, ok := f.Rule(&sig)
+	return !(ok && r.drop)
+}
+
 func TestFilterIncludeAndExcludeReasons(t *testing.T) {
 	inc := mustFilter(t, `{"includeReasons":["BackOff"]}`)
 	backoff := evt("Warning", "prod", "Pod", "p", "BackOff")
 	failed := evt("Warning", "prod", "Pod", "p", "FailedMount")
-	if !inc.Matches(&backoff) || inc.Matches(&failed) {
+	if !emits(inc, backoff) || emits(inc, failed) {
 		t.Fatal("includeReasons must restrict to the listed reasons")
 	}
 
 	exc := mustFilter(t, `{"excludeReasons":["BackOff"]}`)
-	if exc.Matches(&backoff) || !exc.Matches(&failed) {
+	if emits(exc, backoff) || !emits(exc, failed) {
 		t.Fatal("excludeReasons must drop the listed reasons and keep the rest")
 	}
 
 	// exclude wins over include for the same reason
 	both := mustFilter(t, `{"includeReasons":["BackOff"],"excludeReasons":["BackOff"]}`)
-	if both.Matches(&backoff) {
+	if emits(both, backoff) {
 		t.Fatal("excludeReasons must be applied after includeReasons")
+	}
+}
+
+// A reason filter must match the WHOLE reason: excluding "Failed" must not
+// also drop "FailedMount". Translation quotes the reasons and the regex is
+// anchored, so this holds.
+func TestLegacyReasonFiltersAreExactNotSubstring(t *testing.T) {
+	exc := mustFilter(t, `{"excludeReasons":["Failed"]}`)
+	if emits(exc, evt("Warning", "prod", "Pod", "p", "Failed")) {
+		t.Fatal("the listed reason must be dropped")
+	}
+	if !emits(exc, evt("Warning", "prod", "Pod", "p", "FailedMount")) {
+		t.Fatal("a reason merely PREFIXED by the listed one must survive")
+	}
+}
+
+// A source with no rules at all must emit immediately, exactly as before this
+// change: dwell arrives only when rules ask for it.
+func TestEmptyConfigHasNoDwell(t *testing.T) {
+	f := mustFilter(t, `{}`)
+	e := evt("Warning", "prod", "Pod", "p", "BackOff")
+	sig := normalize("src", &e, enrichment{})
+	r, ok := f.Rule(&sig)
+	if !ok {
+		t.Fatal("an empty rule list must still yield a catch-all")
+	}
+	if r.drop || r.dwell != 0 {
+		t.Fatalf("empty config must emit immediately: drop=%v dwell=%v", r.drop, r.dwell)
 	}
 }
 
@@ -106,7 +146,7 @@ func TestFingerprintSurvivesEventRecreation(t *testing.T) {
 	second.Metadata.Name, second.Metadata.UID = "api-1.99z", "uid-2"
 	second.LastTimestamp, second.Count = "2026-08-08T18:30:00Z", 1
 
-	a, b := normalize("k8s-events", &first), normalize("k8s-events", &second)
+	a, b := normalize("k8s-events", &first, enrichment{}), normalize("k8s-events", &second, enrichment{})
 	if a.Fingerprint != b.Fingerprint {
 		t.Fatalf("fingerprint must key on object+reason:\n%s\n%s", a.Fingerprint, b.Fingerprint)
 	}
@@ -117,8 +157,8 @@ func TestFingerprintSurvivesEventRecreation(t *testing.T) {
 	// a different object, or a different reason, is a different problem
 	other := evt("Warning", "prod", "Pod", "api-2", "BackOff")
 	reason := evt("Warning", "prod", "Pod", "api-1", "FailedMount")
-	if normalize("k8s-events", &other).Fingerprint == a.Fingerprint ||
-		normalize("k8s-events", &reason).Fingerprint == a.Fingerprint {
+	if normalize("k8s-events", &other, enrichment{}).Fingerprint == a.Fingerprint ||
+		normalize("k8s-events", &reason, enrichment{}).Fingerprint == a.Fingerprint {
 		t.Fatal("distinct object or reason must produce a distinct fingerprint")
 	}
 }
@@ -127,7 +167,7 @@ func TestNormalizeLabelsAndPayload(t *testing.T) {
 	e := evt("Warning", "prod", "Pod", "api-1", "BackOff")
 	e.Message = "Back-off restarting failed container"
 	e.Count = 7
-	s := normalize("cluster-events", &e)
+	s := normalize("cluster-events", &e, enrichment{})
 
 	want := map[string]string{
 		"alertgroup": "k8s-events", "alertname": "BackOff", "namespace": "prod",

@@ -21,6 +21,19 @@ type sourceConfig struct {
 	IncludeReasons []string `json:"includeReasons,omitempty"`
 	// ExcludeReasons drops these reasons; applied after IncludeReasons.
 	ExcludeReasons []string `json:"excludeReasons,omitempty"`
+	// Rules are the Prometheus half of the policy: ordered, first-match-wins
+	// selection with a dwell (`for`) and an optional `action: drop`. Empty
+	// means one catch-all with no dwell — today's behavior exactly.
+	Rules []Rule `json:"rules,omitempty"`
+	// Route is the Alertmanager half: inhibition.
+	Route Route `json:"route,omitempty"`
+	// IncludeOwnNamespace disables the THIRD self-exclusion mechanism only —
+	// events in the operator's own namespace stop being dropped wholesale. Set
+	// it when your own workloads are co-located with agent-ops. The name-prefix
+	// and owner/label mechanisms still apply and are not configurable: they are
+	// what keeps a failing runtime pod from opening a conversation about
+	// itself, and an editable loop breaker is not a loop breaker.
+	IncludeOwnNamespace bool `json:"includeOwnNamespace,omitempty"`
 }
 
 // validSeverities are the only two values core/v1 Event.type takes.
@@ -32,6 +45,11 @@ type filter struct {
 	namespaces map[string]bool // empty = all
 	include    map[string]bool // empty = all
 	exclude    map[string]bool
+	// includeOwnNamespace relaxes self-exclusion mechanism 3 only.
+	includeOwnNamespace bool
+	// rules is the compiled suppression policy. Legacy include/exclude reasons
+	// are translated into leading drop rules, so this is the single path.
+	rules *ruleSet
 }
 
 // parseConfig validates a source's raw config into a filter. An absent or empty
@@ -45,11 +63,23 @@ func parseConfig(raw json.RawMessage) (*filter, error) {
 		}
 	}
 	f := &filter{
-		severities: map[string]bool{},
-		namespaces: set(cfg.Namespaces),
-		include:    set(cfg.IncludeReasons),
-		exclude:    set(cfg.ExcludeReasons),
+		severities:          map[string]bool{},
+		namespaces:          set(cfg.Namespaces),
+		include:             set(cfg.IncludeReasons),
+		exclude:             set(cfg.ExcludeReasons),
+		includeOwnNamespace: cfg.IncludeOwnNamespace,
 	}
+	// Legacy reason filters become leading drop rules so there is ONE
+	// evaluation path; sources written against the previous config are
+	// unaffected because an otherwise-empty rule list compiles to a catch-all
+	// with no dwell.
+	rules := append(legacyRules(cfg.IncludeReasons, cfg.ExcludeReasons), cfg.Rules...)
+	compiled, err := compileRules(rules, cfg.Route)
+	if err != nil {
+		return nil, fmt.Errorf("spec.config: %w", err)
+	}
+	f.rules = compiled
+
 	if len(cfg.Severities) == 0 {
 		f.severities["Warning"] = true
 		return f, nil
@@ -64,7 +94,13 @@ func parseConfig(raw json.RawMessage) (*filter, error) {
 	return f, nil
 }
 
-// Matches reports whether an event should produce a signal for this source.
+// Matches reports whether an event is in this source's SCOPE: the right
+// severity, in a watched namespace.
+//
+// Reason filtering deliberately does NOT live here any more. Legacy
+// includeReasons/excludeReasons are translated into leading drop rules by
+// parseConfig, so selection by reason has exactly one implementation and
+// legacy and modern config cannot drift apart.
 func (f *filter) Matches(ev *Event) bool {
 	if !f.severities[ev.Type] {
 		return false
@@ -72,10 +108,16 @@ func (f *filter) Matches(ev *Event) bool {
 	if len(f.namespaces) > 0 && !f.namespaces[ev.Namespace()] {
 		return false
 	}
-	if len(f.include) > 0 && !f.include[ev.Reason] {
-		return false
+	return true
+}
+
+// Rule returns the policy for a normalized signal: the first matching rule, or
+// false when no rule applies (which callers treat as emit-immediately).
+func (f *filter) Rule(sig *Signal) (compiledRule, bool) {
+	if f.rules == nil {
+		return compiledRule{}, false
 	}
-	return !f.exclude[ev.Reason]
+	return f.rules.Match(matchLabels(sig))
 }
 
 // Scopes returns the namespaces this source needs watched: the configured list,
@@ -94,7 +136,7 @@ func (f *filter) Scopes() []string {
 // fingerprint that changed with them would open a fresh conversation on every
 // repeat of the same crash loop. Keyed on the OBJECT and REASON instead, a
 // flapping pod collapses into one conversation under the manager's cooldown.
-func normalize(source string, ev *Event) Signal {
+func normalize(source string, ev *Event, enr enrichment) Signal {
 	ns := ev.Namespace()
 	kind, name := ev.InvolvedObject.Kind, ev.InvolvedObject.Name
 
@@ -110,20 +152,30 @@ func normalize(source string, ev *Event) Signal {
 		"lastSeen":  ev.LastTimestamp,
 	}, "", "  ")
 
+	labels := map[string]string{
+		"alertgroup": "k8s-events",
+		"alertname":  ev.Reason,
+		"namespace":  ns,
+		"kind":       kind,
+		"name":       name,
+		"severity":   ev.Type,
+		"source":     source,
+	}
+	enr.applyTo(labels)
+
+	// The title names the WORKLOAD when one is known: a conversation grouped by
+	// workload titled after one of its pods reads as being about that pod.
+	subject := fmt.Sprintf("%s/%s", kind, name)
+	if enr.Workload != "" {
+		subject = enr.Workload
+	}
+
 	return Signal{
 		Fingerprint: fmt.Sprintf("%s@%s/%s/%s/%s", source, ns, kind, name, ev.Reason),
-		Labels: map[string]string{
-			"alertgroup": "k8s-events",
-			"alertname":  ev.Reason,
-			"namespace":  ns,
-			"kind":       kind,
-			"name":       name,
-			"severity":   ev.Type,
-			"source":     source,
-		},
-		Title:   fmt.Sprintf("%s: %s/%s", ev.Reason, kind, name),
-		Payload: string(payload),
-		Kind:    "alert",
+		Labels:      labels,
+		Title:       fmt.Sprintf("%s: %s", ev.Reason, subject),
+		Payload:     string(payload),
+		Kind:        "alert",
 	}
 }
 
