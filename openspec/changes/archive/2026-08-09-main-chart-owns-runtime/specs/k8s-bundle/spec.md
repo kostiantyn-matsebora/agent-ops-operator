@@ -1,9 +1,7 @@
-# k8s-bundle
+# k8s-bundle — delta
 
-## Purpose
+## MODIFIED Requirements
 
-The Kubernetes agent Helm subchart composition at `chart/charts/k8s-bundle/`: packages the k8s events signal source, the `k8s-engineer` profile, and the Kubernetes MCP tooling as three individually toggleable components. It ships no execution substrate: the runtime, its ServiceAccount, its credential and that SA's RBAC are the parent chart's (`agent-runtime-ownership`). Self-gated and off by default, it is also what demo mode turns on — demo mode is an enablement path for the bundle's read-only defaults, not a distinct feature set.
-## Requirements
 ### Requirement: The k8s bundle ships as a self-gated subchart, off by default and on in demo mode
 A Helm subchart at `chart/charts/k8s-bundle/` SHALL package the Kubernetes agent experience as three components — events signal source, k8s-engineer profile, and its MCP tooling. Every bundle template SHALL gate on `enabled OR global.demo.enabled` (self-gating, not a Helm `condition:`), with `k8s-bundle.enabled` defaulting to `false`. The parent chart's demo toggle SHALL live at `global.demo.enabled` and there SHALL be no `chart/templates/demo.yaml` — demo mode means exactly "the bundle with its defaults", which includes read-only RBAC resolved by the parent. Explicit `k8s-bundle.*` values SHALL still apply when enabled via demo.
 
@@ -43,45 +41,6 @@ Cross-component references SHALL be values-resolvable so partial enablement work
 #### Scenario: MCP tooling without the events lane
 - **WHEN** the bundle is enabled with `eventsAdapter.enabled=false`
 - **THEN** the `MCPConfig` and toolsets render for operators to bind from their own Pipelines
-
-### Requirement: The events component packages the adapter with its access
-When active, the `eventsAdapter` component SHALL render: the `SignalAdapter` CR (default name `k8s-events` — the routing key SignalSources select with `spec.adapter` — values-configured image, `kubernetesAccess: true`, singleton); RBAC granting `events` `get`/`list`/`watch` AND `pods`/`replicasets` `list`/`watch` to the adapter's deterministic ServiceAccount `agentops-signal-<name>` (ClusterRole by default, namespaced Role via `rbac.clusterWide: false`, none via `rbac.create: false`); and, when `source.create` is on, a `SignalSource` naming that adapter with `severities` defaulting to `["Warning"]` and values-configurable `namespaces` and `grouping`, TOGETHER WITH the `Pipeline` claiming it. That Pipeline SHALL declare its capabilities explicitly: there is no default to inherit, so a Pipeline declaring none would hand every event-driven conversation an empty allowlist. The manager SHALL NOT create or require any RBAC verbs on roles or rolebindings.
-
-The pods/replicasets grant is read-only and exists because the adapter resolves workload identity through owner references and re-checks liveness before emitting. Where the events grant is namespaced, the pods/replicasets grant SHALL be namespaced identically — the adapter never reads more broadly than it watches.
-
-The rendered source's default `grouping.signatureLabels` SHALL be `["namespace", "workload"]`, and its default `rules` SHALL be calibrated against both failure modes at once: they SHALL NOT open a conversation for ordinary rollout churn, and they SHALL NOT lose an actionable incident. Specifically the shipped defaults SHALL drop only pure-bookkeeping reasons whose underlying problem another undropped reason still reports, SHALL assign `for: 0` to reasons describing a completed event and to node-level conditions, SHALL assign longer dwells with breadth escalation to the known-flappy reasons, and SHALL end in a catch-all dwell so unanticipated reasons are verified rather than discarded.
-
-#### Scenario: A healthy rollout produces no conversation
-- **WHEN** the bundle renders with default values and a ten-replica Deployment rolls out normally, emitting probe and scheduling warnings on pods that then become Ready or terminate
-- **THEN** no conversation is created
-
-#### Scenario: A broken rollout produces exactly one conversation
-- **WHEN** the same Deployment is rolled out with an unpullable image
-- **THEN** exactly one conversation is created for the workload, carrying every contributing reason with its occurrence count
-
-#### Scenario: One values flag yields flowing events
-- **WHEN** the bundle is enabled with defaults and the LLM credential Secret exists
-- **THEN** Warning events in the cluster produce conversations executed by the k8s-engineer profile without building images or applying extra manifests
-
-#### Scenario: The rendered source is always claimed
-- **WHEN** the events component renders a SignalSource
-- **THEN** a Pipeline referencing that source renders alongside it, so signals route instead of dropping with `Wired=False`
-
-#### Scenario: Event-driven conversations are equipped
-- **WHEN** an event routes through the bundle's rendered Pipeline
-- **THEN** the resulting work unit carries a non-empty allowlist, because that Pipeline declares its own toolsets
-
-#### Scenario: Namespace-scoped events RBAC
-- **WHEN** `eventsAdapter.rbac.clusterWide=false`
-- **THEN** only a namespaced Role/RoleBinding renders, covering events, pods and replicasets alike, and the adapter can watch only in the release namespace
-
-#### Scenario: A default install groups by workload
-- **WHEN** the bundle renders with default values and a ten-replica Deployment crash-loops through several rollouts
-- **THEN** the rendered source's `signatureLabels` are `["namespace", "workload"]` and one conversation covers the workload rather than one per pod
-
-#### Scenario: Default rules ship, not an empty filter
-- **WHEN** the bundle renders with default values
-- **THEN** the rendered source carries a non-empty `rules` list, so rollout churn is suppressed without the installer writing any configuration
 
 ### Requirement: The profile component ships the k8s-engineer identity chain
 When active, the `profile` component SHALL render exactly one object: the `k8s-engineer` `AgentProfile` (values-configurable name, `maxTurns`, no repository, and **no capabilities** — no `allowedTools`, no `mcp`). It SHALL render no `AgentRuntime`, no ServiceAccount, and no credential Secret; the profile executes on the parent chart's runtime.
@@ -136,3 +95,10 @@ Upgrading SHALL preserve semantics: the `AgentRuntime` named `default` re-render
 #### Scenario: Both migration hops are findable
 - **WHEN** an operator looks up a value they set at `k8s-bundle.profile.runtime.*`
 - **THEN** the migration table names its 4.0 location, rather than only documenting the 1.x → 2.x hop
+
+## REMOVED Requirements
+
+### Requirement: RBAC is read-only by default with an explicit full mode
+**Reason**: The runtime ServiceAccount's RBAC is not a Kubernetes-bundle concern — it is the power of the one identity every agent in the release executes as, whichever bundle originated the conversation. Keeping `rbac.mode` here forced the bundle to also own the SA it binds, which is what made a second runtime identity exist.
+
+**Migration**: `k8s-bundle.rbac.mode` → `global.agentops.runtime.rbacMode`; `k8s-bundle.rbac.enabled: false` → `rbacMode: none`. The modes keep their exact meanings and rules, `full` is still never a default, and the requirement is restated in `agent-runtime-ownership` against the parent's SA. `eventsAdapter.rbac` is a different block and is unaffected.
