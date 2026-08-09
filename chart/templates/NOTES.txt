@@ -19,20 +19,19 @@ which profiles have no Pipeline granting them anything:
     kubectl -n {{ .Release.Namespace }} get pipeline -o jsonpath="{range .items[?(@.spec.profileRef.name=='$n')]}{.metadata.name} {end}" | grep -q . \
       || echo "no Pipeline grants capabilities to profile/$n"
   done
-{{- $kb := index .Values "k8s-bundle" }}
-{{- if and $kb $kb.enabled $kb.profile.enabled $kb.profile.runtime.create (not $kb.profile.runtime.credentialsSecret.token) }}
+{{- if and .Values.runtime.enabled (not .Values.runtime.credentialsSecret.token) }}
+{{- $cs := .Values.runtime.credentialsSecret }}
 
-ACTION NEEDED — the agent has no credential yet. AgentRuntime {{ $kb.profile.runtime.name }} references
-Secret {{ $kb.profile.runtime.credentialsSecret.name }} (key {{ $kb.profile.runtime.credentialsSecret.key }}), which this release does not create.
+ACTION NEEDED — the agent has no credential yet. AgentRuntime {{ .Values.runtime.name }} references
+Secret {{ $cs.name }} (key {{ $cs.key }}), which this release does not create.
 Without it runtime pods reach CreateContainerConfigError and conversations
 queue forever — the kubelet resolves the reference, so nothing reports it as a
 config error. Either create it:
 
-  kubectl -n {{ .Release.Namespace }} create secret generic {{ $kb.profile.runtime.credentialsSecret.name }} \
-    --from-literal={{ $kb.profile.runtime.credentialsSecret.key }}="$(claude setup-token)"
+  kubectl -n {{ .Release.Namespace }} create secret generic {{ $cs.name }} \
+    --from-literal={{ $cs.key }}="$(claude setup-token)"
 
-...or set k8s-bundle.profile.runtime.credentialsSecret.token and let the
-release manage it.
+...or set runtime.credentialsSecret.token and let the release manage it.
 {{- end }}
 {{- if .Values.console.enabled }}
 {{- $c := .Values.console }}

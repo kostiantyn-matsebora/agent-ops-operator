@@ -1,15 +1,22 @@
+{{- if .Values.serviceAccounts.runtime }}
+{{- fail "serviceAccounts.runtime moved to global.agentops.runtime.serviceAccountName in chart 4.0 (a subchart can read no other parent scope) — move the value and leave this key empty" }}
+{{- end }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ .Values.serviceAccounts.manager }}
   namespace: {{ .Release.Namespace }}
 ---
-# Agent runtime pods run under this SA. The chart grants it NOTHING — bind your
-# own (Cluster)Roles to define what agents may do. Least privilege by default.
+# Agent runtime pods run under this SA — exactly one per release, and the ONLY
+# runtime identity: no bundle creates a second. Its bindings come from
+# global.agentops.runtime.rbacMode plus rbac.runtime (runtime-rbac.yaml); the
+# mode is empty by default, so the chart still grants it NOTHING unconfigured.
+# Rendered even with runtime.enabled=false: the manager defaults every runtime
+# pod onto it, whoever wrote the AgentRuntime.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ .Values.serviceAccounts.runtime }}
+  name: {{ include "agentops.runtimeServiceAccount" . }}
   namespace: {{ .Release.Namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -38,11 +38,15 @@ runtimeIdleTtlMinutes: 1
 serviceAccounts:
   # the manager (CRDs + pod lifecycle in its namespace only)
   manager: agentops-manager
-  # agent runtime pods run under this SA — its permissions ARE the agent's powers
-  runtime: agentops-runtime
+  # MOVED in 4.0 to global.agentops.runtime.serviceAccountName — the k8s bundle
+  # derives its MCP server's identity guard from the runtime SA, and a subchart
+  # can read no parent scope but `global.`. Setting it here now FAILS the render
+  # naming the new key, rather than quietly running agents under an identity you
+  # did not choose.
+  runtime: ""
 
-# The agent's powers, declared in the release (empty = agents can do nothing
-# in-cluster). Object names: <runtime-sa>-<name>.
+# Targeted grants for the runtime SA, ADDITIVE to the mode selected by
+# global.agentops.runtime.rbacMode. Object names: <runtime-sa>-<name>.
 rbac:
   runtime:
     # ClusterRoles created + bound to the runtime SA: [{name, rules: [...]}]
@@ -51,6 +55,58 @@ rbac:
     bindClusterRoles: []
     # Namespaced Roles in other namespaces: [{name, namespace, rules: [...]}]
     namespaced: []
+
+# HOW AGENTS EXECUTE — the substrate, owned by this chart rather than by any
+# bundle. Bundles contribute domain (signal sources, profiles, tooling,
+# channels); the runtime, its identity and its credential are release-wide and
+# live here, so an install with no bundle — or with only telegram-bundle — can
+# still execute a conversation.
+#
+# Renders ONE AgentRuntime, named `default`: the name a profile with no
+# runtimeRef falls back to. Additional runtimes (a second vendor, a
+# higher-trust identity) stay hand-written CRs — that is what the
+# vendor × trust-level model asks for.
+runtime:
+  enabled: true
+  # AgentRuntime CR name. `default` is the fallback every profile without a
+  # runtimeRef resolves; renaming it means every profile needs one.
+  name: default
+  # 0.2.0+ composes the allowlist with the agent definition's own `tools:` and
+  # passes it verbatim — no substituted `Read` when nothing is declared.
+  # Pinning an older tag keeps that substitution and ignores toolsets.mode.
+  image: kmatsebora/agentops-runtime-claude:0.3.0
+  # Empty = follow runtimeIdleTtlMinutes above, so the release has ONE number.
+  # Set it only to give THIS runtime a different one. (It is always written to
+  # the CR: the CRD defaults this field to 10, so an omitted field is not unset
+  # and would override the release's setting.)
+  idleTtlMinutes: ""
+  # Where conversation runtime pods may be scheduled. Set it when the runtime
+  # image is not multi-arch (the reference runtime-claude images are amd64 only)
+  # or when agent work belongs on particular nodes — a runtime pod that lands on
+  # an unsupported architecture just crash-loops.
+  nodeSelector: {}
+  resources: {}
+  # Agent session persistence is wired from the `persistence` block below
+  # automatically (its claim, or existingClaim). Set this only to point at a
+  # claim this chart did not create.
+  homePvcRef: ""
+  # ONE secret with a Claude credential (claude setup-token output or an
+  # Anthropic API key). Projected as env via valueFrom — the manager reads no
+  # Secrets.
+  #
+  # Supply `token` and the chart CREATES this Secret, release-managed, the same
+  # way telegram-bundle handles its bot token — point it at a secret store from
+  # your helmfile/values and the credential is provisioned with the release.
+  # Leave it empty to reference a Secret you manage yourself.
+  #
+  # Getting this wrong fails QUIETLY and late: the runtime pod is created, then
+  # sits in CreateContainerConfigError while conversations queue behind it,
+  # because the kubelet — not the manager — resolves the reference.
+  credentialsSecret:
+    name: agentops-claude
+    key: oauthToken
+    envName: CLAUDE_CODE_OAUTH_TOKEN
+    token: ""
 
 # Demo advisor: a project-agnostic, read-only "k8s-engineer" agent you can try
 # minutes after install — no chat, no repo, no MCP setup. Ask via the HTTP API:
@@ -62,9 +118,10 @@ rbac:
 # (or follow the runtime pod logs live). Requires ONE secret with a Claude
 # credential (claude setup-token output or an Anthropic API key).
 #
-# Demo mode is exactly "the k8s-bundle subchart with its defaults" — profile,
-# runtime, read-only RBAC, AND the cluster Events lane. It lives under `global.`
-# because a subchart can read no other parent scope.
+# Demo mode is exactly "the k8s-bundle subchart with its defaults" — the
+# k8s-engineer profile, its MCP tooling AND the cluster Events lane — plus the
+# read-only RBAC it resolves for this chart's own runtime. It lives under
+# `global.` because a subchart can read no other parent scope.
 #
 # NOTE: unlike the pre-2.0 demo, this ingests Warning events and answers them
 # on its own, which costs LLM credits on a noisy cluster. For the old ask-only
@@ -72,6 +129,34 @@ rbac:
 global:
   demo:
     enabled: false
+
+  # The two release-wide facts about how agents execute, declared in the ONE
+  # scope a subchart can read. k8s-bundle's MCP server derives its own identity
+  # and posture from them, which is why they are not ordinary top-level values.
+  agentops:
+    runtime:
+      # The ServiceAccount every runtime pod runs as — exactly one per release,
+      # created by this chart. Its RBAC IS the agent's power.
+      serviceAccountName: agentops-runtime
+      # The agent's in-cluster power, as ONE knob:
+      #   none     — bind nothing
+      #   readonly — the built-in "view" ClusterRole plus node/namespace/metrics
+      #              reads "view" omits
+      #   full     — cluster-admin. An LLM-driven agent with unrestricted
+      #              control of your cluster: never a default, never demo, and
+      #              worth a second thought before you set it. Prefer readonly
+      #              plus targeted grants through `rbac.runtime` above.
+      #
+      # Empty resolves to `readonly` under global.demo.enabled and to `none`
+      # otherwise — so demo mode stays a one-flag working install while an
+      # ordinary upgrade grants nothing it did not grant before. `full` is
+      # never selected by any default or inferred path.
+      #
+      # DERIVED ELSEWHERE: k8s-bundle's MCP server follows this value (read-only
+      # server under a readonly SA for every mode but `full`). Widening this to
+      # `full` widens the MCP server too unless you set
+      # `k8s-bundle.mcpServers.readOnly: true` explicitly.
+      rbacMode: ""
 
   # The built-in tool vocabulary as MCPToolset CRs, so profiles and pipelines can
   # NAME tools instead of inlining comma strings. Split by risk on purpose — that
@@ -238,19 +323,17 @@ resources:
 
 # Kubernetes agent bundle (embedded subchart, OFF by default; demo mode turns
 # it on with these defaults). Three independent components — the cluster Events
-# lane, the k8s-engineer profile with its runtime, and that runtime's RBAC. See
+# lane, the k8s-engineer profile, and its MCP tooling. The bundle ships NO
+# runtime, no runtime ServiceAccount and no runtime RBAC: those are the
+# `runtime:` block and `global.agentops.runtime.*` above. See
 # chart/charts/k8s-bundle/values.yaml for the full surface. Typical enablement
 # WITHOUT demo mode:
+# global:
+#   agentops:
+#     runtime:
+#       rbacMode: readonly              # readonly | full (full = cluster-admin)
 # k8s-bundle:
 #   enabled: true
-#   profile:
-#     runtime:
-#       credentialsSecret: { name: agentops-claude, key: oauthToken }
-#       # sessions survive runtime pods only with a claim (the parent
-#       # `persistence` block is invisible to subcharts — name it here):
-#       homePvcRef: agentops-home
-#   rbac:
-#     mode: readonly                    # readonly | full (full = cluster-admin)
 #   eventsAdapter:
 #     enabled: true                     # false = ask-only, no event ingestion
 #     source:

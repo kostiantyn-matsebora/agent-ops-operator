@@ -1,73 +1,15 @@
 {{- /*
-Profile component: who the agent is, and what executes it.
+Profile component: WHO the agent is. Identity only — one object.
 
-The identity chain the RBAC component rides on:
-  AgentProfile.runtimeRef -> AgentRuntime.serviceAccountName -> that SA's RBAC
-and a profile with no runtimeRef falls back to the AgentRuntime named "default",
-which is why runtime.name defaults to it.
+Not what executes it: the AgentRuntime, its ServiceAccount, its credential and
+that SA's RBAC are the parent chart's (`runtime:` and
+`global.agentops.runtime.*`), because they are release-wide facts and not a
+Kubernetes-bundle concern. A profile with no runtimeRef falls back to the
+AgentRuntime named "default", which the parent renders whenever runtime.enabled
+is true; profile.runtimeRef names a different one you applied yourself.
 */ -}}
 {{- if and (include "k8s-bundle.active" .) .Values.profile.enabled }}
 {{- $p := .Values.profile }}
-{{- $rt := $p.runtime }}
-{{- if $rt.create }}
-{{- if $rt.credentialsSecret.token }}
-# Created because profile.runtime.credentialsSecret.token was supplied, so the
-# agent's credential is provisioned with the release instead of being a
-# prerequisite someone has to remember. The AgentRuntime below references it by
-# NAME only — the manager reads no Secrets, the kubelet resolves it.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ $rt.credentialsSecret.name }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-k8s-bundle
-type: Opaque
-stringData:
-  {{ $rt.credentialsSecret.key }}: {{ $rt.credentialsSecret.token | quote }}
----
-{{- end }}
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ include "k8s-bundle.runtimeServiceAccount" . }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-k8s-bundle
----
-apiVersion: agentops.dev/v1alpha1
-kind: AgentRuntime
-metadata:
-  name: {{ $rt.name }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-k8s-bundle
-spec:
-  image: {{ $rt.image | quote }}
-  # the agent's security identity — its RBAC IS its power
-  serviceAccountName: {{ include "k8s-bundle.runtimeServiceAccount" . }}
-  idleTtlMinutes: {{ $rt.idleTtlMinutes }}
-  {{- with $rt.nodeSelector }}
-  nodeSelector:
-{{ toYaml . | indent 4 }}
-  {{- end }}
-  {{- with $rt.homePvcRef }}
-  home:
-    pvcRef:
-      name: {{ . }}
-  {{- end }}
-  {{- with $rt.resources }}
-  resources:
-{{ toYaml . | indent 4 }}
-  {{- end }}
-  env:
-    - name: {{ $rt.credentialsSecret.envName }}
-      valueFrom:
-        secretKeyRef:
-          name: {{ $rt.credentialsSecret.name }}
-          key: {{ $rt.credentialsSecret.key }}
----
-{{- end }}
 apiVersion: agentops.dev/v1alpha1
 kind: AgentProfile
 metadata:
@@ -77,9 +19,8 @@ metadata:
     app.kubernetes.io/name: agentops-k8s-bundle
 spec:
   # Identity only — no repository, and no capabilities. What this agent may DO
-  # comes from the Pipelines routing it: the events Pipeline for event-driven
-  # conversations, and the capability Pipeline below for everything else
-  # (POST /task, /<profile> commands).
+  # comes from the Pipelines routing it, declared under the parent chart's
+  # `pipelines:` — this bundle ships none.
   maxTurns: {{ $p.maxTurns }}
   {{- with $p.systemPrompt }}
   # Inline role, because this profile has no repository to hold a definition
@@ -87,11 +28,8 @@ spec:
   systemPrompt: |
 {{ . | trim | indent 4 }}
   {{- end }}
-  {{- if $p.runtimeRef }}
+  {{- with $p.runtimeRef }}
   runtimeRef:
-    name: {{ $p.runtimeRef }}
-  {{- else if and $rt.create (ne $rt.name "default") }}
-  runtimeRef:
-    name: {{ $rt.name }}
+    name: {{ . }}
   {{- end }}
 {{- end }}

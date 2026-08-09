@@ -252,12 +252,14 @@ console/                 the agent-ops console (own module, no deps) — a
                          ambiguous — never guessed
 chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
                          SignalSource — the CLAIM lives in the parent chart's
-                         `pipelines:`, since NO bundle ships wiring),
-                         k8s-engineer profile + runtime + SA, and that SA's RBAC
-                         (readonly | full=cluster-admin). The profile has no
-                         repository, so it carries an inline `systemPrompt`
-                         role — otherwise an event wakes a personality-free
-                         agent.
+                         `pipelines:`, since NO bundle ships wiring), and the
+                         k8s-engineer profile — ONE object, identity only. NO
+                         substrate: no AgentRuntime, no runtime SA, no
+                         credential, no runtime RBAC (all of that is the parent's
+                         `runtime:` + `global.agentops.runtime.*`). The profile
+                         has no repository, so it carries an inline
+                         `systemPrompt` role — otherwise an event wakes a
+                         personality-free agent.
                          Self-gated on `enabled OR global.demo.enabled`; demo
                          mode IS this bundle (chart/templates/demo.yaml is gone).
                          Plus the `mcp` component: MCPConfig `k8s-api` (server
@@ -266,17 +268,23 @@ chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
                          `k8s-admin` (6 mutating), ENUMERATED not wildcarded
                          because `mcp__kubernetes__*` spans both halves and
                          defeats the split. `k8s-admin` renders only when a
-                         server that REGISTERS those tools exists. OFF by
-                         default (alone among the
-                         components): with `mcpServers` off there is no endpoint
-                         to default the URL onto, so default-on would fail its
-                         own guard on every render. `mcpServers` optionally runs
+                         server that REGISTERS those tools exists. `mcp` and
+                         `mcpServers` are ON by default and flip as a PAIR — the
+                         config's URL defaults onto the deployed Service, which
+                         is the only reason the component used to be off; the
+                         endpoint guard stays and still fails `mcp.enabled` with
+                         no server and no `url`. `mcpServers` runs
                          containers/kubernetes-mcp-server (`--read-only`,
                          filters at REGISTRATION not listing) under a SECOND SA
                          `agentops-mcp-k8s` — never the runtime SA (render
                          fails if equal). That second identity IS the component's
                          reason to exist: MCP reach = server SA's RBAC ∩ toolset,
-                         two walls, where kubectl+Bash has only the runtime SA's
+                         two walls, where kubectl+Bash has only the runtime SA's.
+                         `readOnly`/`rbac.mode` are null and DERIVE from
+                         `global.agentops.runtime.rbacMode` (full => write-capable
+                         server under a full SA; anything else => read-only under
+                         readonly). Explicit wins — that is the override that
+                         recovers "kubectl writes, MCP reads only"
 chart/charts/telegram-bundle/
                          subchart: the three-component Telegram stack (router +
                          signal adapter + channel adapter) as adapter CRs, and
@@ -295,7 +303,15 @@ chart/charts/telegram-bundle/
 chart/                   Helm chart: manager Deployment/RBAC/Service + CRDs as gated
                          templates (crds.enabled, crds.keep -> helm.sh/resource-policy:
                          keep so uninstall never cascade-deletes CRs); CRD source of
-                         truth = chart/files/crds/ (controller-gen output)
+                         truth = chart/files/crds/ (controller-gen output).
+                         templates/runtime.yaml = THE SUBSTRATE: one AgentRuntime
+                         named `default` + its credential Secret when
+                         `runtime.credentialsSecret.token` is set, with
+                         `home.pvcRef` WIRED from the parent's own `persistence`
+                         (never copied). templates/runtime-rbac.yaml renders the
+                         mode-driven bindings; templates/_helpers.tpl resolves
+                         BOTH substrate facts from `.Values.global` alone, so a
+                         subchart calling them cannot disagree with the parent
 config/samples/          example CRs (the only config/ content — deployment-specific
                          config belongs with the deployment, never in this module)
 docs/                    reference pages: concepts.md (CRDs + capability
@@ -307,6 +323,17 @@ CHANGELOG.md             every chart-version migration guide, newest first —
 
 ## Invariants (do not break)
 
+- **THE PARENT CHART OWNS THE SUBSTRATE; BUNDLES CONTRIBUTE DOMAIN.** How agents
+  execute — image, LLM credential, idle TTL, node placement, home volume, and the
+  ONE identity whose RBAC is the agent's power — is release-wide and lives in
+  `chart/values.yaml` (`runtime:` + `global.agentops.runtime.*`). No subchart
+  renders an `AgentRuntime`, a runtime ServiceAccount or a credential Secret;
+  bundles ship sources, profiles, tooling and channels and REFERENCE it. Both
+  substrate keys are under `global.` because a subchart can read no other parent
+  scope and k8s-bundle's MCP server derives from them — restating them in a
+  subchart recreates the two-spellings-of-one-fact problem chart 4.0 removed.
+  Putting the runtime in a bundle is what made a chat-only install unable to
+  execute anything and made TWO runtime SAs exist, one granted everything.
 - **The manager reads NO secrets — zero Secret API reads.** Everything
   secret-shaped compiles to `valueFrom`/`envFrom` in pod specs (the kubelet
   resolves it); transport credentials are declared per Channel

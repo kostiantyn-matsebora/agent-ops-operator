@@ -1,10 +1,73 @@
 {{- /*
-RBAC for the agent runtime SA — the agent's powers, declared in values.
-The chart grants NOTHING unless configured here (or via demo.readOnlyRbac).
+What the agent may actually do, bound to the runtime ServiceAccount — because
+that SA's permissions ARE the agent's powers, whichever bundle originated the
+conversation. Hence the parent chart, not a domain bundle.
+
+Two layers, and they compose:
+  * the MODE (global.agentops.runtime.rbacMode) — the canned postures. Empty
+    resolves to readonly under demo mode and to none otherwise, so the chart
+    keeps granting NOTHING unless configured.
+  * rbac.runtime.{clusterRoles,bindClusterRoles,namespaced} — targeted
+    additions, ADDITIVE to whatever the mode granted.
 Object names: <runtime-sa>-<entry-name>.
 */ -}}
-{{- $sa := .Values.serviceAccounts.runtime }}
+{{- $sa := include "agentops.runtimeServiceAccount" . }}
 {{- $ns := .Release.Namespace }}
+{{- $mode := include "agentops.runtimeRbacMode" . }}
+{{- if eq $mode "readonly" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $ns }}
+---
+# "view" omits cluster-scoped reads and metrics; an agent asked why a node is
+# unhealthy needs both.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $sa }}-cluster-ro
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-cluster-ro
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $sa }}-cluster-ro
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $ns }}
+{{- else if eq $mode "full" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $ns }}
+{{- end }}
 {{- range .Values.rbac.runtime.clusterRoles }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

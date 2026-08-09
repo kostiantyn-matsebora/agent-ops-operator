@@ -8,6 +8,103 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+**BREAKING — the main chart owns the agent runtime.** Chart **4.0.0**. No image
+changes; this is a values and object-ownership move.
+
+*Why this exists:* `AgentRuntime` was created in exactly one place — the
+`k8s-bundle` subchart — and nothing about it is Kubernetes-shaped. Image,
+credential, idle TTL, node placement and home volume describe *how an agent
+executes*, which is the same for a VictoriaMetrics lane, a chat-only install or
+a Kubernetes one. The placement was never a decision: chart 2.x relocated the
+parent's `demo.*` block wholesale and the runtime rode along, because demo mode
+and the bundle became the same thing. The interest paid since: an install with
+only `telegram-bundle` rendered nothing that could execute a conversation, two
+runtime ServiceAccounts existed (the parent's, granted nothing, and the
+bundle's, granted everything), `homePvcRef` was a documented copy of a claim the
+parent creates, and idle TTL had two defaults that disagreed (1 vs 10).
+
+**Two upgrade-visible effects that are not value renames — read these first**
+
+1. **The runtime ServiceAccount is renamed.** `agentops-runtime-k8s` →
+   `agentops-runtime` (the one the parent already created and the manager
+   already defaults runtime pods onto). Helm replaces the bundle-named bindings
+   with global-named ones in the same upgrade. **If you bound your own
+   (Cluster)Roles to `agentops-runtime-k8s`, re-point them** — nothing else
+   will. Afterwards, confirm the old binding is gone:
+
+   ```sh
+   kubectl get clusterrolebinding | grep agentops-runtime-k8s   # expect nothing
+   ```
+
+2. **An install that enabled `k8s-bundle` without touching MCP now gets an MCP
+   server workload.** `mcp.enabled` and `mcpServers.enabled` both default to
+   `true` and flip as a pair — the config's URL needs a Service to default onto,
+   which is the only reason the component used to be off. Hold position:
+   `k8s-bundle.mcpServers.enabled: false` (and `mcp.enabled: false`, or an
+   `mcp.url` of your own).
+
+**Values migration**
+
+| 3.x | 4.0 |
+|---|---|
+| `serviceAccounts.runtime` | `global.agentops.runtime.serviceAccountName` (setting the old key now FAILS the render) |
+| `k8s-bundle.profile.runtime.image` | `runtime.image` |
+| `k8s-bundle.profile.runtime.credentialsSecret.*` | `runtime.credentialsSecret.*` |
+| `k8s-bundle.profile.runtime.nodeSelector` | `runtime.nodeSelector` |
+| `k8s-bundle.profile.runtime.resources` | `runtime.resources` |
+| `k8s-bundle.profile.runtime.idleTtlMinutes` | `runtime.idleTtlMinutes` (empty ⇒ follows `runtimeIdleTtlMinutes`) |
+| `k8s-bundle.profile.runtime.homePvcRef` | *(automatic from `persistence`)* |
+| `k8s-bundle.profile.runtime.name` | `runtime.name` |
+| `k8s-bundle.profile.runtime.create` | `runtime.enabled` |
+| `k8s-bundle.profile.runtime.serviceAccountName` | `global.agentops.runtime.serviceAccountName` |
+| `k8s-bundle.rbac.mode` | `global.agentops.runtime.rbacMode` |
+| `k8s-bundle.rbac.enabled: false` | `global.agentops.runtime.rbacMode: none` |
+| `k8s-bundle.mcpServers.readOnly` | *(derived from `rbacMode`; still settable)* |
+| `k8s-bundle.mcpServers.rbac.mode` | *(derived from `rbacMode`; still settable)* |
+
+Moved a value into `k8s-bundle.profile.runtime.*` during the 1.x → 2.x hop? That
+table is still below, under chart 2.0.0 — this one names where it went next.
+
+**Worth knowing**
+
+- **A default install now renders an `AgentRuntime`.** `runtime.enabled` is
+  `true`, so a chart with no bundle — or with only `telegram-bundle` — can
+  execute a conversation. If you manage `AgentRuntime` CRs yourself, set
+  `runtime.enabled: false`; a name collision on `default` makes Helm adopt or
+  conflict loudly rather than silently change behavior.
+- **`rbacMode` is one knob, and empty grants nothing.** `none` | `readonly` |
+  `full`, defaulting to empty, which resolves to `readonly` under
+  `global.demo.enabled` and to `none` otherwise — so a release that never set an
+  RBAC value holds no bindings after upgrade, exactly as before. `full` is never
+  selected by a default or inferred path.
+  `rbac.runtime.{clusterRoles,bindClusterRoles,namespaced}` stay additive.
+- **The MCP server's posture derives from that knob.** `full` yields a
+  write-capable server under a `full` SA and renders `k8s-admin`; every other
+  mode yields a read-only server under a `readonly` SA. It derives because a
+  read-only server under a `full` agent pushes every write back onto kubectl —
+  the single-wall path the component exists to replace. The cost is real:
+  widening the agent widens the server unless you set
+  `k8s-bundle.mcpServers.readOnly: true`, which recovers "kubectl writes, MCP
+  reads only". See
+  [docs/k8s-bundle.md](docs/k8s-bundle.md#kubernetes-as-mcp-tools-mcp--mcpservers).
+- **Idle TTL stops being configured twice, and drops from 10 to 1.** The bundle
+  defaulted `idleTtlMinutes: 10` while the manager's `runtimeIdleTtlMinutes` was
+  `1`; now an empty `runtime.idleTtlMinutes` follows the release value, so a
+  finished conversation gives its slot back in a minute rather than ten. Set
+  `runtime.idleTtlMinutes: 10` to keep the old behavior for this runtime, or
+  raise `runtimeIdleTtlMinutes` for the release. The chart WRITES the field
+  rather than omitting it: `AgentRuntime.spec.idleTtlMinutes` has a CRD default
+  of `10`, so an omitted field is stored as `10` and the manager prefers any
+  non-zero spec value over its own setting — omitting it renders a correct-
+  looking manifest and a wrong stored object.
+- **The bundle keeps its identity, not its substrate.** `profile.enabled` now
+  renders exactly one object, the `AgentProfile`; `profile.runtimeRef` still
+  points at a runtime other than `default`. `eventsAdapter.rbac` is a different
+  block and is untouched.
+- **Rollback = chart 3.4.0.** The CRDs are unchanged, so a downgrade re-renders
+  the bundle-owned objects; the only manual step is deleting the parent-owned
+  `AgentRuntime` if its name differs from the bundle's.
+
 **Conversations are capped, queued, and can be closed.** Chart 3.4.0, manager
 0.21.0, `channel-telegram` 0.6.1, `console` 0.2.0 — ship them together: an
 adapter that does not know the new `close-topic` op leaves topics open.
