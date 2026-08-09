@@ -1,3 +1,5 @@
+//go:build !dev
+
 package main
 
 import (
@@ -6,34 +8,28 @@ import (
 	"net/http"
 )
 
-// The SPA ships inside the binary: hand-written HTML/JS/CSS, no build step, no
-// npm, nothing to fetch at runtime. That keeps the image distroless-friendly
-// and this module dependency-free, and it is enough — the graph is tens of
-// nodes of hand-rolled SVG, not a visualization library's problem.
-
-//go:embed ui
+// The SPA ships INSIDE the binary. `ui/dist` is produced by the Vite build in an
+// earlier Docker stage (or by `make ui` locally) and embedded here, so the
+// deployable artifact stays exactly what every other adapter is: one Go image
+// serving one port, with nothing fetched at runtime and no CDN in the CSP.
+//
+// npm exists at BUILD time only, inside this module and its image. No other
+// module and not the manager gains a build step — the dependency-free rule that
+// governs adapter modules is narrowed here, not broken.
+//
+// `all:` is required: Vite emits `dist/assets/…` and the default embed pattern
+// skips directories whose names begin with `_` or `.`, which hashed asset
+// directories can produce.
+//
+//go:embed all:ui/dist
 var uiFS embed.FS
 
 // UIHandler serves the embedded assets, falling back to index.html so the SPA
-// owns its own routes.
+// owns its own routes (deep links like /conversations/x must not 404).
 func UIHandler() http.Handler {
-	sub, err := fs.Sub(uiFS, "ui")
+	sub, err := fs.Sub(uiFS, "ui/dist")
 	if err != nil {
 		panic(err) // embedded at build time: unreachable unless the tree moved
 	}
-	files := http.FileServer(http.FS(sub))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := fs.Stat(sub, trimLeadingSlash(r.URL.Path)); err != nil {
-			r = r.Clone(r.Context())
-			r.URL.Path = "/"
-		}
-		files.ServeHTTP(w, r)
-	})
-}
-
-func trimLeadingSlash(p string) string {
-	if p == "" || p == "/" {
-		return "index.html"
-	}
-	return p[1:]
+	return spaHandler(http.FS(sub), sub)
 }

@@ -155,31 +155,86 @@ function runClaude(unit) {
     console.log(`\n[runtime] run ${unit.runId}${unit.resumeSessionId ? ' resume=' + unit.resumeSessionId : ''} thread=${unit.threadId ?? 'general'}`);
     console.log(`[runtime] tools agent=${unit.agent || '-'} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${unit.toolsMode || 'merge'} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
     if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
-    const p = spawn('claude', args, {
-      cwd: WORKSPACE,
-      env: { ...process.env, RUN_ID: unit.runId, TG_THREAD_ID: unit.threadId != null ? String(unit.threadId) : '' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let buf = '', sessionId = null, result = '';
-    p.stdout.on('data', (c) => {
-      buf += c;
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        if (!line.trim()) continue;
-        let ev;
-        try { ev = JSON.parse(line); } catch { console.log(line); continue; }
-        if (ev.session_id && !sessionId) sessionId = ev.session_id;
-        if (ev.type === 'result') result = (ev.result || '').slice(0, 2000);
-        const txt = formatEvent(ev, line);
-        if (txt) process.stdout.write(txt);
-      }
-    });
-    p.stderr.on('data', (c) => process.stderr.write(c));
-    p.on('error', (e) => resolve({ status: 'failed', exitCode: -1, sessionId, result: `spawn: ${e.message}` }));
-    p.on('close', (code) => resolve({ status: code === 0 ? 'succeeded' : 'failed', exitCode: code, sessionId, result }));
+    resolve(spawnClaude(args, unit, Boolean(unit.resumeSessionId)));
   });
+}
+
+// spawnClaude runs one `claude` invocation.
+//
+// A RESUME whose session no longer exists is retried ONCE without --resume.
+// Sessions live in $HOME/.claude/projects/-data-workspace/, so they vanish
+// whenever /data/home does not outlive the pod — an install without a home PVC,
+// an eviction, a node move. Losing the thread's context is a real cost; failing
+// the reply outright is a worse one, and it fails with an EMPTY result because
+// claude never reaches its result event, so the person who typed sees "failed"
+// and no reason at all.
+//
+// Only a resume is retried, and only once: an ordinary agent failure must not be
+// silently run twice, which would double the cost and could repeat a mutation.
+async function spawnClaude(args, unit, isResume) {
+  const attempt = (argv) =>
+    new Promise((resolve) => {
+      const p = spawn('claude', argv, {
+        cwd: WORKSPACE,
+        env: { ...process.env, RUN_ID: unit.runId, TG_THREAD_ID: unit.threadId != null ? String(unit.threadId) : '' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let buf = '', sessionId = null, result = '', stderr = '';
+      p.stdout.on('data', (c) => {
+        buf += c;
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          let ev;
+          try { ev = JSON.parse(line); } catch { console.log(line); continue; }
+          if (ev.session_id && !sessionId) sessionId = ev.session_id;
+          if (ev.type === 'result') result = (ev.result || '').slice(0, 2000);
+          const txt = formatEvent(ev, line);
+          if (txt) process.stdout.write(txt);
+        }
+      });
+      p.stderr.on('data', (c) => {
+        stderr += c;
+        process.stderr.write(c);
+      });
+      p.on('error', (e) => resolve({ status: 'failed', exitCode: -1, sessionId, result: `spawn: ${e.message}`, stderr }));
+      p.on('close', (code) =>
+        resolve({ status: code === 0 ? 'succeeded' : 'failed', exitCode: code, sessionId, result, stderr }));
+    });
+
+  const first = await attempt(args);
+  if (!isResume || first.status === 'succeeded') return strip(first);
+
+  // A session that was found emits session_id early, even on a later failure.
+  // No session id AND no result is what a missing session looks like; the
+  // stderr text is the direct confirmation when the CLI gives one.
+  const lost = !first.sessionId && !first.result;
+  const saysSoOnStderr = /no conversation found|session .* not found|could not find session/i.test(first.stderr || '');
+  if (!lost && !saysSoOnStderr) return strip(first);
+
+  console.log(
+    `[runtime] resume of session ${unit.resumeSessionId} produced no output — the session is gone ` +
+      `(is /data/home persisted? without a home PVC it dies with the pod). Retrying as a NEW session; ` +
+      `earlier context is lost.`,
+  );
+  const fresh = args.filter((a, i) => a !== '--resume' && args[i - 1] !== '--resume');
+  const second = await attempt(fresh);
+  if (second.status === 'succeeded') {
+    return strip({
+      ...second,
+      // Said in the ANSWER, not only the log: the person reading it needs to
+      // know the agent has no memory of what came before.
+      result: `⚠️ The previous session could not be resumed, so this was answered without its history.\n\n${second.result}`,
+    });
+  }
+  return strip(second);
+}
+
+/** strip removes the internal stderr capture from what is reported. */
+function strip({ stderr, ...rest }) {
+  return rest
 }
 
 (async () => {

@@ -1,0 +1,56 @@
+import type { ReactElement } from 'react'
+
+// PLAIN TEXT, ALWAYS.
+//
+// Every string the console renders comes from the cluster or the wire: a
+// condition message a reconciler wrote, an agent's own output, a chat message a
+// person typed, an opaque config block. None of it is trusted, and none of it is
+// ours to interpret as markup.
+//
+// React escapes by default, so this component's job is not escaping — it is
+// making the ONE dangerous alternative impossible to reach by accident. There is
+// no dangerouslySetInnerHTML anywhere in this app; if a view wants formatting,
+// it composes elements instead of handing a string to the DOM.
+//
+// The adapters emit a small HTML subset for chat transports (<b>, <i>) because
+// Telegram wants it. Here that markup is STRIPPED rather than rendered: the
+// console is not that transport, and rendering a tag because a Telegram adapter
+// wrote one would be trusting a string from a channel.
+
+const TAG = /<\/?[a-zA-Z][^>]*>/g
+const ENTITIES: Record<string, string> = {
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&#39;': "'",
+  '&nbsp;': ' ',
+}
+
+/**
+ * plain strips the chat HTML subset and decodes the entities the adapters
+ * escape, so text arrives as the person actually typed it.
+ */
+export function plain(input: string): string {
+  const withoutTags = input.replace(TAG, '')
+  return withoutTags.replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (m) => ENTITIES[m] ?? m)
+}
+
+export interface PlainTextProps {
+  children?: string | null
+  /** Render newlines as line breaks — transcripts and messages need it. */
+  multiline?: boolean
+  className?: string
+}
+
+/** PlainText renders cluster- and wire-sourced text, never as markup. */
+export function PlainText({ children, multiline, className }: PlainTextProps): ReactElement | null {
+  if (!children) return null
+  const text = plain(children)
+  if (!multiline) return <span className={className}>{text}</span>
+  return (
+    <span className={className} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      {text}
+    </span>
+  )
+}

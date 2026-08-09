@@ -17,9 +17,11 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/metrics"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
 )
 
@@ -100,9 +102,15 @@ func main() {
 	// here; every other type is served by an external adapter consuming the op
 	// queue over /channel/*. The manager reads no secrets — adapter auth
 	// arrives via env (ADAPTER_TOKEN), transport credentials live adapter-side.
+	// Per-hop telemetry: bounded, in-memory, lossy by design. Every emission
+	// site feeds THIS log, and the log fans out to the Prometheus registry — one
+	// instrumentation pass, two consumers, so the console's stream and the
+	// cluster's charts cannot drift apart.
+	acts := activity.New(envInt("ACTIVITY_BUFFER", activity.DefaultSize))
+
 	registry := chat.NewRegistry()
-	ops := &chat.OpQueue{Client: mgr.GetClient(), Namespace: namespace, Registry: registry}
-	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: namespace, Ops: ops}
+	ops := &chat.OpQueue{Client: mgr.GetClient(), Namespace: namespace, Registry: registry, Activity: acts}
+	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: namespace, Ops: ops, Activity: acts}
 	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080")
 
 	// ChannelAdapter lifecycle: adapters are plugged in as CRs; the reconciler
@@ -177,21 +185,32 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.Add(&httpapi.Server{
+	api := &httpapi.Server{
 		Client:    mgr.GetClient(),
 		Reader:    mgr.GetAPIReader(),
 		Namespace: namespace,
 		Addr:      env("API_ADDR", ":8080"),
 		Ops:       ops,
 		Router:    router,
+		Activity:  acts,
+		Version:   env("VERSION", "dev"),
 		// The backlog bound: the one capacity check that must live in ingest,
 		// because the point is not to create the object at all.
 		MaxQueuedConversations: envInt("MAX_QUEUED_CONVERSATIONS", 50),
+		MaxActiveConversations: maxActive,
 		AdapterToken:           os.Getenv("ADAPTER_TOKEN"),
-	}); err != nil {
+	}
+	if err := mgr.Add(api); err != nil {
 		setupLog.Error(err, "http api")
 		os.Exit(1)
 	}
+
+	// The metric set observes the activity log and samples the same in-memory
+	// state GET /status reports, into the registry already serving :9090. The
+	// counters exist so alerting never depends on anyone having a browser open.
+	collector := metrics.New(api.MetricsSample)
+	collector.MustRegister()
+	acts.AddObserver(collector)
 
 	utilruntime.Must(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	utilruntime.Must(mgr.AddReadyzCheck("readyz", healthz.Ping))

@@ -156,6 +156,167 @@ The same bring-your-own pattern applies to chat transports — see the channel
 adapter contract above and [`channel-telegram/`](../channel-telegram/).
 
 
+## The activity contract
+
+Per-hop telemetry: one structured event for every movement the manager
+mediates. It exists because nothing else records motion — CR status says a
+conversation is `inflight`, never that the manager handed run `r-7` to a runtime
+and got a result 4s later, so a graph derived from status animates what it
+*infers* rather than what happened.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /activity?since=<cursor>&limit=<n>` | bounded replay from the ring buffer |
+| `GET /activity/stream` | SSE; each event carries its cursor |
+| `POST /activity` | adapter-reported hops (delivery confirmation) |
+
+All three use the adapter bearer scheme and accept **either** a channel- or a
+signal-adapter derived token (or the master token) — the console holds both
+identities and would otherwise have to pick one arbitrarily.
+
+Event shape:
+
+```json
+{
+  "cursor":       "0000000000012345",
+  "ts":           "2026-08-09T11:04:22.117Z",
+  "kind":         "run.completed",
+  "from":         {"kind": "runtime",  "name": "default"},
+  "to":           {"kind": "pipeline", "name": "k8s-ops"},
+  "status":       "ok",
+  "conversation": "chat-abc12",
+  "pipeline":     "k8s-ops",
+  "runId":        "r-7",
+  "opId":         "send:9",
+  "inputId":      "in-mfx1",
+  "latencyMs":    4218,
+  "code":         "succeeded",
+  "detail":       "succeeded (exit 0)",
+  "adapter":      "telegram"
+}
+```
+
+`from` and `to` name nodes the way the topology graph names them, so an event
+renders directly as motion along an edge that already exists — no inference in
+the consumer. Node kinds: `signal-adapter`, `signal-source`, `pipeline`,
+`conversation`, `profile`, `runtime`, `channel`, `channel-adapter`, `toolset`,
+`mcp-config`, `manager`.
+
+| Kind | From → To | Emitted when |
+|---|---|---|
+| `signal.received` | signal-adapter → signal-source | `POST /signal/inbound` accepted |
+| `signal.claimed` | signal-source → pipeline | a Ready Pipeline claims the source |
+| `signal.dropped` | signal-source → ∅ | unclaimed source, or the pending backlog is full |
+| `conversation.created` | pipeline → conversation | Conversation CR created |
+| `input.queued` | source/channel → conversation | an input was appended |
+| `run.dispatched` | pipeline → runtime | `GET /work` handed a unit out |
+| `run.completed` | runtime → pipeline | `POST /work/done` |
+| `channel.op.enqueued` | conversation → channel | `ensure-topic` / `send` / `close-topic` queued |
+| `channel.op.completed` | channel-adapter → manager | op acked, or failed with a reason |
+| `channel.inbound` | channel-adapter → conversation | a user reply entered the router |
+
+Three properties are load-bearing:
+
+- **Bounded and lossy by design.** A fixed-size in-memory ring (`ACTIVITY_BUFFER`,
+  default 10000), evicting oldest-first, never persisted and never written to
+  any Kubernetes object. The durable record stays `Conversation.status.runs[]`.
+  Emission never blocks the operation it records: a full buffer drops, a slow
+  subscriber is marked lagged rather than waited on.
+- **A gap is always explicit.** A cursor older than the buffer's oldest answers
+  `"resync": true` (SSE: an `event: resync` frame), and the client is expected
+  to re-read snapshots. A silent short list would be indistinguishable from
+  continuity.
+- **Telemetry is not signal.** These events go to this log, never to
+  `/signal/inbound`, and nothing converts one into the other. agent-ops' own
+  health is STATUS, not SIGNAL — routing an error event about a broken runtime
+  pod back through ingest is the loop `signal-k8s-events/selfexclude.go` exists
+  to break, and keeping the surfaces apart makes it structural here.
+
+**Attribution.** `pipeline` is present when it is knowable and EMPTY when it is
+not: a Conversation records no `pipelineRef`, so attribution is inferred from
+the bindings it materialized and is left blank when two pipelines wire
+identically. Empty means "not attributable", never "none".
+
+**Adapter-reported hops are optional.** An adapter that reports nothing still
+appears on the graph through manager-side events; it simply never confirms
+delivery, and the edge reads "sent, unconfirmed" rather than claiming success.
+`POST /activity` takes `{kind, from?, to?, status?, conversation?, opId?,
+latencyMs?, detail?}`; the reporting adapter is taken from the TOKEN, so an
+adapter naming another in `adapter` is refused with 403.
+
+
+## Manager introspection
+
+**The manager exposes only what only the manager knows.** Anything that lives in
+a CR is read from the API server, with the API server's own RBAC, and is never
+proxied — a manager that mirrors CRs becomes a second Kubernetes API with a
+second auth scope and its own staleness. Both endpoints below are read-only and
+use the same bearer scheme as `/activity`.
+
+`GET /status` — manager-internal state that exists in no Kubernetes object:
+
+- build version, the leader-election lease holder;
+- runtime slots in use against `MAX_ACTIVE_CONVERSATIONS`, counted from the live
+  POD list (the same definition the admission gate uses, so the two cannot
+  disagree), plus how many conversations are waiting for one;
+- per-adapter op queue depth, split into **queued** (nothing is claiming) and
+  **claimed but uncompleted** (an adapter is wedged mid-delivery) — two failure
+  modes that look identical from outside — each with the id and age of the
+  oldest;
+- active cooldowns per source, because a suppressed lane looks exactly like an
+  idle one on a graph.
+
+`GET /pipelines/{name}/resolved` — the authoritative capability resolution:
+`allowedTools` (the wiring's half, composed through the same function dispatch
+uses), `toolsMode`, `toolsets`, `mcpConfigs`, `mcpServers` and the resolving
+runtime, plus `unresolved` for refs that resolve to nothing. 404 for an unknown
+pipeline; **an empty allowlist is reported as empty**, never as a fallback. A
+consumer must not recompute this: a second implementation of composition would
+eventually disagree with the one that runs.
+
+The split between the two surfaces and `:9090/metrics` is deliberate — metrics
+answer *how deep, how old, how many*; `/status` answers *which one*. Ids never
+become metric labels (see below).
+
+
+## Metrics
+
+The same aggregates are exposed in the Prometheus exposition format on the
+manager's existing `:9090/metrics`, registered into the controller-runtime
+registry already serving that port. **Nothing new is listened on**, and alerting
+therefore never depends on anyone having a browser open.
+
+**One instrumentation pass.** Counters and histograms are driven by the activity
+event stream (the metric set is an `activity.Observer`), so an event and its
+metric observation cannot occur independently. Gauges are levels, sampled at
+scrape time from the same in-memory state `/status` reports.
+
+| Metric | Type | Labels |
+|---|---|---|
+| `agentops_signals_received_total` | counter | `source`, `adapter`, `status` |
+| `agentops_signals_dropped_total` | counter | `source`, `reason` |
+| `agentops_conversations_created_total` | counter | `pipeline` |
+| `agentops_runs_total` | counter | `pipeline`, `status` |
+| `agentops_run_duration_seconds` | histogram | `pipeline` |
+| `agentops_channel_ops_total` | counter | `adapter`, `kind`, `status` |
+| `agentops_channel_op_latency_seconds` | histogram | `adapter`, `kind` |
+| `agentops_channel_ops_queued` | gauge | `adapter` |
+| `agentops_channel_ops_claimed` | gauge | `adapter` |
+| `agentops_channel_op_oldest_queued_age_seconds` | gauge | `adapter` |
+| `agentops_channel_op_oldest_claimed_age_seconds` | gauge | `adapter` |
+| `agentops_runtime_slots_in_use` | gauge | — |
+| `agentops_runtime_slots_max` | gauge | — |
+| `agentops_conversations_inflight` | gauge | `pipeline` |
+| `agentops_cooldowns_active` | gauge | `source` |
+
+**The cardinality rule is binding.** Labels carry only values bounded by CR
+count — `pipeline`, `adapter`, `source`, `channel`, `kind`, `status`, `reason` —
+and are read from an event's structured fields (node names, `code`), never from
+`detail`, which may carry a fingerprint or an error message. A conversation, run
+or op id as a label would grow series without limit; those identify the specific
+stuck item and stay in `/status`.
+
+
 ## HTTP API
 
 | Endpoint | Purpose |
@@ -164,5 +325,7 @@ adapter contract above and [`channel-telegram/`](../channel-telegram/).
 | `GET /work`, `POST /work/done` | runtime-facing dispatch (see contract) |
 | `GET/POST /channel/*` | adapter-facing channel contract (bearer token; see adapter contract) |
 | `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token; see signal adapter contract) |
+| `GET/POST /activity*` | per-hop telemetry (bearer token; see activity contract) |
+| `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
-| `:9090/metrics` | controller-runtime metrics |
+| `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |

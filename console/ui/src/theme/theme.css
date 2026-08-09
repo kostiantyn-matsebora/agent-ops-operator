@@ -1,0 +1,127 @@
+/*
+ * The agent-ops palette.
+ *
+ * Deliberately NOT PatternFly's stock Red Hat blue — that is Kiali's face, and
+ * a console that borrows a product's colours reads as that product. The idiom
+ * is inherited (shapes, lanes, edge animation, the Display panel); the identity
+ * is not.
+ *
+ * TEAL primary, VIOLET accent, and a status ramp that stays distinguishable
+ * without relying on hue alone: success/warning/danger differ in lightness as
+ * well as hue, so the graph is still readable in greyscale and to the ~8% of
+ * men with red-green colour vision deficiency. Every status in the UI is also
+ * carried by a word or a shape, never by colour on its own.
+ *
+ * ONE source of truth. The `--ao-*` tokens below are what this app's own SVG
+ * reads, and the PatternFly tokens are then defined FROM them — so a component
+ * and a hand-drawn node can never drift into two different greens.
+ */
+
+:root,
+.pf-v6-theme-light {
+  --ao-brand: #0d7d76;
+  --ao-brand-strong: #0a615c;
+  --ao-brand-soft: #d3ece9;
+  --ao-accent: #6b4bd6;
+  --ao-accent-soft: #e9e3fb;
+
+  --ao-success: #1f7a4d;
+  --ao-warning: #a86400;
+  --ao-danger: #b32c3f;
+  --ao-neutral: #6a7178;
+
+  --ao-surface: #ffffff;
+  --ao-surface-alt: #f3f5f6;
+  --ao-canvas: #eef1f2;
+  --ao-border: #cfd6da;
+  --ao-border-strong: #9aa4ab;
+  --ao-text: #16191c;
+  --ao-text-subtle: #5c656d;
+
+  /* Graph-specific: an edge with no traffic must read as present-but-quiet,
+     which is a different statement from absent. */
+  --ao-edge-idle: #b6c0c6;
+  --ao-lane-fill: #ffffff;
+  --ao-lane-border: #d5dcdf;
+  --ao-code-bg: #f6f8f8;
+}
+
+.pf-v6-theme-dark {
+  --ao-brand: #43c9bd;
+  --ao-brand-strong: #7fded5;
+  --ao-brand-soft: #123b39;
+  --ao-accent: #a996f5;
+  --ao-accent-soft: #2a2350;
+
+  --ao-success: #55c98a;
+  --ao-warning: #e0a63c;
+  --ao-danger: #f2708a;
+  --ao-neutral: #9aa4ab;
+
+  --ao-surface: #1b1f22;
+  --ao-surface-alt: #23282c;
+  --ao-canvas: #14171a;
+  --ao-border: #3a4247;
+  --ao-border-strong: #5c666d;
+  --ao-text: #e8ecee;
+  --ao-text-subtle: #a5b0b7;
+
+  --ao-edge-idle: #4a545b;
+  --ao-lane-fill: #1f2427;
+  --ao-lane-border: #363f44;
+  --ao-code-bg: #14181b;
+}
+
+/*
+ * Map PatternFly's semantic tokens onto ours. Setting these rather than
+ * restyling components is what keeps every table, label, button and alert on
+ * the same palette as the graph — including components this app has not used
+ * yet.
+ */
+:root,
+.pf-v6-theme-light,
+.pf-v6-theme-dark {
+  --pf-t--global--color--brand--default: var(--ao-brand);
+  --pf-t--global--color--brand--hover: var(--ao-brand-strong);
+  --pf-t--global--color--brand--clicked: var(--ao-brand-strong);
+
+  --pf-t--global--color--status--success--default: var(--ao-success);
+  --pf-t--global--color--status--warning--default: var(--ao-warning);
+  --pf-t--global--color--status--danger--default: var(--ao-danger);
+  --pf-t--global--color--status--info--default: var(--ao-brand);
+
+  --pf-t--global--color--nonstatus--blue--default: var(--ao-brand);
+  --pf-t--global--color--nonstatus--teal--default: var(--ao-brand);
+  --pf-t--global--color--nonstatus--purple--default: var(--ao-accent);
+
+  --pf-t--global--background--color--primary--default: var(--ao-surface);
+  --pf-t--global--background--color--secondary--default: var(--ao-surface-alt);
+
+  --pf-t--global--border--color--default: var(--ao-border);
+  --pf-t--global--text--color--regular: var(--ao-text);
+  --pf-t--global--text--color--subtle: var(--ao-text-subtle);
+  --pf-t--global--icon--color--subtle: var(--ao-text-subtle);
+}
+
+/* The link colour PatternFly derives from brand does not always follow the
+   override, so it is stated once here rather than per component. */
+a,
+.pf-v6-c-button--m-link {
+  color: var(--ao-brand);
+}
+
+/* The graph canvas paints its own ground; without this it inherits the page
+   background and a dark theme shows a white rectangle. */
+body {
+  background: var(--ao-canvas);
+  color: var(--ao-text);
+}
+
+/* Respect a reduced-motion preference: edge dashes are decoration, and the
+   graph must stay usable for someone who cannot tolerate them. Rate is still
+   readable from the edge labels. */
+@media (prefers-reduced-motion: reduce) {
+  svg animate {
+    display: none;
+  }
+}

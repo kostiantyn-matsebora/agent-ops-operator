@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/dispatch"
@@ -61,6 +62,16 @@ type Server struct {
 	Ops          *chat.OpQueue
 	Router       *chat.Router
 	AdapterToken string
+
+	// Activity is the per-hop telemetry log served by /activity*. A nil log is
+	// inert, so every emission site can call it unguarded.
+	Activity *activity.Log
+
+	// Version is the manager build reported by GET /status.
+	Version string
+	// MaxActiveConversations is the runtime-slot ceiling reported by
+	// GET /status alongside the slots actually in use.
+	MaxActiveConversations int
 
 	// MaxQueuedConversations bounds the PENDING backlog. An unbounded queue
 	// reproduces the capacity complaint one level down — no pods, but unbounded
@@ -107,7 +118,51 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /signal/state/{source}/{key}", s.signalAuth(s.handleSignalStateGet))
 	mux.HandleFunc("PUT /signal/state/{source}/{key}", s.signalAuth(s.handleSignalStatePut))
 	mux.HandleFunc("POST /signal/sources/{name}/status", s.signalAuth(s.handleSignalStatus))
+	mux.HandleFunc("GET /activity", s.anyAdapterAuth(s.handleActivity))
+	mux.HandleFunc("GET /activity/stream", s.anyAdapterAuth(s.handleActivityStream))
+	mux.HandleFunc("POST /activity", s.anyAdapterAuth(s.handleActivityReport))
+	mux.HandleFunc("GET /status", s.anyAdapterAuth(s.handleStatus))
+	mux.HandleFunc("GET /pipelines/{name}/resolved", s.anyAdapterAuth(s.handlePipelineResolved))
 	return mux
+}
+
+// anyAdapterAuth accepts the master token or ANY derived adapter token, channel
+// or signal. The introspection surfaces are cross-cutting — the console holds
+// both identities and reads them with whichever it has — so scoping them to one
+// adapter kind would only force a caller to pick a token arbitrarily.
+func (s *Server) anyAdapterAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.AdapterToken == "" {
+			writeJSON(w, 503, map[string]string{"error": "adapter auth not configured"})
+			return
+		}
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.AdapterToken)) == 1 {
+			next(w, r)
+			return
+		}
+		var channels agentopsv1alpha1.ChannelAdapterList
+		if err := s.Client.List(r.Context(), &channels, client.InNamespace(s.Namespace)); err == nil {
+			for i := range channels.Items {
+				want := chat.DeriveAdapterToken(s.AdapterToken, channels.Items[i].Name)
+				if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
+					next(w, r.WithContext(context.WithValue(r.Context(), adapterScopeKey{}, channels.Items[i].Name)))
+					return
+				}
+			}
+		}
+		var signals agentopsv1alpha1.SignalAdapterList
+		if err := s.Client.List(r.Context(), &signals, client.InNamespace(s.Namespace)); err == nil {
+			for i := range signals.Items {
+				want := chat.DeriveSignalAdapterToken(s.AdapterToken, signals.Items[i].Name)
+				if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
+					next(w, r.WithContext(context.WithValue(r.Context(), adapterScopeKey{}, signals.Items[i].Name)))
+					return
+				}
+			}
+		}
+		writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+	}
 }
 
 // NeedLeaderElection: the HTTP surface (webhooks, worker dispatch) must serve
@@ -283,7 +338,50 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 		}
 		return dispatch.WorkUnit{}, false, err
 	}
+	pipeline := s.pipelineName(ctx, &conv)
+	s.Activity.Emit(activity.Event{
+		Kind:     activity.KindRunDispatched,
+		From:     s.originNode(pipeline, conv.Name),
+		To:       activity.Node(activity.NodeRuntime, s.runtimeName(ctx, &profile)),
+		Pipeline: pipeline, Conversation: conv.Name, RunID: unit.RunID,
+		Detail: fmt.Sprintf("%d input(s) to %s", len(ids), profile.Name),
+	})
 	return unit, true, nil
+}
+
+// pipelineName attributes a conversation to its originating pipeline, or "" when
+// the wiring is ambiguous. INFERRED from materialized bindings — a Conversation
+// records no pipelineRef — so a blank answer is the honest one and never a
+// guess. Telemetry labelling only; nothing routes on it.
+func (s *Server) pipelineName(ctx context.Context, conv *agentopsv1alpha1.Conversation) string {
+	if p := chat.PipelineForConversation(ctx, s.Client, s.Namespace, conv); p != nil {
+		return p.Name
+	}
+	return ""
+}
+
+// originNode names the graph node a conversation's work flows from: its
+// pipeline when attribution succeeded, the conversation itself when it did not.
+// Falling back to the conversation keeps the hop renderable without inventing an
+// edge from a pipeline that may not be the one that ran it.
+func (s *Server) originNode(pipeline, conversation string) *activity.NodeRef {
+	if pipeline != "" {
+		return activity.Node(activity.NodePipeline, pipeline)
+	}
+	return activity.Node(activity.NodeConversation, conversation)
+}
+
+// runtimeName resolves the AgentRuntime a profile executes on, matching the
+// runtime pod builder's own fallback (profile ref, then "default").
+func (s *Server) runtimeName(ctx context.Context, profile *agentopsv1alpha1.AgentProfile) string {
+	if profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
+		return profile.Spec.RuntimeRef.Name
+	}
+	var rt agentopsv1alpha1.AgentRuntime
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: "default"}, &rt); err == nil {
+		return rt.Name
+	}
+	return "default"
 }
 
 type workDone struct {
@@ -310,7 +408,12 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	}
 	patch := client.MergeFrom(conv.DeepCopy())
 	now := metav1.Now()
+	// Latency is DERIVED from the dispatch stamp the manager itself wrote, not
+	// reported by the runtime: a runtime that lies or has a skewed clock would
+	// otherwise put a fiction on the graph.
+	var latencyMs int64
 	if conv.Status.Inflight != nil && conv.Status.Inflight.RunID == d.RunID {
+		latencyMs = now.Sub(conv.Status.Inflight.DispatchedAt.Time).Milliseconds()
 		conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
 		conv.Status.Inflight = nil
 	}
@@ -337,6 +440,23 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	pipeline := s.pipelineName(ctx, &conv)
+	var doneProfile agentopsv1alpha1.AgentProfile
+	_ = s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &doneProfile)
+	runEvent := activity.Event{
+		Kind:     activity.KindRunCompleted,
+		From:     activity.Node(activity.NodeRuntime, s.runtimeName(ctx, &doneProfile)),
+		To:       s.originNode(pipeline, conv.Name),
+		Pipeline: pipeline, Conversation: conv.Name, RunID: d.RunID,
+		LatencyMs: latencyMs, Detail: d.Status,
+	}
+	if d.Status != "succeeded" {
+		runEvent.Status = activity.StatusError
+	}
+	if d.ExitCode != nil {
+		runEvent.Detail = fmt.Sprintf("%s (exit %d)", d.Status, *d.ExitCode)
+	}
+	s.Activity.Emit(runEvent)
 	// The operator delivers: agent output goes to EVERY bound thread, through
 	// the serving adapters. This is the only delivery path — agents never post
 	// to a transport themselves, so no runtime holds channel credentials and
@@ -426,6 +546,13 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	s.Activity.Emit(activity.Event{
+		Kind:     activity.KindConversationCreated,
+		From:     activity.Node(activity.NodePipeline, p.Name),
+		To:       activity.Node(activity.NodeConversation, conv.Name),
+		Pipeline: p.Name, Conversation: conv.Name,
+		InputID: conv.Spec.Inputs[0].ID, Detail: title,
+	})
 	writeJSON(w, 202, map[string]string{"conversation": conv.Name})
 }
 

@@ -36,19 +36,42 @@ const (
 	APIVersion = "v1alpha1"
 )
 
-// Kinds are the resource plurals the console watches — the wiring graph plus
-// live conversations. Nothing outside this list is ever requested, which is
-// what makes the chart's read-only Role a complete description of the
-// console's reach.
+// Kinds are the agentops.dev resource plurals the console watches — the wiring
+// graph plus live conversations and the capability objects. Nothing outside
+// this list and InstallKinds is ever requested, which is what makes the chart's
+// read-only Role a complete description of the console's reach.
 var Kinds = []string{
 	"agentprofiles",
 	"agentruntimes",
 	"channels",
 	"channeladapters",
 	"conversations",
+	"mcpconfigs",
+	"mcptoolsets",
 	"pipelines",
 	"signaladapters",
 	"signalsources",
+}
+
+// InstallKinds are the workload resources that carry INSTALL FACTS — image
+// references and digests, readiness, restart counts, pod phase and failure
+// reasons. None of it exists in any CR, so an operations console that cannot
+// read them cannot see a CrashLoopBackOff.
+//
+// This is a deliberate widening past agentops.dev, and it stays read-only and
+// namespaced: `get/list/watch` on these two, granted by the chart against the
+// console's own ServiceAccount.
+var InstallKinds = []string{
+	"deployments",
+	"pods",
+}
+
+// groupVersion locates a resource plural in the API. Everything not listed is
+// an agentops.dev custom resource — the console's own group is the default
+// precisely because it is nearly everything the console reads.
+var groupVersion = map[string]struct{ Group, Version string }{
+	"deployments": {"apps", "v1"},
+	"pods":        {"", "v1"}, // core group: /api/v1, no /apis prefix
 }
 
 // Singular renders a plural resource name for display.
@@ -58,9 +81,21 @@ var Singular = map[string]string{
 	"channels":        "Channel",
 	"channeladapters": "ChannelAdapter",
 	"conversations":   "Conversation",
+	"mcpconfigs":      "MCPConfig",
+	"mcptoolsets":     "MCPToolset",
 	"pipelines":       "Pipeline",
 	"signaladapters":  "SignalAdapter",
 	"signalsources":   "SignalSource",
+	"deployments":     "Deployment",
+	"pods":            "Pod",
+}
+
+// AgentOpsKind reports whether a plural is one of ours — the console's own
+// kinds are what the Configuration and Topology views enumerate; the install
+// kinds are facts about the deployment, not objects a user wires.
+func AgentOpsKind(kind string) bool {
+	_, isInstall := groupVersion[kind]
+	return !isInstall
 }
 
 // Kube is a minimal in-cluster API client.
@@ -248,9 +283,20 @@ type objectList struct {
 // read-only viewer turns into an API-server problem.
 const listPageSize = 500
 
+// resourcePath builds the namespaced collection path for a plural. The core
+// group has no group segment and lives under /api rather than /apis — the one
+// irregularity in the REST layout, and the reason this is a lookup rather than
+// string concatenation at every call site.
 func (k *Kube) resourcePath(kind string) string {
-	return "/apis/" + APIGroup + "/" + APIVersion +
-		"/namespaces/" + url.PathEscape(k.Namespace) + "/" + url.PathEscape(kind)
+	gv, ok := groupVersion[kind]
+	if !ok {
+		gv.Group, gv.Version = APIGroup, APIVersion
+	}
+	prefix := "/apis/" + gv.Group + "/" + gv.Version
+	if gv.Group == "" {
+		prefix = "/api/" + gv.Version
+	}
+	return prefix + "/namespaces/" + url.PathEscape(k.Namespace) + "/" + url.PathEscape(kind)
 }
 
 // List returns every object of a kind in the console's namespace plus the

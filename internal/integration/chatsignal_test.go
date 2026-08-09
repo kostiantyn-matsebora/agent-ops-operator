@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -229,6 +230,76 @@ func TestChatCommandsAnswerWithoutCreatingConversations(t *testing.T) {
 	}
 	if convs[0].Spec.Inputs[0].Payload != "check nodes" {
 		t.Fatalf("task payload: %+v", convs[0].Spec.Inputs[0])
+	}
+}
+
+// A chat conversation is titled by the QUESTION, not by the surface it arrived
+// on. Falling back to the source name gave every conversation from one surface
+// the same title, which makes a list of them unreadable and search useless.
+func TestChatConversationIsTitledByTheMessage(t *testing.T) {
+	mkProfile(t, "prof-title")
+	mkChannel(t, "chan-title", "telegram")
+	mkChatSource(t, "src-title", "chan-title")
+	mkPipeline(t, "title-pipe", []string{"src-title"}, []string{"chan-title"}, "prof-title")
+	reconcilePipeline(t, "title-pipe")
+	srv := apiServer()
+
+	if rec := chatSignal(t, srv, "src-title", "chan-title",
+		"  why   is the api pod   crashlooping? "); rec.Code != 200 {
+		t.Fatalf("chat signal: %d %s", rec.Code, rec.Body.String())
+	}
+	convs := convsBoundTo(t, "chan-title")
+	if len(convs) != 1 {
+		t.Fatalf("want 1 conversation, got %d", len(convs))
+	}
+	title := convs[0].Spec.Title
+	if !strings.Contains(title, "why is the api pod crashlooping?") {
+		t.Fatalf("title must come from the message, with whitespace collapsed: %q", title)
+	}
+	if strings.Contains(title, "src-title") {
+		t.Fatalf("the source name is not a useful title for a question: %q", title)
+	}
+
+	// A long question is bounded, and cut on a RUNE so multi-byte input is not
+	// sliced in half.
+	long := strings.Repeat("почему ", 40)
+	if rec := chatSignal(t, srv, "src-title", "chan-title", long); rec.Code != 200 {
+		t.Fatalf("long chat signal: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, c := range convsBoundTo(t, "chan-title") {
+		if n := len([]rune(c.Spec.Title)); n > 60 {
+			t.Fatalf("title not bounded: %d runes", n)
+		}
+		if !utf8.ValidString(c.Spec.Title) {
+			t.Fatalf("title was cut mid-character: %q", c.Spec.Title)
+		}
+	}
+}
+
+// An ALERT keeps the source name: its payload is a machine document, and the
+// source is the useful label there.
+func TestAlertConversationKeepsTheSourceTitle(t *testing.T) {
+	mkProfile(t, "prof-alerttitle")
+	mkSignalSource(t, "src-alerttitle", "am-alerttitle", "")
+	mkPipeline(t, "alerttitle-pipe", []string{"src-alerttitle"}, nil, "prof-alerttitle")
+	reconcilePipeline(t, "alerttitle-pipe")
+
+	rec := postSignal(t, apiServer().Handler(), testMasterToken, "src-alerttitle", []map[string]any{
+		{"fingerprint": "at-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "disk is full"},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
+	}
+	var list agentopsv1alpha1.ConversationList
+	_ = k8sClient.List(context.Background(), &list)
+	found := false
+	for i := range list.Items {
+		if strings.Contains(list.Items[i].Spec.Title, "src-alerttitle") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("an alert conversation should still be titled by its source")
 	}
 }
 

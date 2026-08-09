@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.21.0
+  tag: 0.23.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -74,7 +74,7 @@ runtime:
   # 0.2.0+ composes the allowlist with the agent definition's own `tools:` and
   # passes it verbatim — no substituted `Read` when nothing is declared.
   # Pinning an older tag keeps that substitution and ignores toolsets.mode.
-  image: kmatsebora/agentops-runtime-claude:0.3.0
+  image: kmatsebora/agentops-runtime-claude:0.4.0
   # Empty = follow runtimeIdleTtlMinutes above, so the release has ONE number.
   # Set it only to give THIS runtime a different one. (It is always written to
   # the CR: the CRD defaults this field to 10, so an omitted field is not unset
@@ -217,35 +217,92 @@ adapterAuth:
   # Use an existing Secret (key: token) instead of generating one.
   existingSecret: ""
 
-# The agent-ops console: a browser view of the whole install — CR inventory,
-# the wiring graph, and live conversation runs — that is ALSO a channel, so you
-# can reply to an agent from the screen you are watching it on.
+# Scrape configuration for the manager's `agentops_*` metrics.
 #
-# CRs only: enabling this renders a ChannelAdapter, a Channel, the UI token
-# Secret and a read-only Role. The reconciler brings up the Deployment and the
-# Service, so the chart ships no connectivity.
+# The metrics are ALWAYS exposed on the manager's existing :9090 — this only
+# tells a monitoring stack where to look. Everything here is off by default
+# because neither VMServiceScrape nor ServiceMonitor is a built-in kind, and
+# rendering one without its CRD fails the whole install.
+#
+# Turn on whichever matches your stack. The rules are examples: two conditions
+# that are real failures but look like health from every other angle — ops
+# queued with nothing claiming them, and runtime slots pinned at the ceiling.
+metrics:
+  interval: 30s
+  vmServiceScrape:
+    enabled: false
+    labels: {}
+  serviceMonitor:
+    enabled: false
+    labels: {}
+  rules:
+    enabled: false
+    # VMRule for the VictoriaMetrics operator; set these two to
+    # monitoring.coreos.com/v1 + PrometheusRule for prometheus-operator.
+    apiVersion: operator.victoriametrics.com/v1beta1
+    kind: VMRule
+    labels: {}
+
+# The agent-ops console: a browser view of the whole install — CR inventory,
+# the wiring graph with LIVE traffic, queues, and conversation runs — that is
+# ALSO a channel, so you can reply to an agent from the screen you are watching
+# it on, and a signal source, so you can start one.
+#
+# CRs only: enabling this renders a ChannelAdapter, a Channel, an
+# externally-served SignalAdapter, a SignalSource, the UI token Secret and a
+# read-only Role. The reconciler brings up the Deployment and the Service, so
+# the chart ships no connectivity. Two adapter identities, ONE pod.
 #
 # TRUST BOUNDARY: whoever holds the UI token sees everything the console's
 # ServiceAccount can read — every agentops CR in this namespace, including
-# conversation payloads (alert bodies, agent results). The Role is read-only
-# and namespaced, and the console can write nothing to the cluster; that does
-# not make the token any less worth protecting.
+# conversation payloads (alert bodies, agent results) — and can INSTRUCT any
+# agent the console is joined to, which in a `rbacMode: full` install means an
+# agent holding cluster-admin. The Role is read-only and the console writes
+# nothing to the Kubernetes API; the token still deserves the care that implies.
 #
-# Off by default. Enabling it wires nothing: conversations show up as
-# "observed" until you add the console channel to a Pipeline's channelRefs[].
+# ClusterIP with no Ingress by default: reaching it means a port-forward or a
+# deliberate decision. When you DO expose it, put an authenticating proxy in
+# front (oauth2-proxy against your OIDC provider). The console reads the
+# identity from the proxy's forwarded headers and logs every write with it;
+# without one, every write is recorded as "token".
+#
+# ON BY DEFAULT since chart 5.0.0. Enabling it WIRES nothing: conversations show
+# up as "observed" until you add the console channel to a Pipeline's
+# channelRefs[], and origination is refused until a Pipeline claims the console
+# source. Both are one-line edits the UI prints for you.
 console:
-  enabled: false
+  enabled: true
   # Name of the ChannelAdapter CR — and therefore of the workload, the SA
   # (agentops-adapter-<name>) and the Service.
   name: console
   # Name of the Channel CR pipelines reference (defaults to `name`).
   channelName: ""
+  # Name of the SignalSource the console originates from (defaults to `name`).
+  # A source is claimed by exactly ONE Pipeline, so one source means one
+  # destination — declare several (console-k8s, console-ha) to originate to
+  # several agents, each claimed by its own pipeline.
+  signalSourceName: ""
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.2.0
+    tag: 0.5.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
+  write:
+    # Gates BOTH write paths: the chat composer and "new conversation". On by
+    # default, because a default-enabled component whose headline capabilities
+    # are default-disabled is a confusing way to ship nothing. Turning it off
+    # makes the console a strict viewer — the affordances disappear AND the
+    # endpoints refuse, so it is a boundary rather than a UI preference.
+    enabled: true
+  metrics:
+    # Optional Prometheus/VictoriaMetrics query endpoint. With it the console
+    # renders windows far beyond the manager's in-memory activity buffer
+    # (throughput, run-duration percentiles, queue depth over a week) as clearly
+    # labelled AGGREGATES. Without it every view still works and long windows
+    # are reported unavailable rather than drawn empty.
+    #   url: http://vmselect.monitoring:8481/select/0/prometheus
+    url: ""
   auth:
     # Use an existing Secret (key: uiToken) instead of generating one.
     existingSecret: ""

@@ -1,51 +1,74 @@
 package main
 
 import (
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/hex"
+	"context"
 	"encoding/json"
-	"errors"
 	"io"
-	"log"
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
 
-// The browser surface: a login, JSON snapshots, one SSE stream, and the
-// embedded SPA.
+// The browser surface: a login, one JSON snapshot per page, one SSE stream, and
+// the embedded SPA.
 //
-// Two rules shape it. First, snapshots are authoritative and the stream only
-// carries hints — a browser that misses every event still converges by
-// re-fetching, which is what makes reconnect-after-sleep uneventful. Second,
-// nothing here can mutate the cluster: the only write in the whole console is
-// POST /channel/inbound, and it goes through the channel contract like any
-// other adapter's user message.
-
-const sessionCookie = "agentops_console"
-const sessionTTL = 12 * time.Hour
+// Two rules shape all of it. First, SNAPSHOTS ARE AUTHORITATIVE and the stream
+// carries deltas plus a cursor — a browser that misses every event still
+// converges by re-fetching, which is what makes reconnect-after-sleep the same
+// code path as first connect and a dropped event cost one stale second rather
+// than a wrong screen. Second, NOTHING HERE MUTATES THE CLUSTER: the only two
+// writes in the whole console are POST /channel/inbound and POST
+// /signal/inbound, both through the manager, both gated.
 
 // API serves the console's browser endpoints.
 type API struct {
 	cache       *Cache
 	transcripts *Transcripts
 	adapter     *Adapter
+	activity    *ActivityWindow
+	mgr         *Manager
+	originator  *Originator
+	metrics     *MetricsClient
+	sessions    *Sessions
+
+	namespace    string
+	adapterName  string
+	writeEnabled bool
 	// staticToken is the fallback browser token from env, used when the console
 	// Channel declares no credentials (hand-run deployments).
 	staticToken string
 
-	mu       sync.Mutex
-	sessions map[string]time.Time
+	// metricsFromConfig is the client built from the served Channel's config,
+	// rebuilt when that URL changes.
+	metricsMu         sync.Mutex
+	metricsFromConfig *MetricsClient
+}
+
+// APIDeps is what the browser surface fans in.
+type APIDeps struct {
+	Cache       *Cache
+	Transcripts *Transcripts
+	Adapter     *Adapter
+	Activity    *ActivityWindow
+	Manager     *Manager
+	Originator  *Originator
+	Metrics     *MetricsClient
+	Config      *Config
 }
 
 // NewAPI builds the browser surface.
-func NewAPI(cache *Cache, transcripts *Transcripts, adapter *Adapter, staticToken string) *API {
-	return &API{cache: cache, transcripts: transcripts, adapter: adapter,
-		staticToken: staticToken, sessions: map[string]time.Time{}}
+func NewAPI(d APIDeps) *API {
+	return &API{
+		cache: d.Cache, transcripts: d.Transcripts, adapter: d.Adapter,
+		activity: d.Activity, mgr: d.Manager, originator: d.Originator, metrics: d.Metrics,
+		sessions:     NewSessions(),
+		namespace:    d.Config.Namespace,
+		adapterName:  d.Config.AdapterName,
+		writeEnabled: d.Config.WriteEnabled,
+		staticToken:  d.Config.UIToken,
+	}
 }
 
 // token returns the currently valid browser token: the console Channel's
@@ -59,6 +82,38 @@ func (a *API) token() string {
 	return a.staticToken
 }
 
+// writesAllowed is the effective write gate. The served Channel's config wins
+// over the process default, because a ChannelAdapter CR carries no env and the
+// chart therefore has no other way to say "this install is read-only". Only an
+// EXPLICIT false disables — an absent field is not a decision.
+func (a *API) writesAllowed() bool {
+	if v := a.adapter.PrimaryConfig().WriteEnabled; v != nil {
+		return *v
+	}
+	return a.writeEnabled
+}
+
+// metricsBackend resolves the historical-metrics client the same way: the
+// served Channel's config first, the process env second.
+//
+// It has to be dynamic rather than constructed at startup, because the channel
+// list arrives from the manager AFTER the process is up — a client built in
+// main() would always be nil for a chart-configured URL, which is exactly how
+// this shipped once: the URL was in spec.config and the console still reported
+// "no metrics backend is configured".
+func (a *API) metricsBackend() *MetricsClient {
+	url := a.adapter.PrimaryConfig().MetricsURL
+	if url == "" {
+		return a.metrics
+	}
+	a.metricsMu.Lock()
+	defer a.metricsMu.Unlock()
+	if a.metricsFromConfig == nil || a.metricsFromConfig.BaseURL != url {
+		a.metricsFromConfig = NewMetricsClient(url)
+	}
+	return a.metricsFromConfig
+}
+
 // Handler wires the routes.
 func (a *API) Handler(ui http.Handler) http.Handler {
 	mux := http.NewServeMux()
@@ -66,333 +121,160 @@ func (a *API) Handler(ui http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/login", a.handleLogin)
 	mux.HandleFunc("POST /api/logout", a.handleLogout)
 	mux.HandleFunc("GET /api/session", a.handleSession)
+
+	mux.HandleFunc("GET /api/overview", a.auth(a.handleOverview))
+	mux.HandleFunc("GET /api/queues", a.auth(a.handleQueues))
+	mux.HandleFunc("GET /api/config", a.auth(a.handleKinds))
+	mux.HandleFunc("GET /api/config/{kind}", a.auth(a.handleInventory))
+	mux.HandleFunc("GET /api/config/{kind}/{name}", a.auth(a.handleDetail))
+	mux.HandleFunc("GET /api/findings", a.auth(a.handleFindings))
 	mux.HandleFunc("GET /api/topology", a.auth(a.handleTopology))
-	mux.HandleFunc("GET /api/kinds", a.auth(a.handleKinds))
-	mux.HandleFunc("GET /api/kinds/{kind}", a.auth(a.handleInventory))
-	mux.HandleFunc("GET /api/kinds/{kind}/{name}", a.auth(a.handleDetail))
+	mux.HandleFunc("GET /api/activity", a.auth(a.handleActivity))
+	mux.HandleFunc("GET /api/charts", a.auth(a.handleCharts))
+	mux.HandleFunc("GET /api/charts/{chart}", a.auth(a.handleHistory))
+	mux.HandleFunc("GET /api/sources", a.auth(a.handleOriginationSources))
+
 	mux.HandleFunc("GET /api/conversations", a.auth(a.handleConversations))
 	mux.HandleFunc("GET /api/conversations/{name}", a.auth(a.handleConversation))
-	mux.HandleFunc("POST /api/conversations/{name}/messages", a.auth(a.handleSend))
+	mux.HandleFunc("GET /api/conversations/{name}/graph", a.auth(a.handleConversationGraph))
+	mux.HandleFunc("POST /api/conversations", a.write("start-conversation", a.handleStart))
+	mux.HandleFunc("POST /api/conversations/{name}/messages", a.write("send-message", a.handleSend))
+
 	mux.HandleFunc("GET /api/stream", a.auth(a.handleStream))
 	mux.Handle("/", ui)
 	return mux
 }
 
-// ---- auth -------------------------------------------------------------------
+// ---- topology + activity ------------------------------------------------------
 
-func (a *API) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !a.authorized(r) {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
-			return
-		}
-		next(w, r)
-	}
-}
+// defaultTrafficWindow is the traffic window when the caller names none.
+const defaultTrafficWindow = 5 * time.Minute
 
-// authorized accepts a live session cookie or a bearer token equal to the
-// configured one (constant-time). An unconfigured console authorizes nobody.
-func (a *API) authorized(r *http.Request) bool {
-	want := a.token()
-	if want == "" {
-		return false
-	}
-	if c, err := r.Cookie(sessionCookie); err == nil && a.validSession(c.Value) {
-		return true
-	}
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
-}
-
-func (a *API) validSession(id string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	exp, ok := a.sessions[id]
-	if !ok {
-		return false
-	}
-	if time.Now().After(exp) {
-		delete(a.sessions, id)
-		return false
-	}
-	return true
-}
-
-func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `need {"token":"…"}`})
-		return
-	}
-	want := a.token()
-	if want == "" || subtle.ConstantTimeCompare([]byte(in.Token), []byte(want)) != 1 {
-		// same answer either way: an unconfigured console must not be
-		// distinguishable from a wrong password
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid token"})
-		return
-	}
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "session"})
-		return
-	}
-	id := hex.EncodeToString(buf)
-	a.mu.Lock()
-	a.sessions[id] = time.Now().Add(sessionTTL)
-	for sid, exp := range a.sessions { // opportunistic expiry sweep
-		if time.Now().After(exp) {
-			delete(a.sessions, sid)
+func windowFrom(r *http.Request) time.Duration {
+	if v := r.URL.Query().Get("windowSeconds"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
 		}
 	}
-	a.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: id, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, MaxAge: int(sessionTTL / time.Second),
-	})
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	return defaultTrafficWindow
 }
-
-func (a *API) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
-		a.mu.Lock()
-		delete(a.sessions, c.Value)
-		a.mu.Unlock()
-	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleSession lets the SPA decide between the login form and the app without
-// provoking a 401 on every load.
-func (a *API) handleSession(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": a.authorized(r),
-		"configured":    a.token() != "",
-	})
-}
-
-// ---- snapshots --------------------------------------------------------------
 
 func (a *API) handleTopology(w http.ResponseWriter, r *http.Request) {
+	window := windowFrom(r)
+	topo := BuildTopology(a.cache)
+	a.applyTraffic(&topo, a.activity.Edges(window), window)
+
+	// bufferCovers tells the UI whether the requested window is inside what the
+	// activity buffer can answer. Outside it, the view must say "unavailable"
+	// (or switch to aggregates) rather than render a short window as a quiet one.
+	oldest := ""
+	if events := a.activity.Since("", 1); len(events) > 0 {
+		oldest = events[0].TS.Format(time.RFC3339Nano)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"topology":          BuildTopology(a.cache),
+		"topology":          topo,
 		"consoleChannel":    a.adapter.PrimaryChannel(),
 		"unjoinedPipelines": UnjoinedPipelines(a.cache, a.adapter.PrimaryChannel()),
 		"synced":            a.syncState(),
+		"stream":            a.activity.StreamHealth(),
+		"oldestEvent":       oldest,
+		"metricsAvailable":  a.metricsBackend() != nil,
 	})
 }
 
 func (a *API) syncState() map[string]bool {
 	out := map[string]bool{}
-	for _, k := range Kinds {
+	for _, k := range append(append([]string{}, Kinds...), InstallKinds...) {
 		out[k] = a.cache.Synced(k)
 	}
 	return out
 }
 
-func (a *API) handleKinds(w http.ResponseWriter, r *http.Request) {
-	type kindInfo struct {
-		Kind   string `json:"kind"`
-		Title  string `json:"title"`
-		Count  int    `json:"count"`
-		Synced bool   `json:"synced"`
-	}
-	out := make([]kindInfo, 0, len(Kinds))
-	for _, k := range Kinds {
-		out = append(out, kindInfo{Kind: k, Title: Singular[k], Count: len(a.cache.List(k)), Synced: a.cache.Synced(k)})
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// inventoryRow is one CR in a per-kind listing: identity, health, and the
-// conditions verbatim. Opaque config is not summarized here — the detail view
-// shows it untouched.
-type inventoryRow struct {
-	Name       string      `json:"name"`
-	Created    string      `json:"created,omitempty"`
-	Health     Health      `json:"health"`
-	Conditions []Condition `json:"conditions,omitempty"`
-	Summary    string      `json:"summary,omitempty"`
-}
-
-func (a *API) handleInventory(w http.ResponseWriter, r *http.Request) {
-	kind := r.PathValue("kind")
-	if !knownKind(kind) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown kind " + kind})
-		return
-	}
-	objs := a.cache.List(kind)
-	rows := make([]inventoryRow, 0, len(objs))
-	for _, o := range objs {
-		h, _, _ := health(o)
-		rows = append(rows, inventoryRow{
-			Name: o.Metadata.Name, Created: o.Metadata.CreationTimestamp,
-			Health: h, Conditions: o.Conditions(), Summary: summaryLine(o),
-		})
-	}
-	writeJSON(w, http.StatusOK, rows)
-}
-
-// summaryLine is the one key fact per kind worth showing in a list.
-func summaryLine(o *Object) string {
-	switch o.Kind {
-	case "pipelines":
-		spec := decodeSpec[pipelineSpec](o.Spec)
-		parts := []string{"profile " + spec.ProfileRef.Name}
-		if n := len(spec.SignalSourceRefs); n > 0 {
-			parts = append(parts, plural(n, "source"))
-		}
-		if n := len(spec.ChannelRefs); n > 0 {
-			parts = append(parts, plural(n, "channel"))
-		}
-		return strings.Join(parts, ", ")
-	case "channels", "signalsources":
-		if adapter := decodeSpec[servedSpec](o.Spec).Adapter; adapter != "" {
-			return "adapter " + adapter
-		}
-	case "agentprofiles":
-		spec := decodeSpec[profileSpec](o.Spec)
-		if spec.RuntimeRef.Name != "" {
-			return "runtime " + spec.RuntimeRef.Name
-		}
-	case "conversations":
-		v := conversationView(o)
-		if v.Status.Phase != "" {
-			return strings.ToLower(v.Status.Phase)
-		}
-	}
-	return ""
-}
-
-func plural(n int, word string) string {
-	s := word
-	if n != 1 {
-		s += "s"
-	}
-	return strconv.Itoa(n) + " " + s
-}
-
-func (a *API) handleDetail(w http.ResponseWriter, r *http.Request) {
-	kind, name := r.PathValue("kind"), r.PathValue("name")
-	if !knownKind(kind) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown kind " + kind})
-		return
-	}
-	obj := a.cache.Get(kind, name)
-	if obj == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": Singular[kind] + " " + name + " not found"})
-		return
-	}
-	writeJSON(w, http.StatusOK, obj)
-}
-
-// conversationPageSize bounds the listing. A namespace can hold thousands of
-// conversations (an event storm makes one per fingerprint), and the browser
-// re-fetches this on every stream hint — so the list is the most recent N,
-// newest first, and says how many it left out.
-const conversationPageSize = 200
-
-func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
-	limit := conversationPageSize
-	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 2000 {
+func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
+	limit := 500
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 5000 {
 		limit = n
 	}
-	items, total := a.conversationList(limit)
+	events := a.activity.Since(r.URL.Query().Get("since"), limit)
+	if events == nil {
+		events = []ActivityEvent{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": items, "total": total, "shown": len(items),
+		"events": events, "cursor": a.activity.Cursor(), "stream": a.activity.StreamHealth(),
 	})
 }
 
-// conversationList returns the most recently active conversations plus the
-// total held in cache. Run history is DROPPED from list rows — it is the
-// bulkiest field by far (results are whole agent messages) and the detail view
-// is where it belongs.
-func (a *API) conversationList(limit int) ([]ConversationSummary, int) {
-	pipelines := a.cache.List("pipelines")
-	consoleChannel := a.adapter.PrimaryChannel()
-	objs := a.cache.List("conversations")
-	out := make([]ConversationSummary, 0, len(objs))
-	for _, o := range objs {
-		s := summarize(o, pipelines, consoleChannel)
-		s.RunCount = len(s.Runs)
-		s.Runs = nil
-		out = append(out, s)
+func (a *API) handleFindings(w http.ResponseWriter, r *http.Request) {
+	f := a.findings()
+	if f == nil {
+		f = []Finding{}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].sortKey() > out[j].sortKey() })
-	total := len(out)
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, total
+	writeJSON(w, http.StatusOK, f)
 }
 
-func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	obj := a.cache.Get("conversations", name)
-	if obj == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "conversation " + name + " not found"})
-		return
-	}
-	summary := summarize(obj, a.cache.List("pipelines"), a.adapter.PrimaryChannel())
-	var messages []Message
-	archived := false
-	if summary.ConsoleThread != "" {
-		messages = a.transcripts.Thread(summary.ConsoleThread)
-		archived = a.transcripts.Archived(summary.ConsoleThread)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"conversation": summary,
-		"object":       obj,
-		"transcript":   messages,
-		// archived: a close-topic op ended this thread. The transcript stays
-		// readable; there is just nothing left to reply to.
-		"archived": archived,
-	})
-}
-
-func (a *API) handleSend(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Text   string `json:"text"`
-		Sender string `json:"sender,omitempty"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `need {"text":"…"}`})
-		return
-	}
-	if strings.TrimSpace(in.Text) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text is required"})
-		return
-	}
-	sender := in.Sender
-	if sender == "" {
-		sender = "console"
-	}
-	msg, err := a.adapter.Send(r.Context(), r.PathValue("name"), sender, in.Text)
-	if err != nil {
-		if errors.Is(err, errNotJoined) {
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": "this conversation has no console thread — add the console channel to its pipeline's channels[] to join it",
-			})
-			return
-		}
-		log.Printf("inbound send: %v", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "sending failed"})
-		return
-	}
-	writeJSON(w, http.StatusAccepted, msg)
-}
-
-// ---- stream -----------------------------------------------------------------
-
-// handleStream multiplexes watch deltas and transcript appends onto one SSE
-// connection.
+// OriginationSource is one place this console can start a conversation from.
 //
-// Events are HINTS. A `delta` says "some CR of this kind changed"; the browser
-// re-fetches the snapshots it is showing. That keeps the wire format stable no
-// matter how the CRDs evolve, and makes a missed event cost one stale second
-// rather than a wrong screen.
+// The picker is a RENDERING OF THE TOPOLOGY, not a free-text pipeline field: a
+// source is claimed by exactly one Pipeline, so what you can start is what is
+// wired. A source that is not `Wired=True` is listed WITH its reason rather than
+// hidden — "nothing is wired yet" is the state an operator must be able to see
+// and fix.
+type OriginationSource struct {
+	Name     string `json:"name"`
+	Wired    bool   `json:"wired"`
+	Reason   string `json:"reason,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Pipeline string `json:"pipeline,omitempty"`
+	Profile  string `json:"profile,omitempty"`
+	// Patch is the exact edit that claims this source, shown when nothing does.
+	Patch string `json:"patch,omitempty"`
+}
+
+func (a *API) handleOriginationSources(w http.ResponseWriter, r *http.Request) {
+	out := []OriginationSource{}
+	if a.originator != nil {
+		name := a.originator.Source()
+		src := OriginationSource{Name: name}
+		if obj := a.cache.Get("signalsources", name); obj != nil {
+			if c := obj.Condition("Wired"); c != nil {
+				src.Wired = c.Status == "True"
+				src.Reason, src.Message = c.Reason, c.Message
+			}
+		} else {
+			src.Reason = "NotFound"
+			src.Message = "SignalSource " + name + " does not exist"
+		}
+		for _, p := range a.cache.List("pipelines") {
+			for _, ref := range decodeSpec[pipelineSpec](p.Spec).SignalSourceRefs {
+				if ref.Name == name {
+					src.Pipeline = p.Metadata.Name
+					src.Profile = decodeSpec[pipelineSpec](p.Spec).ProfileRef.Name
+				}
+			}
+		}
+		if !src.Wired {
+			src.Patch = `kubectl patch pipeline <name> --type=json -p ` +
+				`'[{"op":"add","path":"/spec/signalSourceRefs/-","value":{"name":"` + name + `"}}]'`
+		}
+		out = append(out, src)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sources":      out,
+		"canOriginate": a.originator != nil,
+		"writeEnabled": a.writeEnabled,
+	})
+}
+
+// ---- stream -------------------------------------------------------------------
+
+// handleStream multiplexes THREE sources onto one SSE connection: CR watch
+// deltas, activity events, and transcript appends. One connection per browser,
+// not three — and the BFF holds one upstream activity connection for all of them.
+//
+// CR deltas are HINTS carrying kind and name; the browser re-fetches the
+// snapshots it is showing. That keeps the wire format stable no matter how the
+// CRDs evolve. Activity events travel WHOLE, because they are the animation
+// itself and re-fetching would defeat the point.
 func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -409,6 +291,8 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	defer cancelDeltas()
 	messages, cancelMessages := a.transcripts.Subscribe()
 	defer cancelMessages()
+	events, cancelEvents := a.activity.Subscribe()
+	defer cancelEvents()
 
 	send := func(event string, payload any) bool {
 		b, err := json.Marshal(payload)
@@ -421,14 +305,23 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
-	// tell the client to load a fresh snapshot before streaming — the
-	// reconnect path and the first-connect path are then identical
-	if !send("resync", map[string]string{"reason": "connected"}) {
+	// Tell the client to load a fresh snapshot before streaming — reconnect and
+	// first connect are then identical, which is the property that makes a
+	// missed event a non-incident.
+	if !send("resync", map[string]any{
+		"reason": "connected", "cursor": a.activity.Cursor(),
+	}) {
 		return
 	}
 
+	// Queue state is polled, not watched: the OpQueue lives in the manager's
+	// memory with no watch to subscribe to. Polling HERE rather than in every
+	// browser is the whole reason the BFF holds this connection.
+	queueTick := time.NewTicker(5 * time.Second)
+	defer queueTick.Stop()
 	keepalive := time.NewTicker(20 * time.Second)
 	defer keepalive.Stop()
+
 	ctx := r.Context()
 	for {
 		select {
@@ -438,8 +331,14 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			// only the kind and name travel: the browser re-reads what it needs
 			if !send("delta", map[string]string{"type": d.Type, "kind": d.Kind, "name": d.Name}) {
+				return
+			}
+		case e, ok := <-events:
+			if !ok {
+				return
+			}
+			if !send("activity", e) {
 				return
 			}
 		case m, ok := <-messages:
@@ -447,6 +346,13 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !send("message", m) {
+				return
+			}
+		case <-queueTick.C:
+			qctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			q := a.queues(qctx)
+			cancel()
+			if !send("queues", q) {
 				return
 			}
 		case <-keepalive.C:
@@ -458,19 +364,4 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ---- helpers ----------------------------------------------------------------
-
-func knownKind(kind string) bool {
-	for _, k := range Kinds {
-		if k == kind {
-			return true
-		}
-	}
-	return false
-}
-
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
-}
+func sortStrings(s []string) { sort.Strings(s) }

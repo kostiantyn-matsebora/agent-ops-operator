@@ -11,6 +11,19 @@ type ObjectRef struct {
 	Name string `json:"name"`
 }
 
+// AdapterRef references an adapter CR by kind and name (same namespace). Kind
+// is explicit rather than assumed: the two adapter kinds share a namespace and
+// may share a name, so "console" alone would not identify one.
+type AdapterRef struct {
+	// Kind of the referenced adapter.
+	// +kubebuilder:validation:Enum=ChannelAdapter
+	// +kubebuilder:default=ChannelAdapter
+	Kind string `json:"kind"`
+	// Name of the referenced adapter.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
 // ToolingBinding binds MCP configs to a wiring: an ordered set of refs.
 // Content lives entirely in the referenced CRs (MCPConfig) — the binding
 // carries refs only.

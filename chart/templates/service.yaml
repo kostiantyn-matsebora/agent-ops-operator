@@ -3,6 +3,11 @@ kind: Service
 metadata:
   name: agentops-manager
   namespace: {{ .Release.Namespace }}
+  labels:
+    # The scrape templates (templates/metrics.yaml) select on this. Without a
+    # label on the SERVICE, a VMServiceScrape matching pod labels would find
+    # nothing and scrape silently succeed at scraping nothing.
+    app.kubernetes.io/name: agentops-manager
 spec:
   selector:
     app.kubernetes.io/name: agentops-manager

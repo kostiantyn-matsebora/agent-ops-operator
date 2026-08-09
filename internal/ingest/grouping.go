@@ -68,3 +68,19 @@ func (c *Cooldown) Fresh(fingerprints []string) []string {
 	}
 	return out
 }
+
+// Stats reports how many fingerprints are currently SUPPRESSED (inside the
+// window) and the window itself. A cooldown lane looks exactly like an idle one
+// from outside, so this is what lets an operator tell "nothing is happening"
+// from "everything is being swallowed".
+func (c *Cooldown) Stats() (suppressed int, window time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	for _, ts := range c.seen {
+		if now.Sub(ts) < c.ttl {
+			suppressed++
+		}
+	}
+	return suppressed, c.ttl
+}

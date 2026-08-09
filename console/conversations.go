@@ -1,6 +1,9 @@
 package main
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // The live-runs model: Conversations projected into what the UI renders.
 //
@@ -32,12 +35,34 @@ type Inflight struct {
 	DispatchedAt string `json:"dispatchedAt,omitempty"`
 }
 
+// refBinding is a materialized capability binding as the Conversation recorded
+// it. Present on the CONVERSATION, not looked up from the pipeline: refs are
+// snapshotted, so this is what the run actually had.
+type refBinding struct {
+	Mode string `json:"mode,omitempty"`
+	Refs []Ref  `json:"refs,omitempty"`
+}
+
+// refs lists the bound names in order; nil-safe so call sites stay flat.
+func (b *refBinding) refs() []string {
+	if b == nil {
+		return nil
+	}
+	out := make([]string, 0, len(b.Refs))
+	for _, r := range b.Refs {
+		out = append(out, r.Name)
+	}
+	return out
+}
+
 // convView is the console's read of a Conversation.
 type convView struct {
 	Spec struct {
-		ChannelRefs []Ref  `json:"channelRefs,omitempty"`
-		ProfileRef  Ref    `json:"profileRef"`
-		Title       string `json:"title,omitempty"`
+		ChannelRefs []Ref       `json:"channelRefs,omitempty"`
+		ProfileRef  Ref         `json:"profileRef"`
+		Title       string      `json:"title,omitempty"`
+		Toolsets    *refBinding `json:"toolsets,omitempty"`
+		MCPConfigs  *refBinding `json:"mcpConfigs,omitempty"`
 		Inputs      []struct {
 			ID   string `json:"id"`
 			Type string `json:"type"`
@@ -92,6 +117,16 @@ type ConversationSummary struct {
 	Joined bool `json:"joined"`
 	// ConsoleThread is the thread id to post replies against when joined.
 	ConsoleThread string `json:"consoleThread,omitempty"`
+
+	// Errored: the most recent run did not succeed. A filter facet, so "show me
+	// what went wrong" is one click rather than a scan.
+	Errored bool `json:"errored"`
+	// AgeSeconds is time since last activity (creation when it never ran) —
+	// server-computed so sorting and the age filter agree with each other.
+	AgeSeconds float64 `json:"ageSeconds"`
+	// Toolsets/MCPConfigs are the bindings this conversation MATERIALIZED.
+	Toolsets   []string `json:"toolsets,omitempty"`
+	MCPConfigs []string `json:"mcpConfigs,omitempty"`
 }
 
 // summarize projects one Conversation for the browser. consoleChannel is the
@@ -106,8 +141,18 @@ func summarize(obj *Object, pipelines []*Object, consoleChannel string) Conversa
 		Phase: v.Status.Phase, Inflight: v.Status.Inflight, Runs: v.Status.Runs,
 		Threads: v.Status.Threads, RuntimePod: v.Status.RuntimePod,
 		LastActivity: v.Status.LastActivity, Created: obj.Metadata.CreationTimestamp,
-		Queued: len(v.Spec.Inputs),
+		Queued:     len(v.Spec.Inputs),
+		Toolsets:   v.Spec.Toolsets.refs(),
+		MCPConfigs: v.Spec.MCPConfigs.refs(),
 	}
+	// RunCount is set HERE, not only on the list path: the detail view carries
+	// Runs too, and a summary that reported 0 runs beside a populated list was
+	// exactly the kind of small lie a live payload makes obvious.
+	s.RunCount = len(v.Status.Runs)
+	if n := len(v.Status.Runs); n > 0 && v.Status.Runs[n-1].Status != "succeeded" {
+		s.Errored = true
+	}
+	s.AgeSeconds = ageSeconds(time.Now(), s.sortKey())
 	if consoleChannel != "" {
 		for _, t := range v.Status.Threads {
 			if t.Channel == consoleChannel {

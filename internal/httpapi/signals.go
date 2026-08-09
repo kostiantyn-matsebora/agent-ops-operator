@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/addressing"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
@@ -63,6 +64,31 @@ const (
 	LabelChatSender  = "agentops.dev/sender"
 )
 
+// titleFromText renders a conversation title from what a person actually typed:
+// whitespace collapsed, bounded to fit a chat topic name and a table column.
+// Empty for empty input, so the caller keeps its own fallback.
+func titleFromText(text string) string {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return ""
+	}
+	title := "💬 " + strings.Join(fields, " ")
+	// Rune-safe: a byte slice would cut a multi-byte character in half, and chat
+	// input is exactly where non-ASCII shows up.
+	if runes := []rune(title); len(runes) > 60 {
+		title = strings.TrimSpace(string(runes[:59])) + "…"
+	}
+	return title
+}
+
+// orDefault fills an empty string with a fallback (telemetry labelling only).
+func orDefault(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
 // isChat reports whether a batch is chat input.
 func isChat(signals []NormalizedSignal) bool {
 	for _, sig := range signals {
@@ -101,8 +127,22 @@ func combineJoined(group []NormalizedSignal) string {
 func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal, combine combineFunc) (int, int, string, error) {
 	pipeline := chat.PipelineForSource(ctx, s.Client, s.Namespace, source.Name)
 	if pipeline == nil {
-		return 0, 0, "source not claimed by a Ready pipeline (Wired=False) — signals dropped", nil
+		reason := "source not claimed by a Ready pipeline (Wired=False) — signals dropped"
+		s.emitDropped(source, signals, activity.CodeUnclaimed, reason)
+		return 0, 0, reason, nil
 	}
+	// The claim is a decision about the BATCH and it happens here, before any
+	// conversation exists — so this event carries no conversation. That is not a
+	// gap: the chain a consumer walks is adapter -> source -> pipeline ->
+	// conversation, and the next hop (conversation.created) is where a
+	// conversation starts existing to be named.
+	s.Activity.Emit(activity.Event{
+		Kind:     activity.KindSignalClaimed,
+		From:     activity.Node(activity.NodeSignalSource, source.Name),
+		To:       activity.Node(activity.NodePipeline, pipeline.Name),
+		Pipeline: pipeline.Name,
+		Detail:   fmt.Sprintf("%d signal(s)", len(signals)),
+	})
 	cd := s.cooldowns[source.Name]
 	if cd == nil {
 		hours := source.Spec.Grouping.CooldownHours
@@ -147,12 +187,13 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 
 	touched, landed, reason := 0, 0, ""
 	for key, group := range groups {
-		routed, err := s.routeSignalGroup(ctx, source, pipeline, key, group, combine)
+		_, routed, err := s.routeSignalGroup(ctx, source, pipeline, key, group, combine)
 		if err != nil {
 			return 0, 0, "", err
 		}
 		if !routed {
 			reason = ReasonAtCapacity
+			s.emitDropped(source, group, activity.CodeAtCapacity, ReasonAtCapacity)
 			continue
 		}
 		landed += len(group)
@@ -202,6 +243,7 @@ func (s *Server) bumpReceived(ctx context.Context, source *agentopsv1alpha1.Sign
 func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal) (int, int, string, error) {
 	if pipeline := chat.PipelineForSource(ctx, s.Client, s.Namespace, source.Name); pipeline == nil {
 		reason := "source not claimed by a Ready pipeline (Wired=False) — signals dropped"
+		s.emitDropped(source, signals, activity.CodeUnclaimed, reason)
 		s.tellOriginatingSurfaces(ctx, signals, fmt.Sprintf(
 			"⚠️ Nothing here is wired to answer. No Ready Pipeline claims the chat source <b>%s</b>, "+
 				"so this message was dropped. Add it to a Pipeline's sources to give it an agent.", source.Name))
@@ -294,8 +336,9 @@ func (s *Server) backlogFull(ctx context.Context) (bool, error) {
 // profile and channel set — the only wiring there is). Reports routed=false
 // when the pending backlog is full and the group would have needed a NEW
 // conversation — the bound gates creation only, so window reuse keeps appending
-// to a pending conversation however full the backlog is.
-func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, pipeline *agentopsv1alpha1.Pipeline, signature string, group []NormalizedSignal, combine combineFunc) (bool, error) {
+// to a pending conversation however full the backlog is. Returns the
+// conversation the group landed on, so the caller can attribute the claim.
+func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, pipeline *agentopsv1alpha1.Pipeline, signature string, group []NormalizedSignal, combine combineFunc) (string, bool, error) {
 	windowDays := source.Spec.Grouping.WindowDays
 	if windowDays <= 0 {
 		windowDays = 7
@@ -303,7 +346,7 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	var list agentopsv1alpha1.ConversationList
 	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace),
 		client.MatchingLabels{controller.LabelSignatureHash: ingest.SignatureHash(signature)}); err != nil {
-		return false, err
+		return "", false, err
 	}
 	var conv *agentopsv1alpha1.Conversation
 	cutoff := time.Now().Add(-time.Duration(windowDays) * 24 * time.Hour)
@@ -335,10 +378,10 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	if conv == nil {
 		full, err := s.backlogFull(ctx)
 		if err != nil {
-			return false, err
+			return "", false, err
 		}
 		if full {
-			return false, nil
+			return "", false, nil
 		}
 		title := ""
 		for _, sig := range group {
@@ -348,7 +391,18 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			}
 		}
 		if title == "" {
-			title = "🔍 " + source.Name
+			// A CHAT signal is somebody asking something, so the question makes
+			// the title. Falling back to the source name gave every conversation
+			// from one surface the SAME name ("🔍 console", "🔍 home-ops"),
+			// which makes a list of them unreadable and a search useless. An
+			// alert keeps the source name: its payload is a machine document,
+			// and the source is the useful label there.
+			if inputType == agentopsv1alpha1.InputTask {
+				title = titleFromText(group[0].Payload)
+			}
+			if title == "" {
+				title = "🔍 " + source.Name
+			}
 		}
 		conv = &agentopsv1alpha1.Conversation{}
 		conv.Namespace = s.Namespace
@@ -369,8 +423,15 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			Signature:   signature,
 		}
 		if err := s.Client.Create(ctx, conv); err != nil {
-			return false, err
+			return "", false, err
 		}
+		s.Activity.Emit(activity.Event{
+			Kind:     activity.KindConversationCreated,
+			From:     activity.Node(activity.NodePipeline, pipeline.Name),
+			To:       activity.Node(activity.NodeConversation, conv.Name),
+			Pipeline: pipeline.Name, Conversation: conv.Name,
+			Detail: conv.Spec.Title,
+		})
 	} else if conv.Status.SessionID != "" {
 		inputType = agentopsv1alpha1.InputRecurrence // same problem/job, resume with context
 	}
@@ -384,18 +445,19 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		Payload:         combine(group),
 	}
 	if err := s.Client.Create(ctx, ci); err != nil {
-		return false, err
+		return "", false, err
 	}
 
 	// append the input item with optimistic retry
 	for attempt := 0; attempt < 5; attempt++ {
 		var fresh agentopsv1alpha1.Conversation
 		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Name}, &fresh); err != nil {
-			return false, err
+			return "", false, err
 		}
 		patch := client.MergeFrom(fresh.DeepCopy())
+		inputID := "in-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 		fresh.Spec.Inputs = append(fresh.Spec.Inputs, agentopsv1alpha1.InputItem{
-			ID:         "in-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+			ID:         inputID,
 			Type:       inputType,
 			JobName:    jobName,
 			PayloadRef: &agentopsv1alpha1.ObjectRef{Name: ci.Name},
@@ -405,11 +467,33 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			if apierrors.IsConflict(err) {
 				continue
 			}
-			return false, err
+			return "", false, err
 		}
-		return true, nil
+		s.Activity.Emit(activity.Event{
+			Kind:     activity.KindInputQueued,
+			From:     activity.Node(activity.NodeSignalSource, source.Name),
+			To:       activity.Node(activity.NodeConversation, conv.Name),
+			Pipeline: pipeline.Name, Conversation: conv.Name, InputID: inputID,
+			Code: string(inputType), Detail: source.Name,
+		})
+		return conv.Name, true, nil
 	}
-	return false, fmt.Errorf("conflict appending input to %s", conv.Name)
+	return "", false, fmt.Errorf("conflict appending input to %s", conv.Name)
+}
+
+// emitDropped records one signal.dropped per signal a batch lost, carrying the
+// reason. A drop is the event an operator most needs and the one a status-derived
+// graph can never show: nothing changed, so there is nothing to infer from.
+func (s *Server) emitDropped(source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal, code, reason string) {
+	for _, sig := range signals {
+		s.Activity.Emit(activity.Event{
+			Kind:   activity.KindSignalDropped,
+			From:   activity.Node(activity.NodeSignalSource, source.Name),
+			Status: activity.StatusError,
+			Code:   code,
+			Detail: reason + " (" + sig.Fingerprint + ")",
+		})
+	}
 }
 
 // ---- signal adapter contract (auth + endpoints) -----------------------------
@@ -473,6 +557,20 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 	source := s.signalSource(r, w, in.Source)
 	if source == nil {
 		return
+	}
+	// Receipt is recorded before any routing decision: the hop that happened is
+	// "this adapter handed the manager a signal", and it is true whether the
+	// signal is later claimed, deduped by cooldown, or dropped. It carries no
+	// conversation because none has been decided yet — the fingerprint in
+	// `detail` is what correlates it with the claim that follows.
+	for _, sig := range in.Signals {
+		s.Activity.Emit(activity.Event{
+			Kind:   activity.KindSignalReceived,
+			From:   activity.Node(activity.NodeSignalAdapter, source.Spec.Adapter),
+			To:     activity.Node(activity.NodeSignalSource, source.Name),
+			Code:   orDefault(sig.Kind, "alert"),
+			Detail: sig.Fingerprint,
+		})
 	}
 	route := s.routeSignals
 	if isChat(in.Signals) {

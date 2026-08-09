@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/addressing"
 )
 
@@ -60,6 +61,8 @@ type Router struct {
 	Reader    client.Reader
 	Namespace string
 	Ops       *OpQueue
+	// Activity records the inbound hop. Nil is inert.
+	Activity *activity.Log
 }
 
 // HandleMessage routes one inbound message arriving on a channel. Reply-only:
@@ -84,11 +87,26 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 		return r.CloseConversation(ctx, conv)
 	}
 	busy := conv.Status.Inflight != nil || len(conv.Spec.Inputs) > 0
+	inputID := newInputID()
 	if err := r.appendInput(ctx, conv, agentopsv1alpha1.InputItem{
-		ID: newInputID(), Type: agentopsv1alpha1.InputReply, Payload: text, ReceivedAt: metav1.Now(),
+		ID: inputID, Type: agentopsv1alpha1.InputReply, Payload: text, ReceivedAt: metav1.Now(),
 	}); err != nil {
 		return err
 	}
+	pipeline := ""
+	if p := PipelineForConversation(ctx, r.Reader, r.Namespace, conv); p != nil {
+		pipeline = p.Name
+	}
+	// From the CHANNEL, not its adapter: a reply travels surface -> conversation,
+	// and naming the channel is what lets a graph light the wiring edge it
+	// actually crossed. The adapter's own hop is its op completion.
+	r.Activity.Emit(activity.Event{
+		Kind:         activity.KindChannelInbound,
+		From:         activity.Node(activity.NodeChannel, ch.Name),
+		To:           activity.Node(activity.NodeConversation, conv.Name),
+		Conversation: conv.Name, Pipeline: pipeline, InputID: inputID,
+		Detail: "reply on " + ch.Name,
+	})
 	ack := "🔧 On it…"
 	if busy {
 		ack = "⏳ Noted — I'll pick this up as soon as the current step finishes."
@@ -224,7 +242,22 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		conv.Spec.Toolsets = origin.Spec.Toolsets.DeepCopy()
 		conv.Spec.MCPConfigs = origin.Spec.MCPConfigs.DeepCopy()
 	}
-	return conv, r.Client.Create(ctx, conv)
+	if err := r.Client.Create(ctx, conv); err != nil {
+		return conv, err
+	}
+	originName, originKind := ch.Name, activity.NodeChannel
+	pipeline := ""
+	if origin != nil {
+		originName, originKind, pipeline = origin.Name, activity.NodePipeline, origin.Name
+	}
+	r.Activity.Emit(activity.Event{
+		Kind:         activity.KindConversationCreated,
+		From:         activity.Node(originKind, originName),
+		To:           activity.Node(activity.NodeConversation, conv.Name),
+		Conversation: conv.Name, Pipeline: pipeline,
+		InputID: conv.Spec.Inputs[0].ID, Detail: title,
+	})
+	return conv, nil
 }
 
 // convByThread resolves a (channel, thread) pair to its conversation. Thread

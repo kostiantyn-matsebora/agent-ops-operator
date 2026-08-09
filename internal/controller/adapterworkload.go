@@ -32,6 +32,12 @@ const (
 	ConditionDeployed = "Deployed"
 	// ConditionReady: the adapter workload is available.
 	ConditionReady = "Ready"
+	// ReasonServedBy marks an adapter that owns no workload because another
+	// adapter's pod serves its identity (SignalAdapter.spec.servedBy). Ready is
+	// TRUE with this reason: there is nothing to become available, and reporting
+	// "unavailable" for a deliberately workload-less adapter would read as a
+	// fault on every dashboard.
+	ReasonServedBy = "ServedBy"
 	// ConditionSchemaValid: the adapter CR's declared spec.configSchema
 	// compiles. Absent when nothing is declared; False never blocks the
 	// workload, it only disables downstream config validation for the type.
