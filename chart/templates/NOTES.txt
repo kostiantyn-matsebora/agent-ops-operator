@@ -19,6 +19,41 @@ which profiles have no Pipeline granting them anything:
     kubectl -n {{ .Release.Namespace }} get pipeline -o jsonpath="{range .items[?(@.spec.profileRef.name=='$n')]}{.metadata.name} {end}" | grep -q . \
       || echo "no Pipeline grants capabilities to profile/$n"
   done
+{{- $kb := index .Values "k8s-bundle" }}
+{{- if and $kb $kb.enabled $kb.profile.enabled $kb.profile.runtime.create (not $kb.profile.runtime.credentialsSecret.token) }}
+
+ACTION NEEDED — the agent has no credential yet. AgentRuntime {{ $kb.profile.runtime.name }} references
+Secret {{ $kb.profile.runtime.credentialsSecret.name }} (key {{ $kb.profile.runtime.credentialsSecret.key }}), which this release does not create.
+Without it runtime pods reach CreateContainerConfigError and conversations
+queue forever — the kubelet resolves the reference, so nothing reports it as a
+config error. Either create it:
+
+  kubectl -n {{ .Release.Namespace }} create secret generic {{ $kb.profile.runtime.credentialsSecret.name }} \
+    --from-literal={{ $kb.profile.runtime.credentialsSecret.key }}="$(claude setup-token)"
+
+...or set k8s-bundle.profile.runtime.credentialsSecret.token and let the
+release manage it.
+{{- end }}
+{{- if .Values.console.enabled }}
+{{- $c := .Values.console }}
+{{- $ch := $c.channelName | default $c.name }}
+
+Console — reach it at http://agentops-adapter-{{ $c.name }}.{{ .Release.Namespace }}.svc:{{ $c.port }}
+(Service owned by the ChannelAdapter reconciler; no chart-side connectivity.)
+  kubectl -n {{ .Release.Namespace }} port-forward svc/agentops-adapter-{{ $c.name }} {{ $c.port }}:{{ $c.port }}
+Sign in with the UI token:
+  kubectl -n {{ .Release.Namespace }} get secret {{ $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }} -o jsonpath='{.data.uiToken}' | base64 -d
+
+Anyone with that token sees every agentops CR in this namespace, conversation
+payloads included.
+
+Conversations are OBSERVED (read-only) until the console channel carries them.
+To join a pipeline — an ordinary channels[] edit; the chart never touches your
+Pipelines:
+  kubectl -n {{ .Release.Namespace }} patch pipeline <name> --type=json \
+    -p '[{"op":"add","path":"/spec/channelRefs/-","value":{"name":"{{ $ch }}"}}]'
+Existing conversations keep their current bindings; new ones get a console thread.
+{{- end }}
 {{- $vb := index .Values "vm-bundle" }}
 {{- if and $vb $vb.enabled $vb.alertmanager.enabled }}
 

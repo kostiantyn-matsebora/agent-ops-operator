@@ -27,6 +27,19 @@ Two things worth knowing:
   to an LLM-driven agent. It is never a default and never what demo mode
   selects. `readonly` (the default) plus targeted grants under the parent
   chart's `rbac.runtime` block is almost always the better answer.
+- **The agent's credential can be release-managed.** The `AgentRuntime`
+  references a Secret (`profile.runtime.credentialsSecret.name`, default
+  `agentops-claude`, key `oauthToken`) holding a `claude setup-token` result or
+  an Anthropic API key. Set `profile.runtime.credentialsSecret.token` and the
+  bundle **creates** that Secret — point it at your secret store and the
+  credential comes back with the release. Leave it empty and the Secret is
+  yours to create.
+
+  Getting this wrong fails quietly and late: the kubelet resolves the
+  reference, not the manager, so runtime pods sit in
+  `CreateContainerConfigError` while conversations queue behind them and
+  nothing reports a config error. The post-install notes call it out when no
+  token is supplied.
 - **Withholding shell is per-route**: bind
   `toolsets: {refs: [{name: agentops-observe}]}` on one Pipeline and only that
   route loses `Bash`, while every other route sharing the profile keeps it.

@@ -1,5 +1,23 @@
 # Proposal: add-web-chat-channel
 
+> **SUPERSEDED 2026-08-09 by `visualize-agent-ops` — do not implement.** The
+> agent-ops console lands the user need this change exists for (chat with an
+> agent from a browser, no Telegram account) as an out-of-process channel
+> adapter, plus the observability surface this change never had. The
+> architecture moved decisively out-of-process since this was written — every
+> signal type is adapter-served and `ChannelAdapter` owns workloads — so an
+> in-process web channel inside the manager would grow exactly the component
+> the design has been shrinking: a browser surface, an auth token, and
+> CR-snapshot APIs on the manager.
+>
+> Nothing of this change was implemented, so there is no code to unwind; the
+> five tasks marked `[x]` were groundwork the console does not reuse. One idea
+> here is worth keeping and is NOT covered by the console: result-size limits
+> on `/work/done`. The console renders whatever `status.runs[].result` carries,
+> so truncation tuning remains an open manager-side concern for whoever needs
+> it. **Withdraw or re-scope this change to that alone.** (Decision 7 of
+> `visualize-agent-ops/design.md`.)
+
 > **Rebased 2026-08-05** on the implemented `make-channel-type-architecture-extendable` change: generic Channel CRD (`type` + opaque `config`), string thread ids, shared Router/OpQueue, and a zero-secret-reads manager are now the ground truth this change builds on.
 >
 > **Rebase note 2026-08-06 (`wire-it-up` landed)**: conversations are now multi-channel — `spec.channelRefs[]` + `status.threads[]{channel,threadId}` replaced the single `channelRef`/`threadId`. Impacts for this change: (1) conversation listing/transcript queries must filter by `BoundTo(<web channel>)` and read the web channel's own thread binding, not a global thread id; (2) the web provider's `Send` receives fan-out results, acks, AND attributed relay messages from sibling channels (a Pipeline can mirror telegram↔web) — render relays as distinct "remote user" messages; (3) the **no-relay-loop rule is binding**: the web provider must never feed its own outbound posts (including relays) back through the Router as inbound user messages; (4) multi-channel conversations force result delivery, which is already this change's default path — the `/work/done`-sourced transcript needs no change, but fan-out `send` ops now ALSO carry the reply, so the SSE/transcript layer should dedupe (prefer runs[] as the source of truth, treat provider sends as ephemeral display events).

@@ -39,8 +39,8 @@ rules:
   - apiGroups: [""]
     resources: ["serviceaccounts"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
-  # SignalAdapter reconciler: owns the webhook Service of port-declaring
-  # adapters (agentops-signal-<name>)
+  # Adapter reconcilers: own the Service of port-declaring adapters
+  # (agentops-signal-<name>, agentops-adapter-<name>)
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

@@ -62,6 +62,11 @@ Eleven kinds. One line each here; the full reference is in
   beyond its own CRDs + pod lifecycle in its namespace, and never touches agent
   credentials (all `valueFrom`, resolved by the kubelet). Agent powers are
   exactly the runtime service account's RBAC.
+- **See it, and answer it, on one screen.** The optional
+  [console](docs/console.md) (`console.enabled`) draws the wiring as a graph
+  coloured by the conditions the reconcilers already write, plus live runs — and
+  is itself a channel, so a pipeline listing it lets you reply from the run you
+  are watching. Read-only SA; its token sees everything that SA can read.
 - **Structured chat.** Built-in lane prompts embed a six-template message format
   spec (investigation / answer / action report / recurrence / clarification) —
   no stream-of-consciousness walls. Profiles with custom prompts control their own format.
@@ -123,6 +128,7 @@ and point any Alertmanager-compatible sender at the adapter's webhook Service
 |---|---|
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, and how a route's tools are resolved |
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
+| [docs/console.md](docs/console.md) | The console: topology, live runs, and the channel it also is |
 | [docs/k8s-bundle.md](docs/k8s-bundle.md) | Cluster events, the agent that answers them, Kubernetes MCP tooling |
 | [docs/telegram-bundle.md](docs/telegram-bundle.md) | The Telegram ingest stack and chat surface |
 | [docs/vm-bundle.md](docs/vm-bundle.md) | The VictoriaMetrics alert lane |

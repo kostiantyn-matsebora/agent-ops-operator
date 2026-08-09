@@ -24,6 +24,14 @@ type ChannelAdapterSpec struct {
 	// Unset = no inbound surface. Identical semantics to SignalAdapter.port.
 	// +optional
 	Port *int32 `json:"port,omitempty"`
+	// KubernetesAccess declares that this implementation talks to the
+	// Kubernetes API (e.g. a console rendering agentops CRs). When true the
+	// reconciler mounts the SA token and injects POD_NAMESPACE — and grants
+	// NOTHING: permissions are bound externally (chart or user) against the
+	// deterministic SA name agentops-adapter-<name>. Identical semantics to
+	// SignalAdapter.kubernetesAccess.
+	// +optional
+	KubernetesAccess *bool `json:"kubernetesAccess,omitempty"`
 	// Singleton runs the workload as replicas 1 + strategy Recreate so no
 	// rollout ever runs two instances side by side (required for pull-based
 	// transports like Telegram getUpdates).

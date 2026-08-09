@@ -94,6 +94,8 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		EnvFrom:     envFrom,
 		Singleton:   adapter.Spec.Singleton == nil || *adapter.Spec.Singleton,
 		Resources:   adapter.Spec.Resources,
+		// identity only — the operator binds no RBAC to this SA, ever
+		KubernetesAccess: adapter.Spec.KubernetesAccess != nil && *adapter.Spec.KubernetesAccess,
 	})
 	if err != nil {
 		return ctrl.Result{}, err

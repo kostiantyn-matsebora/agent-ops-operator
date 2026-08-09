@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-ops console</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="login" class="login hidden">
+  <form id="login-form">
+    <h1>agent-ops</h1>
+    <p id="login-hint">Enter the console token.</p>
+    <input id="token" type="password" autocomplete="current-password" placeholder="token" required>
+    <button type="submit">Sign in</button>
+    <p id="login-error" class="error"></p>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <strong>agent-ops</strong>
+    <nav>
+      <button data-view="topology" class="active">Topology</button>
+      <button data-view="inventory">Resources</button>
+      <button data-view="conversations">Conversations</button>
+    </nav>
+    <span id="status" class="status"></span>
+    <button id="logout" class="link">Sign out</button>
+  </header>
+
+  <main>
+    <section id="view-topology" class="view">
+      <div id="graph"></div>
+      <aside id="node-detail" class="detail"></aside>
+    </section>
+
+    <section id="view-inventory" class="view hidden">
+      <ul id="kind-list" class="sidebar"></ul>
+      <div id="inventory-rows" class="rows"></div>
+      <aside id="cr-detail" class="detail"></aside>
+    </section>
+
+    <section id="view-conversations" class="view hidden">
+      <ul id="conv-list" class="sidebar wide"></ul>
+      <div id="conv-detail" class="conv"></div>
+    </section>
+  </main>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

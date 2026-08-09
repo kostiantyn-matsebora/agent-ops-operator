@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.19.0
+  tag: 0.20.0
 
 # Concurrency cap: live agent runtime pods across all conversations.
 maxRuntimes: 8
@@ -104,6 +104,48 @@ adapterAuth:
   secretName: agentops-adapter-token
   # Use an existing Secret (key: token) instead of generating one.
   existingSecret: ""
+
+# The agent-ops console: a browser view of the whole install — CR inventory,
+# the wiring graph, and live conversation runs — that is ALSO a channel, so you
+# can reply to an agent from the screen you are watching it on.
+#
+# CRs only: enabling this renders a ChannelAdapter, a Channel, the UI token
+# Secret and a read-only Role. The reconciler brings up the Deployment and the
+# Service, so the chart ships no connectivity.
+#
+# TRUST BOUNDARY: whoever holds the UI token sees everything the console's
+# ServiceAccount can read — every agentops CR in this namespace, including
+# conversation payloads (alert bodies, agent results). The Role is read-only
+# and namespaced, and the console can write nothing to the cluster; that does
+# not make the token any less worth protecting.
+#
+# Off by default. Enabling it wires nothing: conversations show up as
+# "observed" until you add the console channel to a Pipeline's channelRefs[].
+console:
+  enabled: false
+  # Name of the ChannelAdapter CR — and therefore of the workload, the SA
+  # (agentops-adapter-<name>) and the Service.
+  name: console
+  # Name of the Channel CR pipelines reference (defaults to `name`).
+  channelName: ""
+  displayName: agent-ops console
+  image:
+    repository: kmatsebora/agentops-console
+    tag: 0.1.2
+  # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
+  port: 8080
+  auth:
+    # Use an existing Secret (key: uiToken) instead of generating one.
+    existingSecret: ""
+    # Pin the token explicitly (otherwise generated once and reused).
+    uiToken: ""
+  ingress:
+    enabled: false
+    host: ""
+    className: ""
+    annotations: {}
+    tls: []
+  resources: {}
 
 # Telegram — shipped as the embedded `telegram-bundle` subchart
 # (chart/charts/telegram-bundle), the same shape as vm-bundle and k8s-bundle.

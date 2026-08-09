@@ -1,7 +1,8 @@
-# console-deployment
+# console-deployment Specification
 
-## ADDED Requirements
-
+## Purpose
+TBD - created by archiving change visualize-agent-ops. Update Purpose after archive.
+## Requirements
 ### Requirement: Console ships as an opt-in chart bundle of CRs
 The Helm chart SHALL package the console behind `console.enabled` (default **false**): a `ChannelAdapter` named `console` (image, `singleton: true`, `kubernetesAccess: true`, `port` set), a `Channel` with `spec.adapter: console` referencing the UI token Secret via `credentialsSecretRef`, and the token Secret itself. The adapter workload, Service, token injection, and credential projection SHALL all come from the reconcilers — the chart ships no Deployment or Service for the console.
 
@@ -14,10 +15,10 @@ The Helm chart SHALL package the console behind `console.enabled` (default **fal
 - **THEN** the console workload and Service are removed, referencing Channels report `Served=False`, and existing Conversations keep their other channel threads
 
 ### Requirement: Read-only RBAC granted by the chart, not the operator
-The chart SHALL grant SA `agentops-channel-console` a namespaced Role with only `get`/`list`/`watch` on `agentops.dev` resources (no Secrets, no core resources, no write verbs), bound only when `console.enabled=true`. No reconciler SHALL create or bind any RBAC for the console.
+The chart SHALL grant SA `agentops-adapter-console` a namespaced Role with only `get`/`list`/`watch` on `agentops.dev` resources (no Secrets, no core resources, no write verbs), bound only when `console.enabled=true`. No reconciler SHALL create or bind any RBAC for the console.
 
 #### Scenario: Console SA can watch, not write
-- **WHEN** access for SA `agentops-channel-console` is checked
+- **WHEN** access for SA `agentops-adapter-console` is checked
 - **THEN** `list`/`watch` on pipelines/conversations succeed and any write verb or Secret read is denied
 
 ### Requirement: Browser access is authenticated
@@ -33,3 +34,4 @@ Joining the console to a pipeline SHALL use only the existing mechanism — addi
 #### Scenario: Unjoined pipeline shows join instructions
 - **WHEN** a user views a pipeline whose channels do not include the console Channel
 - **THEN** the console displays the `channels[]` addition needed to join it, and performs no mutation itself
+

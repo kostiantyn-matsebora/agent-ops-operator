@@ -8,9 +8,11 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
@@ -397,5 +399,63 @@ func TestChannelAdapterWithoutPortHasNoService(t *testing.T) {
 		if e.Name == "LISTEN_ADDR" {
 			t.Fatal("LISTEN_ADDR injected without spec.port")
 		}
+	}
+	// default posture: no token, so the pod holds no API identity at all
+	pod := deploy.Spec.Template.Spec
+	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Fatal("default posture must keep the SA token unmounted")
+	}
+	for _, e := range pod.Containers[0].Env {
+		if e.Name == "POD_NAMESPACE" {
+			t.Fatal("POD_NAMESPACE injected without kubernetesAccess")
+		}
+	}
+}
+
+// TestChannelAdapterKubernetesAccess pins the channel-side mirror of
+// TestSignalAdapterKubernetesAccess: the field grants IDENTITY only. What the
+// SA may do is an external grant against agentops-adapter-<name>, so the
+// reconciler must still create and bind nothing.
+func TestChannelAdapterKubernetesAccess(t *testing.T) {
+	ctx := context.Background()
+	a := &agentopsv1alpha1.ChannelAdapter{}
+	a.Name, a.Namespace = "k8s-chan", ns
+	a.Spec.Image = "example/adapter:1"
+	yes := true
+	a.Spec.KubernetesAccess = &yes
+	if err := k8sClient.Create(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	reconcileAdapter(t, "k8s-chan")
+
+	var deploy appsv1.Deployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("k8s-chan")}, &deploy); err != nil {
+		t.Fatal(err)
+	}
+	pod := deploy.Spec.Template.Spec
+	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
+		t.Fatal("kubernetesAccess must mount the SA token")
+	}
+	found := false
+	for _, e := range pod.Containers[0].Env {
+		if e.Name == "POD_NAMESPACE" && e.ValueFrom != nil && e.ValueFrom.FieldRef != nil &&
+			e.ValueFrom.FieldRef.FieldPath == "metadata.namespace" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("POD_NAMESPACE downward-API env missing: %+v", pod.Containers[0].Env)
+	}
+	// identity only: zero operator-created RBAC for the adapter's SA
+	var roles rbacv1.RoleList
+	if err := k8sClient.List(ctx, &roles, client.InNamespace(ns)); err != nil {
+		t.Fatal(err)
+	}
+	var bindings rbacv1.RoleBindingList
+	if err := k8sClient.List(ctx, &bindings, client.InNamespace(ns)); err != nil {
+		t.Fatal(err)
+	}
+	if len(roles.Items) != 0 || len(bindings.Items) != 0 {
+		t.Fatalf("operator created RBAC for an adapter: roles=%d bindings=%d", len(roles.Items), len(bindings.Items))
 	}
 }

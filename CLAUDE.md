@@ -3,8 +3,9 @@
 Go/controller-runtime Kubernetes operator (README.md for the product view,
 docs/concepts.md for the CRD detail).
 Self-contained modules — no dependencies outside this directory; keep it that
-way. Seven Go modules: the operator (root), `channel-telegram/` (reference
-channel adapter), `telegram-router/` (the single getUpdates consumer), and
+way. Eight Go modules: the operator (root), `channel-telegram/` (reference
+channel adapter), `console/` (the console — a channel adapter that is also the
+viewer), `telegram-router/` (the single getUpdates consumer), and
 `signal-cron/`, `signal-vmalertmanager/`, `signal-k8s-events/`,
 `signal-telegram/` (signal adapters) — the adapters dependency-free.
 
@@ -90,7 +91,13 @@ channel adapter), `telegram-router/` (the single getUpdates consumer), and
   METADATA is allowed and encouraged: optional `configSchema` (JSON Schema for
   the served CRs' `config`) + `credentialKeys` (docs only — the manager reads
   no Secrets). No config VALUES, connectivity, or credentials. Its reconciler
-  owns the adapter Deployment. Credentials are per-surface on
+  owns the adapter Deployment, and — when `spec.port` is set — the Service,
+  which is named after the WORKLOAD: `agentops-adapter-<name>`. There is no
+  `agentops-channel-<name>`; two changes have now written that name by mistake.
+  `spec.kubernetesAccess` mirrors SignalAdapter's: mounts the SA token +
+  injects `POD_NAMESPACE`, IDENTITY ONLY — permissions stay an external grant
+  against SA `agentops-adapter-<name>`, and no reconciler ever creates RBAC.
+  Credentials are per-surface on
   `Channel.credentialsSecretRef`, projected into the adapter pod as `envFrom`
   with prefix `AGENTOPS_CRED_<CHANNEL>_` (kubelet-resolved; the contract's
   channel listing advertises `credentialEnvPrefix`).
@@ -146,6 +153,7 @@ docker build --platform linux/amd64 -t <registry>/agentops-signal-telegram:<tag>
 docker build --platform linux/amd64 -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
 docker build --platform linux/amd64 -t <registry>/agentops-signal-vmalertmanager:<tag> ./signal-vmalertmanager/
 docker build --platform linux/amd64 -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
+docker build --platform linux/amd64 -t <registry>/agentops-console:<tag> ./console/
 # then update the image refs (chart values for the manager, AgentRuntime CRs for
 # runtimes), helm upgrade, and verify with a live task:
 #   POST /task {"profile":"stub","task":"..."}   (stub runtime = no LLM cost)
@@ -222,6 +230,20 @@ signal-k8s-events/       cluster Events signal adapter (own module, no deps) —
                          events RBAC (the operator grants adapters nothing).
                          Fingerprint keys on involved OBJECT+reason, never the
                          Event object — k8s recreates those per recurrence
+console/                 the agent-ops console (own module, no deps) — a
+                         ChannelAdapter that is ALSO the viewer. Config from
+                         read-only list/watch of the eight agentops kinds
+                         (in-cluster API over net/http, same technique as
+                         signal-k8s-events); conversation traffic from the
+                         ordinary /channel/* contract; embedded SPA via
+                         go:embed (no npm). NO write path to the Kubernetes API
+                         exists in the module — the only write anywhere is
+                         POST /channel/inbound. Needs kubernetesAccess: true
+                         (identity) + the CHART's read-only Role against SA
+                         agentops-adapter-console. Conversations carry no
+                         pipelineRef, so pipeline attribution is INFERRED from
+                         the materialized bindings and left blank when
+                         ambiguous — never guessed
 chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
                          SignalSource — the CLAIM lives in the parent chart's
                          `pipelines:`, since NO bundle ships wiring),
@@ -373,6 +395,7 @@ three documents wearing one filename — so the routing is explicit:
 | A subchart's components or values | `docs/<bundle>.md` |
 | Breaking change + upgrade steps | `CHANGELOG.md`, newest first |
 | Terminology, invariants, hard-won gotchas | this file |
+| The console's views, values, or trust boundary | `docs/console.md` |
 | The pitch, the kind list, the demo, the install command | `README.md` |
 
 **README.md has a budget: 150 lines** (`wc -l README.md`). It holds the pitch and
