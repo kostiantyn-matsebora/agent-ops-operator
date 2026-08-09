@@ -3,10 +3,11 @@
 //	GET  /healthz
 //	GET  /work?convo=&wait=&pod=   worker long-poll dispatch
 //	POST /work/done                worker completion report
-//	POST /task                     {"pipeline","task","agent"?,"channel"?}
 //
 // The manager hosts NO signal transports — alert/webhook ingestion lives in
-// signal adapters feeding POST /signal/inbound.
+// signal adapters feeding POST /signal/inbound. That endpoint is also how work
+// ORIGINATES: there is no route that names a Pipeline, because a caller
+// choosing its own wiring is what the Pipeline model exists to prevent.
 //
 // plus the channel adapter contract (bearer-token auth, see ADAPTER_TOKEN):
 //
@@ -105,7 +106,6 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /work", s.handleWork)
 	mux.HandleFunc("POST /work/done", s.handleWorkDone)
-	mux.HandleFunc("POST /task", s.handleTask)
 	mux.HandleFunc("GET /channel/ops", s.adapterAuth(s.handleChannelOps))
 	mux.HandleFunc("POST /channel/ops/{id}/done", s.adapterAuth(s.handleChannelOpDone))
 	mux.HandleFunc("POST /channel/inbound", s.adapterAuth(s.handleChannelInbound))
@@ -478,82 +478,6 @@ func bound(s []string, n int) []string {
 		return s[len(s)-n:]
 	}
 	return s
-}
-
-// ---- task lane --------------------------------------------------------------
-
-type taskReq struct {
-	// Pipeline is what a task addresses: the Pipeline originates the
-	// conversation, so it supplies the profile, the mirrored channel set, and
-	// the capabilities. Required — there is nothing else to derive them from.
-	Pipeline string `json:"pipeline"`
-	Task     string `json:"task"`
-	// Agent overrides the profile's default role for this task.
-	Agent string `json:"agent,omitempty"`
-	// Channel adds a surface beyond the pipeline's own.
-	Channel string `json:"channel,omitempty"`
-	Title   string `json:"title,omitempty"`
-}
-
-func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	var t taskReq
-	if err := json.Unmarshal(body, &t); err != nil || t.Task == "" || t.Pipeline == "" {
-		writeJSON(w, 400, map[string]string{"error": `need {"pipeline","task"}`})
-		return
-	}
-	ctx := r.Context()
-	// One lookup, one source: the Pipeline that will originate this conversation
-	// carries the profile, the surfaces, and what the agent may do.
-	var p agentopsv1alpha1.Pipeline
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: t.Pipeline}, &p); err != nil {
-		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown pipeline %q", t.Pipeline)})
-		return
-	}
-	title := t.Title
-	if title == "" {
-		title = "🛠 " + strings.Join(strings.Fields(t.Task), " ")
-		if len(title) > 60 {
-			title = title[:60]
-		}
-	}
-	conv := &agentopsv1alpha1.Conversation{}
-	conv.Namespace = s.Namespace
-	conv.GenerateName = "task-"
-	conv.Spec = agentopsv1alpha1.ConversationSpec{
-		ProfileRef:  p.Spec.ProfileRef,
-		ChannelRefs: append([]agentopsv1alpha1.ObjectRef{}, p.Spec.ChannelRefs...),
-		Toolsets:    p.Spec.Toolsets.DeepCopy(),
-		MCPConfigs:  p.Spec.MCPConfigs.DeepCopy(),
-		Title:       title,
-		Inputs: []agentopsv1alpha1.InputItem{{
-			ID: "in-" + strconv.FormatInt(time.Now().UnixNano(), 36), Type: agentopsv1alpha1.InputTask,
-			Payload: t.Task, Agent: t.Agent, ReceivedAt: metav1.Now(),
-		}},
-	}
-	if t.Channel != "" {
-		already := false
-		for _, ref := range conv.Spec.ChannelRefs {
-			if ref.Name == t.Channel {
-				already = true
-			}
-		}
-		if !already {
-			conv.Spec.ChannelRefs = append(conv.Spec.ChannelRefs, agentopsv1alpha1.ObjectRef{Name: t.Channel})
-		}
-	}
-	if err := s.Client.Create(ctx, conv); err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
-	}
-	s.Activity.Emit(activity.Event{
-		Kind:     activity.KindConversationCreated,
-		From:     activity.Node(activity.NodePipeline, p.Name),
-		To:       activity.Node(activity.NodeConversation, conv.Name),
-		Pipeline: p.Name, Conversation: conv.Name,
-		InputID: conv.Spec.Inputs[0].ID, Detail: title,
-	})
-	writeJSON(w, 202, map[string]string{"conversation": conv.Name})
 }
 
 // ---- channel adapter contract ----------------------------------------------

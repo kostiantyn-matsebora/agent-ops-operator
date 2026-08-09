@@ -5,7 +5,7 @@ description: >-
   tasks become Conversations executed by per-conversation agent runtime pods.
 type: application
 version: 5.0.0
-appVersion: "0.23.0"
+appVersion: "0.24.0"
 dependencies:
   # embedded subchart (chart/charts/vm-bundle); templates are additionally
   # self-gated on vm-bundle.enabled

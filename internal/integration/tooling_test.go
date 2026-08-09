@@ -267,35 +267,45 @@ func TestPipelineBindingsMaterializeOnConversations(t *testing.T) {
 		t.Fatalf("mcpConfigs binding not materialized: %+v", conv.Spec.MCPConfigs)
 	}
 
-	// POST /task addresses the SAME Pipeline and gets its whole wiring —
-	// profile, channels, and capabilities from one lookup.
-	rec = adapterReq(srv, "POST", "/task", map[string]any{"pipeline": "mat-pipe", "task": "addressed"}, "")
-	if rec.Code != 202 {
-		t.Fatalf("task: %d %s", rec.Code, rec.Body.String())
+	// A posted task reaches the SAME Pipeline and gets its whole wiring —
+	// profile, channels, and capabilities. It names the SOURCE, never the
+	// pipeline: which agent answers is declared by the claim, not chosen here.
+	rec = postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
+		"fingerprint": "mat-task-1", "kind": "task", "payload": "addressed",
+	}})
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
+		t.Fatalf("task signal: %d %s", rec.Code, rec.Body.String())
 	}
-	var created struct {
-		Conversation string `json:"conversation"`
+	var taskConv *agentopsv1alpha1.Conversation
+	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
+	for i := range list.Items {
+		c := &list.Items[i]
+		if c.Spec.ProfileRef.Name == "prof-mat" && strings.HasPrefix(c.Name, "task-") {
+			taskConv = c
+		}
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	t.Cleanup(func() { cleanupConversation(t, created.Conversation) })
-	var taskConv agentopsv1alpha1.Conversation
-	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: created.Conversation}, &taskConv); err != nil {
-		t.Fatal(err)
+	if taskConv == nil {
+		t.Fatal("task conversation not created")
 	}
-	if taskConv.Spec.ProfileRef.Name != "prof-mat" {
-		t.Fatalf("profile must come from the addressed pipeline: %+v", taskConv.Spec.ProfileRef)
-	}
+	t.Cleanup(func() { cleanupConversation(t, taskConv.Name) })
 	if taskConv.Spec.Toolsets == nil || taskConv.Spec.Toolsets.Refs[0].Name != "mat-ts" {
-		t.Fatalf("addressed pipeline's toolsets must carry: %+v", taskConv.Spec.Toolsets)
+		t.Fatalf("the claiming pipeline's toolsets must carry: %+v", taskConv.Spec.Toolsets)
+	}
+	if taskConv.Spec.MCPConfigs == nil || taskConv.Spec.MCPConfigs.Refs[0].Name != "mat-cfg" {
+		t.Fatalf("the claiming pipeline's mcpConfigs must carry: %+v", taskConv.Spec.MCPConfigs)
 	}
 
-	// addressing nothing, or something unknown, is refused rather than
-	// producing a conversation nobody wired
-	if rec := adapterReq(srv, "POST", "/task", map[string]any{"task": "no pipeline"}, ""); rec.Code != 400 {
-		t.Fatalf("a task naming no pipeline must be refused: %d %s", rec.Code, rec.Body.String())
+	// a malformed signal, or one naming a source nobody serves, is refused
+	// rather than producing a conversation nobody wired
+	if rec := postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
+		"kind": "task", "payload": "no fingerprint",
+	}}); rec.Code != 400 {
+		t.Fatalf("a signal with no fingerprint must be refused: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := adapterReq(srv, "POST", "/task", map[string]any{"pipeline": "nope", "task": "x"}, ""); rec.Code != 404 {
-		t.Fatalf("an unknown pipeline must 404: %d", rec.Code)
+	if rec := postSignal(t, srv.Handler(), testMasterToken, "nope", []map[string]any{{
+		"fingerprint": "mat-task-x", "kind": "task", "payload": "x",
+	}}); rec.Code != 404 {
+		t.Fatalf("an unknown source must 404: %d", rec.Code)
 	}
 }
 

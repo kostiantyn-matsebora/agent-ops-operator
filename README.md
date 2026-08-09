@@ -10,9 +10,9 @@ approvable from your phone.
 ```
   Alertmanager ─┐                                        ┌─▶ Telegram topic per
   cron          ├─▶ SignalSource ─┐                      │   conversation
-  k8s events ───┘                 │                      │   (reply = continue,
-                                  ▼                      │    approve = act)
-  /task API ────────▶        Conversation CR ◀───────────┤
+  k8s events ───┤                 │                      │   (reply = continue,
+  kind: task ───┘                 ▼                      │    approve = act)
+  from a script              Conversation CR ◀───────────┤
   /<agent> <task> ──▶       (queue of inputs)            │
   in chat                         │                      │
                                   ▼                      │
@@ -81,11 +81,11 @@ kubectl -n agent-ops create secret generic agentops-claude \
   --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
 helm install agent-ops ./chart -n agent-ops --create-namespace --set global.demo.enabled=true
 
-# ask something
+# ask something — a task is an ordinary signal to a source a Pipeline claims
+TOKEN=$(kubectl -n agent-ops get secret agentops-adapter-token -o jsonpath='{.data.token}' | base64 -d)
 kubectl -n agent-ops run q --rm -i --image=curlimages/curl --restart=Never -- \
-  curl -s -X POST http://agentops-manager.agent-ops.svc:8080/task \
-  -H 'Content-Type: application/json' \
-  -d '{"pipeline":"k8s-engineer","task":"any pods crashlooping? what should I look at first?"}'
+  curl -s -X POST http://agentops-manager.agent-ops.svc:8080/signal/inbound -H "Authorization: Bearer $TOKEN" \
+  -d '{"source":"cluster-events","signals":[{"fingerprint":"ask-1","kind":"task","payload":"any pods crashlooping?"}]}'
 
 kubectl -n agent-ops get conversations                  # watch it work
 kubectl -n agent-ops logs -f agentops-conv-<name>       # live agent transcript

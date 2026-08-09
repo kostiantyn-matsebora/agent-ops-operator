@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.23.0
+  tag: 0.24.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -109,11 +109,16 @@ runtime:
     token: ""
 
 # Demo advisor: a project-agnostic, read-only "k8s-engineer" agent you can try
-# minutes after install — no chat, no repo, no MCP setup. Ask via the HTTP API:
+# minutes after install — no chat, no repo, no MCP setup. Ask it by posting a
+# `kind: task` signal to the source its Pipeline claims (there is no endpoint
+# that names a Pipeline, and no profile-addressed form):
+#   TOKEN=$(kubectl -n <ns> get secret agentops-adapter-token \
+#     -o jsonpath='{.data.token}' | base64 -d)
 #   kubectl -n <ns> run q --rm -i --image=curlimages/curl --restart=Never -- \
-#     curl -s -X POST http://agentops-manager.<ns>.svc:8080/task \
-#     -H 'Content-Type: application/json' \
-#     -d '{"profile":"k8s-engineer","task":"why is pod X crashlooping?"}'
+#     curl -s -X POST http://agentops-manager.<ns>.svc:8080/signal/inbound \
+#     -H "Authorization: Bearer $TOKEN" \
+#     -d '{"source":"cluster-events","signals":[{"fingerprint":"ask-1",
+#          "kind":"task","payload":"why is pod X crashlooping?"}]}'
 # Answer: kubectl get conversation <name> -o jsonpath='{.status.runs[0].result}'
 # (or follow the runtime pod logs live). Requires ONE secret with a Claude
 # credential (claude setup-token output or an Anthropic API key).
@@ -168,9 +173,10 @@ global:
   #       refs: [{name: agentops-observe}]
   #
   # binds observation only for THAT route, while other pipelines sharing the
-  # profile keep shell. Profiles carry no tools at all — a Pipeline with no
-  # sources and no channels declares a profile's BASELINE, which is what
-  # conversations with no routing pipeline (POST /task, /<profile>) resolve.
+  # profile keep shell. Profiles carry no tools at all, and nothing supplies a
+  # default: a Pipeline that declares no toolsets grants none, so every route —
+  # a claimed source, a posted `kind: task` signal, a chat command — gets
+  # exactly what its own Pipeline binds.
   #
   # Extend a list here rather than creating a CR: adding "Skill" or "WebFetch" to
   # observe.tools reaches every binding that references it, at the next work unit.

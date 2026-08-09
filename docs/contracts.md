@@ -105,14 +105,46 @@ the rest (**adapters normalize, the manager groups**):
 1. Read your sources + opaque `spec.config` from `GET /signal/sources?adapter=`
    (entries carry `credentialEnvPrefix` exactly like the channel listing).
 2. Push normalized signals: `POST /signal/inbound {"source", "signals":
-   [{"fingerprint", "labels", "title"?, "payload", "kind": "alert"|"job"}]}`.
+   [{"fingerprint", "labels", "title"?, "payload", "kind":
+   "alert"|"job"|"task"|"chat"}]}`.
    The manager applies the source's `grouping` policy: fingerprint cooldown
    (at-least-once delivery is safe — re-sends collapse), signature from
    `labels` × `signatureLabels`, window reuse, recurrence-on-session.
-   `kind: job` takes the task-lane prompt instead of the read-only
-   investigation lane.
 3. Persist cursors via `GET/PUT /signal/state/{source}/{key}`, report config
    problems via `POST /signal/sources/{name}/status`.
+
+**This endpoint is the only way work originates from outside a chat surface.**
+There is no route that names a `Pipeline`: a caller posts to a `SignalSource`,
+and the Ready Pipeline claiming that source decides which agent answers, on
+which channels, with which capabilities.
+
+The `kind` selects the lane, and the lane decides two things — which prompt
+renders, and how a later signal is keyed when the source declares no
+`signatureLabels`:
+
+| `kind` | Lane | Subject | Keying with no `signatureLabels` |
+|---|---|---|---|
+| `alert` (default) | read-only investigation | a problem that recurs | default labels `alertgroup`/`alertname`/`namespace` — group and resume |
+| `job` | task-lane prompt, `jobName` = source | a job that recurs | same default labels — successive ticks fold into one conversation |
+| `task` | task-lane prompt, no `jobName` | a caller asking once | the signal's own fingerprint — each post is its own conversation |
+| `chat` | task-lane prompt, no `jobName` | a person asking once | the signal's own fingerprint — each message is its own conversation |
+
+`alert` and `job` are recurring-subject lanes: the second signal is more news
+about the same thing, so it folds into the open conversation and resumes the
+session. `task` and `chat` are one-shot lanes: the second signal is a second
+request, and the default labels are alert vocabulary neither carries, so keying
+on them would hash every request to one empty signature.
+
+A `chat` signal MUST carry the label `agentops.dev/channel` naming the surface
+it arrived on, or it is refused — its reply has nowhere to go. A `task` signal
+must not: replies go to the claiming Pipeline's `channelRefs`.
+
+**A posted task inherits the target source's `grouping`.** The lane rule above
+is a FALLBACK, not an override — a source that declares `signatureLabels` groups
+by them in every lane, `task` included, so two tasks sharing those label values
+land in one conversation (and two tasks carrying none of them share the empty
+signature). Post to a source whose grouping is what you want; operators who need
+an isolated ask lane create their own source against an adapter they run.
 
 Auth mirrors channels: master token or a per-`SignalAdapter` derived token
 (distinct derivation context — channel and signal adapters sharing a name
@@ -321,7 +353,6 @@ stuck item and stay in `/status`.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /task` `{"profile","task","agent"?,"channel"?}` | start a conversation programmatically |
 | `GET /work`, `POST /work/done` | runtime-facing dispatch (see contract) |
 | `GET/POST /channel/*` | adapter-facing channel contract (bearer token; see adapter contract) |
 | `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token; see signal adapter contract) |
@@ -329,3 +360,13 @@ stuck item and stay in `/status`.
 | `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |
+
+**There is no programmatic origination endpoint.** To start a conversation from
+a script, post a `kind: task` signal to a `SignalSource` a Ready Pipeline claims:
+
+```sh
+curl -s -X POST http://agentops-manager.<ns>.svc:8080/signal/inbound \
+  -H "Authorization: Bearer $ADAPTER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"source":"<source>","signals":[{"fingerprint":"ci-'"$BUILD_ID"'",
+       "kind":"task","payload":"why is the api pod crashlooping?"}]}'
+```

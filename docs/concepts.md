@@ -82,7 +82,7 @@ that claims it**.
 
 ### Pipeline
 
-**The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is ADDRESSABLE by name — `POST /task` names a Pipeline, not a profile. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed. One pipeline per source (older claimant wins); channels are shareable — one chat surface carries many jobs, so name a Pipeline for its PURPOSE, never for the channel it answers on. **No chart bundle ships a Pipeline**: wiring spans bundles, so the chart declares it once at the top, under `pipelines:`.
+**The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is reached two ways and no others: a signal posted to a source it CLAIMS, and a chat command NAMING it on a wired surface — there is no HTTP form that names a Pipeline. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed. One pipeline per source (older claimant wins); channels are shareable — one chat surface carries many jobs, so name a Pipeline for its PURPOSE, never for the channel it answers on. **No chart bundle ships a Pipeline**: wiring spans bundles, so the chart declares it once at the top, under `pipelines:`.
 
 ### MCPConfig
 
@@ -239,12 +239,16 @@ The chart ships the built-in tool vocabulary as `MCPToolset` CRs, split by risk
 therefore serve a route that observes and a route that executes, with no
 profile edit and no cloning.
 
-**A task addresses a Pipeline.** `POST /task {"pipeline":"...","task":"..."}` —
-the Pipeline originates the conversation, so it supplies the profile, the
-mirrored channel set, and the capabilities. There is no profile-addressed form:
-a request that named only a profile would have no wiring, and therefore nothing
-to grant. The chart ships an addressable Pipeline per agent so the demo has one
-to name.
+**A task addresses a SOURCE; the Pipeline claiming it answers.** Programmatic
+work is an ordinary signal — `POST /signal/inbound {"source":"...","signals":
+[{"fingerprint":"...","kind":"task","payload":"..."}]}` — and the Ready Pipeline
+that claims that source originates the conversation, supplying the profile, the
+mirrored channel set, and the capabilities. There is no endpoint that names a
+Pipeline and no profile-addressed form: a caller picking its own wiring is what
+this model exists to prevent, and a request naming only a profile would have no
+wiring and therefore nothing to grant. A posted task inherits the target
+source's `grouping` like any other signal; with no `signatureLabels` declared it
+keys on its own fingerprint, so each post is its own conversation.
 
 **Capabilities are declared, never inferred.** A Pipeline that declares no
 `toolsets` gives its conversations none — no default, no inheritance, and no

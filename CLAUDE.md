@@ -23,10 +23,10 @@ viewer), `telegram-router/` (the single getUpdates consumer), and
   bindings — MATERIALIZED state like `profileRef`/`channelRefs`, never hand-set,
   no `pipelineRef` exists. REFS are snapshotted, CONTENT is not: every use
   re-reads the CRs, so edits heal running conversations while re-wiring affects
-  only new ones. EVERY origination now has a Pipeline to mirror: signals from
-  the claiming one, `POST /task` from the one it names, and a `/<pipeline>
-  <task>` chat command from the one it addresses. Nothing creates a
-  Conversation without wiring behind it.
+  only new ones. EVERY origination now has a Pipeline to mirror: signals of
+  EVERY kind — `alert`, `job`, `task`, `chat` — from the one claiming the
+  source, and a `/<pipeline> <task>` chat command from the one it addresses.
+  Nothing creates a Conversation without wiring behind it.
 - **`Pipeline`** = THE wiring, exclusively: sources[] × channels[] + profile
   + TOOL ACCESS. No other CR carries wiring (SignalSource has no
   profile/channel refs, Channel has no default profile) — unclaimed sources
@@ -47,11 +47,13 @@ viewer), `telegram-router/` (the single getUpdates consumer), and
   one behavior wearing two names.
   Refs in order: tools concatenate with dedup, server keys overlay (later wins).
   Content stays in the referenced CRs; Ready validates both ref sets.
-  **ADDRESSABLE**: `POST /task {"pipeline": X, "task": ...}` names a Pipeline and
-  takes its profile, channels, and capabilities from it. There is no
-  profile-addressed form and no per-profile default — a Pipeline declaring no
-  bindings grants nothing, and that is a configuration, not a defect to warn
-  about. Every Pipeline the CHART ships must therefore declare its own tools;
+  **REACHED, NEVER NAMED**: a Pipeline is reached two ways and no others — a
+  signal posted to a source it CLAIMS, and a `/<pipeline>` chat command on a
+  wired surface. There is NO HTTP form that names a Pipeline: `POST /task` was
+  deleted, not renamed, because a caller selecting its own wiring is the shape
+  this CRD exists to prevent. There is likewise no profile-addressed form and no
+  per-profile default — a Pipeline declaring no bindings grants nothing, and
+  that is a configuration, not a defect to warn about. Every Pipeline the CHART ships must therefore declare its own tools;
   forgetting that is what made every signal-driven conversation toolless once.
   Consequence: runtimes are generic — one `AgentRuntime` per vendor × trust
   level (the SA stays runtime-level on purpose; a Pipeline choosing an SA
@@ -72,8 +74,8 @@ viewer), `telegram-router/` (the single getUpdates consumer), and
   The chart ships the built-in vocabulary risk-split under
   `global.builtinToolsets` (`agentops-observe` / `-shell` / `-edit`); `global.`
   because subcharts read no other parent scope.
-  `POST /task {"pipeline": X}` carries X's bindings — channels AND tooling both;
-  naming a pipeline asks for its wiring, not half of it.
+  A `kind: task` signal posted to a source X claims carries X's bindings —
+  channels AND tooling both; reaching a pipeline gets its wiring, not half of it.
   Multi-channel conversations: manager fans replies/acks to every bound
   thread, relays user messages to sibling channels as attributed text, and
   dispatches once ≥1 thread binding exists.
@@ -155,8 +157,13 @@ docker build --platform linux/amd64 -t <registry>/agentops-signal-vmalertmanager
 docker build --platform linux/amd64 -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
 docker build --platform linux/amd64 -t <registry>/agentops-console:<tag> ./console/
 # then update the image refs (chart values for the manager, AgentRuntime CRs for
-# runtimes), helm upgrade, and verify with a live task:
-#   POST /task {"profile":"stub","task":"..."}   (stub runtime = no LLM cost)
+# runtimes), helm upgrade, and verify with a live task — a task is an ordinary
+# signal to a source a Ready Pipeline claims (there is no /task endpoint):
+#   TOKEN=$(kubectl -n <ns> get secret agentops-adapter-token \
+#     -o jsonpath='{.data.token}' | base64 -d)
+#   curl -sX POST http://<manager>:8080/signal/inbound -H "Authorization: Bearer $TOKEN" \
+#     -d '{"source":"<src>","signals":[{"fingerprint":"smoke-1","kind":"task","payload":"..."}]}'
+# (point the claiming Pipeline at a stub runtime = no LLM cost)
 ```
 
 ## Map
@@ -178,10 +185,15 @@ internal/
                          type-conflict guard); Channel + SignalSource
                          reconcilers (Served condition); Pipeline reconciler
                          (wiring validation, source-conflict guard)
-  httpapi/               /work long-poll dispatch, /work/done, /task,
+  httpapi/               /work long-poll dispatch, /work/done,
                          /channel/* + /signal/* adapter contracts
                          (bearer auth via ADAPTER_TOKEN env); the pending-backlog
-                         bound lives here, in signals.go
+                         bound lives here, in signals.go. NO origination
+                         endpoint: `POST /task` is deleted, and the signature
+                         fallback in signals.go splits on LANE — alert/job keep
+                         ingest.DefaultSignatureLabels (vm-bundle and
+                         signal-cron depend on it), task/chat key on the
+                         fingerprint. Do not collapse it into one rule
   chat/                  channel-type-agnostic core: Provider+Registry
                          (in-process built-ins), OpQueue (outbound ops,
                          at-least-once: ensure-topic | send | close-topic),
