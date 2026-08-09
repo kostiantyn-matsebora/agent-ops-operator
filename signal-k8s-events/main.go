@@ -25,11 +25,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -39,6 +42,10 @@ const (
 	refreshEvery   = 30 * time.Second
 	relistBackoff  = 5 * time.Second
 	maxBatchPerSrc = 50
+	// dwellTick is how often closed windows are decided. Fine enough that a
+	// `for: 30s` rule is not meaningfully delayed, coarse enough to cost
+	// nothing when the queue is empty.
+	dwellTick = 5 * time.Second
 )
 
 // servedSource is one SignalSource this adapter serves.
@@ -54,6 +61,23 @@ type adapter struct {
 	mgr  *Manager
 	kube *Kube
 	name string
+	// self drops events about agent-ops' own machinery before anything else
+	// looks at them. See selfexclude.go for why this is an invariant rather
+	// than a filter.
+	self *selfExcluder
+
+	// cache is the trimmed pod/replicaset view backing workload enrichment,
+	// the dwell liveness re-check, and self-exclusion mechanism 2.
+	cache *objectCache
+	// pending holds matched signals through their `for` window.
+	pending *pendingQueue
+	// inhibit suppresses consequences of an already-reported cause.
+	inhibit *inhibitor
+	// cap bounds signals per source per minute, reporting what it clips.
+	cap *emitCap
+	// clipped records the last reported clip count per source, so the
+	// condition is only rewritten when it changes.
+	clipped sync.Map
 
 	mu       sync.Mutex
 	sources  map[string]*servedSource
@@ -61,6 +85,14 @@ type adapter struct {
 
 	// watchers maps a namespace scope to its cancel func.
 	watchers map[string]context.CancelFunc
+	// cacheWatchers maps "<resource>@<scope>" to its cancel func. Kept
+	// separate from watchers because the two share scopes but not lifetimes.
+	cacheWatchers map[string]context.CancelFunc
+
+	// accessErr holds a permission failure reading pods/replicasets. The grant
+	// is always external (the operator grants adapters nothing), so a 403 is
+	// not something waiting fixes — every served source must say so.
+	accessErr atomic.Pointer[string]
 }
 
 func mustEnv(key string) string {
@@ -81,21 +113,32 @@ func main() {
 		log.Fatalf("kubernetes access: %v (this adapter needs kubernetesAccess: true on its SignalAdapter "+
 			"and an events get/list/watch grant bound to its ServiceAccount)", err)
 	}
+	cache := newObjectCache()
 	a := &adapter{
-		mgr:      NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
-		kube:     kube,
-		name:     name,
-		sources:  map[string]*servedSource{},
-		reported: map[string]string{},
-		watchers: map[string]context.CancelFunc{},
+		mgr:           NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
+		kube:          kube,
+		name:          name,
+		cache:         cache,
+		self:          newSelfExcluder().withCache(cache),
+		sources:       map[string]*servedSource{},
+		reported:      map[string]string{},
+		watchers:      map[string]context.CancelFunc{},
+		cacheWatchers: map[string]context.CancelFunc{},
+		inhibit:       newInhibitor(),
+		cap:           newEmitCap(envInt("EMIT_PER_MINUTE", defaultEmitPerMin)),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	a.pending = newPendingQueue(a.health, func(source string, sigs []Signal) {
+		a.post(ctx, source, sigs)
+	})
+	go a.runDwellFlusher(ctx)
 	log.Printf("signal-k8s-events adapter starting (adapter=%s)", name)
 
 	for ctx.Err() == nil {
 		a.refreshSources(ctx)
 		a.reconcileWatchers(ctx)
+		a.reconcileCacheWatchers(ctx)
 		sleepCtx(ctx, refreshEvery)
 	}
 	a.stopAllWatchers()
@@ -122,11 +165,17 @@ func (a *adapter) refreshSources(ctx context.Context) {
 			}
 			continue
 		}
-		if a.reported[info.Name] != "ok" {
-			go func(n string) {
-				_ = a.mgr.ReportStatus(ctx, n, true, "AdapterReady", "served by signal-k8s-events")
-			}(info.Name)
-			a.reported[info.Name] = "ok"
+		// A missing pods/replicasets grant is reported on every served source
+		// rather than degrading silently: without the cache there is no
+		// workload label and no liveness re-check, so the source would look
+		// healthy while doing markedly less than it claims.
+		state, ready, reason, message := "ok", true, "AdapterReady", "served by signal-k8s-events"
+		if msg := a.accessErr.Load(); msg != nil {
+			state, ready, reason, message = "access:"+*msg, false, "MissingPermissions", *msg
+		}
+		if a.reported[info.Name] != state {
+			go func(n string) { _ = a.mgr.ReportStatus(ctx, n, ready, reason, message) }(info.Name)
+			a.reported[info.Name] = state
 		}
 		src := &servedSource{filter: f}
 		if prev, ok := a.sources[info.Name]; ok {
@@ -211,12 +260,83 @@ func (a *adapter) reconcileWatchers(ctx context.Context) {
 	}
 }
 
+// reconcileCacheWatchers keeps the pod/replicaset cache covering exactly the
+// scopes the events watch covers.
+//
+// Sharing desiredScopes() is not an optimization, it is a requirement: the
+// chart renders a NAMESPACED Role when rbac.clusterWide is false, and the
+// pods/replicasets grant is namespaced identically. A cluster-wide pod watch
+// would 403 outright in that supported configuration.
+func (a *adapter) reconcileCacheWatchers(ctx context.Context) {
+	want := map[string]bool{}
+	for _, s := range a.desiredScopes() {
+		want[s] = true
+	}
+	specs := []struct {
+		resource string
+		watcher  func() *cacheWatcher
+	}{
+		{"pods", func() *cacheWatcher {
+			return &cacheWatcher{kube: a.kube, cache: a.cache, kind: "Pod",
+				pathFor: podsPath, decode: decodePod, onError: a.reportAccessError("pods")}
+		}},
+		{"replicasets", func() *cacheWatcher {
+			return &cacheWatcher{kube: a.kube, cache: a.cache, kind: "ReplicaSet",
+				pathFor: replicaSetsPath, decode: decodeReplicaSet, onError: a.reportAccessError("replicasets")}
+		}},
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	live := map[string]bool{}
+	for _, spec := range specs {
+		for scope := range want {
+			live[spec.resource+"@"+scope] = true
+		}
+	}
+	for key, cancel := range a.cacheWatchers {
+		if !live[key] {
+			cancel()
+			delete(a.cacheWatchers, key)
+		}
+	}
+	for _, spec := range specs {
+		for scope := range want {
+			key := spec.resource + "@" + scope
+			if _, running := a.cacheWatchers[key]; running {
+				continue
+			}
+			wctx, cancel := context.WithCancel(ctx)
+			a.cacheWatchers[key] = cancel
+			w := spec.watcher()
+			go w.run(wctx, scope)
+			log.Printf("caching %s in scope %q", spec.resource, scopeName(scope))
+		}
+	}
+}
+
+// reportAccessError records a permission failure for one resource so every
+// served source reports it. The operator grants adapters nothing, so a 403 is
+// an external grant that is missing — naming it is the only useful response.
+func (a *adapter) reportAccessError(resource string) func(error) {
+	return func(err error) {
+		msg := "cannot read " + resource + ": " + err.Error() +
+			" — this adapter needs list/watch on " + resource +
+			" bound to its ServiceAccount (the operator grants adapters nothing; the chart binds it)"
+		a.accessErr.Store(&msg)
+	}
+}
+
 func (a *adapter) stopAllWatchers() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for scope, cancel := range a.watchers {
 		cancel()
 		delete(a.watchers, scope)
+	}
+	for key, cancel := range a.cacheWatchers {
+		cancel()
+		delete(a.cacheWatchers, key)
 	}
 }
 
@@ -274,6 +394,13 @@ func (a *adapter) deliver(ctx context.Context, events []Event, fromList bool) {
 		p := &pending{}
 		for i := range events {
 			ev := &events[i]
+			// Self-exclusion runs FIRST — before matching, before the cursor.
+			// An event about agent-ops' own machinery must not reach the
+			// filters at all: no rule may re-admit it, and it must not
+			// advance a cursor as though it had been considered.
+			if excluded, _ := a.self.Excludes(ev, src.filter.includeOwnNamespace); excluded {
+				continue
+			}
 			if !src.filter.Matches(ev) {
 				continue
 			}
@@ -284,28 +411,49 @@ func (a *adapter) deliver(ctx context.Context, events []Event, fromList bool) {
 			if fromList && !when.IsZero() && !when.After(src.cursor) {
 				continue
 			}
-			p.signals = append(p.signals, normalize(name, ev))
+			sig := normalize(name, ev, a.enrich(ev))
+			rule, hasRule := src.filter.Rule(&sig)
+			if hasRule && rule.drop {
+				continue
+			}
+
+			// Inhibition before the dwell queue: a consequence of an already
+			// reported cause must not even occupy a window.
+			a.inhibit.Observe(name, src.filter.rules, &sig)
+			if a.inhibit.Inhibited(name, src.filter.rules, &sig) {
+				continue
+			}
+
+			// The cursor advances for a deferred signal too. A restart inside a
+			// window loses at most that window, and a problem real enough to
+			// have survived verification is still emitting events — so it is
+			// re-detected within the minute. Holding the cursor back instead
+			// would replay the whole window on every restart.
 			if when.After(p.newest) {
 				p.newest = when
 			}
+
+			if hasRule && rule.dwell > 0 {
+				a.pending.Add(name, sig, rule)
+				continue
+			}
+			p.signals = append(p.signals, sig)
 			if len(p.signals) >= maxBatchPerSrc {
 				break
 			}
 		}
-		if len(p.signals) > 0 {
+		// A batch with no immediate signals but a fresh timestamp still matters:
+		// its events went into the dwell queue, and the cursor must move.
+		if len(p.signals) > 0 || !p.newest.IsZero() {
 			batches[name] = p
 		}
 	}
 	a.mu.Unlock()
 
 	for name, p := range batches {
-		if err := a.mgr.Inbound(ctx, name, p.signals); err != nil {
-			if ctx.Err() == nil {
-				log.Printf("posting %d signals for %s: %v", len(p.signals), name, err)
-			}
+		if len(p.signals) > 0 && !a.post(ctx, name, p.signals) {
 			continue // cursor not advanced — the next pass retries
 		}
-		log.Printf("posted %d event signal(s) for %s", len(p.signals), name)
 		if p.newest.IsZero() {
 			continue
 		}
@@ -321,6 +469,60 @@ func (a *adapter) deliver(ctx context.Context, events []Event, fromList bool) {
 			}
 		}
 	}
+}
+
+// post sends a batch through the emit cap and reports clipping. It is the
+// single exit from this adapter: both the immediate path and the dwell queue
+// go through it, so the cap cannot be bypassed by one of them.
+func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
+	allowed, clipped := a.cap.Allow(source, sigs)
+	a.reportClipping(ctx, source, clipped)
+	if len(allowed) == 0 {
+		return false
+	}
+	if err := a.mgr.Inbound(ctx, source, allowed); err != nil {
+		if ctx.Err() == nil {
+			log.Printf("posting %d signals for %s: %v", len(allowed), source, err)
+		}
+		return false
+	}
+	log.Printf("posted %d event signal(s) for %s", len(allowed), source)
+	return true
+}
+
+// reportClipping surfaces a clipped window on the source's condition. Silent
+// clipping is how an incident goes missing, so it is reported the first time
+// the count changes and never merely logged.
+func (a *adapter) reportClipping(ctx context.Context, source string, clipped int) {
+	if clipped == 0 {
+		return
+	}
+	if prev, ok := a.clipped.Load(source); ok && prev.(int) == clipped {
+		return
+	}
+	a.clipped.Store(source, clipped)
+	msg := fmt.Sprintf("emit cap reached: %d signal(s) clipped in the last minute — "+
+		"something is producing events far faster than an agent can act on them", clipped)
+	log.Printf("%s: %s", source, msg)
+	go func() { _ = a.mgr.ReportStatus(ctx, source, false, "EmitCapReached", msg) }()
+}
+
+// runDwellFlusher decides pending entries whose window has closed.
+func (a *adapter) runDwellFlusher(ctx context.Context) {
+	for ctx.Err() == nil {
+		a.pending.Flush(time.Now())
+		sleepCtx(ctx, dwellTick)
+	}
+}
+
+// envInt reads an integer env var, falling back when unset or unparsable.
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
 }
 
 func scopeName(scope string) string {

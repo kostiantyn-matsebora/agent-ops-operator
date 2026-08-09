@@ -112,3 +112,129 @@ func stripComments(doc string) string {
 	}
 	return strings.Join(kept, "\n")
 }
+
+// ---- k8s-bundle events lane -------------------------------------------------
+
+// The events adapter now reads pods and replicasets to resolve an event's
+// workload and to re-check liveness. The operator grants adapters nothing, so
+// the chart is the only place that grant can come from — and if it silently
+// went missing the adapter would report Ready=False forever.
+func TestEventsAdapterRBACCoversPodsAndReplicaSets(t *testing.T) {
+	for _, mode := range []struct{ name, flag, kind string }{
+		{"cluster-wide", "true", "ClusterRole"},
+		{"namespaced", "false", "Role"},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			out := helmTemplate(t, "--set", "k8s-bundle.enabled=true",
+				"--set", "k8s-bundle.eventsAdapter.rbac.clusterWide="+mode.flag)
+
+			// Anchor on the document's OWN kind line, which is followed by
+			// metadata:. A binding names the same kind and the same name in
+			// its roleRef, so both "kind: Role" and the name are ambiguous.
+			var found string
+			for _, doc := range splitDocs(out) {
+				if strings.Contains(doc, "kind: "+mode.kind+"\nmetadata:") &&
+					strings.Contains(doc, "name: agentops-signal-k8s-events-events") {
+					found = stripComments(doc)
+				}
+			}
+			if found == "" {
+				t.Fatalf("no %s for the events adapter rendered", mode.kind)
+			}
+			for _, needle := range []string{`resources: ["events"]`, `resources: ["pods"]`, `resources: ["replicasets"]`} {
+				if !strings.Contains(found, needle) {
+					t.Errorf("%s missing %s\n%s", mode.kind, needle, found)
+				}
+			}
+		})
+	}
+}
+
+// Grouping by pod name is what produced hundreds of conversations: pod names
+// are unique per replica and regenerated on every rollout, so the signature
+// never repeated and window reuse could never fire.
+func TestEventsSourceGroupsByWorkload(t *testing.T) {
+	out := helmTemplate(t, "--set", "k8s-bundle.enabled=true")
+	src := eventsSourceDoc(t, out)
+	if !strings.Contains(src, "- workload") {
+		t.Fatalf("the events source must group by workload:\n%s", src)
+	}
+	if strings.Contains(src, "- name\n") {
+		t.Fatalf("per-pod grouping must be gone:\n%s", src)
+	}
+}
+
+// The default rule set's SHAPE is what keeps it safe, and the shape is what a
+// well-meaning edit breaks. Pin the invariants, not the tuning: the numbers
+// should stay editable without anyone having to re-derive these properties.
+func TestDefaultRulesShape(t *testing.T) {
+	out := helmTemplate(t, "--set", "k8s-bundle.enabled=true")
+	src := eventsSourceDoc(t, out)
+
+	// Reasons describing something that ALREADY happened must never dwell: a
+	// re-check would find the healthy replacement and erase the incident.
+	pastTense := []string{"OOMKilling", "SystemOOM", "Evicted", "BackoffLimitExceeded", "DeadlineExceeded"}
+	for _, reason := range pastTense {
+		line := ruleLineContaining(src, reason)
+		if line == "" {
+			t.Errorf("past-tense reason %q is not covered by any rule", reason)
+			continue
+		}
+		if !strings.Contains(line, `for: "0"`) {
+			t.Errorf("past-tense reason %q must carry for: \"0\", got rule:\n%s", reason, line)
+		}
+	}
+
+	// The last rule must be a catch-all WITH a dwell, or an unanticipated
+	// reason is silently discarded instead of verified.
+	rules := ruleBlocks(src)
+	if len(rules) == 0 {
+		t.Fatal("no default rules rendered")
+	}
+	last := rules[len(rules)-1]
+	if !strings.Contains(last, "matchers: []") {
+		t.Fatalf("the last rule must be a catch-all:\n%s", last)
+	}
+	if strings.Contains(last, "action: drop") {
+		t.Fatalf("the catch-all must never be a drop:\n%s", last)
+	}
+	if !strings.Contains(last, "for:") {
+		t.Fatalf("the catch-all must carry a dwell:\n%s", last)
+	}
+}
+
+func eventsSourceDoc(t *testing.T, rendered string) string {
+	t.Helper()
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, "kind: SignalSource") && strings.Contains(doc, "name: cluster-events") {
+			return stripComments(doc)
+		}
+	}
+	t.Fatal("no cluster-events SignalSource rendered")
+	return ""
+}
+
+// ruleBlocks splits the rendered `rules:` list into its entries.
+func ruleBlocks(src string) []string {
+	_, after, ok := strings.Cut(src, "\n    rules:\n")
+	if !ok {
+		return nil
+	}
+	body, _, _ := strings.Cut(after, "\n    severities:")
+	var out []string
+	for _, chunk := range strings.Split(body, "\n    - ") {
+		if strings.TrimSpace(chunk) != "" {
+			out = append(out, chunk)
+		}
+	}
+	return out
+}
+
+func ruleLineContaining(src, reason string) string {
+	for _, block := range ruleBlocks(src) {
+		if strings.Contains(block, reason) {
+			return block
+		}
+	}
+	return ""
+}

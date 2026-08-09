@@ -18,7 +18,10 @@ eventsAdapter:
     repository: kmatsebora/agentops-signal-k8s-events
     # multi-arch from 0.1.1: adapter pods carry no node constraints, so on a
     # mixed-arch cluster an amd64-only adapter image is a coin flip.
-    tag: 0.1.1
+    # 0.2.x adds self-exclusion, workload enrichment, the rules engine and the
+    # dwell window — it REQUIRES the pods/replicasets grant below, and reports
+    # Ready=False naming the permission when it is missing.
+    tag: 0.2.2
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding
@@ -42,16 +45,113 @@ eventsAdapter:
       - Warning
     # Namespaces to watch; empty = every namespace the RBAC above allows.
     namespaces: []
-    # Optional exact-match reason filters.
+    # Optional exact-match reason filters. Superseded by `rules` below, kept
+    # because sources written against the previous config must keep working:
+    # they translate into leading drop rules.
     includeReasons: []
     excludeReasons: []
+
+    # The suppression policy. Ordered, FIRST MATCH WINS.
+    #
+    # Two halves, spelled after the systems they come from. `rules` is the
+    # PROMETHEUS half — what counts as a problem and how long it must hold
+    # (`for`). `route` is the ALERTMANAGER half — inhibition. Dwell is
+    # deliberately not called `group_wait`: Alertmanager's group_wait batches a
+    # group before its first notification and is NOT `for:`, which does not
+    # exist in Alertmanager at all.
+    #
+    # `for` holds a matched event, then RE-CHECKS the involved object before
+    # emitting: gone (the terminating pod of a rollout) or recovered (the new
+    # pod became Ready) means drop; still unhealthy means emit once, with the
+    # whole burst's evidence attached.
+    #
+    # Two properties make this set safe to trust, and both are pinned by test:
+    #   * the LAST rule is a catch-all with a dwell, never a drop — so a reason
+    #     nobody anticipated (a third-party controller, a future Kubernetes
+    #     release) is verified and reported rather than discarded;
+    #   * every reason in the drop list has its underlying problem reported by
+    #     some OTHER rule that is not dropped.
+    # The asymmetry is deliberate: a wrong entry in tier 1 costs a missed
+    # incident, a wrong entry in the catch-all costs one surplus conversation.
+    rules:
+      # 1 ── never actionable on their own ─────────────────────────────────
+      # ProbeWarning: the probe SUCCEEDED and printed something.
+      # SandboxChanged / FailedPreStopHook / FailedKillPod: pod infra churn and
+      #   teardown noise; anything that matters shows up as another reason on
+      #   the same object.
+      # Preempting / NodeNotSchedulable: the scheduler and a cordoning operator
+      #   doing exactly what they were told.
+      # FailedToUpdateEndpoint* / ExternalProvisioning: controllers retrying on
+      #   their own loop.
+      # ContainerGCFailed / ImageGCFailed: node housekeeping — safe to drop
+      #   ONLY because NodeHasDiskPressure below is tier 3 at for: 0.
+      - matchers:
+          - reason=~"ProbeWarning|SandboxChanged|Preempting|NodeNotSchedulable|ExternalProvisioning|FailedToUpdateEndpoint.*|FailedPreStopHook|FailedKillPod|ContainerGCFailed|ImageGCFailed"
+        action: drop
+
+      # 2 ── PAST TENSE: these already happened ────────────────────────────
+      # A dwell would find the healthy REPLACEMENT and erase a real incident:
+      # OOMKilling fires, the container restarts, and three minutes later the
+      # pod is Ready. Never give these a dwell.
+      - matchers:
+          - reason=~"OOMKilling|SystemOOM|Evicted|BackoffLimitExceeded|DeadlineExceeded|VolumeFailedDelete"
+        for: "0"
+
+      # 3 ── node-level: one event, many workloads affected ────────────────
+      - matchers:
+          - reason=~"NodeNotReady|NodeHasDiskPressure|NodeHasMemoryPressure|NodeHasPIDPressure"
+        for: "0"
+
+      # 4 ── flappy by nature: long dwell, but escalate on breadth ─────────
+      # Unhealthy is the noisiest reason in any cluster — every rollout, every
+      # slow start. A probe still failing at 10m is real. escalateAfterObjects
+      # SHORTENS the dwell (to a quarter of it, floored at 1m) when THREE pods
+      # of one workload go unready — it does NOT skip the wait. Firing on
+      # breadth alone reports every ordinary rollout, because a rollout also
+      # makes every replica unready at once; only duration separates the two.
+      - matchers:
+          - reason=~"Unhealthy|FailedGetResourceMetric|FailedComputeMetricsReplicas"
+        for: 10m
+        escalateAfterObjects: 3
+
+      # 5 ── real, but they resolve on their own timescale ─────────────────
+      # FailedScheduling: a cluster autoscaler needs 1–3 minutes to provision.
+      #   With no autoscaler, lower this to ~2m.
+      # BackOff: a container that crashes twice and stabilises is not an
+      #   incident; one still in CrashLoopBackOff at 5m is.
+      # Volume reasons: RWO disks genuinely take minutes to detach from the old
+      #   node during a rollout — a classic false positive.
+      - matchers:
+          - reason=~"FailedScheduling|BackOff|FailedMount|FailedAttachVolume|FailedMapVolume|FailedBinding|ProvisioningFailed|SyncLoadBalancerFailed|FailedRescale"
+        for: 5m
+
+      # 6 ── catch-all: everything unknown is KEPT, verified, reported ─────
+      # Includes Failed, FailedCreate, FailedCreatePodSandBox, and every reason
+      # a third-party operator invents. MUST stay last and MUST stay a dwell.
+      - matchers: []
+        for: 3m
+
+    # Alertmanager-style inhibition: suppress the CONSEQUENCES of a cause that
+    # is already reported. Empty by default — the node case below is the
+    # canonical use, enable it if node drains produce pod noise you don't want.
+    #   route:
+    #     inhibitRules:
+    #       - sourceMatchers: ['reason="NodeNotReady"']
+    #         targetMatchers: ['reason=~"Unhealthy|FailedScheduling"']
+    #         equal: [node]
+    route: {}
     # SignalSource grouping policy (manager-side; defaults apply when empty).
-    # Grouping by object keeps one crash-looping pod in ONE conversation.
+    #
+    # Group by WORKLOAD, not by object. `name` here used to be a POD name —
+    # unique per replica and regenerated on every rollout — so conversation
+    # count scaled with pods × rollouts and the manager's 7-day window reuse
+    # could never fire, because the signature never repeated. `workload` is the
+    # owning controller (Deployment/api), resolved through owner references, so
+    # every replica shares one conversation and it survives rollouts.
     grouping:
       signatureLabels:
         - namespace
-        - kind
-        - name
+        - workload
 
 # The agent that answers: profile + its execution identity.
 profile:

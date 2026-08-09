@@ -279,12 +279,21 @@ func TestWatchScopeRelistsAfterExpiry(t *testing.T) {
 // ---- adapter behavior --------------------------------------------------------
 
 func newTestAdapter(m *Manager, k *Kube, source string, f *filter) *adapter {
-	return &adapter{
+	a := &adapter{
 		mgr: m, kube: k, name: "k8s-events",
-		sources:  map[string]*servedSource{source: {filter: f}},
-		reported: map[string]string{},
-		watchers: map[string]context.CancelFunc{},
+		// no POD_NAMESPACE in tests: mechanisms 1 and 2 apply, 3 is inert
+		self:          newSelfExcluder(),
+		sources:       map[string]*servedSource{source: {filter: f}},
+		reported:      map[string]string{},
+		watchers:      map[string]context.CancelFunc{},
+		cacheWatchers: map[string]context.CancelFunc{},
+		inhibit:       newInhibitor(),
+		cap:           newEmitCap(defaultEmitPerMin),
 	}
+	a.pending = newPendingQueue(a.health, func(src string, sigs []Signal) {
+		a.post(context.Background(), src, sigs)
+	})
+	return a
 }
 
 // A restart must not replay the cluster's event backlog into new conversations.

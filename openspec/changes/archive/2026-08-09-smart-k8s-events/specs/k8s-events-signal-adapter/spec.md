@@ -1,9 +1,7 @@
 # k8s-events-signal-adapter
 
-## Purpose
+## MODIFIED Requirements
 
-The Kubernetes events signal adapter in `signal-k8s-events/`: a dependency-free module that serves SignalSources naming its `SignalAdapter` CR through the signal adapter contract, watching core `v1` Events with its own ServiceAccount token and normalizing them into `kind: alert` signals with deterministic fingerprints, so grouping, cooldown, and recurrence stay manager-side.
-## Requirements
 ### Requirement: Kubernetes events run as a signal adapter
 A signal adapter in `signal-k8s-events/` (own dependency-free Go module and image, precedents `signal-cron/` and `channel-telegram/`) SHALL serve SignalSources whose `spec.adapter` names its `SignalAdapter` CR (default name `k8s-events`) through the signal adapter contract, watching core `v1` Events via the in-cluster Kubernetes API using its own ServiceAccount token (no client-go). Per-source `config` SHALL support `severities` (Event `type` values, default `["Warning"]`), `namespaces` (empty or absent = all namespaces the granted RBAC allows), the ordered `rules` and `route` stanzas defined by the `k8s-event-suppression` capability, and the legacy `includeReasons`/`excludeReasons` exact-match filters, which SHALL remain accepted and translate to equivalent rules. Invalid config (unknown severity value, malformed matcher, unparsable duration, or malformed shape) SHALL be reported as a False Ready condition on that source via the contract status API while other sources keep being served. No signal-type constant SHALL be added to `api/v1alpha1`: the adapter CR's NAME is the routing key, and there are no built-in signal types.
 
@@ -52,16 +50,7 @@ The adapter SHALL NOT group signals or apply cooldown beyond its restart cursor 
 - **WHEN** an event's involved object is a bare pod with no owner references
 - **THEN** `workload` names that pod
 
-### Requirement: Watching is restart-safe
-The adapter SHALL persist a per-source cursor (the maximum event `lastTimestamp` observed) through the contract state API and skip already-seen events on startup's initial list; on watch expiry (`410 Gone`) or stream error it SHALL relist and resume. Delivery is at-least-once: duplicates after an ill-timed restart are acceptable because deterministic fingerprints collapse under the manager's cooldown.
-
-#### Scenario: Restart does not replay old events
-- **WHEN** the adapter restarts and the initial Events list returns events at or before the persisted cursor
-- **THEN** no signals are emitted for those events
-
-#### Scenario: Watch expiry recovers without losing new events
-- **WHEN** the API server ends the watch with `410 Gone`
-- **THEN** the adapter relists, resumes watching, and events emitted after the expiry still produce signals
+## ADDED Requirements
 
 ### Requirement: The adapter never signals on agent-ops' own objects
 The adapter SHALL implement the `signal-self-exclusion` invariant: events whose involved object belongs to agent-ops are dropped before any rule is evaluated, by the owner/label rule, the name-prefix rule, and release-namespace exclusion independently. The first two SHALL NOT be configurable.
@@ -69,4 +58,3 @@ The adapter SHALL implement the `signal-self-exclusion` invariant: events whose 
 #### Scenario: A failing runtime pod does not create a conversation
 - **WHEN** a runtime pod cannot be scheduled and emits `FailedScheduling` warnings under successive pod names
 - **THEN** no signal is emitted for any of them, and the create-fail-create cycle does not start
-

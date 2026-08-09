@@ -53,9 +53,72 @@ spec:
           type: string
       excludeReasons:
         type: array
-        description: Event reasons to drop, applied after includeReasons.
+        description: >-
+          Event reasons to drop, applied after includeReasons. Superseded by
+          rules; translated into leading drop rules for compatibility.
         items:
           type: string
+      includeOwnNamespace:
+        type: boolean
+        description: >-
+          Stop excluding the operator's own namespace wholesale. Relaxes ONLY
+          that mechanism — events about agent-ops' own pods are still dropped
+          by name prefix and by owner, and no configuration can re-admit them.
+      rules:
+        type: array
+        description: >-
+          Ordered, first-match-wins suppression policy. Each rule selects with
+          Alertmanager matchers and either drops or holds for `for`, after
+          which the involved object is re-checked before emitting.
+        items:
+          type: object
+          properties:
+            matchers:
+              type: array
+              description: >-
+                Alertmanager matcher syntax over the signal's labels
+                (=, !=, =~, !~). `reason` is available as an alias for
+                alertname. Empty = catch-all.
+              items:
+                type: string
+            for:
+              type: string
+              description: >-
+                Dwell before re-checking, e.g. "5m". "0" emits immediately —
+                required for reasons describing something that ALREADY
+                happened (OOMKilling, Evicted), where a re-check would find
+                the healthy replacement and erase the incident.
+            action:
+              type: string
+              description: '"drop" suppresses outright; absent means dwell and verify.'
+              enum: ["drop"]
+            escalateAfterObjects:
+              type: integer
+              description: >-
+                Emit early once this many distinct objects of one workload are
+                pending, so a long dwell cannot hide a whole-workload outage.
+      route:
+        type: object
+        description: The Alertmanager half of the policy.
+        properties:
+          inhibitRules:
+            type: array
+            items:
+              type: object
+              properties:
+                sourceMatchers:
+                  type: array
+                  items:
+                    type: string
+                targetMatchers:
+                  type: array
+                  items:
+                    type: string
+                equal:
+                  type: array
+                  description: Labels that must be equal on cause and target.
+                  items:
+                    type: string
 {{- if $ea.rbac.create }}
 ---
 {{- if $ea.rbac.clusterWide }}
@@ -67,6 +130,17 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
+  # Read-only pods/replicasets: the adapter resolves an event's WORKLOAD through
+  # owner references (Pod -> ReplicaSet -> Deployment) and re-checks whether the
+  # involved object is still unhealthy before emitting. Without this grant it
+  # reports Ready=False naming the missing permission rather than silently
+  # emitting per-pod signals again.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -90,6 +164,15 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
+  # Namespaced identically to the events grant on purpose: the adapter scopes
+  # its pod/replicaset watches to the same namespaces it watches events in, so
+  # a broader grant would be unused and a narrower one would 403.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -131,6 +214,9 @@ spec:
   {{- with $src.namespaces }}{{ $_ := set $cfg "namespaces" . }}{{ end }}
   {{- with $src.includeReasons }}{{ $_ := set $cfg "includeReasons" . }}{{ end }}
   {{- with $src.excludeReasons }}{{ $_ := set $cfg "excludeReasons" . }}{{ end }}
+  {{- with $src.rules }}{{ $_ := set $cfg "rules" . }}{{ end }}
+  {{- with $src.route }}{{ $_ := set $cfg "route" . }}{{ end }}
+  {{- if $src.includeOwnNamespace }}{{ $_ := set $cfg "includeOwnNamespace" true }}{{ end }}
   {{- if $cfg }}
   config:
 {{ toYaml $cfg | indent 4 }}
