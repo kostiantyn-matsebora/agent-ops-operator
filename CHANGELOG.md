@@ -8,6 +8,55 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+**Conversations are capped, queued, and can be closed.** Chart 3.4.0, manager
+0.21.0, `channel-telegram` 0.6.1, `console` 0.2.0 — ship them together: an
+adapter that does not know the new `close-topic` op leaves topics open.
+
+*Why this exists:* nothing bounded how many conversations ran at once in terms
+an operator recognises. The only cap was `MAX_RUNTIMES`, named after pods, and
+an idle runtime held its slot for ten minutes after the agent had stopped
+working. Conversations also never ended — no way to say "this one is done", so
+threads accumulated and capacity came back only by eviction.
+
+**Upgrade steps**
+
+1. **Two defaults change on upgrade, both visible.**
+   - `maxRuntimes: 8` → **`maxActiveConversations: 5`**. Less throughput, more
+     queueing. Nothing is dropped, only delayed — raise the new key to restore
+     the old figure. `maxRuntimes` still works for ONE release (unset by
+     default; setting it emits `MAX_RUNTIMES` and the manager logs the
+     deprecation), then it is removed.
+   - `runtimeIdleTtlMinutes: 10` → **`1`**. A finished conversation gives its
+     slot back within a minute instead of ten, which is what makes a cap of 5
+     workable. The trade is latency, not memory: sessions live in `/data/home`
+     and resume with full context. Raise it — or set
+     `AgentRuntime.spec.idleTTLMinutes` — for runtimes with expensive startup.
+2. **Third-party channel adapters should handle `close-topic`.** It carries the
+   `threadId` to archive and completes with an EMPTY body. An adapter that
+   ignores it is not broken: the op fails its 2-minute grace and deletion
+   proceeds, leaving one open thread per closed conversation. See
+   [docs/contracts.md](docs/contracts.md#the-channel-adapter-contract).
+3. **Nothing to migrate for existing objects.** `Pending` is an additive phase
+   value; no old manager writes it, and rolling back is a chart rollback —
+   phase is status-only and nothing keys behavior off it.
+
+**Worth knowing**
+
+- **Over-cap work waits in `Pending` with NOTHING provisioned** — no runtime
+  pod, no MCP ConfigMap and no chat topic. That last one is the point: a burst
+  of signals no longer becomes a burst of chat threads. Admission is FIFO by
+  creation time. `Queued` keeps its old meaning (admitted, waiting its turn).
+- **The backlog is bounded too**, at `maxQueuedConversations: 50`. Past it
+  `/signal/inbound` declines to create a conversation and reports the batch
+  dropped for capacity — chat senders are told on the surface they typed on.
+  Window reuse is unaffected: the bound gates new objects, not new inputs.
+- **`/close` ends a conversation** from its thread — any sender who can post
+  there, honored mid-run (the farewell names the abandoned work). It deletes
+  the `Conversation`; the pod and `agentops-mcp-conv-<name>` follow by owner
+  reference. `kubectl delete conversation` behaves identically, archiving
+  threads first. On a general surface `/close` answers with usage, so a
+  Pipeline named `close` is no longer addressable from chat.
+
 **Cluster events get suppression, workload grouping, and a loop breaker.**
 `signal-k8s-events` 0.2.0. Two breaking-ish defaults and one new RBAC grant.
 

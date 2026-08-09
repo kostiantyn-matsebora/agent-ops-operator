@@ -300,6 +300,7 @@ spec:
               phase:
                 description: ConversationPhase is the coarse conversation state.
                 enum:
+                - Pending
                 - Idle
                 - Queued
                 - Working

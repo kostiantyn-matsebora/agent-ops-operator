@@ -337,13 +337,18 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	summary := summarize(obj, a.cache.List("pipelines"), a.adapter.PrimaryChannel())
 	var messages []Message
+	archived := false
 	if summary.ConsoleThread != "" {
 		messages = a.transcripts.Thread(summary.ConsoleThread)
+		archived = a.transcripts.Archived(summary.ConsoleThread)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"conversation": summary,
 		"object":       obj,
 		"transcript":   messages,
+		// archived: a close-topic op ended this thread. The transcript stays
+		// readable; there is just nothing left to reply to.
+		"archived": archived,
 	})
 }
 

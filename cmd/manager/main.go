@@ -44,6 +44,22 @@ func envInt(key string, def int) int {
 	return def
 }
 
+// maxActiveConversations resolves the cap on simultaneously ACTIVE
+// conversations (one holding a runtime pod), reporting whether the deprecated
+// MAX_RUNTIMES spelling supplied it. The rename is deliberate: the number is
+// read by people who think in conversations, and `maxRuntimes` next to
+// AgentRuntime CRs reads as a limit on runtime KINDS. MAX_RUNTIMES is honored
+// for one release when the new name is unset.
+func maxActiveConversations() (n int, deprecated bool) {
+	if v, err := strconv.Atoi(os.Getenv("MAX_ACTIVE_CONVERSATIONS")); err == nil && v > 0 {
+		return v, false
+	}
+	if v, err := strconv.Atoi(os.Getenv("MAX_RUNTIMES")); err == nil && v > 0 {
+		return v, true
+	}
+	return 5, false
+}
+
 // commandFromEnv parses RUNTIME_COMMAND_JSON (e.g. ["sh","-c","..."]) — used to
 // run a stub worker during shadow verification.
 func commandFromEnv() []string {
@@ -136,16 +152,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	maxActive, deprecatedCap := maxActiveConversations()
+	if deprecatedCap {
+		setupLog.Info("MAX_RUNTIMES is deprecated and is removed after one release — "+
+			"set MAX_ACTIVE_CONVERSATIONS (chart: maxActiveConversations) instead", "cap", maxActive)
+	}
 	reconciler := &controller.ConversationReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		MaxRuntimes: envInt("MAX_RUNTIMES", 8),
-		Ops:         ops,
+		Client:                 mgr.GetClient(),
+		Scheme:                 mgr.GetScheme(),
+		MaxActiveConversations: maxActive,
+		Ops:                    ops,
 		Runtime: runtimepod.Config{
 			Image:          env("RUNTIME_IMAGE", ""),
 			ServiceAccount: env("RUNTIME_SA", "agentops-runtime"),
 			ControlURL:     env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080"),
-			IdleTTLMinutes: envInt("RUNTIME_IDLE_TTL_M", 10),
+			IdleTTLMinutes: envInt("RUNTIME_IDLE_TTL_M", 1),
 			HomePVC:        os.Getenv("HOME_PVC"),
 			NodeSelector:   map[string]string{"node-role/app": "true"},
 			Command:        commandFromEnv(),
@@ -157,13 +178,16 @@ func main() {
 	}
 
 	if err := mgr.Add(&httpapi.Server{
-		Client:       mgr.GetClient(),
-		Reader:       mgr.GetAPIReader(),
-		Namespace:    namespace,
-		Addr:         env("API_ADDR", ":8080"),
-		Ops:          ops,
-		Router:       router,
-		AdapterToken: os.Getenv("ADAPTER_TOKEN"),
+		Client:    mgr.GetClient(),
+		Reader:    mgr.GetAPIReader(),
+		Namespace: namespace,
+		Addr:      env("API_ADDR", ":8080"),
+		Ops:       ops,
+		Router:    router,
+		// The backlog bound: the one capacity check that must live in ingest,
+		// because the point is not to create the object at all.
+		MaxQueuedConversations: envInt("MAX_QUEUED_CONVERSATIONS", 50),
+		AdapterToken:           os.Getenv("ADAPTER_TOKEN"),
 	}); err != nil {
 		setupLog.Error(err, "http api")
 		os.Exit(1)

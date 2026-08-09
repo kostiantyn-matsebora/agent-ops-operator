@@ -69,6 +69,10 @@ type Transcripts struct {
 
 type threadLog struct {
 	messages []Message
+	// archived: the conversation was closed and its thread ended. The buffer is
+	// kept — a closed conversation's last exchange is exactly what someone
+	// wants to read — but the UI stops offering a reply box for it.
+	archived bool
 }
 
 // NewTranscripts builds an empty store.
@@ -167,6 +171,36 @@ func (t *Transcripts) Thread(thread string) []Message {
 		}
 	}
 	return out
+}
+
+// Archive marks a thread closed, keeping its transcript for this console
+// session. Idempotent: close-topic ops are at-least-once.
+func (t *Transcripts) Archive(thread string) {
+	t.mu.Lock()
+	log := t.threads[thread]
+	if log == nil {
+		log = &threadLog{}
+		t.threads[thread] = log
+		t.order = append(t.order, thread)
+	}
+	already := log.archived
+	log.archived = true
+	t.mu.Unlock()
+	if already {
+		return
+	}
+	t.append(Message{
+		ID: "archived:" + thread, Thread: thread, Kind: MsgAgent,
+		Text: "🗄 Conversation closed — this thread is archived.", At: nowRFC3339(),
+	}, false)
+}
+
+// Archived reports whether a thread has been closed.
+func (t *Transcripts) Archived(thread string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	log := t.threads[thread]
+	return log != nil && log.archived
 }
 
 // Subscribe streams appended messages.

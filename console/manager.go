@@ -36,7 +36,7 @@ type Op struct {
 	ID           string  `json:"id"`
 	Channel      string  `json:"channel"`
 	Conversation string  `json:"conversation,omitempty"`
-	Kind         string  `json:"kind"` // "ensure-topic" | "send"
+	Kind         string  `json:"kind"` // "ensure-topic" | "send" | "close-topic"
 	Title        string  `json:"title,omitempty"`
 	ThreadID     *string `json:"threadId,omitempty"`
 	Text         string  `json:"text,omitempty"`

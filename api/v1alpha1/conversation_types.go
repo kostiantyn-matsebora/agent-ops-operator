@@ -69,10 +69,16 @@ type ConversationSpec struct {
 }
 
 // ConversationPhase is the coarse conversation state.
-// +kubebuilder:validation:Enum=Idle;Queued;Working
+// +kubebuilder:validation:Enum=Pending;Idle;Queued;Working
 type ConversationPhase string
 
 const (
+	// ConversationPending: created, awaiting a capacity slot; nothing
+	// provisioned. No runtime pod, no chat topic, no MCP ConfigMap — the
+	// conversation holds its inputs and its wiring snapshot and nothing else.
+	// Distinct from Queued, which means ADMITTED with work waiting behind the
+	// serial-per-conversation rule.
+	ConversationPending ConversationPhase = "Pending"
 	ConversationIdle    ConversationPhase = "Idle"
 	ConversationQueued  ConversationPhase = "Queued"
 	ConversationWorking ConversationPhase = "Working"

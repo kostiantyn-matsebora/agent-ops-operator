@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/addressing"
@@ -144,17 +145,32 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 		groups[key] = append(groups[key], sig)
 	}
 
-	touched := 0
+	touched, landed, reason := 0, 0, ""
 	for key, group := range groups {
-		if err := s.routeSignalGroup(ctx, source, pipeline, key, group, combine); err != nil {
+		routed, err := s.routeSignalGroup(ctx, source, pipeline, key, group, combine)
+		if err != nil {
 			return 0, 0, "", err
 		}
+		if !routed {
+			reason = ReasonAtCapacity
+			continue
+		}
+		landed += len(group)
 		touched++
 	}
+	if reason != "" {
+		log.FromContext(ctx).Info("signal batch declined: pending backlog is full",
+			"source", source.Name, "maxQueuedConversations", s.maxQueued())
+	}
 
-	s.bumpReceived(ctx, source, len(fresh))
-	return len(fresh), touched, "", nil
+	s.bumpReceived(ctx, source, landed)
+	return landed, touched, reason, nil
 }
+
+// ReasonAtCapacity is the drop reason for a batch refused because the pending
+// backlog is full — the same channel every other drop reason travels: reported
+// in the response for machine origins, spoken on the surface for chat.
+const ReasonAtCapacity = "pending conversation backlog is full — signals dropped"
 
 // bumpReceived records ingest on the source (the single place lastReceived /
 // receivedTotal move).
@@ -218,6 +234,12 @@ func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.
 		return answered, 0, "", nil
 	}
 	queued, touched, reason, err := s.routeSignals(ctx, source, rest, combineJoined)
+	if reason == ReasonAtCapacity {
+		// A person is waiting on the surface they typed on; an alert can be
+		// found later in a condition, a question cannot.
+		s.tellOriginatingSurfaces(ctx, rest, "⚠️ At capacity — too many conversations are already waiting for "+
+			"an agent slot, so this message was dropped. Try again once the backlog clears.")
+	}
 	return queued + answered, touched, reason, err
 }
 
@@ -250,10 +272,30 @@ func (s *Server) tellOriginatingSurfaces(ctx context.Context, signals []Normaliz
 	}
 }
 
+// backlogFull reports whether the pending backlog has reached its bound. Only
+// PENDING conversations count: an admitted one holds a pod (or is about to) and
+// is already bounded by MAX_ACTIVE_CONVERSATIONS.
+func (s *Server) backlogFull(ctx context.Context) (bool, error) {
+	var list agentopsv1alpha1.ConversationList
+	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace)); err != nil {
+		return false, err
+	}
+	n := 0
+	for i := range list.Items {
+		if list.Items[i].Status.Phase == agentopsv1alpha1.ConversationPending {
+			n++
+		}
+	}
+	return n >= s.maxQueued(), nil
+}
+
 // routeSignalGroup lands one signature group as an input on the matching
 // conversation (window reuse; created on demand with the claiming pipeline's
-// profile and channel set — the only wiring there is).
-func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, pipeline *agentopsv1alpha1.Pipeline, signature string, group []NormalizedSignal, combine combineFunc) error {
+// profile and channel set — the only wiring there is). Reports routed=false
+// when the pending backlog is full and the group would have needed a NEW
+// conversation — the bound gates creation only, so window reuse keeps appending
+// to a pending conversation however full the backlog is.
+func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, pipeline *agentopsv1alpha1.Pipeline, signature string, group []NormalizedSignal, combine combineFunc) (bool, error) {
 	windowDays := source.Spec.Grouping.WindowDays
 	if windowDays <= 0 {
 		windowDays = 7
@@ -261,7 +303,7 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	var list agentopsv1alpha1.ConversationList
 	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace),
 		client.MatchingLabels{controller.LabelSignatureHash: ingest.SignatureHash(signature)}); err != nil {
-		return err
+		return false, err
 	}
 	var conv *agentopsv1alpha1.Conversation
 	cutoff := time.Now().Add(-time.Duration(windowDays) * 24 * time.Hour)
@@ -291,6 +333,13 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		inputType = agentopsv1alpha1.InputTask
 	}
 	if conv == nil {
+		full, err := s.backlogFull(ctx)
+		if err != nil {
+			return false, err
+		}
+		if full {
+			return false, nil
+		}
 		title := ""
 		for _, sig := range group {
 			if sig.Title != "" {
@@ -320,7 +369,7 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			Signature:   signature,
 		}
 		if err := s.Client.Create(ctx, conv); err != nil {
-			return err
+			return false, err
 		}
 	} else if conv.Status.SessionID != "" {
 		inputType = agentopsv1alpha1.InputRecurrence // same problem/job, resume with context
@@ -335,14 +384,14 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		Payload:         combine(group),
 	}
 	if err := s.Client.Create(ctx, ci); err != nil {
-		return err
+		return false, err
 	}
 
 	// append the input item with optimistic retry
 	for attempt := 0; attempt < 5; attempt++ {
 		var fresh agentopsv1alpha1.Conversation
 		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Name}, &fresh); err != nil {
-			return err
+			return false, err
 		}
 		patch := client.MergeFrom(fresh.DeepCopy())
 		fresh.Spec.Inputs = append(fresh.Spec.Inputs, agentopsv1alpha1.InputItem{
@@ -356,11 +405,11 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			if apierrors.IsConflict(err) {
 				continue
 			}
-			return err
+			return false, err
 		}
-		return nil
+		return true, nil
 	}
-	return fmt.Errorf("conflict appending input to %s", conv.Name)
+	return false, fmt.Errorf("conflict appending input to %s", conv.Name)
 }
 
 // ---- signal adapter contract (auth + endpoints) -----------------------------

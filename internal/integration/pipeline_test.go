@@ -53,7 +53,9 @@ func reconcilePipeline(t *testing.T, name string) *agentopsv1alpha1.Pipeline {
 }
 
 // cleanupConversation force-removes a conversation and its runtime pod so the
-// shared MaxRuntimes pool stays predictable for later tests.
+// active-conversation cap stays predictable for later tests. The close-topics
+// finalizer is stripped rather than driven: without a reconciler running here
+// the object would sit Terminating forever and the name would stay taken.
 func cleanupConversation(t *testing.T, name string) {
 	t.Helper()
 	ctx := context.Background()
@@ -63,6 +65,24 @@ func cleanupConversation(t *testing.T, name string) {
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Name, conv.Namespace = name, ns
 	_ = k8sClient.Delete(ctx, conv)
+	dropCloseFinalizer(t, name)
+}
+
+// dropCloseFinalizer releases a deleting conversation in tests that never run
+// the finalize path themselves.
+func dropCloseFinalizer(t *testing.T, name string) {
+	t.Helper()
+	ctx := context.Background()
+	var conv agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &conv); err != nil {
+		return
+	}
+	if len(conv.Finalizers) == 0 {
+		return
+	}
+	patch := client.MergeFrom(conv.DeepCopy())
+	conv.Finalizers = nil
+	_ = k8sClient.Patch(ctx, &conv, patch)
 }
 
 func TestPipelineValidationAndConflicts(t *testing.T) {

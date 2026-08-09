@@ -30,6 +30,7 @@ const state = {
   conversations: [],
   conversation: null,
   transcript: [],
+  archived: false,
   stream: null,
 };
 
@@ -377,6 +378,7 @@ async function openConversation(name, quiet) {
   const data = await api('/api/conversations/' + encodeURIComponent(name));
   state.conversation = data.conversation;
   state.transcript = data.transcript || [];
+  state.archived = !!data.archived;
   renderConversation();
   if (!quiet) loadConversations();
 }
@@ -402,7 +404,10 @@ function renderConversation() {
   scroll.id = 'conv-scroll';
   box.appendChild(scroll);
 
-  if (c.joined) {
+  if (state.archived) {
+    box.appendChild(el('div', 'notice',
+      'Closed — this conversation ended and its thread is archived. The transcript stays until the console restarts.'));
+  } else if (c.joined) {
     const form = el('form', 'composer');
     const input = el('input');
     input.placeholder = 'Reply to the agent…';
