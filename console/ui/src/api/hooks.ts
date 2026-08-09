@@ -108,6 +108,11 @@ export function useSources() {
   return useQuery({ queryKey: ['sources', rev], queryFn: api.sources })
 }
 
+/** Which historical charts the backend can answer, and whether one exists. */
+export function useCharts() {
+  return useQuery({ queryKey: ['charts'], queryFn: api.charts, staleTime: 30_000 })
+}
+
 export function useChart(name: string, windowSeconds: number, enabled: boolean) {
   return useQuery({
     queryKey: ['chart', name, windowSeconds],
