@@ -41,7 +41,7 @@ spec:
             - name: RUNTIME_IDLE_TTL_M
               value: {{ .Values.runtimeIdleTtlMinutes | quote }}
             - name: RUNTIME_SA
-              value: {{ .Values.serviceAccounts.runtime | quote }}
+              value: {{ include "agentops.runtimeServiceAccount" . | quote }}
             - name: ADAPTER_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -1,9 +1,15 @@
-# Kubernetes agent bundle: cluster Events → conversations, plus the agent that
-# answers them and the RBAC it answers with. Four independently toggleable
+# Kubernetes agent bundle: cluster Events → conversations, the agent that
+# answers them, and its Kubernetes tooling. Three independently toggleable
 # components. The WHOLE bundle is off by default and is turned on either
 # directly (`enabled: true`) or by demo mode (`global.demo.enabled: true`) —
 # demo mode means exactly "this bundle with its defaults", nothing more.
 # Override under the `k8s-bundle:` key of the parent chart's values.
+#
+# The bundle ships NO SUBSTRATE: no AgentRuntime, no runtime ServiceAccount, no
+# LLM credential, no runtime RBAC. Those are release-wide facts and live in the
+# parent chart's `runtime:` block and `global.agentops.runtime.*`. Bundles
+# contribute domain — sources, profiles, tooling, channels — and reference what
+# the parent provides.
 enabled: false
 
 # The cluster Events ingest lane: adapter implementation, the RBAC its
@@ -153,7 +159,9 @@ eventsAdapter:
         - namespace
         - workload
 
-# The agent that answers: profile + its execution identity.
+# The agent that answers. IDENTITY ONLY — one AgentProfile and nothing else.
+# What executes it is the parent chart's `runtime:` block; what it may do in the
+# cluster is `global.agentops.runtime.rbacMode` plus the Pipeline routing it.
 profile:
   enabled: true
   name: k8s-engineer
@@ -189,57 +197,10 @@ profile:
 
     Answer briefly. Lead with the finding, then the evidence.
   maxTurns: 40
-  # Names an existing AgentRuntime when runtime.create is false.
+  # Names an AgentRuntime other than the parent's `default` — a higher-trust or
+  # different-vendor runtime you applied yourself. Empty emits no runtimeRef and
+  # falls back to `default`, which the parent renders whenever runtime.enabled.
   runtimeRef: ""
-  runtime:
-    create: true
-    # Default name preserves the pre-bundle demo behavior: profiles with no
-    # runtimeRef fall back to the AgentRuntime named "default".
-    name: default
-    # 0.2.0+ composes the allowlist with the agent definition's own `tools:`
-    # and passes it verbatim — no substituted `Read` when nothing is declared.
-    # Pinning an older tag keeps that substitution and ignores toolsets.mode.
-    image: kmatsebora/agentops-runtime-claude:0.3.0
-    # The agent's security identity — its RBAC IS its power (see the rbac block).
-    serviceAccountName: agentops-runtime-k8s
-    idleTtlMinutes: 10
-    # Where conversation runtime pods may be scheduled. Set it when the runtime
-    # image is not multi-arch (the reference runtime-claude images are amd64
-    # only) or when agent work belongs on particular nodes — a runtime pod that
-    # lands on an unsupported architecture just crash-loops.
-    nodeSelector: {}
-    # Agent session persistence. The parent chart's `persistence` block is not
-    # visible to a subchart, so name its claim here to keep sessions alive
-    # across runtime pods; empty = emptyDir (sessions die with the pod).
-    homePvcRef: ""
-    # ONE secret with a Claude credential (claude setup-token output or an
-    # Anthropic API key). Projected as env via valueFrom — the manager reads no
-    # Secrets.
-    #
-    # Supply `token` and the bundle CREATES this Secret, release-managed, the
-    # same way telegram-bundle handles its bot token — point it at a secret
-    # store from your helmfile/values and the credential is provisioned with
-    # the release. Leave it empty to reference a Secret you manage yourself.
-    #
-    # Getting this wrong fails QUIETLY and late: the runtime pod is created,
-    # then sits in CreateContainerConfigError while conversations queue behind
-    # it, because the kubelet — not the manager — resolves the reference.
-    credentialsSecret:
-      name: agentops-claude
-      key: oauthToken
-      envName: CLAUDE_CODE_OAUTH_TOKEN
-      token: ""
-    resources: {}
-
-# What the agent may do in the cluster, bound to profile.runtime.serviceAccountName.
-rbac:
-  enabled: true
-  # readonly — the built-in "view" ClusterRole plus node/namespace/metrics reads.
-  # full     — cluster-admin. An LLM-driven agent with unrestricted control of
-  #            your cluster: never a default, never demo, and worth a second
-  #            thought before you set it. Prefer readonly plus targeted grants
-  #            through the parent chart's rbac.runtime block.
-  mode: readonly
 
 # Structured Kubernetes access as MCP tools — the same two halves vm-bundle
 # ships for VictoriaMetrics: an MCPConfig (the server) and an MCPToolset (the
@@ -249,12 +210,15 @@ rbac:
 # This does NOT replace kubectl. The agent keeps Bash + kubectl under the
 # runtime SA; MCP is the structured path, kubectl is the fallback.
 #
-# OFF by default, unlike the other components: an MCPConfig needs an endpoint,
-# and with mcpServers off there is none to default onto — so a default-on
-# component would fail its own render guard on every install, demo included.
-# Turn it on with a `url`, or with `mcpServers.enabled` (which supplies one).
+# ON by default, together with `mcpServers` below: an MCPConfig needs an
+# endpoint, and the server component supplies one, so the two flip as a pair.
+# That pairing is the whole reason this used to default off — a Kubernetes
+# bundle whose Kubernetes tooling is off is an install that looks complete and
+# cannot see the cluster through the path this project prefers. The endpoint
+# guard stays, and still fails loudly for the one combination that is genuinely
+# broken: `mcp.enabled` with no server workload and no `url`.
 mcp:
-  enabled: false
+  enabled: true
   # MCPConfig CR name (what Pipelines put in mcpConfigs.refs).
   name: k8s-api
   # The MCP server endpoint. REQUIRED when enabled — unless mcpServers below
@@ -306,8 +270,9 @@ mcp:
     # name that resolves to nothing is how allowlists rot.
     admin:
       # null = follow the deployed server (on when mcpServers deploys one in
-      # write mode). true/false forces it — use true when mcp.url points at
-      # your own server that you know serves writes.
+      # write mode, which by default means global.agentops.runtime.rbacMode is
+      # `full`). true/false forces it — use true when mcp.url points at your own
+      # server that you know serves writes.
       enabled: null
       name: k8s-admin
       tools:
@@ -320,7 +285,9 @@ mcp:
 
 # The MCP server WORKLOAD itself — a separate sub-component (sibling of `mcp`,
 # which renders only the CRs): run containers/kubernetes-mcp-server in-cluster
-# when you don't already have one. Off by default.
+# when you don't already have one. On by default, with `mcp` — set this to false
+# (and `mcp.url` to your own endpoint, or `mcp.enabled: false`) if you already
+# run one or want no server at all.
 #
 # The point of this component is the SECOND IDENTITY. The server pod
 # authenticates to the API as its OWN ServiceAccount, not the runtime's, so the
@@ -328,7 +295,7 @@ mcp:
 # two walls, each reviewable alone. The kubectl path has only one: the runtime
 # SA's RBAC, which Bash hands over whole.
 mcpServers:
-  enabled: false
+  enabled: true
   image:
     # Talks to the API directly (no kubectl in the image) and resolves
     # in-cluster config from the pod SA, which is what makes the second
@@ -340,29 +307,45 @@ mcpServers:
   # annotation, so mutating tools are uncallable, not merely unlisted — the
   # first of the two walls, with the toolsets above as the second.
   #
-  # Turning it OFF registers the six mutating tools and renders the k8s-admin
-  # toolset, which routes must then bind deliberately. Pair it with
-  # rbac.mode: full — a write-capable server with readonly grants just fails
-  # every mutation with a Forbidden.
-  readOnly: true
+  # null = DERIVE from global.agentops.runtime.rbacMode: read-only for every
+  # mode but `full`. The two are bound by an invariant that used to be
+  # maintained by hand in every install's values — a read-only server under a
+  # `full` agent pushes every write back onto kubectl, the single-wall path this
+  # component exists to replace.
+  #
+  # An explicit value still wins, and that is the override worth knowing:
+  # `readOnly: true` under `rbacMode: full` keeps a write-capable agent with a
+  # read-only MCP path. Deriving is a default, not a merge — but it does mean
+  # widening the agent to `full` widens this server too unless you say so.
+  #
+  # With the server in write mode the six mutating tools register and the
+  # k8s-admin toolset renders, which routes must then bind deliberately.
+  readOnly: null
   # Upstream's default is [core, config, helm]. Helm is dropped: an
   # observability lane has no reason to carry a Helm client, and one less
   # toolset is one less thing riding on the read-only filter being right.
   toolsets:
     - core
     - config
-  # Distinct from profile.runtime.serviceAccountName ON PURPOSE — see above.
+  # Distinct from global.agentops.runtime.serviceAccountName ON PURPOSE — see
+  # above. Setting them equal FAILS the render.
   serviceAccountName: agentops-mcp-k8s
   rbac:
     create: true
-    # Same vocabulary as the agent's rbac block, granted to the SERVER's SA:
+    # Same vocabulary as global.agentops.runtime.rbacMode, granted to the
+    # SERVER's SA:
     # readonly — "view" plus node/namespace/metrics reads.
-    # full     — cluster-admin. Pointless with readOnly: true and dangerous
-    #            without it; there is no good reason to set this.
+    # full     — cluster-admin. Pointless with a read-only server and dangerous
+    #            without it; there is no good reason to set this by hand.
+    # null     — DERIVE: `full` when the agent's mode is `full`, readonly for
+    #            everything else, `none` included. `none` mapping to a readonly
+    #            server is deliberate — an agent that reads the cluster through
+    #            MCP and can do nothing at all through its own identity is the
+    #            useful shape two identities exist to offer.
     # NOTE: nodes_log / nodes_stats_summary read through nodes/proxy, which
     # readonly does NOT grant (it is a large privilege). Those two tools are
     # registered and fail with a readable Forbidden; widen deliberately.
-    mode: readonly
+    mode: null
   # Extra env passthrough (the flags above are passed as args, not env).
   env: []
   resources: {}

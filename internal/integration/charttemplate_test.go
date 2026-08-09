@@ -26,6 +26,21 @@ func helmTemplate(t *testing.T, args ...string) string {
 	return string(out)
 }
 
+// helmTemplateErr renders expecting FAILURE and returns the message. Used for
+// the guards whose whole value is that they fire.
+func helmTemplateErr(t *testing.T, args ...string) string {
+	t.Helper()
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	cmd := exec.Command("helm", append([]string{"template", "test", "../../chart"}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("helm template unexpectedly succeeded:\n%s", out)
+	}
+	return string(out)
+}
+
 func TestConsoleRendersNothingWhenDisabled(t *testing.T) {
 	out := helmTemplate(t)
 	// console-specific names only: "kind: ChannelAdapter" appears in the CRD
@@ -200,6 +215,182 @@ func TestDefaultRulesShape(t *testing.T) {
 	}
 	if !strings.Contains(last, "for:") {
 		t.Fatalf("the catch-all must carry a dwell:\n%s", last)
+	}
+}
+
+// ---- runtime ownership ------------------------------------------------------
+
+// The substrate is the PARENT's: one AgentRuntime, one runtime ServiceAccount,
+// whatever bundles are on. The bundle used to ship its own — which is how two
+// runtime identities came to exist, one of them granted everything.
+func TestParentOwnsExactlyOneRuntime(t *testing.T) {
+	for _, combo := range [][]string{
+		nil,
+		{"--set", "global.demo.enabled=true"},
+		{"--set", "k8s-bundle.enabled=true"},
+		{"--set", "telegram-bundle.enabled=true"},
+		{"--set", "k8s-bundle.enabled=true", "--set", "telegram-bundle.enabled=true"},
+	} {
+		name := "defaults"
+		if len(combo) > 0 {
+			name = strings.Join(combo[1:], ",")
+		}
+		t.Run(name, func(t *testing.T) {
+			out := helmTemplate(t, combo...)
+			if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 1 {
+				t.Errorf("want exactly 1 AgentRuntime, got %d", n)
+			}
+			var sas int
+			for _, doc := range splitDocs(out) {
+				if strings.Contains(doc, "kind: ServiceAccount\nmetadata:\n  name: agentops-runtime\n") {
+					sas++
+				}
+			}
+			if sas != 1 {
+				t.Errorf("want exactly 1 runtime ServiceAccount, got %d", sas)
+			}
+			// the bundle-named identity must be gone everywhere, bindings included
+			if strings.Contains(out, "agentops-runtime-k8s") {
+				t.Error("the bundle-named runtime ServiceAccount must not render")
+			}
+		})
+	}
+}
+
+// "Bring your own runtime": the component renders nothing, but the SA stays —
+// the manager defaults every runtime pod onto it whoever wrote the CR.
+func TestRuntimeDisabledRendersNoRuntimeObjects(t *testing.T) {
+	out := helmTemplate(t, "--set", "runtime.enabled=false",
+		"--set", "runtime.credentialsSecret.token=x")
+	// anchored: the CRD document names the kind too, and it ships regardless
+	if strings.Contains(out, "\nkind: AgentRuntime\n") {
+		t.Error("runtime.enabled=false must render no AgentRuntime")
+	}
+	if strings.Contains(out, "name: agentops-claude") {
+		t.Error("runtime.enabled=false must render no credential Secret")
+	}
+	if !strings.Contains(out, "kind: ServiceAccount\nmetadata:\n  name: agentops-runtime\n") {
+		t.Error("the runtime ServiceAccount is not part of the component and must still render")
+	}
+}
+
+// The release has ONE idle-TTL number. The field must be WRITTEN, not omitted:
+// AgentRuntime.spec.idleTtlMinutes carries a CRD default of 10, so an omitted
+// field is stored as 10, and the manager prefers any non-zero spec value over
+// RUNTIME_IDLE_TTL_M — omitting it looks right in the manifest and silently
+// ignores runtimeIdleTtlMinutes in the cluster.
+func TestRuntimeIdleTTLFollowsTheReleaseDefault(t *testing.T) {
+	out := helmTemplate(t, "--set", "runtimeIdleTtlMinutes=7")
+	if !strings.Contains(out, "idleTtlMinutes: 7") {
+		t.Error("an empty runtime.idleTtlMinutes must follow runtimeIdleTtlMinutes")
+	}
+	out = helmTemplate(t, "--set", "runtimeIdleTtlMinutes=7", "--set", "runtime.idleTtlMinutes=30")
+	if !strings.Contains(out, "idleTtlMinutes: 30") {
+		t.Error("an explicit runtime.idleTtlMinutes must win")
+	}
+}
+
+// Empty rbacMode grants NOTHING outside demo mode — defaulting it to readonly
+// would silently bind cluster `view` on every upgrade. `full` is never inferred.
+func TestRuntimeRbacModeResolution(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		want    []string
+		notWant []string
+	}{
+		{"unset grants nothing", nil, nil,
+			[]string{"agentops-runtime-view", "agentops-runtime-cluster-admin"}},
+		{"demo is read-only", []string{"--set", "global.demo.enabled=true"},
+			[]string{"agentops-runtime-view", "agentops-runtime-cluster-ro"},
+			[]string{"agentops-runtime-cluster-admin"}},
+		{"none", []string{"--set", "global.agentops.runtime.rbacMode=none", "--set", "global.demo.enabled=true"}, nil,
+			[]string{"agentops-runtime-view", "agentops-runtime-cluster-admin"}},
+		{"full", []string{"--set", "global.agentops.runtime.rbacMode=full"},
+			[]string{"agentops-runtime-cluster-admin"}, nil},
+		{"targeted grants compose with the mode",
+			[]string{"--set", "global.agentops.runtime.rbacMode=readonly", "--set", "rbac.runtime.bindClusterRoles={edit}"},
+			[]string{"agentops-runtime-view", "agentops-runtime-edit"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := helmTemplate(t, tc.args...)
+			for _, needle := range tc.want {
+				if !strings.Contains(out, needle) {
+					t.Errorf("missing %q", needle)
+				}
+			}
+			for _, needle := range tc.notWant {
+				if strings.Contains(out, needle) {
+					t.Errorf("must not render %q", needle)
+				}
+			}
+		})
+	}
+}
+
+// The old key would otherwise be read by nothing, running agents under an
+// identity the operator did not choose.
+func TestMovedRuntimeSAKeyFails(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "serviceAccounts.runtime=agentops-runtime-k8s")
+	if !strings.Contains(msg, "global.agentops.runtime.serviceAccountName") {
+		t.Fatalf("the failure must name the new key:\n%s", msg)
+	}
+}
+
+// ---- k8s-bundle MCP ---------------------------------------------------------
+
+// mcp and mcpServers flip together, so the config's URL always has a Service to
+// default onto. The guard exists for the combination that is genuinely broken.
+func TestMCPEndpointGuardStillBites(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "k8s-bundle.enabled=true",
+		"--set", "k8s-bundle.mcpServers.enabled=false")
+	if !strings.Contains(msg, "mcp.url is required") {
+		t.Fatalf("the endpoint guard must name the missing URL:\n%s", msg)
+	}
+}
+
+// One knob configures both identities coherently: with derivation, rbacMode
+// full must render the mutating toolset and a write-capable server with no
+// other value set — and an explicit readOnly must still recover the separation.
+func TestMCPServerDerivesFromRuntimeRbacMode(t *testing.T) {
+	readOnly := helmTemplate(t, "--set", "k8s-bundle.enabled=true")
+	if !strings.Contains(readOnly, "- --read-only") {
+		t.Error("default posture must be a read-only server")
+	}
+	if strings.Contains(readOnly, "name: k8s-admin") {
+		t.Error("no mutating toolset without a server that registers those tools")
+	}
+
+	full := helmTemplate(t, "--set", "k8s-bundle.enabled=true",
+		"--set", "global.agentops.runtime.rbacMode=full")
+	if strings.Contains(full, "- --read-only") {
+		t.Error("rbacMode=full must yield a write-capable server")
+	}
+	if !strings.Contains(full, "name: k8s-admin") {
+		t.Error("rbacMode=full must render the mutating toolset with no other value set")
+	}
+	if !strings.Contains(full, "name: agentops-mcp-k8s-cluster-admin") {
+		t.Error("rbacMode=full must yield a full server ServiceAccount")
+	}
+
+	recovered := helmTemplate(t, "--set", "k8s-bundle.enabled=true",
+		"--set", "global.agentops.runtime.rbacMode=full",
+		"--set", "k8s-bundle.mcpServers.readOnly=true")
+	if !strings.Contains(recovered, "- --read-only") {
+		t.Error("an explicit readOnly must win over the derivation")
+	}
+	if strings.Contains(recovered, "name: k8s-admin") {
+		t.Error("a read-only server must not render the mutating toolset")
+	}
+}
+
+// Collapsing the two identities removes the only thing this component adds
+// over kubectl. The guard now compares against the release-wide SA.
+func TestMCPServerRefusesTheRuntimeIdentity(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "k8s-bundle.enabled=true",
+		"--set", "k8s-bundle.mcpServers.serviceAccountName=agentops-runtime")
+	if !strings.Contains(msg, "global.agentops.runtime.serviceAccountName") {
+		t.Fatalf("the guard must name the global key:\n%s", msg)
 	}
 }
 

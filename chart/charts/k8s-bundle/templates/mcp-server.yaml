@@ -15,8 +15,10 @@ defaults an empty MCPConfig URL onto this Service.
 {{- $s := .Values.mcpServers }}
 {{- $name := include "k8s-bundle.mcpServerName" . }}
 {{- $sa := include "k8s-bundle.mcpServerServiceAccount" . }}
-{{- if eq $sa (include "k8s-bundle.runtimeServiceAccount" .) }}
-{{- fail "k8s-bundle: mcpServers.serviceAccountName must differ from profile.runtime.serviceAccountName — the MCP server's separate identity is the reason this component exists; sharing the runtime SA collapses the two walls into one" }}
+{{- $readOnly := include "k8s-bundle.mcpServerReadOnly" . }}
+{{- $rbacMode := include "k8s-bundle.mcpServerRbacMode" . }}
+{{- if eq $sa (include "agentops.runtimeServiceAccount" .) }}
+{{- fail "k8s-bundle: mcpServers.serviceAccountName must differ from global.agentops.runtime.serviceAccountName — the MCP server's separate identity is the reason this component exists; sharing the runtime SA collapses the two walls into one" }}
 {{- end }}
 apiVersion: v1
 kind: ServiceAccount
@@ -53,7 +55,7 @@ spec:
             # --port puts the server in HTTP mode: streamable HTTP on /mcp and
             # SSE on /sse, both from this one port.
             - --port={{ $s.port }}
-            {{- if $s.readOnly }}
+            {{- if $readOnly }}
             # Filters at REGISTRATION, not at listing: a mutating tool is never
             # added to the server, so it cannot be called by a client that
             # already knows its name.
@@ -99,11 +101,12 @@ spec:
 {{- if $s.rbac.create }}
 {{- /*
 The server's own grants — the first of the two walls. Same vocabulary as the
-agent's rbac block (readonly = "view" plus the cluster-scoped and metrics reads
-"view" omits), bound to the SERVER's SA. Revoking these removes the agent's MCP
-reach without touching the runtime SA.
+parent's global.agentops.runtime.rbacMode (readonly = "view" plus the
+cluster-scoped and metrics reads "view" omits), bound to the SERVER's SA and
+derived from that mode unless set. Revoking these removes the agent's MCP reach
+without touching the runtime SA.
 */ -}}
-{{- if eq $s.rbac.mode "readonly" }}
+{{- if eq $rbacMode "readonly" }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -148,7 +151,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
     namespace: {{ .Release.Namespace }}
-{{- else if eq $s.rbac.mode "full" }}
+{{- else if eq $rbacMode "full" }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -165,7 +168,7 @@ subjects:
     name: {{ $sa }}
     namespace: {{ .Release.Namespace }}
 {{- else }}
-{{- fail (printf "k8s-bundle: mcpServers.rbac.mode must be \"readonly\" or \"full\", got %q" $s.rbac.mode) }}
+{{- fail (printf "k8s-bundle: mcpServers.rbac.mode must be \"readonly\" or \"full\" (null derives it from global.agentops.runtime.rbacMode), got %q" $rbacMode) }}
 {{- end }}
 {{- end }}
 {{- end }}

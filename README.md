@@ -27,8 +27,7 @@ approvable from your phone.
 
 ## Concepts (CRDs)
 
-Eleven kinds. One line each here; the full reference is in
-[docs/concepts.md](docs/concepts.md).
+Eleven kinds, one line each; the full reference is [docs/concepts.md](docs/concepts.md).
 
 | Kind | What it defines |
 |---|---|
@@ -48,29 +47,27 @@ Eleven kinds. One line each here; the full reference is in
 
 - **One workflow: a signal originates, a channel carries.** Every Conversation
   starts from a signal routed against a `SignalSource` some Ready `Pipeline`
-  claims — an alert, a cron job, or a person typing on a chat surface, all
-  through one path. Channels never start conversations; they carry them, so
-  "who answers this?" is always declared by a claim, never inferred.
+  claims — an alert, a cron job, or a person typing on chat, all one path.
+  Channels never start conversations, so "who answers this?" is always declared
+  by a claim, never inferred.
 - **Conversation = topic = session.** Replying in a topic resumes the same agent
-  session; new problems get new topics; a repeat alert signature within its
-  window reuses the conversation instead of spamming duplicates.
+  session; a repeat alert signature within its window reuses the conversation.
 - **Per-conversation pods, on demand.** A runtime pod spawns when work arrives,
-  stays warm across turns, exits after its idle TTL (default 1 min), respawns
-  with full context (sessions live on a shared volume). `kubectl logs
-  agentops-conv-<name> -f` streams the live agent transcript.
+  stays warm across turns, exits after its idle TTL (default 1 min), respawns with
+  full context. `kubectl logs agentops-conv-<name> -f` streams the transcript.
 - **[Bounded concurrency, queued not dropped](docs/concepts.md#capacity-how-many-run-at-once).**
   At most `maxActiveConversations` (default 5) conversations hold a pod at once;
   over-cap work waits in phase `Pending` — nothing provisioned, not even the chat
-  topic — and is admitted oldest-first as slots free. `/close` in a thread ends a
-  conversation: the CR is deleted, every bound thread archived, the slot reused.
+  topic — and is admitted oldest-first. `/close` in a thread deletes the CR,
+  archives every bound thread, and frees the slot.
 - **Least privilege by construction.** The manager holds no cluster powers
   beyond its own CRDs + pod lifecycle in its namespace, and never touches agent
   credentials (all `valueFrom`). Agent powers are the runtime SA's RBAC.
 - **See it, and answer it, on one screen.** The optional
-  [console](docs/console.md) (`console.enabled`) draws the wiring as a graph
-  coloured by the conditions the reconcilers already write, plus live runs — and
-  is itself a channel, so a pipeline listing it lets you reply from the run you
-  are watching. Read-only SA; its token sees all that SA can read.
+  [console](docs/console.md) draws the wiring as a graph coloured by the
+  conditions the reconcilers already write, plus live runs — and is itself a
+  channel, so a pipeline listing it lets you reply from the run you are watching.
+  Read-only SA; its token sees all that SA can read.
 - **Structured chat.** Built-in lane prompts embed a six-template message format
   spec — no stream-of-consciousness walls. Custom prompts set their own.
 
@@ -95,17 +92,15 @@ kubectl -n agent-ops logs -f agentops-conv-<name>       # live agent transcript
 kubectl -n agent-ops get conversation <name> -o jsonpath='{.status.runs[0].result}'
 ```
 
-Demo mode is exactly **the k8s bundle with its defaults** (below) — nothing
-demo-specific exists any more. It binds only the built-in `view` ClusterRole
-(+ node/namespace/metrics reads) to the bundle's runtime SA: a pure advisor.
-Everything is gated by `global.demo.enabled` (default `false`) and removable by
-flipping it off. Graduating to the real thing = adding your own `AgentProfile`s
-(repos, MCP, chat) and declaring agent powers under `rbac.runtime` values.
+Demo mode is exactly **the k8s bundle with its defaults** plus the read-only
+RBAC it resolves — nothing demo-specific exists any more. It binds only `view`
+(+ node/namespace/metrics reads) to the release's one runtime SA: a pure
+advisor, gated by `global.demo.enabled` and removable by flipping it off.
 
 > **It also watches your cluster.** Unlike the pre-2.0 demo, this ingests
-> `Warning` events and answers them itself, which costs LLM credits on a noisy
-> cluster. Cooldown, grouping and the conversation cap bound the volume; for the
-> old ask-only behavior add `--set k8s-bundle.eventsAdapter.enabled=false`.
+> `Warning` events and answers them itself (LLM credits on a noisy cluster;
+> cooldown, grouping and the cap bound it). `--set
+> k8s-bundle.eventsAdapter.enabled=false` restores ask-only.
 
 ## Install (current state)
 
@@ -113,16 +108,21 @@ flipping it off. Graduating to the real thing = adding your own `AgentProfile`s
 helm install agent-ops ./chart -n agent-ops --create-namespace \
   --set persistence.enabled=true   # agent session continuity (PVC, RWX recommended;
                                    # off = sessions are ephemeral per runtime pod)
-# CRDs install/upgrade with the release (crds.enabled=true) and carry
-# helm.sh/resource-policy: keep (crds.keep=true) — uninstall never deletes your CRs;
-# the session PVC is kept on uninstall too.
-# Then your site config: secrets, AgentRuntime "default", profiles, Channel, SignalSource
-# (see config/samples/ for example CRs)
+# CRDs install/upgrade with the release and carry helm.sh/resource-policy: keep —
+# uninstall deletes neither your CRs nor the session PVC.
+# Then your site config: profiles, Channel, SignalSource, pipelines (config/samples/)
 ```
 
-For alert ingestion, enable the [VictoriaMetrics bundle](docs/vm-bundle.md)
-and point any Alertmanager-compatible sender at the adapter's webhook Service
-(`continue: true` route). Helm chart, docs site, and public repo extraction are on the roadmap (Phase D).
+**The chart owns the substrate; bundles contribute domain.** `runtime:` renders
+the one `AgentRuntime` named `default` (image, credential, idle TTL, `home.pvcRef`
+wired from `persistence`), so an install with no bundle — or only a chat bundle —
+still executes conversations; `global.agentops.runtime.rbacMode` (`none` |
+`readonly` | `full`, empty = readonly under demo) is the one knob for the agent's
+in-cluster power. [Full reference](docs/concepts.md#the-substrate-runtime-and-globalagentopsruntime).
+
+For alert ingestion, enable the [VictoriaMetrics bundle](docs/vm-bundle.md) and
+point an Alertmanager-compatible sender at the adapter's webhook Service
+(`continue: true` route).
 
 ## Documentation
 

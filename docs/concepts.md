@@ -10,7 +10,7 @@ The full CRD reference, and how an agent's capabilities are resolved.
 
 ### AgentRuntime
 
-**What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, home volume (session persistence), service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](contracts.md#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env.
+**What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, home volume (session persistence), service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](contracts.md#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env. The chart renders the `default` one for you ([below](#the-substrate-runtime-and-globalagentopsruntime)).
 
 ### Conversation
 
@@ -49,6 +49,94 @@ Reusable MCP server sets bound per wiring (or a hand-written `mcp.json` via `con
 ### MCPToolset
 
 A named, reusable **list of tool patterns** (`spec.tools`) — MCP namespaces like `mcp__victorialogs__*` or built-in tool names like `Bash`. It defines no servers (that stays `MCPConfig`'s job) and has no status: the patterns are opaque strings passed to the runtime. Pipelines bind it to grant a route its tools; the chart ships the built-in vocabulary as three risk-split toolsets.
+
+## The substrate: `runtime:` and `global.agentops.runtime.*`
+
+**The parent chart contributes the substrate; bundles contribute domain.** How
+agents execute here — image, LLM credential, idle TTL, node placement, home
+volume, and the identity whose RBAC is the agent's power — is a release-wide
+fact, the same whether a conversation started from a VictoriaMetrics alert, a
+cluster Event or a person typing on Telegram. A bundle contributes signal
+sources, profiles, tooling and channels, and references what the parent
+provides. No subchart renders an `AgentRuntime`, a runtime ServiceAccount or a
+credential Secret.
+
+That is why a chart with no bundle enabled — or with only `telegram-bundle` —
+is still a working install. It was not, for two chart majors: the runtime lived
+in `k8s-bundle`, so a chat-only install rendered nothing that could execute a
+conversation, and a bundle install ended up with two runtime ServiceAccounts,
+one of them granted everything.
+
+```yaml
+runtime:
+  enabled: true                 # false = you manage AgentRuntime CRs yourself
+  name: default                 # the name a profile with no runtimeRef resolves
+  image: kmatsebora/agentops-runtime-claude:0.3.0
+  idleTtlMinutes: ""            # empty = follow runtimeIdleTtlMinutes
+  nodeSelector: {}
+  resources: {}
+  homePvcRef: ""                # only for a claim this chart did not create
+  credentialsSecret:
+    name: agentops-claude
+    key: oauthToken
+    envName: CLAUDE_CODE_OAUTH_TOKEN
+    token: ""                   # supplied = the chart CREATES the Secret
+
+global:
+  agentops:
+    runtime:
+      serviceAccountName: agentops-runtime
+      rbacMode: ""              # none | readonly | full
+```
+
+- **One runtime, named `default`.** Additional runtimes — a second vendor, a
+  higher-trust identity — stay hand-written CRs, which is what the vendor ×
+  trust-level model asks for. A profile points at one with `runtimeRef`.
+- **`home.pvcRef` is wired, not copied.** With `persistence.enabled` (or
+  `persistence.existingClaim`) the rendered `AgentRuntime` takes the chart's own
+  claim. `runtime.homePvcRef` exists only for a claim the chart did not create.
+- **Idle TTL has one default.** Empty `runtime.idleTtlMinutes` follows the
+  release's `runtimeIdleTtlMinutes`, so there is one number unless you
+  deliberately want a second. The chart writes the value out rather than
+  omitting the field: `AgentRuntime.spec.idleTtlMinutes` carries a CRD default
+  of `10`, so an omitted field is stored as `10` and the manager prefers any
+  non-zero spec value over its own setting — omitting it looks right in the
+  manifest and is wrong in the stored object.
+- **The credential is release-managed or yours.** With `token` set the chart
+  creates the Secret; empty, the `AgentRuntime` references it by name and the
+  post-install notes say so — the kubelet resolves that reference, so an
+  unsatisfied one shows up as `CreateContainerConfigError` on the runtime pod
+  and nowhere else.
+- **Why `global.`.** A subchart can read no parent scope but `global.`, and
+  `k8s-bundle`'s MCP server derives its own identity guard and posture from both
+  keys. Restating them in the subchart would make an operator maintain agreement
+  between two keys describing one fact.
+
+### `rbacMode` — the agent's in-cluster power
+
+| mode | what binds to the runtime SA |
+|---|---|
+| `none` | nothing |
+| `readonly` | the built-in `view` ClusterRole, plus `get`/`list`/`watch` on `nodes` and `namespaces` and `get`/`list` on `metrics.k8s.io` nodes/pods — the cluster-scoped reads `view` omits |
+| `full` | `cluster-admin`: unrestricted cluster control for an LLM-driven agent |
+| `""` (default) | `readonly` when `global.demo.enabled`, otherwise `none` |
+
+Empty resolving two ways is deliberate. Defaulting to `readonly` would silently
+bind cluster `view` to the runtime SA of every existing install on upgrade, for
+a chart whose stated posture is least privilege; defaulting to `none` would
+break the promise that demo mode is one flag and a working, cluster-reading
+agent. `full` is never selected by any default or inferred path.
+
+`rbac.runtime.{clusterRoles,bindClusterRoles,namespaced}` are **additive** to
+the mode — targeted grants on top of a canned posture, named
+`<runtime-sa>-<entry>`.
+
+The mode is also the source `k8s-bundle`'s MCP server derives from: `full`
+yields a write-capable server under a `full` ServiceAccount, everything else a
+read-only server under a `readonly` one. Widening the agent therefore widens
+the MCP path unless you say otherwise — see
+[k8s-bundle](k8s-bundle.md#kubernetes-as-mcp-tools-mcp--mcpservers) for the
+override that recovers the separation.
 
 ## Capabilities are wiring
 

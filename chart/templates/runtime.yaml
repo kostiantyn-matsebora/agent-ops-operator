@@ -1,0 +1,81 @@
+{{- /*
+The runtime component: HOW agents execute here.
+
+One AgentRuntime, named `default` — the name a profile with no runtimeRef falls
+back to — so an install with no bundle at all, or with only a chat bundle, can
+still execute a conversation. Bundles contribute domain and reference this; none
+of them renders a runtime, an SA or a credential.
+
+The SA itself is created in rbac.yaml (unconditionally, because the manager
+defaults every runtime pod onto it whoever wrote the AgentRuntime), and its
+bindings in runtime-rbac.yaml.
+*/ -}}
+{{- if .Values.runtime.enabled }}
+{{- $rt := .Values.runtime }}
+{{- $p := .Values.persistence }}
+{{- $pvc := $rt.homePvcRef }}
+{{- if not $pvc }}
+{{- if $p.existingClaim }}
+{{- $pvc = $p.existingClaim }}
+{{- else if $p.enabled }}
+{{- $pvc = $p.name }}
+{{- end }}
+{{- end }}
+{{- if $rt.credentialsSecret.token }}
+# Created because runtime.credentialsSecret.token was supplied, so the agent's
+# credential is provisioned with the release instead of being a prerequisite
+# someone has to remember. The AgentRuntime below references it by NAME only —
+# the manager reads no Secrets, the kubelet resolves it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $rt.credentialsSecret.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-runtime
+type: Opaque
+stringData:
+  {{ $rt.credentialsSecret.key }}: {{ $rt.credentialsSecret.token | quote }}
+---
+{{- end }}
+apiVersion: agentops.dev/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ $rt.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-runtime
+spec:
+  image: {{ $rt.image | quote }}
+  # the agent's security identity — its RBAC IS its power
+  serviceAccountName: {{ include "agentops.runtimeServiceAccount" . }}
+  # Empty runtime.idleTtlMinutes follows the release's runtimeIdleTtlMinutes, so
+  # there is ONE number unless an operator deliberately wants two. It is written
+  # OUT rather than omitted on purpose: the CRD carries a structural default of
+  # 10, so an omitted field is not "unset" — the API server stores 10 and the
+  # manager, which prefers any non-zero spec value over RUNTIME_IDLE_TTL_M,
+  # would silently ignore the release's setting. Omitting it looked correct in
+  # the rendered manifest and was wrong in the stored object.
+  idleTtlMinutes: {{ $rt.idleTtlMinutes | default .Values.runtimeIdleTtlMinutes }}
+  {{- with $rt.nodeSelector }}
+  nodeSelector:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  {{- with $pvc }}
+  # wired from the chart's own `persistence` block unless runtime.homePvcRef
+  # names a claim the chart did not create
+  home:
+    pvcRef:
+      name: {{ . }}
+  {{- end }}
+  {{- with $rt.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  env:
+    - name: {{ $rt.credentialsSecret.envName }}
+      valueFrom:
+        secretKeyRef:
+          name: {{ $rt.credentialsSecret.name }}
+          key: {{ $rt.credentialsSecret.key }}
+{{- end }}

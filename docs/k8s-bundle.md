@@ -4,17 +4,25 @@ The Kubernetes subchart: cluster Events, the agent that answers them, and its MC
 
 
 `chart/charts/k8s-bundle/` packages the whole "watch my cluster and let an agent
-act on what it sees" experience as four independently toggleable components.
+act on what it sees" experience as three independently toggleable components.
 Off by default; `global.demo.enabled=true` and `k8s-bundle.enabled=true` are
 equivalent ways to turn it on.
 
 | Component | Flag | What it renders |
 |---|---|---|
 | Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), RBAC bound to its ServiceAccount (`events get/list/watch` plus read-only `pods`/`replicasets`), and — under `source.create` — a `SignalSource`. **Not the Pipeline**: claim it under `pipelines:` |
-| Profile | `profile.enabled` | The `k8s-engineer` `AgentProfile` (identity only, with an inline `systemPrompt` role), its runtime `ServiceAccount` (`agentops-runtime-k8s`), and an `AgentRuntime` (named `default`) |
-| RBAC | `rbac.enabled` | Bindings for that ServiceAccount — see `rbac.mode` below |
-| MCP tooling | `mcp.enabled` | An `MCPConfig` (`k8s-api`, server key `kubernetes`) and an `MCPToolset` (`k8s-observability`), both bound automatically by the Pipelines above — see below |
-| MCP server | `mcpServers.enabled` | The MCP server workload itself: `Deployment` + `Service` (`agentops-mcp-k8s`), **its own `ServiceAccount`**, and that SA's RBAC |
+| Profile | `profile.enabled` | Exactly one object: the `k8s-engineer` `AgentProfile` (identity only, with an inline `systemPrompt` role) |
+| MCP tooling | `mcp.enabled` (**on**) | An `MCPConfig` (`k8s-api`, server key `kubernetes`) and an `MCPToolset` (`k8s-observability`), bound by whichever Pipeline you declare — see below |
+| MCP server | `mcpServers.enabled` (**on**) | The MCP server workload itself: `Deployment` + `Service` (`agentops-mcp-k8s`), **its own `ServiceAccount`**, and that SA's RBAC |
+
+**The bundle ships no substrate.** There is no `AgentRuntime`, no runtime
+ServiceAccount, no LLM credential Secret and no runtime RBAC here: those are
+release-wide facts and live in the parent chart's `runtime:` block and
+`global.agentops.runtime.*`
+([concepts](concepts.md#the-substrate-runtime-and-globalagentopsruntime)),
+including the credential the notes warn about when it is missing. The profile
+executes on the parent's `AgentRuntime` named `default`; `profile.runtimeRef`
+points it at a different one you applied yourself.
 
 Two things worth knowing:
 
@@ -23,28 +31,16 @@ Two things worth knowing:
   pipeline-only, so a `SignalSource` nobody claims reports `Wired=False` and
   drops every event. Shipping the source alone would look installed and do
   nothing.
-- **`rbac.mode: full` is cluster-admin.** It binds unrestricted cluster control
-  to an LLM-driven agent. It is never a default and never what demo mode
-  selects. `readonly` (the default) plus targeted grants under the parent
-  chart's `rbac.runtime` block is almost always the better answer.
-- **The agent's credential can be release-managed.** The `AgentRuntime`
-  references a Secret (`profile.runtime.credentialsSecret.name`, default
-  `agentops-claude`, key `oauthToken`) holding a `claude setup-token` result or
-  an Anthropic API key. Set `profile.runtime.credentialsSecret.token` and the
-  bundle **creates** that Secret — point it at your secret store and the
-  credential comes back with the release. Leave it empty and the Secret is
-  yours to create.
-
-  Getting this wrong fails quietly and late: the kubelet resolves the
-  reference, not the manager, so runtime pods sit in
-  `CreateContainerConfigError` while conversations queue behind them and
-  nothing reports a config error. The post-install notes call it out when no
-  token is supplied.
+- **`global.agentops.runtime.rbacMode: full` is cluster-admin.** It binds
+  unrestricted cluster control to an LLM-driven agent, and — because the MCP
+  server derives from it — hands the same power to the second identity too. It
+  is never a default and never what demo mode selects. `readonly` plus targeted
+  grants under the parent chart's `rbac.runtime` block is almost always the
+  better answer.
 - **Withholding shell is per-route**: bind
   `toolsets: {refs: [{name: agentops-observe}]}` on one Pipeline and only that
   route loses `Bash`, while every other route sharing the profile keeps it.
-  `profile.addressable.grantShell: false` does the same for the shipped
-  addressable Pipeline.
+  The bundle ships no Pipeline, so every route is one you declared.
 
 ## Event suppression (`eventsAdapter.source.rules`)
 
@@ -190,16 +186,23 @@ an `MCPConfig` (the server the agent connects to) and an `MCPToolset`
 (permission to call it). Both halves matter — a config without the toolset gives
 the agent a server it may not call.
 
-Unlike the other components this one is **off by default**, because an
-`MCPConfig` needs an endpoint and the bundle has none until you supply a URL or
-enable `mcpServers`. Either turns it on:
+Both are **on by default**, and they flip as a pair: an `MCPConfig` needs an
+endpoint, and the server component supplies one, so the config's URL always has
+a Service to default onto. That pairing is the whole reason this used to default
+off — a Kubernetes bundle whose Kubernetes tooling is off is an install that
+looks complete and cannot see the cluster through the path this project prefers.
 
 ```sh
-# point at a server you already run
---set k8s-bundle.mcp.enabled=true --set k8s-bundle.mcp.url=http://my-k8s-mcp.svc:8080/mcp
-# or let the bundle run one
---set k8s-bundle.mcp.enabled=true --set k8s-bundle.mcpServers.enabled=true
+# point at a server you already run instead of the bundled one
+--set k8s-bundle.mcpServers.enabled=false --set k8s-bundle.mcp.url=http://my-k8s-mcp.svc:8080/mcp
+# or no MCP at all
+--set k8s-bundle.mcp.enabled=false --set k8s-bundle.mcpServers.enabled=false
 ```
+
+The endpoint guard stays and still fails the render loudly for the one
+combination that is genuinely broken — `mcp.enabled` with no server workload and
+no `url` — because an `MCPConfig` pointing nowhere silently costs agents their
+tools.
 
 **Name both halves from your wiring.** The bundle renders the CRs; the route
 that uses them is declared under the parent chart's `pipelines:`:
@@ -223,9 +226,8 @@ read tools, `k8s-admin` the 6 mutating ones (`resources_create_or_update`,
 They are enumerated rather than `mcp__kubernetes__*` on purpose: a wildcard spans
 both halves and defeats the split. Bind the read set alone and the route can
 explain the cluster without touching it. `k8s-admin` only renders when a server
-that actually registers those tools exists — `mcpServers.readOnly: false`, which
-you should pair with `mcpServers.rbac.mode: full` or every mutation just returns
-a Forbidden.
+that actually registers those tools exists — which, by default, means
+`global.agentops.runtime.rbacMode: full` (see below).
 
 **MCP does not replace kubectl.** The served tools have no patch semantics, no
 rollout, drain, wait or port-forward, and no text processing — so a route that
@@ -238,19 +240,46 @@ render if you set them equal):
 
 | Path | Who authenticates | Walls between the agent and the API |
 |---|---|---|
-| `Bash` + `kubectl` | the runtime SA (`agentops-runtime-k8s`) | one: that SA's RBAC, which `Bash` hands over whole |
+| `Bash` + `kubectl` | the runtime SA (`agentops-runtime`) | one: that SA's RBAC, which `Bash` hands over whole |
 | `mcp__kubernetes__*` | the MCP server's own SA (`agentops-mcp-k8s`) | three: the server's `--read-only` tool registration, the toolset allowlist, and that SA's RBAC |
 
 Revoking `agentops-mcp-k8s`'s grants removes the agent's MCP reach without
 touching the runtime SA, and vice versa. Both default to the same shape (`view`
 plus node/namespace/metrics reads), so turning the component on widens nothing.
 
+**The server's posture derives from the one RBAC knob.** `mcpServers.readOnly`
+and `mcpServers.rbac.mode` are `null` by default and follow
+`global.agentops.runtime.rbacMode`:
+
+| `rbacMode` | `--read-only` | server SA RBAC | `k8s-admin` toolset |
+|---|---|---|---|
+| `full` | off | `full` | rendered |
+| `readonly`, `none`, `""` | on | `readonly` | absent |
+
+They derive because they are bound by an invariant operators used to maintain by
+hand in every install's values: a read-only MCP server under a `full` agent
+pushes every write back onto kubectl, which is the single-wall path this
+component exists to replace.
+
+**What derivation costs, plainly.** Widening the agent to `full` widens the
+server too, unless you say otherwise — the two identities are no longer
+independently reviewable *by default*. That is accepted because the safe
+direction (both read-only) is what every default path produces, and because the
+separation stays reachable: `mcpServers.readOnly: true` under `rbacMode: full`
+gives "kubectl writes, MCP reads only", and no mutating toolset renders. The
+toolset wall is untouched either way — mutations need a Pipeline to bind
+`k8s-admin` deliberately no matter what the server serves. `none` maps to a
+**readonly** server rather than to nothing, on purpose: an agent that can read
+the cluster through MCP and do nothing at all through its own identity is a
+useful shape, not an accident.
+
 **kubectl remains the fallback.** This changes nothing about the runtime image
 or the profile — with `mcp.enabled=false` the agent reaches the cluster exactly
 as it did before, and with it on it simply has both paths.
 
 The shipped server is `ghcr.io/containers/kubernetes-mcp-server` (pinned in
-values), run with `--read-only` and toolsets `core,config`. `--read-only` filters
+values), run with toolsets `core,config` and `--read-only` unless the derivation
+above turns it off. `--read-only` filters
 at tool *registration*, so mutating tools are uncallable rather than merely
 unlisted. `mcp.transport` selects streamable HTTP (`/mcp`, the default) or legacy
 SSE (`/sse`); `mcp.toolset.tools` is overridable if you want to enumerate
@@ -258,7 +287,7 @@ individual tool names instead of the `mcp__kubernetes__*` wildcard — which is
 worth doing when `mcp.url` points at a server this chart did not deploy.
 
 Two tools (`nodes_log`, `nodes_stats_summary`) read through `nodes/proxy`, which
-`mcpServers.rbac.mode: readonly` deliberately does not grant; they fail with a
+a `readonly` server SA deliberately does not grant; they fail with a
 Forbidden the agent can read, and widening is a deliberate grant.
 
 The events adapter (`signal-k8s-events/`) watches core `v1` Events through the
