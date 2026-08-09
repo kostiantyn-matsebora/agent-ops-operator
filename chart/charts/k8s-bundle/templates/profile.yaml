@@ -10,6 +10,23 @@ which is why runtime.name defaults to it.
 {{- $p := .Values.profile }}
 {{- $rt := $p.runtime }}
 {{- if $rt.create }}
+{{- if $rt.credentialsSecret.token }}
+# Created because profile.runtime.credentialsSecret.token was supplied, so the
+# agent's credential is provisioned with the release instead of being a
+# prerequisite someone has to remember. The AgentRuntime below references it by
+# NAME only — the manager reads no Secrets, the kubelet resolves it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $rt.credentialsSecret.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+type: Opaque
+stringData:
+  {{ $rt.credentialsSecret.key }}: {{ $rt.credentialsSecret.token | quote }}
+---
+{{- end }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:

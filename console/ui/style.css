@@ -1,0 +1,133 @@
+:root {
+  --bg: #0f1216;
+  --panel: #171b21;
+  --panel-2: #1e242c;
+  --line: #2a323c;
+  --text: #dfe5ec;
+  --muted: #8b95a3;
+  --ok: #3fb950;
+  --bad: #f85149;
+  --unknown: #8b95a3;
+  --accent: #58a6ff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.hidden { display: none !important; }
+button { font: inherit; cursor: pointer; }
+
+/* login */
+.login { display: flex; align-items: center; justify-content: center; height: 100vh; }
+.login form {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 28px 32px; width: 320px; display: flex; flex-direction: column; gap: 12px;
+}
+.login h1 { margin: 0; font-size: 20px; }
+.login p { margin: 0; color: var(--muted); font-size: 13px; }
+.login input, .login button {
+  padding: 9px 11px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text);
+}
+.login button { background: var(--accent); color: #07121f; border-color: transparent; font-weight: 600; }
+.error { color: var(--bad); min-height: 18px; }
+
+/* chrome */
+header {
+  display: flex; align-items: center; gap: 18px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+header nav { display: flex; gap: 4px; }
+header nav button {
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  padding: 5px 11px; border-radius: 6px;
+}
+header nav button.active { color: var(--text); background: var(--panel-2); border-color: var(--line); }
+.status { margin-left: auto; color: var(--muted); font-size: 12px; }
+.link { background: none; border: none; color: var(--muted); text-decoration: underline; }
+
+main { height: calc(100vh - 47px); }
+.view { display: flex; height: 100%; overflow: hidden; }
+
+/* topology */
+#graph { flex: 1; overflow: auto; padding: 16px; }
+#graph svg { display: block; }
+.node rect { rx: 6; fill: var(--panel-2); stroke: var(--line); cursor: pointer; }
+.node.ok rect { stroke: var(--ok); }
+.node.bad rect { stroke: var(--bad); }
+.node.unknown rect { stroke: var(--unknown); stroke-dasharray: 3 3; }
+/* reports no health at all — neutral, not pending */
+.node.none rect { stroke: var(--line); }
+.node.detached rect { fill: #241a1a; }
+.node text { fill: var(--text); font-size: 12px; pointer-events: none; }
+.node text.kind { fill: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.node text.badge { fill: var(--ok); font-size: 11px; }
+.edge { stroke: var(--line); fill: none; stroke-width: 1.5; }
+.edge.dangling { stroke: var(--bad); stroke-dasharray: 4 3; }
+.col-title { fill: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+
+/* panels */
+.detail {
+  width: 380px; border-left: 1px solid var(--line); background: var(--panel);
+  padding: 14px 16px; overflow: auto;
+}
+.detail h2 { font-size: 15px; margin: 0 0 2px; }
+.detail .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+.sidebar { list-style: none; margin: 0; padding: 8px; width: 210px; overflow: auto; border-right: 1px solid var(--line); }
+.sidebar.wide { width: 300px; }
+.sidebar li { padding: 7px 10px; border-radius: 6px; cursor: pointer; color: var(--muted); }
+.sidebar li.active, .sidebar li:hover { background: var(--panel-2); color: var(--text); }
+.sidebar .count { float: right; font-size: 11px; opacity: .7; }
+.rows { flex: 1; overflow: auto; padding: 12px 14px; }
+/* Resources view only: a row carries a name and a type, the detail panel
+   carries spec/status JSON — so the space belongs to the panel on the right.
+   The topology view keeps the opposite split, where the graph is the content. */
+#view-inventory #inventory-rows { flex: 0 0 300px; }
+#view-inventory #cr-detail { flex: 1; width: auto; min-width: 0; }
+.row {
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px;
+  margin-bottom: 8px; cursor: pointer; background: var(--panel);
+}
+.row:hover { border-color: var(--accent); }
+.row .name { font-weight: 600; }
+.row .meta { color: var(--muted); font-size: 12px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+.dot.ok { background: var(--ok); }
+.dot.bad { background: var(--bad); }
+.dot.unknown { background: var(--unknown); }
+.dot.none { background: var(--line); }
+pre {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; overflow: auto; font-size: 12px; white-space: pre-wrap; word-break: break-word;
+}
+.cond { border-left: 2px solid var(--line); padding-left: 9px; margin-bottom: 9px; }
+.cond.bad { border-color: var(--bad); }
+.cond.ok { border-color: var(--ok); }
+.cond .t { font-weight: 600; }
+.cond .m { color: var(--muted); font-size: 12px; }
+
+/* conversations */
+.conv { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 14px 16px; }
+.conv .head { border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 10px; }
+.conv .scroll { flex: 1; overflow: auto; }
+.msg { margin-bottom: 9px; max-width: 78%; padding: 8px 11px; border-radius: 9px; background: var(--panel-2); }
+.msg.local { margin-left: auto; background: #1d2b3a; }
+.msg.relay { background: #24202f; }
+.msg.ack { background: transparent; border: 1px dashed var(--line); color: var(--muted); }
+.msg .who { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.msg .body { white-space: pre-wrap; word-break: break-word; }
+.msg.pending { opacity: .6; }
+.composer { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.composer input {
+  flex: 1; padding: 9px 11px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text);
+}
+.composer button { padding: 9px 16px; border-radius: 6px; border: none; background: var(--accent); color: #07121f; font-weight: 600; }
+.notice { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; color: var(--muted); }
+.run { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+.run .h { display: flex; gap: 8px; align-items: baseline; }
+.run .h .id { font-weight: 600; }
+.run .h .st { font-size: 12px; color: var(--muted); }

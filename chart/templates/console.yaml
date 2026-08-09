@@ -1,0 +1,175 @@
+{{- /*
+The agent-ops console: a ChannelAdapter that is also the viewer.
+
+CRs ONLY. There is no Deployment and no Service here — the ChannelAdapter
+reconciler owns both (spec.port makes it own Service agentops-adapter-<name>
+and inject LISTEN_ADDR), exactly as for every other adapter. A chart that
+shipped connectivity would make the console installable only by this chart.
+
+The one thing the chart MUST supply is RBAC: the operator grants adapters no
+Kubernetes permissions, ever. spec.kubernetesAccess mounts the pod's SA token —
+identity, nothing more — and the read-only Role below is what turns that
+identity into "may list agentops CRs". Same posture as the vm-bundle adapter's
+registration rights.
+
+No Pipeline is rendered. Joining the console to a pipeline is an ordinary
+channels[] edit the installer makes; a chart mutating user Pipelines would be a
+new and worse pattern. The post-install notes print the edit.
+*/ -}}
+{{- if .Values.console.enabled }}
+{{- $c := .Values.console }}
+{{- $sa := printf "agentops-adapter-%s" $c.name }}
+{{- $secretName := $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }}
+{{- if not $c.auth.existingSecret }}
+{{- /* Generate once, reuse across upgrades (lookup); under template-only
+       rendering (no cluster) a fresh token is generated — pin one with
+       console.auth.existingSecret for GitOps flows. */}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+type: Opaque
+data:
+  {{- if and $existing $existing.data (index $existing.data "uiToken") }}
+  uiToken: {{ index $existing.data "uiToken" }}
+  {{- else if $c.auth.uiToken }}
+  uiToken: {{ $c.auth.uiToken | b64enc }}
+  {{- else }}
+  uiToken: {{ randAlphaNum 40 | b64enc }}
+  {{- end }}
+---
+{{- end }}
+# Pure implementation: image + workload knobs. Nothing configurable about the
+# surface lives here — that is on the Channel below.
+apiVersion: agentops.dev/v1alpha1
+kind: ChannelAdapter
+metadata:
+  name: {{ $c.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+spec:
+  image: {{ printf "%s:%s" $c.image.repository (toString $c.image.tag) | quote }}
+  # browser-facing surface: the reconciler owns Service agentops-adapter-<name>
+  # and injects LISTEN_ADDR
+  port: {{ $c.port }}
+  # one replica serves both the browsers and the channel ops loop, which is
+  # what makes thread transcripts deterministic
+  singleton: true
+  # identity only — the Role below is what grants anything, and no reconciler
+  # creates or binds RBAC
+  kubernetesAccess: true
+  {{- with $c.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  configSchema:
+    type: object
+    properties:
+      displayName:
+        type: string
+        description: Label for this surface in the console UI.
+  credentialKeys:
+    # documentation only — the manager never reads Secrets
+    - key: uiToken
+      required: true
+      description: >-
+        Bearer token the browser signs in with. Projected into the console pod
+        by the reconciler as AGENTOPS_CRED_<CHANNEL>_uiToken; anyone holding it
+        sees everything the console's ServiceAccount can read.
+---
+# The console surface itself. A Channel CARRIES conversations and originates
+# nothing, so there is no wiring here either.
+apiVersion: agentops.dev/v1alpha1
+kind: Channel
+metadata:
+  name: {{ $c.channelName | default $c.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+spec:
+  adapter: {{ $c.name }}
+  # projected into the console pod as env by the reconciler, kubelet-resolved
+  credentialsSecretRef:
+    name: {{ $secretName }}
+  config:
+    displayName: {{ $c.displayName | default "agent-ops console" | quote }}
+---
+# READ-ONLY, and only agentops.dev. No secrets, no core resources, no write
+# verbs: the console renders CR state and sends chat through the adapter
+# contract, so nothing it does needs more than this.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+rules:
+  - apiGroups: ["agentops.dev"]
+    resources:
+      - agentprofiles
+      - agentruntimes
+      - channels
+      - channeladapters
+      - conversations
+      - pipelines
+      - signaladapters
+      - signalsources
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}
+subjects:
+  # the ServiceAccount the ChannelAdapter reconciler creates for this adapter
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+{{- if $c.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentops-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+  {{- with $c.ingress.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  {{- with $c.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with $c.ingress.tls }}
+  tls:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ required "console.ingress.host is required when console.ingress.enabled" $c.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                # owned by the ChannelAdapter reconciler, not by this chart
+                name: {{ $sa }}
+                port:
+                  number: {{ $c.port }}
+{{- end }}
+{{- end }}

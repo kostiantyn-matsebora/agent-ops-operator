@@ -115,10 +115,20 @@ profile:
     # ONE secret with a Claude credential (claude setup-token output or an
     # Anthropic API key). Projected as env via valueFrom — the manager reads no
     # Secrets.
+    #
+    # Supply `token` and the bundle CREATES this Secret, release-managed, the
+    # same way telegram-bundle handles its bot token — point it at a secret
+    # store from your helmfile/values and the credential is provisioned with
+    # the release. Leave it empty to reference a Secret you manage yourself.
+    #
+    # Getting this wrong fails QUIETLY and late: the runtime pod is created,
+    # then sits in CreateContainerConfigError while conversations queue behind
+    # it, because the kubelet — not the manager — resolves the reference.
     credentialsSecret:
       name: agentops-claude
       key: oauthToken
       envName: CLAUDE_CODE_OAUTH_TOKEN
+      token: ""
     resources: {}
 
 # What the agent may do in the cluster, bound to profile.runtime.serviceAccountName.

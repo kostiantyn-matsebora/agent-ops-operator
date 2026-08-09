@@ -8,7 +8,45 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
-_Nothing yet._
+**The agent-ops console — additive, opt-in, no upgrade steps.** A browser view
+of the whole install (CR inventory, wiring graph, live conversation runs) that
+is also a channel: conversations on pipelines listing its Channel bind a
+console thread, so you can reply to an agent from the run you are watching.
+See [docs/console.md](docs/console.md).
+
+- New `console/` module and image `agentops-console`.
+- `ChannelAdapter.spec` gains `kubernetesAccess` (parity with SignalAdapter):
+  mounts the SA token and injects `POD_NAMESPACE`. **Identity only** — the
+  operator still creates and binds no RBAC, so an adapter CR cannot escalate.
+  Existing adapters are unaffected (optional, default off). `spec.port` already
+  existed and is unchanged; its Service is named after the workload,
+  `agentops-adapter-<name>`.
+- Enable with `console.enabled=true`. It renders **CRs and RBAC only** — a
+  ChannelAdapter, a Channel, the UI token Secret, and a namespaced read-only
+  Role for SA `agentops-adapter-console`; the reconciler brings up the
+  Deployment and Service.
+- Nothing is wired by enabling it: conversations show as *observed* until you
+  add the console Channel to a Pipeline's `channelRefs[]`. The chart never
+  edits your Pipelines.
+- **Trust boundary**: anyone holding the UI token sees every agentops CR in the
+  namespace, conversation payloads included. Keep the Service ClusterIP unless
+  you mean to expose it.
+- Manager image `0.20.0` — required for `kubernetesAccess` on ChannelAdapter.
+  An older manager silently ignores the field: the CR accepts it, the pod comes
+  up without a token, and the console crash-loops on the missing CA file.
+
+**The k8s-bundle can now create the agent's credential Secret.** Additive and
+default-off. `k8s-bundle.profile.runtime.credentialsSecret.token`, when set,
+renders the Secret the `AgentRuntime` already referenced
+(`agentops-claude`/`oauthToken`) instead of leaving it as an unstated
+prerequisite — so the credential survives a teardown with the release, the same
+way `telegram-bundle` handles its bot token. Leaving it empty keeps the old
+behavior exactly.
+
+Worth knowing because the old failure mode is silent: the reference is resolved
+by the kubelet, not the manager, so a missing Secret produces runtime pods in
+`CreateContainerConfigError` and conversations that queue forever, with no
+condition anywhere saying why. The post-install notes now name it.
 
 ## chart 3.2 — toolsets compose with the agent definition — BREAKING
 
