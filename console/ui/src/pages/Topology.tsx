@@ -39,10 +39,26 @@ export function TopologyPage() {
 
         {!bufferCovers && (
           <StackItem>
-            <Alert variant="info" isInline title="This window is longer than the recorded buffer">
-              Rates cover only what the manager still holds. Longer windows come from a metrics
-              backend when one is configured{data.metricsAvailable ? '' : ' — none is'}.
-            </Alert>
+            {/* Two DIFFERENT situations that the same sentence used to describe,
+                which read as "no backend configured" even when one was. */}
+            {data.metricsAvailable ? (
+              <Alert
+                variant="info"
+                isInline
+                title="Edge rates cover the manager's live buffer, not the whole window"
+              >
+                A metrics backend <strong>is</strong> connected, but it cannot extend these
+                particular numbers: metric labels are bounded by CR count, so there is no per-edge
+                series to read. Edge rates are therefore always live-buffer only. The aggregate
+                charts below do cover this window.
+              </Alert>
+            ) : (
+              <Alert variant="warning" isInline title="No metrics backend is configured">
+                Edge rates cover only what the manager still holds in memory, and nothing covers
+                longer windows. Set <code>console.metrics.url</code> to a Prometheus or
+                VictoriaMetrics query endpoint for historical aggregates.
+              </Alert>
+            )}
           </StackItem>
         )}
         {!data.stream.connected && (
