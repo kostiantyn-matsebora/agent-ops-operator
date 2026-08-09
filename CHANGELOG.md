@@ -8,6 +8,89 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+**BREAKING — the console is on by default, and it can now start conversations.**
+Chart **5.0.0**, manager **0.22.0**, console **0.3.1**.
+
+### What changes on upgrade
+
+`console.enabled` flips from `false` to `true`. Upgrading STARTS A POD that was
+not running before — one that reads every `agentops.dev` CR in the namespace,
+plus Deployments and Pods, and that can instruct any agent it is joined to. That
+is why this is a major bump rather than a feature.
+
+**The one-value opt-out:**
+
+```yaml
+console:
+  enabled: false
+```
+
+With that set, nothing about your install changes.
+
+**One caveat, if you later turn it off again.** Once a Pipeline references the
+console — `channelRefs: [console]` or `signalSourceRefs: [console]` — disabling
+the console removes those objects and the Pipeline correctly reports
+`unresolved references: signalsource/console, channel/console` and stops being
+Ready. Remove the references in the same change as the opt-out. `helm upgrade
+--wait` will otherwise fail on that Pipeline, which is the system telling you
+the truth rather than a bug.
+
+### If you keep the console on
+
+The new pod is a `ChannelAdapter` **and** a `SignalAdapter`, and it is still ONE
+Deployment: the SignalAdapter declares `servedBy` the ChannelAdapter, so it owns
+no workload and simply receives a second token in the same pod.
+
+- **What it reads.** Its Role gains `apps/deployments` and `pods`
+  (get/list/watch, namespaced, read-only) on top of the `agentops.dev` kinds.
+  Image digests, restart counts and pod failure reasons exist in no CR, and an
+  operations console that cannot see a CrashLoopBackOff is not one. There are
+  still no write verbs anywhere in it.
+- **What it can do.** `console.write.enabled` defaults to `true`, so the chat
+  composer and "new conversation" are live. Set it to `false` for a strict
+  viewer — the affordances disappear AND both endpoints refuse.
+- **Origination is refused until you wire it.** The chart renders a
+  `SignalSource` named `console` and NO Pipeline. Until some Ready Pipeline
+  claims that source it sits at `Wired=False`, and the UI shows that reason with
+  the patch:
+
+  ```sh
+  kubectl patch pipeline <name> --type=json \
+    -p '[{"op":"add","path":"/spec/signalSourceRefs/-","value":{"name":"console"}}]'
+  ```
+
+- **Exposure.** Still `ClusterIP` with `console.ingress.enabled: false`. If you
+  expose it, put an authenticating proxy in front — the console reads the
+  identity from forwarded headers and logs every write with it; without one every
+  write is recorded as `token`.
+
+### New in the manager (additive, no action required)
+
+- **Per-hop activity telemetry.** `GET /activity`, `GET /activity/stream` (SSE)
+  and `POST /activity`, under the existing adapter bearer scheme. A bounded
+  in-memory ring (`ACTIVITY_BUFFER`, default 10000), never persisted; the durable
+  record stays `status.runs[]`.
+- **Introspection.** `GET /status` (runtime slots, op queue depth with the oldest
+  stuck item's identity, cooldowns, leader) and
+  `GET /pipelines/{name}/resolved` (the authoritative capability resolution).
+- **Prometheus metrics** on the existing `:9090` — `agentops_*` counters, gauges
+  and histograms, emitted from the same call sites as the activity events. No new
+  listener. Optional scrape templates under `metrics:` (VMServiceScrape,
+  ServiceMonitor, example alert rules), all default-disabled because neither CRD
+  is guaranteed present.
+- **`SignalAdapter.spec.servedBy`.** `spec.image` becomes optional; an adapter
+  declaring `servedBy` owns no workload and reports `Ready=True/ServedBy`. Purely
+  additive — existing adapters are unaffected.
+
+### Optional
+
+`console.metrics.url` points the console at a Prometheus/VictoriaMetrics query
+endpoint, which lets it render windows far beyond the activity buffer as clearly
+labelled aggregates. Unset, every view still works and long windows are reported
+unavailable rather than drawn empty.
+
+## 4.0.0
+
 **BREAKING — the main chart owns the agent runtime.** Chart **4.0.0**. No image
 changes; this is a values and object-ownership move.
 

@@ -12,10 +12,30 @@ import (
 // construction). No configuration lives here: per-source settings are on the
 // served SignalSources (config, credentialsSecretRef — projected into the
 // pod by the reconciler, kubelet-resolved, never read through the API).
+// +kubebuilder:validation:XValidation:rule="has(self.image) != has(self.servedBy)",message="set exactly one of image (this adapter runs its own workload) or servedBy (another adapter's pod serves this identity)"
 type SignalAdapterSpec struct {
-	// Image implementing the signal adapter contract.
+	// Image implementing the signal adapter contract. Required UNLESS servedBy
+	// names the workload that already serves this identity.
 	// +kubebuilder:validation:MinLength=1
-	Image string `json:"image"`
+	// +optional
+	Image string `json:"image,omitempty"`
+	// ServedBy declares this adapter EXTERNALLY SERVED: another adapter's pod
+	// already holds the process, and this CR exists only to give it a signal
+	// identity. When set the reconciler creates NO Deployment, Service or
+	// ServiceAccount and reports Ready=True with reason ServedBy; the named
+	// ChannelAdapter's reconciler injects SIGNAL_ADAPTER_TOKEN into its pod.
+	//
+	// Why this exists: a chat transport is inherently a SURFACE and an
+	// ORIGINATOR — it carries conversations on threads and starts them from the
+	// general surface. Without this, declaring both identities produces two
+	// Deployments, one of which is an idle pod existing only to make a source
+	// Served. This repo has paid for that shape once already (telegram-router
+	// was an adapter with a signal-free SignalSource purely to carry a
+	// credential, which then sat at Wired=False). The difference here is the one
+	// that matters: an externally-served source originates real conversations
+	// for a Pipeline that claims it.
+	// +optional
+	ServedBy *AdapterRef `json:"servedBy,omitempty"`
 	// Port the image's own HTTP surface listens on (webhook-receiving
 	// implementations). When set, the reconciler owns a Service
 	// agentops-signal-<name> targeting it and injects LISTEN_ADDR — enabling

@@ -76,6 +76,21 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if r.MasterToken != "" {
 		env = append(env, corev1.EnvVar{Name: "ADAPTER_TOKEN", Value: chat.DeriveAdapterToken(r.MasterToken, adapter.Name)})
 	}
+	// A SignalAdapter may declare itself served by THIS workload, which gives
+	// this pod a second identity: one env var is the whole mechanism. The two
+	// tokens use distinct derivation contexts and each surface validates only
+	// against its own CRD list, so the identities stay separate — a channel
+	// token is still a stranger to /signal/*, and vice versa.
+	//
+	// Absence removes it: clearing servedBy must take the capability away, not
+	// leave a token behind in a pod nobody re-rendered.
+	if signalIdentity, err := r.servedSignalAdapter(ctx, &adapter); err != nil {
+		return ctrl.Result{}, err
+	} else if signalIdentity != "" && r.MasterToken != "" {
+		env = append(env,
+			corev1.EnvVar{Name: "SIGNAL_ADAPTER_NAME", Value: signalIdentity},
+			corev1.EnvVar{Name: "SIGNAL_ADAPTER_TOKEN", Value: chat.DeriveSignalAdapterToken(r.MasterToken, signalIdentity)})
+	}
 	if adapter.Spec.Port != nil {
 		env = append(env, corev1.EnvVar{Name: "LISTEN_ADDR", Value: fmt.Sprintf(":%d", *adapter.Spec.Port)})
 	}
@@ -133,9 +148,37 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, r.Status().Patch(ctx, &adapter, patch)
 }
 
+// servedSignalAdapter finds the SignalAdapter (if any) that names this
+// ChannelAdapter in spec.servedBy. Deterministic when several do — the oldest,
+// name-tiebroken — because a pod gets ONE signal identity: a second would be a
+// token the process has no way to choose between.
+func (r *ChannelAdapterReconciler) servedSignalAdapter(ctx context.Context,
+	adapter *agentopsv1alpha1.ChannelAdapter) (string, error) {
+
+	var list agentopsv1alpha1.SignalAdapterList
+	if err := r.List(ctx, &list, client.InNamespace(adapter.Namespace)); err != nil {
+		return "", err
+	}
+	best := ""
+	var bestCreated metav1.Time
+	for i := range list.Items {
+		sa := &list.Items[i]
+		if sa.Spec.ServedBy == nil || sa.Spec.ServedBy.Name != adapter.Name {
+			continue
+		}
+		if best == "" || sa.CreationTimestamp.Before(&bestCreated) ||
+			(sa.CreationTimestamp.Equal(&bestCreated) && sa.Name < best) {
+			best, bestCreated = sa.Name, sa.CreationTimestamp
+		}
+	}
+	return best, nil
+}
+
 // SetupWithManager wires the controller: adapter CRs, their owned Deployments
-// and Services, and Channel events (projection inputs) mapped straight to the
-// adapter the channel names in spec.type.
+// and Services, Channel events (projection inputs) mapped straight to the
+// adapter the channel names in spec.type, and SignalAdapter events mapped to
+// the workload their servedBy points at — without that watch, granting a second
+// identity would not re-render the pod that needs the token.
 func (r *ChannelAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapChannel := func(ctx context.Context, obj client.Object) []ctrl.Request {
 		ch, ok := obj.(*agentopsv1alpha1.Channel)
@@ -144,10 +187,18 @@ func (r *ChannelAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return []ctrl.Request{{NamespacedName: types.NamespacedName{Namespace: ch.Namespace, Name: ch.Spec.Adapter}}}
 	}
+	mapSignalAdapter := func(ctx context.Context, obj client.Object) []ctrl.Request {
+		sa, ok := obj.(*agentopsv1alpha1.SignalAdapter)
+		if !ok || sa.Spec.ServedBy == nil || sa.Spec.ServedBy.Name == "" {
+			return nil
+		}
+		return []ctrl.Request{{NamespacedName: types.NamespacedName{Namespace: sa.Namespace, Name: sa.Spec.ServedBy.Name}}}
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.ChannelAdapter{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Watches(&agentopsv1alpha1.Channel{}, handler.EnqueueRequestsFromMapFunc(mapChannel)).
+		Watches(&agentopsv1alpha1.SignalAdapter{}, handler.EnqueueRequestsFromMapFunc(mapSignalAdapter)).
 		Complete(r)
 }

@@ -14,18 +14,35 @@ import (
 // without the token, and an unconfigured console is closed rather than open.
 
 func apiUnderTest(t *testing.T, staticToken string, objs ...*Object) (*API, *fakeManager, *Transcripts) {
+	api, f, tr, _ := apiWithOptions(t, staticToken, true, objs...)
+	return api, f, tr
+}
+
+// apiWithOptions builds the browser surface over a fixture cache. writeEnabled
+// is explicit because the read-only posture is a behaviour with its own tests,
+// not a variant.
+func apiWithOptions(t *testing.T, staticToken string, writeEnabled bool, objs ...*Object) (*API, *fakeManager, *Transcripts, *Cache) {
 	t.Helper()
 	f := newFakeManager(t, ChannelInfo{Name: "console"})
 	adapter, tr, cache := consoleUnderTest(t, f, objs...)
 	adapter.refreshChannels(context.Background())
-	return NewAPI(cache, tr, adapter, staticToken), f, tr
+	cfg := &Config{
+		Namespace: "agent-ops", AdapterName: "console", UIToken: staticToken,
+		WriteEnabled: writeEnabled, SignalSourceName: "console",
+	}
+	api := NewAPI(APIDeps{
+		Cache: cache, Transcripts: tr, Adapter: adapter,
+		Activity: NewActivityWindow(adapter.mgr, 500),
+		Manager:  adapter.mgr, Config: cfg,
+	})
+	return api, f, tr, cache
 }
 
 func TestEveryDataEndpointRequiresAuth(t *testing.T) {
 	api, _, _ := apiUnderTest(t, "tok")
 	h := api.Handler(http.NotFoundHandler())
 	for _, path := range []string{
-		"/api/topology", "/api/kinds", "/api/kinds/pipelines", "/api/kinds/pipelines/x",
+		"/api/topology", "/api/config", "/api/config/pipelines", "/api/config/pipelines/x",
 		"/api/conversations", "/api/conversations/x", "/api/stream",
 	} {
 		rec := httptest.NewRecorder()
@@ -132,9 +149,10 @@ func TestConversationListDistinguishesJoinedFromObserved(t *testing.T) {
 
 	rec := authed(t, h, "GET", "/api/conversations", "")
 	var page struct {
-		Items []ConversationSummary `json:"items"`
-		Total int                   `json:"total"`
-		Shown int                   `json:"shown"`
+		Items  []ConversationSummary `json:"items"`
+		Total  int                   `json:"total"`
+		Offset int                   `json:"offset"`
+		Limit  int                   `json:"limit"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
@@ -153,7 +171,7 @@ func TestConversationListDistinguishesJoinedFromObserved(t *testing.T) {
 	if byName["observed"].RunCount != 1 || len(byName["observed"].Runs) != 0 {
 		t.Fatalf("list row should summarize runs, not carry them: %+v", byName["observed"])
 	}
-	if page.Total != 2 || page.Shown != 2 {
+	if page.Total != 2 || len(page.Items) != 2 {
 		t.Fatalf("page counts wrong: %+v", page)
 	}
 
@@ -186,18 +204,71 @@ func TestConversationListIsBoundedAndNewestFirst(t *testing.T) {
 
 	rec := authed(t, h, "GET", "/api/conversations?limit=5", "")
 	var page struct {
-		Items []ConversationSummary `json:"items"`
-		Total int                   `json:"total"`
-		Shown int                   `json:"shown"`
+		Items  []ConversationSummary `json:"items"`
+		Total  int                   `json:"total"`
+		Offset int                   `json:"offset"`
+		Limit  int                   `json:"limit"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if page.Total != 12 || page.Shown != 5 || len(page.Items) != 5 {
+	if page.Total != 12 || len(page.Items) != 5 {
 		t.Fatalf("listing not bounded: %+v", page)
 	}
 	if page.Items[0].Name != "c11" || page.Items[4].Name != "c07" {
 		t.Fatalf("listing must be newest-activity-first: %s…%s", page.Items[0].Name, page.Items[4].Name)
+	}
+
+	// The total is the MATCH COUNT, so a second page continues rather than
+	// restarts — an operator paging through a storm must not see c11 twice.
+	rec = authed(t, h, "GET", "/api/conversations?limit=5&offset=5", "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 12 || page.Offset != 5 || page.Items[0].Name != "c06" {
+		t.Fatalf("second page wrong: %+v", page)
+	}
+}
+
+// Filtering happens SERVER-side: shipping thousands of rows so the client can
+// hide most is how a read-only viewer becomes an API-server problem.
+func TestConversationListFiltersServerSide(t *testing.T) {
+	working := obj("conversations", "busy", "1",
+		`{"profileRef":{"name":"ops"},"channelRefs":[{"name":"console"}]}`,
+		`{"phase":"Working","lastActivity":"2026-08-09T10:00:00Z","threads":[{"channel":"console","threadId":"t1"}]}`)
+	idle := obj("conversations", "calm", "1",
+		`{"profileRef":{"name":"other"}}`,
+		`{"phase":"Idle","lastActivity":"2026-08-09T10:00:00Z","runs":[{"runId":"r","status":"failed"}]}`)
+	api, _, _ := apiUnderTest(t, "tok", working, idle)
+	h := api.Handler(http.NotFoundHandler())
+
+	get := func(query string) []ConversationSummary {
+		t.Helper()
+		rec := authed(t, h, "GET", "/api/conversations?"+query, "")
+		var page struct {
+			Items []ConversationSummary `json:"items"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		return page.Items
+	}
+	if got := get("phase=Working"); len(got) != 1 || got[0].Name != "busy" {
+		t.Fatalf("phase filter: %+v", got)
+	}
+	if got := get("profile=other"); len(got) != 1 || got[0].Name != "calm" {
+		t.Fatalf("profile filter: %+v", got)
+	}
+	if got := get("channel=console"); len(got) != 1 || got[0].Name != "busy" {
+		t.Fatalf("channel filter: %+v", got)
+	}
+	// errored keys on the LAST run, so a conversation that recovered is not
+	// flagged forever
+	if got := get("errored=true"); len(got) != 1 || got[0].Name != "calm" {
+		t.Fatalf("errored filter: %+v", got)
+	}
+	if got := get("q=bus"); len(got) != 1 || got[0].Name != "busy" {
+		t.Fatalf("search filter: %+v", got)
 	}
 }
 
@@ -225,7 +296,7 @@ func TestUnknownKindIsRefused(t *testing.T) {
 	h := api.Handler(http.NotFoundHandler())
 	// secrets are not in Kinds — the console has no path to any resource
 	// outside the agentops group, and asking for one is a 404 here
-	if rec := authed(t, h, "GET", "/api/kinds/secrets", ""); rec.Code != http.StatusNotFound {
+	if rec := authed(t, h, "GET", "/api/config/secrets", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("want 404 for an unwatched kind, got %d", rec.Code)
 	}
 }
@@ -236,8 +307,8 @@ func TestInventoryCarriesConditionsVerbatim(t *testing.T) {
 	api, _, _ := apiUnderTest(t, "tok", ch)
 	h := api.Handler(http.NotFoundHandler())
 
-	rec := authed(t, h, "GET", "/api/kinds/channels", "")
-	var rows []inventoryRow
+	rec := authed(t, h, "GET", "/api/config/channels", "")
+	var rows []InventoryRow
 	if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
 		t.Fatal(err)
 	}
@@ -254,15 +325,20 @@ func TestDetailReturnsOpaqueConfigUntouched(t *testing.T) {
 	api, _, _ := apiUnderTest(t, "tok", ch)
 	h := api.Handler(http.NotFoundHandler())
 
-	rec := authed(t, h, "GET", "/api/kinds/channels/tg", "")
+	rec := authed(t, h, "GET", "/api/config/channels/tg", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("detail: %d", rec.Code)
 	}
-	var out Object
+	var out Detail
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(out.Spec), `"chatId":"-100"`) {
-		t.Fatalf("opaque config must pass through verbatim: %s", out.Spec)
+	if !strings.Contains(string(out.Object.Spec), `"chatId":"-100"`) {
+		t.Fatalf("opaque config must pass through verbatim: %s", out.Object.Spec)
+	}
+	// and the YAML view carries it too, so what an operator copies matches what
+	// the cluster holds
+	if !strings.Contains(out.YAML, "chatId") || !strings.Contains(out.YAML, "kind: Channel") {
+		t.Fatalf("YAML view wrong:\n%s", out.YAML)
 	}
 }

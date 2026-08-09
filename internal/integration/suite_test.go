@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
@@ -94,13 +95,26 @@ func reconcilerWithCap(ops *chat.OpQueue, cap int) *controller.ConversationRecon
 }
 
 func apiServer() *httpapi.Server {
-	ops := testOps()
+	srv, _ := apiServerWithActivity()
+	return srv
+}
+
+// apiServerWithActivity wires the telemetry log through every emitting
+// component, and hands it back for assertions. Plain apiServer() uses the same
+// path — so every existing test also exercises emission, and a hop that panics
+// or blocks fails a test about something else, which is where it should fail.
+func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
+	acts := activity.New(512)
+	ops := &chat.OpQueue{Client: k8sClient, Namespace: ns, Registry: chat.NewRegistry(), Activity: acts}
 	return &httpapi.Server{
 		Client: k8sClient, Reader: k8sClient, Namespace: ns,
-		Ops:          ops,
-		Router:       &chat.Router{Client: k8sClient, Reader: k8sClient, Namespace: ns, Ops: ops},
-		AdapterToken: "test-adapter-token",
-	}
+		Ops:                    ops,
+		Router:                 &chat.Router{Client: k8sClient, Reader: k8sClient, Namespace: ns, Ops: ops, Activity: acts},
+		AdapterToken:           "test-adapter-token",
+		Activity:               acts,
+		Version:                "test",
+		MaxActiveConversations: 5,
+	}, acts
 }
 
 func mkProfile(t *testing.T, name string) {

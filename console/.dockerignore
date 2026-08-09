@@ -1,0 +1,6 @@
+# node_modules is installed inside the build stage; copying the host's would
+# both bloat the context and risk shipping a platform-specific tree.
+ui/node_modules
+# dist is produced by the ui stage — a stale host build must never win over it.
+ui/dist
+bin

@@ -12,13 +12,34 @@ identity, nothing more — and the read-only Role below is what turns that
 identity into "may list agentops CRs". Same posture as the vm-bundle adapter's
 registration rights.
 
-No Pipeline is rendered. Joining the console to a pipeline is an ordinary
-channels[] edit the installer makes; a chart mutating user Pipelines would be a
-new and worse pattern. The post-install notes print the edit.
+TWO IDENTITIES, ONE POD. The console is a Channel adapter (carry conversations,
+reply in a thread) AND a signal adapter (originate). The SignalAdapter is
+declared `servedBy` this ChannelAdapter, so it owns no workload of its own and
+the ChannelAdapter reconciler injects SIGNAL_ADAPTER_TOKEN into the same pod.
+Two adapter CRs, one Deployment — see docs/concepts.md.
+
+No Pipeline is rendered. Joining the console to a pipeline, and CLAIMING its
+signal source, are ordinary edits the installer makes; a chart mutating user
+Pipelines would be a new and worse pattern. Until the source is claimed the
+console cannot start conversations and says so, with the patch. The post-install
+notes print it.
 */ -}}
 {{- if .Values.console.enabled }}
 {{- $c := .Values.console }}
 {{- $sa := printf "agentops-adapter-%s" $c.name }}
+{{- /*
+Sub-maps are read defensively. `helm upgrade --reuse-values` keeps the PREVIOUS
+release's `console:` map wholesale rather than merging this chart's defaults into
+it, so on an upgrade from 4.x these keys simply are not there — and a template
+that assumed them would fail the upgrade instead of the thing it was upgrading.
+
+`hasKey` rather than `| default true`: an explicit `false` must survive, and
+`default` cannot tell "absent" from "deliberately off".
+*/ -}}
+{{- $write := $c.write | default dict }}
+{{- $writeEnabled := true }}
+{{- if hasKey $write "enabled" }}{{ $writeEnabled = $write.enabled }}{{ end }}
+{{- $metricsURL := ($c.metrics | default dict).url | default "" }}
 {{- $secretName := $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }}
 {{- if not $c.auth.existingSecret }}
 {{- /* Generate once, reuse across upgrades (lookup); under template-only
@@ -73,6 +94,19 @@ spec:
       displayName:
         type: string
         description: Label for this surface in the console UI.
+      writeEnabled:
+        type: boolean
+        description: >-
+          Gates both write paths (chat composer and new-conversation). Absent
+          means enabled; only an explicit false makes this a strict viewer.
+      signalSource:
+        type: string
+        description: SignalSource this console originates conversations from.
+      metricsUrl:
+        type: string
+        description: >-
+          Optional Prometheus/VictoriaMetrics query endpoint for windows beyond
+          the manager's in-memory activity buffer.
   credentialKeys:
     # documentation only — the manager never reads Secrets
     - key: uiToken
@@ -96,12 +130,63 @@ spec:
   # projected into the console pod as env by the reconciler, kubelet-resolved
   credentialsSecretRef:
     name: {{ $secretName }}
+  # OPAQUE to the manager and interpreted only by the console. This is where the
+  # console's own settings live, and the only place they can: a ChannelAdapter CR
+  # is pure implementation and carries no configuration or env, so there is no
+  # other way for the chart to reach the pod.
   config:
     displayName: {{ $c.displayName | default "agent-ops console" | quote }}
+    writeEnabled: {{ $writeEnabled }}
+    signalSource: {{ $c.signalSourceName | default $c.name | quote }}
+    {{- with $metricsURL }}
+    metricsUrl: {{ . | quote }}
+    {{- end }}
 ---
-# READ-ONLY, and only agentops.dev. No secrets, no core resources, no write
-# verbs: the console renders CR state and sends chat through the adapter
-# contract, so nothing it does needs more than this.
+# The ORIGINATION identity. Externally served: no image, no workload — the
+# ChannelAdapter above already holds the process, and this CR exists to give it
+# a signal identity so "start a conversation" travels the sanctioned lane (a
+# chat signal from a claimed source) rather than a side door.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: {{ $c.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+spec:
+  servedBy:
+    kind: ChannelAdapter
+    name: {{ $c.name }}
+---
+# The source the console originates from. It carries NO wiring: a Pipeline must
+# claim it (signalSourceRefs) before anything can be started, and until one does
+# it sits at Wired=False — which reads exactly as "this console cannot start
+# conversations yet", with the fix.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: {{ $c.signalSourceName | default $c.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-console
+  labels:
+    app.kubernetes.io/name: agentops-console
+spec:
+  adapter: {{ $c.name }}
+  grouping:
+    # Chat: a person asking the same thing twice means it twice, so dedup is off
+    # and each message gets its own conversation.
+    cooldownHours: 0
+---
+# READ-ONLY. Two API groups: agentops.dev for configuration, plus deployments
+# and pods for INSTALL FACTS — image digests, restart counts and pod failure
+# reasons exist in no CR, and an operations console that cannot see a
+# CrashLoopBackOff is not one.
+#
+# NO WRITE VERBS ANYWHERE. The console has no write path to the Kubernetes API
+# at all; its only writes are POST /channel/inbound and POST /signal/inbound,
+# through the manager's contracts. Adding a write verb here would grant
+# something no code in that module can use.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -117,9 +202,17 @@ rules:
       - channels
       - channeladapters
       - conversations
+      - mcpconfigs
+      - mcptoolsets
       - pipelines
       - signaladapters
       - signalsources
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

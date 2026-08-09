@@ -41,14 +41,26 @@ func helmTemplateErr(t *testing.T, args ...string) string {
 	return string(out)
 }
 
+// The console is ON by default since chart 5.0.0, so the opt-out is what needs
+// pinning: ONE value must remove every console object, or the "nothing about
+// your install changes" promise in CHANGELOG.md is not true.
 func TestConsoleRendersNothingWhenDisabled(t *testing.T) {
-	out := helmTemplate(t)
+	out := helmTemplate(t, "--set", "console.enabled=false")
 	// console-specific names only: "kind: ChannelAdapter" appears in the CRD
 	// definition itself, which ships regardless
 	for _, needle := range []string{"agentops-console", "agentops-adapter-console", "app.kubernetes.io/name: agentops-console"} {
 		if strings.Contains(out, needle) {
 			t.Fatalf("console.enabled=false must render nothing, found %q", needle)
 		}
+	}
+}
+
+// ...and that the default really is on, since that is the breaking half of the
+// major bump.
+func TestConsoleIsEnabledByDefault(t *testing.T) {
+	out := helmTemplate(t)
+	if !strings.Contains(out, "app.kubernetes.io/name: agentops-console") {
+		t.Fatal("console.enabled must default to true (chart 5.0.0)")
 	}
 }
 
@@ -64,6 +76,11 @@ func TestConsoleBundleIsCRsAndRBACOnly(t *testing.T) {
 		"adapter: console",
 		"credentialsSecretRef",
 		"uiToken",
+		// the origination half: an externally-served SignalAdapter plus the
+		// source it originates from
+		"kind: SignalAdapter",
+		"servedBy:",
+		"kind: SignalSource",
 	} {
 		if !strings.Contains(out, needle) {
 			t.Fatalf("console bundle missing %q", needle)
@@ -84,7 +101,33 @@ func TestConsoleBundleIsCRsAndRBACOnly(t *testing.T) {
 	}
 }
 
-func TestConsoleRoleIsReadOnlyAgentopsOnly(t *testing.T) {
+// TWO adapter identities, and the SignalAdapter must own NO workload — that is
+// the whole point of servedBy, and a chart that gave it an image would quietly
+// produce the second pod this design exists to prevent.
+func TestConsoleSignalAdapterIsExternallyServed(t *testing.T) {
+	out := helmTemplate(t, "--set", "console.enabled=true")
+	var sa string
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: SignalAdapter") && strings.Contains(doc, "name: console") {
+			sa = doc
+		}
+	}
+	if sa == "" {
+		t.Fatal("console SignalAdapter not rendered")
+	}
+	rules := stripComments(sa)
+	if strings.Contains(rules, "image:") {
+		t.Fatalf("an externally-served SignalAdapter must declare no image:\n%s", rules)
+	}
+	if !strings.Contains(rules, "kind: ChannelAdapter") || !strings.Contains(rules, "name: console") {
+		t.Fatalf("servedBy must name the serving ChannelAdapter:\n%s", rules)
+	}
+}
+
+// The console's RBAC is read-only. It gained pods and deployments deliberately
+// (install facts exist in no CR), so the check is on VERBS and on the group set
+// being exactly the three it needs — not on the absence of pods.
+func TestConsoleRoleIsReadOnly(t *testing.T) {
 	out := helmTemplate(t, "--set", "console.enabled=true")
 	var role string
 	for _, doc := range splitDocs(out) {
@@ -96,20 +139,60 @@ func TestConsoleRoleIsReadOnlyAgentopsOnly(t *testing.T) {
 	if role == "" {
 		t.Fatal("console Role not rendered")
 	}
-	if !strings.Contains(role, `verbs: ["get", "list", "watch"]`) {
-		t.Fatalf("console Role verbs changed:\n%s", role)
-	}
 	// assert on the RULES, not the prose above them: the template's own comment
 	// says the words this check forbids
 	rules := stripComments(role)
-	for _, forbidden := range []string{"create", "update", "patch", "delete", "secrets", "pods"} {
+
+	// EVERY rule is get/list/watch. The console has no write path to the
+	// Kubernetes API at all, so a write verb here would grant something no code
+	// in that module can use.
+	for _, line := range strings.Split(rules, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "verbs:") && !strings.HasPrefix(trimmed, "- verbs:") {
+			continue
+		}
+		if !strings.Contains(trimmed, `["get", "list", "watch"]`) {
+			t.Fatalf("console Role verbs changed:\n%s", rules)
+		}
+	}
+	for _, forbidden := range []string{"create", "update", "patch", "delete", "secrets"} {
 		if strings.Contains(rules, forbidden) {
 			t.Fatalf("console Role must not grant %q:\n%s", forbidden, rules)
 		}
 	}
-	// only the agentops group
-	if strings.Count(rules, "apiGroups:") != 1 || !strings.Contains(rules, `apiGroups: ["agentops.dev"]`) {
-		t.Fatalf("console Role must cover agentops.dev only:\n%s", rules)
+	// exactly three groups: agentops.dev, apps (deployments) and core (pods)
+	if n := strings.Count(rules, "apiGroups:"); n != 3 {
+		t.Fatalf("console Role should cover exactly 3 API groups, found %d:\n%s", n, rules)
+	}
+	for _, want := range []string{`apiGroups: ["agentops.dev"]`, `apiGroups: ["apps"]`, `apiGroups: [""]`} {
+		if !strings.Contains(rules, want) {
+			t.Fatalf("console Role missing %s:\n%s", want, rules)
+		}
+	}
+}
+
+// The scrape templates are DEFAULT-DISABLED: neither VMServiceScrape nor
+// ServiceMonitor is a built-in kind, and rendering one without its CRD fails the
+// whole install.
+func TestMetricsScrapeTemplatesAreOptIn(t *testing.T) {
+	out := helmTemplate(t)
+	for _, forbidden := range []string{"kind: VMServiceScrape", "kind: ServiceMonitor", "kind: VMRule"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("%s must not render by default", forbidden)
+		}
+	}
+	on := helmTemplate(t,
+		"--set", "metrics.vmServiceScrape.enabled=true",
+		"--set", "metrics.serviceMonitor.enabled=true",
+		"--set", "metrics.rules.enabled=true")
+	for _, want := range []string{"kind: VMServiceScrape", "kind: ServiceMonitor", "kind: VMRule"} {
+		if !strings.Contains(on, want) {
+			t.Fatalf("%s did not render when enabled", want)
+		}
+	}
+	// the scrape selects the manager Service by label, so that label must exist
+	if !strings.Contains(on, "app.kubernetes.io/name: agentops-manager") {
+		t.Fatal("the manager Service must carry the label the scrape selects")
 	}
 }
 

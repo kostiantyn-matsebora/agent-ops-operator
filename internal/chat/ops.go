@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
 )
 
 // OpKind is an outbound channel operation kind.
@@ -54,8 +56,18 @@ type Op struct {
 	Text         string  `json:"text,omitempty"`     // send payload (chat HTML subset)
 
 	channelType string
+	enqueuedAt  time.Time
 	claimedAt   time.Time // zero = queued
 }
+
+// Age reports how long an op has been outstanding since it was enqueued.
+func (o *Op) Age() time.Duration { return time.Since(o.enqueuedAt) }
+
+// ClaimedAt is the moment an adapter took the op (zero while still queued).
+func (o *Op) ClaimedAt() time.Time { return o.claimedAt }
+
+// ChannelType is the adapter this op is addressed to.
+func (o *Op) ChannelType() string { return o.channelType }
 
 // OpResult completes an operation.
 type OpResult struct {
@@ -76,6 +88,8 @@ type OpQueue struct {
 	Client    client.Client
 	Namespace string
 	Registry  *Registry
+	// Activity records enqueue and completion hops. Nil is inert.
+	Activity *activity.Log
 
 	mu     sync.Mutex
 	ops    map[string]*Op      // by id, queued + claimed
@@ -153,9 +167,21 @@ func (q *OpQueue) enqueue(ctx context.Context, op *Op) {
 		q.mu.Unlock()
 		return
 	}
+	op.enqueuedAt = time.Now()
 	q.ops[op.ID] = op
 	q.order[op.channelType] = append(q.order[op.channelType], op.ID)
 	q.mu.Unlock()
+
+	// Enqueued is INTENT, not delivery. The console renders this edge as "sent,
+	// unconfirmed" until a channel.op.completed arrives — a dedup that silently
+	// suppressed the op emits nothing, so the graph never shows a hop that did
+	// not happen.
+	q.Activity.Emit(activity.Event{
+		Kind:         activity.KindChannelOpEnqueued,
+		From:         opOriginNode(op),
+		To:           activity.Node(activity.NodeChannel, op.Channel),
+		Conversation: op.Conversation, OpID: op.ID, Code: string(op.Kind), Detail: op.Channel,
+	})
 
 	// in-process types execute immediately through the same claim/complete
 	// path; detached from the caller's (request-scoped) context
@@ -247,6 +273,26 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 	}
 	q.mu.Unlock()
 
+	// The manager's own view of delivery. An adapter that also POSTs /activity
+	// reports the latency it measured on the wire; this one is queue-to-ack.
+	done := activity.Event{
+		Kind: activity.KindChannelOpCompleted,
+		From: activity.Node(activity.NodeChannelAdapter, op.channelType),
+		// The CHANNEL, not the manager: the adapter delivered to that surface,
+		// which is both what happened and something the graph can draw. Naming
+		// the manager made this hop unrenderable — the manager is not a wiring
+		// node, so the served-by edge every reply travels never lit up.
+		To:           activity.Node(activity.NodeChannel, op.Channel),
+		Conversation: op.Conversation, OpID: op.ID, Code: string(op.Kind),
+		Detail:    op.Channel,
+		LatencyMs: time.Since(op.enqueuedAt).Milliseconds(),
+	}
+	if res.Error != "" {
+		done.Status = activity.StatusError
+		done.Detail = op.Channel + ": " + res.Error
+	}
+	q.Activity.Emit(done)
+
 	switch {
 	case op.Kind == OpEnsureTopic:
 		if err := q.finishEnsureTopic(ctx, op, res); err != nil {
@@ -307,4 +353,75 @@ func (q *OpQueue) Pending(id string) bool {
 	defer q.mu.Unlock()
 	q.init()
 	return q.ops[id] != nil
+}
+
+// opOriginNode names where an op came from. A conversation-bound op flows from
+// its conversation; a bare notice (an unwired-source warning on a general
+// surface) flows from the manager.
+func opOriginNode(op *Op) *activity.NodeRef {
+	if op.Conversation != "" {
+		return activity.Node(activity.NodeConversation, op.Conversation)
+	}
+	return activity.Node(activity.NodeManager, activity.NodeManager)
+}
+
+// QueueStat is one adapter's outstanding-op picture: how deep, how old, and
+// WHICH op is the oldest of each kind. The identities live here rather than in
+// a metric label, because a conversation or op id as a label grows series
+// without bound — metrics answer "how deep, how old", this answers "which one".
+type QueueStat struct {
+	Adapter string `json:"adapter"`
+	// Queued ops wait for an adapter to claim them: deep-and-old means nothing
+	// is polling.
+	Queued int `json:"queued"`
+	// Claimed ops were taken and never completed: deep-and-old means an adapter
+	// is wedged mid-delivery. The two failure modes look identical from outside,
+	// which is exactly why they are counted apart.
+	Claimed             int     `json:"claimed"`
+	OldestQueuedOpID    string  `json:"oldestQueuedOpId,omitempty"`
+	OldestQueuedAgeSecs float64 `json:"oldestQueuedAgeSeconds,omitempty"`
+	OldestQueuedConv    string  `json:"oldestQueuedConversation,omitempty"`
+
+	OldestClaimedOpID    string  `json:"oldestClaimedOpId,omitempty"`
+	OldestClaimedAgeSecs float64 `json:"oldestClaimedAgeSeconds,omitempty"`
+	OldestClaimedConv    string  `json:"oldestClaimedConversation,omitempty"`
+}
+
+// Stats snapshots the queue per adapter. The OpQueue is in-memory by design, so
+// this is the ONLY place these facts exist — no Kubernetes object carries them.
+func (q *OpQueue) Stats() []QueueStat {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.init()
+	byAdapter := map[string]*QueueStat{}
+	oldestQueued := map[string]time.Time{}
+	oldestClaimed := map[string]time.Time{}
+	for _, op := range q.ops {
+		st := byAdapter[op.channelType]
+		if st == nil {
+			st = &QueueStat{Adapter: op.channelType}
+			byAdapter[op.channelType] = st
+		}
+		if op.claimedAt.IsZero() {
+			st.Queued++
+			if t, ok := oldestQueued[op.channelType]; !ok || op.enqueuedAt.Before(t) {
+				oldestQueued[op.channelType] = op.enqueuedAt
+				st.OldestQueuedOpID, st.OldestQueuedConv = op.ID, op.Conversation
+				st.OldestQueuedAgeSecs = time.Since(op.enqueuedAt).Seconds()
+			}
+			continue
+		}
+		st.Claimed++
+		if t, ok := oldestClaimed[op.channelType]; !ok || op.claimedAt.Before(t) {
+			oldestClaimed[op.channelType] = op.claimedAt
+			st.OldestClaimedOpID, st.OldestClaimedConv = op.ID, op.Conversation
+			st.OldestClaimedAgeSecs = time.Since(op.claimedAt).Seconds()
+		}
+	}
+	out := make([]QueueStat, 0, len(byAdapter))
+	for _, st := range byAdapter {
+		out = append(out, *st)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Adapter < out[j].Adapter })
+	return out
 }

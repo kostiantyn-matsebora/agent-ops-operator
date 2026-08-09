@@ -38,6 +38,48 @@ Ingest lane, split like `Channel`: **implementation-agnostic metadata** (`adapte
 
 **A signal implementation, nothing more**: the inbound-only sibling of `ChannelAdapter` — an image implementing the [signal contract](contracts.md#the-signal-adapter-contract), plugged in as a CR whose **name is the type key** SignalSources select via `spec.adapter`, with the same posture (owned workload, zero-RBAC SA, singleton, derived name-scoped token, credential projection). Webhook-receiving implementations declare `spec.port` and the reconciler also owns a Service `agentops-signal-<name>` + injects `LISTEN_ADDR` — enabling the adapter is a complete appliance. A new signal kind (PagerDuty, email, k8s events, …) = an image + one CR. `signal-cron/` is the reference.
 
+#### `servedBy` — two identities, one pod
+
+A SignalAdapter declares **exactly one of** `spec.image` (it runs its own
+workload) or `spec.servedBy: {kind: ChannelAdapter, name: <adapter>}` (another
+adapter's pod already holds the process, and this CR exists only to give it a
+signal identity). The API enforces the either/or, so neither a CR declaring both
+nor one declaring neither reaches a controller.
+
+When `servedBy` is set:
+
+- the SignalAdapter reconciler creates **no** Deployment, Service or
+  ServiceAccount — and deletes any it used to own, because ownerRef GC will not
+  (the owner is still there) and a leftover Deployment is exactly the second pod
+  this mode exists to prevent;
+- it reports `Ready=True` with reason `ServedBy`. An adapter with nothing to
+  become available must not read as a fault on every dashboard. A `servedBy`
+  naming a workload that does not exist reports `Ready=False/ServingAdapterMissing`
+  and names it — otherwise the adapter would sit Ready while nothing held its
+  token, and its sources would look `Served` while nothing served them;
+- the named ChannelAdapter's reconciler injects `SIGNAL_ADAPTER_NAME` and
+  `SIGNAL_ADAPTER_TOKEN` into its pod, derived exactly as always
+  (`HMAC(master, "signal-adapter:"+name)`) — stateless, nothing minted or
+  stored. Clearing the link removes them.
+
+A single env var is the whole mechanism. The identities share a **process**,
+never a **scope**: the two derivation contexts differ, and each surface still
+validates only against its own CRD list, so a channel token remains a stranger
+to `/signal/*` and vice versa. `SignalSource.status.Served` resolves identically
+either way — the serving relationship is what matters, not where the process
+lives.
+
+**When to use it.** When one implementation is genuinely both a *surface* and an
+*originator*: it carries conversations on threads AND starts them from a general
+surface. That is the shape of every chat transport — Telegram needs three pods
+today precisely because one adapter could not be both. The alternative, two
+adapter CRs with images, means an idle pod whose only job is to make a source
+`Served`; this repo already paid for that shape once, when `telegram-router` was
+an adapter with a signal-free `SignalSource` purely to carry a credential, which
+then sat at `Wired=False`. The difference that makes `servedBy` legitimate is
+that an externally-served source **originates real conversations for a Pipeline
+that claims it**.
+
 ### Pipeline
 
 **The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is ADDRESSABLE by name — `POST /task` names a Pipeline, not a profile. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed. One pipeline per source (older claimant wins); channels are shareable — one chat surface carries many jobs, so name a Pipeline for its PURPOSE, never for the channel it answers on. **No chart bundle ships a Pipeline**: wiring spans bundles, so the chart declares it once at the top, under `pipelines:`.

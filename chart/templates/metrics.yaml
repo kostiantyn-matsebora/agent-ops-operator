@@ -1,0 +1,125 @@
+{{- /*
+Scrape configuration and example alert rules for the manager's `agentops_*`
+metrics.
+
+ALL DEFAULT-DISABLED, and that is not timidity: neither VMServiceScrape nor
+ServiceMonitor is a built-in kind. Rendering one into a cluster without the CRD
+fails the whole install, so an operator opts in once they know which monitoring
+stack they run.
+
+The metrics themselves are always exposed — they are registered into the
+controller-runtime registry already serving :9090. These templates only tell an
+existing Prometheus/VictoriaMetrics where to look, so alerting never depends on
+anyone having the console open.
+*/ -}}
+{{- $m := .Values.metrics | default dict }}
+{{- $svc := "agentops-manager" }}
+{{- if $m.vmServiceScrape }}{{- if $m.vmServiceScrape.enabled }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: agentops-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-manager
+    {{- with $m.vmServiceScrape.labels }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $svc }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  endpoints:
+    - port: metrics
+      interval: {{ $m.interval | default "30s" }}
+---
+{{- end }}{{- end }}
+{{- if $m.serviceMonitor }}{{- if $m.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: agentops-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-manager
+    {{- with $m.serviceMonitor.labels }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $svc }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  endpoints:
+    - port: metrics
+      interval: {{ $m.interval | default "30s" }}
+---
+{{- end }}{{- end }}
+{{- if $m.rules }}{{- if $m.rules.enabled }}
+{{- /*
+Two conditions, chosen because each is a real failure that looks like health
+from every other angle:
+
+  - ops QUEUED with nothing claiming them — the adapter is down, and CR state
+    says nothing at all, because the op queue lives in the manager's memory;
+  - runtime slots pinned at the ceiling WITH waiters — the system is capacity
+    bound, and every conversation looks merely "Pending".
+
+Deliberately not alerting on error RATES: a failed agent run is ordinary and
+paging on it teaches people to ignore the pager.
+*/ -}}
+apiVersion: {{ $m.rules.apiVersion | default "operator.victoriametrics.com/v1beta1" }}
+kind: {{ $m.rules.kind | default "VMRule" }}
+metadata:
+  name: agentops
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-manager
+    {{- with $m.rules.labels }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: agentops
+      rules:
+        - alert: AgentOpsChannelOpsUnclaimed
+          expr: |
+            agentops_channel_ops_queued > 0
+              and agentops_channel_op_oldest_queued_age_seconds > 300
+              and agentops_channel_ops_claimed == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "agent-ops: channel ops queued with nothing claiming them"
+            description: >-
+              Adapter {{ "{{ $labels.adapter }}" }} has ops queued for over five
+              minutes and has claimed none. Its pod is probably down or not
+              polling — agent replies are not being delivered.
+        - alert: AgentOpsAdapterWedged
+          expr: agentops_channel_op_oldest_claimed_age_seconds > 600
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "agent-ops: an adapter claimed ops and stopped completing them"
+            description: >-
+              Adapter {{ "{{ $labels.adapter }}" }} has held a claimed op for
+              over ten minutes. See GET /status for which op.
+        - alert: AgentOpsAtRuntimeCeiling
+          expr: |
+            agentops_runtime_slots_in_use >= agentops_runtime_slots_max
+              and sum(agentops_conversations_inflight) > 0
+          for: 15m
+          labels:
+            severity: info
+          annotations:
+            summary: "agent-ops: runtime slots pinned at the ceiling"
+            description: >-
+              Every runtime slot has been in use for fifteen minutes.
+              Conversations are queueing rather than running — raise
+              maxActiveConversations or shed load.
+{{- end }}{{- end }}

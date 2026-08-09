@@ -1,81 +1,70 @@
-// console: the agent-ops console — a channel adapter that is also the viewer.
+// console: the agent-ops console — a channel adapter that is also the viewer,
+// and (when granted a signal identity) an originator.
 //
-// It serves Channels with spec.adapter=console against the operator's adapter
-// contract, and renders the whole agentops.dev configuration as a topology
-// graph with live conversation activity:
+// It fans in five sources the browser must never touch directly:
 //
-//	config:   Kubernetes list/watch (own SA, read-only, chart-granted RBAC)
+//	config:   Kubernetes list/watch, agentops.dev kinds (own SA, read-only)
+//	install:  Kubernetes list/watch, deployments + pods (images, readiness)
+//	traffic:  one SSE connection to the manager's GET /activity/stream
 //	outbound: long-poll GET /channel/ops?adapter=console  ->  live transcripts
 //	inbound:  a message typed in the UI                   ->  POST /channel/inbound
-//	browser:  embedded SPA + JSON snapshots + one SSE stream
+//	start:    "new conversation" -> POST /signal/inbound   (chat signal)
 //
 // The console is IN the system it shows: conversations on pipelines listing its
 // Channel bind a console thread, so watching a run and replying to it are the
-// same screen. Joining a pipeline is an ordinary `channels[]` edit made by a
-// human — the console never mutates a CR (there is no write path to the
-// Kubernetes API in this module at all).
+// same screen, and a conversation the console STARTS arrives already joined —
+// the claiming pipeline's channel set includes the console Channel.
 //
-// Environment: MANAGER_URL, ADAPTER_TOKEN, ADAPTER_NAME (default "console"),
-// LISTEN_ADDR (default ":8080" — in-cluster the reconciler injects it from
-// ChannelAdapter.spec.port), POD_NAMESPACE (injected by kubernetesAccess),
-// UI_TOKEN (fallback browser token for channels declaring no credentials),
-// projected AGENTOPS_CRED_* vars (key uiToken).
+// There is NO write path to the Kubernetes API in this module at all. The only
+// writes anywhere are POST /channel/inbound and POST /signal/inbound, both
+// through the manager, both gated by WRITE_ENABLED and an identity.
+//
+// Environment: see config.go.
 package main
 
 import (
 	"context"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
 )
 
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		log.Fatalf("missing required env %s", key)
-	}
-	return v
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 func main() {
-	adapterName := envOr("ADAPTER_NAME", "console")
-	listen := envOr("LISTEN_ADDR", ":8080")
-	namespace := envOr("POD_NAMESPACE", "")
+	cfg, err := LoadConfig()
+	if err != nil {
+		log.Fatalf("configuration: %v", err)
+	}
 
-	kube, err := NewInClusterKube(namespace)
+	kube, err := NewInClusterKube(cfg.Namespace)
 	if err != nil {
 		// Without API access the console has nothing to show — failing at
 		// startup names the missing grant instead of serving empty pages.
 		log.Fatalf("kubernetes access: %v (ChannelAdapter needs kubernetesAccess: true and a chart-granted read-only Role)", err)
 	}
-	if namespace == "" {
-		log.Fatalf("missing required env POD_NAMESPACE (injected by ChannelAdapter spec.kubernetesAccess)")
-	}
 
-	cache := NewCache(kube, Kinds)
+	cache := NewCache(kube, append(append([]string{}, Kinds...), InstallKinds...))
 	transcripts := NewTranscripts()
-	mgr := NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN"))
-	adapter := NewAdapter(mgr, cache, transcripts, adapterName)
-	api := NewAPI(cache, transcripts, adapter, os.Getenv("UI_TOKEN"))
+	mgr := NewManager(cfg.ManagerURL, cfg.AdapterToken)
+	adapter := NewAdapter(mgr, cache, transcripts, cfg.AdapterName)
+	activity := NewActivityWindow(mgr, 5000)
+	originator := NewOriginator(cfg.ManagerURL, cfg.SignalAdapterToken, cfg.SignalSourceName)
+	api := NewAPI(APIDeps{
+		Cache: cache, Transcripts: transcripts, Adapter: adapter, Activity: activity,
+		Manager: mgr, Originator: originator, Metrics: NewMetricsClient(cfg.MetricsURL), Config: cfg,
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("agent-ops console starting (adapter=%s, namespace=%s, listen=%s)", adapterName, namespace, listen)
+	log.Printf("agent-ops console starting (adapter=%s, namespace=%s, listen=%s, writes=%v, originates=%v)",
+		cfg.AdapterName, cfg.Namespace, cfg.ListenAddr, cfg.WriteEnabled, originator != nil)
 
 	go cache.Run(ctx)
 	go adapter.Run(ctx)
+	go activity.Run(ctx)
 
-	srv := &http.Server{Addr: listen, Handler: api.Handler(UIHandler()), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: api.Handler(UIHandler()), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

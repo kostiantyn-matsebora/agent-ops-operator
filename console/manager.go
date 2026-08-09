@@ -134,3 +134,83 @@ func (m *Manager) ReportStatus(ctx context.Context, channel string, ready bool, 
 		map[string]any{"ready": ready, "reason": reason, "message": message}, nil)
 	return err
 }
+
+// ---- manager introspection --------------------------------------------------
+//
+// THE BOUNDARY: the manager exposes only what only the manager knows. Everything
+// below exists in NO Kubernetes object — op queues are in-memory by design,
+// runtime slots are counted from live pods, cooldowns are per-source memory, and
+// capability resolution is manager logic. CR state is read from the API server
+// and is never fetched through here.
+
+// QueueStat is one adapter's outstanding-op picture. The IDENTITIES live here
+// rather than in a metric label: metrics answer "how deep, how old", this
+// answers "which one".
+type QueueStat struct {
+	Adapter                 string  `json:"adapter"`
+	Queued                  int     `json:"queued"`
+	Claimed                 int     `json:"claimed"`
+	OldestQueuedOpID        string  `json:"oldestQueuedOpId,omitempty"`
+	OldestQueuedAgeSeconds  float64 `json:"oldestQueuedAgeSeconds,omitempty"`
+	OldestQueuedConv        string  `json:"oldestQueuedConversation,omitempty"`
+	OldestClaimedOpID       string  `json:"oldestClaimedOpId,omitempty"`
+	OldestClaimedAgeSeconds float64 `json:"oldestClaimedAgeSeconds,omitempty"`
+	OldestClaimedConv       string  `json:"oldestClaimedConversation,omitempty"`
+}
+
+// CooldownStat reports a suppressed signal lane. A suppressed lane looks exactly
+// like an idle one on a graph, which is the whole reason it is reported.
+type CooldownStat struct {
+	Source        string  `json:"source"`
+	Suppressed    int     `json:"suppressed"`
+	WindowSeconds float64 `json:"windowSeconds"`
+}
+
+// ManagerStatus is GET /status.
+type ManagerStatus struct {
+	Version      string `json:"version,omitempty"`
+	Leader       string `json:"leader,omitempty"`
+	Now          string `json:"now,omitempty"`
+	RuntimeSlots struct {
+		InUse   int `json:"inUse"`
+		Max     int `json:"max"`
+		Waiting int `json:"waiting"`
+	} `json:"runtimeSlots"`
+	Queues    []QueueStat    `json:"queues"`
+	Cooldowns []CooldownStat `json:"cooldowns"`
+}
+
+// Status reads the manager's own runtime state.
+func (m *Manager) Status(ctx context.Context) (*ManagerStatus, error) {
+	var out ManagerStatus
+	if _, err := m.do(ctx, "GET", "/status", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ResolvedCapabilities is GET /pipelines/{name}/resolved — what an agent routed
+// by this pipeline may actually reach. Rendered VERBATIM: the console must not
+// recompute composition, because a second implementation would eventually
+// disagree with the one that runs, and the console's entire claim is that it
+// cannot disagree with the system.
+type ResolvedCapabilities struct {
+	Pipeline     string   `json:"pipeline"`
+	Profile      string   `json:"profile"`
+	Runtime      string   `json:"runtime,omitempty"`
+	AllowedTools []string `json:"allowedTools"`
+	ToolsMode    string   `json:"toolsMode"`
+	Toolsets     []string `json:"toolsets"`
+	MCPConfigs   []string `json:"mcpConfigs"`
+	MCPServers   []string `json:"mcpServers"`
+	Unresolved   []string `json:"unresolved,omitempty"`
+}
+
+// Resolved reads a pipeline's authoritative capability resolution.
+func (m *Manager) Resolved(ctx context.Context, pipeline string) (*ResolvedCapabilities, error) {
+	var out ResolvedCapabilities
+	if _, err := m.do(ctx, "GET", "/pipelines/"+url.PathEscape(pipeline)+"/resolved", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

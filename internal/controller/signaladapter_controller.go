@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -74,6 +75,14 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	envFrom, collisions := projectCredentials(creds)
 
+	// Externally served: this identity lives in ANOTHER adapter's pod, so this
+	// reconciler owns no workload at all. Returning before ensureAdapterWorkload
+	// is the whole mechanism — there is no "empty deployment" to garbage-collect,
+	// because none was ever rendered.
+	if adapter.Spec.ServedBy != nil {
+		return ctrl.Result{}, r.reconcileExternallyServed(ctx, &adapter, served)
+	}
+
 	env := []corev1.EnvVar{
 		{Name: "MANAGER_URL", Value: r.ManagerURL},
 		{Name: "ADAPTER_NAME", Value: adapter.Name},
@@ -135,6 +144,77 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	apimeta.SetStatusCondition(&adapter.Status.Conditions, ready)
 	return ctrl.Result{}, r.Status().Patch(ctx, &adapter, patch)
+}
+
+// reconcileExternallyServed writes status for an adapter whose process belongs
+// to another workload. Nothing is created: no Deployment, no Service, no
+// ServiceAccount — the point of the mode is that two identities cost one pod.
+//
+// A dangling servedBy is reported rather than ignored: an adapter naming a
+// workload that does not exist would otherwise sit silently Ready while nothing
+// holds its token, and its sources would look Served while nothing serves them.
+func (r *SignalAdapterReconciler) reconcileExternallyServed(ctx context.Context,
+	adapter *agentopsv1alpha1.SignalAdapter, served int) error {
+
+	target := adapter.Spec.ServedBy
+	// Switching an adapter INTO this mode must take its old workload away.
+	// OwnerRef GC will not: the owner is still there, so a Deployment left from
+	// the image mode would keep running — and "two identities, two pods" is
+	// precisely what the mode exists to prevent.
+	if err := r.removeOwnedWorkload(ctx, adapter); err != nil {
+		return err
+	}
+	patch := client.MergeFrom(adapter.DeepCopy())
+	_, schemaCond := compileDeclaredSchema(adapter.Spec.ConfigSchema)
+	applySchemaCondition(&adapter.Status.Conditions, schemaCond)
+	adapter.Status.ServedSources = int32(served)
+
+	apimeta.SetStatusCondition(&adapter.Status.Conditions, metav1.Condition{
+		Type: ConditionDeployed, Status: metav1.ConditionTrue, Reason: ReasonServedBy,
+		Message: fmt.Sprintf("no workload of its own: %s/%s serves this identity", target.Kind, target.Name),
+	})
+
+	ready := metav1.Condition{
+		Type: ConditionReady, Status: metav1.ConditionTrue, Reason: ReasonServedBy,
+		Message: fmt.Sprintf("served by %s/%s; %d source(s)", target.Kind, target.Name, served),
+	}
+	var host agentopsv1alpha1.ChannelAdapter
+	if err := r.Get(ctx, types.NamespacedName{Namespace: adapter.Namespace, Name: target.Name}, &host); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		ready.Status = metav1.ConditionFalse
+		ready.Reason = "ServingAdapterMissing"
+		ready.Message = fmt.Sprintf("servedBy names %s/%s, which does not exist — nothing holds this adapter's token",
+			target.Kind, target.Name)
+	}
+	apimeta.SetStatusCondition(&adapter.Status.Conditions, ready)
+	return r.Status().Patch(ctx, adapter, patch)
+}
+
+// removeOwnedWorkload deletes what this reconciler would otherwise own and what
+// would keep RUNNING or ROUTING if left behind: the Deployment and the Service.
+// Only ever called for an externally-served adapter, where the correct number of
+// each is zero.
+//
+// The ServiceAccount is deliberately NOT deleted. The manager holds no `delete`
+// verb on serviceaccounts — it creates them and lets ownerRef GC remove them
+// when the adapter CR goes away — and widening that grant to tidy up an inert
+// object would be the wrong trade: a leftover SA carries zero RBAC, no token
+// automount and no workload, so it costs nothing, while a leftover Deployment is
+// the second pod this whole mode exists to prevent.
+func (r *SignalAdapterReconciler) removeOwnedWorkload(ctx context.Context, adapter *agentopsv1alpha1.SignalAdapter) error {
+	name := SignalAdapterDeploymentName(adapter.Name)
+	meta := metav1.ObjectMeta{Name: name, Namespace: adapter.Namespace}
+	for _, obj := range []client.Object{
+		&appsv1.Deployment{ObjectMeta: meta},
+		&corev1.Service{ObjectMeta: meta},
+	} {
+		if err := client.IgnoreNotFound(r.Delete(ctx, obj)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetupWithManager wires the controller (mirrors ChannelAdapterReconciler):

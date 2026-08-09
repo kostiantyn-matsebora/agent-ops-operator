@@ -26,9 +26,23 @@ import (
 // consoleChannelConfig is this adapter's reading of Channel spec.config.
 // Everything is optional: a console channel needs no configuration to work,
 // so an empty config is valid rather than an error.
+//
+// This is where the console's own settings live, and it is the ONLY place they
+// can: a ChannelAdapter CR is pure implementation and carries no configuration
+// or env, so a chart cannot inject them into the pod. `config` is opaque to the
+// manager and interpreted by the serving adapter — which is exactly this.
 type consoleChannelConfig struct {
 	// DisplayName labels the surface in the UI.
 	DisplayName string `json:"displayName,omitempty"`
+	// WriteEnabled gates BOTH write paths. A POINTER so "unset" is
+	// distinguishable from "false": unset takes the process default (on), and
+	// only an explicit false makes the console a strict viewer.
+	WriteEnabled *bool `json:"writeEnabled,omitempty"`
+	// SignalSource names the SignalSource this console originates from.
+	SignalSource string `json:"signalSource,omitempty"`
+	// MetricsURL is an optional Prometheus/VictoriaMetrics query endpoint for
+	// windows beyond the manager's activity buffer.
+	MetricsURL string `json:"metricsUrl,omitempty"`
 }
 
 // Adapter runs the /channel/* client loop.
@@ -172,6 +186,22 @@ func (a *Adapter) UITokenFromChannel() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.uiToken
+}
+
+// PrimaryConfig returns the served config of the primary console Channel. The
+// zero value is valid — a console with no config still works.
+func (a *Adapter) PrimaryConfig() consoleChannelConfig {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	names := make([]string, 0, len(a.channels))
+	for name := range a.channels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return consoleChannelConfig{}
+	}
+	return a.channels[names[0]]
 }
 
 // ThreadFor resolves a conversation's console thread id from the watch cache.
