@@ -57,6 +57,10 @@ spec:
             - name: HOME_PVC
               value: {{ .Values.persistence.existingClaim | default .Values.persistence.name | quote }}
             {{- end }}
+            {{- if .Values.persistence.workspace.enabled }}
+            - name: WORKSPACE_PVC
+              value: {{ .Values.persistence.workspace.existingClaim | default .Values.persistence.workspace.name | quote }}
+            {{- end }}
             {{- with .Values.extraEnv }}
 {{ toYaml . | indent 12 }}
             {{- end }}

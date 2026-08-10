@@ -10,11 +10,38 @@ The full CRD reference, and how an agent's capabilities are resolved.
 
 ### AgentRuntime
 
-**What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, home volume (session persistence), service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](contracts.md#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env. The chart renders the `default` one for you ([below](#the-substrate-runtime-and-globalagentopsruntime)).
+**What executes it**: the engine hosting the LLM agent — image, entrypoint, idle TTL, storage volumes, service account (the agent's RBAC). Ships with a claude-code runtime; any image speaking the [work contract](contracts.md#the-work-contract) plugs in. `profile.runtimeRef` → CR named `default` → manager env. The chart renders the `default` one for you ([below](#the-substrate-runtime-and-globalagentopsruntime)).
+
+Two optional volumes, shaped alike (`pvcRef` / `emptyDir`) and defaulted apart:
+
+| | mounts at | chart default | absent means |
+|---|---|---|---|
+| `spec.home` | `/data/home` | **on** (`persistence.enabled`) | agent session files die with the pod, so a resume finds nothing and answers without prior context |
+| `spec.workspace` | `/data/workspace` | **off** (`persistence.workspace.enabled`) | the repository checkout is re-cloned per pod |
+
+The asymmetry is the point: losing session files silently costs conversational
+history, whereas losing a checkout costs a re-clone, which is cheap and always
+correct — a stale shared checkout is neither. Turn `workspace` on to keep
+uncommitted agent work across a pod restart mid-conversation.
+
+Each conversation gets **its own subdirectory** within the workspace claim,
+mounted with a `subPath`, so concurrent runtime pods can never observe or modify
+each other's tree. The mount path itself does not move — claude-code keys
+sessions by working directory — which is why isolation is bought with `subPath`
+rather than with a per-conversation path. Both claims want `ReadWriteMany` once
+more than one runtime pod runs at a time; nothing reclaims a conversation's
+workspace directory after it is deleted.
 
 ### Conversation
 
 One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. Phases: `Pending` (waiting for a capacity slot — nothing provisioned, see [below](#capacity-how-many-run-at-once)), `Queued` (admitted, work waiting its turn), `Working`, `Idle`. Ends with `/close` in its thread, or `kubectl delete` — both archive the chat threads first.
+
+`status.runs[]` records each completed run and **who has been told about it**:
+`delivered[]` names the bound channels whose thread already carries the reply,
+and `deliveryTracked` marks a run recorded by a manager that maintains those
+markers. Together they make the reply derivable rather than queue-resident — see
+[Restart resilience](#restart-resilience). Both are materialized state; nothing
+sets them by hand.
 
 ### ConversationInput
 
@@ -31,6 +58,14 @@ Chat surface, split in two parts: **implementation-agnostic metadata** (`adapter
 ### SignalSource
 
 Ingest lane, split like `Channel`: **implementation-agnostic metadata** (`adapter`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports.
+
+`status.cooldown[]` records fingerprint suppression for this source —
+`{fingerprint, at}` per admitted signal, pruned past the window and bounded. The
+manager keeps an in-memory map as the hot path, but this is the record: it is
+read on first use per source after a restart, so a restart mid-incident does not
+re-open conversations for signals still inside their window. Only an **admitted**
+fingerprint writes; a suppressed re-delivery — the high-volume case cooldown
+exists for — writes nothing.
 
 **Signal labels** are what `grouping.signatureLabels` selects over, so what an adapter emits determines what can be grouped. The shared vocabulary — `alertgroup`, `alertname`, `namespace`, `severity`, `source` — is joined by kind-specific keys. The Kubernetes events adapter adds `kind`, `name`, **`workload`** (the owning controller, e.g. `Deployment/api`, resolved through owner references) and `node`, plus the involved pod's own labels. Adapter-defined keys are reserved: a pod label named `name` or `workload` is never allowed to overwrite one, because through `signatureLabels` that would silently rewrite grouping. Suppression — deciding whether a signal is emitted at all — is the **adapter's** job and is distinct from grouping; see [k8s-bundle](k8s-bundle.md#event-suppression-eventsadaptersourcerules).
 
@@ -314,6 +349,66 @@ Two bounds keep this honest:
   resumes with its context. An idle pod may also be evicted early to admit
   waiting work — that deletes the pod only; the conversation resumes on its
   next input.
+
+## Restart resilience
+
+Every piece of live state has **one declared home**, chosen by what the state is:
+
+- **The Kubernetes API** — configuration, conversation state (session id,
+  threads, inputs, runs, phase), adapter cursors, delivery markers and
+  suppression windows. Recovered by reading; survives any restart and any
+  rescheduling.
+- **A PersistentVolume** — state that genuinely *is* a filesystem: the runtime's
+  agent session files, and optionally its repository checkout.
+- **Deliberately lossy** — bounded telemetry whose loss costs history, never
+  correctness. It is documented as lossy and it reports its gaps.
+
+**The manager mounts no volume.** Its state either derives from CR state or is
+telemetry, and a claim would pin it to one node, defeat rescheduling, and create
+a second source of truth beside the CRs.
+
+| Component | State it holds | Home | A restart costs |
+|---|---|---|---|
+| Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | nothing |
+| Manager — op queue | outbound channel ops | derived from CR state | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker. `close-topic` is the one exception ([below](#ending-a-conversation)) |
+| Manager — ingest cooldown | fingerprint suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
+| Manager — admission | active/pending counts | live pod list + `Conversation` phase | nothing |
+| Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history; clients are told to resync rather than handed silence |
+| Runtime pod | agent session files, repo checkout | PVC when enabled, else ephemeral | with `persistence.enabled` off, conversational context; with it on, nothing |
+| Channel / signal adapters | transport cursors | annotations on `Channel` / `SignalSource` | nothing |
+| Console | config cache, activity index | rebuilt by list→watch and cursor replay | nothing authoritative; it mounts no volume by design |
+
+Adding state to a component means adding its row. State that fits no row is a
+defect: it is either a cache of a Kubernetes object, derivable from Kubernetes
+objects, or declared lossy.
+
+### The reply is a fact, not a queue entry
+
+`POST /work/done` records the run result and enqueues the reply — the fast path,
+unchanged. It is no longer the *only* path: reconciliation enqueues a `send` for
+any completed run whose result is recorded and whose bound thread carries no
+delivery marker, and the reply's op id is stable per
+conversation×channel×run, so the two dedup against each other. A manager restart
+between the result landing in `status.runs[].result` and an adapter claiming the
+op therefore re-derives the answer instead of dropping it.
+
+Marking happens when the op **completes**, which is what makes the two directions
+safe: an op lost before completion is re-derived, one completed before the
+restart is not, and a fan-out interrupted after one of three threads succeeds
+completes the other two without repeating the first.
+
+Runs recorded by a manager older than this mechanism carry no
+`deliveryTracked`. They are backfilled as delivered without sending anything —
+otherwise upgrading would re-post every recent answer to every bound thread.
+
+### Telemetry says where it lost the thread
+
+The activity ring stays bounded, in-memory and lossy. What it does not do is
+present a gap as quiet: a cursor it cannot serve — evicted, or issued by a
+previous manager process, since the sequence restarts at 1 — is answered with a
+resync, and the console renders that as an explicit gap in its timeline.
+Conversations, topology and configuration are unaffected: those are read from
+Kubernetes.
 
 ## Ending a conversation
 

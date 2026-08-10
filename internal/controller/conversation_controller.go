@@ -166,6 +166,10 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// it: the human reads the event while the agent is already working, and
 		// a run that hangs or dies still leaves the thread saying what happened.
 		r.postInputCards(ctx, &conv)
+		// The BACKSTOP that makes a reply derivable rather than queue-resident.
+		if err := r.deliverRunReplies(ctx, &conv); err != nil {
+			logger.Error(err, "re-deriving undelivered run replies")
+		}
 	}
 
 	if needsWorker && !podExists {
@@ -530,6 +534,100 @@ func (r *ConversationReconciler) postInputCards(ctx context.Context, conv *agent
 			r.Ops.EnqueueInputCard(ctx, &ch, conv.Name, item.ID, tid, msg)
 		}
 	}
+}
+
+// deliverRunReplies re-derives the answer for every completed run that a bound
+// thread has not received. It is the backstop that makes `send` derivable:
+// `POST /work/done` enqueues the reply on the fast path, but the queue is
+// in-memory, so without this a manager restart in the window between recording
+// the result and an adapter claiming the op would lose the answer permanently —
+// durably written to status.runs[].result and delivered to nobody.
+//
+// Two facts keep it safe to run on EVERY reconcile:
+//
+//   - the op id is stable per conversation×channel×run, so re-enqueues dedup
+//     against the pending map and the completed window, and the CR's markers
+//     cover the window after a restart, when both are empty;
+//   - a run written by a manager that did NOT track delivery is BACKFILLED as
+//     delivered rather than sent (see RunStatus.DeliveryTracked). That is the
+//     one migration hazard: without it, upgrading would re-post every recent
+//     answer to every bound thread.
+func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	if len(conv.Spec.ChannelRefs) == 0 || len(conv.Status.Runs) == 0 {
+		return nil
+	}
+	// Threads, not channelRefs: a channel whose topic does not exist yet has
+	// nowhere to receive the reply, and the reconcile its binding triggers will
+	// come back here.
+	var backfill []string
+	for i := range conv.Status.Runs {
+		run := &conv.Status.Runs[i]
+		if !run.DeliveryTracked {
+			backfill = append(backfill, run.RunID)
+			continue
+		}
+		msg := chat.RunReplyMessage(run)
+		for _, t := range conv.Status.Threads {
+			if run.DeliveredTo(t.Channel) || !conv.BoundTo(t.Channel) {
+				continue
+			}
+			var ch agentopsv1alpha1.Channel
+			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil ||
+				ch.Spec.Adapter == "" {
+				continue
+			}
+			tid := t.ThreadID
+			r.Ops.EnqueueRunReply(ctx, &ch, conv.Name, run.RunID, &tid, msg)
+		}
+	}
+	if len(backfill) == 0 {
+		return nil
+	}
+	return r.backfillDelivered(ctx, conv, backfill)
+}
+
+// backfillDelivered records pre-upgrade runs as delivered to every bound
+// channel WITHOUT enqueueing anything. Their replies were posted by the manager
+// that ran them; the markers simply did not exist yet.
+func (r *ConversationReconciler) backfillDelivered(ctx context.Context, conv *agentopsv1alpha1.Conversation, runIDs []string) error {
+	want := map[string]bool{}
+	for _, id := range runIDs {
+		want[id] = true
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		var fresh agentopsv1alpha1.Conversation
+		if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Name}, &fresh); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		patch := client.MergeFrom(fresh.DeepCopy())
+		changed := false
+		for i := range fresh.Status.Runs {
+			run := &fresh.Status.Runs[i]
+			if !want[run.RunID] || run.DeliveryTracked {
+				continue
+			}
+			// Tracked from here on, and already delivered as far as anyone can
+			// tell — which is the honest record: this manager never owed it.
+			run.DeliveryTracked = true
+			for _, ref := range conv.Spec.ChannelRefs {
+				if !run.DeliveredTo(ref.Name) {
+					run.Delivered = append(run.Delivered, ref.Name)
+				}
+			}
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		err := r.Status().Patch(ctx, &fresh, patch)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("conflict backfilling delivery markers on %s", conv.Name)
 }
 
 func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {

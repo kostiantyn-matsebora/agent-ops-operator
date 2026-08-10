@@ -3,9 +3,7 @@
 ## Purpose
 
 The restructured `SignalSource` CRD: an open string `spec.adapter` with opaque per-type `config` and name-only credential references, manager-side grouping policy applied uniformly to every source type, and unchanged in-process compatibility for the built-in `alertmanagerWebhook` type.
-
 ## Requirements
-
 ### Requirement: SignalSource CRD splits shared metadata from type-specific config
 The `SignalSource` CRD SHALL consist of type-agnostic metadata — required immutable open-string `spec.type`, typed `spec.grouping` (signatureLabels, windowDays, cooldownHours), optional `spec.credentialsSecretRef` — plus an optional opaque `spec.config` (`x-kubernetes-preserve-unknown-fields`) whose shape only the serving signal implementation defines and validates authoritatively. The operator SHALL never interpret `spec.config` semantically and SHALL never read the credential Secret's values (name-only projection). **When the serving `SignalAdapter` CR declares a config schema for the type, the manager SHALL mechanically validate `spec.config` against that adapter-declared schema and report the result as an advisory `ConfigValid` condition — admission still accepts arbitrary config, and a violation never blocks serving or ingestion.** **The source SHALL carry no wiring: `channelRef` and `profileRef` are removed (BREAKING) — a `Pipeline` claim is the only way a source reaches a profile and channels.**
 
@@ -55,11 +53,15 @@ A SignalSource SHALL carry a `Wired` condition: True (naming the pipeline) when 
 ### Requirement: Grouping policy stays manager-side for every source type
 Signature grouping, fingerprint cooldown, window-based conversation reuse, and recurrence-on-session SHALL be applied by the manager from `spec.grouping` for signals of every source type. Adapters SHALL NOT need to implement any grouping logic.
 
-When a source declares `signatureLabels`, they SHALL compose the signature for signals of every kind. When a source declares NONE, the fallback SHALL depend on what the lane is about: `alert` and `job` are recurring-subject lanes, where a later signal is more news about the same thing, and SHALL fall back to the default alert labels (`alertgroup`/`alertname`/`namespace`) so they group and resume an existing session; `task` and `chat` are one-shot lanes, where a later signal is a separate request, and SHALL key on the signal's own fingerprint so each opens its own conversation. The default labels are alert vocabulary, so applying them to a one-shot lane would hash every request to one empty signature and pile unrelated work into a single conversation.
+Cooldown state SHALL be durable rather than process memory: the manager SHALL record fingerprint suppression on the owning `SignalSource` and SHALL load it before applying cooldown to that source after a restart, so a restart does not re-open conversations for signals inside an active window. An in-memory map MAY remain the hot path, but SHALL NOT be the record. Recorded entries SHALL be pruned once past their window so the object stays bounded.
 
 #### Scenario: Cooldown suppresses adapter-fed duplicates
 - **WHEN** an adapter re-delivers a signal with a fingerprint seen within `cooldownHours`
 - **THEN** no new input is created (at-least-once delivery is safe)
+
+#### Scenario: Cooldown survives a manager restart
+- **WHEN** the manager restarts and an adapter re-delivers a signal whose fingerprint was suppressed before the restart and is still inside `cooldownHours`
+- **THEN** the signal is still suppressed and no duplicate conversation is opened
 
 #### Scenario: Adapter-fed signals group manager-side
 - **WHEN** two normalized signals with different fingerprints but identical signature labels arrive via an adapter within the source's window
@@ -84,3 +86,8 @@ When a source declares `signatureLabels`, they SHALL compose the signature for s
 #### Scenario: Explicit labels override the lane default
 - **WHEN** a source declares `signatureLabels` and receives `kind: task` signals sharing those label values
 - **THEN** they group under that signature — an operator who asks for grouping gets it in every lane
+
+#### Scenario: Suppression record stays bounded
+- **WHEN** recorded suppression entries age past their cooldown window
+- **THEN** they are pruned from the `SignalSource` rather than accumulating
+

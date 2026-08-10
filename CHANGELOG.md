@@ -8,8 +8,84 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
-**BREAKING — adapters render, `POST /task` is removed, and the console is on by
-default.** Chart **5.0.0**, manager **0.25.1**, channel-telegram **0.7.0**,
+### Restarting anything stops losing state — chart 5.1.0, manager 0.26.0
+
+Storage is on by default and the two silent losses a restart used to cause are
+closed. No adapter changes; the CRD gains three optional fields.
+
+**BREAKING for value-reset installs: `persistence.enabled` now defaults to
+`true`.** A fresh install requests a ReadWriteMany claim for `/data/home`, so
+agent session files survive a runtime pod restart instead of dying with it. A
+`helm upgrade` on an existing release is unaffected unless values are reset.
+
+On a cluster with no default StorageClass or no RWX provisioner, the claim sits
+`Pending`, runtime pods never schedule and conversations queue forever — with no
+error anywhere else, because the kubelet is what waits. The opt-out is one flag:
+
+```sh
+helm upgrade ... --set persistence.enabled=false
+```
+
+Sessions then live in `emptyDir` and die with each runtime pod; an agent
+resuming a lost session answers without prior context. `NOTES.txt` prints the
+diagnosis, and `chart/ci/default-values.yaml` sets it false for test installs.
+
+**New `persistence.workspace` block, off by default** — a second claim backing
+the repository checkout, mounted per-conversation via `subPath` so concurrent
+runtime pods never share a working tree. Turning it on preserves uncommitted
+agent work across a pod restart and skips the re-clone. Off by default because a
+fresh checkout is cheap and always correct, whereas a stale shared one is
+neither. Nothing reclaims a conversation's directory after deletion — size the
+claim accordingly. It renders `AgentRuntime.spec.workspace`, wired from the
+chart's own values the way `home.pvcRef` already is.
+
+**The agent's answer survives a manager restart.** Previously, a restart between
+`POST /work/done` and an adapter claiming the outbound op dropped the reply
+permanently: the result was durably in `status.runs[].result` and delivered to
+nobody. Replies now carry a stable op id
+(`send:<conversation>:<channel>:<runId>`), delivery is recorded per bound thread
+in `status.runs[].delivered[]`, and reconciliation re-enqueues anything still
+owed. A partially delivered fan-out completes the remaining threads without
+repeating the delivered one.
+
+**Upgrading re-posts nothing.** Runs recorded before this release carry no
+`deliveryTracked` marker; on first observation they are recorded as delivered
+*without* sending, so no bound thread receives an old answer again.
+
+**Ingest cooldown survives a restart.** Fingerprint suppression is recorded on
+`SignalSource.status.cooldown[]` (pruned past its window, bounded at 200
+entries) and read back on first use per source, so a restart mid-incident no
+longer re-opens conversations for alerts still being suppressed. Only an
+admitted fingerprint writes; suppressed re-deliveries — the high-volume case —
+write nothing.
+
+**Telemetry gaps are reported, not rendered as silence.** The activity ring
+stays bounded, in-memory and lossy. A cursor it cannot serve — evicted, or
+issued by a previous manager process — is now answered with a resync, and the
+console renders that as an explicit gap in its timeline instead of an empty
+window that reads as "nothing happened". Conversations, topology and
+configuration are unaffected; they are read from Kubernetes. The gap is carried
+on the console's stream health, so a browser opened *after* the incident sees it
+too.
+
+**Console fix: the `live` chip recovers on its own.** `EventSource` gives up
+permanently on an HTTP error (a 502 during a rollout, a 401 on session expiry)
+rather than retrying, and nothing reopened it — so the masthead stuck on
+`stream disconnected` and the graph stayed frozen until the page was reloaded.
+The client now reconnects with backoff, leaving genuine transport blips to the
+browser. Console **0.7.1**.
+
+New CRD fields (all optional, old objects stay valid):
+`AgentRuntime.spec.workspace`, `Conversation.status.runs[].delivered[]` +
+`.deliveryTracked`, `SignalSource.status.cooldown[]`.
+
+Rollback: revert the chart and the image. The new fields are ignored by an older
+manager, and both claims carry `helm.sh/resource-policy: keep`, so no data is
+destroyed by a downgrade.
+
+### BREAKING — adapters render, `POST /task` is removed, and the console is on by default
+
+Chart **5.0.0**, manager **0.25.1**, channel-telegram **0.7.0**,
 console **0.6.0**.
 
 **Upgrade all three together.** The manager and every channel adapter share the

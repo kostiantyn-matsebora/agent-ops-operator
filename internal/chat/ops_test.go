@@ -100,6 +100,57 @@ func TestCompleteIsIdempotentForSends(t *testing.T) {
 	}
 }
 
+// A run reply is DERIVED, so its id must round-trip: completion maps the op
+// back to the run it delivers with nothing but the id.
+func TestRunReplyOpIDRoundTrips(t *testing.T) {
+	id := RunReplyOpID("conv-1", "chan-a", "run-7")
+	conv, channel, run, ok := ParseRunReplyOpID(id)
+	if !ok || conv != "conv-1" || channel != "chan-a" || run != "run-7" {
+		t.Fatalf("round trip: %q -> %q/%q/%q ok=%v", id, conv, channel, run, ok)
+	}
+	// A run id containing ':' keeps its tail — object names cannot, so the
+	// REMAINDER is the run rather than the third field.
+	if _, _, run, _ := ParseRunReplyOpID(RunReplyOpID("c", "ch", "a:b")); run != "a:b" {
+		t.Fatalf("run id with a colon lost its tail: %q", run)
+	}
+	// Ephemeral sends share the prefix and must NOT be mistaken for replies —
+	// marking one delivered would attribute an ack to a run.
+	for _, other := range []string{"send:1a", "topic:conv-1:chan-a", "input:conv-1:in-1:chan-a", ""} {
+		if _, _, _, ok := ParseRunReplyOpID(other); ok {
+			t.Fatalf("%q must not parse as a run reply", other)
+		}
+	}
+}
+
+// Unlike an ack, a reply is re-derived on every reconcile: it must dedup while
+// pending and after completion, or a conversation reposts its answer forever.
+func TestRunReplyDedupsWhilePendingAndAfterCompletion(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+	tid := "t1"
+	msg := AnswerMessage("done", "succeeded")
+
+	q.EnqueueRunReply(ctx, ch, "conv-1", "run-1", &tid, msg)
+	q.EnqueueRunReply(ctx, ch, "conv-1", "run-1", &tid, msg) // reconcile-driven repeat
+	op := q.Claim("slack")
+	if op == nil || op.ID != "send:conv-1:c1:run-1" {
+		t.Fatalf("first claim: %+v", op)
+	}
+	if dup := q.Claim("slack"); dup != nil {
+		t.Fatalf("duplicate reply not deduped: %+v", dup)
+	}
+	q.EnqueueRunReply(ctx, ch, "conv-1", "run-1", &tid, msg) // re-enqueue while claimed
+	if dup := q.Claim("slack"); dup != nil {
+		t.Fatalf("re-enqueue while claimed must dedup: %+v", dup)
+	}
+	// An ack for the same conversation is EPHEMERAL and must still get through.
+	q.EnqueueMessage(ctx, ch, &tid, Notice("working on it"))
+	if ack := q.Claim("slack"); ack == nil || ack.Message.Body != "working on it" {
+		t.Fatalf("an ack must never be suppressed by reply dedup: %+v", ack)
+	}
+}
+
 func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
 	q := &OpQueue{Registry: NewRegistry()}
 	ctx := context.Background()

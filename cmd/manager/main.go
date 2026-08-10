@@ -176,6 +176,7 @@ func main() {
 			ControlURL:     env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080"),
 			IdleTTLMinutes: envInt("RUNTIME_IDLE_TTL_M", 1),
 			HomePVC:        os.Getenv("HOME_PVC"),
+			WorkspacePVC:   os.Getenv("WORKSPACE_PVC"),
 			NodeSelector:   map[string]string{"node-role/app": "true"},
 			Command:        commandFromEnv(),
 		},

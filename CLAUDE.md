@@ -391,6 +391,32 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   derivable from CR state" true while one is outstanding. `/close` is
   intercepted on the REPLY path before the text could become an input, and
   answers with usage on a general surface (no conversation there to end).
+- **FILESYSTEM STATE GOES ON A PVC; EVERYTHING ELSE GOES IN THE KUBERNETES API,
+  and THE MANAGER MOUNTS NOTHING.** A claim would pin it to one node, defeat
+  rescheduling, and be a second source of truth beside the CRs — which is the
+  failure mode this rule exists to name. Manager state is therefore always one
+  of three things: a cache of a Kubernetes object, DERIVABLE from Kubernetes
+  objects, or declared lossy telemetry. State fitting none of the three is a
+  defect; the matrix in `docs/concepts.md` is where its row goes.
+  Consequences that were each a real loss:
+  **the reply is a FACT, not a queue entry** — `status.runs[].delivered[]` per
+  bound thread plus `.deliveryTracked`, a stable op id
+  `send:<conversation>:<channel>:<runId>`, and a reconciler backstop, because
+  `/work/done` enqueueing into an in-memory queue meant a restart dropped an
+  answer already durable in `status.runs[].result`. Marking happens on op
+  COMPLETION — mark on enqueue and a lost op is never re-derived.
+  **A run with no `deliveryTracked` is BACKFILLED as delivered, never sent**: it
+  predates the mechanism, and no timestamp can tell it from a run lost to a
+  restart, since both completed before the current process started. Without it,
+  upgrading re-posts every recent answer to every bound thread.
+  **Cooldown lives on `SignalSource.status.cooldown[]`**, written only when a
+  fingerprint is ADMITTED — a suppressed re-delivery must stay free, or the
+  high-volume case cooldown exists for becomes a write storm.
+  **`close-topic` stays the ONE non-derivable op** (above).
+  Telemetry is the declared-lossy class and must REPORT its gaps: a cursor from
+  a previous process is `>= next` in the new one's sequence, so answering it
+  with an empty list reads as "nothing happened" — the case eviction alone does
+  not catch.
 - **CONVERSATIONS ORIGINATE ONLY FROM CLAIMED SIGNAL SOURCES.** A channel
   CARRIES conversations; it never starts one. `/channel/inbound` is
   reply-only — `threadId` REQUIRED, unknown threads dropped, no adoption. A

@@ -114,6 +114,15 @@ export interface StreamHealth {
   events: number
   resyncs: number
   error?: string
+  /**
+   * When history was last lost, and why. Present means the activity window is
+   * NOT a continuous record.
+   *
+   * It arrives on the health rather than on the stream deliberately: a gap
+   * outlives the connection that reported it, and the browser that matters is
+   * usually the one opened AFTER something went wrong.
+   */
+  lastGap?: { ts: string; detail?: string }
 }
 
 // ---- overview ----------------------------------------------------------------

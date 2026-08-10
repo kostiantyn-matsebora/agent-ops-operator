@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.25.1
+  tag: 0.26.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -90,6 +90,8 @@ runtime:
   # automatically (its claim, or existingClaim). Set this only to point at a
   # claim this chart did not create.
   homePvcRef: ""
+  # Same, for the repository checkout, from `persistence.workspace`.
+  workspacePvcRef: ""
   # ONE secret with a Claude credential (claude setup-token output or an
   # Anthropic API key). Projected as env via valueFrom — the manager reads no
   # Secrets.
@@ -291,7 +293,7 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.6.0
+    tag: 0.7.1
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -352,12 +354,22 @@ console:
 telegram-bundle:
   enabled: false
 
-# Agent session persistence (the "home" volume runtime pods mount at /data/home).
-# Without it, sessions live in emptyDir and die with each runtime pod — replies
-# after an idle period lose conversational context. With multiple concurrent
-# runtime pods the volume must be ReadWriteMany (or all pods must land on one node).
+# Runtime storage. ON by default: agent session files (/data/home) go on a
+# claim, so conversational history survives a runtime pod restart.
+#
+# Turning it OFF is a supported choice, not a downgrade to avoid — a cluster
+# with no default StorageClass, or no ReadWriteMany provisioner, needs it:
+#
+#   --set persistence.enabled=false
+#
+# What that costs: sessions live in emptyDir and die with each runtime pod, so a
+# reply after an idle period resumes a session whose files are gone and answers
+# without prior context. The symptom is an agent apologising for lost history.
+#
+# ReadWriteMany matters once more than one runtime pod runs concurrently (the
+# default cap is 5). With ReadWriteOnce every runtime pod must land on one node.
 persistence:
-  enabled: false
+  enabled: true
   # Create a PVC with this name (AgentRuntime CRs reference it via home.pvcRef;
   # it is also exported as the manager's HOME_PVC bootstrap default).
   name: agentops-home
@@ -370,6 +382,39 @@ persistence:
   volumeName: ""
   # Use an existing PVC instead of creating one (overrides everything above).
   existingClaim: ""
+
+  # The repository checkout (/data/workspace), OFF by default — and the
+  # asymmetry with the home volume above is deliberate. Losing session files
+  # silently costs conversational history; losing a checkout costs a re-clone,
+  # which is cheap and always correct, whereas a stale shared checkout is
+  # neither.
+  #
+  # Turn it on to keep uncommitted agent work across a runtime pod restart
+  # mid-conversation and to skip the re-clone. Each conversation gets its own
+  # subdirectory in the claim, so concurrent runtime pods never share a working
+  # tree — but that makes ReadWriteMany a real requirement here rather than a
+  # recommendation, since the pods mount the same claim at the same time.
+  #
+  # Nothing reclaims a conversation's directory after it is deleted. Size the
+  # claim for the conversations you keep, or prune it out of band.
+  #
+  # The claim OUTLIVES this setting. Both volumes carry
+  # `helm.sh/resource-policy: keep`, so disabling this — or uninstalling the
+  # release — leaves the PVC behind rather than destroying uncommitted agent
+  # work. Helm then stops tracking it and reports it nowhere, so an orphaned
+  # volume is yours to remove deliberately:
+  #   kubectl -n <ns> delete pvc <name>
+  # That is the trade: a flag toggle can strand storage, but it can never
+  # silently delete work an agent has not committed.
+  workspace:
+    enabled: false
+    name: agentops-workspace
+    size: 10Gi
+    storageClassName: ""
+    accessModes:
+      - ReadWriteMany
+    volumeName: ""
+    existingClaim: ""
 
 # Extra env for the manager (e.g. RUNTIME_IMAGE bootstrap fallback).
 extraEnv: []

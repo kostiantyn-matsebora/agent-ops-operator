@@ -27,7 +27,11 @@ type Config struct {
 	ControlURL     string
 	IdleTTLMinutes int
 	// HomePVC (RWX) for durable agent session state; emptyDir when empty.
-	HomePVC      string
+	HomePVC string
+	// WorkspacePVC (RWX) backs the repository checkout, one subdirectory per
+	// conversation; emptyDir when empty. Separate from HomePVC because the two
+	// are enabled independently — sessions by default, checkouts on request.
+	WorkspacePVC string
 	NodeSelector map[string]string
 	// Command/Args override the image entrypoint (e.g. a stub worker script).
 	Command []string
@@ -61,6 +65,10 @@ func FromRuntime(rt *agentopsv1alpha1.AgentRuntimeSpec, fallback Config) Config 
 	if rt.Home != nil && rt.Home.PVCRef != nil {
 		cfg.HomePVC = rt.Home.PVCRef.Name
 	}
+	cfg.WorkspacePVC = ""
+	if rt.Workspace != nil && rt.Workspace.PVCRef != nil {
+		cfg.WorkspacePVC = rt.Workspace.PVCRef.Name
+	}
 	cfg.DefaultResources = rt.Resources
 	return cfg
 }
@@ -89,12 +97,25 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 		}},
 	}
 
-	volumes := []corev1.Volume{
-		{Name: "workspace", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-	}
+	// workspace: the repository checkout, on a claim or ephemeral.
+	//
 	// /data/workspace: Claude sessions are keyed by cwd — this matches the
-	// pre-operator claude-runner path so existing sessions resume seamlessly.
-	mounts := []corev1.VolumeMount{{Name: "workspace", MountPath: "/data/workspace"}}
+	// pre-operator claude-runner path so existing sessions resume seamlessly, and
+	// it is why the claim is mounted with a subPath rather than at a per-
+	// conversation path. The subPath is the conversation name, so concurrent
+	// runtime pods sharing one claim cannot observe each other's tree.
+	var volumes []corev1.Volume
+	workspaceMount := corev1.VolumeMount{Name: "workspace", MountPath: "/data/workspace"}
+	if cfg.WorkspacePVC != "" {
+		volumes = append(volumes, corev1.Volume{Name: "workspace", VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.WorkspacePVC},
+		}})
+		workspaceMount.SubPath = conv.Name
+	} else {
+		volumes = append(volumes, corev1.Volume{Name: "workspace",
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
+	}
+	mounts := []corev1.VolumeMount{workspaceMount}
 
 	// home: durable session state (RWX PVC) or ephemeral
 	if cfg.HomePVC != "" {

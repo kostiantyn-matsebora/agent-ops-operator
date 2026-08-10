@@ -159,6 +159,37 @@ type RunStatus struct {
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
 	// +optional
 	InputIDs []string `json:"inputIds,omitempty"`
+	// DeliveryTracked marks a run recorded by a manager that tracks delivery. It
+	// is what tells an UNDELIVERED run from a PRE-UPGRADE one — both look like "a
+	// completed run with no delivery markers", and both completed before the
+	// current process started, so no timestamp can separate them.
+	//
+	// Absent (an older manager wrote the run): reconciliation records it
+	// delivered without sending, so upgrading never re-posts history.
+	// Set with no markers: the reply is genuinely owed and is re-enqueued.
+	// +optional
+	DeliveryTracked bool `json:"deliveryTracked,omitempty"`
+	// Delivered names the bound channels whose thread has already received this
+	// run's reply. It is what makes the reply DERIVABLE: reconciliation enqueues
+	// a send for every bound thread missing from this list, so a manager restart
+	// between `/work/done` and the adapter claiming the op re-derives the answer
+	// instead of losing it.
+	//
+	// Per-THREAD rather than a per-run boolean on purpose: a fan-out to three
+	// channels can be interrupted after one succeeds, and a boolean would either
+	// re-post to the delivered thread or abandon the other two.
+	// +optional
+	Delivered []string `json:"delivered,omitempty"`
+}
+
+// DeliveredTo reports whether this run's reply already reached a channel.
+func (r *RunStatus) DeliveredTo(channel string) bool {
+	for _, c := range r.Delivered {
+		if c == channel {
+			return true
+		}
+	}
+	return false
 }
 
 // InflightRun tracks the unit currently dispatched to the worker.

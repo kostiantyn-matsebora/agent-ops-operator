@@ -79,6 +79,43 @@ func TestEvictedCursorDemandsResync(t *testing.T) {
 	}
 }
 
+// The OTHER way history is lost, and the one eviction cannot catch: the ring
+// is in-memory, so a manager restart begins the sequence again at 1. A cursor
+// from the previous process is then "ahead" of everything this one has, and the
+// old code answered it with an empty list and no resync — which a viewer reads
+// as a period in which nothing happened.
+func TestCursorFromAPreviousProcessDemandsResync(t *testing.T) {
+	old := New(64)
+	emitN(old, 20)
+	seen, _ := old.Since("", 0)
+	carried := seen[len(seen)-1].Cursor
+
+	restarted := New(64) // same buffer size, sequence back to 1
+
+	got, resync := restarted.Since(carried, 0)
+	if !resync {
+		t.Fatal("a cursor this process never issued must resync, not report silence")
+	}
+	if len(got) != 0 {
+		t.Fatalf("nothing has been emitted yet, got %d event(s)", len(got))
+	}
+
+	// ...and it keeps saying so once the new process starts producing, until the
+	// client comes back with a cursor from THIS sequence.
+	emitN(restarted, 3)
+	got, resync = restarted.Since(carried, 0)
+	if !resync {
+		t.Fatal("still ahead of this process's sequence — still a gap")
+	}
+	if len(got) != 0 {
+		t.Fatalf("a resynced client re-reads snapshots; it is handed no partial tail, got %d", len(got))
+	}
+	fresh, _ := restarted.Since("", 0)
+	if _, resync := restarted.Since(fresh[len(fresh)-1].Cursor, 0); resync {
+		t.Fatal("a cursor from this process's own sequence must be served normally")
+	}
+}
+
 func TestEmitNeverBlocksOnAFullSubscriber(t *testing.T) {
 	l := New(64)
 	sub := l.Subscribe() // never drained

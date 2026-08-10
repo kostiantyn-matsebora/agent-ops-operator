@@ -21,6 +21,22 @@ Cooldown state SHALL be durable rather than process memory: the manager SHALL re
 - **WHEN** one inbound batch carries several fresh signals sharing a signature
 - **THEN** they land as ONE combined input on one conversation
 
+#### Scenario: Alerts keep the default labels when a source declares none
+- **WHEN** two `kind: alert` signals with different fingerprints but the same `alertname` and `namespace` arrive at a source with `grouping: {}`
+- **THEN** they land in the same conversation, exactly as before — the default labels still apply to the alert lane
+
+#### Scenario: Recurring jobs keep folding into one conversation
+- **WHEN** a job source with no `signatureLabels` fires successive ticks carrying distinct fingerprints
+- **THEN** the ticks land in the same conversation and later ones resume the agent session as recurrences
+
+#### Scenario: One-shot lanes key on the fingerprint
+- **WHEN** two `kind: task` signals with different fingerprints arrive at a source with no `signatureLabels`
+- **THEN** each opens its own conversation, rather than sharing the empty default signature
+
+#### Scenario: Explicit labels override the lane default
+- **WHEN** a source declares `signatureLabels` and receives `kind: task` signals sharing those label values
+- **THEN** they group under that signature — an operator who asks for grouping gets it in every lane
+
 #### Scenario: Suppression record stays bounded
 - **WHEN** recorded suppression entries age past their cooldown window
 - **THEN** they are pruned from the `SignalSource` rather than accumulating

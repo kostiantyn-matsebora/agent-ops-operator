@@ -512,3 +512,94 @@ func ruleLineContaining(src, reason string) string {
 	}
 	return ""
 }
+
+// runtimeDoc returns the rendered AgentRuntime document.
+func runtimeDoc(t *testing.T, out string) string {
+	t.Helper()
+	for _, doc := range splitDocs(out) {
+		// anchored: the CRD document names the kind too, and ships regardless
+		if strings.Contains(doc, "\nkind: AgentRuntime\n") && !strings.Contains(doc, "CustomResourceDefinition") {
+			return doc
+		}
+	}
+	t.Fatal("no AgentRuntime rendered")
+	return ""
+}
+
+// The storage defaults, and the asymmetry between them: sessions persist out of
+// the box because losing them silently costs conversational history, while a
+// checkout is re-cloned because a stale shared one is worse than no cache.
+func TestPersistenceDefaultsHomeOnWorkspaceOff(t *testing.T) {
+	out := helmTemplate(t)
+
+	if !strings.Contains(out, "\n  name: agentops-home\n") {
+		t.Error("the home claim must render by default (persistence.enabled: true)")
+	}
+	if strings.Contains(out, "agentops-workspace") {
+		t.Error("workspace persistence must be OFF by default — a stale shared checkout is worse than a re-clone")
+	}
+	rt := runtimeDoc(t, out)
+	if !strings.Contains(rt, "home:\n    pvcRef:\n      name: agentops-home") {
+		t.Errorf("home.pvcRef must be wired from the chart's own persistence block:\n%s", rt)
+	}
+	if strings.Contains(rt, "workspace:") {
+		t.Error("no workspace claim means the AgentRuntime declares no workspace volume")
+	}
+	if !strings.Contains(out, "name: HOME_PVC") {
+		t.Error("the manager's HOME_PVC bootstrap default must follow the claim")
+	}
+	if strings.Contains(out, "name: WORKSPACE_PVC") {
+		t.Error("WORKSPACE_PVC must not be set when no workspace claim exists")
+	}
+}
+
+// The opt-out is the whole mitigation for a cluster with no RWX provisioner —
+// it must remove the claim AND the reference, or runtime pods still wait on it.
+func TestPersistenceOptOutRemovesEverything(t *testing.T) {
+	out := helmTemplate(t, "--set", "persistence.enabled=false")
+
+	if strings.Contains(out, "agentops-home") {
+		t.Error("persistence.enabled=false must render no home claim and no reference to one")
+	}
+	if strings.Contains(out, "name: HOME_PVC") {
+		t.Error("persistence.enabled=false must not set HOME_PVC")
+	}
+	if rt := runtimeDoc(t, out); strings.Contains(rt, "home:") {
+		t.Errorf("the AgentRuntime must declare no home volume:\n%s", rt)
+	}
+}
+
+// Enabling workspace persistence takes ONE value: the claim name is never
+// restated by the operator, exactly as home.pvcRef already works.
+func TestWorkspacePersistenceIsWiredFromOneValue(t *testing.T) {
+	out := helmTemplate(t, "--set", "persistence.workspace.enabled=true")
+
+	if !strings.Contains(out, "\n  name: agentops-workspace\n") {
+		t.Error("the workspace claim must render when enabled")
+	}
+	// Uninstall must never destroy uncommitted agent work.
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "name: agentops-workspace") && strings.Contains(doc, "kind: PersistentVolumeClaim") {
+			if !strings.Contains(doc, "helm.sh/resource-policy: keep") {
+				t.Error("the workspace claim must carry the keep policy, like the home claim")
+			}
+		}
+	}
+	rt := runtimeDoc(t, out)
+	if !strings.Contains(rt, "workspace:\n    pvcRef:\n      name: agentops-workspace") {
+		t.Errorf("workspace.pvcRef must be wired from the chart's own values:\n%s", rt)
+	}
+	if !strings.Contains(out, "name: WORKSPACE_PVC") {
+		t.Error("the manager's WORKSPACE_PVC bootstrap default must follow the claim")
+	}
+
+	// An existing claim is honored and provisions nothing.
+	out = helmTemplate(t, "--set", "persistence.workspace.enabled=true",
+		"--set", "persistence.workspace.existingClaim=byo-checkouts")
+	if strings.Contains(out, "kind: PersistentVolumeClaim\nmetadata:\n  name: agentops-workspace") {
+		t.Error("an existingClaim must provision nothing")
+	}
+	if !strings.Contains(runtimeDoc(t, out), "name: byo-checkouts") {
+		t.Error("the AgentRuntime must reference the existing claim")
+	}
+}

@@ -65,6 +65,11 @@ const EVENTS = [
 ]
 
 async function mockApi(page: Page) {
+  // The catch-all goes FIRST: Playwright checks handlers in reverse
+  // registration order, so a fallback registered last swallows every specific
+  // route above it — the app then renders the login page and none of the
+  // assertions below can pass.
+  await page.route('**/api/**', (r) => r.fulfill({ json: {} }))
   await page.route('**/api/session', (r) => r.fulfill({ json: SESSION }))
   await page.route('**/api/topology*', (r) => r.fulfill({ json: TOPOLOGY }))
   await page.route('**/api/sources', (r) =>
@@ -77,7 +82,6 @@ async function mockApi(page: Page) {
         'event: resync\ndata: {"reason":"connected"}\n\n' +
         EVENTS.map((e) => `event: activity\ndata: ${JSON.stringify(e)}\n\n`).join(''),
     }))
-  await page.route('**/api/**', (r) => r.fulfill({ json: {} }))
 }
 
 test('the graph animates exactly the edges the events name, and hiding a class keeps health honest', async ({
@@ -105,17 +109,23 @@ test('the graph animates exactly the edges the events name, and hiding a class k
   await expect(fed.locator('animate')).toHaveCount(1)
 
   const nodeCountBefore = await page.locator('[data-testid^="node-"]').count()
-  await expect(page.getByText('1 failing')).toBeVisible()
 
-  // hide the failing class: it leaves the picture, the counts do NOT move, and
-  // the panel says so
-  await page.getByLabel('Toolsets').click()
+  // The capability layer (toolsets, MCP configs, runtime pods) starts FOLDED
+  // AWAY, so the failing toolset is hidden before anything is clicked. That is
+  // exactly the case worth pinning: a filter that could conceal a broken
+  // component without saying so is the one way this view could mislead, so the
+  // counts are computed BEFORE filtering and the panel names the concealment.
   await expect(page.getByTestId('node-mcptoolsets/admin')).toHaveCount(0)
-  await expect(page.locator('[data-testid^="node-"]')).toHaveCount(nodeCountBefore - 1)
   await expect(page.getByText('1 failing')).toBeVisible()
   await expect(page.getByText(/hidden element\(s\) are failing/)).toBeVisible()
 
+  // bringing the class back adds the node and moves no count
+  await page.getByLabel('Toolsets').click()
+  await expect(page.getByTestId('node-mcptoolsets/admin')).toHaveCount(1)
+  await expect(page.locator('[data-testid^="node-"]')).toHaveCount(nodeCountBefore + 1)
+  await expect(page.getByText('1 failing')).toBeVisible()
+
   // the selection persists across a reload
   await page.reload()
-  await expect(page.getByTestId('node-mcptoolsets/admin')).toHaveCount(0)
+  await expect(page.getByTestId('node-mcptoolsets/admin')).toHaveCount(1)
 })

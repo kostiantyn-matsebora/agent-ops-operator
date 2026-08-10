@@ -154,6 +154,27 @@ its topics exists (one broken channel never deadlocks it), and channel
 implementations must never re-ingest their own outbound posts as inbound
 (relayed messages would loop otherwise).
 
+**...and delivery is a recorded fact, not a queue entry.** `/work/done` writes
+the run into `Conversation.status.runs[]` and enqueues the reply, exactly as
+before — but it is no longer the only path that can produce it. The reply op id
+is **stable per conversation×channel×run**:
+
+```
+send:<conversation>:<channel>:<runId>
+```
+
+Completing it appends the channel to `status.runs[].delivered[]`, and
+reconciliation enqueues a reply for any completed run whose bound thread is
+missing from that list. So a manager restart between `/work/done` and an adapter
+claiming the op re-derives the answer rather than losing it, and a fan-out
+interrupted after one of three threads completes the other two without repeating
+the first. Adapters need change nothing: the id is a better dedup key than the
+counter it replaces, and delivery stays at-least-once.
+
+Ack and notice sends keep counter-based ids (`send:<counter>`) and stay
+fire-and-forget — saying the same thing twice is correct when a user asked
+twice, and neither derives from CR state.
+
 
 ## The signal adapter contract
 

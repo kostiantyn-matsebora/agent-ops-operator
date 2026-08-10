@@ -170,22 +170,7 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 		Pipeline: pipeline.Name,
 		Detail:   fmt.Sprintf("%d signal(s)", len(signals)),
 	})
-	cd := s.cooldowns[source.Name]
-	if cd == nil {
-		hours := source.Spec.Grouping.CooldownHours
-		if hours <= 0 {
-			hours = 6
-			if isChat(signals) {
-				// Chat defaults cooldown OFF. Fingerprint dedup exists so a
-				// flapping alert opens one investigation; a person asking the
-				// same thing twice means it twice, and swallowing the second
-				// ask would be a bug wearing dedup's clothes.
-				hours = 0
-			}
-		}
-		cd = ingest.NewCooldown(time.Duration(hours) * time.Hour)
-		s.cooldowns[source.Name] = cd
-	}
+	cd := s.cooldown(source, signals)
 	var fps []string
 	byFP := map[string]NormalizedSignal{}
 	for _, sig := range signals {
@@ -194,8 +179,11 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 	}
 	fresh := cd.Fresh(fps)
 	if len(fresh) == 0 {
+		// The high-volume case — a flapping alert re-delivered inside its
+		// window — writes NOTHING. Only admitting a fingerprint moves the record.
 		return 0, 0, "", nil
 	}
+	s.recordCooldown(ctx, source, cd)
 
 	groups := map[string][]NormalizedSignal{}
 	for _, fp := range fresh {
@@ -249,6 +237,61 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 
 	s.bumpReceived(ctx, source, landed)
 	return landed, touched, reason, nil
+}
+
+// cooldown returns this source's suppression window, RECOVERED from the source
+// on first use in this process. The in-memory map is the hot path; the CR is
+// the record, so a restart mid-incident does not re-open conversations for
+// signals still inside their window.
+func (s *Server) cooldown(source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal) *ingest.Cooldown {
+	if cd := s.cooldowns[source.Name]; cd != nil {
+		return cd
+	}
+	hours := source.Spec.Grouping.CooldownHours
+	if hours <= 0 {
+		hours = 6
+		if isChat(signals) {
+			// Chat defaults cooldown OFF. Fingerprint dedup exists so a flapping
+			// alert opens one investigation; a person asking the same thing twice
+			// means it twice, and swallowing the second ask would be a bug wearing
+			// dedup's clothes.
+			hours = 0
+		}
+	}
+	recorded := make([]ingest.Entry, 0, len(source.Status.Cooldown))
+	for _, e := range source.Status.Cooldown {
+		recorded = append(recorded, ingest.Entry{Fingerprint: e.Fingerprint, At: e.At.Time})
+	}
+	cd := ingest.NewCooldownFrom(time.Duration(hours)*time.Hour, recorded)
+	s.cooldowns[source.Name] = cd
+	return cd
+}
+
+// recordCooldown writes the suppression window back to the source. Called only
+// when a fingerprint was newly admitted — which already costs a conversation
+// create or patch, so this adds no write to any path that was previously free.
+// Entries past the window are pruned and the list is bounded by the write.
+func (s *Server) recordCooldown(ctx context.Context, source *agentopsv1alpha1.SignalSource, cd *ingest.Cooldown) {
+	entries := cd.Entries()
+	if entries == nil {
+		return // window disabled — nothing to recover
+	}
+	out := make([]agentopsv1alpha1.CooldownEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, agentopsv1alpha1.CooldownEntry{
+			Fingerprint: e.Fingerprint, At: metav1.NewTime(e.At),
+		})
+	}
+	patch := client.MergeFrom(source.DeepCopy())
+	source.Status.Cooldown = out
+	if err := s.Client.Status().Patch(ctx, source, patch); err != nil {
+		// Suppression still holds in memory; only the recovery copy is stale.
+		// Failing the batch over it would trade a duplicate investigation for a
+		// dropped signal, which is the worse of the two.
+		log.FromContext(ctx).Info("recording cooldown on the signal source failed; "+
+			"suppression holds in memory but will not survive a restart",
+			"source", source.Name, "error", err.Error())
+	}
 }
 
 // ReasonAtCapacity is the drop reason for a batch refused because the pending

@@ -21,6 +21,15 @@ bindings in runtime-rbac.yaml.
 {{- $pvc = $p.name }}
 {{- end }}
 {{- end }}
+{{- $ws := $p.workspace }}
+{{- $wsPvc := $rt.workspacePvcRef }}
+{{- if not $wsPvc }}
+{{- if $ws.existingClaim }}
+{{- $wsPvc = $ws.existingClaim }}
+{{- else if $ws.enabled }}
+{{- $wsPvc = $ws.name }}
+{{- end }}
+{{- end }}
 {{- if $rt.credentialsSecret.token }}
 # Created because runtime.credentialsSecret.token was supplied, so the agent's
 # credential is provisioned with the release instead of being a prerequisite
@@ -65,6 +74,13 @@ spec:
   # wired from the chart's own `persistence` block unless runtime.homePvcRef
   # names a claim the chart did not create
   home:
+    pvcRef:
+      name: {{ . }}
+  {{- end }}
+  {{- with $wsPvc }}
+  # same wiring, from `persistence.workspace` — a claim name is never restated
+  # by the operator. Absent = ephemeral checkout, which is the default.
+  workspace:
     pvcRef:
       name: {{ . }}
   {{- end }}

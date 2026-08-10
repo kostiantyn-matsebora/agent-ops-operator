@@ -106,6 +106,9 @@ type ActivityWindow struct {
 	// resyncs counts explicit gap notifications. Surfaced rather than hidden:
 	// a console that silently dropped hops would be rendering a partial truth.
 	resyncs int
+	// lastGap is the most recent one, kept so a browser opening LATER still
+	// learns that the window it is reading is not continuous.
+	lastGap *ActivityGap
 
 	subMu  sync.Mutex
 	subs   map[int]chan ActivityEvent
@@ -171,7 +174,11 @@ func (w *ActivityWindow) stream(ctx context.Context) error {
 		case strings.HasPrefix(line, "data:"):
 			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if event == "resync" {
-				w.noteResync()
+				var r struct {
+					Reason string `json:"reason"`
+				}
+				_ = json.Unmarshal([]byte(payload), &r)
+				w.noteResync(r.Reason)
 				continue
 			}
 			var e ActivityEvent
@@ -198,10 +205,40 @@ func (w *ActivityWindow) setConnected(up bool, err error) {
 	}
 }
 
-func (w *ActivityWindow) noteResync() {
+// KindActivityGap marks lost history IN the timeline. It is a console-local
+// kind, not a manager hop: it has no from/to, so nothing renders it as motion
+// along an edge.
+//
+// The counter alone was not enough. A gap has a POSITION — the events either
+// side of it are not consecutive — and a timeline that shows them adjacent is
+// telling the reader something false, however honest the number in the health
+// panel is.
+const KindActivityGap = "activity.gap"
+
+// GapReasonDefault is what a resync frame means when it carries no reason.
+const GapReasonDefault = "history before this point is unavailable"
+
+func (w *ActivityWindow) noteResync(reason string) {
+	if reason == "" {
+		reason = GapReasonDefault
+	}
 	w.mu.Lock()
 	w.resyncs++
+	now := time.Now().UTC()
+	w.lastGap = &ActivityGap{TS: now, Detail: reason}
+	// Drop the cursor. It belonged to a history that is gone — and after a
+	// MANAGER RESTART it is worse than stale: the manager's sequence restarts at
+	// 1, so a retained cursor is permanently "ahead", every reconnect resyncs
+	// again, and the same backlog is appended each time. Clearing it lets the
+	// next event set the cursor in the new process's own sequence space.
+	w.cursor = ""
+	gap := ActivityEvent{TS: now, Kind: KindActivityGap, Status: "warn", Detail: reason}
+	w.events = append(w.events, gap)
+	if len(w.events) > w.max {
+		w.events = w.events[len(w.events)-w.max:]
+	}
 	w.mu.Unlock()
+	w.publish(gap)
 }
 
 func (w *ActivityWindow) add(e ActivityEvent) {
@@ -233,14 +270,32 @@ type StreamHealth struct {
 	Events    int    `json:"events"`
 	Resyncs   int    `json:"resyncs"`
 	Error     string `json:"error,omitempty"`
+	// LastGap is when history was most recently lost, and why.
+	//
+	// It rides on the HEALTH rather than on the stream because a gap outlives
+	// the connection that reported it: the browser that matters is usually the
+	// one opened AFTER something went wrong, and a live-only signal is invisible
+	// to exactly that reader.
+	LastGap *ActivityGap `json:"lastGap,omitempty"`
+}
+
+// ActivityGap describes lost history for a viewer.
+type ActivityGap struct {
+	TS     time.Time `json:"ts"`
+	Detail string    `json:"detail,omitempty"`
 }
 
 // StreamHealth reports the state of the upstream connection.
 func (w *ActivityWindow) StreamHealth() StreamHealth {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	return StreamHealth{Connected: w.connected, Cursor: w.cursor, Events: len(w.events),
+	h := StreamHealth{Connected: w.connected, Cursor: w.cursor, Events: len(w.events),
 		Resyncs: w.resyncs, Error: w.lastErr}
+	if w.lastGap != nil {
+		gap := *w.lastGap
+		h.LastGap = &gap
+	}
+	return h
 }
 
 // Since returns events newer than a cursor, oldest first.

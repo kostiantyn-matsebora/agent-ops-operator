@@ -68,6 +68,18 @@ export function TopologyPage() {
             </Alert>
           </StackItem>
         )}
+        {data.stream.lastGap && (
+          <StackItem>
+            {/* A quiet edge and an edge whose traffic was never recorded look
+                identical. Only one of them means the system was idle. */}
+            <Alert variant="info" isInline title="This window has a gap in recorded activity">
+              Nothing was recorded before {new Date(data.stream.lastGap.ts).toLocaleTimeString()} — the
+              manager's activity buffer is in memory, so a restart or an overflow ends its history.
+              Edge rates covering that stretch under-report; the wiring itself is read from
+              Kubernetes and is complete.
+            </Alert>
+          </StackItem>
+        )}
 
         <StackItem>
           <Graph topology={data.topology} liveEvents={liveEvents} />

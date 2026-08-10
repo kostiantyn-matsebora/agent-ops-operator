@@ -1,3 +1,8 @@
+{{- /*
+Runtime storage: the home claim (session files, on by default) and the
+workspace claim (repository checkouts, off by default). Both carry
+`helm.sh/resource-policy: keep`, so an uninstall never destroys agent state.
+*/ -}}
 {{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -18,5 +23,29 @@ spec:
   {{- end }}
   {{- if .Values.persistence.volumeName }}
   volumeName: {{ .Values.persistence.volumeName }}
+  {{- end }}
+{{- end }}
+{{- $ws := .Values.persistence.workspace }}
+{{- if and $ws.enabled (not $ws.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $ws.name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # never delete uncommitted agent work on uninstall
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+{{ toYaml $ws.accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ $ws.size }}
+  {{- if $ws.storageClassName }}
+  storageClassName: {{ $ws.storageClassName }}
+  {{- end }}
+  {{- if $ws.volumeName }}
+  volumeName: {{ $ws.volumeName }}
   {{- end }}
 {{- end }}

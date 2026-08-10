@@ -23,6 +23,21 @@ which profiles have no Pipeline granting them anything:
     kubectl -n {{ .Release.Namespace }} get pipeline -o jsonpath="{range .items[?(@.spec.profileRef.name=='$n')]}{.metadata.name} {end}" | grep -q . \
       || echo "no Pipeline grants capabilities to profile/$n"
   done
+{{- if .Values.persistence.enabled }}
+
+Agent sessions persist by default (chart 5.1.0): claim {{ .Values.persistence.existingClaim | default .Values.persistence.name }} backs
+/data/home, so conversational history survives a runtime pod restart.
+
+If runtime pods never start, check the claim FIRST — a Pending PVC produces no
+error anywhere else, just conversations that queue forever:
+  kubectl -n {{ .Release.Namespace }} get pvc {{ .Values.persistence.existingClaim | default .Values.persistence.name }}
+Pending with "no persistent volumes available" or "storageclass not found"
+means this cluster has no default StorageClass or no {{ join "/" .Values.persistence.accessModes }} provisioner.
+Either name one (persistence.storageClassName) or turn storage off:
+  helm upgrade ... --set persistence.enabled=false
+Sessions then die with each runtime pod, and an agent resuming a lost session
+answers without prior context.
+{{- end }}
 {{- if and .Values.runtime.enabled (not .Values.runtime.credentialsSecret.token) }}
 {{- $cs := .Values.runtime.credentialsSecret }}
 

@@ -15,6 +15,25 @@ type HomeVolume struct {
 	EmptyDir bool `json:"emptyDir,omitempty"`
 }
 
+// WorkspaceVolume selects storage for the repository checkout at
+// /data/workspace. Shaped identically to HomeVolume, and deliberately a
+// SEPARATE claim: the two hold different kinds of state and are enabled
+// independently (sessions by default, checkouts on request).
+//
+// Each conversation gets its own subdirectory within the claim, so concurrent
+// runtime pods never share a working tree. The mount path does not move —
+// claude-code keys sessions by cwd.
+type WorkspaceVolume struct {
+	// PVCRef mounts an existing (RWX when conversations run concurrently) PVC,
+	// one subdirectory per conversation, at /data/workspace.
+	// +optional
+	PVCRef *ObjectRef `json:"pvcRef,omitempty"`
+	// EmptyDir (default when no pvcRef): the checkout dies with the pod, which
+	// costs a re-clone and nothing else.
+	// +optional
+	EmptyDir bool `json:"emptyDir,omitempty"`
+}
+
 // AgentRuntimeSpec defines HOW agents execute: the worker image implementing
 // the operator's work contract, and its pod-level defaults. Adopters bring
 // their own agent backend (claude-code, aider, custom) by supplying an image
@@ -52,6 +71,11 @@ type AgentRuntimeSpec struct {
 	// Home volume for durable agent session state.
 	// +optional
 	Home *HomeVolume `json:"home,omitempty"`
+	// Workspace volume for the repository checkout. Absent = ephemeral, which
+	// is always correct — persisting it preserves uncommitted work across a pod
+	// restart and skips the re-clone.
+	// +optional
+	Workspace *WorkspaceVolume `json:"workspace,omitempty"`
 	// Resources default for runtime pods (AgentProfile.resources overrides).
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
