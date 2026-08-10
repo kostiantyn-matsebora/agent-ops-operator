@@ -16,7 +16,9 @@
 
 ### Modified Capabilities
 
-- `k8s-bundle`: the bundle's cluster access requires its MCP component rather than kubectl-via-`Bash`; the RBAC-mode documentation changes accordingly, since the runtime SA's grants are no longer directly exercisable from a shell.
+- `k8s-mcp-tooling`: its "kubectl remains the fallback path" requirement is exactly what this change overturns — it was that capability's deliberate scope limit, holding until the evidence gate here confirmed the MCP path stands alone. Removed and replaced by "MCP is the only cluster path", plus the consequence of disabling the component.
+
+(The `k8s-bundle` spec was the original target, but the RBAC requirement this change was drafted against no longer exists there — it moved to the parent chart when the substrate did, and the kubectl promise lives in `k8s-mcp-tooling`.)
 
 ## Impact
 

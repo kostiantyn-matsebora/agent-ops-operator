@@ -32,6 +32,42 @@ rather than with a per-conversation path. Both claims want `ReadWriteMany` once
 more than one runtime pod runs at a time; nothing reclaims a conversation's
 workspace directory after it is deleted.
 
+#### Runtime images are generic
+
+A runtime differentiates by **vendor backend and trust level, and nothing else**.
+The reference image carries git and openssh-client — for the repository checkout,
+which is a runtime responsibility — plus generic shell utilities. It carries **no
+domain tooling**: image `0.5.0` dropped the `kubectl` binary earlier versions
+shipped.
+
+That is the same rule capabilities already follow. What an agent may reach is
+wiring — `MCPConfig` servers and `MCPToolset` allowlists bound by a Pipeline — so
+a Kubernetes CLI in the vendor layer would be the same category error as bundling
+an MCP server in it. It also removes a version pin that could skew against
+whatever cluster the image happened to run near.
+
+Practically: an agent reaches Kubernetes through the MCP tools its Pipeline binds
+(the [k8s bundle](k8s-bundle.md) ships them), and `Bash` no longer implies cluster
+access. Binding `agentops-shell` is still useful for the workspace; it just stops
+being a second door to the API.
+
+**If you need a CLI in the runtime**, that is a supported path — `spec.image`
+exists so the runtime is swappable. Derive one:
+
+```dockerfile
+FROM kmatsebora/agentops-runtime-claude:0.5.0
+USER root
+RUN curl -fsSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/<ver>/bin/linux/amd64/kubectl \
+ && chmod 0755 /usr/local/bin/kubectl
+USER node
+```
+
+and point an `AgentRuntime` at it. The version pin becomes yours to own against
+your cluster, which is the right place for it. Note what you are choosing: that
+CLI authenticates as the runtime ServiceAccount, so its reach is that SA's RBAC
+handed over whole — one wall, where the MCP path has the server's own identity
+*and* the toolset allowlist.
+
 ### Conversation
 
 One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. Phases: `Pending` (waiting for a capacity slot — nothing provisioned, see [below](#capacity-how-many-run-at-once)), `Queued` (admitted, work waiting its turn), `Working`, `Idle`. Ends with `/close` in its thread, or `kubectl delete` — both archive the chat threads first.
@@ -148,7 +184,7 @@ one of them granted everything.
 runtime:
   enabled: true                 # false = you manage AgentRuntime CRs yourself
   name: default                 # the name a profile with no runtimeRef resolves
-  image: kmatsebora/agentops-runtime-claude:0.3.0
+  image: kmatsebora/agentops-runtime-claude:0.5.0
   idleTtlMinutes: ""            # empty = follow runtimeIdleTtlMinutes
   nodeSelector: {}
   resources: {}

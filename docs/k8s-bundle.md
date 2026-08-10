@@ -220,7 +220,7 @@ pipelines:
 Tooling lives on wiring, so a conversation reaching the same profile through a
 Pipeline that binds neither gets no MCP. That is the design, not a gap.
 
-**Reads and mutations are separate toolsets.** `k8s-observability` grants the 16
+**Reads and mutations are separate toolsets.** `k8s-observability` grants the 14
 read tools, `k8s-admin` the 6 mutating ones (`resources_create_or_update`,
 `resources_delete`, `resources_scale`, `pods_delete`, `pods_exec`, `pods_run`).
 They are enumerated rather than `mcp__kubernetes__*` on purpose: a wildcard spans
@@ -229,10 +229,12 @@ explain the cluster without touching it. `k8s-admin` only renders when a server
 that actually registers those tools exists — which, by default, means
 `global.agentops.runtime.rbacMode: full` (see below).
 
-**MCP does not replace kubectl.** The served tools have no patch semantics, no
-rollout, drain, wait or port-forward, and no text processing — so a route that
-grants MCP writes usually still wants `agentops-shell` for what they cannot
-express.
+**MCP is the only cluster path.** Runtime image 0.5.0 dropped kubectl, so what
+the served tools cannot express, the agent cannot do: there is no patch
+semantics, no rollout, drain, wait or port-forward, and no text processing over
+results. `agentops-shell` is still worth binding for the workspace, but it no
+longer reaches Kubernetes. Operators who need a CLI keep one with a derived
+runtime image — see the README.
 
 **Two identities, and why the server component exists.** The `mcpServers`
 workload runs as `agentops-mcp-k8s`, *never* the runtime SA (the chart fails the
@@ -240,8 +242,11 @@ render if you set them equal):
 
 | Path | Who authenticates | Walls between the agent and the API |
 |---|---|---|
-| `Bash` + `kubectl` | the runtime SA (`agentops-runtime`) | one: that SA's RBAC, which `Bash` hands over whole |
 | `mcp__kubernetes__*` | the MCP server's own SA (`agentops-mcp-k8s`) | three: the server's `--read-only` tool registration, the toolset allowlist, and that SA's RBAC |
+| a derived image with a CLI | the runtime SA (`agentops-runtime`) | one: that SA's RBAC, which a shell hands over whole |
+
+The second row is not shipped — it is what you opt into by building your own
+runtime image, and it is listed so the cost of that choice is visible.
 
 Revoking `agentops-mcp-k8s`'s grants removes the agent's MCP reach without
 touching the runtime SA, and vice versa. Both default to the same shape (`view`
@@ -257,25 +262,28 @@ and `mcpServers.rbac.mode` are `null` by default and follow
 | `readonly`, `none`, `""` | on | `readonly` | absent |
 
 They derive because they are bound by an invariant operators used to maintain by
-hand in every install's values: a read-only MCP server under a `full` agent
-pushes every write back onto kubectl, which is the single-wall path this
-component exists to replace.
+hand in every install's values: an operator who grants the agent `full` and
+leaves the server read-only has asked for a write-capable agent and given it no
+way to write.
 
 **What derivation costs, plainly.** Widening the agent to `full` widens the
 server too, unless you say otherwise — the two identities are no longer
 independently reviewable *by default*. That is accepted because the safe
 direction (both read-only) is what every default path produces, and because the
 separation stays reachable: `mcpServers.readOnly: true` under `rbacMode: full`
-gives "kubectl writes, MCP reads only", and no mutating toolset renders. The
+makes this a strictly observing agent — broad grants on the runtime SA that
+nothing can exercise — and no mutating toolset renders. The
 toolset wall is untouched either way — mutations need a Pipeline to bind
 `k8s-admin` deliberately no matter what the server serves. `none` maps to a
 **readonly** server rather than to nothing, on purpose: an agent that can read
 the cluster through MCP and do nothing at all through its own identity is a
 useful shape, not an accident.
 
-**kubectl remains the fallback.** This changes nothing about the runtime image
-or the profile — with `mcp.enabled=false` the agent reaches the cluster exactly
-as it did before, and with it on it simply has both paths.
+**Turning the component off leaves a blind agent.** With `mcp.enabled=false`
+there is no other path: the runtime image ships no CLI, so the k8s-engineer
+profile installs, starts, and cannot see the cluster it was installed to
+inspect. The post-install notes say so rather than letting it be discovered by
+asking a question and getting an apology.
 
 The shipped server is `ghcr.io/containers/kubernetes-mcp-server` (pinned in
 values), run with toolsets `core,config` and `--read-only` unless the derivation

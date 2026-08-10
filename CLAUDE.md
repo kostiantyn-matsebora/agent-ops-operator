@@ -213,7 +213,14 @@ internal/
   runtimepod/            runtime pod builder (AgentRuntime CR over bootstrap Config)
   addressing/            /<profile>[:<agent>] parsing
   integration/           envtest suite (real API server, fake chat, no kubelet)
-runtime-claude/          reference AgentRuntime (Node + claude-code) — /work contract
+runtime-claude/          reference AgentRuntime (Node + claude-code) — /work contract.
+                         GENERIC BY CONSTRUCTION: git/openssh (the checkout it
+                         owns) plus generic shell utilities, and NO domain
+                         tooling — kubectl was dropped in image 0.5.0. A CLI
+                         here would be the same category error as bundling an
+                         MCP server: what an agent may reach is wiring. Need
+                         one? Derive an image and point AgentRuntime.spec.image
+                         at it (README) — that is why the field exists
 channel-telegram/        reference channel adapter (own module, no deps) —
                          /channel contract; Bot API sending lives HERE. Does
                          NOT poll: receives topic updates pushed by the router
@@ -279,7 +286,7 @@ chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
                          mode IS this bundle (chart/templates/demo.yaml is gone).
                          Plus the `mcp` component: MCPConfig `k8s-api` (server
                          key FIXED at `kubernetes`) + TWO MCPToolsets split by
-                         risk — `k8s-observability` (16 read tools) and
+                         risk — `k8s-observability` (14 read tools) and
                          `k8s-admin` (6 mutating), ENUMERATED not wildcarded
                          because `mcp__kubernetes__*` spans both halves and
                          defeats the split. `k8s-admin` renders only when a
@@ -294,12 +301,15 @@ chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
                          `agentops-mcp-k8s` — never the runtime SA (render
                          fails if equal). That second identity IS the component's
                          reason to exist: MCP reach = server SA's RBAC ∩ toolset,
-                         two walls, where kubectl+Bash has only the runtime SA's.
+                         two walls. Since runtime 0.5.0 it is also the ONLY
+                         cluster path — no CLI in the image — so `mcp.enabled:
+                         false` leaves an agent that cannot see the cluster.
                          `readOnly`/`rbac.mode` are null and DERIVE from
                          `global.agentops.runtime.rbacMode` (full => write-capable
                          server under a full SA; anything else => read-only under
-                         readonly). Explicit wins — that is the override that
-                         recovers "kubectl writes, MCP reads only"
+                         readonly). Explicit wins — `readOnly: true` under
+                         `full` is a strictly observing agent: broad grants on
+                         the runtime SA that nothing can exercise
 chart/charts/telegram-bundle/
                          subchart: the three-component Telegram stack (router +
                          signal adapter + channel adapter) as adapter CRs, and

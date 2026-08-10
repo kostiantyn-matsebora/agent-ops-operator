@@ -61,7 +61,7 @@ Eleven kinds, one line each; the full reference is [docs/concepts.md](docs/conce
   topic — admitted oldest-first. `/close` deletes the CR and frees the slot.
 - **Least privilege by construction.** The manager holds no cluster powers beyond
   its own CRDs + pod lifecycle in its namespace, and never reads a Secret (all
-  `valueFrom`). Agent powers are the runtime SA's RBAC.
+  `valueFrom`). No cluster CLI in the runtime image — reach is [wiring](docs/concepts.md#runtime-images-are-generic).
 - **See it, and answer it, on one screen.** The optional
   [console](docs/console.md) draws the wiring as a graph coloured by the
   conditions the reconcilers already write, plus live runs — and is itself a
@@ -117,8 +117,8 @@ helm install agent-ops ./chart -n agent-ops --create-namespace
 the one `AgentRuntime` named `default` (image, credential, idle TTL, `home.pvcRef`
 wired from `persistence`), so an install with no bundle — or only a chat bundle —
 still executes conversations; `global.agentops.runtime.rbacMode` (`none` |
-`readonly` | `full`, empty = readonly under demo) is the one knob for the agent's
-in-cluster power. [Full reference](docs/concepts.md#the-substrate-runtime-and-globalagentopsruntime).
+`readonly` | `full`, empty = readonly under demo) governs what an MCP-independent
+path could do. [Full reference](docs/concepts.md#the-substrate-runtime-and-globalagentopsruntime).
 
 For alert ingestion, enable the [VictoriaMetrics bundle](docs/vm-bundle.md) and
 point an Alertmanager-compatible sender at the adapter's webhook Service

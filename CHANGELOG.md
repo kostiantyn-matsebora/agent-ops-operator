@@ -8,6 +8,53 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### The runtime image drops kubectl — chart 5.3.0, runtime-claude 0.5.0
+
+**BREAKING for anything that shelled out to `kubectl` inside a runtime pod.**
+
+`runtime-claude` shipped a pinned `kubectl` v1.34.3, the one domain-specific
+dependency in an image whose other contents are runtime responsibilities (git,
+openssh-client for the checkout) or generic shell utilities. That contradicted
+the rule the rest of the project already follows: an `AgentRuntime` differs by
+vendor backend and trust level, and what an agent may reach is wiring —
+`MCPConfig` + `MCPToolset` bound by a Pipeline. A CLI in the vendor layer was
+the same category error as bundling an MCP server would be, and it carried a
+version pin that could skew against whatever cluster it ran near.
+
+**What breaks.** An agent whose route relied on `Bash` + `kubectl` for cluster
+access has none after upgrading the image. `Bash` still works; it just no longer
+reaches the Kubernetes API.
+
+**The hold position is one line.** `AgentRuntime.spec.image` is why that field
+exists — pin the previous tag and nothing changes:
+
+```yaml
+runtime:
+  image: kmatsebora/agentops-runtime-claude:0.4.0
+```
+
+**To migrate**, give the route MCP tooling. With the k8s bundle that is already
+the default: `mcp` and `mcpServers` are on, and a Pipeline binds
+`k8s-observability` (reads) and optionally `k8s-admin` (mutations). Verified
+against the shipped server: crashlooping pods, node pressure and failed
+workloads are all answerable through `pods_list`, `pods_log`, `events_list`,
+`resources_list` and `nodes_top`, which return kubectl-shaped tables.
+
+**What MCP does not give you**: patch semantics, rollout/drain/wait,
+port-forward, `auth can-i`, and any text processing over results — there is no
+pipe. If you need those, build a derived image (three lines) and point an
+`AgentRuntime` at it; the version pin becomes yours to own against your cluster,
+which is the right place for it. Recipe in
+[docs/concepts.md](docs/concepts.md#runtime-images-are-generic).
+
+**New warning.** Enabling the k8s bundle with `mcp.enabled=false` now leaves an
+agent that cannot see the cluster at all, so the post-install notes say so. The
+render still succeeds — pointing `mcp.url` at your own server is legitimate.
+
+**Also**: `k8s-observability` dropped two tool patterns
+(`configuration_contexts_list`, `targets_list`) that the shipped server does not
+register. Inert entries, but they implied capability the install never had.
+
 ### Console Ingress gains TLS and hostnames — chart 5.2.0
 
 Chart only: no operator, image, CRD or contract change. Existing values files

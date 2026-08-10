@@ -9,11 +9,12 @@ RUN apt-get update -qq && \
     npm install -g @anthropic-ai/claude-code && \
     npm cache clean --force
 
-# kubectl for the bounded cluster-apply lane (RBAC of the worker SA is the wall)
-RUN curl -fsSL -o /usr/local/bin/kubectl \
-      "https://dl.k8s.io/release/v1.34.3/bin/linux/amd64/kubectl" && \
-    chmod 0755 /usr/local/bin/kubectl
-
+# NO kubectl, and no other domain tooling. This image is a VENDOR runtime: it
+# checks out a repo and runs claude-code. What an agent may reach is wiring —
+# MCPConfig + MCPToolset bound by a Pipeline — so a Kubernetes CLI here would be
+# the same category error as bundling an MCP server. Need one? Derive an image
+# (three lines, and the version pin becomes yours to own against your cluster)
+# and point AgentRuntime.spec.image at it; see README.
 COPY runtime.js tools.js /srv/
 
 ENV HOME=/data/home
