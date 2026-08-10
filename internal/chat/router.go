@@ -90,6 +90,10 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	inputID := newInputID()
 	if err := r.appendInput(ctx, conv, agentopsv1alpha1.InputItem{
 		ID: inputID, Type: agentopsv1alpha1.InputReply, Payload: text, ReceivedAt: metav1.Now(),
+		// Channel origin: the person is looking at the surface they typed on, so
+		// this input is never posted back as a card. Siblings see it through
+		// relayToSiblings instead.
+		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: ch.Name},
 	}); err != nil {
 		return err
 	}
@@ -112,7 +116,7 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 		ack = "⏳ Noted — I'll pick this up as soon as the current step finishes."
 	}
 	r.relayToSiblings(ctx, conv, ch.Name, msg.Sender, text)
-	r.FanOutSend(ctx, conv, ack)
+	r.FanOutSend(ctx, conv, Notice(ack))
 	return nil
 }
 
@@ -143,7 +147,7 @@ func (r *Router) CloseConversation(ctx context.Context, conv *agentopsv1alpha1.C
 		text = "👋 Conversation closed while a run was in progress — " +
 			conv.Status.Inflight.RunID + " was abandoned. This thread is archived."
 	}
-	r.FanOutSend(ctx, conv, text)
+	r.FanOutSend(ctx, conv, Notice(text))
 	return client.IgnoreNotFound(r.Client.Delete(ctx, conv))
 }
 
@@ -182,16 +186,17 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 			}
 		}
 		sort.Strings(names)
-		r.Ops.EnqueueSend(ctx, ch, nil, "🤖 <b>Agents</b>: "+strings.Join(names, "  ")+
-			"\nUsage: /&lt;agent&gt; &lt;task&gt; — each call gets its own topic. /&lt;agent&gt;:&lt;role&gt; picks a role inside the agent's repo.")
+		r.Ops.EnqueueMessage(ctx, ch, nil, Notice("🤖 **Agents**: "+strings.Join(names, "  ")+
+			"\nUsage: `/<agent> <task>` — each call gets its own topic. "+
+			"`/<agent>:<role>` picks a role inside the agent's repo."))
 		return nil
 	}
 	if cmd.Profile == CloseCommand {
 		// /close reaches HandleCommand only from a general surface, where there
 		// is no conversation to end. Answer with usage rather than "unknown
 		// agent": typing it here is an obvious mistake, not a typo'd pipeline.
-		r.Ops.EnqueueSend(ctx, ch, nil, "⚠️ /close ends a conversation — send it inside that "+
-			"conversation's own thread. Nothing was closed.")
+		r.Ops.EnqueueMessage(ctx, ch, nil, Warn("⚠️ `/close` ends a conversation — send it inside that "+
+			"conversation's own thread. Nothing was closed."))
 		return nil
 	}
 	// A command addresses a PIPELINE: it originates the conversation, so it
@@ -200,13 +205,13 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 	var pipe agentopsv1alpha1.Pipeline
 	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Profile}, &pipe); err != nil {
 		if apierrors.IsNotFound(err) {
-			r.Ops.EnqueueSend(ctx, ch, nil, fmt.Sprintf("⚠️ Unknown agent <b>%s</b> — see /agents.", cmd.Profile))
+			r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf("⚠️ Unknown agent **%s** — see `/agents`.", cmd.Profile)))
 			return nil
 		}
 		return err
 	}
 	if cmd.Rest == "" {
-		r.Ops.EnqueueSend(ctx, ch, nil, fmt.Sprintf("⚠️ Usage: /%s &lt;task&gt;", cmd.Profile))
+		r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf("⚠️ Usage: `/%s <task>`", cmd.Profile)))
 		return nil
 	}
 	_, err := r.CreateTaskConversation(ctx, ch, pipe.Spec.ProfileRef.Name, cmd.Agent, cmd.Rest, &pipe)
@@ -236,6 +241,9 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		Inputs: []agentopsv1alpha1.InputItem{{
 			ID: newInputID(), Type: agentopsv1alpha1.InputTask,
 			Payload: task, Agent: agentOverride, ReceivedAt: metav1.Now(),
+			// A command is typed on a surface, so it is a channel origin and
+			// posts no card — the user already sees what they sent.
+			Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: ch.Name},
 		}},
 	}
 	if origin != nil {
@@ -280,34 +288,39 @@ func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	return nil
 }
 
-// FanOutSend posts a message to every bound channel of a conversation, each in
-// its own thread (channels without a binding yet are skipped — their topic
-// catches up via reconciliation).
-func (r *Router) FanOutSend(ctx context.Context, conv *agentopsv1alpha1.Conversation, text string) {
-	for _, ref := range conv.Spec.ChannelRefs {
-		tid := conv.ThreadFor(ref.Name)
-		if tid == nil {
-			continue
-		}
-		var bound agentopsv1alpha1.Channel
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref.Name}, &bound); err != nil {
-			continue
-		}
-		r.Ops.EnqueueSend(ctx, &bound, tid, text)
-	}
+// FanOutSend posts ONE SEMANTIC MESSAGE to every bound channel of a
+// conversation, each in its own thread (channels without a binding yet are
+// skipped — their topic catches up via reconciliation).
+//
+// Each adapter renders it independently, so the same answer may look different
+// on Telegram and on the web. That is the point of fanning out meaning rather
+// than markup.
+func (r *Router) FanOutSend(ctx context.Context, conv *agentopsv1alpha1.Conversation, msg Message) {
+	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
+		r.Ops.EnqueueMessage(ctx, ch, tid, msg)
+	})
 }
 
 // relayToSiblings mirrors a user message onto the conversation's other
-// channels as attributed text ("channels fully repeat the conversation").
+// channels ("channels fully repeat the conversation"). The attribution stays
+// STRUCTURED — origin and sender as fields, not composed into the body — so
+// each surface decides how to mark somebody else's words.
 // Channel implementations must never re-ingest their own outbound posts.
 func (r *Router) relayToSiblings(ctx context.Context, conv *agentopsv1alpha1.Conversation, origin, sender, text string) {
-	who := origin
-	if sender != "" {
-		who = origin + "/" + sender
-	}
-	relay := "💬 <b>" + who + "</b>: " + text
+	msg := RelayMessage(origin, sender, text)
+	r.eachBoundThread(ctx, conv, origin, func(ch *agentopsv1alpha1.Channel, tid *string) {
+		r.Ops.EnqueueMessage(ctx, ch, tid, msg)
+	})
+}
+
+// eachBoundThread runs fn for every bound channel that already has a thread,
+// optionally skipping one by name. Channels with no binding are skipped rather
+// than queued: a send to a thread that does not exist has nowhere to land.
+func (r *Router) eachBoundThread(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+	skip string, fn func(ch *agentopsv1alpha1.Channel, threadID *string)) {
+
 	for _, ref := range conv.Spec.ChannelRefs {
-		if ref.Name == origin {
+		if ref.Name == skip {
 			continue
 		}
 		tid := conv.ThreadFor(ref.Name)
@@ -318,7 +331,7 @@ func (r *Router) relayToSiblings(ctx context.Context, conv *agentopsv1alpha1.Con
 		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref.Name}, &bound); err != nil {
 			continue
 		}
-		r.Ops.EnqueueSend(ctx, &bound, tid, relay)
+		fn(&bound, tid)
 	}
 }
 

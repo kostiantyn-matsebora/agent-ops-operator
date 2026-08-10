@@ -9,11 +9,16 @@ A channel adapter is a deployment that dials the manager (never the reverse) —
 same pattern as runtimes, so NetworkPolicies stay simple and transport
 credentials never leave the adapter:
 
-1. Long-poll `GET /channel/ops?adapter=<your-adapter>&wait=25` for outbound
-   operations: `ensure-topic` (create a thread for a conversation), `send`
-   (post a message; chat HTML subset) and `close-topic` (archive the thread in
+1. Long-poll `GET /channel/ops?adapter=<your-adapter>&contract=2&wait=25` for
+   outbound operations: `ensure-topic` (create a thread for a conversation),
+   `send` (post a message) and `close-topic` (archive the thread in
    `op.threadId` — its conversation has ended). Delivery is at-least-once —
    dedup by `op.id`.
+
+   **`contract` is required**, and an absent or outdated version is refused with
+   400 naming the current one. Version 1 carried rendered `text`; an adapter
+   still reading that field would post empty messages and look healthy doing it,
+   so the handshake fails at the door rather than downstream.
 2. Complete each op with `POST /channel/ops/{id}/done` — `{"threadId":"…"}`
    for `ensure-topic` (an opaque string in your id space), an **empty body**
    for `close-topic`, `{"error":"…"}` on failure (surfaced as a Conversation
@@ -45,6 +50,49 @@ credentials never leave the adapter:
 4. Read your channels + opaque `spec.config` from `GET /channel/channels?adapter=`,
    persist cursors (e.g. poll offsets) via `GET/PUT /channel/state/{channel}/{key}`,
    report config problems via `POST /channel/channels/{name}/status`.
+
+### The manager composes meaning; the adapter composes presentation
+
+An op carries STRUCTURE, never rendered text. There is no `op.text` and no
+`op.title`.
+
+`send` carries `op.message`, one of four kinds:
+
+| kind | fields | what it is |
+|---|---|---|
+| `signal` | `pipeline?`, `source`, `title`, `labels{}`, `body`, `inputRef` | the event that opened or advanced the conversation, as it arrived |
+| `answer` | `body`, `status` | agent output, reported through `/work/done` |
+| `relay` | `origin`, `sender?`, `body` | a user message from a sibling channel |
+| `notice` | `level` (`info`/`warn`), `body` | the manager on its own behalf: acks, listings, refusals |
+
+`ensure-topic` carries `op.topic`, a descriptor — `conversation`, `pipeline?`,
+`source?`, `title`, `labels{}`, `kind` — and YOU name the thread from it. The
+manager sends no baked title because it cannot know your limits: Telegram forum
+topics cap at 128 characters and take no markup; a web chat has neither
+constraint. The descriptor and the first card in the thread carry the same
+facts, so an adapter can choose not to repeat itself.
+
+`pipeline` may be EMPTY on both. It is inferred from the conversation's
+materialized bindings and left blank when several Ready Pipelines could claim
+it — blank means "not determinable", so render it as absent rather than
+inventing a name.
+
+**Prose fields are markdown**, in one deliberately small subset:
+
+```
+**bold**   *italic*   `inline code`   ```fenced code```   [text](url)
+```
+
+Anything outside that subset is UNDEFINED — you may render it, escape it or
+strip it, and no caller may depend on which. The subset is small because the
+alternative to naming it is every adapter inventing its own.
+
+**Rendering, escaping, splitting and truncation are yours, entirely.** The
+manager guarantees nothing about how a message looks or how long it may be.
+`channel-telegram/render.go` is the reference: HTML composition, entity
+escaping, 4096-character splitting, 128-character topic names. An adapter that
+cannot be bothered may concatenate the fields and send them plain — the contract
+asks only that presentation be the adapter's call.
 
 **Credentials** are declared per Channel (`spec.credentialsSecretRef`, a Secret
 name) and projected into the adapter pod by the ChannelAdapter reconciler as
@@ -84,6 +132,17 @@ the schema in the same diff as `image`.
 A `Channel` whose adapter nothing serves (no in-process provider, no Ready
 `ChannelAdapter`, no adapter-reported readiness) carries a `Served=False`
 condition — typos fail visibly instead of queueing ops forever.
+
+**A thread opens with the event that caused it.** When an input is appended and
+a thread binding exists, the manager posts it as a `signal` message — so an
+alert thread reads as the event, then the work, then the answer, and a run that
+hangs or dies still leaves the thread saying what happened. The rule is "post
+what a human has not already seen": inputs with a `signal` origin are posted,
+`chat` signals and channel-originated inputs are not (the person typed those,
+and siblings get them as a `relay`), and inputs predating provenance post
+nothing at all. Card op ids are stable per conversation×input×channel, so
+reconcile-driven re-enqueues dedup. Posting runs parallel to dispatch — it
+neither gates nor is gated by the run.
 
 **The operator delivers, always.** An agent's printed answer is its whole
 deliverable: the runtime reports it via `/work/done` and the manager posts it

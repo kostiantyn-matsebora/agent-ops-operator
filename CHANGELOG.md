@@ -8,8 +8,71 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
-**BREAKING — `POST /task` is removed, and the console is on by default.**
-Chart **5.0.0**, manager **0.24.0**, console **0.3.1**.
+**BREAKING — adapters render, `POST /task` is removed, and the console is on by
+default.** Chart **5.0.0**, manager **0.25.1**, channel-telegram **0.7.0**,
+console **0.6.0**.
+
+**Upgrade all three together.** The manager and every channel adapter share the
+outbound message contract, and version 2 is not compatible with version 1 in
+either direction. The signal adapters (`signal-telegram`, `signal-k8s-events`,
+`signal-cron`, `signal-vmalertmanager`) and `telegram-router` are unaffected —
+they never consume `/channel/ops`.
+
+### BREAKING — outbound ops carry a typed message; adapters render it
+
+**Every channel adapter must be updated in lockstep with the manager.** An op no
+longer has `text` or `title`.
+
+- `send` carries `op.message`: `signal` (the event, with `source`, `labels{}`,
+  the payload inline and `inputRef`), `answer` (`body`, `status`), `relay`
+  (`origin`, `sender`, `body`) or `notice` (`level`, `body`). Prose is markdown
+  in a named subset — `**bold**`, `*italic*`, `` `code` ``, ```` ``` ````
+  fenced, `[text](url)` — and anything outside it is undefined.
+- `ensure-topic` carries `op.topic`, a descriptor the adapter NAMES the thread
+  from. Telegram's 128-character topic limit is now enforced where it is known.
+- `GET /channel/ops` requires `contract=2`. An adapter that declares nothing, or
+  an older version, gets a 400 naming the replacement — because one still
+  reading `op.text` would post empty messages and look healthy doing it.
+
+**The agent's own output moved with it.** `dispatch/templates/format.md` — the
+mandatory message-format spec shipped to every profile — told the agent to write
+a "chat HTML subset" (`<b>`, `<code>`, `<pre>`), which used to pass through to
+Telegram untouched. Adapters escape what they are handed, so that HTML now
+reaches chat as literal characters. The six templates are markdown. Custom
+prompts that instruct HTML must be updated the same way; a resumed session
+picks the new spec up on its next work unit.
+
+The manager stops guaranteeing anything about how a message looks. Escaping,
+the 4096-character split, and topic naming moved into `channel-telegram`, which
+is the reference renderer; in-process providers get the same treatment, since
+exempting them would put presentation back inside the manager through a side
+door. **Two bugs close with it**: a message over 4096 characters used to fail
+the op outright, and a payload containing `<`, `>` or `&` broke HTML parsing —
+so the alerts most worth reading were the ones that did not arrive.
+
+Third-party adapters: implement the four kinds, name the topic from the
+descriptor, and send `contract=2`. `channel-telegram/render.go` is ~180 lines
+and is the whole job.
+
+### A conversation thread now opens with the event that caused it
+
+An alert thread used to be a topic title, then silence, then the agent's
+interpretation — and if the agent hung, the thread never said what had happened.
+Every input a human has not already seen is now posted to the bound threads as a
+`signal` card, in parallel with dispatch.
+
+`InputItem` gains `origin` (`{kind: signal|channel, name, signalKind}`), which
+**replaces `jobName`** — that field recorded the source for `kind: job` only, so
+a conversation could not say what woke it. `ConversationInput` gains `labels`,
+kept beside the payload so an adapter can render them. Both are additive and
+optional; **an input with no origin posts nothing**, so upgrading does not fill
+open threads with history.
+
+No `pipelineRef` is introduced. A card names its pipeline from the same
+inference `/status` and the console already use, and omits it when the wiring is
+ambiguous — blank rather than guessed.
+
+Anything reading `InputItem.jobName` breaks: read `origin.name`.
 
 ### BREAKING — a task is a signal; `POST /task` is gone
 

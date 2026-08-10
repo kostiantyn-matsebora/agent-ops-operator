@@ -121,7 +121,7 @@ func TestActivityRecordsAConversationEndToEnd(t *testing.T) {
 		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: convName}}); err != nil {
 		t.Fatal(err)
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=telegram&wait=0", nil, testMasterToken)
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, testMasterToken)
 	if rec.Code != 200 {
 		t.Fatalf("ensure-topic op not queued: %d", rec.Code)
 	}
@@ -457,7 +457,7 @@ func TestStatusReportsOpQueueState(t *testing.T) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "chan-status"}, &ch); err != nil {
 		t.Fatal(err)
 	}
-	srv.Ops.EnqueueEnsureTopic(ctx, &ch, conv)
+	srv.Ops.EnqueueEnsureTopic(ctx, &ch, conv, chat.TopicDescriptor{})
 
 	st := getStatus(t, srv)
 	q := queueFor(st, "status-adapter")

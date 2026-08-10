@@ -27,8 +27,8 @@ func TestEnsureTopicDedupsByConversation(t *testing.T) {
 	q := &OpQueue{Registry: NewRegistry()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
-	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"))
-	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1")) // reconcile-driven repeat
+	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{})
+	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{}) // reconcile-driven repeat
 	if op := q.Claim("slack"); op == nil || op.ID != "topic:conv-1:c1" || op.Kind != OpEnsureTopic {
 		t.Fatalf("first claim: %+v", op)
 	}
@@ -36,7 +36,7 @@ func TestEnsureTopicDedupsByConversation(t *testing.T) {
 		t.Fatalf("duplicate ensure-topic not deduped: %+v", op)
 	}
 	// still deduped while claimed
-	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"))
+	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{})
 	if op := q.Claim("slack"); op != nil {
 		t.Fatalf("re-enqueue while claimed must dedup: %+v", op)
 	}
@@ -47,19 +47,19 @@ func TestClaimIsFIFOAndTypeScoped(t *testing.T) {
 	ctx := context.Background()
 	slack := testChannel("s", "slack")
 	teams := testChannel("m", "teams")
-	q.EnqueueSend(ctx, slack, nil, "one")
-	q.EnqueueSend(ctx, slack, nil, "two")
-	q.EnqueueSend(ctx, teams, nil, "other")
-	if op := q.Claim("slack"); op == nil || op.Text != "one" {
+	q.EnqueueMessage(ctx, slack, nil, Notice("one"))
+	q.EnqueueMessage(ctx, slack, nil, Notice("two"))
+	q.EnqueueMessage(ctx, teams, nil, Notice("other"))
+	if op := q.Claim("slack"); op == nil || op.Message.Body != "one" {
 		t.Fatalf("fifo: %+v", op)
 	}
-	if op := q.Claim("slack"); op == nil || op.Text != "two" {
+	if op := q.Claim("slack"); op == nil || op.Message.Body != "two" {
 		t.Fatalf("fifo second: %+v", op)
 	}
 	if op := q.Claim("slack"); op != nil {
 		t.Fatalf("teams op leaked into slack: %+v", op)
 	}
-	if op := q.Claim("teams"); op == nil || op.Text != "other" {
+	if op := q.Claim("teams"); op == nil || op.Message.Body != "other" {
 		t.Fatalf("teams claim: %+v", op)
 	}
 }
@@ -67,7 +67,7 @@ func TestClaimIsFIFOAndTypeScoped(t *testing.T) {
 func TestReclaimAfterTimeout(t *testing.T) {
 	q := &OpQueue{Registry: NewRegistry()}
 	ctx := context.Background()
-	q.EnqueueSend(ctx, testChannel("s", "slack"), nil, "hello")
+	q.EnqueueMessage(ctx, testChannel("s", "slack"), nil, Notice("hello"))
 	op := q.Claim("slack")
 	if op == nil {
 		t.Fatal("claim")
@@ -87,7 +87,7 @@ func TestReclaimAfterTimeout(t *testing.T) {
 func TestCompleteIsIdempotentForSends(t *testing.T) {
 	q := &OpQueue{Registry: NewRegistry()}
 	ctx := context.Background()
-	q.EnqueueSend(ctx, testChannel("s", "slack"), nil, "hello")
+	q.EnqueueMessage(ctx, testChannel("s", "slack"), nil, Notice("hello"))
 	op := q.Claim("slack")
 	q.Complete(ctx, op.ID, OpResult{})
 	if q.Pending(op.ID) {
@@ -164,14 +164,16 @@ type fakeProvider struct {
 	sends []string
 }
 
-func (f *fakeProvider) EnsureTopic(ctx context.Context, title string) (string, error) {
+func (f *fakeProvider) EnsureTopic(ctx context.Context, topic TopicDescriptor) (string, error) {
 	return "T-1", nil
 }
 
-func (f *fakeProvider) Send(ctx context.Context, threadID *string, text string) error {
+// An in-process provider RENDERS like any adapter — it receives the semantic
+// message, not text — so this fake records what it would have composed.
+func (f *fakeProvider) Send(ctx context.Context, threadID *string, msg Message) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sends = append(f.sends, text)
+	f.sends = append(f.sends, msg.Body)
 	return nil
 }
 
@@ -180,7 +182,7 @@ func TestInProcessProviderServesRegisteredType(t *testing.T) {
 	fake := &fakeProvider{}
 	reg.Register("web", func(ctx context.Context, channelName string) (Provider, error) { return fake, nil })
 	q := &OpQueue{Registry: reg}
-	q.EnqueueSend(context.Background(), testChannel("w", "web"), nil, "hi there")
+	q.EnqueueMessage(context.Background(), testChannel("w", "web"), nil, Notice("hi there"))
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {

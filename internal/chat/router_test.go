@@ -98,8 +98,8 @@ func TestCloseInThreadDeletesAndSaysGoodbyeOnEveryChannel(t *testing.T) {
 		if ops[0].Kind != OpSend || ops[0].ThreadID == nil || *ops[0].ThreadID != tc.thread {
 			t.Fatalf("%s: farewell op %+v", tc.adapter, ops[0])
 		}
-		if !strings.Contains(ops[0].Text, "closed") {
-			t.Fatalf("%s: farewell text %q", tc.adapter, ops[0].Text)
+		if !strings.Contains(opBody(ops[0]), "closed") {
+			t.Fatalf("%s: farewell text %q", tc.adapter, opBody(ops[0]))
 		}
 	}
 }
@@ -131,7 +131,7 @@ func TestCloseNamesAbandonedWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
-	if len(ops) != 1 || !strings.Contains(ops[0].Text, "run-7") {
+	if len(ops) != 1 || !strings.Contains(opBody(ops[0]), "run-7") {
 		t.Fatalf("farewell must name the abandoned run: %+v", ops)
 	}
 }
@@ -168,8 +168,8 @@ func TestCloseOnGeneralSurfaceAnswersWithUsage(t *testing.T) {
 	if len(ops) != 1 || ops[0].ThreadID != nil {
 		t.Fatalf("want one general-surface reply, got %+v", ops)
 	}
-	if !strings.Contains(ops[0].Text, "/close") || strings.Contains(ops[0].Text, "Unknown agent") {
-		t.Fatalf("must explain usage rather than report an unknown pipeline: %q", ops[0].Text)
+	if !strings.Contains(opBody(ops[0]), "/close") || strings.Contains(opBody(ops[0]), "Unknown agent") {
+		t.Fatalf("must explain usage rather than report an unknown pipeline: %q", opBody(ops[0]))
 	}
 	var list agentopsv1alpha1.ConversationList
 	if err := c.List(context.Background(), &list); err != nil {
@@ -195,4 +195,13 @@ func TestIsCloseCommand(t *testing.T) {
 			t.Errorf("isCloseCommand(%q) = %v, want %v", text, got, want)
 		}
 	}
+}
+
+// opBody is the message body an op would render from, or "" when the op carries
+// no message. Tests assert on MEANING now — the markup is the adapter's.
+func opBody(op *Op) string {
+	if op == nil || op.Message == nil {
+		return ""
+	}
+	return op.Message.Body
 }

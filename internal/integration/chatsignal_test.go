@@ -125,13 +125,13 @@ func TestUnclaimedChatSourceDropsAndTellsTheUser(t *testing.T) {
 		t.Fatalf("unclaimed source must create no conversation, got %d", n)
 	}
 	// the reason reaches the originating surface as a send op
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=telegram&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("expected a send op carrying the drop reason: %d", rec.Code)
 	}
 	var op chat.Op
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
-	if op.Kind != chat.OpSend || !strings.Contains(op.Text, "src-unwired") {
+	if op.Kind != chat.OpSend || !strings.Contains(opBody(op), "src-unwired") {
 		t.Fatalf("drop reason must name the unwired source: %+v", op)
 	}
 }
@@ -210,13 +210,13 @@ func TestChatCommandsAnswerWithoutCreatingConversations(t *testing.T) {
 	if n := len(convsBoundTo(t, "chan-cmd")); n != 0 {
 		t.Fatalf("/agents must create no conversation, got %d", n)
 	}
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("/agents must emit a send op: %d", rec.Code)
 	}
 	var op chat.Op
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
-	if op.Kind != chat.OpSend || !strings.Contains(op.Text, "/cmd-pipe") {
+	if op.Kind != chat.OpSend || !strings.Contains(opBody(op), "/cmd-pipe") {
 		t.Fatalf("listing must name addressable pipelines: %+v", op)
 	}
 

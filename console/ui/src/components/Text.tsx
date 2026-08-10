@@ -12,10 +12,11 @@ import type { ReactElement } from 'react'
 // no dangerouslySetInnerHTML anywhere in this app; if a view wants formatting,
 // it composes elements instead of handing a string to the DOM.
 //
-// The adapters emit a small HTML subset for chat transports (<b>, <i>) because
-// Telegram wants it. Here that markup is STRIPPED rather than rendered: the
-// console is not that transport, and rendering a tag because a Telegram adapter
-// wrote one would be trusting a string from a channel.
+// The manager now sends SEMANTIC messages and each adapter renders its own
+// surface, so this text should arrive as markdown rather than Telegram HTML.
+// The stripping stays anyway: an agent's own output is free text, a Kubernetes
+// object can carry anything, and "no tag reaches the DOM" is a property worth
+// keeping independent of what any upstream promises this week.
 
 const TAG = /<\/?[a-zA-Z][^>]*>/g
 const ENTITIES: Record<string, string> = {

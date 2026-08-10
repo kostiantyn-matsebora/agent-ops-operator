@@ -5,11 +5,13 @@
 The HTTP contract between the manager and out-of-process channel adapters: outbound op delivery, async completion, inbound routing, config/state/status serving, and auth.
 ## Requirements
 ### Requirement: Outbound operations delivered to adapters by long-poll
-The manager SHALL expose `GET /channel/ops?adapter=<name>&wait=<seconds>` (non-leader-gated) returning the next pending outbound operation for any Channel served by that adapter, or 204 on timeout. The parameter names the adapter (the same value Channels carry in `spec.adapter`), replacing the former `?type=`; a request carrying the retired parameter SHALL fail with 400 naming the replacement rather than being served an empty list, so an outdated adapter fails loudly instead of appearing to work while delivering nothing. Operations SHALL carry a stable id, the channel and conversation names, a kind (`ensure-topic`, `send`, or `close-topic`), and a kind-specific payload (`send` includes the message text and target thread id; `close-topic` includes the target thread id and asks the adapter to archive or close that thread on its transport). Operations SHALL be derived from CR state or router actions such that an operation lost in flight (manager restart, adapter crash) is regenerated or safely skipped; delivery is at-least-once and adapters MUST tolerate duplicates by id. A `close-topic` operation SHALL be derivable from CR state for as long as it is outstanding, which the deleting conversation's finalizer guarantees.
+The manager SHALL expose `GET /channel/ops?adapter=<name>&wait=<seconds>` (non-leader-gated) returning the next pending outbound operation for any Channel served by that adapter, or 204 on timeout. The parameter names the adapter (the same value Channels carry in `spec.adapter`), replacing the former `?type=`; a request carrying the retired parameter SHALL fail with 400 naming the replacement rather than being served an empty list, so an outdated adapter fails loudly instead of appearing to work while delivering nothing. The polling adapter SHALL additionally declare the outbound contract version it speaks, and an absent or unsupported declaration SHALL fail with 400 naming what is expected.
+
+Operations SHALL carry a stable id, the channel and conversation names, a kind (`ensure-topic`, `send`, or `close-topic`), and a kind-specific **structured** payload. `send` SHALL carry a typed message — one of `signal`, `answer`, `relay`, or `notice` — with markdown-valued free text and typed structured fields, plus the target thread id; it SHALL NOT carry pre-rendered display text. `ensure-topic` SHALL carry a topic descriptor (`conversation`, `pipeline?`, `source?`, `title`, `labels`, `kind`) rather than a rendered title string; `pipeline` is inferred and MAY be empty. `close-topic` SHALL carry the target thread id and asks the adapter to archive or close that thread on its transport. Escaping, length limits, chunking, truncation, and thread naming SHALL be the adapter's responsibility; the manager SHALL emit no transport markup and declare no maximum message size. Operations SHALL be derived from CR state or router actions such that an operation lost in flight (manager restart, adapter crash) is regenerated or safely skipped; delivery is at-least-once and adapters MUST tolerate duplicates by id. A `close-topic` operation SHALL be derivable from CR state for as long as it is outstanding, which the deleting conversation's finalizer guarantees.
 
 #### Scenario: Adapter receives a topic-creation op
 - **WHEN** a Conversation referencing a Channel with `adapter: slack` is reconciled with no `threadId` and an adapter is long-polling `/channel/ops?adapter=slack`
-- **THEN** the adapter receives an `ensure-topic` operation identifying that conversation
+- **THEN** the adapter receives an `ensure-topic` operation identifying that conversation, carrying a descriptor it names the thread from
 
 #### Scenario: Adapter receives a topic-close op
 - **WHEN** a Conversation bound to a Channel with `adapter: slack` is deleted while holding a thread id
@@ -26,6 +28,14 @@ The manager SHALL expose `GET /channel/ops?adapter=<name>&wait=<seconds>` (non-l
 #### Scenario: Retired parameter fails loudly
 - **WHEN** an adapter built against the old contract polls `/channel/ops?type=slack`
 - **THEN** the manager responds 400 naming `adapter` as the expected parameter
+
+#### Scenario: Outdated outbound contract fails loudly
+- **WHEN** an adapter that expects string-valued `send` ops polls for operations
+- **THEN** the manager responds 400 naming the required contract version, rather than delivering messages it would post as empty text
+
+#### Scenario: Send ops carry meaning, not markup
+- **WHEN** a `send` op is delivered for an agent's answer
+- **THEN** it carries an `answer` message with a markdown body and no transport markup, and the adapter renders it
 
 ### Requirement: Asynchronous operation completion
 The manager SHALL expose `POST /channel/ops/{id}/done` accepting the operation result — for `ensure-topic`, the thread id string to store in the conversation's status; for `close-topic`, an empty body on success; for failures, an error the manager records (condition/event) and may retry via regeneration. The Conversation reconciler SHALL tolerate the pending window between enqueue and completion: inputs stay queued, serial-per-conversation semantics hold, and runtime-pod handling proceeds per existing ordering rules. A failed `close-topic` SHALL be logged rather than recorded on the Conversation and SHALL NOT be regenerated after its grace period, because the conversation it belongs to is being deleted and no object remains to carry a condition; an adapter that does not implement the kind therefore leaves the thread open without blocking anything.
@@ -47,7 +57,7 @@ The manager SHALL expose `POST /channel/ops/{id}/done` accepting the operation r
 - **THEN** the failure is logged, no Conversation condition is written, and deletion proceeds
 
 ### Requirement: Inbound messages enter through the shared router
-The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, text, sender?}` as the CONTINUATION path only: `threadId` is REQUIRED, and the message SHALL be routed through the transport-neutral router as a reply input on the matching conversation (busy-ack preserved). Resulting acks SHALL flow back to the adapter as `send` operations, and the message SHALL be relayed to the conversation's sibling channels as attributed text. In-process (registry) providers SHALL use the same operation pipeline so routing behavior is identical for built-in and external types.
+The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, text, sender?}` as the CONTINUATION path only: `threadId` is REQUIRED, and the message SHALL be routed through the transport-neutral router as a reply input on the matching conversation (busy-ack preserved). Resulting acks SHALL flow back to the adapter as `send` operations, and the message SHALL be relayed to the conversation's sibling channels as a `relay` message carrying its attribution as fields rather than composed into the text. In-process (registry) providers SHALL use the same operation pipeline so routing behavior is identical for built-in and external types.
 
 The ORIGINATION branch is removed: command parsing and default-profile conversation creation no longer occur here, and a message in an unrecognized thread is no longer adopted as a new conversation. A request without `threadId` SHALL be rejected with a message naming the signal path as the origination route. Channel implementations MAY omit inbound entirely when a separate component handles their ingest.
 
@@ -65,7 +75,7 @@ The ORIGINATION branch is removed: command parsing and default-profile conversat
 
 #### Scenario: Reply still mirrors to sibling channels
 - **WHEN** a reply arrives on one channel of a multi-channel conversation
-- **THEN** it is relayed to the sibling channels as attributed text, unchanged from before
+- **THEN** it is relayed to the sibling channels as a `relay` message, attributed by each adapter's own rendering
 
 ### Requirement: Adapters need no Kubernetes access
 The contract SHALL carry everything an adapter needs beyond ops and inbound: `GET /channel/channels?adapter=<t>` returns the channels of that type with their opaque `spec.config` **and a `credentialEnvPrefix` locating each channel's projected credentials in the adapter's own environment (Secret key `K` is env `<prefix>K`)**; `GET/PUT /channel/state/{channel}/{key}` persists adapter cursor state (manager-side, as Channel annotations) across adapter restarts; `POST /channel/channels/{name}/status` sets the Channel's Ready condition (adapters report their own config validation results there). The prefix SHALL be derived from projection metadata (the Channel name), never from Secret values or key enumeration.

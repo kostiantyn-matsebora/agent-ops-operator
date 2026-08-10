@@ -239,20 +239,43 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 	tg := a.client(sc.token)
 	switch op.Kind {
 	case "ensure-topic":
-		id, err := tg.CreateTopic(ctx, sc.cfg.ChatID, op.Title)
+		if op.Topic == nil {
+			return "", "ensure-topic without a topic descriptor"
+		}
+		id, err := tg.CreateTopic(ctx, sc.cfg.ChatID, renderTopicName(*op.Topic))
 		if err != nil {
 			return "", err.Error()
 		}
 		return strconv.FormatInt(id, 10), ""
 	case "send":
+		if op.Message == nil {
+			return "", "send without a message"
+		}
 		var tid *int64
 		if op.ThreadID != nil {
 			if n, err := strconv.ParseInt(*op.ThreadID, 10, 64); err == nil {
 				tid = &n
 			}
 		}
-		if err := tg.Send(ctx, sc.cfg.ChatID, tid, op.Text); err != nil {
-			return "", err.Error()
+		// A very large EVENT payload becomes an attachment rather than a wall of
+		// consecutive messages: a 50k alert body would otherwise arrive as a
+		// dozen chunks and bury the thread it exists to inform. Only possible
+		// because the op carries the payload inline — the adapter has no
+		// Kubernetes access to fetch it with.
+		if caption, doc, ok := asDocument(*op.Message); ok {
+			if err := tg.SendDocument(ctx, sc.cfg.ChatID, tid,
+				documentName(*op.Message), caption, doc); err != nil {
+				return "", err.Error()
+			}
+			return "", ""
+		}
+		// Render here, split here: the Bot API caps a message at 4096 and used
+		// to FAIL the whole op past it, which lost exactly the long payloads
+		// worth reading. Every chunk must land for the op to succeed.
+		for _, chunk := range splitHTML(renderMessage(*op.Message)) {
+			if err := tg.Send(ctx, sc.cfg.ChatID, tid, chunk); err != nil {
+				return "", err.Error()
+			}
 		}
 		return "", ""
 	case "close-topic":

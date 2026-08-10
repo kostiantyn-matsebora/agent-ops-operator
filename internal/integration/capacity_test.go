@@ -110,7 +110,7 @@ func TestOverCapConversationProvisionsNothing(t *testing.T) {
 	// no ensure-topic op for cap-second: the only ops queued are the first
 	// conversation's topic and the queued notice
 	for {
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-cap&wait=0", nil, "test-adapter-token")
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-cap&contract=2&wait=0", nil, "test-adapter-token")
 		if rec.Code != 200 {
 			break
 		}
@@ -141,7 +141,7 @@ func TestQueuedNoticeIsSentOncePerEntry(t *testing.T) {
 
 	notices := 0
 	for {
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-notice&wait=0", nil, "test-adapter-token")
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-notice&contract=2&wait=0", nil, "test-adapter-token")
 		if rec.Code != 200 {
 			break
 		}
@@ -449,7 +449,7 @@ func TestDefaultIdleTTLReachesThePod(t *testing.T) {
 func findOp(t *testing.T, srv *httpapi.Server, adapter string, kind chat.OpKind, conversation string) *chat.Op {
 	t.Helper()
 	for {
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+adapter+"&wait=0", nil, testMasterToken)
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+adapter+"&contract=2&wait=0", nil, testMasterToken)
 		if rec.Code != 200 {
 			return nil
 		}

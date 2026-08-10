@@ -54,19 +54,24 @@ fixing the missing context, so they are one change.
   the topic from its own template and enforces its own limits (Telegram forum
   topics cap at 128 characters) — so a topic can be named `[vm-alerts]
   HighMemoryUsage` without the manager deciding that format.
-- **Conversations record their provenance, because today they cannot.** No
-  `pipelineRef` exists anywhere in `api/v1alpha1`, and the originating source
-  name survives only by accident — `signals.go:351` sets `InputItem.JobName`
-  to the source name for `kind: job` and drops it for alerts. A card cannot
-  name what the conversation never recorded, so:
-  - `ConversationSpec` gains `pipelineRef` — the route that originated it,
-    snapshotted like `profileRef` and `channelRefs`;
-  - `InputItem` gains a typed `origin` (`{kind: signal|api|channel, name}`),
-    generalizing the accidental `JobName` into provenance that every input
-    carries.
+- **Inputs record their provenance, because today they cannot.** The originating
+  source name survives only by accident — `signals.go` sets `InputItem.JobName`
+  to the source name for `kind: job` and drops it for every other kind. A card
+  cannot name what the input never recorded, so `InputItem` gains a typed
+  `origin` (`{kind: signal|channel, name}`), generalizing the accidental
+  `JobName` into provenance that every input carries.
 
   This also makes the posting rule computable from the input itself rather than
   inferred from its type.
+
+  **The pipeline is INFERRED, not stored.** `Conversation` carries no
+  `pipelineRef` and this change does not add one — the model forbids it
+  (`mcp-toolset-model`: "no `pipelineRef` is introduced"), and
+  `chat.PipelineForConversation` already derives it from the materialized
+  bindings, blank when ambiguous. The card names the pipeline when attribution
+  succeeds and omits it when it does not, which is the posture `/status` and the
+  console already take. Only what is genuinely underivable — which source fired
+  a given input — is stored.
 - **Rendering, escaping, chunking, and truncation move to adapters, entirely.**
   The manager stops guaranteeing anything about how a message looks. Telegram
   renders HTML and splits at 4096; a web chat renders a card; each does what its
@@ -77,8 +82,14 @@ fixing the missing context, so they are one change.
   | input | origin | posted |
   |---|---|---|
   | `alert`, `job`, `recurrence` | signal source | yes |
-  | `task` via `POST /task` | API | yes — today such a topic appears with no explanation |
-  | `chat`, `reply` | the channel itself | no — echo; `relayToSiblings` already mirrors those |
+  | `task` from a `kind: task` signal | signal source | yes — today such a topic appears with no explanation |
+  | `chat` | signal source (a chat source) | no — the surface the person typed on already showed it |
+  | `task` from a `/<pipeline>` command, `reply` | the channel itself | no — echo; `relayToSiblings` already mirrors those |
+
+  Chat is the one case where the origin KIND is not enough: a chat signal
+  arrives through a `SignalSource` like any other, but the human already saw
+  what they typed. It is excluded by the signal's own kind, and that exclusion
+  is stated rather than left to fall out.
 
   The card is enqueued once the thread binding exists, in parallel with
   dispatch — the human reads the event while the agent is still working.
@@ -116,9 +127,9 @@ dispatch.
 
 ## Impact
 
-- **`api/v1alpha1/conversation_types.go`**: `ConversationSpec.PipelineRef` and
-  `InputItem.Origin`; `JobName` folds into `Origin`. Regenerates deepcopy and
-  the Conversation CRD.
+- **`api/v1alpha1/conversation_types.go`**: `InputItem.Origin`; `JobName` folds
+  into `Origin`. No `ConversationSpec.PipelineRef` — the pipeline is inferred.
+  Regenerates deepcopy and the Conversation CRD.
 - **`internal/chat/ops.go`**: `Op.Text`/`Op.Title` become structured message and
   topic-descriptor fields; `EnqueueSend` splits into per-kind constructors. FIFO,
   dedup, claim/complete, and `ReclaimAfter` are untouched.
@@ -137,10 +148,13 @@ dispatch.
   presentation" as an invariant.
 - **Migration**: manager and adapters upgrade together. Third-party adapters
   break by design and fail loudly on the version check.
-- **Interacts with `chat-signal-origination`**: chat messages become signals
-  there, and this change's "don't post what the channel originated" rule is what
-  keeps them from echoing. Land the rule with whichever ships second.
-- **Overlaps `pipeline-addressed-conversations`** (in flight): it also makes a
-  conversation address its Pipeline. Whichever lands first should add
-  `ConversationSpec.PipelineRef`; the other consumes it. Adding it twice, or
-  under two names, is the failure to avoid.
+- **`chat-signal-origination` has landed**, so this change ships second and owns
+  the rule: a chat signal reaches `routeSignals` like any other, so excluding it
+  from posting is this change's job, by signal kind rather than by origin kind.
+- **`pipeline-addressed-conversations` has landed** and added NO
+  `ConversationSpec.PipelineRef` — the model settled on inference instead, and
+  `mcp-toolset-model` now states "no `pipelineRef` is introduced". This change
+  consumes `chat.PipelineForConversation` rather than reopening that.
+- **`task-is-a-signal` has landed**, removing `POST /task`. There is no `api`
+  origin kind: a programmatic task is a `kind: task` signal through a claimed
+  source, so it carries a `signal` origin and posts under the ordinary rule.

@@ -92,9 +92,35 @@ spec:
                     id:
                       minLength: 1
                       type: string
-                    jobName:
-                      description: JobName for job inputs.
-                      type: string
+                    origin:
+                      description: |-
+                        Origin is where this input came from. Absent on inputs created before
+                        provenance existed — and an absent origin means NOT POSTED to bound
+                        channels, so upgrading cannot fill open threads with history.
+                      properties:
+                        kind:
+                          description: |-
+                            OriginKind says HOW an input reached the manager. Two values, and there are
+                            only two doors: a signal through a claimed SignalSource, or a channel the user
+                            is already looking at. (`POST /task` was a third once; it is gone.)
+                          enum:
+                          - signal
+                          - channel
+                          type: string
+                        name:
+                          description: Name is the SignalSource or Channel the input
+                            came from.
+                          type: string
+                        signalKind:
+                          description: |-
+                            SignalKind is the originating signal's lane (alert | job | task | chat)
+                            for `signal` origins, empty otherwise. Carried because CHAT is the one
+                            signal a bound channel must NOT be shown: the person typed it, so posting
+                            it back is an echo — and origin kind alone cannot tell it from an alert.
+                          type: string
+                      required:
+                      - kind
+                      type: object
                     payload:
                       type: string
                     payloadRef:

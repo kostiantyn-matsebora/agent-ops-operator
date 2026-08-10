@@ -162,6 +162,10 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.Error(err, "ensureTopics enqueue (continuing chat-less)")
 		}
 		topicPending = waiting
+		// Input cards, posted PARALLEL to dispatch rather than sequenced with
+		// it: the human reads the event while the agent is already working, and
+		// a run that hangs or dies still leaves the thread saying what happened.
+		r.postInputCards(ctx, &conv)
 	}
 
 	if needsWorker && !podExists {
@@ -396,8 +400,8 @@ func (r *ConversationReconciler) notifyQueued(ctx context.Context, conv *agentop
 	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil || ch.Spec.Adapter == "" {
 		return
 	}
-	r.Ops.EnqueueSend(ctx, &ch, conv.ThreadFor(ref.Name),
-		"⏳ Queued for capacity — every agent slot is busy. This starts as soon as one frees up.")
+	r.Ops.EnqueueMessage(ctx, &ch, conv.ThreadFor(ref.Name), chat.Notice(
+		"⏳ Queued for capacity — every agent slot is busy. This starts as soon as one frees up."))
 }
 
 func (r *ConversationReconciler) setPhase(ctx context.Context, conv *agentopsv1alpha1.Conversation, phase agentopsv1alpha1.ConversationPhase) error {
@@ -429,10 +433,103 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 		if ch.Spec.Adapter == "" {
 			continue
 		}
-		r.Ops.EnqueueEnsureTopic(ctx, &ch, conv)
+		r.Ops.EnqueueEnsureTopic(ctx, &ch, conv, r.topicDescriptor(ctx, conv))
 		pending = true
 	}
 	return pending, firstErr
+}
+
+// topicDescriptor describes a conversation's thread for the adapter to NAME.
+// The manager supplies facts — route, source, title, labels, lane — and no
+// formatting: Telegram caps forum topics at 128 characters and takes no markup,
+// a web chat has neither limit, and neither constraint belongs here.
+func (r *ConversationReconciler) topicDescriptor(ctx context.Context, conv *agentopsv1alpha1.Conversation) chat.TopicDescriptor {
+	d := chat.TopicDescriptor{
+		Conversation: conv.Name,
+		Title:        conv.Spec.Title,
+		Pipeline:     r.inferredPipeline(ctx, conv),
+	}
+	// The FIRST input is what opened the conversation, so it names the lane and
+	// the source the topic is about; later recurrences share both.
+	for i := range conv.Spec.Inputs {
+		if o := conv.Spec.Inputs[i].Origin; o != nil {
+			d.Source, d.Kind = o.Name, o.SignalKind
+			if payload := r.inputPayload(ctx, conv, &conv.Spec.Inputs[i]); payload != nil {
+				d.Labels = payload.Spec.Labels
+			}
+			break
+		}
+	}
+	return d
+}
+
+// inferredPipeline names the route that originated a conversation, or "" when
+// the bindings are ambiguous. Conversations record no pipelineRef on purpose —
+// this is the same inference /status and the console already use, and a blank
+// answer is the honest one rather than a guess.
+func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *agentopsv1alpha1.Conversation) string {
+	if p := chat.PipelineForConversation(ctx, r.Client, conv.Namespace, conv); p != nil {
+		return p.Name
+	}
+	return ""
+}
+
+// inputPayload reads an input's out-of-line ConversationInput, or nil when the
+// payload is inline or the object is gone (pruned after processing).
+func (r *ConversationReconciler) inputPayload(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+	item *agentopsv1alpha1.InputItem) *agentopsv1alpha1.ConversationInput {
+
+	if item.PayloadRef == nil {
+		return nil
+	}
+	var ci agentopsv1alpha1.ConversationInput
+	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: item.PayloadRef.Name}, &ci); err != nil {
+		return nil
+	}
+	return &ci
+}
+
+// postInputCards posts every input a human has not already seen to every bound
+// channel that has a thread.
+//
+// Three properties make this safe to run on EVERY reconcile:
+//
+//   - the op id is stable per conversation×input×channel, so a re-enqueue
+//     dedups against both the pending map and the completed window;
+//   - the posting rule is read off the input's recorded origin
+//     (InputItem.PostToChannels), so a channel never sees its own echo and
+//     pre-provenance inputs post nothing at all;
+//   - a channel with no thread binding yet is skipped, and picked up on the
+//     reconcile the binding triggers — enqueuing earlier would drop the card.
+func (r *ConversationReconciler) postInputCards(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
+	pipeline := ""
+	resolved := false
+	for i := range conv.Spec.Inputs {
+		item := &conv.Spec.Inputs[i]
+		if !item.PostToChannels() {
+			continue
+		}
+		if !resolved { // one lookup per reconcile, and only when something posts
+			pipeline, resolved = r.inferredPipeline(ctx, conv), true
+		}
+		body, inputRef, labels := item.Payload, "", map[string]string(nil)
+		if ci := r.inputPayload(ctx, conv, item); ci != nil {
+			body, inputRef, labels = ci.Spec.Payload, ci.Name, ci.Spec.Labels
+		}
+		msg := chat.SignalMessage(pipeline, item.Origin.Name, conv.Spec.Title, inputRef, labels, body)
+		for _, ref := range conv.Spec.ChannelRefs {
+			tid := conv.ThreadFor(ref.Name)
+			if tid == nil {
+				continue
+			}
+			var ch agentopsv1alpha1.Channel
+			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil ||
+				ch.Spec.Adapter == "" {
+				continue
+			}
+			r.Ops.EnqueueInputCard(ctx, &ch, conv.Name, item.ID, tid, msg)
+		}
+	}
 }
 
 func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
