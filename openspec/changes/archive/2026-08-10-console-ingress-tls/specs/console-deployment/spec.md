@@ -1,9 +1,19 @@
 ## MODIFIED Requirements
 
 ### Requirement: Browser access is authenticated
-The console UI and its APIs SHALL require the chart-provisioned bearer token (projected to the adapter via the console Channel's `credentialsSecretRef`), validated with constant-time comparison; unauthenticated requests receive 401. The Service SHALL default to ClusterIP with an optional Ingress template.
+Read access SHALL require a bearer token or a session established from it, sourced from the console Channel's projected `uiToken` credential. An unconfigured token SHALL authorize nobody and SHALL be indistinguishable from a wrong token.
+
+Write actions — replying in a conversation and originating one — SHALL additionally require `console.write.enabled` and a resolved identity, taken from a trusted forward-auth header when present and recorded as the token identity otherwise. Every write SHALL be logged with that identity. The Service SHALL remain `ClusterIP` and Ingress disabled by default; OIDC via forward-auth SHALL be documented as the answer for any Ingress exposure.
 
 Because that token is the whole boundary — it reads every conversation payload and instructs any joined agent — the Ingress template SHALL make its exposure in transit explicit: TLS SHALL be configurable by naming a certificate or a cert-manager issuer without restating hostnames, and enabling the Ingress without TLS SHALL be reported in the post-install notes as sending the token in clear text. The chart SHALL NOT refuse to render in that case, since TLS is frequently terminated upstream, and SHALL NOT claim the exposure is safe.
+
+#### Scenario: Unconfigured is closed, not open
+- **WHEN** no token is configured
+- **THEN** every authenticated route is refused, and failures do not reveal whether a token exists
+
+#### Scenario: Viewer-only deployment
+- **WHEN** `console.write.enabled=false`
+- **THEN** the composer and the new-conversation action are absent and both endpoints reject requests server-side
 
 #### Scenario: No anonymous access
 - **WHEN** a browser requests any console page or API without the token (or session established from it)

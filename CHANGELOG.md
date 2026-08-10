@@ -8,6 +8,49 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Console Ingress gains TLS and hostnames — chart 5.2.0
+
+Chart only: no operator, image, CRD or contract change. Existing values files
+keep rendering the same Ingress.
+
+**New `console.ingress` keys.** `extraHosts[]` (additional hostnames serving the
+same console, each getting a rule), `labels`, `path` and `pathType`.
+
+**TLS is configurable instead of hand-written.** `console.ingress.tls` is now a
+map:
+
+```yaml
+console:
+  ingress:
+    enabled: true
+    host: console.example.com
+    tls:
+      secretName: console-tls      # existing certificate, or...
+      clusterIssuer: letsencrypt   # ...cert-manager, which derives secretName
+      existing: []                 # raw tls[] entries, verbatim, wins over both
+```
+
+`tls[].hosts` is DERIVED from `host` + `extraHosts`, so a rule host and a
+certificate host cannot drift apart.
+
+**The old list form still works.** `console.ingress.tls` supplied as a list of
+raw Ingress `tls` entries — the only form before this release — is detected and
+rendered verbatim. `helm upgrade --reuse-values` carries a previous release's
+`console:` map forward wholesale, so an upgrade needs no values edit.
+
+**BREAKING (render-time), only if you set a sub-path.** `console.ingress.path`
+must be `/`. The console's SPA is embedded at build time with an absolute asset
+base and emits `/assets/...` URLs, so serving it under `/console` routes
+correctly and then renders a blank page. The chart now refuses that
+configuration instead of producing it. Give the console its own hostname or
+subdomain. Nothing to do unless you had already set a path that did not work.
+
+**New warning, no new failure.** Enabling the Ingress with no TLS configured
+still renders — TLS often terminates upstream at a load balancer or in a mesh,
+and the chart cannot see what sits in front of it — but the post-install notes
+now state that the UI token crosses the network in clear text, and name both
+remedies. If your TLS terminates upstream, ignore it.
+
 ### Restarting anything stops losing state — chart 5.1.0, manager 0.26.0
 
 Storage is on by default and the two silent losses a restart used to cause are

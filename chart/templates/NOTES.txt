@@ -56,14 +56,42 @@ config error. Either create it:
 {{- $c := .Values.console }}
 {{- $ch := $c.channelName | default $c.name }}
 
+{{- $ing := $c.ingress }}
+{{- $tls := $ing.tls }}
+{{- $hasTLS := false }}
+{{- if kindIs "slice" $tls }}{{ if $tls }}{{ $hasTLS = true }}{{ end }}
+{{- else if $tls }}{{ if or $tls.secretName $tls.clusterIssuer $tls.existing }}{{ $hasTLS = true }}{{ end }}{{ end }}
+
 Console — reach it at http://agentops-adapter-{{ $c.name }}.{{ .Release.Namespace }}.svc:{{ $c.port }}
 (Service owned by the ChannelAdapter reconciler; no chart-side connectivity.)
   kubectl -n {{ .Release.Namespace }} port-forward svc/agentops-adapter-{{ $c.name }} {{ $c.port }}:{{ $c.port }}
+{{- if $ing.enabled }}
+Exposed at {{ if $hasTLS }}https{{ else }}http{{ end }}://{{ $ing.host }}/
+{{- range $ing.extraHosts }}
+           {{ if $hasTLS }}https{{ else }}http{{ end }}://{{ . }}/
+{{- end }}
+{{- end }}
 Sign in with the UI token:
   kubectl -n {{ .Release.Namespace }} get secret {{ $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }} -o jsonpath='{.data.uiToken}' | base64 -d
 
 Anyone with that token sees every agentops CR in this namespace, conversation
 payloads included.
+{{- if and $ing.enabled (not $hasTLS) }}
+
+ACTION NEEDED — the console is exposed over plain HTTP. That token is sent as a
+request header on every call, so it crosses the network in CLEAR TEXT, and it
+reads every conversation payload and instructs any agent the console is joined
+to. Two things to do, both worth doing:
+  1. Terminate TLS. Name a certificate Secret:
+       --set console.ingress.tls.secretName=<secret>
+     or let cert-manager issue one:
+       --set console.ingress.tls.clusterIssuer=<issuer>
+     (Ignore this if TLS already terminates upstream at a load balancer or in a
+     service mesh — the chart cannot see what sits in front of it.)
+  2. Put an authenticating proxy in front (oauth2-proxy against your OIDC
+     provider). The console reads the identity from its forwarded headers and
+     logs every write with it; without one, every write is recorded as "token".
+{{- end }}
 
 Conversations are OBSERVED (read-only) until the console channel carries them.
 To join a pipeline — an ordinary channels[] edit; the chart never touches your

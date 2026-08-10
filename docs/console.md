@@ -266,10 +266,25 @@ instruct an agent that, in a `rbacMode: full` install, holds `cluster-admin`.
   wrong one. "No token set" must never read as "no authentication required".
 - **`ClusterIP`, no Ingress by default.** Reaching it means a port-forward or a
   deliberate decision.
-- **OIDC is the answer for Ingress exposure**, via forward-auth from a proxy that
-  has already authenticated the user (oauth2-proxy is the usual one). When a
-  trusted identity header is present the console records it; when it is absent it
-  records `token`.
+- **Exposing it takes two things, not one.** The token is sent as a request
+  header on every call, so an Ingress without TLS puts it on the wire in clear
+  text, and TLS alone still leaves a single shared secret as the only gate.
+  - **TLS** — name a certificate (`console.ingress.tls.secretName`) or let
+    cert-manager issue one (`console.ingress.tls.clusterIssuer`, which also
+    derives the Secret name). The chart cannot see what sits in front of it, so
+    an install terminating TLS upstream at a load balancer or in a mesh is
+    correct and the post-install warning can be ignored — but it warns, because
+    the alternative is exposing the token silently.
+  - **A forward-auth proxy** — oauth2-proxy against your OIDC provider is the
+    usual one. When a trusted identity header is present the console records it;
+    when it is absent it records `token`, so an install without a proxy has an
+    audit trail that names nobody.
+- **Root of a hostname only.** The SPA is embedded at build time with an
+  absolute asset base, so it emits `/assets/...` URLs and cannot be served under
+  a sub-path — that configuration routes correctly and then renders a blank
+  page. `console.ingress.path` exists and is validated rather than quietly
+  accepted: a non-root value fails the render. Give the console its own hostname
+  or subdomain.
 - **Every write is logged with the resolved identity** — who started what, and who
   said what to an agent.
 - **`console.write.enabled: false`** makes it a strict viewer: the composer and the
@@ -308,7 +323,23 @@ console that cannot see a CrashLoopBackOff is not one.
 | `console.image.*` | | image, bumped per release |
 | `console.port` | `8080` | browser-facing port; the reconciler owns the Service |
 | `console.auth.existingSecret` / `.uiToken` | `""` | supply or pin the browser token instead of generating one |
-| `console.ingress.*` | disabled | see the trust boundary above before enabling |
+| `console.ingress.enabled` | `false` | see the trust boundary above before enabling |
+| `console.ingress.host` | `""` | **required** when enabled — a hostname cannot be guessed |
+| `console.ingress.extraHosts` | `[]` | additional hostnames serving the same console; each gets a rule and is covered by the derived certificate |
+| `console.ingress.className` | `""` | `ingressClassName` |
+| `console.ingress.annotations` | `{}` | merged with the cert-manager annotation when `tls.clusterIssuer` is set |
+| `console.ingress.labels` | `{}` | merged onto the Ingress alongside the chart's own |
+| `console.ingress.path` | `/` | root only — a non-root value fails the render (see the trust boundary) |
+| `console.ingress.pathType` | `Prefix` | `Prefix`, `ImplementationSpecific` or `Exact`; all work at the root |
+| `console.ingress.tls.secretName` | `""` | existing certificate Secret; `tls[].hosts` is derived from `host` + `extraHosts` |
+| `console.ingress.tls.clusterIssuer` | `""` | cert-manager issuer: adds the annotation and derives `secretName` when unset |
+| `console.ingress.tls.existing` | `[]` | raw `tls[]` entries, used verbatim and taking precedence over the derived form |
+
+`console.ingress.tls` also still accepts the pre-6.x **list** form (raw Ingress
+`tls` entries), rendered verbatim so existing values files and
+`helm upgrade --reuse-values` keep working. The map form above is its
+replacement — it derives the hostnames, so a rule host and a certificate host
+cannot drift apart.
 
 ## Building it
 
