@@ -153,9 +153,15 @@ func (l *Log) oldestSeq() uint64 {
 
 // Since returns events after a cursor, oldest first, at most limit of them.
 //
-// resync reports that the caller's cursor has already been evicted, so the gap
-// is real and it must re-read snapshots instead of assuming continuity. An
-// empty cursor is a first connect, not a gap: it gets the tail of the buffer
+// resync reports that the caller's cursor cannot be served, so the gap is real
+// and it must re-read snapshots instead of assuming continuity. Two ways that
+// happens, and the ring is only one of them:
+//
+//   - the cursor was EVICTED — the buffer wrapped past it;
+//   - the cursor PREDATES this process — the manager restarted, and the ring is
+//     in-memory, so it started counting again from 1.
+//
+// An empty cursor is a first connect, not a gap: it gets the tail of the buffer
 // and no resync.
 func (l *Log) Since(cursor string, limit int) (events []Event, resync bool) {
 	if l == nil {
@@ -167,12 +173,21 @@ func (l *Log) Since(cursor string, limit int) (events []Event, resync bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	seq, hasCursor := parseCursor(cursor)
+	// A cursor this process never issued. The sequence space restarts at 1 on
+	// every start, so a cursor from the PREVIOUS process reads as "ahead of us"
+	// — and answering it with an empty list would be a viewer's evidence that
+	// nothing happened, when what actually happened is that the history holding
+	// it is gone. This is the restart case; eviction is handled below.
+	if hasCursor && seq >= l.next {
+		return nil, true
+	}
 	oldest := l.oldestSeq()
 	if oldest == 0 {
 		return nil, false
 	}
 	from := oldest
-	if seq, ok := parseCursor(cursor); ok {
+	if hasCursor {
 		if seq+1 < oldest {
 			resync = true
 		} else {

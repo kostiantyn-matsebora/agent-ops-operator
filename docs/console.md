@@ -148,6 +148,46 @@ reported unavailable rather than drawn empty: an empty chart claims "there was n
 traffic", which the console cannot honestly say about a window it never had data
 for.
 
+#### Gaps in recorded activity
+
+The buffer is in memory, so its history ends two ways: it wraps, or the manager
+restarts and begins its sequence again at 1. Either way the manager answers an
+unservable cursor with a **resync**, and the console records that as an
+`activity.gap` marker at the point it happened — not just as a counter. The
+Topology page carries a banner and the Overview's telemetry card names the time
+before which nothing is available.
+
+The gap rides on the **stream health** (`stream.lastGap`), which every view
+already reads, rather than only on the live event stream. That is deliberate:
+the reader who matters is usually the one who opens the console *after*
+something went wrong, and a live-only signal is invisible to exactly that
+person.
+
+That is the whole reason it exists: a stretch with no recorded hops and a
+stretch in which nothing happened look identical, and only one of them means the
+system was idle. Edge rates spanning a gap under-report and say so.
+
+#### The `live` chip, and who owns reconnection
+
+The masthead chip reports the browser's own stream to the console. **The SPA
+reconnects it, not the browser.** `EventSource` retries a dropped connection by
+itself, but on an HTTP error — a 502 while the console pod rolls, a 401 once the
+session expires — it sets `readyState` to `CLOSED` and gives up permanently.
+Nothing reopened it, so the chip read `stream disconnected` and the graph stayed
+frozen until the page was reloaded. The client now reopens with backoff (1s
+doubling to 30s), leaves genuine transport blips to the browser, and stops on
+unmount.
+
+A chip that only tells the truth after a reload is the same failure this surface
+exists to prevent, one layer up: a viewer that cannot tell "the link died" from
+"the system is idle".
+
+Everything else is unaffected, because everything else is read from Kubernetes:
+conversations, topology, configuration and run history come back complete after
+any restart. Only the per-hop timeline has a hole in it — the console persists
+nothing and needs no volume, since its config cache rebuilds by list→watch and
+its activity index by cursor replay.
+
 ### Conversations
 
 Server-side filtering (phase, pipeline, profile, channel, errored, search),

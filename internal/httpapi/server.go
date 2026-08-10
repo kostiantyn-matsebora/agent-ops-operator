@@ -426,6 +426,9 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	}
 	conv.Status.Runs = append(conv.Status.Runs, agentopsv1alpha1.RunStatus{
 		RunID: d.RunID, Status: d.Status, ExitCode: d.ExitCode, Result: result, FinishedAt: &now,
+		// This manager owes the reply to every bound thread. Recorded on the run
+		// itself so the obligation survives the process that took it on.
+		DeliveryTracked: true,
 	})
 	if len(conv.Status.Runs) > 10 {
 		conv.Status.Runs = conv.Status.Runs[len(conv.Status.Runs)-10:]
@@ -461,21 +464,28 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// the serving adapters. This is the only delivery path — agents never post
 	// to a transport themselves, so no runtime holds channel credentials and
 	// no surface can mistake silence for success.
+	//
+	// This is the FAST PATH, not the only one: the reply's op id is stable per
+	// conversation×channel×run and delivery is marked on the run, so a manager
+	// restart in the window between this write and an adapter claiming the op
+	// re-derives the answer from reconciliation instead of losing it. The message
+	// is composed from the RECORDED run so both paths say the same thing.
 	if len(conv.Spec.ChannelRefs) > 0 && s.Router != nil {
-		text := strings.TrimSpace(result)
-		// A run that produced nothing is a FAILURE to report, not an answer to
-		// render: it goes out as a notice so an adapter styles it as one rather
-		// than presenting an empty agent reply.
-		switch {
-		case d.Status != "succeeded":
-			s.Router.FanOutSend(ctx, &conv, chat.Warn("❌ run failed ("+d.Status+")"))
-		case text == "":
-			s.Router.FanOutSend(ctx, &conv, chat.Warn("❌ run finished without output"))
-		default:
-			s.Router.FanOutSend(ctx, &conv, chat.AnswerMessage(text, d.Status))
+		if run := runByID(&conv, d.RunID); run != nil {
+			s.Router.FanOutRunReply(ctx, &conv, d.RunID, chat.RunReplyMessage(run))
 		}
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// runByID finds a recorded run on a conversation, or nil.
+func runByID(conv *agentopsv1alpha1.Conversation, runID string) *agentopsv1alpha1.RunStatus {
+	for i := range conv.Status.Runs {
+		if conv.Status.Runs[i].RunID == runID {
+			return &conv.Status.Runs[i]
+		}
+	}
+	return nil
 }
 
 func bound(s []string, n int) []string {

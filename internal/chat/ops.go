@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -94,9 +96,15 @@ const ReclaimAfter = 5 * time.Minute
 
 var sendSeq atomic.Int64
 
-// OpQueue holds pending outbound ops per channel type. In-memory by design:
-// every op is derived from CR state (ensure-topic) or is fire-and-forget UX
-// (send acks), so queue loss on restart is regenerated or safely dropped.
+// OpQueue holds pending outbound ops per channel type. In-memory by design and
+// NEVER the record of what is owed: every op is either DERIVED from CR state —
+// ensure-topic from a missing thread binding, an input card from an unposted
+// input, a run reply from a run without a delivery marker — or is
+// fire-and-forget UX (acks, notices) whose loss costs nothing. Queue loss on
+// restart is therefore regenerated or safely dropped.
+//
+// `close-topic` is the one exception, and it is exceptional because the object
+// that would carry the obligation is being deleted. See OpCloseTopic.
 type OpQueue struct {
 	Client    client.Client
 	Namespace string
@@ -194,6 +202,39 @@ func (q *OpQueue) EnqueueInputCard(ctx context.Context, ch *agentopsv1alpha1.Cha
 // InputCardOpID is the stable id of one input's card on one channel.
 func InputCardOpID(conversation, inputID, channel string) string {
 	return "input:" + conversation + ":" + inputID + ":" + channel
+}
+
+// EnqueueRunReply queues one run's answer on one channel. Its id is STABLE per
+// conversation×channel×run, which is what makes the reply derivable: `/work/done`
+// enqueues it on the fast path and reconciliation re-enqueues it for any bound
+// thread still lacking a delivery marker, and the two dedup against each other
+// through the pending map and the completed window.
+//
+// Ack and notice sends stay on the counter-based id: saying the same thing twice
+// is correct when a user asked twice, and neither derives from CR state.
+func (q *OpQueue) EnqueueRunReply(ctx context.Context, ch *agentopsv1alpha1.Channel,
+	conversation, runID string, threadID *string, msg Message) {
+
+	q.enqueueMessage(ctx, RunReplyOpID(conversation, ch.Name, runID), ch, conversation, threadID, msg, true)
+}
+
+// RunReplyOpID is the stable id of one run's reply on one channel. Exported
+// because completion has to map the op back to the run it delivers.
+func RunReplyOpID(conversation, channel, runID string) string {
+	return "send:" + conversation + ":" + channel + ":" + runID
+}
+
+// ParseRunReplyOpID splits a reply op id back into its parts, reporting false
+// for any other id. Completion uses it to mark the run/channel pair delivered
+// without the op having to carry redundant fields.
+func ParseRunReplyOpID(id string) (conversation, channel, runID string, ok bool) {
+	parts := strings.Split(id, ":")
+	// Conversation and channel are Kubernetes object names, so they cannot
+	// contain ':'; a run id could in principle, so the REMAINDER is the run.
+	if len(parts) < 4 || parts[0] != "send" {
+		return "", "", "", false
+	}
+	return parts[1], parts[2], strings.Join(parts[3:], ":"), true
 }
 
 func (q *OpQueue) enqueueMessage(ctx context.Context, id string, ch *agentopsv1alpha1.Channel,
@@ -357,6 +398,19 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 			delete(q.recent, id)
 			q.mu.Unlock()
 		}
+	case op.Kind == OpSend && res.Error == "" && isRunReply(op.ID):
+		// Delivery becomes a FACT on the conversation. Marking on completion
+		// rather than on enqueue is what makes the two paths safe: an op lost
+		// before completion is re-derived by reconciliation, and one completed
+		// before a restart is not.
+		if err := q.markDelivered(ctx, op); err != nil {
+			log.FromContext(ctx).Error(err, "mark run reply delivered", "conversation", op.Conversation, "op", op.ID)
+			// Unmark the dedup entry: an undelivered marker with a suppressed op
+			// would leave the answer owed and unenqueueable.
+			q.mu.Lock()
+			delete(q.recent, id)
+			q.mu.Unlock()
+		}
 	case op.Kind == OpCloseTopic:
 		// Terminal either way: an empty body means archived, an error means the
 		// thread stays open. No condition is written — the Conversation is being
@@ -369,6 +423,54 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 	case res.Error != "":
 		log.FromContext(ctx).Info("send op failed", "channel", op.Channel, "error", res.Error)
 	}
+}
+
+// isRunReply reports whether an op id is a stable run-reply id.
+func isRunReply(id string) bool {
+	_, _, _, ok := ParseRunReplyOpID(id)
+	return ok
+}
+
+// markDelivered records that a run's reply reached one channel's thread, so
+// reconciliation stops re-deriving it. Retried on conflict: the reply and the
+// next run's status write compete for the same subresource.
+func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
+	_, channel, runID, ok := ParseRunReplyOpID(op.ID)
+	if !ok {
+		return nil
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		var conv agentopsv1alpha1.Conversation
+		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: q.Namespace, Name: op.Conversation}, &conv); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		patch := client.MergeFrom(conv.DeepCopy())
+		found := false
+		for i := range conv.Status.Runs {
+			run := &conv.Status.Runs[i]
+			if run.RunID != runID {
+				continue
+			}
+			found = true
+			if run.DeliveredTo(channel) {
+				return nil
+			}
+			run.Delivered = append(run.Delivered, channel)
+		}
+		if !found {
+			// The run aged out of the bounded list. Nothing is owed — a run that
+			// is no longer recorded cannot be re-derived either.
+			return nil
+		}
+		err := q.Client.Status().Patch(ctx, &conv, patch)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("conflict marking run %s delivered on %s", runID, channel)
 }
 
 func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) error {

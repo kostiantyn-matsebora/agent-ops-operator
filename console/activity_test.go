@@ -130,9 +130,10 @@ func TestActivityWindowIsBounded(t *testing.T) {
 	}
 }
 
-// A resync frame is COUNTED, not swallowed. A console that silently dropped
-// hops would be rendering a partial truth while looking complete.
-func TestActivityConsumerRecordsResync(t *testing.T) {
+// A resync frame is COUNTED and PLACED. The count says history was lost; the
+// marker says WHERE — the events either side of it are not consecutive, and a
+// timeline showing them adjacent claims something false.
+func TestActivityConsumerRecordsResyncAsAGapInTheTimeline(t *testing.T) {
 	srv := httptest.NewServer(&sseServer{seen: make(chan string, 4), frames: []string{
 		"event: resync\ndata: {\"reason\":\"cursor evicted\"}\n\n",
 		sseEvent(t, ActivityEvent{Cursor: "0000000000000009", TS: time.Now(), Kind: "input.queued"}),
@@ -145,7 +146,74 @@ func TestActivityConsumerRecordsResync(t *testing.T) {
 	go w.Run(ctx)
 
 	waitForNamed(t, "resync recorded", func() bool { return w.StreamHealth().Resyncs == 1 })
-	waitForNamed(t, "the event after the resync", func() bool { return len(w.Since("", 0)) == 1 })
+	waitForNamed(t, "the gap and the event after it", func() bool { return len(w.Since("", 0)) == 2 })
+
+	events := w.Since("", 0)
+	gap := events[0]
+	if gap.Kind != KindActivityGap {
+		t.Fatalf("the timeline must open with the gap, got %q", gap.Kind)
+	}
+	if gap.Detail != "cursor evicted" {
+		t.Fatalf("the gap must carry the reason it was told, got %q", gap.Detail)
+	}
+	if gap.From != nil || gap.To != nil {
+		t.Fatal("a gap is not a hop — it must never render as motion along an edge")
+	}
+	if events[1].Kind != "input.queued" {
+		t.Fatalf("the real event must follow the gap, got %q", events[1].Kind)
+	}
+}
+
+// The reader who matters is the one who opens the console AFTER something went
+// wrong. A gap reported only on the live stream is invisible to exactly that
+// person, so it rides on the stream HEALTH, which every view already reads.
+func TestGapIsReportedToAViewerThatArrivesLate(t *testing.T) {
+	srv := httptest.NewServer(&sseServer{seen: make(chan string, 4), frames: []string{
+		"event: resync\ndata: {\"reason\":\"cursor predates this manager process\"}\n\n",
+		sseEvent(t, ActivityEvent{Cursor: "0000000000000001", TS: time.Now(), Kind: "input.queued"}),
+	}})
+	defer srv.Close()
+
+	w := NewActivityWindow(NewManager(srv.URL, "t"), 100)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	waitForNamed(t, "the gap on the health", func() bool { return w.StreamHealth().LastGap != nil })
+
+	gap := w.StreamHealth().LastGap
+	if gap.Detail != "cursor predates this manager process" {
+		t.Fatalf("the health must carry WHY history is missing, got %q", gap.Detail)
+	}
+	if gap.TS.IsZero() {
+		t.Fatal("a gap needs its time — the banner says what history is unavailable BEFORE")
+	}
+	// Health is a snapshot, not a stream: asking again keeps reporting it.
+	if again := w.StreamHealth().LastGap; again == nil || !again.TS.Equal(gap.TS) {
+		t.Fatal("the gap must persist for the next viewer, not be consumed by the first")
+	}
+}
+
+// After a MANAGER restart the upstream sequence starts again at 1, so a
+// retained cursor is permanently "ahead": every reconnect resyncs, and the same
+// backlog is appended each time. Dropping it on resync is what stops that.
+func TestResyncDropsTheStaleCursor(t *testing.T) {
+	srv := httptest.NewServer(&sseServer{seen: make(chan string, 8), frames: []string{
+		sseEvent(t, ActivityEvent{Cursor: "0000000000009999", TS: time.Now(), Kind: "run.completed"}),
+		"event: resync\ndata: {\"reason\":\"cursor predates this manager process\"}\n\n",
+		sseEvent(t, ActivityEvent{Cursor: "0000000000000001", TS: time.Now(), Kind: "input.queued"}),
+	}})
+	defer srv.Close()
+
+	w := NewActivityWindow(NewManager(srv.URL, "t"), 100)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	waitForNamed(t, "the post-restart event", func() bool { return len(w.Since("", 0)) == 3 })
+	if got := w.Cursor(); got != "0000000000000001" {
+		t.Fatalf("the cursor must track the NEW process's sequence, got %q", got)
+	}
 }
 
 // Reconnect resumes from the last cursor rather than restarting — that is what

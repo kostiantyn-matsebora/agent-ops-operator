@@ -184,6 +184,35 @@ spec:
                   - type
                   type: object
                 type: array
+              cooldown:
+                description: |-
+                  Cooldown records fingerprint suppression for THIS source. The manager
+                  keeps an in-memory map as the hot path, but this is the record: it is
+                  loaded on first use per source after a restart, so a restart mid-incident
+                  no longer re-opens conversations for signals inside an active window.
+
+                  Bounded and pruned past the window. Only a FRESH fingerprint writes here —
+                  and a fresh fingerprint already causes a conversation create or patch — so
+                  the suppressed high-volume case costs nothing.
+                items:
+                  description: |-
+                    CooldownEntry records when a fingerprint was last admitted, so suppression
+                    survives a manager restart. MATERIALIZED state — written by ingest, never
+                    hand-set.
+                  properties:
+                    at:
+                      description: At is when the fingerprint was last admitted; the
+                        window runs from here.
+                      format: date-time
+                      type: string
+                    fingerprint:
+                      description: Fingerprint identifies the signal being suppressed.
+                      type: string
+                  required:
+                  - at
+                  - fingerprint
+                  type: object
+                type: array
               lastReceived:
                 format: date-time
                 type: string

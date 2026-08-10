@@ -105,9 +105,9 @@ metrics reads) to the release's one runtime SA, gated by `global.demo.enabled`.
 ## Install (current state)
 
 ```sh
-helm install agent-ops ./chart -n agent-ops --create-namespace \
-  --set persistence.enabled=true   # agent session continuity (PVC, RWX recommended;
-                                   # off = sessions are ephemeral per runtime pod)
+helm install agent-ops ./chart -n agent-ops --create-namespace
+# Agent sessions persist by default (an RWX PVC at /data/home). No default
+# StorageClass or no RWX provisioner? --set persistence.enabled=false.
 # CRDs install/upgrade with the release and carry helm.sh/resource-policy: keep —
 # uninstall deletes neither your CRs nor the session PVC.
 # Then your site config: profiles, Channel, SignalSource, pipelines (config/samples/)

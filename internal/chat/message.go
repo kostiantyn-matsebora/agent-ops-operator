@@ -1,5 +1,11 @@
 package chat
 
+import (
+	"strings"
+
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+)
+
 // THE MANAGER COMPOSES MEANING; ADAPTERS COMPOSE PRESENTATION.
 //
 // An outbound op carries a TYPED message, never a rendered string. The manager
@@ -159,6 +165,26 @@ func SignalMessage(pipeline, source, title, inputRef string, labels map[string]s
 // AnswerMessage builds agent output with its run outcome.
 func AnswerMessage(body, status string) Message {
 	return Message{Kind: MsgAnswer, Body: body, Status: status}
+}
+
+// RunReplyMessage builds what a completed run says on a bound thread, FROM THE
+// RECORDED RUN ALONE. That is the point: `/work/done` and the reconciler
+// backstop must compose the same message from the same facts, or a re-derived
+// reply would differ from the one it replaces.
+//
+// A run that produced nothing is a FAILURE to report, not an answer to render —
+// it goes out as a notice so an adapter styles it as one rather than presenting
+// an empty agent reply.
+func RunReplyMessage(run *agentopsv1alpha1.RunStatus) Message {
+	body := strings.TrimSpace(run.Result)
+	switch {
+	case run.Status != "succeeded":
+		return Warn("❌ run failed (" + run.Status + ")")
+	case body == "":
+		return Warn("❌ run finished without output")
+	default:
+		return AnswerMessage(body, run.Status)
+	}
 }
 
 // RelayMessage builds a user message mirrored onto a sibling channel.

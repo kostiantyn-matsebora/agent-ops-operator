@@ -290,6 +290,30 @@ spec:
                   runtimes sharing an SA share powers. Falls back to the operator's default
                   runtime SA when empty.
                 type: string
+              workspace:
+                description: |-
+                  Workspace volume for the repository checkout. Absent = ephemeral, which
+                  is always correct — persisting it preserves uncommitted work across a pod
+                  restart and skips the re-clone.
+                properties:
+                  emptyDir:
+                    description: |-
+                      EmptyDir (default when no pvcRef): the checkout dies with the pod, which
+                      costs a re-clone and nothing else.
+                    type: boolean
+                  pvcRef:
+                    description: |-
+                      PVCRef mounts an existing (RWX when conversations run concurrently) PVC,
+                      one subdirectory per conversation, at /data/workspace.
+                    properties:
+                      name:
+                        description: Name of the referenced object.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                type: object
             required:
             - image
             type: object

@@ -9,7 +9,7 @@ import { Empty, ErrorState, Loading } from '../App'
 import { Crumbs } from '../components/Crumbs'
 import { healthVariant, useCharts, useOverview } from '../api/hooks'
 import { PlainText } from '../components/Text'
-import type { Overview, Problem, ProblemSource } from '../api/types'
+import type { Overview, Problem, ProblemSource, StreamHealth } from '../api/types'
 
 const SOURCE_LABEL: Record<ProblemSource, { text: string; color: 'blue' | 'grey' | 'purple' }> = {
   // A condition a reconciler wrote and a cross-reference the console derived
@@ -239,6 +239,28 @@ export function OverviewPage() {
  *   LIVE       the manager's activity stream — exact per-item detail, bounded
  *   HISTORICAL a metrics backend — aggregates over long windows, optional
  */
+/**
+ * What a resync COST, stated where the count is.
+ *
+ * The count alone reads as a connection statistic. What it actually means is
+ * that events between two points were never seen and never will be — the ring
+ * is in-memory, so a manager restart erases it. Saying "history before HH:MM is
+ * unavailable" is the difference between a viewer that is stale and one that is
+ * wrong, because the alternative is a quiet stretch that reads as an idle system.
+ */
+function GapNotice({ lastGap }: { lastGap: StreamHealth['lastGap'] }) {
+  if (!lastGap) return null
+  return (
+    <div>
+      <small>
+        Activity history before {new Date(lastGap.ts).toLocaleTimeString()} is unavailable
+        {lastGap.detail ? ` — ${lastGap.detail}` : ''}. Conversations, topology and configuration
+        are unaffected: those are read from Kubernetes, not from this buffer.
+      </small>
+    </div>
+  )
+}
+
 function TelemetryCard({ stream }: { stream: Overview['stream'] }) {
   const charts = useCharts()
   const backend = charts.data?.available ?? false
@@ -256,6 +278,7 @@ function TelemetryCard({ stream }: { stream: Overview['stream'] }) {
               </Label>{' '}
               <small>{stream.events} event(s) held</small>
               {stream.resyncs > 0 && <small> · {stream.resyncs} resync(s)</small>}
+              <GapNotice lastGap={stream.lastGap} />
             </DescriptionListDescription>
           </DescriptionListGroup>
           <DescriptionListGroup>

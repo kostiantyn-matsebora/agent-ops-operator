@@ -301,6 +301,31 @@ func (r *Router) FanOutSend(ctx context.Context, conv *agentopsv1alpha1.Conversa
 	})
 }
 
+// FanOutRunReply posts ONE RUN'S ANSWER to every bound thread that has not
+// already received it. Unlike FanOutSend it is DERIVABLE: the op id is stable
+// per conversation×channel×run and delivery is recorded on the run, so both the
+// `/work/done` fast path and the reconciler backstop can call it and the second
+// caller is a no-op.
+//
+// A thread already marked delivered is skipped before the queue is even asked —
+// the queue's dedup window is bounded, and after a restart it is empty, so the
+// CR is the only thing that can tell an undelivered reply from a delivered one.
+func (r *Router) FanOutRunReply(ctx context.Context, conv *agentopsv1alpha1.Conversation, runID string, msg Message) {
+	var run *agentopsv1alpha1.RunStatus
+	for i := range conv.Status.Runs {
+		if conv.Status.Runs[i].RunID == runID {
+			run = &conv.Status.Runs[i]
+			break
+		}
+	}
+	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
+		if run != nil && run.DeliveredTo(ch.Name) {
+			return
+		}
+		r.Ops.EnqueueRunReply(ctx, ch, conv.Name, runID, tid, msg)
+	})
+}
+
 // relayToSiblings mirrors a user message onto the conversation's other
 // channels ("channels fully repeat the conversation"). The attribution stays
 // STRUCTURED — origin and sender as fields, not composed into the body — so
