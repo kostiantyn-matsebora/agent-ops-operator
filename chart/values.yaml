@@ -316,12 +316,47 @@ console:
     existingSecret: ""
     # Pin the token explicitly (otherwise generated once and reused).
     uiToken: ""
+  # Browser-facing exposure. OFF by default — see the TRUST BOUNDARY above
+  # before turning it on, because this is the moment the UI token starts
+  # crossing a network.
+  #
+  # ROOT OF A HOSTNAME ONLY. The SPA is built with Vite's default base and emits
+  # absolute /assets/… URLs, so serving it under a sub-path routes correctly and
+  # then renders a blank page. `path` exists and is validated rather than
+  # silently accepted: a non-root value FAILS the render.
   ingress:
     enabled: false
+    # REQUIRED when enabled — a hostname cannot be guessed.
     host: ""
+    # Additional hostnames serving the same console. Each gets its own rule, and
+    # each is covered by the derived certificate below.
+    extraHosts: []
     className: ""
     annotations: {}
-    tls: []
+    # Merged onto the Ingress alongside the chart's own labels.
+    labels: {}
+    path: /
+    # Prefix | ImplementationSpecific | Exact — all work at the root; ingress
+    # controllers differ on which they prefer.
+    pathType: Prefix
+    # TLS. Nothing here is required, and leaving it empty renders no `tls`
+    # section — legitimate when TLS terminates upstream at a load balancer or in
+    # a service mesh. The install notes will point out that the bearer token
+    # otherwise crosses the network in clear text.
+    #
+    # `tls` also still accepts the pre-5.x LIST form (raw Ingress tls entries).
+    # A list is rendered verbatim so existing values files and
+    # `helm upgrade --reuse-values` keep working.
+    tls:
+      # Existing certificate Secret. The tls[] hosts are DERIVED from `host` +
+      # `extraHosts`, so hostnames are never restated.
+      secretName: ""
+      # cert-manager issuer: adds the issuer annotation and derives secretName
+      # when it is unset.
+      clusterIssuer: ""
+      # Full raw override — a list of Ingress tls entries, used verbatim and
+      # taking precedence over the derived form.
+      existing: []
   resources: {}
 
 # Telegram — shipped as the embedded `telegram-bundle` subchart

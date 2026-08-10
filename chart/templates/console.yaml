@@ -232,6 +232,51 @@ subjects:
     name: {{ $sa }}
     namespace: {{ .Release.Namespace }}
 {{- if $c.ingress.enabled }}
+{{- $ing := $c.ingress }}
+{{- /*
+Sub-map keys are read with `default` for the reason the `write` block above uses
+`hasKey`: `helm upgrade --reuse-values` keeps the PREVIOUS release's `console:`
+map wholesale rather than merging this chart's defaults into it, so on an upgrade
+from a chart that predates these keys they simply are not there — and a template
+that assumed them would fail the upgrade instead of the thing being upgraded.
+*/ -}}
+{{- $path := $ing.path | default "/" }}
+{{- if ne $path "/" }}
+{{- fail (printf "console.ingress.path must be \"/\" (got %q). The console's SPA is embedded at build time with an absolute asset base, so it emits /assets/... URLs and can only be served from the ROOT of a hostname: a sub-path routes correctly and then renders a blank page. Give the console its own hostname (or a subdomain) instead." $path) }}
+{{- end }}
+{{- /* One list feeding both the rules and the certificate, so a rule host and a
+       certificate host cannot disagree. */ -}}
+{{- $hosts := prepend ($ing.extraHosts | default list) (required "console.ingress.host is required when console.ingress.enabled" $ing.host) }}
+{{- /*
+TLS accepts BOTH shapes. A LIST is the pre-6.x form and is rendered verbatim —
+again because --reuse-values carries it forward and an upgrade must not fail on
+it. A MAP derives its hosts from the list above.
+*/ -}}
+{{- $tls := $ing.tls }}
+{{- $tlsEntries := list }}
+{{- $issuer := "" }}
+{{- if kindIs "slice" $tls }}
+{{- $tlsEntries = $tls }}
+{{- else if $tls }}
+{{- $issuer = $tls.clusterIssuer | default "" }}
+{{- if $tls.existing }}
+{{- $tlsEntries = $tls.existing }}
+{{- else }}
+{{- $secret := $tls.secretName | default "" }}
+{{- if and (not $secret) $issuer }}
+{{- $secret = printf "agentops-console-%s-tls" $c.name }}
+{{- end }}
+{{- if $secret }}
+{{- $tlsEntries = list (dict "hosts" $hosts "secretName" $secret) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- /* merge into a fresh dict: `merge` mutates its destination, and mutating
+       .Values would leak into anything rendered after this. */ -}}
+{{- $ann := merge (dict) ($ing.annotations | default dict) }}
+{{- if $issuer }}
+{{- $_ := set $ann "cert-manager.io/cluster-issuer" $issuer }}
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -240,29 +285,34 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-console
-  {{- with $c.ingress.annotations }}
+    {{- with $ing.labels }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+  {{- with $ann }}
   annotations:
 {{ toYaml . | indent 4 }}
   {{- end }}
 spec:
-  {{- with $c.ingress.className }}
+  {{- with $ing.className }}
   ingressClassName: {{ . }}
   {{- end }}
-  {{- with $c.ingress.tls }}
+  {{- with $tlsEntries }}
   tls:
 {{ toYaml . | indent 4 }}
   {{- end }}
   rules:
-    - host: {{ required "console.ingress.host is required when console.ingress.enabled" $c.ingress.host | quote }}
+    {{- range $hosts }}
+    - host: {{ . | quote }}
       http:
         paths:
-          - path: /
-            pathType: Prefix
+          - path: {{ $path }}
+            pathType: {{ $ing.pathType | default "Prefix" }}
             backend:
               service:
                 # owned by the ChannelAdapter reconciler, not by this chart
                 name: {{ $sa }}
                 port:
                   number: {{ $c.port }}
+    {{- end }}
 {{- end }}
 {{- end }}

@@ -171,6 +171,151 @@ func TestConsoleRoleIsReadOnly(t *testing.T) {
 	}
 }
 
+// Console Ingress. Exposing the console is when its bearer token starts
+// crossing a network, so both the positive shapes and the two guards that
+// REFUSE a configuration are pinned here — a guard nobody tests is a guard that
+// silently stops firing.
+
+const (
+	ingressOn   = "--set=console.ingress.enabled=true"
+	ingressHost = "--set=console.ingress.host=console.example.com"
+)
+
+// consoleIngress returns the rendered Ingress document, failing if there is not
+// exactly one.
+func consoleIngress(t *testing.T, out string) string {
+	t.Helper()
+	var found []string
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: Ingress") {
+			found = append(found, doc)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("expected exactly 1 Ingress, found %d:\n%s", len(found), out)
+	}
+	return found[0]
+}
+
+// No Ingress unless asked for: reaching the console means a port-forward or a
+// deliberate decision.
+func TestConsoleIngressIsOptIn(t *testing.T) {
+	if strings.Contains(helmTemplate(t), "kind: Ingress") {
+		t.Fatal("default install must render no Ingress")
+	}
+	// ingress values set while the console itself is off must still render
+	// nothing — one value removes every console object, the Ingress included
+	out := helmTemplate(t, "--set=console.enabled=false", ingressOn, ingressHost)
+	if strings.Contains(out, "kind: Ingress") {
+		t.Fatal("console.enabled=false must render no Ingress even with ingress values set")
+	}
+}
+
+// The backend is the Service the ChannelAdapter reconciler owns. A chart that
+// shipped its own would make the console deployable only by this chart.
+func TestConsoleIngressTargetsTheReconcilersService(t *testing.T) {
+	doc := consoleIngress(t, helmTemplate(t, ingressOn, ingressHost))
+	for _, want := range []string{"name: agentops-adapter-console", "number: 8080"} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("Ingress backend missing %q:\n%s", want, doc)
+		}
+	}
+	// scoped to console documents: the chart ships a Service for the MANAGER,
+	// which is its own and unrelated
+	for _, d := range splitDocs(helmTemplate(t, ingressOn, ingressHost)) {
+		if !strings.Contains(d, "agentops-adapter-console") {
+			continue
+		}
+		// "kind: Service\n" with the newline: the console RoleBinding's subject
+		// is `kind: ServiceAccount`, which a prefix match would flag
+		for _, forbidden := range []string{"kind: Deployment", "kind: Service\n"} {
+			if strings.Contains(d, forbidden) {
+				t.Fatalf("chart must not ship %s for the console:\n%s", forbidden, d)
+			}
+		}
+	}
+}
+
+// extraHosts serve the same console: one rule each, all to the same backend.
+func TestConsoleIngressExtraHosts(t *testing.T) {
+	doc := consoleIngress(t, helmTemplate(t, ingressOn, ingressHost,
+		"--set=console.ingress.extraHosts={alt.example.com,legacy.example.com}"))
+	for _, want := range []string{"console.example.com", "alt.example.com", "legacy.example.com"} {
+		if !strings.Contains(doc, "host: \""+want+"\"") {
+			t.Fatalf("missing rule for %s:\n%s", want, doc)
+		}
+	}
+	if n := strings.Count(doc, "name: agentops-adapter-console"); n != 3 {
+		t.Fatalf("expected 3 rules to the same backend, found %d:\n%s", n, doc)
+	}
+}
+
+// TLS hosts are DERIVED from host+extraHosts, so a rule host and a certificate
+// host cannot drift apart.
+func TestConsoleIngressTLSDerivesItsHosts(t *testing.T) {
+	doc := consoleIngress(t, helmTemplate(t, ingressOn, ingressHost,
+		"--set=console.ingress.extraHosts={alt.example.com}",
+		"--set=console.ingress.tls.secretName=my-cert"))
+	if !strings.Contains(doc, "secretName: my-cert") {
+		t.Fatalf("TLS entry missing the named secret:\n%s", doc)
+	}
+	tls := doc[strings.Index(doc, "tls:"):strings.Index(doc, "rules:")]
+	for _, want := range []string{"console.example.com", "alt.example.com"} {
+		if !strings.Contains(tls, want) {
+			t.Fatalf("derived tls hosts missing %s:\n%s", want, tls)
+		}
+	}
+}
+
+// cert-manager in one value: the annotation plus a derived Secret name.
+func TestConsoleIngressClusterIssuer(t *testing.T) {
+	doc := consoleIngress(t, helmTemplate(t, ingressOn, ingressHost,
+		"--set=console.ingress.tls.clusterIssuer=letsencrypt"))
+	if !strings.Contains(doc, "cert-manager.io/cluster-issuer: letsencrypt") {
+		t.Fatalf("missing issuer annotation:\n%s", doc)
+	}
+	if !strings.Contains(doc, "secretName: agentops-console-console-tls") {
+		t.Fatalf("clusterIssuer must derive a secretName:\n%s", doc)
+	}
+}
+
+// The raw escape hatch wins over the derived form — it exists for the cases
+// derivation cannot express, so derivation must not fight it.
+func TestConsoleIngressExistingTLSWins(t *testing.T) {
+	doc := consoleIngress(t, helmTemplate(t, ingressOn, ingressHost,
+		"--set=console.ingress.tls.secretName=derived",
+		`--set-json=console.ingress.tls.existing=[{"secretName":"raw","hosts":["only.example.com"]}]`))
+	if !strings.Contains(doc, "secretName: raw") || strings.Contains(doc, "secretName: derived") {
+		t.Fatalf("tls.existing must render verbatim and suppress derivation:\n%s", doc)
+	}
+}
+
+// The pre-6.x LIST form still renders. `helm upgrade --reuse-values` carries a
+// previous release's console: map forward wholesale, so dropping this branch
+// would fail the upgrade rather than the thing being upgraded.
+func TestConsoleIngressLegacyTLSListStillRenders(t *testing.T) {
+	doc := consoleIngress(t, helmTemplate(t, ingressOn, ingressHost,
+		`--set-json=console.ingress.tls=[{"secretName":"legacy","hosts":["old.example.com"]}]`))
+	if !strings.Contains(doc, "secretName: legacy") || !strings.Contains(doc, "old.example.com") {
+		t.Fatalf("legacy list form of tls must render verbatim:\n%s", doc)
+	}
+}
+
+// Two configurations that must FAIL rather than render something broken.
+func TestConsoleIngressGuards(t *testing.T) {
+	// a hostname cannot be guessed
+	if msg := helmTemplateErr(t, ingressOn); !strings.Contains(msg, "console.ingress.host is required") {
+		t.Fatalf("missing host must fail naming the value, got:\n%s", msg)
+	}
+	// the SPA is embedded with an absolute asset base, so a sub-path routes
+	// correctly and then renders a blank page — refuse at render time rather
+	// than at first page load
+	msg := helmTemplateErr(t, ingressOn, ingressHost, "--set=console.ingress.path=/console")
+	if !strings.Contains(msg, `console.ingress.path must be "/"`) {
+		t.Fatalf("non-root path must fail with the root-hosting explanation, got:\n%s", msg)
+	}
+}
+
 // The scrape templates are DEFAULT-DISABLED: neither VMServiceScrape nor
 // ServiceMonitor is a built-in kind, and rendering one without its CRD fails the
 // whole install.
