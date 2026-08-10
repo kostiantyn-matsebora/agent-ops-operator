@@ -4,9 +4,9 @@ mcp.yaml (which point at it, or at an endpoint you already run).
 
 Everything here exists for one reason: the server authenticates to the API as
 its OWN ServiceAccount. That SA's RBAC is what MCP tools can reach — reviewable
-on its own, revocable on its own, and unrelated to the runtime SA that Bash +
-kubectl authenticate as. Two identities is the whole point; a chart that reused
-the runtime SA here would be a strictly worse kubectl.
+on its own, revocable on its own, and unrelated to the runtime SA the agent pod
+runs under. Two identities is the whole point; a chart that reused the runtime
+SA here would collapse them back into one.
 
 The Deployment/Service name is fixed (agentops-mcp-k8s) because mcp.yaml
 defaults an empty MCPConfig URL onto this Service.

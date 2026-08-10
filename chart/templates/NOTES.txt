@@ -159,3 +159,23 @@ telegram-bundle.surface.enabled=true (with surface.chatId and a credential) to
 have the bundle create the Channel and chat SignalSource, or apply your own.
 {{- end }}
 {{- end }}
+{{- $kb := index .Values "k8s-bundle" }}
+{{- if and $kb (or $kb.enabled .Values.global.demo.enabled) }}
+{{- $mcpOn := $kb.mcp.enabled }}
+{{- if and $kb.profile.enabled (not $mcpOn) }}
+
+ACTION NEEDED — the k8s-engineer agent cannot see the cluster. Runtime image
+0.5.0 dropped kubectl, so the mcp__kubernetes__* tools are the only path to the
+Kubernetes API, and k8s-bundle.mcp.enabled is false. The agent will install,
+start, and answer cluster questions by apologising. Either:
+  --set k8s-bundle.mcp.enabled=true                    (ships the server too)
+or point it at an MCP server you already run:
+  --set k8s-bundle.mcp.url=<your endpoint> --set k8s-bundle.mcpServers.enabled=false
+or, if you meant to keep a CLI, build a derived runtime image and set
+runtime.image — see docs/concepts.md#runtime-images-are-generic.
+{{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
+Note also that global.agentops.runtime.rbacMode=full currently grants
+cluster-admin to an identity nothing can exercise.
+{{- end }}
+{{- end }}
+{{- end }}

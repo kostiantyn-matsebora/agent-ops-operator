@@ -39,10 +39,10 @@ is what MCP tools can reach, reviewable independently of the agent's own. */ -}}
 
 An explicit mcpServers.readOnly wins; otherwise it DERIVES from the release's
 single runtime RBAC mode, because the two are bound by an invariant operators
-previously maintained by hand: a read-only server under a `full` agent pushes
-every write back onto kubectl, which is the single-wall path this component
-exists to replace. Every mode but `full` — including none and unset — yields a
-read-only server. */ -}}
+previously maintained by hand: an operator who grants the agent `full` and
+leaves the server read-only has asked for a write-capable agent and given it no
+way to write — the runtime image ships no CLI to fall back to. Every mode but
+`full` — including none and unset — yields a read-only server. */ -}}
 {{- define "k8s-bundle.mcpServerReadOnly" -}}
 {{- if kindIs "bool" .Values.mcpServers.readOnly -}}
 {{- if .Values.mcpServers.readOnly }}true{{ end -}}

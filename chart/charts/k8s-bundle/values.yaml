@@ -180,10 +180,14 @@ profile:
   systemPrompt: |
     You are a Kubernetes site reliability engineer operating a live cluster.
 
-    Reach for the mcp__kubernetes__* tools first: they return structured data
-    and cost far fewer tokens than shelling out. Use Bash with kubectl only for
-    what those tools cannot express — rollout restarts, patch semantics,
-    draining, or piping output through text processing.
+    The mcp__kubernetes__* tools are how you reach the cluster. The runtime
+    image ships no Kubernetes CLI, so there is no shell fallback: if a tool for
+    something is not in your allowlist, you cannot do it — say so plainly
+    instead of trying to improvise one.
+
+    Those tools return kubectl-shaped tables and cannot filter server-side, so
+    ask for the narrowest scope you can (a namespace rather than the cluster)
+    and read what comes back rather than fetching everything twice.
 
     When you are woken by a cluster event, investigate before you act: identify
     the failing object, read its recent events and logs, and state the likely
@@ -207,8 +211,9 @@ profile:
 # permission to call it). Name both from a `pipelines:` entry in the parent
 # chart — servers without the toolset give an agent tools it may not call.
 #
-# This does NOT replace kubectl. The agent keeps Bash + kubectl under the
-# runtime SA; MCP is the structured path, kubectl is the fallback.
+# REQUIRED for cluster access, not an optimisation. Runtime image 0.5.0 dropped
+# kubectl, so with this component off the agent cannot see the cluster at all,
+# whatever `global.agentops.runtime.rbacMode` grants.
 #
 # ON by default, together with `mcpServers` below: an MCPConfig needs an
 # endpoint, and the server component supplies one, so the two flip as a pair.
@@ -262,9 +267,7 @@ mcp:
         - "mcp__kubernetes__pods_top"
         - "mcp__kubernetes__resources_list"
         - "mcp__kubernetes__resources_get"
-        - "mcp__kubernetes__configuration_contexts_list"
         - "mcp__kubernetes__configuration_view"
-        - "mcp__kubernetes__targets_list"
     # Mutations. Only meaningful against a server that REGISTERS them — with
     # mcpServers.readOnly: true the tools below do not exist, and granting a
     # name that resolves to nothing is how allowlists rot.
@@ -292,8 +295,9 @@ mcp:
 # The point of this component is the SECOND IDENTITY. The server pod
 # authenticates to the API as its OWN ServiceAccount, not the runtime's, so the
 # agent's MCP reach is (what this SA may do) ∩ (what mcp.toolset.tools grants) —
-# two walls, each reviewable alone. The kubectl path has only one: the runtime
-# SA's RBAC, which Bash hands over whole.
+# two walls, each reviewable alone. Since runtime image 0.5.0 there is no
+# one-wall path left beside it: the image ships no cluster CLI, so this server
+# is how an agent reaches Kubernetes, and turning it off leaves one that cannot.
 mcpServers:
   enabled: true
   image:
@@ -309,14 +313,15 @@ mcpServers:
   #
   # null = DERIVE from global.agentops.runtime.rbacMode: read-only for every
   # mode but `full`. The two are bound by an invariant that used to be
-  # maintained by hand in every install's values — a read-only server under a
-  # `full` agent pushes every write back onto kubectl, the single-wall path this
-  # component exists to replace.
+  # maintained by hand in every install's values — an operator who grants the
+  # agent `full` and leaves the server read-only has asked for a write-capable
+  # agent and given it no way to write.
   #
   # An explicit value still wins, and that is the override worth knowing:
-  # `readOnly: true` under `rbacMode: full` keeps a write-capable agent with a
-  # read-only MCP path. Deriving is a default, not a merge — but it does mean
-  # widening the agent to `full` widens this server too unless you say so.
+  # `readOnly: true` under `rbacMode: full` makes this a strictly observing
+  # agent — the runtime SA's grants stay broad but nothing can exercise them.
+  # Deriving is a default, not a merge — but it does mean widening the agent to
+  # `full` widens this server too unless you say so.
   #
   # With the server in write mode the six mutating tools register and the
   # k8s-admin toolset renders, which routes must then bind deliberately.

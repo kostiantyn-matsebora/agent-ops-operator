@@ -37,8 +37,8 @@ spec:
 #
 # The endpoint is a Kubernetes MCP server run with --read-only; it authenticates
 # to the API as ITS OWN pod ServiceAccount, so what these tools can reach is that
-# SA's RBAC — reviewable independently of the runtime SA that Bash + kubectl
-# authenticate as.
+# SA's RBAC — reviewable independently of the runtime SA the agent pod runs
+# under. This is the ONLY cluster path: the runtime image ships no CLI.
 apiVersion: agentops.dev/v1alpha1
 kind: MCPConfig
 metadata:
