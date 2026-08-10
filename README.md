@@ -53,21 +53,22 @@ Eleven kinds, one line each; the full reference is [docs/concepts.md](docs/conce
 - **Conversation = topic = session.** Replying in a topic resumes the same agent
   session; a repeat alert signature within its window reuses the conversation.
 - **Per-conversation pods, on demand.** A runtime pod spawns when work arrives,
-  stays warm across turns, exits after its idle TTL (default 1 min), respawns with
-  full context. `kubectl logs agentops-conv-<name> -f` streams the transcript.
+  stays warm, exits after its idle TTL (default 1 min), respawns with full
+  context. `kubectl logs agentops-conv-<name> -f` streams the transcript.
 - **[Bounded concurrency, queued not dropped](docs/concepts.md#capacity-how-many-run-at-once).**
   At most `maxActiveConversations` (default 5) conversations hold a pod at once;
   over-cap work waits in phase `Pending` — nothing provisioned, not even the chat
-  topic — and is admitted oldest-first. `/close` in a thread deletes the CR,
-  archives every bound thread, and frees the slot.
-- **Least privilege by construction.** The manager holds no cluster powers
-  beyond its own CRDs + pod lifecycle in its namespace, and never touches agent
-  credentials (all `valueFrom`). Agent powers are the runtime SA's RBAC.
+  topic — admitted oldest-first. `/close` deletes the CR and frees the slot.
+- **Least privilege by construction.** The manager holds no cluster powers beyond
+  its own CRDs + pod lifecycle in its namespace, and never reads a Secret (all
+  `valueFrom`). Agent powers are the runtime SA's RBAC.
 - **See it, and answer it, on one screen.** The optional
   [console](docs/console.md) draws the wiring as a graph coloured by the
   conditions the reconcilers already write, plus live runs — and is itself a
   channel, so a pipeline listing it lets you reply from the run you are watching.
-  Read-only SA; its token sees all that SA can read.
+- **Threads open with the event**, so a thread reads event → work → answer and a
+  run that hangs still says what happened. The manager sends MEANING; each
+  adapter renders its own surface (escaping, length limits, topic names).
 - **Structured chat.** Built-in lane prompts embed a six-template message format
   spec — no stream-of-consciousness walls. Custom prompts set their own.
 
@@ -92,15 +93,14 @@ kubectl -n agent-ops logs -f agentops-conv-<name>       # live agent transcript
 kubectl -n agent-ops get conversation <name> -o jsonpath='{.status.runs[0].result}'
 ```
 
-Demo mode is exactly **the k8s bundle with its defaults** plus the read-only
-RBAC it resolves — nothing demo-specific exists any more. It binds only `view`
-(+ node/namespace/metrics reads) to the release's one runtime SA: a pure
-advisor, gated by `global.demo.enabled` and removable by flipping it off.
+Demo mode is exactly **the k8s bundle with its defaults** plus the read-only RBAC
+it resolves — nothing demo-specific exists. It binds only `view` (+ node/namespace/
+metrics reads) to the release's one runtime SA, gated by `global.demo.enabled`.
 
 > **It also watches your cluster.** Unlike the pre-2.0 demo, this ingests
 > `Warning` events and answers them itself (LLM credits on a noisy cluster;
-> cooldown, grouping and the cap bound it). `--set
-> k8s-bundle.eventsAdapter.enabled=false` restores ask-only.
+> cooldown, grouping and the cap bound it).
+> `--set k8s-bundle.eventsAdapter.enabled=false` restores ask-only.
 
 ## Install (current state)
 

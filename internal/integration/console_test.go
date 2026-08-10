@@ -146,7 +146,7 @@ func TestConsoleWiredPipelineBindsAConsoleThread(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "console-conv"}}); err != nil {
 		t.Fatal(err)
 	}
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=console-ui&wait=0", nil, testMasterToken)
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=console-ui&contract=2&wait=0", nil, testMasterToken)
 	if rec.Code != 200 {
 		t.Fatalf("ensure-topic op expected for the console: %d", rec.Code)
 	}

@@ -288,7 +288,7 @@ func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.
 		reason := "source not claimed by a Ready pipeline (Wired=False) — signals dropped"
 		s.emitDropped(source, signals, activity.CodeUnclaimed, reason)
 		s.tellOriginatingSurfaces(ctx, signals, fmt.Sprintf(
-			"⚠️ Nothing here is wired to answer. No Ready Pipeline claims the chat source <b>%s</b>, "+
+			"⚠️ Nothing here is wired to answer. No Ready Pipeline claims the chat source **%s**, "+
 				"so this message was dropped. Add it to a Pipeline's sources to give it an agent.", source.Name))
 		return 0, 0, reason, nil
 	}
@@ -344,6 +344,8 @@ func (s *Server) chatChannel(ctx context.Context, sig NormalizedSignal) *agentop
 // tellOriginatingSurfaces posts one message to each distinct chat surface a
 // batch came from, so a drop is visible where the user is looking.
 func (s *Server) tellOriginatingSurfaces(ctx context.Context, signals []NormalizedSignal, text string) {
+	// A drop is something the reader has to act on, so it goes out as a WARNING
+	// notice rather than plain text — the adapter decides how loud that looks.
 	told := map[string]bool{}
 	for _, sig := range signals {
 		name := sig.Labels[LabelChatChannel]
@@ -352,7 +354,7 @@ func (s *Server) tellOriginatingSurfaces(ctx context.Context, signals []Normaliz
 		}
 		told[name] = true
 		if ch := s.chatChannel(ctx, sig); ch != nil {
-			s.Ops.EnqueueSend(ctx, ch, nil, text)
+			s.Ops.EnqueueMessage(ctx, ch, nil, chat.Warn(text))
 		}
 	}
 }
@@ -408,16 +410,14 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	// input lane: base kind for new work, recurrence once a session exists
 	kind := group[0].Kind
 	inputType := agentopsv1alpha1.InputAlert
-	jobName := ""
 	switch kind {
 	case KindJob:
 		inputType = agentopsv1alpha1.InputJob
-		jobName = source.Name
 	case KindChat, KindTask:
 		// Task lane, and deliberately NOT the job lane: job carries
-		// recurrence-on-session and a jobName, which would make a second
-		// question — or a second posted task — resume the first one's session
-		// as news about a standing job.
+		// recurrence-on-session, which would make a second question — or a
+		// second posted task — resume the first one's session as news about a
+		// standing job.
 		inputType = agentopsv1alpha1.InputTask
 	}
 	if conv == nil {
@@ -496,6 +496,9 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		ConversationRef: agentopsv1alpha1.ObjectRef{Name: conv.Name},
 		Type:            inputType,
 		Payload:         combine(group),
+		// The first signal's labels represent the group: they all share a
+		// signature, so they agree on everything grouping keyed off.
+		Labels: group[0].Labels,
 	}
 	if err := s.Client.Create(ctx, ci); err != nil {
 		return "", false, err
@@ -512,8 +515,14 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		fresh.Spec.Inputs = append(fresh.Spec.Inputs, agentopsv1alpha1.InputItem{
 			ID:         inputID,
 			Type:       inputType,
-			JobName:    jobName,
 			PayloadRef: &agentopsv1alpha1.ObjectRef{Name: ci.Name},
+			// Provenance for EVERY kind, not just jobs: the source is what a card
+			// names, and the signal kind is what keeps a chat message from being
+			// posted back at the person who typed it.
+			Origin: &agentopsv1alpha1.InputOrigin{
+				Kind: agentopsv1alpha1.OriginSignal, Name: source.Name,
+				SignalKind: orDefault(kind, KindAlert),
+			},
 			ReceivedAt: metav1.Now(),
 		})
 		if err := s.Client.Patch(ctx, &fresh, patch); err != nil {

@@ -132,7 +132,7 @@ func TestEnsureTopicIsDeterministicFromConversationUID(t *testing.T) {
 	conv.Metadata.UID = "7f3c-uid"
 	a, _, _ := consoleUnderTest(t, f, conv)
 
-	f.queue(Op{ID: "topic:task-abc:console", Channel: "console", Conversation: "task-abc", Kind: "ensure-topic", Title: "t"})
+	f.queue(Op{ID: "topic:task-abc:console", Channel: "console", Conversation: "task-abc", Kind: "ensure-topic", Topic: &TopicDescriptor{Conversation: "task-abc", Title: "t"}})
 	runUntil(t, a, func() bool { return len(f.completions()) > 0 })
 
 	got := f.completions()[0]
@@ -150,7 +150,7 @@ func TestRedeliveredSendRendersOnce(t *testing.T) {
 	f := newFakeManager(t, ChannelInfo{Name: "console"})
 	a, tr, _ := consoleUnderTest(t, f)
 	thread := "console-uid-1"
-	send := Op{ID: "send:42", Channel: "console", Kind: "send", ThreadID: &thread, Text: "done"}
+	send := Op{ID: "send:42", Channel: "console", Kind: "send", ThreadID: &thread, Message: &OpMessage{Kind: "answer", Body: "done"}}
 	f.queue(send, send) // at-least-once: the manager may redeliver
 
 	runUntil(t, a, func() bool { return len(f.completions()) == 2 })
@@ -164,14 +164,19 @@ func TestRelayIsAttributedAndAcksAreDistinct(t *testing.T) {
 	a, tr, _ := consoleUnderTest(t, f)
 	thread := "console-uid-1"
 	f.queue(
-		Op{ID: "s1", Channel: "console", Kind: "send", ThreadID: &thread, Text: "💬 <b>telegram/kim</b>: look at this"},
-		Op{ID: "s2", Channel: "console", Kind: "send", ThreadID: &thread, Text: "🔧 On it…"},
-		Op{ID: "s3", Channel: "console", Kind: "send", ThreadID: &thread, Text: "restarted the deployment"},
+		Op{ID: "s1", Channel: "console", Kind: "send", ThreadID: &thread,
+			Message: &OpMessage{Kind: "relay", Origin: "telegram", Sender: "kim", Body: "look at this"}},
+		Op{ID: "s2", Channel: "console", Kind: "send", ThreadID: &thread, Message: &OpMessage{Kind: "notice", Body: "🔧 On it…"}},
+		Op{ID: "s3", Channel: "console", Kind: "send", ThreadID: &thread, Message: &OpMessage{Kind: "answer", Body: "restarted the deployment"}},
 	)
 	runUntil(t, a, func() bool { return len(tr.Thread(thread)) == 3 })
 
 	msgs := tr.Thread(thread)
-	if msgs[0].Kind != MsgRelay || msgs[0].Sender != "telegram/kim" || msgs[0].Text != "look at this" {
+	// The kind and the sender are FIELD READS now, not a prefix match against
+	// Telegram HTML. The text keeps the attribution too, because the console
+	// renders one string per bubble and the SPA shows it verbatim.
+	if msgs[0].Kind != MsgRelay || msgs[0].Sender != "telegram/kim" ||
+		!strings.Contains(msgs[0].Text, "look at this") {
 		t.Fatalf("relay not attributed: %+v", msgs[0])
 	}
 	if msgs[1].Kind != MsgAck {
@@ -193,7 +198,7 @@ func TestNoRelayLoop(t *testing.T) {
 
 	// the manager fans a console user's own message back as a relay
 	f.queue(Op{ID: "s1", Channel: "console", Kind: "send", ThreadID: &thread,
-		Text: "💬 <b>console/kim</b>: restart it"})
+		Message: &OpMessage{Kind: "relay", Origin: "console", Sender: "kim", Body: "restart it"}})
 	runUntil(t, a, func() bool { return len(tr.Thread(thread)) == 1 })
 
 	if got := f.inbounds(); len(got) != 0 {
@@ -223,7 +228,7 @@ func TestSendMarksPendingThenConfirms(t *testing.T) {
 
 	// the manager's ack confirms it
 	thread := "console-uid-1"
-	f.queue(Op{ID: "ack1", Channel: "console", Kind: "send", ThreadID: &thread, Text: "🔧 On it…"})
+	f.queue(Op{ID: "ack1", Channel: "console", Kind: "send", ThreadID: &thread, Message: &OpMessage{Kind: "notice", Body: "🔧 On it…"}})
 	runUntil(t, a, func() bool { return len(tr.Thread(thread)) == 2 })
 	if tr.Thread(thread)[0].Pending {
 		t.Fatal("ack must confirm the pending message")
@@ -262,7 +267,7 @@ func TestUITokenComesFromProjectedChannelCredentials(t *testing.T) {
 func TestChannelNoticeWithoutThreadIsStillVisible(t *testing.T) {
 	f := newFakeManager(t, ChannelInfo{Name: "console"})
 	a, tr, _ := consoleUnderTest(t, f)
-	f.queue(Op{ID: "n1", Channel: "console", Kind: "send", Text: "🤖 <b>Agents</b>: /ops"})
+	f.queue(Op{ID: "n1", Channel: "console", Kind: "send", Message: &OpMessage{Kind: "notice", Body: "🤖 **Agents**: /ops"}})
 	runUntil(t, a, func() bool { return len(tr.Thread("channel:console")) == 1 })
 	if msg := tr.Thread("channel:console")[0]; !strings.Contains(msg.Text, "Agents") {
 		t.Fatalf("channel-level notice lost: %+v", msg)

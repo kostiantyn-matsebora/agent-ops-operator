@@ -27,15 +27,69 @@ func NewManager(baseURL, token string) *Manager {
 	return &Manager{BaseURL: baseURL, Token: token, HTTP: &http.Client{Timeout: 40 * time.Second}}
 }
 
+// ContractVersion is the outbound message contract this adapter speaks. The
+// manager refuses the ops long-poll without it: version 1 carried rendered
+// `text`, and an adapter still reading that field would post empty messages
+// forever rather than fail. Bump only alongside the renderer.
+const ContractVersion = "2"
+
+// MessageKind names what the manager is saying.
+type MessageKind string
+
+const (
+	MsgSignal MessageKind = "signal"
+	MsgAnswer MessageKind = "answer"
+	MsgRelay  MessageKind = "relay"
+	MsgNotice MessageKind = "notice"
+)
+
+// Message is one SEMANTIC outbound message. The manager composes meaning; this
+// adapter composes presentation (see render.go). Prose fields are markdown in
+// the contract's subset: **bold**, *italic*, `code`, ```fenced```, [text](url).
+type Message struct {
+	Kind MessageKind `json:"kind"`
+	Body string      `json:"body,omitempty"`
+
+	// signal
+	Pipeline string            `json:"pipeline,omitempty"` // may be empty: inferred, blank when ambiguous
+	Source   string            `json:"source,omitempty"`
+	Title    string            `json:"title,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
+	InputRef string            `json:"inputRef,omitempty"`
+
+	// relay
+	Origin string `json:"origin,omitempty"`
+	Sender string `json:"sender,omitempty"`
+
+	// answer
+	Status string `json:"status,omitempty"`
+
+	// notice
+	Level string `json:"level,omitempty"`
+}
+
+// TopicDescriptor describes the thread to create. THIS adapter names it, within
+// Telegram's own 128-character limit — the manager sends facts, not a title it
+// already cut to a length it guessed at.
+type TopicDescriptor struct {
+	Conversation string            `json:"conversation"`
+	Pipeline     string            `json:"pipeline,omitempty"`
+	Source       string            `json:"source,omitempty"`
+	Title        string            `json:"title,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Kind         string            `json:"kind,omitempty"`
+}
+
 // Op mirrors the manager's outbound operation shape.
 type Op struct {
 	ID           string  `json:"id"`
 	Channel      string  `json:"channel"`
 	Conversation string  `json:"conversation,omitempty"`
 	Kind         string  `json:"kind"` // "ensure-topic" | "send" | "close-topic"
-	Title        string  `json:"title,omitempty"`
 	ThreadID     *string `json:"threadId,omitempty"`
-	Text         string  `json:"text,omitempty"`
+
+	Topic   *TopicDescriptor `json:"topic,omitempty"`   // ensure-topic
+	Message *Message         `json:"message,omitempty"` // send
 }
 
 // ChannelInfo is one channel served by this adapter, with its opaque config.
@@ -84,7 +138,8 @@ func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int
 func (m *Manager) NextOp(ctx context.Context, channelType string, waitSeconds int) (*Op, error) {
 	var op Op
 	code, err := m.do(ctx, "GET",
-		fmt.Sprintf("/channel/ops?adapter=%s&wait=%d", url.QueryEscape(channelType), waitSeconds), nil, &op)
+		fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
+			url.QueryEscape(channelType), ContractVersion, waitSeconds), nil, &op)
 	if err != nil {
 		return nil, err
 	}

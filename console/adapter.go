@@ -228,6 +228,9 @@ func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 	case "ensure-topic":
 		return a.threadID(op.Conversation), ""
 	case "send":
+		if op.Message == nil {
+			return "", "send without a message"
+		}
 		thread := ""
 		if op.ThreadID != nil {
 			thread = *op.ThreadID
@@ -237,7 +240,7 @@ func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			// park it on the channel's own pseudo-thread so it is still visible
 			thread = "channel:" + op.Channel
 		}
-		a.transcripts.AppendOp(op.ID, thread, op.Text)
+		a.transcripts.AppendOp(op.ID, thread, op.Message)
 		return "", ""
 	case "close-topic":
 		// The Conversation is being deleted and its CR is about to vanish from

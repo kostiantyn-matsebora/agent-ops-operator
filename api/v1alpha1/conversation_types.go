@@ -16,6 +16,45 @@ const (
 	InputJob        InputType = "job"
 )
 
+// OriginKind says HOW an input reached the manager. Two values, and there are
+// only two doors: a signal through a claimed SignalSource, or a channel the user
+// is already looking at. (`POST /task` was a third once; it is gone.)
+// +kubebuilder:validation:Enum=signal;channel
+type OriginKind string
+
+const (
+	// OriginSignal: the input arrived through /signal/inbound on a
+	// SignalSource. Name is that source.
+	OriginSignal OriginKind = "signal"
+	// OriginChannel: the input was typed into a channel — a command or a thread
+	// reply. Name is that channel.
+	OriginChannel OriginKind = "channel"
+)
+
+// InputOrigin records where one input came from. MATERIALIZED state, written at
+// creation and never set by hand.
+//
+// It exists because provenance was previously an accident: `JobName` recorded
+// the source for `kind: job` and dropped it for every other kind, so a
+// conversation could not say what woke it. It replaces that field.
+//
+// The conversation's PIPELINE is deliberately NOT here. Conversations carry no
+// pipelineRef; the route is inferred from the materialized bindings
+// (chat.PipelineForConversation) and left blank when ambiguous. What is stored
+// is only what cannot be derived afterwards.
+type InputOrigin struct {
+	Kind OriginKind `json:"kind"`
+	// Name is the SignalSource or Channel the input came from.
+	// +optional
+	Name string `json:"name,omitempty"`
+	// SignalKind is the originating signal's lane (alert | job | task | chat)
+	// for `signal` origins, empty otherwise. Carried because CHAT is the one
+	// signal a bound channel must NOT be shown: the person typed it, so posting
+	// it back is an echo — and origin kind alone cannot tell it from an alert.
+	// +optional
+	SignalKind string `json:"signalKind,omitempty"`
+}
+
 // InputItem is one queued work unit. Payload is inline OR referenced via
 // PayloadRef (a ConversationInput object) for large payloads.
 type InputItem struct {
@@ -29,11 +68,30 @@ type InputItem struct {
 	// Agent override for task inputs (`/<profile>:<agent>` addressing).
 	// +optional
 	Agent string `json:"agent,omitempty"`
-	// JobName for job inputs.
+	// Origin is where this input came from. Absent on inputs created before
+	// provenance existed — and an absent origin means NOT POSTED to bound
+	// channels, so upgrading cannot fill open threads with history.
 	// +optional
-	JobName string `json:"jobName,omitempty"`
+	Origin *InputOrigin `json:"origin,omitempty"`
 	// +optional
 	ReceivedAt metav1.Time `json:"receivedAt,omitempty"`
+}
+
+// PostToChannels reports whether this input should be posted to the
+// conversation's bound channels as a card.
+//
+// The rule is "post what a human has not already seen", read off the recorded
+// origin rather than by enumerating input types — so a new input type inherits
+// correct behavior instead of defaulting to whichever branch someone forgot:
+//
+//	signal  -> yes, except kind: chat (the person typed it; siblings get a relay)
+//	channel -> no  (the originating surface already showed it)
+//	absent  -> no  (predates provenance; the event is long delivered)
+func (i *InputItem) PostToChannels() bool {
+	if i.Origin == nil || i.Origin.Kind != OriginSignal {
+		return false
+	}
+	return i.Origin.SignalKind != "chat"
 }
 
 // ConversationSpec pins a conversation to its chat surfaces and an agent

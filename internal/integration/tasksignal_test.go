@@ -114,8 +114,9 @@ func TestJobTicksWithDistinctFingerprintsStillFold(t *testing.T) {
 		t.Fatalf("tick1 must open one conversation, got %d", len(convs))
 	}
 	conv := convs[0]
-	if conv.Spec.Inputs[0].Type != agentopsv1alpha1.InputJob || conv.Spec.Inputs[0].JobName != "src-cronfold" {
-		t.Fatalf("a job carries the source as its job name: %+v", conv.Spec.Inputs[0])
+	if in := conv.Spec.Inputs[0]; in.Type != agentopsv1alpha1.InputJob ||
+		in.Origin == nil || in.Origin.Name != "src-cronfold" || in.Origin.SignalKind != "job" {
+		t.Fatalf("a job records its source as provenance: %+v", conv.Spec.Inputs[0])
 	}
 
 	// a session exists once the agent has run: the next tick resumes it
@@ -168,8 +169,12 @@ func TestTaskSignalsOpenOneConversationEach(t *testing.T) {
 		if in.Type != agentopsv1alpha1.InputTask {
 			t.Fatalf("%s: task lane expected, got %q", c.Name, in.Type)
 		}
-		if in.JobName != "" {
-			t.Fatalf("%s: a one-off ask carries no job name, got %q", c.Name, in.JobName)
+		if in.Origin == nil || in.Origin.Kind != agentopsv1alpha1.OriginSignal ||
+			in.Origin.SignalKind != "task" {
+			t.Fatalf("%s: a posted task records a signal origin of kind task: %+v", c.Name, in.Origin)
+		}
+		if !in.PostToChannels() {
+			t.Fatalf("%s: a posted task is news to the channel and must be carded", c.Name)
 		}
 	}
 }

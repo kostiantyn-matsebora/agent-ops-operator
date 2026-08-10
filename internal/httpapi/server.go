@@ -463,12 +463,17 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// no surface can mistake silence for success.
 	if len(conv.Spec.ChannelRefs) > 0 && s.Router != nil {
 		text := strings.TrimSpace(result)
-		if d.Status != "succeeded" {
-			text = "❌ run failed (" + d.Status + ")"
-		} else if text == "" {
-			text = "❌ run finished without output"
+		// A run that produced nothing is a FAILURE to report, not an answer to
+		// render: it goes out as a notice so an adapter styles it as one rather
+		// than presenting an empty agent reply.
+		switch {
+		case d.Status != "succeeded":
+			s.Router.FanOutSend(ctx, &conv, chat.Warn("❌ run failed ("+d.Status+")"))
+		case text == "":
+			s.Router.FanOutSend(ctx, &conv, chat.Warn("❌ run finished without output"))
+		default:
+			s.Router.FanOutSend(ctx, &conv, chat.AnswerMessage(text, d.Status))
 		}
-		s.Router.FanOutSend(ctx, &conv, text)
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -534,6 +539,31 @@ func adapterParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return "", false
 }
 
+// contractOK enforces the outbound message contract handshake on the ops
+// long-poll: an adapter declares `contract=<version>` and is refused otherwise.
+//
+// Without it the failure is silent and baffling. An adapter built against the
+// string-valued contract reads `op.text`, finds nothing, and posts empty
+// messages forever — healthy-looking, delivering nothing. So the check is at the
+// door, and the 400 names the version to build against, exactly as the retired
+// `?type=` parameter names its replacement.
+func contractOK(w http.ResponseWriter, r *http.Request) bool {
+	got := r.URL.Query().Get("contract")
+	if got == chat.ContractVersion {
+		return true
+	}
+	detail := "this adapter declared no outbound contract version"
+	if got != "" {
+		detail = fmt.Sprintf("this adapter speaks contract %q", got)
+	}
+	writeJSON(w, 400, map[string]string{"error": fmt.Sprintf(
+		"%s; the manager serves %q. Ops carry a TYPED message (op.message{kind,body,…}) and a topic "+
+			"descriptor (op.topic{…}), never rendered text — an adapter reading op.text would post empty "+
+			"messages. Render the message kinds and request /channel/ops?adapter=…&contract=%s",
+		detail, chat.ContractVersion, chat.ContractVersion)})
+	return false
+}
+
 // scopeAllows enforces the per-adapter type scope; master-token requests
 // (empty scope) pass everything.
 func scopeAllows(r *http.Request, channelType string) bool {
@@ -552,6 +582,9 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	}
 	if !scopeAllows(r, channelType) {
 		forbidScope(w)
+		return
+	}
+	if !contractOK(w, r) {
 		return
 	}
 	wait, _ := strconv.Atoi(r.URL.Query().Get("wait"))

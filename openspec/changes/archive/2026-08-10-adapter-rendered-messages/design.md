@@ -54,11 +54,14 @@ and named by the adapter from its own template.
 ### D1. Four message kinds, typed fields, markdown prose
 
 ```
-signal   {title, labels{}, body, sourceRef}
+signal   {pipeline, source, title, labels{}, body, inputRef}
 answer   {body, status}
 relay    {origin, sender, body}
 notice   {level, body}
 ```
+
+`pipeline` is filled from inference (D1b) and may be empty; `source` comes from
+the input's stored origin.
 
 The split between typed and free-text is the whole design. `labels` stays a map
 so Telegram can render `k=v` inline while a web chat renders a table and a
@@ -75,36 +78,53 @@ Rejected: keeping `text` alongside the structured fields as a fallback. It
 would leave the manager rendering, which is the thing being removed, and the
 fallback would rot into the real path.
 
-### D1b. Provenance is recorded on the CR, not reconstructed at render time
+### D1b. The SOURCE is stored per input; the PIPELINE is inferred
 
-A card naming its pipeline and source requires the conversation to know both,
-and today it knows neither: there is no `pipelineRef` in `api/v1alpha1`, and the
-source name is captured only as a side effect — `signals.go:351` writes
-`InputItem.JobName = source.Name` for `kind: job` and drops it for every other
-kind.
+A card naming its pipeline and source needs both at render time, and they are
+not symmetric.
 
-Reconstructing it at render time is not available: the card is enqueued when the
-thread binding lands (D4), inside the conversation reconciler, far from the
-`routeSignalGroup` call that had the `Pipeline` and `SignalSource` objects in
-hand. So provenance is stored:
+**The source is stored.** It is captured today only as a side effect —
+`signals.go` writes `InputItem.JobName = source.Name` for `kind: job` and drops
+it for every other kind — and it is genuinely underivable afterwards: nothing on
+the Conversation records which source fired which input. So `InputItem.Origin`
+(`{kind: signal|channel, name}`) replaces `JobName`. Per-input rather than
+per-conversation, because a conversation accumulates inputs over time and a
+recurrence should be able to say which source fired it even if a later input
+arrived another way.
 
-- `ConversationSpec.PipelineRef` — the originating route, snapshotted like
-  `profileRef` and `channelRefs`. Materialized state, never hand-set; a
-  conversation with no originating pipeline carries none.
-- `InputItem.Origin` — `{kind: signal|api|channel, name}` per input, replacing
-  `JobName`. Per-input rather than per-conversation because a conversation
-  accumulates inputs over time and a recurrence should be able to say which
-  source fired it, even if a later input arrived another way.
+**The pipeline is inferred.** `Conversation` carries no `pipelineRef`, and this
+change does not add one:
 
-Two things fall out beyond the card. The posting rule (D5) becomes a property of
-the input — `origin.kind == channel` means don't post — rather than a type
-lookup that has to be extended every time an input type is added. And
-"why did this agent answer?" becomes answerable from the CR alone, which it is
-not today.
+- `mcp-toolset-model` states it as a requirement — "materialized
+  per-conversation state, following the profileRef/channelRefs pattern; no
+  `pipelineRef` is introduced" — and `CLAUDE.md` repeats it as binding
+  terminology. `pipeline-addressed-conversations` landed without adding it.
+- `chat.PipelineForConversation` (`internal/chat/pipelines.go:78`) already
+  derives the pipeline from the materialized bindings, and `server.go` uses it
+  to attribute every dispatch and completion event. It returns blank when the
+  wiring is ambiguous, deliberately: `docs/console.md` documents attribution as
+  INFERRED and "left blank when ambiguous — never guessed".
 
-Cost: a CRD change in a change that would otherwise touch no API. Accepted
-because the alternative is threading pipeline and source through the reconciler
-purely for display, which stores the same information in a worse place.
+So the renderer takes the pipeline from that helper and omits it when it comes
+back empty. A card that cannot name its route says less; it never says something
+false. This is the same posture `/status` and the console already take, so a
+blank pipeline on a card is consistent with the rest of the product rather than
+a new kind of gap.
+
+The original argument for storing it — "reconstructing at render time is not
+available, because the card is enqueued in the reconciler far from the
+`routeSignalGroup` call that held the objects" — mistook *proximity* for
+*availability*. The helper needs only the Conversation and a client, both of
+which the reconciler has.
+
+Two things still fall out of `Origin`. The posting rule (D5) becomes a property
+of the input rather than a type lookup extended every time an input type is
+added. And "which source fired this input?" becomes answerable from the CR
+alone, which it is not today.
+
+Cost: one optional CRD field where the earlier draft added two. Existing inputs
+carry no origin; D5 states what that means rather than leaving it to a nil
+check.
 
 ### D2. `ensure-topic` carries a descriptor; the adapter names the topic
 
@@ -150,23 +170,35 @@ re-enqueue dedups against both the pending map and the `recent` window, exactly
 as `topic:<conv>:<channel>` already does. Without this, every reconcile of a
 conversation would repost its alert.
 
-### D5. "Post what the channel did not originate" is the posting rule
+### D5. "Post what a human has not already seen" is the posting rule
 
 Not "post signals" — the general rule is shorter and answers more:
 
-| `origin.kind` | input types | posted | why |
+| `origin.kind` | reaches the manager as | posted | why |
 |---|---|---|---|
-| `signal` | `alert`, `job`, `recurrence` | yes | the event nobody in chat has seen |
-| `api` | `task` via `POST /task` | yes | otherwise a topic appears in chat with no stated cause |
-| `channel` | `chat`, `reply` | no | the originating surface already showed it; siblings get it via `relayToSiblings` |
+| `signal` | `alert`, `job`, `task` signals → `alert`/`job`/`task`/`recurrence` inputs | yes | the event nobody in chat has seen |
+| `signal`, but `kind: chat` | a chat signal from a chat source | **no** | the surface the person typed on already showed it; siblings get it via `relayToSiblings` |
+| `channel` | a `/<pipeline>` command, a thread reply | no | same reason, one path earlier |
+| absent (pre-upgrade inputs) | — | no | an input that predates provenance describes an event already delivered or long past; posting it on the next reconcile would spam every open thread at upgrade |
 
-With D1b the rule reads off `origin.kind` rather than enumerating input types,
-so a new input type inherits correct behavior instead of silently defaulting to
-"posted" or "not posted" depending on which branch someone forgot.
+With D1b the rule reads mostly off `origin.kind` rather than enumerating input
+types, so a new input type inherits correct behavior instead of silently
+defaulting to "posted" or "not posted" depending on which branch someone forgot.
+
+**Chat is the one exception, and it is a `signal` origin.** Since
+`chat-signal-origination` landed, a general-surface message arrives through a
+`SignalSource` exactly like an alert, so origin kind alone would post a card
+echoing what the user just typed back at them. The signal's own `kind: chat` is
+what excludes it. That is one enumerated case, stated here and carried onto the
+input, rather than the type-lookup this rule exists to avoid.
 
 The rule is evaluated per input, not per conversation, so a recurrence on a
 week-old conversation posts into the existing thread — which is exactly the
 behavior that makes a thread an incident log.
+
+`POST /task` had its own origin kind (`api`) in an earlier draft. `task-is-a-signal`
+removed that endpoint, so a programmatic task is a `kind: task` signal through a
+claimed source: `signal` origin, posted, no special case. The enum is two-valued.
 
 ### D6. Adapters declare the contract version; old ones fail loudly
 
@@ -208,14 +240,15 @@ get renderers too. Exempting them would put presentation logic back inside
   as a task; getting this wrong reintroduces the leak in a new dialect.
 - [Duplicate cards if the stable id is wrong] → D4's id is pinned by a test that
   reconciles a conversation repeatedly and asserts one card.
-- [`ConversationSpec.PipelineRef` is added twice, or under two names, because
-  `pipeline-addressed-conversations` is adding it too] → Whichever lands first
-  owns the field; the other consumes it. Called out in both changes rather than
-  left to a merge conflict to reveal.
-- [Existing conversations predate the provenance fields, so their cards cannot
-  name a pipeline or source] → Both fields are optional and the renderer omits
-  what is absent. In-flight conversations degrade to today's information rather
-  than failing.
+- [Inference leaves the pipeline blank on cards where two Ready pipelines could
+  claim the conversation] → Accepted, and the whole reason D1b chose inference:
+  a blank is the honest answer the product already gives in `/status` and the
+  console. If it turns out to matter often, storing the ref is an additive
+  follow-up that would then have evidence behind it rather than an assumption.
+- [Existing inputs predate `Origin`, so their cards have no provenance] → The
+  field is optional and an absent origin means NOT POSTED (D5), so upgrading
+  cannot spray cards for old inputs into every open thread on the first
+  reconcile. New inputs get cards; in-flight threads are unchanged.
 
 ## Migration Plan
 

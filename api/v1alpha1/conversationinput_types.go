@@ -9,6 +9,16 @@ type ConversationInputSpec struct {
 	ConversationRef ObjectRef `json:"conversationRef"`
 	Type            InputType `json:"type"`
 	Payload         string    `json:"payload"`
+	// Labels are the originating signal's labels, kept beside the payload
+	// rather than on the Conversation: they are per-input, they can be numerous,
+	// and this object exists precisely to hold the bulky half of an input.
+	//
+	// They travel so an adapter can RENDER them — a label table, a chip row, or
+	// nothing — from the same data that named the topic. Grouping already
+	// consumed them at ingest; this is presentation, and the manager does not
+	// decide how much of it a surface shows.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // ConversationInputStatus tracks consumption.

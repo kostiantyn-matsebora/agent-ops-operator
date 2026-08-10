@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -130,4 +133,52 @@ type tgUpdate struct {
 		IsTopicMessage  bool  `json:"is_topic_message"`
 		MessageThreadID int64 `json:"message_thread_id"`
 	} `json:"message"`
+}
+
+// SendDocument uploads text as a file with a caption, for payloads too large to
+// read as chat messages.
+//
+// The alternative for a 50k alert body is thirteen consecutive messages, which
+// buries the thread it is supposed to inform. Splitting still guarantees nothing
+// is LOST; this is about the payload staying readable — and it is only possible
+// because the op carries the full payload inline rather than a reference the
+// adapter cannot resolve (it has no Kubernetes access).
+func (t *Telegram) SendDocument(ctx context.Context, chatID string, threadID *int64, filename, caption, content string) error {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("chat_id", chatID)
+	_ = w.WriteField("caption", caption)
+	_ = w.WriteField("parse_mode", "HTML")
+	if threadID != nil {
+		_ = w.WriteField("message_thread_id", strconv.FormatInt(*threadID, 10))
+	}
+	part, err := w.CreateFormFile("document", filename)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(part, content); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.telegram.org/bot"+t.Token+"/sendDocument", &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := t.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var out tgResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+	if !out.OK {
+		return fmt.Errorf("sendDocument: %s", out.Description)
+	}
+	return nil
 }

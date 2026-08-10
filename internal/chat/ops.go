@@ -46,18 +46,31 @@ const ConditionTopicReady = "TopicReady"
 
 // Op is one outbound operation addressed to a channel implementation.
 // Delivery is at-least-once; consumers must tolerate duplicates by ID.
+//
+// The payload is STRUCTURED, never rendered: `Message` says what is being
+// communicated and `Topic` describes the thread to create. The adapter turns
+// either into whatever its surface speaks. See message.go for why.
 type Op struct {
 	ID           string  `json:"id"`
 	Channel      string  `json:"channel"`
 	Conversation string  `json:"conversation,omitempty"`
 	Kind         OpKind  `json:"kind"`
-	Title        string  `json:"title,omitempty"`    // ensure-topic
 	ThreadID     *string `json:"threadId,omitempty"` // send target; nil = general
-	Text         string  `json:"text,omitempty"`     // send payload (chat HTML subset)
+
+	// Topic describes the thread to create (ensure-topic only).
+	Topic *TopicDescriptor `json:"topic,omitempty"`
+	// Message is the semantic message to post (send only).
+	Message *Message `json:"message,omitempty"`
 
 	channelType string
 	enqueuedAt  time.Time
 	claimedAt   time.Time // zero = queued
+	// stable marks an op whose id is DERIVED from CR state, so reconciliation
+	// re-enqueues it on every pass and it must dedup against the completed
+	// window as well as the pending map. Ephemeral sends (acks, notices) carry a
+	// fresh id each time and are never suppressed — saying the same thing twice
+	// is correct when a user asked twice.
+	stable bool
 }
 
 // Age reports how long an op has been outstanding since it was enqueued.
@@ -110,15 +123,23 @@ func (q *OpQueue) init() {
 // bound channels. The id is stable per conversation×channel so
 // reconcile-driven re-enqueues dedup while one is pending and after
 // completion.
-func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.Channel, conv *agentopsv1alpha1.Conversation) {
-	title := conv.Spec.Title
-	if title == "" {
-		title = conv.Name
+// The descriptor carries the same facts as the first card in the thread, so an
+// adapter can choose not to repeat itself — the alert name in the topic, the
+// labels in the card — and can enforce its own naming limits (Telegram forum
+// topics cap at 128 characters) instead of receiving a title already cut to a
+// length the manager guessed at.
+func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.Channel, conv *agentopsv1alpha1.Conversation, topic TopicDescriptor) {
+	topic.Conversation = conv.Name
+	if topic.Title == "" {
+		topic.Title = conv.Spec.Title
+	}
+	if topic.Title == "" {
+		topic.Title = conv.Name
 	}
 	// ':' keeps the id a single URL path segment for /channel/ops/{id}/done
 	q.enqueue(ctx, &Op{
 		ID: "topic:" + conv.Name + ":" + ch.Name, Channel: ch.Name, Conversation: conv.Name,
-		Kind: OpEnsureTopic, Title: title, channelType: ch.Spec.Adapter,
+		Kind: OpEnsureTopic, Topic: &topic, channelType: ch.Spec.Adapter, stable: true,
 	})
 }
 
@@ -129,7 +150,7 @@ func (q *OpQueue) EnqueueCloseTopic(ctx context.Context, ch *agentopsv1alpha1.Ch
 	tid := threadID
 	q.enqueue(ctx, &Op{
 		ID: CloseTopicOpID(conversation, ch.Name), Channel: ch.Name, Conversation: conversation,
-		Kind: OpCloseTopic, ThreadID: &tid, channelType: ch.Spec.Adapter,
+		Kind: OpCloseTopic, ThreadID: &tid, channelType: ch.Spec.Adapter, stable: true,
 	})
 }
 
@@ -148,22 +169,52 @@ func (q *OpQueue) Settled(id string) bool {
 	return q.recent[id]
 }
 
-// EnqueueSend queues a message post (acks, notices). Fire-and-forget.
-func (q *OpQueue) EnqueueSend(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID *string, text string) {
+// EnqueueMessage queues one semantic message. Fire-and-forget: the id is fresh
+// each time, so sends are never suppressed by dedup.
+//
+// Callers pass a Message built by one of the kind constructors in message.go
+// (Notice, Warn, AnswerMessage, RelayMessage, SignalMessage) — there is no
+// string-valued form on purpose, because that is what let transport markup back
+// into the manager.
+func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID *string, msg Message) {
+	q.enqueueMessage(ctx, "send:"+strconv.FormatInt(sendSeq.Add(1), 36), ch, "", threadID, msg, false)
+}
+
+// EnqueueInputCard queues the card for one input on one channel. Unlike an
+// ordinary send its id is STABLE per conversation×input×channel, so the
+// reconciler re-deriving it on every pass dedups against both the pending map
+// and the recent window — exactly as ensure-topic already does. Without that, a
+// conversation would repost its alert on every reconcile.
+func (q *OpQueue) EnqueueInputCard(ctx context.Context, ch *agentopsv1alpha1.Channel,
+	conversation, inputID string, threadID *string, msg Message) {
+
+	q.enqueueMessage(ctx, InputCardOpID(conversation, inputID, ch.Name), ch, conversation, threadID, msg, true)
+}
+
+// InputCardOpID is the stable id of one input's card on one channel.
+func InputCardOpID(conversation, inputID, channel string) string {
+	return "input:" + conversation + ":" + inputID + ":" + channel
+}
+
+func (q *OpQueue) enqueueMessage(ctx context.Context, id string, ch *agentopsv1alpha1.Channel,
+	conversation string, threadID *string, msg Message, stable bool) {
+
 	q.enqueue(ctx, &Op{
-		ID: "send:" + strconv.FormatInt(sendSeq.Add(1), 36), Channel: ch.Name,
-		Kind: OpSend, ThreadID: threadID, Text: text, channelType: ch.Spec.Adapter,
+		ID: id, Channel: ch.Name, Conversation: conversation,
+		Kind: OpSend, ThreadID: threadID, Message: &msg, channelType: ch.Spec.Adapter, stable: stable,
 	})
 }
 
 func (q *OpQueue) enqueue(ctx context.Context, op *Op) {
 	q.mu.Lock()
 	q.init()
-	// Dedup by id for the derived kinds: already pending, a completed
-	// ensure-topic racing its status patch, or a close-topic the finalizer
-	// re-derives on every pass until it lets go. Sends carry a fresh id each
-	// time and are never suppressed.
-	if q.ops[op.ID] != nil || (op.Kind != OpSend && q.recent[op.ID]) {
+	// Dedup by id for the DERIVED ops: already pending, a completed
+	// ensure-topic racing its status patch, a close-topic the finalizer
+	// re-derives until it lets go, or an input card the reconciler re-derives on
+	// every pass. Ephemeral sends carry a fresh id each time and are never
+	// suppressed. Keying this on `stable` rather than on Kind is what lets an
+	// input card be a send AND survive re-enqueue without duplicating.
+	if q.ops[op.ID] != nil || (op.stable && q.recent[op.ID]) {
 		q.mu.Unlock()
 		return
 	}
@@ -211,9 +262,13 @@ func (q *OpQueue) runInProcess(ctx context.Context, channelType string, f Provid
 	if err == nil {
 		switch op.Kind {
 		case OpEnsureTopic:
-			res.ThreadID, err = p.EnsureTopic(ctx, op.Title)
+			if op.Topic != nil {
+				res.ThreadID, err = p.EnsureTopic(ctx, *op.Topic)
+			}
 		case OpSend:
-			err = p.Send(ctx, op.ThreadID, op.Text)
+			if op.Message != nil {
+				err = p.Send(ctx, op.ThreadID, *op.Message)
+			}
 		case OpCloseTopic:
 			if closer, ok := p.(TopicCloser); ok && op.ThreadID != nil {
 				err = closer.CloseTopic(ctx, *op.ThreadID)

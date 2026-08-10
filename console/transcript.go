@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"sync"
 	"time"
 )
@@ -25,18 +24,20 @@ const (
 	pendingTTL = 2 * time.Minute
 )
 
-// Message kinds. The manager sends TEXT, not semantics — these are the
-// console's best reading of it, not a contract. (The pending
-// `adapter-rendered-messages` change replaces transport-rendered text with
-// semantic messages; when it lands, classification here becomes a field read
-// instead of a prefix match.)
+// Message kinds — now a FIELD READ, not a guess. The manager sends semantic
+// messages, so the console maps one enum to another instead of sniffing
+// Telegram HTML prefixes off text it did not compose.
 const (
-	// MsgAgent: agent output or an operator notice.
+	// MsgAgent: agent output (an `answer`).
 	MsgAgent = "agent"
-	// MsgAck: the router's busy/acknowledged notice.
+	// MsgAck: a manager notice — ack, listing, refusal.
 	MsgAck = "ack"
 	// MsgRelay: a user message from a SIBLING channel, attributed to its sender.
 	MsgRelay = "relay"
+	// MsgSignal: the event that opened or advanced the conversation. Its own
+	// kind because it is neither the agent speaking nor the manager: it is what
+	// the agent was woken for, and a thread reads as event-then-work.
+	MsgSignal = "signal"
 	// MsgLocal: typed in this console, awaiting confirmation.
 	MsgLocal = "local"
 )
@@ -87,7 +88,7 @@ func NewTranscripts() *Transcripts {
 // AppendOp records one incoming `send` op. Returns false when the op id was
 // already recorded — channel ops are at-least-once, so a redelivered op must
 // render exactly once.
-func (t *Transcripts) AppendOp(opID, thread, text string) bool {
+func (t *Transcripts) AppendOp(opID, thread string, m *OpMessage) bool {
 	t.mu.Lock()
 	if t.seen[opID] {
 		t.mu.Unlock()
@@ -101,8 +102,8 @@ func (t *Transcripts) AppendOp(opID, thread, text string) bool {
 	}
 	t.mu.Unlock()
 
-	kind, sender, body := classify(text)
-	msg := Message{ID: opID, Thread: thread, Kind: kind, Sender: sender, Text: body, At: nowRFC3339()}
+	kind, sender := transcriptKind(m)
+	msg := Message{ID: opID, Thread: thread, Kind: kind, Sender: sender, Text: m.Render(), At: nowRFC3339()}
 	t.append(msg, kind == MsgAck || kind == MsgRelay)
 	return true
 }
@@ -232,31 +233,31 @@ func (t *Transcripts) publish(msg Message) {
 	}
 }
 
-// relayPrefix is how internal/chat/router.go attributes a sibling-channel
-// message: "💬 <b>channel/sender</b>: text".
-const relayPrefix = "💬 <b>"
-
-// ackMarkers are the router's fire-and-forget notices.
-var ackMarkers = []string{"🔧 ", "⏳ ", "⚠️ ", "🤖 "}
-
-// classify reads a send op's text into (kind, sender, body).
+// transcriptKind maps a contract message kind onto a transcript bubble, and
+// composes the relay attribution the UI shows in place of a kind label.
 //
-// A prefix match is a poor substitute for a typed message, and it is what the
-// contract offers today: `send` carries rendered text only. Getting it wrong
-// only mislabels a bubble — never drops or duplicates one — so the console
-// guesses and stays honest about it in the UI.
-func classify(text string) (kind, sender, body string) {
-	if rest, ok := strings.CutPrefix(text, relayPrefix); ok {
-		if who, msg, found := strings.Cut(rest, "</b>: "); found {
-			return MsgRelay, who, msg
-		}
+// This replaced a prefix match against "💬 <b>" and a list of emoji markers —
+// the console reverse-engineering Telegram HTML the manager had rendered for a
+// different surface. A message kind is now stated, so nothing here can be
+// wrong about it.
+func transcriptKind(m *OpMessage) (kind, sender string) {
+	if m == nil {
+		return MsgAgent, ""
 	}
-	for _, m := range ackMarkers {
-		if strings.HasPrefix(text, m) {
-			return MsgAck, "", text
+	switch m.Kind {
+	case "relay":
+		who := m.Origin
+		if m.Sender != "" {
+			who = m.Origin + "/" + m.Sender
 		}
+		return MsgRelay, who
+	case "notice":
+		return MsgAck, ""
+	case "signal":
+		return MsgSignal, ""
+	default:
+		return MsgAgent, ""
 	}
-	return MsgAgent, "", text
 }
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339Nano) }

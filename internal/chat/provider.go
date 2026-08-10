@@ -14,13 +14,19 @@ import (
 
 // Provider is an in-process channel implementation bound to one Channel.
 // External adapters do not implement this — they consume the op queue instead.
+//
+// It takes the SAME structured payloads an external adapter receives, so an
+// in-process provider is a second renderer rather than an exemption. Handing it
+// pre-rendered text would put presentation logic back inside the manager
+// through a side door, which is the leak this contract closes.
 type Provider interface {
 	// EnsureTopic creates a conversation thread and returns its id (opaque
-	// string in the channel type's own id space).
-	EnsureTopic(ctx context.Context, title string) (string, error)
-	// Send posts a message (chat HTML subset); nil threadID targets the
+	// string in the channel type's own id space). The provider names the thread
+	// from the descriptor, within whatever limits its surface has.
+	EnsureTopic(ctx context.Context, topic TopicDescriptor) (string, error)
+	// Send renders and posts one semantic message; nil threadID targets the
 	// channel's general surface.
-	Send(ctx context.Context, threadID *string, text string) error
+	Send(ctx context.Context, threadID *string, msg Message) error
 }
 
 // TopicCloser is the optional half of Provider: an in-process implementation

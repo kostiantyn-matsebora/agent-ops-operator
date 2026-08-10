@@ -161,7 +161,7 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	}
 	claimTopic := func(chanType, threadID string) {
 		t.Helper()
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&wait=0", nil, "test-adapter-token")
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
 		if rec.Code != 200 {
 			t.Fatalf("%s ensure-topic expected: %d", chanType, rec.Code)
 		}
@@ -214,13 +214,13 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	}
 	expectSend := func(chanType, threadID, contains string) chat.Op {
 		t.Helper()
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&wait=0", nil, "test-adapter-token")
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
 		if rec.Code != 200 {
 			t.Fatalf("%s send expected: %d", chanType, rec.Code)
 		}
 		var op chat.Op
 		_ = json.Unmarshal(rec.Body.Bytes(), &op)
-		if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != threadID || !strings.Contains(op.Text, contains) {
+		if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != threadID || !strings.Contains(opBody(op), contains) {
 			t.Fatalf("%s send op: %+v", chanType, op)
 		}
 		return op
@@ -243,17 +243,23 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	// channel A: first the attributed relay, then the ack (FIFO). The ack is
 	// the busy variant — the processed task input is pruned only on reconcile,
 	// so the conversation still counts as busy.
-	relay := expectSend("mc-ta", "111", "💬")
-	if !strings.Contains(relay.Text, "mc-b/operator") || !strings.Contains(relay.Text, "and the disks?") {
-		t.Fatalf("relay attribution: %q", relay.Text)
+	//
+	// Attribution is STRUCTURED now: origin and sender are fields, not a "💬
+	// <b>…</b>: " prefix the manager composed. Each adapter decides how to mark
+	// somebody else's words, so asserting on markup here would be asserting on
+	// a decision the manager no longer makes.
+	relay := expectSend("mc-ta", "111", "and the disks?")
+	if relay.Message.Kind != chat.MsgRelay ||
+		relay.Message.Origin != "mc-b" || relay.Message.Sender != "operator" {
+		t.Fatalf("relay attribution: %+v", relay.Message)
 	}
 	expectSend("mc-ta", "111", "Noted")
 	// origin channel B: ack only, never a relay of its own message
 	ack := expectSend("mc-tb", "222", "Noted")
-	if strings.Contains(ack.Text, "💬") {
-		t.Fatalf("origin channel got a relay: %q", ack.Text)
+	if ack.Message.Kind == chat.MsgRelay {
+		t.Fatalf("origin channel got a relay: %+v", ack.Message)
 	}
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=mc-tb&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=mc-tb&contract=2&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
 		t.Fatalf("unexpected extra op on origin channel: %d", rec.Code)
 	}
 }
@@ -312,7 +318,7 @@ func TestBrokenChannelNeverDeadlocks(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "bk-conv"}}); err != nil {
 		t.Fatal(err)
 	}
-	rec := adapterReq(srv, "GET", "/channel/ops?adapter=bk-tg&wait=0", nil, "test-adapter-token")
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=bk-tg&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("good channel's ensure-topic expected: %d", rec.Code)
 	}
@@ -373,7 +379,7 @@ func TestSingleChannelResultIsDeliveredByTheOperator(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: conv.Name}}); err != nil {
 		t.Fatal(err)
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=sc-tg&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=sc-tg&contract=2&wait=0", nil, "test-adapter-token")
 	var op chat.Op
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
 	if op.Kind != chat.OpEnsureTopic {
@@ -402,12 +408,12 @@ func TestSingleChannelResultIsDeliveredByTheOperator(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=sc-tg&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=sc-tg&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("operator must post the result itself: %d", rec.Code)
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
-	if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != "555" || !strings.Contains(op.Text, "the single answer") {
+	if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != "555" || !strings.Contains(opBody(op), "the single answer") {
 		t.Fatalf("result send op: %+v", op)
 	}
 }

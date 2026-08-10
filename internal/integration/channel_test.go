@@ -49,14 +49,14 @@ func adapterReq(srv *httpapi.Server, method, path string, body any, token string
 
 func TestChannelAuthRequired(t *testing.T) {
 	srv := apiServer()
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&wait=0", nil, ""); rec.Code != 401 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=2&wait=0", nil, ""); rec.Code != 401 {
 		t.Fatalf("missing token: %d", rec.Code)
 	}
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&wait=0", nil, "wrong"); rec.Code != 401 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=2&wait=0", nil, "wrong"); rec.Code != 401 {
 		t.Fatalf("wrong token: %d", rec.Code)
 	}
 	srv.AdapterToken = ""
-	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&wait=0", nil, "anything"); rec.Code != 503 {
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-auth&contract=2&wait=0", nil, "anything"); rec.Code != 503 {
 		t.Fatalf("unconfigured auth must 503: %d", rec.Code)
 	}
 }
@@ -102,7 +102,7 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("agents inbound: %d", rec.Code)
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-inb&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-inb&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("expected queued send op: %d", rec.Code)
 	}
@@ -111,11 +111,11 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	// the listing names PIPELINES: they are what a message can address, and
 	// what carries the capabilities the conversation will get. Listing profiles
 	// would advertise names a user cannot actually address.
-	if op.Kind != chat.OpSend || !strings.Contains(op.Text, "/inb-pipe") {
+	if op.Kind != chat.OpSend || !strings.Contains(opBody(op), "/inb-pipe") {
 		t.Fatalf("agents send op must list addressable pipelines: %+v", op)
 	}
-	if strings.Contains(op.Text, "/prof-inb") {
-		t.Fatalf("listing must not advertise profile names: %q", op.Text)
+	if strings.Contains(opBody(op), "/prof-inb") {
+		t.Fatalf("listing must not advertise profile names: %q", opBody(op))
 	}
 }
 
@@ -146,13 +146,14 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "topic-1"}}); err != nil {
 		t.Fatal(err)
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-topic&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-topic&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("ensure-topic op expected: %d", rec.Code)
 	}
 	var op chat.Op
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
-	if op.Kind != chat.OpEnsureTopic || op.Conversation != "topic-1" || op.Title != "needs a topic" {
+	if op.Kind != chat.OpEnsureTopic || op.Conversation != "topic-1" ||
+		op.Topic == nil || op.Topic.Title != "needs a topic" {
 		t.Fatalf("op: %+v", op)
 	}
 
@@ -234,13 +235,13 @@ func TestThreadedReplyQueuesInputWithBusyAck(t *testing.T) {
 	}
 
 	// busy ack queued for the adapter, addressed to the thread
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-reply&wait=0", nil, "test-adapter-token")
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-reply&contract=2&wait=0", nil, "test-adapter-token")
 	if rec.Code != 200 {
 		t.Fatalf("busy ack op expected: %d", rec.Code)
 	}
 	var op chat.Op
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
-	if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != "4242" || !strings.Contains(op.Text, "Noted") {
+	if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != "4242" || !strings.Contains(opBody(op), "Noted") {
 		t.Fatalf("busy ack: %+v", op)
 	}
 }
@@ -261,4 +262,13 @@ func TestAdapterStateAndChannelListing(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"1044"`) {
 		t.Fatalf("state get: %d %s", rec.Code, rec.Body.String())
 	}
+}
+
+// opBody is the message body an op would render from, or "" when the op carries
+// no message. Assertions are on MEANING — the markup belongs to the adapter.
+func opBody(op chat.Op) string {
+	if op.Message == nil {
+		return ""
+	}
+	return op.Message.Body
 }

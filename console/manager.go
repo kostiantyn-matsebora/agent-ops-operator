@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -37,9 +39,98 @@ type Op struct {
 	Channel      string  `json:"channel"`
 	Conversation string  `json:"conversation,omitempty"`
 	Kind         string  `json:"kind"` // "ensure-topic" | "send" | "close-topic"
-	Title        string  `json:"title,omitempty"`
 	ThreadID     *string `json:"threadId,omitempty"`
-	Text         string  `json:"text,omitempty"`
+
+	Topic   *TopicDescriptor `json:"topic,omitempty"`   // ensure-topic
+	Message *OpMessage       `json:"message,omitempty"` // send
+}
+
+// ContractVersion is the outbound message contract this console speaks. The
+// manager refuses the ops long-poll without it — an adapter reading the retired
+// `text` field would render empty transcript entries and look healthy doing it.
+const ContractVersion = "2"
+
+// OpMessage is one SEMANTIC outbound message: the manager composes meaning, each
+// adapter composes presentation. The console renders in the browser, so it
+// keeps the fields STRUCTURED all the way to the transcript rather than
+// flattening them to a string here.
+type OpMessage struct {
+	Kind string `json:"kind"` // signal | answer | relay | notice
+	Body string `json:"body,omitempty"`
+
+	Pipeline string            `json:"pipeline,omitempty"`
+	Source   string            `json:"source,omitempty"`
+	Title    string            `json:"title,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
+	InputRef string            `json:"inputRef,omitempty"`
+
+	Origin string `json:"origin,omitempty"`
+	Sender string `json:"sender,omitempty"`
+
+	Status string `json:"status,omitempty"`
+	Level  string `json:"level,omitempty"`
+}
+
+// TopicDescriptor describes a thread to create. The console has no naming limit
+// worth enforcing, so it uses the title as given.
+type TopicDescriptor struct {
+	Conversation string            `json:"conversation"`
+	Pipeline     string            `json:"pipeline,omitempty"`
+	Source       string            `json:"source,omitempty"`
+	Title        string            `json:"title,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Kind         string            `json:"kind,omitempty"`
+}
+
+// Render composes the plain-text form of a message for a transcript entry.
+// Markdown passes through untouched — the SPA renders it — but the structured
+// fields are laid out here, because the console is the surface that can show
+// them most fully.
+func (m *OpMessage) Render() string {
+	if m == nil {
+		return ""
+	}
+	switch m.Kind {
+	case "relay":
+		who := m.Origin
+		if m.Sender != "" {
+			who = m.Origin + "/" + m.Sender
+		}
+		return "💬 **" + who + "**: " + m.Body
+	case "signal":
+		var b strings.Builder
+		if m.Title != "" {
+			b.WriteString("📣 **" + m.Title + "**\n")
+		}
+		var from []string
+		if m.Source != "" {
+			from = append(from, "source "+m.Source)
+		}
+		// Omitted when blank rather than filled in: the pipeline is inferred and
+		// an empty value means "not determinable", not "none".
+		if m.Pipeline != "" {
+			from = append(from, "via "+m.Pipeline)
+		}
+		if len(from) > 0 {
+			b.WriteString("_" + strings.Join(from, " · ") + "_\n")
+		}
+		if len(m.Labels) > 0 {
+			keys := make([]string, 0, len(m.Labels))
+			for k := range m.Labels {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys) // stable: a card that reshuffles reads as new
+			parts := make([]string, 0, len(keys))
+			for _, k := range keys {
+				parts = append(parts, k+"="+m.Labels[k])
+			}
+			b.WriteString("`" + strings.Join(parts, "  ") + "`\n")
+		}
+		b.WriteString(m.Body)
+		return b.String()
+	default:
+		return m.Body
+	}
 }
 
 // ChannelInfo is one channel served by this adapter, with its opaque config.
@@ -88,7 +179,8 @@ func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int
 func (m *Manager) NextOp(ctx context.Context, adapter string, waitSeconds int) (*Op, error) {
 	var op Op
 	code, err := m.do(ctx, "GET",
-		fmt.Sprintf("/channel/ops?adapter=%s&wait=%d", url.QueryEscape(adapter), waitSeconds), nil, &op)
+		fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
+			url.QueryEscape(adapter), ContractVersion, waitSeconds), nil, &op)
 	if err != nil {
 		return nil, err
 	}

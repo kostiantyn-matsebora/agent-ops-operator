@@ -114,9 +114,14 @@ func TestSignalInboundRouting(t *testing.T) {
 	if !strings.HasPrefix(conv.Name, "job-") {
 		t.Fatalf("job conversation name: %s", conv.Name)
 	}
-	if len(conv.Spec.Inputs) != 1 || conv.Spec.Inputs[0].Type != agentopsv1alpha1.InputJob ||
-		conv.Spec.Inputs[0].JobName != "sig-src" || conv.Spec.Inputs[0].PayloadRef == nil {
+	in := conv.Spec.Inputs[0]
+	if len(conv.Spec.Inputs) != 1 || in.Type != agentopsv1alpha1.InputJob || in.PayloadRef == nil {
 		t.Fatalf("job input wrong: %+v", conv.Spec.Inputs)
+	}
+	// provenance replaces the job-only jobName: every input records its source
+	if in.Origin == nil || in.Origin.Kind != agentopsv1alpha1.OriginSignal ||
+		in.Origin.Name != "sig-src" || in.Origin.SignalKind != "job" {
+		t.Fatalf("job input origin: %+v", in.Origin)
 	}
 	var ci agentopsv1alpha1.ConversationInput
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Spec.Inputs[0].PayloadRef.Name}, &ci); err != nil {
@@ -234,7 +239,7 @@ func TestSignalAuthScoping(t *testing.T) {
 	if rec := get("/signal/sources?adapter=auth-chan", chanTok); rec.Code != 401 {
 		t.Fatalf("channel token on signal surface: %d", rec.Code)
 	}
-	if rec := get("/channel/ops?adapter=auth-sig&wait=0", sigTok); rec.Code != 401 {
+	if rec := get("/channel/ops?adapter=auth-sig&contract=2&wait=0", sigTok); rec.Code != 401 {
 		t.Fatalf("signal token on channel surface: %d", rec.Code)
 	}
 	// same-name adapters on both surfaces never share a token

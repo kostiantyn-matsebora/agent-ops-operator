@@ -262,11 +262,11 @@ func TestAdapterAuthScoping(t *testing.T) {
 	derived := chat.DeriveAdapterToken(testMasterToken, "scope-slack")
 
 	// cross-key: derived token polling another adapter's key -> 403
-	if rec := get("/channel/ops?adapter=scope-tg-type&wait=0", derived); rec.Code != 403 {
+	if rec := get("/channel/ops?adapter=scope-tg-type&contract=2&wait=0", derived); rec.Code != 403 {
 		t.Fatalf("cross-type ops: want 403, got %d %s", rec.Code, rec.Body.String())
 	}
 	// own key (the adapter's NAME) -> served (204: no ops queued)
-	if rec := get("/channel/ops?adapter=scope-slack&wait=0", derived); rec.Code != 204 {
+	if rec := get("/channel/ops?adapter=scope-slack&contract=2&wait=0", derived); rec.Code != 204 {
 		t.Fatalf("own-type ops: want 204, got %d %s", rec.Code, rec.Body.String())
 	}
 	// channel-scoped endpoints enforce the resolved channel's type
@@ -274,11 +274,11 @@ func TestAdapterAuthScoping(t *testing.T) {
 		t.Fatalf("cross-type state: want 403, got %d", rec.Code)
 	}
 	// master token keeps full scope
-	if rec := get("/channel/ops?adapter=scope-tg-type&wait=0", testMasterToken); rec.Code != 204 {
+	if rec := get("/channel/ops?adapter=scope-tg-type&contract=2&wait=0", testMasterToken); rec.Code != 204 {
 		t.Fatalf("master scope: want 204, got %d", rec.Code)
 	}
 	// garbage token -> 401
-	if rec := get("/channel/ops?adapter=scope-tg-type&wait=0", "nonsense"); rec.Code != 401 {
+	if rec := get("/channel/ops?adapter=scope-tg-type&contract=2&wait=0", "nonsense"); rec.Code != 401 {
 		t.Fatalf("bad token: want 401, got %d", rec.Code)
 	}
 

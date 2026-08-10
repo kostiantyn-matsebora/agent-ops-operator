@@ -200,7 +200,10 @@ internal/
                          Router (transport-neutral inbound; /close intercepted
                          on the reply path)
   dispatch/              input → work-unit resolution + built-in lane templates
-                         (templates/format.md = mandatory message format spec);
+                         (templates/format.md = mandatory message format spec —
+                         the agent writes the SAME markdown subset the outbound
+                         contract carries, never HTML: adapters escape tags, so
+                         a `<b>` reaches chat as literal characters);
                          EffectiveAllowedTools = the bound toolsets, per unit
                          (no profile base, no mode)
   ingest/                signature grouping, fingerprint cooldown
@@ -415,6 +418,32 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   config, but it MAY apply an adapter-declared `configSchema` mechanically
   (`internal/configschema`, the one place config content is touched):
   advisory-only `ConfigValid`, no type knowledge, adapter stays authoritative.
+- **THE MANAGER COMPOSES MEANING; ADAPTERS COMPOSE PRESENTATION.** No transport
+  dialect anywhere in `internal/` — no `<b>`, no `&lt;`, no `parse_mode`. An op
+  carries a TYPED message (`signal` | `answer` | `relay` | `notice`, prose in a
+  named markdown subset) or a TOPIC DESCRIPTOR, never rendered text: there is no
+  `op.text` and no `op.title`. Escaping, length limits, splitting and topic
+  naming belong to the component that knows them — Telegram caps messages at
+  4096 and topics at 128, nothing else does, and a manager-side fix would be one
+  transport's limits imposed on all of them. In-process providers are held to
+  the same contract (they are a second renderer, not an exemption), and
+  `/channel/ops` REFUSES an adapter that does not declare `contract=`, because
+  one reading the retired `text` field would post empty messages and look
+  healthy doing it. `router.go` used to open with "transport-neutral" and then
+  emit Telegram HTML; that is the habit this invariant names. **It binds the
+  AGENT too**: `dispatch/templates/format.md` tells it to write the same
+  markdown subset, because an adapter escapes what it is given — the first
+  version of this change left format.md on HTML and every agent answer reached
+  Telegram with its tags showing.
+- **A thread opens with the event that caused it.** Every input a human has not
+  already seen is posted to the bound threads as a `signal` card, from
+  `InputItem.Origin` — `signal` posts, `channel` does not, `kind: chat` does
+  not (the person typed it), and an ABSENT origin does not, so upgrading cannot
+  spray history into every open thread. Read the rule off the origin
+  (`InputItem.PostToChannels`), never by enumerating input types. Card op ids
+  are stable per conversation×input×channel or every reconcile reposts the
+  alert. Conversations still carry **no `pipelineRef`**: a card names its
+  pipeline from `chat.PipelineForConversation` and omits it when ambiguous.
 - **No relay loops**: channel implementations (adapters AND in-process
   providers) must never re-ingest their own outbound posts as inbound —
   cross-channel relay depends on it.

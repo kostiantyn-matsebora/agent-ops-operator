@@ -20,7 +20,7 @@ Conversations bound to any number of channels with per-channel thread bindings: 
 - **THEN** an inbound message resolves by its own channel's binding only — no cross-channel collision
 
 ### Requirement: Bound channels fully mirror the conversation
-Every bound channel SHALL receive the whole conversation: router acks fan out to all bound channels; a user message arriving on one channel SHALL be relayed to the sibling channels as an attributed message (e.g. `💬 <channel>: <text>`); agent replies SHALL be fanned out by the manager (see below). Channel implementations MUST NOT re-ingest their own outbound posts as inbound (no relay loops).
+Every bound channel SHALL receive the whole conversation: router acks fan out to all bound channels; a user message arriving on one channel SHALL be relayed to the sibling channels as a `relay` message whose attribution stays STRUCTURED (`origin`, `sender`), so each surface decides how to mark somebody else's words; agent replies SHALL be fanned out by the manager (see below). Channel implementations MUST NOT re-ingest their own outbound posts as inbound (no relay loops).
 
 #### Scenario: Telegram and web chat repeat each other
 - **WHEN** a user writes in the telegram topic of a conversation also bound to the web channel
@@ -31,7 +31,7 @@ Every bound channel SHALL receive the whole conversation: router acks fan out to
 - **THEN** it is not fed back through `/channel/inbound` (or any provider's inbound path) as a new user message
 
 ### Requirement: Manager fans out agent replies on multi-channel conversations
-For conversations bound to one or more channels, `POST /work/done` SHALL fan the run's result out as one `send` op per bound channel targeting that channel's thread. Failed or empty results SHALL fan out a short failure notice — mirrored surfaces never mistake silence for success. Composition uses the existing op pipeline only: external adapters and in-process providers require no changes.
+For conversations bound to one or more channels, `POST /work/done` SHALL fan the run's result out as one `send` op per bound channel targeting that channel's thread, carrying an `answer` message with the result as its markdown body. Failed or empty results SHALL fan out a short failure `notice` — mirrored surfaces never mistake silence for success. Each bound channel's adapter renders the same semantic message independently, so one answer MAY be presented differently per surface (chunked, collapsed, attached) without the manager knowing any transport's limits. Composition uses the existing op pipeline only.
 
 #### Scenario: One answer, every surface
 - **WHEN** a run completes with a result on a conversation bound to telegram and web
@@ -40,6 +40,14 @@ For conversations bound to one or more channels, `POST /work/done` SHALL fan the
 #### Scenario: Failure is visible on every surface
 - **WHEN** a run finishes with status failed and no result
 - **THEN** every bound channel receives a short failure notice in the thread
+
+#### Scenario: The same answer may look different per surface
+- **WHEN** a long answer fans out to two channels whose transports have different limits
+- **THEN** each adapter renders it for its own surface — one may split it, another may show it whole — from the identical semantic message
+
+#### Scenario: Relayed user messages are semantic too
+- **WHEN** a user message on one bound channel is mirrored to its siblings
+- **THEN** each sibling receives a `relay` message carrying origin, sender, and body as fields, and composes the attribution itself
 
 ### Requirement: Closing a conversation ends it on every bound channel
 Closing a conversation SHALL apply to the whole conversation, not to the channel
