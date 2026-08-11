@@ -1,106 +1,66 @@
 ## Why
 
-The project is preparing to go public, and the only picture it has is a 16-line
+The project is preparing to go public and the only picture it has is a 16-line
 ASCII sketch at the top of `README.md`. That sketch answers one question — how a
-signal becomes a pod — and it answers it for someone who already believes. A
-first-time reader arrives with three questions in a fixed order: **what is this
-for**, **what are the pieces**, and **what is the model I have to learn**.
-Nothing in the repository answers the first, `docs/contracts.md` answers the
-second only in prose, and `docs/concepts.md` answers the third across 519 lines
-of reference text. Eleven CRDs and eight processes are a lot to hold from prose
-alone; the shape is the product, and the shape is currently invisible.
+signal becomes a pod — and it answers it for someone who already believes.
+Nothing in the repository shows a first-time reader what the product is *for*,
+what makes it different from the automation they already run, or why an agent
+with cluster access is safe to adopt.
 
-This is the first step of adopter documentation, and deliberately the first:
-every later adopter page (getting started, the wiring walkthrough, the adapter
-author guide) will reference these pictures, so drawing them settles the visual
-vocabulary — names, colours, boundaries — before the prose that leans on it
-gets written.
+This change draws that picture.
 
 ## What Changes
 
-**A committed diagram set** — one `draw.io` source file, `docs/diagrams/agent-ops.drawio`,
-holding three pages that answer the three questions in order, plus committed SVG
-exports rendered from it:
+**One diagram**, `docs/diagrams/agent-ops.drawio`, arguing the product in its
+own vocabulary:
 
-- **Page 1 — "Why" (the pitch).** The value story as a picture: an alert or a
-  question enters, a Conversation is created with its own chat thread, an
-  isolated agent pod answers it, and a human approves from their phone. Carries
-  the three claims that distinguish the product — *addressable* (`/<pipeline> <task>`
-  reaches a named agent), *isolated* (one pod per conversation, serial, capped),
-  *least-privilege by construction* (capabilities come from wiring, the manager
-  reads no Secret). This page replaces the ASCII block in `README.md`.
-- **Page 2 — C4 component view.** Level 3 over one container boundary per
-  process: the manager and its internal components (`httpapi`, the reconcilers,
-  `chat` ops queue, `dispatch`, `ingest`), the adapter processes, the runtime
-  pods, the Kubernetes API, and the external systems (Alertmanager, Telegram,
-  the LLM). Every edge labelled with the actual protocol and direction —
-  `GET /work` long-poll, `GET /channel/ops` long-poll, `POST /signal/inbound`,
-  `GET /activity/stream` SSE, watch/patch against the API — because who calls
-  whom is the single most misread thing about an operator with an HTTP surface.
-- **Page 3 — Domain model.** The eleven CRD kinds with their reference and
-  ownership edges and cardinalities, laid out so that `Pipeline` is visibly the
-  hub: sources × channels + profile + capabilities. Shows what carries wiring
-  and what does not, which is the one concept an adopter must get right and the
-  one the prose has had to repeat in five places.
+- any signal wakes it, including a non-infrastructure one, so the domain range
+  is shown rather than asserted;
+- the three declarations appear as their real CRD kinds — `Pipeline`,
+  `AgentProfile`, `MCPToolset` — each subtitled with the question it answers,
+  beside a real copy-pasteable `Pipeline` manifest;
+- a verb ladder defines what "takes care of it" means, with **Acts** marked
+  conditional because the shipped defaults are read-only;
+- the three extension points are drawn as sockets wired to what replaces them,
+  so pluggability is visible rather than claimed.
 
-**A new documentation page** `docs/architecture.md` that hosts pages 2 and 3
-with the paragraph of orientation each needs, and is listed in the README's
-Documentation index. Reference prose stays in `docs/concepts.md` and
-`docs/contracts.md` — the new page is the visual index into them, not a fourth
-copy of their content.
+The file is self-contained: its 19 icons are embedded as `data:` URIs, so it
+opens and renders anywhere with no external assets.
 
-**A rendering and freshness rule**, written into the spec and `CLAUDE.md`: the
-`.drawio` file is the source of truth, the SVGs are generated and committed
-beside it (a repository that renders on GitHub with no build step is the same
-property `go:embed` buys the console), and a change that alters a CRD kind, an
-adapter contract endpoint, or a process boundary updates the affected page in
-the same commit.
+### Explicitly not in this change
 
-**Dark-mode-safe exports.** GitHub renders README images on a white or dark
-canvas depending on the reader's theme; a diagram with a transparent background
-and black strokes is unreadable on one of them. Each page exports a light and a
-dark SVG, referenced through `<picture>`/`prefers-color-scheme`.
+Earlier drafts of this proposal grew a documentation programme around the
+diagram — a C4 component page, a redrawn domain model, a `docs/architecture.md`,
+committed SVG exports, a generator script, a Go test asserting CRD coverage, and
+README and CHANGELOG edits. That was scope invented around the request rather
+than the request itself.
 
-Not in scope: rewriting `docs/concepts.md` or `docs/contracts.md`, a
-getting-started guide, a website, a logo, or any change to product behaviour.
-This change adds pictures and the one page that frames them.
+Exports are produced from the drawing on demand, by hand, when a rendered image
+is actually needed. Consequently this change makes **no edit to `README.md`**:
+the ASCII block stays until there is an exported image to replace it with, which
+is a separate decision.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `architecture-diagrams`: the committed diagram set — the three views and what
-  each must show, `.drawio` as source of truth with generated SVG beside it,
-  theme-safe exports, the naming and colour vocabulary shared across pages, and
-  the rule that binds a diagram page to the code it depicts.
+- `architecture-diagrams`: the diagram — what it must show and argue, the visual
+  vocabulary it establishes, and the rule that every claim on it is checkable in
+  the repo.
 
 ### Modified Capabilities
 
-- `documentation-structure`: the README's architecture diagram becomes an
-  embedded generated image rather than an ASCII block, and the `docs/` page set
-  gains `docs/architecture.md` — a page that is neither CRD reference, contract
-  reference, nor a bundle page, so the existing routing requirement does not
-  cover it. The `CLAUDE.md` routing table gains a row for diagram updates, and
-  the README's 150-line budget is restated against a diagram that now costs a
-  handful of lines instead of sixteen.
+None. Nothing about how documentation is organised changes: no page moves, no
+new page, and the README is untouched.
 
 ## Impact
 
-- **New files**: `docs/diagrams/agent-ops.drawio` (source), six generated SVGs
-  (`why`, `components`, `domain` × light/dark), `docs/architecture.md`.
-- **Modified**: `README.md` (ASCII block → embedded hero image; Documentation
-  index gains a row), `CLAUDE.md` (map entry for `docs/diagrams/`, routing table
-  row, the freshness rule as an invariant), `CHANGELOG.md` (documentation entry;
-  no chart version change).
-- **Tooling dependency**: authoring uses the draw.io MCP server, which is
-  **currently disconnected from this workspace**. The source format is chosen so
-  that this is a convenience and not a blocker — `.drawio` is XML and its
-  export is reproducible from the desktop app or the VS Code extension. The
-  design records the fallback path.
-- **No Go code, no CRD, no chart change.** Nothing in `api/`, `internal/`, any
-  adapter module, or `chart/` is touched, so the build and test matrix is
-  unaffected.
-- **Risk to name**: a diagram is a second source of truth about the
-  architecture, and a stale one is worse than none — it will be believed. The
-  freshness rule and the per-page "what this must show" list in the spec exist
-  to make staleness reviewable rather than invisible.
+- **New**: `docs/diagrams/agent-ops.drawio`.
+- **No other file changes.** No Go, no CRD, no chart, no README — the build and
+  test matrix is untouched.
+- **Known limitation, accepted**: the dark variant was generator output and is
+  not retained. The committed drawing is the light version; a dark rendering
+  would mean reworking the palette by hand.
+- **Risk to name**: a stale diagram is worse than none, because it will be
+  believed. Mitigated by keeping every number on it checkable against the repo,
+  and by the diagram naming real kinds so a rename is visible.

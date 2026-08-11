@@ -52,86 +52,39 @@ Constraints that shape the solution:
 
 ## Decisions
 
-### D1. Three pages with a combining hero — not one merged canvas
+### D1. One page, not three
 
-The request is a diagram combining C4 components, the domain model, and the
-buyer's case. Drawn literally as one canvas, that fails: C4's one useful rule is
-one abstraction level per diagram, and runtime processes and CRD types are
-different levels. Eleven kinds plus eight processes plus a value narrative on
-one sheet is roughly seventy nodes, which is a poster nobody reads.
+*Revised: the original decision was a three-page set — hero, C4 components,
+domain model. That was scope invented around the request. The ask was a diagram;
+a documentation programme is a different change and should be argued on its own.*
 
-The combination happens on **page 1**, and it is a real combination rather than
-a compromise: the hero is laid out as the buyer's story — something happens, an
-agent takes care of it, and you can see exactly what "takes care of it" means —
-but every process on it is real and every object it names is a real CRD kind. It
-is the buyer's view spoken in the system's own vocabulary, and pages 2 and 3 are
-zoom-ins of its middle and its nouns.
+What survives from the original reasoning is the rule that stopped the three
+being merged into one canvas, and it still applies to the one page that exists:
+**one abstraction level per picture.** The hero shows the value path in the
+system's own nouns; it does not also try to be a component diagram or an entity
+model. When those are wanted they get their own pages and their own change, and
+they inherit the vocabulary and the icon set settled here — which is the main
+thing this change leaves behind besides the picture itself.
 
-- *Alternative — one literal poster*: rejected for the density above. If wanted
-  later it is cheap to add as a fourth page composited from the three, because
-  they will already share a vocabulary.
-- *Alternative — three separate files*: rejected. One `.drawio` file with three
-  `<diagram>` pages keeps the vocabulary physically together and makes "did you
-  update the others?" a question the reviewer can answer without hunting.
+### D2. The `.drawio` file is the deliverable; renders are made on demand
 
-### D2. The GENERATOR is the source of truth; `.drawio` and SVG are both outputs
+*Revised twice, and the round trip is the point. It began as "`.drawio` is the
+source of truth". Building the page argued that out of it — 105 cells, 19 icons
+and a palette that must exist twice is not hand-maintainable, so a generator
+became the source and the drawing an output. Descoping then argued it back: with
+no committed exports and no README embed, a generator exists to keep two
+artifacts in step that no longer both exist.*
 
-*Revised during implementation — the original decision named the `.drawio` file
-as the source, and building the hero disproved it.*
+So: the drawing is the deliverable, editable by anyone with the free draw.io app
+and nothing else. Icons are embedded as `data:` URIs, so it has no external
+assets. Rendered images are exported by hand when a rendered image is actually
+wanted, and are not committed — which removes the whole class of problem where a
+checked-in SVG silently disagrees with the drawing beside it.
 
-The hero is 105 cells, 19 hand-authored line-art icons embedded as data URIs,
-and a palette that has to exist twice (light and dark). Hand-maintaining that in
-the draw.io app is not realistic: a type-scale change touches every cell, and
-the dark variant is not an edit but a *derivation* — the icons bake their stroke
-colour in, so dark needs its own generated set.
-
-So the tree is:
-
-```
-docs/diagrams/
-  build-why.py        <- SOURCE: layout, copy, palette, both themes
-  icons/*.svg         <- SOURCE: 19 line-art icons, light strokes
-  agent-ops.drawio    <- OUTPUT: light rendering, editable in the app
-  *.svg               <- OUTPUT: committed exports, light + dark
-```
-
-`python build-why.py light|dark` emits the page; draw.io is used only to render
-and export. The dark icons are generated from the light ones by substitution
-(`#1A1A1A`→`#E6EDF3` strokes, `#FFFFFF`→`#0D1117` knockouts, amber untouched),
-so there is exactly one drawn version of each icon.
-
-- *Alternative — keep `.drawio` authoritative*: rejected. It would mean either
-  hand-editing two 105-cell pages in lockstep, or accepting that light and dark
-  drift. The whole reason dark needs regenerating is that an embedded `<image>`
-  cannot be recoloured by a stylesheet.
-- *Consequence for contributors*: editing `agent-ops.drawio` in the app is fine
-  for a one-off nudge, but the change must be folded back into `build-why.py`
-  or the next generation overwrites it. That rule belongs in `CLAUDE.md`.
-
-### D3. Two exports per page, selected by `prefers-color-scheme`
-
-GitHub renders README images against a light or dark canvas depending on the
-reader's theme, and a transparent-background diagram with dark strokes is
-unreadable on one of them. Each page exports `<page>-light.svg` and
-`<page>-dark.svg` with an **opaque** background, referenced through the
-`<picture>` element GitHub supports:
-
-```html
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/why-dark.svg">
-  <img alt="…" src="docs/diagrams/why-light.svg">
-</picture>
-```
-
-- *Alternative — one SVG with an internal `@media (prefers-color-scheme)` style
-  block*: elegant, and unreliable through GitHub's image proxying and `<img>`
-  embedding. Rejected for a reader-facing surface.
-- *Alternative — one theme-neutral diagram* (mid-grey on transparent): readable
-  nowhere in particular. Rejected.
-
-Export settings are pinned in the spec: **text exported as text, never as
-curves** — so the diagram is searchable, selectable, screen-reader-reachable,
-and greppable by the freshness test (D5).
+What that costs, accepted deliberately: the dark variant does not survive. It
+only ever existed as generator output, because an embedded `data:` URI cannot be
+recoloured by a stylesheet — dark needed its own derived icon set. Anyone wanting
+a dark rendering reworks the palette by hand.
 
 ### D4. Line art on two colours — not filled boxes
 
@@ -161,30 +114,21 @@ Three consequences worth stating as decisions:
   shapes encode meaning; forbidden on the hero, where every element is labelled
   and a legend would be furniture on the one page that must read in seconds.
 
-### D5. Freshness is enforced by a test for the half that can be tested
+### D5. No test; the freshness rule is prose
 
-A diagram nobody re-draws becomes a confident lie. Two mechanisms, and the
-design is honest that they cover different amounts:
+*Revised: the original decision was a Go test asserting that every CRD kind
+appears as text in the domain page's SVG. That page is no longer in this change,
+and the hero names only three kinds by design.*
 
-1. **Testable — CRD coverage.** A Go test reads `docs/diagrams/domain-light.svg`
-   and asserts that every kind registered in `api/v1alpha1`'s scheme appears as
-   a text node. One direction only: every kind must be drawn; the diagram may
-   contain words that are not kinds. This catches the exact failure that matters
-   — a twelfth kind ships and the picture silently claims there are eleven — and
-   it is cheap because D3 guarantees SVG text is text. It lives beside the
-   existing precedent for pinning documentation facts in tests
-   (`internal/integration/charttemplate_test.go`).
-2. **Prose only — everything else.** Component boundaries, endpoints and call
-   directions get a routing-table row in `CLAUDE.md` and a review expectation,
-   not a test. Asserting the route set against page 2 would mean scraping mux
-   patterns and matching them to arrow labels; the brittleness would exceed the
-   value, and a test that gets disabled is worse than a rule that gets read.
+A test that asserted "these three strings appear in an SVG" would pin a
+composition choice rather than a fact, and would fail every time the picture was
+legitimately reworded. So freshness is a routing rule in `CLAUDE.md` and the
+requirement that every number on the page be checkable in the repo — the numbers
+are where staleness would actually mislead.
 
-- *Alternative — generate the diagrams from code*: the domain page is close to
-  derivable from the CRD types, and a generator would never go stale. Rejected
-  for now: generated layout is unreadable at this node count, and the hero and
-  component pages are not derivable at all, so it would buy one of three pages
-  at the cost of a build step this repository does not otherwise have.
+If a domain page is drawn later, the coverage test becomes worth it again: there
+the mapping from kinds to labels is total, so the assertion is about a fact
+rather than a phrasing.
 
 ### D6. Authoring is MCP-driven, and the one real tooling constraint is session ownership
 
@@ -204,135 +148,67 @@ all. The recovery is `/mcp` → reconnect, which re-runs the command and rebinds
 the container to the reconnecting session. This happened once during planning.
 
 Within a session, the authoring method is **XML import, not shape-by-shape
-construction**: pages are authored as `mxGraphModel` XML and pushed with
-`import-diagram`, because layout on pages 2 and 3 is deliberate and dozens of
-individual placement calls make it neither reviewable nor reproducible. Export
-runs through `export-diagram` with an explicit `background` and
-`embed_xml: false`.
+construction**: the page is authored as `mxGraphModel` XML and pushed with
+`import-diagram`, because the layout is deliberate and dozens of individual
+placement calls make it neither reviewable nor reproducible.
 
-Fallbacks, in order, if the server cannot be held:
+The fallback, if the server cannot be held: author the `mxGraphModel` XML
+directly and open the file in the draw.io desktop app or the VS Code extension.
+Nothing about the deliverable depends on the MCP server — it is an authoring
+convenience, and the committed artifact is a plain file either tool can open.
 
-1. Author the `mxGraphModel` XML directly and export with the draw.io desktop
-   CLI (`drawio -x -f svg -p <page>`) or the VS Code extension — the same XML,
-   a different exporter.
-2. Ship pages 2 and 3 as Mermaid fenced blocks inside `docs/architecture.md`
-   (GitHub renders them natively, no export step, no staleness gap) and only the
-   hero as draw.io.
+### D7. The README is the only home
 
-Fallback 2 is a real degradation — it loses layout control and the shared
-vocabulary on two of three pages — so it is a last resort, recorded so the
-change cannot become blocked on a tool.
+*Revised: the original decision added a `docs/architecture.md` to host pages 2
+and 3. With one page and no reference prose to index, that file would exist to
+hold a single image the README already carries.*
 
-### D7. `docs/architecture.md` is a visual index, not a fourth reference page
-
-The existing `documentation-structure` spec routes CRD semantics to
-`docs/concepts.md`, contracts to `docs/contracts.md`, and one page per bundle.
-The new page fits none of those, so the spec is amended rather than stretched.
-Its content rule is explicit: each embedded diagram gets one orienting paragraph
-and links into the page that owns the detail. Any sentence on it that explains a
-CRD field or an endpoint belongs somewhere else — that rule is what keeps a
-fourth copy of the reference from growing here, which is the failure mode
-`documentation-structure` was written to stop in the first place.
-
-The hero lives at the top of `README.md`, replacing the ASCII block. Seventeen
-lines out, roughly five in — the README gains headroom against its budget rather
-than spending it.
-
-### D8. The hero's positioning, and the words that carry it
-
-Settled in review, after four rejected framings. Recorded because each rejection
-removed a specific wrong claim, and re-deriving that is expensive.
-
-**Headline:** *Something happens. An agent takes care of it.*
-
-**Subhead:** *A signal wakes it, your prompt tells it what to do, your YAML
-decides what it may touch — whether that's a crashlooping pod or the hallway
-lights.*
-
-What each rejection established, in order:
-
-1. **"Agents you can address"** describes a mechanism, not a benefit.
-2. **Alert must not lead.** `alert` is one of four kinds (`alert | job | task |
-   chat`). Leading with it silently narrows the product to alerting.
-3. **"Autonomous operations" is not a differentiator.** Ansible, StackStorm and
-   self-healing controllers are all autonomous operations with no AI in them.
-4. **Nor is "judgment about the unforeseen."** That over-narrows to diagnosis.
-   Turning on a light is not judgment about an unpredicted failure, and it is
-   the product working exactly as designed.
-
-What survived as the actual AI-supplied element: **the behaviour is authored in
-prose and becomes executable.** Automation makes you write the remedy in code;
-here it is written in English and fenced by grants. That, not reasoning, is why
-one product serves a crashlooping pod and a hallway light.
-
-Which reduces the whole thing to three inputs, and they map one-to-one onto the
-CRDs the hero's middle zone already draws:
-
-| Input | Means | CRD |
-|---|---|---|
-| Signal | what wakes it | the `Pipeline` claim over a `SignalSource` |
-| Prompt | what it should do | `AgentProfile` |
-| Capabilities | what it may touch | `MCPToolset` / `MCPConfig`, bound by `Pipeline` |
-
-**The honesty constraint on the headline.** "Takes care of it" implies
-resolution, and the defaults do not resolve: `k8s-observability` is on,
-`k8s-admin` is off, `rbacMode` defaults to `readonly`. Out of the box the agent
-investigates and explains but cannot act. The subhead therefore has to carry
-"what it may touch", and the hero's right-hand column is the verb ladder that
-defines the claim — **investigates → explains → acts → asks** — with *acts*
-marked as granted, not assumed. A hero that implied autonomous remediation by
-default would be the one overclaim this change must not ship.
-
+The diagram goes at the top of `README.md`, replacing the ASCII block. Seventeen
+lines out, roughly five in, so the README gains headroom against its 150-line
+budget rather than spending it. If a components or domain page is drawn later,
+`docs/architecture.md` becomes the right home for the set and can be introduced
+with them.
 
 ## Risks / Trade-offs
 
-- **A stale diagram is believed; stale prose is skimmed.** → D5's coverage test
-  for kinds, the `CLAUDE.md` routing row for the rest, and a per-page "what this
-  must show" list in the spec so a reviewer can check the picture against a list
-  instead of against their memory.
-- **Density kills the component page.** Eight processes with every edge labelled
-  is already busy. → A stated node budget per page in the spec, external systems
-  collapsed to one box per system, and the manager's internals limited to the
-  five packages a reader must know (`httpapi`, controllers, `chat`, `dispatch`,
-  `ingest`) rather than all of `internal/`.
-- **`.drawio` XML merges badly.** → Pages are separate `<diagram>` elements so
-  conflicts localise to the page edited; in practice conflicts are resolved by
-  re-exporting rather than by merging XML, and the SVGs are regenerated
-  artefacts so their conflicts are never resolved by hand.
-- **Committed binaries-that-aren't-binaries bloat the repo.** → A per-file SVG
-  size budget in the spec; text-as-text export and no embedded raster keep
-  these in the tens of kilobytes.
-- **The palette is being invented, not inherited.** → Recorded as hex values in
-  the spec so it is a decision that can be revisited in one place, rather than
-  re-guessed per diagram.
-- **Choosing three pages over one poster is a deviation from the literal
-  request.** → Mitigated by making the hero itself the combination, and by
-  noting that a composited poster page is cheap to add once the vocabulary
-  exists (D1).
+- **A stale diagram is believed; stale prose is skimmed.** → Every number on it
+  is checkable against the repo and the check is recorded in the spec, so a
+  reviewer verifies against a list rather than against memory. There is no test:
+  for a single hand-composed picture naming three kinds, an assertion would pin
+  a phrasing rather than a fact (D5).
+- **No dark variant survives.** → Accepted. It was generator output, and the
+  generator is gone with the rest of the descoped machinery. The dark palette is
+  recorded in the spec so a later rendering does not start from guesses.
+- **No committed render means the diagram is invisible to a README reader.** →
+  Also accepted, and deliberate: the README keeps its ASCII block until someone
+  exports an image, which is a separate decision. The alternative — committing an
+  SVG — reintroduces two artifacts that can disagree.
+- **`.drawio` XML merges badly.** → One page in one file, so a conflict is
+  resolved by taking one side and re-opening the drawing, never by hand-merging
+  mxGraphModel.
+- **The palette is invented, not inherited.** → Recorded as hex values in the
+  spec, so it is a decision revisitable in one place rather than re-guessed per
+  diagram.
+- **Deviating from "one diagram combining three views".** → The literal reading
+  was rejected for density (D1); the delivered page is the combination, drawn in
+  the system's own nouns.
 
 ## Migration Plan
 
-Documentation-only; there is nothing to deploy and no version to bump.
+Documentation-only: one new file, nothing to deploy, no version to bump.
 
-1. Reconnect the draw.io MCP server, or fall down D6's ladder.
-2. Land the `.drawio` source and all six SVGs in one commit with
-   `docs/architecture.md`, so the page is never live against missing images.
-3. Swap the README block and add the Documentation index row in the same commit
-   — the README must not reference an image that is not yet there.
-4. `CLAUDE.md` map entry, routing row, and freshness rule; `CHANGELOG.md`
-   documentation entry under `Unreleased` (no chart version).
-5. Rollback is `git revert` of the commit; nothing else observes these files.
+1. Commit `docs/diagrams/agent-ops.drawio`.
+2. Rollback is `git revert`; no other file observes it.
 
 ## Open Questions
 
-- **Does the hero deserve a PNG twin?** A 1280×640 raster is what GitHub social
-  previews, conference slides and blog posts need, and SVG serves none of them.
-  Deferred rather than decided: it costs one export and a size budget, but it
-  adds a second generated artefact per theme with no test behind it.
-- **Should `docs/architecture.md` carry a fourth "how a request flows" sequence
-  diagram?** It is the natural next question after page 2, and it is also the
-  thing most likely to go stale. Left out of this change deliberately; worth
-  revisiting once the vocabulary has survived one real update.
-- **Palette source.** The change picks a neutral accessible palette. If a brand
-  identity is chosen before going public, these six SVGs are the first things to
-  re-export.
+- **When should a render be committed?** Today none is, so the README still
+  shows the ASCII block and the diagram reaches nobody who does not open the
+  file. The moment someone wants it in the README, a decision is needed about
+  which formats to commit and how to keep them in step — that is the natural
+  follow-up change.
+- **Do the other two views get drawn?** The component and domain views were cut
+  as invented scope. If they are wanted they inherit this vocabulary, and the
+  CRD-coverage test becomes worth building at that point (D5).
+- **Palette source.** A neutral accessible palette was picked. If a brand
+  identity is chosen before going public, the drawing is the one place to change.
