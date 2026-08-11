@@ -1,5 +1,8 @@
-## ADDED Requirements
+# chart-managed-secrets Specification
 
+## Purpose
+TBD - created by archiving change stable-generated-secrets. Update Purpose after archive.
+## Requirements
 ### Requirement: A credential the chart generates has three sources in a fixed order
 For every credential the chart can generate, the value SHALL be taken from the
 first available of: an explicitly configured value, an existing Secret of that
@@ -48,6 +51,28 @@ conditional.
 - **WHEN** a token is configured explicitly
 - **THEN** the Secret is rendered on install and on every upgrade, so changing the value takes effect
 
+### Requirement: An upgrade that would orphan an unretained credential is refused
+When the chart is about to stop rendering a generated Secret that exists in the
+cluster without the retention policy, the render SHALL FAIL and SHALL name the
+command that applies the policy.
+
+The retention policy is read off the LIVE object, not off the manifest dropping
+it, so a Secret created before the policy existed carries none and is deleted by
+the first upgrade that stops rendering it. A migration note is not a safeguard:
+the failure is silent, immediate and unrecoverable — every browser signed out,
+every adapter credential invalidated. Refusing costs one command run once.
+
+The guard SHALL be silent where it cannot act. A renderer with no cluster sees no
+existing Secret and prunes nothing, so it has nothing to protect.
+
+#### Scenario: An install predating the policy is protected
+- **WHEN** an upgrade would drop a generated Secret that carries no retention policy
+- **THEN** the render fails, naming the Secret and the command that retains it
+
+#### Scenario: A retained credential upgrades silently
+- **WHEN** the same upgrade runs after the policy has been applied to the object
+- **THEN** it succeeds and the Secret keeps its value
+
 ### Requirement: Reinstalling does not overwrite a credential still in use
 When the chart generates a credential at install time and a Secret of that name
 already exists, the existing value SHALL be adopted rather than replaced.
@@ -81,3 +106,4 @@ are corrected together or the belief survives the fix.
 #### Scenario: A pinned token is not presented as something to fetch
 - **WHEN** an install configures its UI token explicitly and is upgraded
 - **THEN** the notes name the configured source instead of printing a command to read a newly generated value
+

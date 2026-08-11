@@ -1,9 +1,28 @@
+{{- /*
+The adapter master token — the root of every adapter credential, since
+per-adapter tokens are HMAC(master, adapter name) validated by re-derivation.
+
+THREE SOURCES, IN ORDER: an explicit adapterAuth.token, an existing Secret of
+this name, then generation. Explicit is checked FIRST; a setting overridden by
+history is accepted and ignored, which is the worst shape a setting can have.
+
+NOTHING RANDOM REACHES THE UPGRADE PATH. With no explicit value the Secret
+renders on INSTALL ONLY and carries `helm.sh/resource-policy: keep`, so an
+upgrade neither regenerates it nor reports it as changed — on ANY renderer.
+`lookup` returns empty wherever the renderer has no cluster (helm template |
+kubectl apply, CI, a GitOps controller, a client-side dry run), and relying on
+it succeeding is what left a fresh credential on that path.
+*/ -}}
 {{- if not .Values.adapterAuth.existingSecret }}
-{{- /* Generate once, reuse across upgrades (lookup); under template-only
-       rendering (no cluster) a fresh token is generated — pin one with
-       adapterAuth.existingSecret for GitOps flows. */}}
 {{- $name := .Values.adapterAuth.secretName }}
+{{- $explicit := .Values.adapterAuth.token | default "" }}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+{{- $existingVal := "" }}
+{{- if and $existing $existing.data }}
+{{- $existingVal = index $existing.data "token" | default "" }}
+{{- end }}
+{{- include "agentops.generatedSecretGuard" (dict "root" . "name" $name "explicit" $explicit "existing" $existing "existingVal" $existingVal "key" "token" "setting" "adapterAuth.token") }}
+{{- if or $explicit .Release.IsInstall }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -11,11 +30,20 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-manager
+  annotations:
+    # not rendering on upgrade is only safe because leaving the manifest would
+    # otherwise DELETE the object
+    helm.sh/resource-policy: keep
 type: Opaque
 data:
-  {{- if and $existing $existing.data $existing.data.token }}
-  token: {{ $existing.data.token }}
+  {{- if $explicit }}
+  token: {{ $explicit | b64enc }}
+  {{- else if $existingVal }}
+  {{- /* install over a Secret a previous release retained: adopt it rather
+         than mint a credential every adapter still holds */}}
+  token: {{ $existingVal }}
   {{- else }}
   token: {{ randAlphaNum 32 | b64enc }}
   {{- end }}
+{{- end }}
 {{- end }}

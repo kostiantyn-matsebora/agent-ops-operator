@@ -34,3 +34,31 @@ cannot drift apart. */ -}}
 {{- fail (printf "global.agentops.runtime.rbacMode must be \"none\", \"readonly\" or \"full\" (empty = readonly under demo, else none), got %q" $mode) -}}
 {{- end -}}
 {{- end -}}
+
+{{- /*
+THE ONE-TIME MIGRATION GUARD for a chart-generated credential.
+
+A generated Secret now leaves the release manifest on upgrade, retained by
+`helm.sh/resource-policy: keep`. Helm reads that annotation off the LIVE object,
+not off the manifest that is dropping it — so a Secret created by an earlier
+chart, which carries no annotation, is DELETED by the first upgrade that stops
+rendering it. Verified against helm v4: unannotated + dropped = gone.
+
+Deleting the console token signs every browser out; deleting the adapter master
+token 401s every adapter at once. So the upgrade is REFUSED, naming the one
+command that makes it safe, rather than silently destroying the credential this
+whole mechanism exists to hold still.
+
+Fires at most once per install, and only where it can act: on a real upgrade,
+where `lookup` sees the cluster. A cluster-less renderer prunes nothing, so a
+silent guard there is correct.
+*/ -}}
+{{- define "agentops.generatedSecretGuard" -}}
+{{- $root := .root -}}
+{{- if and (not .explicit) (not $root.Release.IsInstall) .existingVal -}}
+{{- $ann := (.existing.metadata).annotations | default dict -}}
+{{- if ne (index $ann "helm.sh/resource-policy" | default "") "keep" -}}
+{{- fail (printf "Secret %q in namespace %q holds a chart-generated credential that this chart version no longer renders on upgrade. Helm reads helm.sh/resource-policy off the live object, so dropping it from the manifest DELETES it — and with it every session or adapter credential derived from key %q. Annotate it once, then upgrade again:\n\n  kubectl -n %s annotate secret %s helm.sh/resource-policy=keep\n\nOr take the credential under release management instead by setting %s to its current value." .name $root.Release.Namespace .key $root.Release.Namespace .name .setting) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

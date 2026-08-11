@@ -61,16 +61,32 @@ protects this console?".
 {{- end }}
 {{- $secretName := $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }}
 {{- if not $c.auth.existingSecret }}
-{{- /* Generate once, reuse across upgrades (lookup); under template-only
-       rendering (no cluster) a fresh token is generated — pin one with
-       console.auth.existingSecret for GitOps flows.
+{{- /*
+THREE SOURCES, IN ORDER: an explicit console.auth.uiToken, an existing Secret of
+this name, then generation. Explicit is checked FIRST — it used to be checked
+LAST, which made the setting a silent no-op on every install that already had a
+token: accepted, documented and ignored.
 
-       RENDERED EVEN WHEN AUTHENTICATION IS DISABLED. The Channel below declares
-       credentialsSecretRef and the reconciler projects it with envFrom, so a
-       missing Secret is a pod that will not start — "disable auth" would become
-       "console will not boot", with no obvious cause. Keeping it also makes
-       re-enabling authentication one value rather than a reinstall. */}}
+NOTHING RANDOM REACHES THE UPGRADE PATH. With no explicit value the Secret
+renders on INSTALL ONLY and carries `helm.sh/resource-policy: keep`, so an
+upgrade neither regenerates the token nor reports it as changed on a renderer
+with no cluster — signing every browser out is a thing an operator asks for,
+never a thing a redeploy causes.
+
+RENDERED EVEN WHEN AUTHENTICATION IS DISABLED. The Channel below declares
+credentialsSecretRef and the reconciler projects it with envFrom, so a missing
+Secret is a pod that will not start — "disable auth" would become "console will
+not boot", with no obvious cause. Keeping it also makes re-enabling
+authentication one value rather than a reinstall.
+*/}}
+{{- $explicit := $auth.uiToken | default "" }}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName }}
+{{- $existingVal := "" }}
+{{- if and $existing $existing.data }}
+{{- $existingVal = index $existing.data "uiToken" | default "" }}
+{{- end }}
+{{- include "agentops.generatedSecretGuard" (dict "root" . "name" $secretName "explicit" $explicit "existing" $existing "existingVal" $existingVal "key" "uiToken" "setting" "console.auth.uiToken") }}
+{{- if or $explicit .Release.IsInstall }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -78,16 +94,23 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-console
+  annotations:
+    # not rendering on upgrade is only safe because leaving the manifest would
+    # otherwise DELETE the object
+    helm.sh/resource-policy: keep
 type: Opaque
 data:
-  {{- if and $existing $existing.data (index $existing.data "uiToken") }}
-  uiToken: {{ index $existing.data "uiToken" }}
-  {{- else if $c.auth.uiToken }}
-  uiToken: {{ $c.auth.uiToken | b64enc }}
+  {{- if $explicit }}
+  uiToken: {{ $explicit | b64enc }}
+  {{- else if $existingVal }}
+  {{- /* install over a Secret a previous release retained: adopt it rather
+         than sign out browsers that still hold it */}}
+  uiToken: {{ $existingVal }}
   {{- else }}
   uiToken: {{ randAlphaNum 40 | b64enc }}
   {{- end }}
 ---
+{{- end }}
 {{- end }}
 # Pure implementation: image + workload knobs. Nothing configurable about the
 # surface lives here — that is on the Channel below.

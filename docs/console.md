@@ -295,6 +295,40 @@ instruct an agent that, in a `rbacMode: full` install, holds `cluster-admin`.
 What it **cannot** do: write anything to the Kubernetes API. Its Role carries no
 write verb, and no write path exists in the module.
 
+### Where the UI token comes from
+
+Three sources, in this order — the first one available wins:
+
+| Source | Set | Rendered |
+|---|---|---|
+| Configured value | `console.auth.uiToken` | on install **and every upgrade** |
+| Existing Secret of that name | — | install only, adopted rather than replaced |
+| Generated | — | install only, 40 random characters |
+
+A fourth option sits outside the order: `console.auth.existingSecret` supplies the
+whole Secret, and the chart creates none.
+
+**A redeploy does not sign anyone out.** When the token was generated, the Secret
+is rendered on install only and carries `helm.sh/resource-policy: keep`, so an
+upgrade neither regenerates it nor reports it as changed — including on a renderer
+with no cluster (`helm template` piped to apply, CI, a GitOps controller, a
+client-side dry run), where a cluster `lookup` returns nothing and the old
+template therefore minted a fresh token. Signing every browser out is a
+consequence an operator asks for, never one a deploy causes.
+
+**Rotating is a values edit**: set `console.auth.uiToken` and upgrade. It wins
+over the existing Secret, so it takes effect on an install that already has a
+token — it used to be checked last, which made it a silent no-op exactly there.
+
+The trade for stability: once generated, the Secret is no longer part of the
+release. Deleting it by hand leaves the console pod unable to start (the Channel
+projects it with `envFrom`), and the way back is `console.auth.uiToken`, not
+another upgrade. The same trade the CRDs and the persistence claims already make.
+
+The adapter master token behaves identically via `adapterAuth.token` /
+`adapterAuth.existingSecret` — with a wider blast radius, since every per-adapter
+token is an HMAC of it: changing it 401s every adapter until its pod restarts.
+
 ### Letting something else authenticate
 
 With a proxy already in front, the console's own token is a second sign-in that

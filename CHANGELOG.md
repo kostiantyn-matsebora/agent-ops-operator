@@ -8,6 +8,69 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Generated credentials hold still — chart 5.8.0
+
+**ONE COMMAND REQUIRED before upgrading an existing install.** Annotate the two
+Secrets the chart generated, or the upgrade deletes them:
+
+```sh
+kubectl -n <ns> annotate secret agentops-adapter-token agentops-console-console \
+  helm.sh/resource-policy=keep
+```
+
+The chart refuses to render without it and prints this command, so a forgotten
+step is a failed upgrade rather than a lost credential. Skip it only for a fresh
+install, or where you supply both credentials yourself.
+
+The chart generates two credentials — the console UI token and the adapter master
+token — and both were meant to survive upgrades via a cluster `lookup`. On a real
+`helm upgrade` they did. But `lookup` returns nothing wherever the renderer has
+no cluster, so every `helmfile diff` reported both as changed on an install where
+nothing had:
+
+```
+agent-ops, agentops-adapter-token, Secret (v1) has changed:
+-   token: '-------- # (32 bytes)'
++   token: '++++++++ # (32 bytes)'
+```
+
+Cosmetic on the diff; not cosmetic anywhere the render is applied. `helm template
+| kubectl apply`, CI, a GitOps controller and a client-side dry run all produce a
+*fresh* token — signing every console session out and invalidating every adapter
+at once, since per-adapter tokens are HMACs of the master.
+
+**A generated credential now leaves the upgrade path entirely.** With no explicit
+value the Secret renders on install only, carrying `helm.sh/resource-policy:
+keep`. Nothing random exists on the upgrade path to be applied, whichever renderer
+runs — rather than a hazard neutralised by a lookup that happens to succeed.
+
+That annotation is why the manual step above exists: Helm reads it off the **live
+object**, not off the manifest dropping it, so a Secret created by an earlier
+chart carries none and gets deleted by the first upgrade that stops rendering it.
+Once annotated, the object stays put with the same value. It is a removal from
+the release manifest, not from the cluster.
+
+**An explicitly configured value now wins.** Precedence is explicit → existing
+Secret → generate. `console.auth.uiToken` was checked *last*, so on any install
+that already had a token it was accepted, documented and silently ignored — the
+worst way for a setting to fail. Rotating is now a values edit rather than
+"delete the Secret, then upgrade".
+
+**`adapterAuth.token` is new**, matching `console.auth.uiToken` and the
+`runtime.credentialsSecret.token` pattern: supply it and the credential is
+release-managed from your secret store; leave it empty and it is generated.
+Changing it 401s every adapter until its pod restarts with the new env — inherent
+to rotating a master credential, and stated at the setting.
+
+An explicit value is rendered on install **and every upgrade**, because that is
+how changing it takes effect. It is also the way back if a generated Secret is
+deleted by hand: once the chart has stopped managing the object, no upgrade
+restores it.
+
+`NOTES.txt` no longer prints "fetch your token" after every deploy — it names the
+source in effect, since that instruction is where the belief that the token
+rotates on every deploy came from.
+
 ### An answer describing its own tools reaches Telegram again — channel-telegram 0.7.1
 
 Bug fix; upgrade the image. No values change beyond the tag.

@@ -102,9 +102,17 @@ Exposed at {{ if $hasTLS }}https{{ else }}http{{ end }}://{{ $ing.host }}/
 {{- $auth := $c.auth | default dict }}
 {{- $authEnabled := true }}
 {{- if hasKey $auth "enabled" }}{{ $authEnabled = $auth.enabled }}{{ end }}
+{{- $secretName := $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }}
 {{- if $authEnabled }}
-Sign in with the UI token:
-  kubectl -n {{ .Release.Namespace }} get secret {{ $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }} -o jsonpath='{.data.uiToken}' | base64 -d
+{{- if $auth.uiToken }}
+Sign in with the UI token you configured (console.auth.uiToken). It is applied on
+every upgrade, so changing that value is how you rotate it.
+{{- else if $c.auth.existingSecret }}
+Sign in with the UI token from the Secret you supplied ({{ $secretName }}, key uiToken).
+{{- else }}
+Sign in with the UI token — generated once at install, and unchanged by upgrades:
+  kubectl -n {{ .Release.Namespace }} get secret {{ $secretName }} -o jsonpath='{.data.uiToken}' | base64 -d
+{{- end }}
 
 Anyone with that token sees every agentops CR in this namespace, conversation
 payloads included.
@@ -131,9 +139,11 @@ Two things to check on the proxy itself:
      this console is read-only: writes are refused rather than recorded against
      nobody, and the UI says so.
 
-The UI token Secret is still created, so re-enabling authentication is one value:
+The UI token Secret is still there, so re-enabling authentication is one value:
   --set console.auth.enabled=true
-  kubectl -n {{ .Release.Namespace }} get secret {{ $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }} -o jsonpath='{.data.uiToken}' | base64 -d
+{{- if not $auth.uiToken }}
+  kubectl -n {{ .Release.Namespace }} get secret {{ $secretName }} -o jsonpath='{.data.uiToken}' | base64 -d
+{{- end }}
 {{- end }}
 {{- if and $ing.enabled (not $hasTLS) }}
 

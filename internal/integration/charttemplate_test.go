@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/base64"
 	"os/exec"
 	"strings"
 	"testing"
@@ -396,6 +397,124 @@ func TestMetricsScrapeTemplatesAreOptIn(t *testing.T) {
 	// the scrape selects the manager Service by label, so that label must exist
 	if !strings.Contains(on, "app.kubernetes.io/name: agentops-manager") {
 		t.Fatal("the manager Service must carry the label the scrape selects")
+	}
+}
+
+// ---- chart-generated credentials --------------------------------------------
+
+// The two credentials the chart can generate, and the key each carries.
+var generatedCredentials = []struct{ name, key string }{
+	{"agentops-adapter-token", "token"},
+	{"agentops-console-console", "uiToken"},
+}
+
+// secretDoc returns the rendered Secret of that name, or "" if none was emitted.
+func secretDoc(rendered, name string) string {
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, "kind: Secret") && strings.Contains(doc, "name: "+name+"\n") {
+			return doc
+		}
+	}
+	return ""
+}
+
+// An explicitly configured token must WIN over whatever history the namespace
+// holds. It used to lose: the existing-Secret branch was tested first, so on any
+// install that already had a token the setting was accepted, documented and
+// silently ignored — the worst shape a setting can have.
+func TestExplicitTokensAreRendered(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "console.auth.uiToken=pinned-ui-token",
+		"--set", "adapterAuth.token=pinned-master-token")
+	for _, c := range []struct{ secret, key, want string }{
+		{"agentops-console-console", "uiToken", "pinned-ui-token"},
+		{"agentops-adapter-token", "token", "pinned-master-token"},
+	} {
+		doc := secretDoc(out, c.secret)
+		if doc == "" {
+			t.Fatalf("%s was not rendered", c.secret)
+		}
+		want := c.key + ": " + base64.StdEncoding.EncodeToString([]byte(c.want))
+		if !strings.Contains(doc, want) {
+			t.Fatalf("%s must carry the configured value (%s):\n%s", c.secret, want, doc)
+		}
+	}
+}
+
+// THE property this whole mechanism exists for: no renderer, cluster or not,
+// ever proposes a fresh credential on the upgrade path. `lookup` returns empty
+// wherever there is no cluster, so a template that could generate on upgrade
+// does not merely SHOW a new token in a diff — piped to apply, it sets one,
+// signing every browser out and invalidating every derived adapter token.
+func TestUpgradeRendersNoGeneratedCredential(t *testing.T) {
+	out := helmTemplate(t, "--is-upgrade")
+	for _, c := range generatedCredentials {
+		if doc := secretDoc(out, c.name); doc != "" {
+			t.Fatalf("an upgrade with no explicit value must render no Secret, got:\n%s", doc)
+		}
+	}
+}
+
+// ...and the counterpart: an EXPLICIT value renders on upgrade too, because that
+// is the path by which changing it takes effect. Install-only applies to the
+// generated case alone.
+func TestExplicitTokensRenderOnUpgrade(t *testing.T) {
+	out := helmTemplate(t, "--is-upgrade",
+		"--set", "console.auth.uiToken=rotated-ui",
+		"--set", "adapterAuth.token=rotated-master")
+	for _, c := range generatedCredentials {
+		if secretDoc(out, c.name) == "" {
+			t.Fatalf("%s must render on upgrade when configured explicitly", c.name)
+		}
+	}
+}
+
+// An install generates both, and each MUST carry the keep policy: not rendering
+// on upgrade is only safe because the object survives leaving the manifest.
+// Verified against helm — an unannotated resource dropped from the manifest is
+// deleted, so this annotation is load-bearing rather than decorative.
+func TestInstallGeneratesBothCredentialsAndKeepsThem(t *testing.T) {
+	out := helmTemplate(t)
+	for _, c := range generatedCredentials {
+		doc := secretDoc(out, c.name)
+		if doc == "" {
+			t.Fatalf("%s must be generated on install", c.name)
+		}
+		if !strings.Contains(doc, "helm.sh/resource-policy: keep") {
+			t.Fatalf("%s must carry the keep policy, or the first upgrade deletes it:\n%s", c.name, doc)
+		}
+		if !strings.Contains(doc, c.key+": ") {
+			t.Fatalf("%s must carry key %q:\n%s", c.name, c.key, doc)
+		}
+	}
+}
+
+// Bringing a whole Secret still means the chart creates NONE — and the name is
+// what the Channel references, so a rename cannot silently point the adapter at
+// a Secret that is not there.
+func TestExistingSecretIsReferencedAndNotCreated(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "console.auth.existingSecret=my-console-secret",
+		"--set", "adapterAuth.existingSecret=my-adapter-secret")
+	for _, c := range generatedCredentials {
+		if doc := secretDoc(out, c.name); doc != "" {
+			t.Fatalf("no Secret may be created when one is supplied, got:\n%s", doc)
+		}
+	}
+	if secretDoc(out, "my-console-secret") != "" {
+		t.Fatal("the supplied Secret must be referenced, never rendered")
+	}
+	var channel string
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: Channel\n") && strings.Contains(doc, "adapter: console") {
+			channel = doc
+		}
+	}
+	if channel == "" {
+		t.Fatal("console Channel not rendered")
+	}
+	if !strings.Contains(channel, "name: my-console-secret") {
+		t.Fatalf("the Channel must reference the supplied Secret by name:\n%s", channel)
 	}
 }
 
