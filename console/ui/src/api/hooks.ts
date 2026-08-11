@@ -108,6 +108,12 @@ export function useSources() {
   return useQuery({ queryKey: ['sources', rev], queryFn: api.sources })
 }
 
+/** The Pipelines a message can address — Ready only, exactly like `/agents`. */
+export function useAgents() {
+  const rev = useRevision(['pipelines'])
+  return useQuery({ queryKey: ['agents', rev], queryFn: api.agents })
+}
+
 /** Which historical charts the backend can answer, and whether one exists. */
 export function useCharts() {
   return useQuery({ queryKey: ['charts'], queryFn: api.charts, staleTime: 30_000 })

@@ -169,6 +169,7 @@ func (a *API) Handler(ui http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/charts", a.auth(a.handleCharts))
 	mux.HandleFunc("GET /api/charts/{chart}", a.auth(a.handleHistory))
 	mux.HandleFunc("GET /api/sources", a.auth(a.handleOriginationSources))
+	mux.HandleFunc("GET /api/agents", a.auth(a.handleAgents))
 
 	mux.HandleFunc("GET /api/conversations", a.auth(a.handleConversations))
 	mux.HandleFunc("GET /api/conversations/{name}", a.auth(a.handleConversation))
@@ -280,13 +281,24 @@ func (a *API) handleOriginationSources(w http.ResponseWriter, r *http.Request) {
 			src.Reason = "NotFound"
 			src.Message = "SignalSource " + name + " does not exist"
 		}
+		// A source is SHAREABLE, so this collects every server rather than
+		// keeping whichever the loop saw last — which was an arbitrary pick
+		// dressed as a fact. The profile is filled only when ONE pipeline
+		// serves the source: with several, a bare message is refused as
+		// ambiguous and no single profile answers here.
+		var servers, profiles []string
 		for _, p := range a.cache.List("pipelines") {
 			for _, ref := range decodeSpec[pipelineSpec](p.Spec).SignalSourceRefs {
 				if ref.Name == name {
-					src.Pipeline = p.Metadata.Name
-					src.Profile = decodeSpec[pipelineSpec](p.Spec).ProfileRef.Name
+					servers = append(servers, p.Metadata.Name)
+					profiles = append(profiles, decodeSpec[pipelineSpec](p.Spec).ProfileRef.Name)
 				}
 			}
+		}
+		sort.Strings(servers)
+		src.Pipeline = strings.Join(servers, ", ")
+		if len(profiles) == 1 {
+			src.Profile = profiles[0]
 		}
 		if !src.Wired {
 			src.Patch = `kubectl patch pipeline <name> --type=json -p ` +

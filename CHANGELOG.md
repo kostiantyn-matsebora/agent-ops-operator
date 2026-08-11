@@ -29,6 +29,10 @@ tiebreak are deleted. A Pipeline that sat at `Ready=False, reason=SourceConflict
 becomes `Ready=True` and starts answering, so one alert on a shared source now
 opens **two conversations — two agents, two runtimes, two LLM bills.**
 
+A `SourceConflict` condition left on such a Pipeline is **cleared automatically**
+on the first reconcile — deleting the rule that wrote it does not delete what it
+already wrote, so the manager removes it for one release.
+
 *Fix, if that is not what you want:* drop the source from every Pipeline but the
 intended one.
 

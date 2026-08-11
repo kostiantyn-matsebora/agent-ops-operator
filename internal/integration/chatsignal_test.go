@@ -118,7 +118,7 @@ func TestUnclaimedChatSourceDropsAndTellsTheUser(t *testing.T) {
 	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	reason, _ := out["reason"].(string)
-	if !strings.Contains(reason, "not claimed") {
+	if !strings.Contains(reason, "not served by any Ready pipeline") {
 		t.Fatalf("want a drop reason, got %v", out)
 	}
 	if n := len(convsBoundTo(t, "chan-unwired")); n != 0 {

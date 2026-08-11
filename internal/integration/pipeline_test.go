@@ -1,5 +1,5 @@
 // Pipeline + multi-channel conversation tests: wiring validation, source
-// conflicts, per-channel topic ensure, the at-least-one dispatch gate, forced
+// SHARING, per-channel topic ensure, the at-least-one dispatch gate, forced
 // result delivery, reply/ack fan-out, and attributed cross-channel relay.
 package integration
 
@@ -12,6 +12,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -52,6 +53,20 @@ func reconcilePipeline(t *testing.T, name string) *agentopsv1alpha1.Pipeline {
 	return &p
 }
 
+func reconcileSignalSource(t *testing.T, name string) *agentopsv1alpha1.SignalSource {
+	t.Helper()
+	rc := &controller.SignalSourceReconciler{Client: k8sClient}
+	if _, err := rc.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}); err != nil {
+		t.Fatal(err)
+	}
+	var src agentopsv1alpha1.SignalSource
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &src); err != nil {
+		t.Fatal(err)
+	}
+	return &src
+}
+
 // cleanupConversation force-removes a conversation and its runtime pod so the
 // active-conversation cap stays predictable for later tests. The close-topics
 // finalizer is stripped rather than driven: without a reconciler running here
@@ -85,7 +100,7 @@ func dropCloseFinalizer(t *testing.T, name string) {
 	_ = k8sClient.Patch(ctx, &conv, patch)
 }
 
-func TestPipelineValidationAndConflicts(t *testing.T) {
+func TestPipelineValidationAndSharing(t *testing.T) {
 	mkProfile(t, "prof-pipe")
 	mkChannel(t, "pipe-chan-a", "pipe-ta")
 	mkSignalSource(t, "pipe-src", "pipe-sig", "")
@@ -104,14 +119,46 @@ func TestPipelineValidationAndConflicts(t *testing.T) {
 		t.Fatalf("dangling ref not surfaced: %+v", p.Status.Conditions)
 	}
 
-	// second claim on a source → SourceConflict on the newer, older keeps it
+	// A SECOND pipeline on the same source is a valid configuration, not a
+	// conflict: sources are shareable exactly as channels are, and a signal
+	// there opens a conversation on each. Both stay Ready, and no
+	// SourceConflict condition is written on either — the condition type is
+	// gone, so a stale one would have to be invented to appear.
 	mkPipeline(t, "pipe-second", []string{"pipe-src"}, []string{"pipe-chan-a"}, "prof-pipe")
 	p = reconcilePipeline(t, "pipe-second")
-	if !apimeta.IsStatusConditionTrue(p.Status.Conditions, controller.ConditionSourceConflict) {
-		t.Fatalf("SourceConflict expected on newer: %+v", p.Status.Conditions)
+	if !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
+		t.Fatalf("second pipeline on a shared source must be Ready: %+v", p.Status.Conditions)
+	}
+	if c := apimeta.FindStatusCondition(p.Status.Conditions, "SourceConflict"); c != nil {
+		t.Fatalf("no SourceConflict condition may be written: %+v", c)
+	}
+
+	// A condition a PREVIOUS manager wrote must be CLEARED, not merely left
+	// unwritten: deleting the writer does not delete what it already wrote, so
+	// on upgrade the stale one would sit there forever next to Ready=True.
+	stale := p.DeepCopy()
+	apimeta.SetStatusCondition(&stale.Status.Conditions, metav1.Condition{
+		Type: "SourceConflict", Status: metav1.ConditionTrue, Reason: "SourceConflict",
+		Message: "sources already claimed by older pipelines: pipe-src (by pipe-ok)",
+	})
+	if err := k8sClient.Status().Patch(context.Background(), stale, client.MergeFrom(p)); err != nil {
+		t.Fatal(err)
+	}
+	p = reconcilePipeline(t, "pipe-second")
+	if c := apimeta.FindStatusCondition(p.Status.Conditions, "SourceConflict"); c != nil {
+		t.Fatalf("a stale SourceConflict from an older manager must be removed: %+v", c)
 	}
 	if p := reconcilePipeline(t, "pipe-ok"); !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
-		t.Fatalf("older claimant must stay Ready: %+v", p.Status.Conditions)
+		t.Fatalf("first pipeline must stay Ready: %+v", p.Status.Conditions)
+	}
+
+	// the source names BOTH servers on Wired — the count is what tells an
+	// operator how many conversations one signal will open
+	src := reconcileSignalSource(t, "pipe-src")
+	wired := apimeta.FindStatusCondition(src.Status.Conditions, controller.ConditionWired)
+	if wired == nil || wired.Status != "True" ||
+		!strings.Contains(wired.Message, "pipe-ok") || !strings.Contains(wired.Message, "pipe-second") {
+		t.Fatalf("Wired must name every serving pipeline: %+v", wired)
 	}
 
 	// channels may be shared between pipelines — no conflict

@@ -226,9 +226,10 @@ Four things fall out of that:
 
 1. The origination invariant holds literally — no side door to defend.
 2. **Who answers is declared, not chosen by the caller.** Naming a pipeline in a
-   request body would let the caller pick the agent. With a claimed source, the
+   request body would let the caller pick the agent. With a wired source, the
    wiring decides, which is the rule's actual point. The console cannot reach an
-   agent no wiring points at.
+   agent no wiring points at — addressing one by name reaches only what is
+   already declared Ready.
 3. **Origination becomes visible traffic.** A conversation conjured by a direct
    call materializes from nowhere, leaving a hole in the graph exactly where the
    operator acted. A console source is a node with an edge: pressing "start"
@@ -248,11 +249,33 @@ kubectl patch pipeline <name> --type=json \
   -p '[{"op":"add","path":"/spec/signalSourceRefs/-","value":{"name":"console"}}]'
 ```
 
-A source is claimed by exactly ONE Pipeline, so one source means one destination.
-To originate to several agents, declare several sources (`console-k8s`,
-`console-ha`), each claimed by its own pipeline. This is a feature: *what you can
-start is what is wired.* The picker is a rendering of the topology, not a
-free-text field that can name something no wiring supports.
+A source is **shareable**: several Pipelines may list the console source, and all
+of them stay Ready and addressable. What you can start is still exactly what is
+wired — the picker is a rendering of the topology, not a free-text field that can
+name something no wiring supports.
+
+### Addressing an agent
+
+With ONE Pipeline serving the console source, an unaddressed task goes to it and
+nothing needs saying. With SEVERAL, an unaddressed task is **refused** rather
+than handed to an arbitrary one, and the way to reach a specific agent is to
+address it: `/<pipeline> <task>`.
+
+The composer offers them. Typing `/` at the start of the task lists the Ready
+Pipelines with their answering profile, narrows as you keep typing, and inserts
+`/<name> ` with the cursor after it. Arrow keys move, Enter or Tab picks, Escape
+dismisses without sending; a surface with nothing addressable shows no menu
+rather than an empty one.
+
+The listing is served by `GET /api/agents` from the Pipelines the console already
+list/watches — **no new RBAC, no manager endpoint, no CRD field.** It is
+Ready-filtered for the same reason `/agents` is: an unready Pipeline names wiring
+that does not resolve, so offering it would invite a request nothing can serve.
+The two must never disagree, and tests on both sides pin that they do not.
+
+The listing is advisory — the console's cache can lag a moment, and an addressed
+message to a Pipeline that has since gone is already answered with "unknown
+agent". `/agents` remains the fallback wherever a client cannot present a menu.
 
 ## Trust boundary
 

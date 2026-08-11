@@ -32,17 +32,22 @@ Because the originating channel is appended to the conversation's channels, a co
 - **THEN** it is fully visible but has no composer, and the UI states why and shows the patch that would join it
 
 ### Requirement: What can be started is what is wired
-The console SHALL offer as origination targets exactly those console SignalSources reporting `Wired=True`, each labeled with the Pipeline that claimed it and that Pipeline's profile. Sources that are unclaimed SHALL be shown as unavailable with their `Wired=False` reason, not hidden.
+The console SHALL offer as origination targets exactly those console SignalSources reporting `Wired=True`, each labeled with the Pipelines serving it and — when exactly one does — that Pipeline's profile. Sources no Ready Pipeline serves SHALL be shown as unavailable with their `Wired=False` reason, not hidden.
 
-Because a SignalSource is claimed by exactly one Pipeline, multiple destinations SHALL be expressed as multiple console SignalSources.
+A SignalSource is SHAREABLE, so several Pipelines MAY serve one console source. Where they do, an unaddressed task is refused rather than sent to an arbitrary one, and the console SHALL say so before the task is typed. Reaching a specific agent on such a source is ADDRESSING it by name, and the composer SHALL offer the addressable Pipelines rather than requiring the name be recalled (see `chat-addressing-discovery`). Separate console SignalSources remain a valid way to express separate destinations, but are no longer the only one.
 
 #### Scenario: No wiring, honest empty state
 - **WHEN** no Pipeline claims any console SignalSource
 - **THEN** origination is unavailable, and the UI states that no pipeline claims the console source and shows the patch that would claim it — rather than offering a control that fails
 
 #### Scenario: Several destinations
-- **WHEN** two console SignalSources are claimed by two different Pipelines
-- **THEN** both appear as targets, each labeled with its claiming pipeline and profile
+- **WHEN** two console SignalSources are served by two different Pipelines
+- **THEN** both appear as targets, each labeled with its serving pipeline and profile
+
+#### Scenario: One source, several answerers
+- **WHEN** two Ready Pipelines serve one console SignalSource
+- **THEN** the target names both, offers no single profile, and states that a
+  task must address one of them
 
 #### Scenario: Origination is refused when unclaimed
 - **WHEN** a start request names a source no Pipeline claims

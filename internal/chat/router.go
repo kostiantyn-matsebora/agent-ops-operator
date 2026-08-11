@@ -179,15 +179,25 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		if err := r.Reader.List(ctx, &pipelines, client.InNamespace(r.Namespace)); err != nil {
 			return err
 		}
-		names := make([]string, 0, len(pipelines.Items))
+		// Each entry carries its answering PROFILE, matching what a surface with
+		// input assistance offers in its typeahead. Two agents on one surface is
+		// now an ordinary configuration — a source is shareable — and a bare
+		// list of names is not enough to choose between them.
+		lines := make([]string, 0, len(pipelines.Items))
 		for i := range pipelines.Items {
-			if apimeta.IsStatusConditionTrue(pipelines.Items[i].Status.Conditions, "Ready") {
-				names = append(names, "/"+pipelines.Items[i].Name)
+			p := &pipelines.Items[i]
+			if !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
+				continue
 			}
+			line := "• `/" + p.Name + "`"
+			if profile := p.Spec.ProfileRef.Name; profile != "" {
+				line += " — " + profile
+			}
+			lines = append(lines, line)
 		}
-		sort.Strings(names)
-		r.Ops.EnqueueMessage(ctx, ch, nil, Notice("🤖 **Agents**: "+strings.Join(names, "  ")+
-			"\nUsage: `/<agent> <task>` — each call gets its own topic. "+
+		sort.Strings(lines)
+		r.Ops.EnqueueMessage(ctx, ch, nil, Notice("🤖 **Agents**\n"+strings.Join(lines, "\n")+
+			"\n\nUsage: `/<agent> <task>` — each call gets its own topic. "+
 			"`/<agent>:<role>` picks a role inside the agent's repo."))
 		return nil
 	}
@@ -249,6 +259,12 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 	if origin != nil {
 		conv.Spec.Toolsets = origin.Spec.Toolsets.DeepCopy()
 		conv.Spec.MCPConfigs = origin.Spec.MCPConfigs.DeepCopy()
+		// Provenance, written once at creation like the bindings above it and
+		// read for the same reasons they are not: attribution and reuse
+		// scoping, never to resolve wiring. An addressed command is the one
+		// origination that names its pipeline outright, so this ref is exact
+		// rather than inferred.
+		conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: origin.Name}
 	}
 	if err := r.Client.Create(ctx, conv); err != nil {
 		return conv, err

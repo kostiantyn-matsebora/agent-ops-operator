@@ -1,5 +1,5 @@
 import type {
-  ChartResponse, ConversationDetail, ConversationGraph, ConversationPage, Detail,
+  AgentsResponse, ChartResponse, ConversationDetail, ConversationGraph, ConversationPage, Detail,
   Finding, KindInfo, InventoryRow, Overview, Queues, Session, SourcesResponse, TopologyResponse,
 } from './types'
 
@@ -56,6 +56,7 @@ export const api = {
     request<ConversationGraph>(`/api/conversations/${name}/graph`),
 
   sources: () => request<SourcesResponse>('/api/sources'),
+  agents: () => request<AgentsResponse>('/api/agents'),
   start: (task: string, source?: string) =>
     request<{ source: string; note: string }>('/api/conversations', {
       method: 'POST',

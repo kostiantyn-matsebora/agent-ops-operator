@@ -1,6 +1,13 @@
+# chat-signal-origination — delta
+
+## RENAMED Requirements
+
+- FROM: `### Requirement: Conversations originate only from claimed signal sources`
+- TO: `### Requirement: Conversations originate only from served signal sources`
+
 ## MODIFIED Requirements
 
-### Requirement: Conversations originate only from claimed signal sources
+### Requirement: Conversations originate only from served signal sources
 
 A Conversation SHALL be created only from a signal routed against a
 `SignalSource` served by a Ready `Pipeline`. A message arriving on a channel's
@@ -9,14 +16,22 @@ chat `SignalSource`, not created directly by the channel router. No channel
 SHALL supply a default profile, and resolution SHALL NOT fall back to any
 creation-timestamp ordering among pipelines.
 
-A bare general-surface message — one addressing no Pipeline — SHALL be routed
-only when the answering Pipeline is UNAMBIGUOUS:
+A source served by several Ready Pipelines fans a signal out to all of them, one
+conversation each. The chat lane is the ONE exception, and only for a message
+addressing no Pipeline: a person asked one question on one surface and is owed
+one answer, and — unlike an alert — can say which agent they meant. So a bare
+general-surface message SHALL be routed only when the answering Pipeline is
+UNAMBIGUOUS:
 
 - exactly ONE Ready Pipeline lists the chat source → the message routes to it;
 - TWO OR MORE list it → no Conversation is created and the surface is answered
   with the Pipelines available and the addressed form to use;
 - NONE list it → unchanged: `Wired=False` and the drop reason returns to the
   surface.
+
+That distinction SHALL be drawn from the arriving signal's kind, which ingest
+already carries. No `SignalSource` or adapter declaration SHALL be required to
+mark a source as a chat lane.
 
 An addressed message SHALL be routed by the name it carries, independent of
 which Pipelines list the source and independent of how many do.
@@ -35,8 +50,14 @@ address.
 #### Scenario: Ambiguous bare message is answered with the choices
 
 - **WHEN** a user sends a bare message on a surface two Ready Pipelines serve
-- **THEN** no Conversation is created and the surface receives the available
-  Pipelines with the `/<pipeline> <task>` form to use
+- **THEN** no Conversation is created, neither Pipeline is woken, and the surface
+  receives the available Pipelines with the `/<pipeline> <task>` form to use
+
+#### Scenario: A non-chat signal on the same shared source still fans out
+
+- **WHEN** an alert arrives on a source two Ready Pipelines serve
+- **THEN** both Pipelines open a conversation, because no person is waiting on a
+  single answer and no address could have been given
 
 #### Scenario: Addressing works however many pipelines serve the surface
 
@@ -44,7 +65,7 @@ address.
 - **THEN** the conversation is created for the named Pipeline, with its profile
   and capabilities, and no ambiguity arises
 
-#### Scenario: Unclaimed chat source drops with a reason
+#### Scenario: Unserved chat source drops with a reason
 
 - **WHEN** a general-surface message arrives for a chat source no Ready Pipeline
   serves

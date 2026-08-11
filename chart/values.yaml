@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.28.0
+  tag: 0.29.1
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -295,7 +295,7 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.8.1
+    tag: 0.9.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
