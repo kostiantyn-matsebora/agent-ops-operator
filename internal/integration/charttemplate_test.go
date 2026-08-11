@@ -593,7 +593,12 @@ func TestDefaultRulesShape(t *testing.T) {
 
 	// Reasons describing something that ALREADY happened must never dwell: a
 	// re-check would find the healthy replacement and erase the incident.
-	pastTense := []string{"OOMKilling", "SystemOOM", "Evicted", "BackoffLimitExceeded", "DeadlineExceeded"}
+	//
+	// Evicted is deliberately NOT in this list: it is dropped outright, not
+	// given a dwell. The two are different failures — a dwell would erase the
+	// incident silently, whereas the drop is justified below by the reasons
+	// that report the same incident from the cause end and the consequence end.
+	pastTense := []string{"OOMKilling", "SystemOOM", "BackoffLimitExceeded", "DeadlineExceeded"}
 	for _, reason := range pastTense {
 		line := ruleLineContaining(src, reason)
 		if line == "" {
@@ -603,6 +608,26 @@ func TestDefaultRulesShape(t *testing.T) {
 		if !strings.Contains(line, `for: "0"`) {
 			t.Errorf("past-tense reason %q must carry for: \"0\", got rule:\n%s", reason, line)
 		}
+	}
+
+	// Evicted is dropped, and the drop is only defensible while BOTH of its
+	// substitutes survive. Pin them together: a later edit that re-tunes node
+	// pressure or FailedScheduling must not silently leave eviction unreported
+	// from every direction at once.
+	evicted := ruleLineContaining(src, "Evicted")
+	if evicted == "" {
+		t.Error("Evicted is not covered by any rule")
+	} else if !strings.Contains(evicted, "action: drop") {
+		t.Errorf("Evicted must be dropped, not dwelled, got rule:\n%s", evicted)
+	}
+	for _, cause := range []string{"NodeHasMemoryPressure", "NodeHasDiskPressure"} {
+		line := ruleLineContaining(src, cause)
+		if line == "" || !strings.Contains(line, `for: "0"`) {
+			t.Errorf("dropping Evicted requires %q to report the cause at for: \"0\", got rule:\n%s", cause, line)
+		}
+	}
+	if line := ruleLineContaining(src, "FailedScheduling"); line == "" {
+		t.Error("dropping Evicted requires FailedScheduling to report pods that fail to come back")
 	}
 
 	// The last rule must be a catch-all WITH a dwell, or an unanticipated

@@ -82,7 +82,13 @@ The premise a long dwell rests on — that one object misbehaving is churn — s
 ### Requirement: Reasons describing a completed event never dwell
 A rule SHALL NOT apply a non-zero dwell to a reason that reports something that has ALREADY happened rather than an ongoing state. For such reasons the liveness re-check is not merely uninformative but destructive: the object recovers or is replaced, the re-check finds it healthy, and a real incident is erased.
 
-At minimum `OOMKilling`, `SystemOOM`, `Evicted`, `BackoffLimitExceeded`, `DeadlineExceeded`, and `VolumeFailedDelete` SHALL carry `for: 0` in any shipped default rule set.
+At minimum `OOMKilling`, `SystemOOM`, `BackoffLimitExceeded`, `DeadlineExceeded`, and `VolumeFailedDelete` SHALL carry `for: 0` in any shipped default rule set.
+
+`Evicted` is past-tense too, and is therefore NEVER given a dwell — but the shipped default DROPS it rather than emitting it at `for: 0`, because an eviction is reported from the cause end by node pressure (one node-level signal instead of one per displaced pod) and from the consequence end by `FailedScheduling` (the pod that does not come back), while an API-initiated eviction is a drain and is routine. This is an application of the drop rule below, not an exception to this one: a rule set MUST NOT give `Evicted` a non-zero dwell in either case.
+
+#### Scenario: An eviction is not given a dwell in any shipped default
+- **WHEN** the shipped default rule set is rendered
+- **THEN** `Evicted` is either dropped or carries `for: 0`, and never a non-zero dwell
 
 #### Scenario: An OOM kill is not erased by the container's recovery
 - **WHEN** a container is OOM-killed, restarts, and is Ready well within any dwell window
