@@ -2,7 +2,9 @@
 
 Three things accumulate today and nothing removes any of them:
 
-1. **`Conversation` objects.** Only `/close` and `kubectl delete` remove one. An
+1. **`Conversation` objects.** Only `/close` and `kubectl delete` remove one — and
+   `/close` requires a human in a thread, so an unattended lane has no way to end
+   anything. An
    install with an observing lane makes them continuously — 31 in 35 hours on
    the reference cluster — each owning `ConversationInput` objects and an
    `agentops-mcp-conv-<name>` ConfigMap that GC only reclaims once the owner goes.
@@ -41,7 +43,9 @@ Constraints that shape everything below:
 - Reclaiming other etcd content. Adapters' cursors are annotations on objects the
   operator does not own.
 - Deleting a conversation a human might still reply to. The gate is
-  **finished and old**, never old alone.
+  **finished and idle**, never old alone.
+- Closing a conversation silently. An autoclose that archives a thread without a
+  word is indistinguishable from a fault.
 - Archiving or exporting before deletion. A conversation's durable record is the
   chat thread the finalizer leaves behind and whatever scrapes metrics.
 - Reclaiming the home claim's non-session content.
@@ -50,7 +54,7 @@ Constraints that shape everything below:
 
 ### D1: Split by what needs the disk
 
-Retention of `Conversation` objects goes in the **manager**; reclaiming
+Autoclose of `Conversation` objects goes in the **manager**; reclaiming
 directories and transcripts goes in a **separate workload**.
 
 *Why:* the CR half needs no disk, and conversation lifecycle — admission,
@@ -59,60 +63,98 @@ Putting it in a Job instead would duplicate lifecycle logic and demand a second
 identity with write access to conversations. The volume half genuinely cannot go
 in the manager without breaking the no-volume invariant.
 
-A useful consequence: an install with persistence off gets retention with **no
+A useful consequence: an install with persistence off gets autoclose with **no
 new workload at all**.
 
 *Alternatives:* everything in one Job (rejected — needs `delete` on conversations
 from a pod that also mounts the claim root, which is the widest possible blast
 radius); everything in the manager with volumes attached (rejected outright).
 
-### D2: Retention is a self-scheduled requeue, not a sweep
+### D2: Autoclose is a self-scheduled requeue, not a sweep
 
-When retention is on and a conversation is finished, the reconciler requeues it
-for the moment it expires; that reconcile deletes it. No listing, no ticker, no
+When autoclose is on and a conversation is finished, the reconciler requeues it
+for the moment it expires; that reconcile closes it. No listing, no ticker, no
 cross-conversation coordination.
 
 *Why:* a sweep re-reads every conversation on a timer to find the few that
 matter, and the reconciler is already invoked per conversation with the state
-the decision needs. Self-scheduling also spreads deletions naturally instead of
+the decision needs. Self-scheduling also spreads closes naturally instead of
 producing a burst.
 
-*Finished* means all of: phase `Idle`, no pending inputs, no inflight run, and no
-runtime pod. Any one of those missing means the conversation is live work.
+*Finished* means all of: phase `Idle`, no pending inputs, no inflight run, no
+runtime pod, and every recorded run delivered to every bound channel (D2b). Any
+one of those missing means the conversation is live work.
 
 *Alternative:* a periodic `List` in the manager (rejected — re-reads everything
 to act on almost nothing, and re-introduces the burst the requeue avoids).
 
-### D2a: Retention is a MODE, and `immediate` waits for delivery
+### D2a: A flag and an IDLE window — no third mode, and no lifetime clock
 
-Three modes — `off`, `age`, `immediate` — rather than a single duration where
-`0` would have to mean one of "immediately" or "disabled" and could not mean
-both. Naming the mode also makes the aggressive option impossible to enable by
-fat-fingering a number.
+Two values: `retention.enabled` (default `false`) and `retention.age`. The window
+is measured from **last activity** — the most recent run or input — and never from
+`metadata.creationTimestamp`.
 
-`immediate` deletes a conversation as soon as it is finished, with one extra
-condition that is easy to miss and expensive to omit: **every recorded run must
-be marked delivered to every bound channel.**
+*Why idle and not lifetime:* the feature people mean by "autoclose after a
+period" is an inactivity timeout. A creation clock closes a conversation that
+answered an hour ago simply because it was opened last week, which is the one
+outcome nobody asks for. The requeue in D2 schedules against the same instant the
+console already shows as `ageSeconds`, so the list and the behaviour agree.
 
-A conversation reaches `Idle` the instant `POST /work/done` records the result.
-The reply at that moment may still be an unclaimed `send` op — that window is
-precisely the one `persistence-in-chart` made survivable. Deleting on `Idle`
-alone would run the close-topics finalizer against a thread whose answer has not
-arrived, and the reply would be posted into an archived topic or dropped with the
-conversation. `status.runs[].delivered[]` already records exactly this, so the
-gate is a check rather than a new mechanism.
+*Why no "close as soon as the answer is delivered" mode:* an earlier draft had a
+third mode, `immediate`, that deleted a conversation the moment its reply was
+marked delivered. It is cut, and the reason is worth keeping because it is easy
+to re-propose. **The `Conversation` IS the durable record of a result.**
+`status.runs[].result` is the only place the answer lives in the Kubernetes API;
+the console projects its transcript from the CR, and metrics keep aggregates
+only. So `immediate` deleted the answer at the instant of delivery: the console
+showed nothing, and a conversation bound to no channel lost the result outright.
+Its apparent safety rested on a chat thread retaining the message after the topic
+was archived — a binding it never checked, and one that does not exist for a
+console-only or unbound conversation. A short `retention.age` covers the same
+noisy-observing-lane case and leaves a window in which the result is readable.
 
-The consequence to state plainly rather than discover: `immediate` makes a
-thread **reply-dead** the moment the agent answers. `/channel/inbound` is
-reply-only and drops unknown threads, so a human replying to the answer they are
-reading gets nothing. That is correct for an observing lane whose product is the
-answer, and wrong anywhere a person converses — hence off by default, and
-documented next to the switch rather than in a release note.
+*Alternatives:* a bare duration where `0` means immediate (rejected — ambiguous
+between "immediately" and "disabled", and one keystroke from a very different
+behaviour; the flag removes the ambiguity without a mode enum); a `maxLifetime`
+ceiling alongside the idle window (deferred — it backstops a conversation kept
+alive by trickle traffic, which no observed install produces yet).
 
-*Alternatives:* delete on run completion inside `/work/done` (rejected — it is
-the request path, and the delivery it would have to wait for happens after it
-returns); a duration of `0` meaning immediate (rejected — ambiguous, and one
-keystroke from a very different behaviour).
+### D2b: Delivery is an eligibility rule, not a mode's special case
+
+A conversation with a recorded run not yet marked delivered to every bound
+channel is NOT finished, and autoclose leaves it alone regardless of age.
+
+*Why it survives `immediate`'s removal:* a conversation reaches `Idle` the
+instant `POST /work/done` records the result, while the reply may still be an
+unclaimed `send` op — the window `persistence-in-chart` made survivable. A long
+window makes that window unlikely, not impossible: an adapter down for the length
+of the retention window is exactly when it happens, and then the close-topics
+finalizer archives a thread whose answer never arrived. Retaining is the safe
+direction; `status.runs[].delivered[]` already records this, so the gate is a
+check rather than a new mechanism.
+
+*Consequence to accept:* a channel whose adapter is permanently down holds its
+conversations open forever. That is visible in the queue statistics as
+outstanding ops, and it is the correct direction to fail.
+
+### D2c: An autoclose says goodbye — it closes, it does not delete
+
+Autoclose calls the router's existing `CloseConversation` rather than issuing a
+bare `Delete`, and the farewell names why the conversation ended.
+
+*Why:* `/close` posts a farewell precisely so that an archived thread reads as
+closed rather than as one that stopped. A conversation ended by a timer needs
+that more than one ended by hand, because nobody in the thread asked for it. It
+also keeps ONE close implementation — `/close`, the console's batch close, and
+autoclose all take the same path, so the farewell, the finalizer, ownerRef GC and
+the capacity release cannot drift between them.
+
+*Cost:* the reconciler gains a dependency on the chat router, which today it does
+not have. The alternative — duplicating the farewell enqueue in the reconciler —
+is a second implementation of the thing this decision exists to keep single.
+
+*Note:* this makes the reason text operator-facing. It states the window that
+elapsed, so the person reading it can find the setting that closed their thread.
 
 ### D3: Scan the disk BEFORE listing the API — ordering, not guessing
 
@@ -202,34 +244,40 @@ because it fails on a schedule.
 ## Risks / Trade-offs
 
 - **A first run deletes a large backlog at once** → `dryRun` default on first
-  install, `maxDeletions` per run, and jitter on the initial retention pass so
+  install, `maxDeletions` per run, and jitter on the initial autoclose pass so
   conversations that all become eligible at manager start do not expire in the
-  same instant.
-- **Retention deletes a conversation someone was about to reply to** → the gate
-  is finished AND older than the window; the window is off by default and
-  operator-chosen. A reply after deletion opens a new conversation rather than
-  failing, since chat origination does not depend on the old object.
+  same instant. Enabling autoclose on an established install is the moment this
+  bites: every conversation is already past the window, and each close enqueues a
+  farewell and a `close-topic` op per bound thread.
+- **Autoclose ends a conversation someone was about to reply to** → the gate is
+  finished AND idle for the window; the window is off by default and
+  operator-chosen, and the farewell says the thread is closed rather than leaving
+  it to be discovered. A reply after the close opens a new conversation rather
+  than failing, since chat origination does not depend on the old object.
 - **The job holds the claim root** → no agent code in the image, read-only API,
   its own SA, and a render-time guard against reusing the runtime SA.
 - **A transcript is reclaimed while still resumable** → generous grace period
   plus listing after the scan; the failure mode is a resume that starts a new
   session, which the runtime already handles and reports.
-- **Deleting conversations loses history an operator wanted** → chat threads are
-  archived, not deleted, and metrics keep the aggregates. Stated plainly in the
-  values comment, because "retention" reads as harmless until it is not.
-- **`immediate` races the reply out of its own thread** → the mode additionally
-  requires every run delivered to every bound channel before deleting. Without
-  that clause the feature would reintroduce, by configuration, the exact loss
-  `persistence-in-chart` closed.
-- **`immediate` silently makes threads reply-dead** → off by default, and the
-  behaviour is documented at the switch. An install that wants answers without
-  conversations should be choosing that, not discovering it when somebody's
-  follow-up vanishes.
-- **A run that never delivers keeps a conversation forever under `immediate`** →
-  a channel whose adapter is permanently down never marks delivery, so the
-  conversation is retained rather than deleted. Retaining is the safe direction,
-  and the undelivered op is already visible in the queue stats; `age` remains
-  available as the backstop for installs that want a hard ceiling regardless.
+- **Closing conversations loses the result an operator wanted** → this is the
+  cost the cut mode made unacceptable and a window makes merely real: once the CR
+  is gone, `status.runs[].result` goes with it and the console has nothing to
+  show. Chat threads keep their messages and metrics keep aggregates, but neither
+  is the record. Stated plainly in the values comment, because "retention" reads
+  as harmless until it is not, and the window should be chosen as "how long do I
+  want to be able to read this", not "how long until it is tidy".
+- **A close races the reply out of its own thread** → a conversation with an
+  undelivered run is not finished (D2b), so it is never closed. Without that
+  clause a down adapter plus an elapsed window reintroduces, by configuration,
+  the exact loss `persistence-in-chart` closed.
+- **A run that never delivers keeps a conversation forever** → a channel whose
+  adapter is permanently down never marks delivery, so the conversation is
+  retained rather than closed. Retaining is the safe direction, and the
+  undelivered op is already visible in the queue stats.
+- **The reconciler now depends on the chat router** (D2c) → accepted
+  deliberately: the alternative is a second farewell implementation, which is the
+  drift this decision exists to prevent. The dependency is one call, and the
+  reconciler already enqueues topic ops.
 - **The job and the manager disagree about what exists** → they never coordinate:
   the manager deletes CRs, the job reclaims only what has no CR. A CR deleted
   between the two runs is simply reclaimed on the next one.
@@ -238,18 +286,25 @@ because it fails on a schedule.
 
 1. Ship every component off. An install that changes nothing behaves as today.
 2. Enable `dryRun` first; the job logs counts and names it would have removed.
-3. Turn retention on with a long window, watch topic archiving, then shorten.
-4. Rollback: disable the values. Nothing already deleted comes back — which is
+3. Turn autoclose on with a long window, watch the farewells and topic archiving,
+   then shorten. The first pass on an established install closes everything
+   already past the window, so a long window makes that pass small.
+4. Rollback: disable the values. Nothing already closed comes back — which is
    why dry run precedes the first real run rather than following it.
 
 ## Open Questions
 
-- **Should retention consider a conversation's channel bindings?** A conversation
-  on a shared surface archives a topic somebody may still be reading. Currently
-  no — closing is what archiving means — but a "retain while the thread is
-  visible" option may be wanted.
 - **Where does the session-file grace default land?** It must exceed the longest
   run, and nothing in the system bounds run duration today. Leaning to 7 days.
+- **Should a `maxLifetime` ceiling accompany the idle window?** A conversation
+  kept alive by trickle traffic never idles out. Deferred rather than declined —
+  no observed install produces one, and two windows need two explanations.
 - **Should the job reclaim `ConversationInput` objects orphaned by a failed
   ownerRef GC?** Probably not — that would paper over a GC bug rather than
   surface it.
+
+**Resolved:** *should autoclose consider a conversation's channel bindings, since
+it archives a topic somebody may still be reading?* No special case is needed —
+D2c makes the close announce itself on every bound thread, so a reader is told
+rather than left with a thread that stopped. The delivery gate (D2b) covers the
+one binding-dependent risk that remains.
