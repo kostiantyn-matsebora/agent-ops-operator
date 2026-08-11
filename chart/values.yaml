@@ -220,10 +220,12 @@ service:
 # token is generated once and injected into both sides as env — the manager
 # never reads Secrets from the API.
 adapterAuth:
-  # Name of the generated token Secret (key: token). Reused across upgrades.
+  # Name of the token Secret (key: token). Generated at install, then unmanaged.
   secretName: agentops-adapter-token
   # Use an existing Secret (key: token) instead of generating one.
   existingSecret: ""
+  # Pin the master token; changing it 401s EVERY adapter until its pod restarts.
+  token: ""
 
 # Scrape configuration for the manager's `agentops_*` metrics.
 #
@@ -314,7 +316,7 @@ console:
   auth:
     # Use an existing Secret (key: uiToken) instead of generating one.
     existingSecret: ""
-    # Pin the token explicitly (otherwise generated once and reused).
+    # Pin the token; wins over an existing Secret, and is how you rotate one.
     uiToken: ""
     # Does the CONSOLE authenticate browsers? Leave this true unless something
     # in front of it already does.
@@ -331,8 +333,7 @@ console:
     # `rbacMode: full` install). The proxy becomes the ONLY gate, so it must
     # also be the only route to the Service.
     #
-    # Lost the token? Re-issue it (auth.uiToken, or delete the Secret) rather
-    # than disabling the gate.
+    # Lost the token? Set auth.uiToken — deleting the Secret restores nothing.
     enabled: true
     # REQUIRED when enabled is false — the render FAILS without it. Name what
     # authenticates instead: oauth2-proxy, cloudflare-access, envoy-ext-authz,

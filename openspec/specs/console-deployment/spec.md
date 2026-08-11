@@ -10,6 +10,8 @@ Setting `console.enabled: false` SHALL remove the CRs and with them the Deployme
 
 Because this default changes from `false`, an upgrade starts a workload that was not previously running and that reads every `agentops.dev` CR in the namespace. The chart major SHALL be bumped and `CHANGELOG.md` SHALL carry the migration entry naming the one-value opt-out.
 
+The UI token Secret SHALL take its value from a defined source order — an explicitly configured token, then an existing Secret, then generation — and SHALL NOT change on an upgrade that configures none. Signing every browser out is a consequence an operator asks for, never one a redeploy causes.
+
 #### Scenario: Default install has a console
 - **WHEN** the chart is installed at defaults
 - **THEN** the console pod runs and is reachable on its ClusterIP Service
@@ -25,6 +27,10 @@ Because this default changes from `false`, an upgrade starts a workload that was
 #### Scenario: Disabling is non-destructive to conversations
 - **WHEN** `console.enabled` is flipped to false
 - **THEN** the console workload and Service are removed, referencing Channels report `Served=False`, and existing Conversations keep their other channel threads
+
+#### Scenario: Redeploying does not sign anyone out
+- **WHEN** an install whose UI token was generated is upgraded without configuring one
+- **THEN** the token is unchanged and browser sessions established from it keep working
 
 ### Requirement: Read-only RBAC granted by the chart, not the operator
 The chart SHALL grant SA `agentops-adapter-console` a namespaced read-only Role covering `get`, `list`, `watch` on every `agentops.dev` kind **and on `deployments` and `pods`** — the latter because versions, image digests, restart counts and manager health exist in no CR. No write verb SHALL be granted on any resource, and no reconciler SHALL create or bind RBAC.

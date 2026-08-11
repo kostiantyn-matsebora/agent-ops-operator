@@ -109,7 +109,47 @@ needed when a Secret already exists (a `helm install` over a namespace that has
 one, e.g. after `helm uninstall` left it behind under `keep`). Without that
 check, reinstalling would overwrite a credential every adapter is still using.
 
-### D5: The notes say which source is in effect
+### D5: `keep` does not protect a Secret that never carried it — the upgrade is refused until it does
+
+Found during implementation and verified against helm v4 in a throwaway
+namespace, three cases:
+
+| Live object | Dropped from manifest | Result |
+|---|---|---|
+| no annotation | yes | **DELETED** |
+| annotation rendered at install | yes | survives |
+| annotation applied by hand afterwards | yes | survives |
+
+Helm reads `helm.sh/resource-policy` off the **live object** at deletion time, not
+off the manifest that is dropping it. So D2 is correct for fresh installs and
+destructive for every existing one: the Secrets on the reference cluster carry no
+annotation, and the first upgrade under D2 would delete both — signing every
+browser out and 401ing every adapter, which is precisely the outcome this change
+exists to prevent.
+
+The chart therefore **fails the render** when it is about to stop managing a live
+generated Secret that carries no keep annotation, printing the one command that
+makes the upgrade safe (`kubectl annotate secret … helm.sh/resource-policy=keep`).
+Same idiom as the auth and MCP-ServiceAccount guards: a configuration that cannot
+be right is refused at render time.
+
+It fires at most once per install, and only where it can act — on a real upgrade,
+where `lookup` sees the cluster. A cluster-less renderer prunes nothing, so the
+guard staying silent there is correct rather than a gap.
+
+*Alternatives:*
+- **Render the existing value on upgrade whenever `lookup` finds it** (rejected —
+  the Secret then never leaves the manifest on a cluster-full render but is
+  absent from a cluster-less one, so `helmfile diff` reports it as *removed* on
+  every run: the same noise wearing different clothes, and permanent rather than
+  one-time).
+- **A `pre-upgrade` hook Job that annotates the Secrets** (rejected — needs
+  Secret-write RBAC in a release whose defining invariant is that the manager
+  reads no Secrets, to save one command run once).
+- **Document the step and let a forgotten one delete the credential** (rejected —
+  a migration note is not a safeguard; the failure is silent and unrecoverable).
+
+### D6: The notes say which source is in effect
 
 `NOTES.txt` currently prints the `kubectl get secret … uiToken` recipe
 unconditionally, which reads as "fetch your new token" after every deploy even
@@ -144,12 +184,22 @@ fixed together, or the next operator draws the same conclusion.
 
 1. Ship the precedence fix and the new value. No install changes behaviour on
    upgrade: an existing generated Secret is left exactly as it is.
-2. First upgrade drops the generated Secret from the release manifest while
+2. **Annotate the live Secrets once, before the first upgrade** (D5) — the
+   objects predate the policy and helm reads it off the live object:
+
+   ```sh
+   kubectl -n <ns> annotate secret agentops-adapter-token agentops-console-console \
+     helm.sh/resource-policy=keep
+   ```
+
+   Forgetting it is not a lost credential: the render is refused and prints this
+   command.
+3. The upgrade then drops the generated Secret from the release manifest while
    `keep` retains the object. Verify with `helm get manifest` and by reading the
    Secret — the value must be identical before and after.
-3. Verify the diff is empty on a second no-op upgrade. That is the acceptance
+4. Verify the diff is empty on a second no-op upgrade. That is the acceptance
    test for the whole change.
-4. Rollback: revert the chart. The Secret is still present and still holds the
+5. Rollback: revert the chart. The Secret is still present and still holds the
    same value, so the old template's `lookup` finds it and continues as before.
 
 ## Open Questions

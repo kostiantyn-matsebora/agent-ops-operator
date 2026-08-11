@@ -571,6 +571,19 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   the Secret from base64 rather than shell `--from-literal` interpolation.
 - envtest needs `KUBEBUILDER_ASSETS`; `kubectl auth can-i` misparses the
   `pods/eviction` slash form — use `--subresource=eviction`.
+- **`helm.sh/resource-policy: keep` protects nothing retroactively.** Helm reads
+  it off the LIVE object when a resource leaves the manifest, not off the
+  manifest dropping it, so adding the annotation in the same release that stops
+  rendering the resource DELETES it. Verified against helm v4, all three cases.
+  Anything that stops being rendered (the generated credential Secrets) needs the
+  annotation on the object FIRST — which is why `agentops.generatedSecretGuard`
+  fails the render rather than trusting a migration note.
+- **`lookup` returns empty on any renderer without a cluster** (`helm template`,
+  CI, a GitOps controller, `--dry-run=client`), so a template that can generate a
+  value on the UPGRADE path does not merely show a new credential in a diff — it
+  applies one. Generate under `.Release.IsInstall` only. The corollary: a
+  `lookup`-driven guard is silent under `helm template`, so it cannot be pinned
+  by a chart render test — verify it with `helm upgrade --dry-run=server`.
 - Never run two getUpdates consumers against one Telegram bot token (409s and
   stolen updates) — when migrating from another system, or from the old
   single-container adapter, stop its poller and CONFIRM none remains before
