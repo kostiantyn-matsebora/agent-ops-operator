@@ -539,6 +539,21 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   replacement and erases the incident; and the LAST rule must be a catch-all
   with a dwell, never a drop, so an unanticipated reason is verified rather
   than discarded. Both are pinned in `internal/integration/charttemplate_test.go`.
+  The TIME axis (`route.timeIntervals` + `route.muteTimeIntervals`) is
+  Alertmanager vocabulary too, borrowed field-for-field — a scheduled outage is
+  the one thing the other three axes cannot express, since `for:` verifies a
+  condition the outage genuinely satisfies, inhibition needs a cause event a
+  power cut never produces, and no label carries the time of day. **Mute is
+  evaluated at EMIT** — after the dwell, before the emit cap — and that ordering
+  IS the safety property: a problem outliving the window still emits once it
+  closes, and a muted burst never spends the emit budget. Two more: `location`
+  defaults to UTC but must be NAMED, because a UTC-pinned window drifts an hour
+  at each DST change (`_ "time/tzdata"` is imported in `mute.go` — distroless
+  carries no zoneinfo, so without it every valid zone is rejected); and a window
+  with no `matchers` deafens the source outright, which is why the shipped
+  example narrows. Muting reports itself on the source's Ready condition
+  (`Ready=True`, reason `Muted`, then `MuteEnded` with the count) — a muted lane
+  and an idle lane are otherwise indistinguishable.
 - Event grouping is by **workload** (`[namespace, workload]`), resolved through
   OWNER REFERENCES (Pod → ReplicaSet → Deployment) and never by parsing a pod
   name — that breaks on StatefulSets (`api-0`), DaemonSets and bare pods. Pod

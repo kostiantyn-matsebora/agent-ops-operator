@@ -27,7 +27,10 @@ eventsAdapter:
     # 0.2.x adds self-exclusion, workload enrichment, the rules engine and the
     # dwell window — it REQUIRES the pods/replicasets grant below, and reports
     # Ready=False naming the permission when it is missing.
-    tag: 0.2.2
+    # 0.3.0 adds the time axis (route.timeIntervals / route.muteTimeIntervals);
+    # an earlier image ignores those keys, which looks like a window that never
+    # fires.
+    tag: 0.3.0
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding
@@ -137,14 +140,58 @@ eventsAdapter:
       - matchers: []
         for: 3m
 
-    # Alertmanager-style inhibition: suppress the CONSEQUENCES of a cause that
-    # is already reported. Empty by default — the node case below is the
-    # canonical use, enable it if node drains produce pod noise you don't want.
+    # The Alertmanager half: inhibition and the TIME axis. Empty by default —
+    # both halves below are opt-in, and both are shown as worked examples.
+    #
     #   route:
+    #     # Inhibition — suppress the CONSEQUENCES of a cause that is already
+    #     # reported. The canonical use: a draining node makes its pods noisy.
     #     inhibitRules:
     #       - sourceMatchers: ['reason="NodeNotReady"']
     #         targetMatchers: ['reason=~"Unhealthy|FailedScheduling"']
     #         equal: [node]
+    #
+    #     # Time intervals — the one axis the other three cannot express.
+    #     # `for:` verifies a condition still holds, and during a scheduled
+    #     # outage it genuinely does; inhibition needs a CAUSE event, and a
+    #     # router losing power produces no in-cluster object; matchers select
+    #     # on labels, and there is no label for the time of day.
+    #     timeIntervals:
+    #       - name: nightly-restart
+    #         # Start INCLUSIVE, end EXCLUSIVE. A window spanning midnight is
+    #         # two entries, exactly as in Alertmanager.
+    #         times:
+    #           - startTime: "04:00"
+    #             endTime: "04:20"
+    #         # NAME YOUR ZONE. "Four in the morning" is a LOCAL fact: the
+    #         # default (UTC) drifts by an hour at each daylight-saving
+    #         # transition, so the window stops covering the outage it was
+    #         # written for — on a date nobody chose, at an hour nobody is
+    #         # watching. With a location the offset moves and the window does
+    #         # not. The IANA database is embedded in the adapter image, so any
+    #         # zone name works without adding tzdata to the pod.
+    #         location: Europe/Kyiv
+    #         # Optional narrowing: weekdays, daysOfMonth (negative counts back
+    #         # from the end of the month), months, years — Alertmanager's forms.
+    #         # weekdays: ["monday:friday"]
+    #
+    #     # Which intervals actually mute, and what they mute.
+    #     muteTimeIntervals:
+    #       - name: nightly-restart
+    #         # STRONGLY RECOMMENDED. With no matchers the source goes deaf for
+    #         # the whole window. A restarting router produces connectivity
+    #         # reasons; it does not produce OOMKilling, and an OOMKill at 04:05
+    #         # is exactly as real as one at noon. Narrowing means the safe
+    #         # configuration does not depend on the window staying short.
+    #         matchers:
+    #           - reason=~"NodeNotReady|Unhealthy|FailedMount|FailedScheduling"
+    #
+    # Muting is evaluated at EMIT — after the dwell above, before the emit cap —
+    # so a problem that OUTLIVES the window is still reported once it closes,
+    # and a muted burst never spends the emit budget. While a window is active
+    # the source says so on its Ready condition, and names the interval: a muted
+    # lane and an idle lane look identical from outside, and only one of them
+    # means the cluster is healthy.
     route: {}
     # SignalSource grouping policy (manager-side; defaults apply when empty).
     #

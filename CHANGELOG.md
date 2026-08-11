@@ -8,7 +8,64 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
-### A conversation either continues or it fails — chart 5.4.0, manager 0.27.0
+### A maintenance window for cluster events — chart 5.6.0, signal-k8s-events 0.3.0
+
+Additive; no action required. Nothing changes unless you configure a window.
+
+Some outages are on a schedule. A router that restarts at 04:00 takes the
+cluster's connectivity with it for a quarter of an hour, every night, and the
+events it produces are *real* — so none of the three existing suppression axes
+can silence them. `for:` verifies a condition the outage genuinely satisfies;
+inhibition needs a cause event that a power cut never produces; matchers select
+on labels, and there is no label for the time of day.
+
+`route` gains the fourth axis, in Alertmanager's exact vocabulary:
+
+```yaml
+k8s-bundle:
+  eventsAdapter:
+    source:
+      route:
+        timeIntervals:
+          - name: nightly-restart
+            times:
+              - startTime: "04:00"   # inclusive
+                endTime: "04:20"     # exclusive
+            location: Europe/Kyiv
+        muteTimeIntervals:
+          - name: nightly-restart
+            matchers:
+              - reason=~"NodeNotReady|Unhealthy|FailedMount|FailedScheduling"
+```
+
+`timeIntervals` also takes `weekdays`, `daysOfMonth`, `months` and `years` in
+Alertmanager's forms; a window spanning midnight is two entries; overlapping
+intervals union.
+
+Three things worth knowing before you write one:
+
+- **Name your `location`.** It defaults to UTC, as in Alertmanager, but "four in
+  the morning" is a local fact — a UTC-pinned window drifts by an hour at each
+  daylight-saving change and stops covering the outage it was written for, on a
+  date nobody chose. The IANA database is compiled into the adapter image, so
+  any zone name works on distroless.
+- **Narrow with `matchers`.** With none, the source goes deaf for the whole
+  window. A restarting router produces connectivity reasons; it does not produce
+  `OOMKilling`, and an OOMKill at 04:05 is as real as one at noon.
+- **Muting is evaluated at emit**, after the dwell and before the emit cap. A
+  problem that outlives the window is still reported once it closes, and a muted
+  burst never spends the emit budget.
+
+Muting is not silent: while a window is active the source's `Ready` condition
+stays true and names the interval (reason `Muted`), and reports the muted count
+when it ends (`MuteEnded`). A malformed interval fails the source rather than
+being ignored — a typo producing a window that never fires looks exactly like
+one that works.
+
+Requires `k8s-bundle.eventsAdapter.image.tag` 0.3.0 (the chart default). Full
+reference: [docs/k8s-bundle.md](docs/k8s-bundle.md#maintenance-windows-the-time-axis).
+
+### A conversation either continues or it fails — chart 5.5.0, manager 0.28.0, runtime-claude 0.6.0
 
 **BREAKING (API): `Conversation.status.sessionId` is renamed to
 `runtimeContextId`.** "session" is claude-code's noun; agent-ops has

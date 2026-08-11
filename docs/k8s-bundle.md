@@ -56,6 +56,7 @@ The config has two halves, named after the systems they come from:
 |---|---|---|
 | `rules` | Prometheus | what counts as a problem, and how long it must hold (`for`) |
 | `route.inhibitRules` | Alertmanager | which consequences to suppress when their cause is already reported |
+| `route.timeIntervals` / `route.muteTimeIntervals` | Alertmanager | **when** to stay quiet, regardless of what the events say |
 
 Dwell is **not** spelled `group_wait`. Alertmanager's `group_wait` batches a
 group before its first notification; it is not `for:`, which does not exist in
@@ -96,6 +97,84 @@ verified and reported rather than discarded.
 
 Both are pinned by test in `internal/integration/charttemplate_test.go`, so the
 tuning numbers stay editable without anyone having to re-derive the shape.
+
+### Maintenance windows: the time axis
+
+Some outages are on a schedule. A router that restarts at 04:00 takes the
+cluster's connectivity with it for fifteen minutes, every night, and the events
+it produces are real — the nodes really are NotReady — so nothing above can
+suppress them:
+
+- **`for:` cannot.** A dwell verifies the condition still holds, and during a
+  scheduled outage it genuinely does. A dwell long enough to cover the window
+  would delay every real incident by the same amount, all day.
+- **Inhibition cannot.** It suppresses the consequences of a cause that is
+  already reported, keyed on a cause event. A router losing power produces no
+  in-cluster object; the cluster only ever sees consequences.
+- **Matchers cannot.** They select on labels, and there is no label for the time
+  of day.
+
+So the fourth axis is time, in Alertmanager's exact vocabulary:
+
+```yaml
+eventsAdapter:
+  source:
+    route:
+      timeIntervals:
+        - name: nightly-restart
+          times:
+            - startTime: "04:00"    # inclusive
+              endTime: "04:20"      # exclusive
+          location: Europe/Kyiv     # name your zone — see below
+      muteTimeIntervals:
+        - name: nightly-restart
+          matchers:                 # narrow it — see below
+            - reason=~"NodeNotReady|Unhealthy|FailedMount|FailedScheduling"
+```
+
+`timeIntervals` also takes `weekdays`, `daysOfMonth` (negative values count back
+from the end of the month), `months` and `years`, in Alertmanager's forms
+(`monday:friday`, `january`, `1:7`). A window spanning midnight is two entries,
+as in Alertmanager. Overlapping intervals **union** — muted when any of them
+matches — so ordering never has to be reasoned about.
+
+**Name your zone.** `location` defaults to UTC, which is Alertmanager's
+behaviour, but "four in the morning" is a *local* fact: a UTC-pinned window
+drifts by an hour at each daylight-saving transition, so it stops covering the
+outage it was written for, on a date nobody chose, at an hour nobody is
+watching. Any IANA name works — the timezone database is compiled into the
+adapter image, so the distroless pod needs nothing added.
+
+**Narrow it.** With no `matchers`, the window silences the source completely for
+its whole duration, and that is the feature's principal hazard. A restarting
+router produces connectivity-shaped reasons; it does not produce `OOMKilling`,
+and an OOMKill at 04:05 is exactly as real as one at noon. Naming what you
+expect means the configuration is safe without depending on the window staying
+short or on anyone reviewing it later.
+
+**Muting is evaluated at emit** — after the dwell, before the emit cap. Two
+consequences worth relying on:
+
+- A problem that **outlives** the window still gets reported. The cluster keeps
+  producing events for anything genuinely broken, and the first one after 04:20
+  emits normally. The window suppresses the transient, not the incident.
+- A muted burst never spends the emit budget, so a maintenance window cannot
+  read as a runaway.
+
+**Muting is never silent.** While a window is active the source's `Ready`
+condition stays true and says so, naming the interval; when the window closes it
+reports how many events it muted. A muted lane and an idle lane look identical
+from outside, and only one of them means the cluster is healthy.
+
+```
+kubectl get signalsource cluster-events -o wide
+kubectl get signalsource cluster-events -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
+```
+
+A malformed interval — an unknown zone, a reversed range, a mute naming an
+interval that does not exist — **fails the source** rather than being ignored,
+because a typo that silently produced a window which never fires would look
+exactly like a window that works.
 
 ### Cookbook
 
