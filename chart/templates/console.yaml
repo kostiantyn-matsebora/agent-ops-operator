@@ -40,11 +40,36 @@ that assumed them would fail the upgrade instead of the thing it was upgrading.
 {{- $writeEnabled := true }}
 {{- if hasKey $write "enabled" }}{{ $writeEnabled = $write.enabled }}{{ end }}
 {{- $metricsURL := ($c.metrics | default dict).url | default "" }}
+{{- $auth := $c.auth | default dict }}
+{{- $authEnabled := true }}
+{{- if hasKey $auth "enabled" }}{{ $authEnabled = $auth.enabled }}{{ end }}
+{{- $externalAuth := $auth.externalAuthenticator | default "" }}
+{{- /*
+Disabling the console's own authentication REQUIRES naming what authenticates
+instead. The same posture as the non-root ingress path and the MCP
+ServiceAccount collision: a configuration that cannot be right is refused at
+render time rather than installed.
+
+Two deliberate statements, not one boolean, because the state this guards
+against is "an absent value read as no authentication required" — and one edit
+is exactly how that happens. The name is not verified (the chart cannot see what
+sits in front of it); it is RECORDED, so the release itself answers "what
+protects this console?".
+*/ -}}
+{{- if and (not $authEnabled) (not $externalAuth) }}
+{{- fail "console.auth.enabled=false requires console.auth.externalAuthenticator to name what authenticates instead (e.g. oauth2-proxy, cloudflare-access, envoy-ext-authz). With authentication off, anyone who reaches the console Service reads every agentops CR in this namespace — conversation payloads included — and can instruct any agent it is joined to. The chart cannot check what is in front of it, so it requires you to say. Lost the token? Re-issue it with console.auth.uiToken instead of removing the gate." }}
+{{- end }}
 {{- $secretName := $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }}
 {{- if not $c.auth.existingSecret }}
 {{- /* Generate once, reuse across upgrades (lookup); under template-only
        rendering (no cluster) a fresh token is generated — pin one with
-       console.auth.existingSecret for GitOps flows. */}}
+       console.auth.existingSecret for GitOps flows.
+
+       RENDERED EVEN WHEN AUTHENTICATION IS DISABLED. The Channel below declares
+       credentialsSecretRef and the reconciler projects it with envFrom, so a
+       missing Secret is a pod that will not start — "disable auth" would become
+       "console will not boot", with no obvious cause. Keeping it also makes
+       re-enabling authentication one value rather than a reinstall. */}}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName }}
 apiVersion: v1
 kind: Secret
@@ -99,6 +124,19 @@ spec:
         description: >-
           Gates both write paths (chat composer and new-conversation). Absent
           means enabled; only an explicit false makes this a strict viewer.
+      authEnabled:
+        type: boolean
+        description: >-
+          Whether the console authenticates browsers itself. Absent means yes.
+          An explicit false takes effect only alongside externalAuthenticator;
+          on its own it leaves the console closed, so a value lost in transit
+          cannot open one.
+      externalAuthenticator:
+        type: string
+        description: >-
+          What authenticates browsers when the console does not (oauth2-proxy,
+          cloudflare-access, …). In that mode forward-auth identity headers are
+          believed, and a request carrying none is read-only.
       signalSource:
         type: string
         description: SignalSource this console originates conversations from.
@@ -137,6 +175,13 @@ spec:
   config:
     displayName: {{ $c.displayName | default "agent-ops console" | quote }}
     writeEnabled: {{ $writeEnabled }}
+    # Whether the console authenticates, and — when it does not — what does.
+    # Both travel here because a ChannelAdapter CR carries no env: this opaque
+    # config is the only way the chart reaches the pod.
+    authEnabled: {{ $authEnabled }}
+    {{- with $externalAuth }}
+    externalAuthenticator: {{ . | quote }}
+    {{- end }}
     signalSource: {{ $c.signalSourceName | default $c.name | quote }}
     {{- with $metricsURL }}
     metricsUrl: {{ . | quote }}

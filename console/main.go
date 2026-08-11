@@ -57,8 +57,16 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("agent-ops console starting (adapter=%s, namespace=%s, listen=%s, writes=%v, originates=%v)",
-		cfg.AdapterName, cfg.Namespace, cfg.ListenAddr, cfg.WriteEnabled, originator != nil)
+	// The auth mode is logged because it is the one setting whose wrong value is
+	// invisible from inside the UI: a console that authenticates nobody looks
+	// exactly like one you are already signed in to. What is logged HERE is only
+	// the process DEFAULT — a chart reaches this pod through the served
+	// Channel's config, which arrives after startup and wins. The adapter logs
+	// the effective mode when it resolves one, so the two lines together say
+	// where the answer came from.
+	log.Printf("agent-ops console starting (adapter=%s, namespace=%s, listen=%s, authDefault=%s, writes=%v, originates=%v)",
+		cfg.AdapterName, cfg.Namespace, cfg.ListenAddr, authMode(cfg.AuthEnabled, cfg.ExternalAuthenticator),
+		cfg.WriteEnabled, originator != nil)
 
 	go cache.Run(ctx)
 	go adapter.Run(ctx)

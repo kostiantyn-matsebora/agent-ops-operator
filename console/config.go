@@ -36,6 +36,16 @@ type Config struct {
 	// indistinguishable from a wrong one — see api auth.
 	UIToken string
 
+	// AuthEnabled says whether THE CONSOLE authenticates. Default true, and
+	// false is not the same thing as "no token configured": an empty token with
+	// this true authorizes nobody, which is the whole point of keeping the two
+	// independent. ExternalAuthenticator names what authenticates instead, and
+	// is REQUIRED for AuthEnabled=false to mean anything — an unnamed
+	// authenticator leaves the console closed rather than open, so a value lost
+	// in transit cannot become an open door.
+	AuthEnabled           bool
+	ExternalAuthenticator string
+
 	// WriteEnabled gates BOTH write paths (origination and replying). Default
 	// true: a default-enabled component whose headline capabilities are
 	// default-disabled is a confusing way to ship nothing.
@@ -79,8 +89,12 @@ func LoadConfig() (*Config, error) {
 		ListenAddr:         envOr("LISTEN_ADDR", ":8080"),
 		Namespace:          os.Getenv("POD_NAMESPACE"),
 		UIToken:            os.Getenv("UI_TOKEN"),
-		WriteEnabled:       envBool("WRITE_ENABLED", true),
-		MetricsURL:         os.Getenv("METRICS_URL"),
+
+		AuthEnabled:           envBool("AUTH_ENABLED", true),
+		ExternalAuthenticator: os.Getenv("EXTERNAL_AUTHENTICATOR"),
+
+		WriteEnabled: envBool("WRITE_ENABLED", true),
+		MetricsURL:   os.Getenv("METRICS_URL"),
 	}
 	if c.ManagerURL == "" {
 		return nil, fmt.Errorf("missing required env MANAGER_URL")

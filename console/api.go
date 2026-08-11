@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -39,6 +40,11 @@ type API struct {
 	// staticToken is the fallback browser token from env, used when the console
 	// Channel declares no credentials (hand-run deployments).
 	staticToken string
+	// authEnabled / externalAuthenticator are the process defaults for "does
+	// this console authenticate, and if not, what does" — overridden by the
+	// served Channel's config the same way writeEnabled is.
+	authEnabled           bool
+	externalAuthenticator string
 
 	// metricsFromConfig is the client built from the served Channel's config,
 	// rebuilt when that URL changes.
@@ -68,6 +74,9 @@ func NewAPI(d APIDeps) *API {
 		adapterName:  d.Config.AdapterName,
 		writeEnabled: d.Config.WriteEnabled,
 		staticToken:  d.Config.UIToken,
+
+		authEnabled:           d.Config.AuthEnabled,
+		externalAuthenticator: d.Config.ExternalAuthenticator,
 	}
 }
 
@@ -91,6 +100,33 @@ func (a *API) writesAllowed() bool {
 		return *v
 	}
 	return a.writeEnabled
+}
+
+// externalAuthenticatorName is the release's declaration of what authenticates
+// browsers when the console does not — resolved the same way as every other
+// console setting, served Channel config first and process env second.
+func (a *API) externalAuthenticatorName() string {
+	if v := strings.TrimSpace(a.adapter.PrimaryConfig().ExternalAuthenticator); v != "" {
+		return v
+	}
+	return strings.TrimSpace(a.externalAuthenticator)
+}
+
+// authIsExternal reports that this release DECLARED authentication to happen in
+// front of the console.
+//
+// It takes TWO deliberate statements — authentication turned off AND a named
+// authenticator — because either one alone is ambiguous. A false with nothing
+// named is not "open": it is a half-applied configuration, and the console
+// stays closed, which keeps the property that no absent value opens a door.
+// The chart refuses that combination at render time; this is what happens if it
+// reaches the pod anyway.
+func (a *API) authIsExternal() bool {
+	enabled := a.authEnabled
+	if v := a.adapter.PrimaryConfig().AuthEnabled; v != nil {
+		enabled = *v
+	}
+	return !enabled && a.externalAuthenticatorName() != ""
 }
 
 // metricsBackend resolves the historical-metrics client the same way: the

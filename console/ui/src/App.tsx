@@ -2,7 +2,7 @@ import { Component, type ReactNode, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import {
   Alert, Button, Nav, NavItem, NavList, Masthead, MastheadBrand, MastheadContent,
-  MastheadMain, Page, PageSidebar, PageSidebarBody, Label, Toolbar, ToolbarContent,
+  MastheadMain, Page, PageSidebar, PageSidebarBody, Label, Popover, Toolbar, ToolbarContent,
   ToolbarGroup, ToolbarItem, EmptyState, EmptyStateBody, Bullseye, Spinner, PageSection,
 } from '@patternfly/react-core'
 import { useLiveStream, useSession } from './api/hooks'
@@ -88,6 +88,10 @@ export function App() {
   const [navOpen, setNavOpen] = useState(true)
 
   if (session.isLoading) return <Loading />
+  // A console that authenticates nobody itself reports every request as
+  // authenticated, so this branch is never taken there — which is the point: a
+  // login form that accepts no token is a dead end that reads as a broken
+  // install.
   if (!session.data?.authenticated) {
     return <LoginPage configured={session.data?.configured ?? false} onLogin={() => session.refetch()} />
   }
@@ -130,22 +134,49 @@ export function App() {
                 </ToolbarItem>
               )}
               <ToolbarItem>
-                <Label color="blue">{session.data.identity || 'token'}</Label>
+                {/* WHO the console thinks you are. Under external
+                    authentication an unresolved identity is not cosmetic — it
+                    is the reason writes are refused — so it says "unknown" and
+                    explains itself instead of quietly reading "token". */}
+                {session.data.identity ? (
+                  <Label color="blue">{session.data.identity}</Label>
+                ) : (
+                  <Popover
+                    headerContent="Nobody said who you are"
+                    bodyContent={
+                      <>
+                        {session.data.externalAuthenticator || 'A proxy'} authenticated this
+                        request, but forwarded no identity header, so there is nothing to record a
+                        write against. Reads work; writes are refused. Configure it to forward
+                        X-Forwarded-Email or X-Auth-Request-User.
+                      </>
+                    }
+                  >
+                    <Label color="orange" isCompact>
+                      unknown
+                    </Label>
+                  </Popover>
+                )}
               </ToolbarItem>
               <ToolbarItem>
                 <ThemeSwitcher />
               </ToolbarItem>
-              <ToolbarItem>
-                <Button
-                  variant="secondary"
-                  onClick={async () => {
-                    await api.logout()
-                    session.refetch()
-                  }}
-                >
-                  Sign out
-                </Button>
-              </ToolbarItem>
+              {/* No sign-out where there is no session to end: with
+                  authentication in front of the console, the button would clear
+                  a cookie that authorized nothing and leave you signed in. */}
+              {session.data.authMode !== 'external' && (
+                <ToolbarItem>
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      await api.logout()
+                      session.refetch()
+                    }}
+                  >
+                    Sign out
+                  </Button>
+                </ToolbarItem>
+              )}
             </ToolbarGroup>
           </ToolbarContent>
         </Toolbar>

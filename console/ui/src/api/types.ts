@@ -400,7 +400,15 @@ export interface Session {
   authenticated: boolean
   configured: boolean
   identity: string
+  /** Where `identity` came from: a proxy, the shared token, or nobody. */
+  identitySource: 'forward-auth' | 'token' | ''
+  /** `token` = this console authenticates; `external` = something in front does. */
+  authMode: 'token' | 'external'
+  /** What the release named as the thing authenticating instead. */
+  externalAuthenticator: string
   writeEnabled: boolean
+  /** writeEnabled AND an identity to attribute the write to. */
+  canWrite: boolean
   canOriginate: boolean
   metrics: boolean
 }

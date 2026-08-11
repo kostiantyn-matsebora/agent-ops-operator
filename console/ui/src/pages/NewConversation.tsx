@@ -15,13 +15,15 @@ import { PlainText } from '../components/Text'
 // supports. Who answers is DECLARED by the claim, which is the origination
 // invariant's actual point.
 //
-// It renders in three states rather than disappearing, because "there is no
+// It renders in four states rather than disappearing, because "there is no
 // button" and "the button is unavailable, here is why" are different messages
 // and only one of them is actionable:
 //
 //   wired          → the button
 //   claimable      → disabled, with the exact patch that claims the source
 //   not originating→ disabled, with the CR that grants the signal identity
+//   no identity    → disabled: authentication happens in front of this console
+//                    and the proxy forwarded nobody to record the start against
 
 export function NewConversation({ onStarted }: { onStarted?: () => void }) {
   const session = useSession()
@@ -33,6 +35,7 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
   const [started, setStarted] = useState<string>()
 
   const writeEnabled = session.data?.writeEnabled ?? false
+  const canWrite = session.data?.canWrite ?? false
   const canOriginate = sources.data?.canOriginate ?? false
   const all = sources.data?.sources ?? []
   const wired = all.filter((s) => s.wired)
@@ -43,6 +46,30 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
       <Popover
         headerContent="This console is read-only"
         bodyContent="console.write.enabled is false, so both write paths are refused server-side."
+      >
+        <Button variant="secondary" isAriaDisabled>
+          New conversation
+        </Button>
+      </Popover>
+    )
+  }
+
+  // Writes are enabled and there is nobody to attribute them to: an install
+  // with authentication in front that forwards no identity. Disabled WITH the
+  // reason, like every other unavailable state here — the alternative is a
+  // button that opens a modal and then fails on submit.
+  if (!canWrite) {
+    return (
+      <Popover
+        headerContent="Nobody said who you are"
+        bodyContent={
+          <>
+            {session.data?.externalAuthenticator || 'The proxy'} in front of this console
+            authenticated you but forwarded no identity header, and a conversation is recorded
+            against the person who started it. Configure it to forward X-Forwarded-Email or
+            X-Auth-Request-User.
+          </>
+        }
       >
         <Button variant="secondary" isAriaDisabled>
           New conversation

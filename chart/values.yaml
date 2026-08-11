@@ -293,7 +293,7 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.7.1
+    tag: 0.8.1
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -316,6 +316,36 @@ console:
     existingSecret: ""
     # Pin the token explicitly (otherwise generated once and reused).
     uiToken: ""
+    # Does the CONSOLE authenticate browsers? Leave this true unless something
+    # in front of it already does.
+    #
+    # This is NOT the same setting as "no token configured", and the two must
+    # never be confused: an empty uiToken with `enabled: true` authorizes
+    # NOBODY, which is the safe reading of an absent value. Only this explicit
+    # false relaxes the requirement.
+    #
+    # Turning it off means: anyone who reaches the Service — a port-forward, a
+    # pod in this namespace, a request that bypassed your proxy — reads every
+    # agentops CR in the namespace, conversation payloads included, and can
+    # instruct any agent the console is joined to (cluster-admin, in a
+    # `rbacMode: full` install). The proxy becomes the ONLY gate, so it must
+    # also be the only route to the Service.
+    #
+    # Lost the token? Re-issue it (auth.uiToken, or delete the Secret) rather
+    # than disabling the gate.
+    enabled: true
+    # REQUIRED when enabled is false — the render FAILS without it. Name what
+    # authenticates instead: oauth2-proxy, cloudflare-access, envoy-ext-authz,
+    # a mesh policy. The chart cannot verify the claim; naming it puts the
+    # answer to "what protects this console?" in `helm get values` and in the
+    # post-install notes rather than in someone's head.
+    #
+    # In this mode, forward-auth identity headers are BELIEVED. The proxy MUST
+    # strip client-supplied copies of them, or a caller picks their own
+    # identity. A proxy that forwards no identity at all leaves a read-only
+    # console: reads are served, writes are refused rather than attributed to
+    # nobody.
+    externalAuthenticator: ""
   # Browser-facing exposure. OFF by default — see the TRUST BOUNDARY above
   # before turning it on, because this is the moment the UI token starts
   # crossing a network.

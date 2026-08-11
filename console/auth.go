@@ -23,10 +23,19 @@ import (
 //   - AN UNCONFIGURED TOKEN AUTHORIZES NOBODY, and is indistinguishable from a
 //     wrong one. "No token set" must never read as "no authentication required"
 //     — that is the failure mode where a fresh install is wide open.
+//     The ONE named exception is an explicit declaration that something else
+//     authenticates: `auth.enabled: false` TOGETHER WITH a named
+//     `externalAuthenticator`. Two deliberate statements, neither of which can
+//     be arrived at by omission — which is precisely what separates it from the
+//     failure mode above. Half of it (a false with nothing named) leaves the
+//     console closed.
 //   - WRITES NEED AN IDENTITY, not just a session. A trusted forward-auth header
 //     supplies one when a proxy has already authenticated the user (oauth2-proxy
 //     in front of an Ingress); otherwise the identity is "token", which is
-//     honest about what was actually proven.
+//     honest about what was actually proven. Under external authentication
+//     there is no such fallback: no token was proven, so a write with no
+//     forward-auth identity is REFUSED rather than attributed to one. Reads
+//     continue — a proxy forwarding no identity yields a read-only console.
 //   - EVERY WRITE IS LOGGED with that identity: who started what, and who said
 //     what to an agent.
 
@@ -50,13 +59,17 @@ var forwardAuthHeaders = []string{
 // identityKey carries the resolved writer identity through the request context.
 type identityKey struct{}
 
-// Identity returns the authenticated writer for a request ("token" when only
-// the shared token was proven).
+// Identity returns the authenticated writer for a request, or "" when none
+// could be resolved.
+//
+// The value is DECIDED BY THE MIDDLEWARE (see auth), not reconstructed here:
+// "token" is a legitimate identity only where a token was actually proven, and
+// this function cannot see which mode admitted the request. It used to default
+// to "token", which under external authentication would have written a name for
+// a credential nobody presented.
 func Identity(r *http.Request) string {
-	if v, ok := r.Context().Value(identityKey{}).(string); ok && v != "" {
-		return v
-	}
-	return "token"
+	v, _ := r.Context().Value(identityKey{}).(string)
+	return v
 }
 
 // Sessions holds browser sessions minted from the shared token.
@@ -106,9 +119,10 @@ func (s *Sessions) drop(id string) {
 }
 
 // resolveIdentity reads a trusted forward-auth identity, or "" when none is
-// present. It never invents one: "token" is recorded by Identity() instead, so
-// a log line distinguishes "alice signed in through OIDC" from "somebody held
-// the shared token".
+// present. It never invents one: "token" is supplied by the middleware, and
+// only where a token was proven, so a log line distinguishes "alice signed in
+// through OIDC" from "somebody held the shared token" — and, under external
+// authentication, from "nobody said who this was".
 func resolveIdentity(r *http.Request) string {
 	for _, h := range forwardAuthHeaders {
 		if v := strings.TrimSpace(r.Header.Get(h)); v != "" {
@@ -121,17 +135,23 @@ func resolveIdentity(r *http.Request) string {
 // auth guards a READ route.
 func (a *API) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !a.authorized(r) {
+		identity, ok := a.admit(r)
+		if !ok {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			return
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, resolveIdentity(r))))
+		next(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, identity)))
 	}
 }
 
-// write guards a WRITE route: authentication, plus the install-wide write gate.
-// The two failures are reported apart because they need different fixes — one
-// is "sign in", the other is "your operator turned this off".
+// write guards a WRITE route: authentication, the install-wide write gate, and
+// an identity to record it against.
+//
+// The three failures are reported apart because they need different fixes —
+// "sign in", "your operator turned this off", and "the proxy in front of this
+// console is not forwarding who you are". The last one is the honest end of
+// dropping the `token` fallback: it is better to say a write cannot be
+// attributed than to attribute it to a credential nobody presented.
 func (a *API) write(action string, next http.HandlerFunc) http.HandlerFunc {
 	return a.auth(func(w http.ResponseWriter, r *http.Request) {
 		if !a.writesAllowed() {
@@ -140,23 +160,64 @@ func (a *API) write(action string, next http.HandlerFunc) http.HandlerFunc {
 			})
 			return
 		}
+		if Identity(r) == "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "writes need an identity: this console authenticates nobody itself (" +
+					a.externalAuthenticatorName() + " does) and the request carries no forward-auth " +
+					"identity header, so there is nothing to record this write against. " +
+					"Configure the proxy to forward one (X-Forwarded-Email or X-Auth-Request-User).",
+			})
+			return
+		}
 		log.Printf("console write: action=%s identity=%s path=%s", action, Identity(r), r.URL.Path)
 		next(w, r)
 	})
 }
 
-// authorized accepts a live session cookie or a bearer token equal to the
-// configured one (constant-time). An unconfigured console authorizes nobody.
-func (a *API) authorized(r *http.Request) bool {
+// admit is THE authentication decision, and it is one decision rather than two
+// code paths: was this request authenticated BY US, or did the release declare
+// that someone else authenticated it? It returns the identity to record along
+// with the verdict, because who you are depends on which of those it was.
+//
+// By us: a live session cookie or a bearer token equal to the configured one
+// (constant-time), identity being the forward-auth header when a proxy supplied
+// one and otherwise "token" — honest about what was proven. An unconfigured
+// console authorizes nobody, and that is NOT relaxed by anything here.
+//
+// By someone else: only when the release said so twice over (see
+// authIsExternal). Identity is then the forward-auth header or nothing at all.
+func (a *API) admit(r *http.Request) (identity string, ok bool) {
+	if a.authIsExternal() {
+		return resolveIdentity(r), true
+	}
 	want := a.token()
 	if want == "" {
-		return false
+		return "", false
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil && a.sessions.valid(c.Value) {
-		return true
+		return identityOrToken(r), true
 	}
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	if got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
+		return identityOrToken(r), true
+	}
+	return "", false
+}
+
+// authorized answers the same question without the identity, for the session
+// endpoint and anything else that only needs the verdict.
+func (a *API) authorized(r *http.Request) bool {
+	_, ok := a.admit(r)
+	return ok
+}
+
+// identityOrToken names the writer when the CONSOLE authenticated the request:
+// the proxy's identity when there is one, else the shared token.
+func identityOrToken(r *http.Request) string {
+	if id := resolveIdentity(r); id != "" {
+		return id
+	}
+	return "token"
 }
 
 func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -198,13 +259,40 @@ func (a *API) handleLogout(w http.ResponseWriter, r *http.Request) {
 // provoking a 401 on every load, and tells it which write affordances to render
 // at all. Hiding a button the server would refuse is presentation; the server
 // refuses regardless.
+//
+// It also reports HOW the request was authenticated, because the two modes need
+// different screens: a login form on a console that accepts no token is a dead
+// end, and an identity of "unknown" is the only visible sign that the fronting
+// proxy forwards none — otherwise discoverable solely by attempting a write.
 func (a *API) handleSession(w http.ResponseWriter, r *http.Request) {
+	identity, ok := a.admit(r)
+	external := a.authIsExternal()
+	mode, source := "token", ""
+	if external {
+		mode = "external"
+	}
+	switch {
+	case identity == "":
+	case identity == "token":
+		source = "token"
+	default:
+		source = "forward-auth"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": a.authorized(r),
+		"authenticated": ok,
 		"configured":    a.token() != "",
-		"identity":      resolveIdentity(r),
-		"writeEnabled":  a.writesAllowed(),
-		"canOriginate":  a.originator != nil,
-		"metrics":       a.metricsBackend() != nil,
+		"identity":      identity,
+		// where that identity came from: "forward-auth" (a proxy said so),
+		// "token" (only the shared credential was proven), or "" (nobody said)
+		"identitySource":        source,
+		"authMode":              mode,
+		"externalAuthenticator": a.externalAuthenticatorName(),
+		"writeEnabled":          a.writesAllowed(),
+		// writes need something to attribute them to; under external
+		// authentication a missing identity is a read-only console, not an
+		// opaque 403 at the moment of sending
+		"canWrite":     a.writesAllowed() && identity != "",
+		"canOriginate": a.originator != nil,
+		"metrics":      a.metricsBackend() != nil,
 	})
 }

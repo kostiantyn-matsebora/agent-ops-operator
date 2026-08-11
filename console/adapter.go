@@ -38,6 +38,13 @@ type consoleChannelConfig struct {
 	// distinguishable from "false": unset takes the process default (on), and
 	// only an explicit false makes the console a strict viewer.
 	WriteEnabled *bool `json:"writeEnabled,omitempty"`
+	// AuthEnabled says whether the CONSOLE authenticates browsers. A POINTER
+	// for the same reason WriteEnabled is one, and with a sharper edge: unset
+	// must take the process default (on), because a config that lost the field
+	// would otherwise disable the only gate. ExternalAuthenticator names what
+	// authenticates instead and is required for a false to take effect.
+	AuthEnabled           *bool  `json:"authEnabled,omitempty"`
+	ExternalAuthenticator string `json:"externalAuthenticator,omitempty"`
 	// SignalSource names the SignalSource this console originates from.
 	SignalSource string `json:"signalSource,omitempty"`
 	// MetricsURL is an optional Prometheus/VictoriaMetrics query endpoint for
@@ -56,6 +63,9 @@ type Adapter struct {
 	channels map[string]consoleChannelConfig
 	reported map[string]string
 	uiToken  string
+	// authLogged is the last auth mode written to the log, so a mode that has
+	// not changed is not restated every refresh.
+	authLogged string
 }
 
 // NewAdapter builds the channel-side half of the console.
@@ -155,6 +165,43 @@ func (a *Adapter) refreshChannels(ctx context.Context) {
 		a.uiToken = token
 	}
 	a.mu.Unlock()
+	a.reportAuthMode()
+}
+
+// reportAuthMode logs the EFFECTIVE authentication mode, once per change.
+//
+// The startup line can only report the process default: the served Channel's
+// config is where a chart puts this, and it arrives here, minutes of uptime
+// later. Without this line a console authenticating nobody logs "authDefault=
+// token" and nothing else ever contradicts it — which is precisely the state
+// this setting must never be able to hide in.
+func (a *Adapter) reportAuthMode() {
+	cfg := a.PrimaryConfig()
+	enabled := true
+	if cfg.AuthEnabled != nil {
+		enabled = *cfg.AuthEnabled
+	}
+	mode := authMode(enabled, cfg.ExternalAuthenticator)
+	a.mu.Lock()
+	changed := a.authLogged != mode
+	a.authLogged = mode
+	a.mu.Unlock()
+	if changed {
+		log.Printf("console auth: %s", mode)
+	}
+}
+
+// authMode names how browsers are authenticated. Half a declaration — off with
+// no authenticator named — is reported as what it actually does: nothing.
+func authMode(enabled bool, external string) string {
+	switch {
+	case enabled:
+		return "token"
+	case external != "":
+		return "external:" + external
+	default:
+		return "token (authentication disabled with no external authenticator named — ignored)"
+	}
 }
 
 // ChannelNames lists the served channels, sorted.

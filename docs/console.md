@@ -278,7 +278,8 @@ instruct an agent that, in a `rbacMode: full` install, holds `cluster-admin`.
   - **A forward-auth proxy** — oauth2-proxy against your OIDC provider is the
     usual one. When a trusted identity header is present the console records it;
     when it is absent it records `token`, so an install without a proxy has an
-    audit trail that names nobody.
+    audit trail that names nobody. Once one is in place you can stop
+    authenticating twice — see below.
 - **Root of a hostname only.** The SPA is embedded at build time with an
   absolute asset base, so it emits `/assets/...` URLs and cannot be served under
   a sub-path — that configuration routes correctly and then renders a blank
@@ -293,6 +294,74 @@ instruct an agent that, in a `rbacMode: full` install, holds `cluster-admin`.
 
 What it **cannot** do: write anything to the Kubernetes API. Its Role carries no
 write verb, and no write path exists in the module.
+
+### Letting something else authenticate
+
+With a proxy already in front, the console's own token is a second sign-in that
+identifies nobody. Two values retire it — and they must be set together, because
+the render fails otherwise:
+
+```yaml
+console:
+  auth:
+    enabled: false
+    externalAuthenticator: oauth2-proxy   # cloudflare-access, envoy-ext-authz, …
+```
+
+The name is not verified — the chart cannot see what sits in front of it. It is
+**recorded**, so "what protects this console?" is answerable from `helm get
+values`, from the post-install notes and from review, rather than from memory.
+
+With ingress-nginx and an oauth2-proxy deployed alongside, that is four
+annotations on the console Ingress (`console.ingress.annotations`):
+
+```yaml
+nginx.ingress.kubernetes.io/auth-url: http://<proxy>.<ns>.svc.cluster.local:8091/oauth2/auth
+nginx.ingress.kubernetes.io/auth-signin: https://$host/oauth2/start?rd=$escaped_request_uri
+nginx.ingress.kubernetes.io/auth-cache-duration: "200 202 401 5m"
+nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Preferred-Username,X-Forwarded-User,X-Forwarded-Email,X-Forwarded-Preferred-Username
+```
+
+The last one does **two** jobs, and the second is the one worth understanding:
+nginx sets each listed header from the auth subrequest, which also means a
+client-supplied copy of it never reaches the console — a header oauth2-proxy
+does not send is set empty and therefore dropped. List **all six** the console
+trusts, not just the ones your proxy populates. Listing only
+`X-Auth-Request-Email` would leave `X-Forwarded-Preferred-Username` passing
+straight through from the client, and the console prefers that one first.
+
+The proxy also needs `set_xauthrequest = true`, or its `/oauth2/auth` response
+carries no identity for nginx to copy and the console stays read-only.
+
+What this mode requires of the proxy:
+
+- **It must be the only route to the Service.** A port-forward, or any pod in
+  the namespace, reaches `agentops-adapter-console:8080` directly and is served
+  without question. In a shared namespace, restrict that with a NetworkPolicy.
+- **It must STRIP client-supplied identity headers.** The console *believes*
+  `X-Forwarded-Email` and its five siblings; it cannot distinguish a header the
+  proxy set from one a client sent, since both arrive on the same connection. A
+  proxy that passes them through lets a caller choose their own identity. This
+  is a requirement of every forward-auth deployment, not a peculiarity of this
+  one — the console does not reimplement the check weakly.
+- **It should FORWARD one.** Without an identity the console is **read-only**:
+  reads are served, writes are refused, and the masthead shows `unknown` with
+  the reason. There is no `token` fallback in this mode — no token was proven,
+  and a write log naming one asserts something untrue. Every write is recorded
+  against a person or it does not happen.
+
+What does **not** change:
+
+- **An empty `uiToken` still authorizes nobody.** "No credential configured" and
+  "no credential required" stay independent settings; the entire hazard is one
+  being read as the other. A `false` with no authenticator named is half a
+  declaration and leaves the console closed — in the chart, which refuses to
+  render, and in the pod, which ignores it.
+- **The token Secret is still created.** The console Channel projects it with
+  `envFrom`, so a missing Secret is a pod that will not start. Re-enabling
+  authentication is one value (`console.auth.enabled=true`) and the same token.
+- **Authorization is still coarse.** Whoever is in sees everything the
+  ServiceAccount can read. Per-user RBAC is not in scope.
 
 ## RBAC
 
@@ -323,6 +392,8 @@ console that cannot see a CrashLoopBackOff is not one.
 | `console.image.*` | | image, bumped per release |
 | `console.port` | `8080` | browser-facing port; the reconciler owns the Service |
 | `console.auth.existingSecret` / `.uiToken` | `""` | supply or pin the browser token instead of generating one |
+| `console.auth.enabled` | `true` | whether the console authenticates browsers itself; `false` requires the next value |
+| `console.auth.externalAuthenticator` | `""` | **required** when `auth.enabled: false` — names what authenticates instead (see the trust boundary) |
 | `console.ingress.enabled` | `false` | see the trust boundary above before enabling |
 | `console.ingress.host` | `""` | **required** when enabled — a hostname cannot be guessed |
 | `console.ingress.extraHosts` | `[]` | additional hostnames serving the same console; each gets a rule and is covered by the derived certificate |

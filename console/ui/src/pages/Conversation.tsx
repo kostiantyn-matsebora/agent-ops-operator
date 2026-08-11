@@ -107,7 +107,12 @@ function Transcript({
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const messages = detail.transcript ?? []
-  const canWrite = (session.data?.writeEnabled ?? false) && detail.conversation.joined && !detail.archived
+  // canWrite from the session, not writeEnabled: a console whose fronting proxy
+  // forwards no identity has writes ON and nothing to attribute them to, and
+  // the composer must say so rather than accept text the server will refuse.
+  const canWrite = (session.data?.canWrite ?? false) && detail.conversation.joined && !detail.archived
+  const noIdentity =
+    (session.data?.writeEnabled ?? false) && !(session.data?.canWrite ?? false)
 
   async function send() {
     setBusy(true)
@@ -175,6 +180,18 @@ function Transcript({
           </CardBody>
         </Card>
       </StackItem>
+      {noIdentity && detail.conversation.joined && !detail.archived && (
+        <StackItem>
+          {/* Writes are on; nobody said who is making them. Saying it here is
+              the difference between a read-only console and a broken one. */}
+          <Alert variant="info" isInline title="Replying needs an identity">
+            {session.data?.externalAuthenticator || 'The proxy'} in front of this console
+            authenticated you but forwarded no identity header, and every write is logged with the
+            identity that made it. Configure it to forward X-Forwarded-Email or
+            X-Auth-Request-User.
+          </Alert>
+        </StackItem>
+      )}
       {canWrite && (
         <StackItem>
           <TextArea

@@ -99,26 +99,68 @@ Exposed at {{ if $hasTLS }}https{{ else }}http{{ end }}://{{ $ing.host }}/
            {{ if $hasTLS }}https{{ else }}http{{ end }}://{{ . }}/
 {{- end }}
 {{- end }}
+{{- $auth := $c.auth | default dict }}
+{{- $authEnabled := true }}
+{{- if hasKey $auth "enabled" }}{{ $authEnabled = $auth.enabled }}{{ end }}
+{{- if $authEnabled }}
 Sign in with the UI token:
   kubectl -n {{ .Release.Namespace }} get secret {{ $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }} -o jsonpath='{.data.uiToken}' | base64 -d
 
 Anyone with that token sees every agentops CR in this namespace, conversation
 payloads included.
+{{- else }}
+
+THIS CONSOLE AUTHENTICATES NOBODY. You declared {{ $auth.externalAuthenticator }} as the
+authenticator, and the console now serves any request that reaches it: every
+agentops CR in this namespace, conversation payloads included, plus the ability
+to instruct any agent it is joined to.
+{{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
+That agent holds cluster-admin in this install (global.agentops.runtime.rbacMode=full).
+{{- end }}
+
+So {{ $auth.externalAuthenticator }} must be the ONLY route to it. A port-forward, a pod in this
+namespace, or any path that reaches Service agentops-adapter-{{ $c.name }}:{{ $c.port }} directly
+bypasses it entirely — restrict that with a NetworkPolicy if the namespace is
+shared.
+
+Two things to check on the proxy itself:
+  1. It STRIPS client-supplied X-Forwarded-* / X-Auth-Request-* identity
+     headers. The console believes them, so a proxy that passes them through
+     lets a caller choose their own identity.
+  2. It FORWARDS one (X-Forwarded-Email or X-Auth-Request-User). Without it
+     this console is read-only: writes are refused rather than recorded against
+     nobody, and the UI says so.
+
+The UI token Secret is still created, so re-enabling authentication is one value:
+  --set console.auth.enabled=true
+  kubectl -n {{ .Release.Namespace }} get secret {{ $c.auth.existingSecret | default (printf "agentops-console-%s" $c.name) }} -o jsonpath='{.data.uiToken}' | base64 -d
+{{- end }}
 {{- if and $ing.enabled (not $hasTLS) }}
 
-ACTION NEEDED — the console is exposed over plain HTTP. That token is sent as a
+ACTION NEEDED — the console is exposed over plain HTTP.
+{{- if $authEnabled }} That token is sent as a
 request header on every call, so it crosses the network in CLEAR TEXT, and it
 reads every conversation payload and instructs any agent the console is joined
 to. Two things to do, both worth doing:
+{{- else }} Conversation payloads and the
+identity headers {{ $auth.externalAuthenticator }} sets cross the network in CLEAR TEXT, and an
+identity header on the wire is one an attacker can replay or forge. One thing to
+do, and one already done:
+{{- end }}
   1. Terminate TLS. Name a certificate Secret:
        --set console.ingress.tls.secretName=<secret>
      or let cert-manager issue one:
        --set console.ingress.tls.clusterIssuer=<issuer>
      (Ignore this if TLS already terminates upstream at a load balancer or in a
      service mesh — the chart cannot see what sits in front of it.)
+{{- if $authEnabled }}
   2. Put an authenticating proxy in front (oauth2-proxy against your OIDC
      provider). The console reads the identity from its forwarded headers and
      logs every write with it; without one, every write is recorded as "token".
+{{- else }}
+  2. Already done — {{ $auth.externalAuthenticator }} authenticates. Just make sure the Ingress
+     routes THROUGH it rather than straight to the Service.
+{{- end }}
 {{- end }}
 
 Conversations are OBSERVED (read-only) until the console channel carries them.

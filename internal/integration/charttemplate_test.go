@@ -171,6 +171,64 @@ func TestConsoleRoleIsReadOnly(t *testing.T) {
 	}
 }
 
+// ---- console authentication --------------------------------------------------
+
+// The default authenticates: a token is required, and the config says so. This
+// is the half of the switch that must survive every edit to the other half.
+func TestConsoleAuthenticatesByDefault(t *testing.T) {
+	out := helmTemplate(t)
+	// the Channel document specifically: `externalAuthenticator` also names a
+	// property in the ChannelAdapter's configSchema, which is documentation
+	ch := consoleChannel(t, out)
+	if !strings.Contains(ch, "authEnabled: true") {
+		t.Fatalf("the console Channel must declare authEnabled: true by default:\n%s", ch)
+	}
+	if strings.Contains(ch, "externalAuthenticator:") {
+		t.Fatalf("no authenticator is named by default — the console is its own:\n%s", ch)
+	}
+	if !strings.Contains(out, "uiToken:") {
+		t.Fatal("the default install must still render the browser token")
+	}
+}
+
+// consoleChannel returns the rendered console Channel document.
+func consoleChannel(t *testing.T, out string) string {
+	t.Helper()
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: Channel\nmetadata:") && strings.Contains(doc, "adapter: console") {
+			return stripComments(doc)
+		}
+	}
+	t.Fatal("no console Channel rendered")
+	return ""
+}
+
+// Disabling the only gate takes TWO deliberate statements. One alone is a
+// configuration that cannot be right, and the chart refuses it rather than
+// installing an open console.
+func TestConsoleAuthDisabledRequiresAnAuthenticator(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "console.auth.enabled=false")
+	for _, want := range []string{"console.auth.externalAuthenticator", "oauth2-proxy"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("the guard must name the value to set and an example, got:\n%s", msg)
+		}
+	}
+
+	out := helmTemplate(t, "--set", "console.auth.enabled=false",
+		"--set", "console.auth.externalAuthenticator=oauth2-proxy")
+	ch := consoleChannel(t, out)
+	if !strings.Contains(ch, "authEnabled: false") ||
+		!strings.Contains(ch, `externalAuthenticator: "oauth2-proxy"`) {
+		t.Fatalf("both settings must reach the pod through the Channel config:\n%s", ch)
+	}
+	// The Channel declares credentialsSecretRef and the reconciler projects it
+	// with envFrom, so tidying the Secret away would turn "disable auth" into
+	// "the console will not start" — with no obvious cause.
+	if !strings.Contains(out, "uiToken:") {
+		t.Fatal("the token Secret must survive the switch, or the adapter pod cannot start")
+	}
+}
+
 // Console Ingress. Exposing the console is when its bearer token starts
 // crossing a network, so both the positive shapes and the two guards that
 // REFUSE a configuration are pinned here — a guard nobody tests is a guard that
