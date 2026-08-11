@@ -178,6 +178,13 @@ func AnswerMessage(body, status string) Message {
 func RunReplyMessage(run *agentopsv1alpha1.RunStatus) Message {
 	body := strings.TrimSpace(run.Result)
 	switch {
+	case run.Status != "succeeded" && body != "":
+		// A FAILED run that said why. Its result is the explanation — "this
+		// conversation cannot be continued", a refusal, a diagnosis — and
+		// discarding it in favour of "run failed" is exactly the inarticulate
+		// failure that made answering-without-context look like the lesser evil.
+		// The reader gets the reason; the level still says something went wrong.
+		return Warn(body)
 	case run.Status != "succeeded":
 		return Warn("❌ run failed (" + run.Status + ")")
 	case body == "":

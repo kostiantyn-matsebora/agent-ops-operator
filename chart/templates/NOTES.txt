@@ -35,8 +35,36 @@ Pending with "no persistent volumes available" or "storageclass not found"
 means this cluster has no default StorageClass or no {{ join "/" .Values.persistence.accessModes }} provisioner.
 Either name one (persistence.storageClassName) or turn storage off:
   helm upgrade ... --set persistence.enabled=false
-Sessions then die with each runtime pod, and an agent resuming a lost session
-answers without prior context.
+See below for what turning it off costs.
+{{- end }}
+{{- if and .Values.persistence.enabled (not (has "ReadWriteMany" .Values.persistence.accessModes)) (not .Values.runtime.nodeSelector) }}
+
+HEADS UP — this claim can be attached by ONE node ({{ join "/" .Values.persistence.accessModes }}), but runtime pods
+are not pinned. It works until a second conversation schedules on another node,
+then that pod fails to attach the volume (Multi-Attach) — at the moment of
+concurrency, far from the storage setting that caused it.
+
+Pin them:
+  --set runtime.nodeSelector.kubernetes\.io/hostname=<node>
+(unnecessary on a single-node cluster, which is why this is a note and not a
+render failure.)
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+
+CONVERSATIONS CANNOT BE CONTINUED in this install. The runtime keeps a
+conversation's context on its home volume, and this release provides none, so
+the context goes when the pod exits — which is every {{ .Values.runtimeIdleTtlMinutes }} minute(s) of idle
+time, i.e. between almost any two messages.
+
+Nothing is broken: each message is answered on its own, and conversations say so
+rather than failing. But a reply will not remember the message before it. To
+change that you need durable storage for /data/home, and it does NOT have to be
+distributed:
+  - shared:      persistence.enabled=true with a ReadWriteMany class
+  - single-node: persistence.enabled=true, persistence.accessModes={ReadWriteOnce},
+                 and runtime.nodeSelector pinning runtime pods to one node
+                 (a `local` PersistentVolume works here too — no dynamic
+                 provisioner required)
 {{- end }}
 {{- if and .Values.runtime.enabled (not .Values.runtime.credentialsSecret.token) }}
 {{- $cs := .Values.runtime.credentialsSecret }}

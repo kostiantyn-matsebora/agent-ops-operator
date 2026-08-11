@@ -217,7 +217,32 @@ type ConversationStatus struct {
 	// Threads: one binding per bound channel whose topic has been created.
 	// +optional
 	Threads []ThreadBinding `json:"threads,omitempty"`
-	// Agent session id (resume handle).
+	// RuntimeContextID is the RUNTIME's opaque handle for this conversation's
+	// accumulated context — every message, tool call and model response it has
+	// built up. The manager stores it and hands it back on the next work unit;
+	// it never interprets it and never assumes where the context lives (session
+	// files on a volume, a thread id at a vendor API, rows in a database are all
+	// valid, and none of them are distinguishable from here).
+	//
+	// Named for what agent-ops means, not for one backend's word: "session" is
+	// claude-code's noun, and a vendor's noun in this API would teach every later
+	// reader that the operator knows what is inside the handle.
+	//
+	// LATEST-WINS. Every completed run's reported handle replaces this one. It
+	// was write-once, which was unsound: a run may legitimately end in a
+	// different context than it was asked to continue, and keeping the first
+	// handle then named something that no longer existed — so every later
+	// message repeated the same failed continuation and one recoverable loss
+	// became permanent.
+	// +optional
+	RuntimeContextID string `json:"runtimeContextId,omitempty"`
+	// SessionID is the former name of RuntimeContextID.
+	//
+	// DEPRECATED, and retained for exactly one release so the rename cannot do
+	// the harm this field exists to prevent: it is still DECODED, so a
+	// conversation written by an older manager is adopted rather than losing its
+	// handle at the moment of upgrade. Readers must prefer RuntimeContextID and
+	// fall back to this; writers must only ever set RuntimeContextID.
 	// +optional
 	SessionID string `json:"sessionId,omitempty"`
 	// +optional
@@ -254,6 +279,30 @@ type Conversation struct {
 
 	Spec   ConversationSpec   `json:"spec,omitempty"`
 	Status ConversationStatus `json:"status,omitempty"`
+}
+
+// ContextID returns the runtime's context handle for this conversation, or "".
+//
+// THE ONE PLACE the deprecated spelling is read. Prefer the current field, fall
+// back to the old one so a conversation written before the rename keeps its
+// handle across the upgrade instead of restarting its context — which is the
+// exact failure this whole area exists to prevent, and would have been
+// self-inflicted by a rename that simply moved the field.
+//
+// Callers use this rather than touching either field, so removing the fallback
+// after one release is a one-line change here.
+func (c *Conversation) ContextID() string {
+	if c.Status.RuntimeContextID != "" {
+		return c.Status.RuntimeContextID
+	}
+	return c.Status.SessionID
+}
+
+// SetContextID records the runtime's handle, writing ONLY the current field and
+// retiring the deprecated one so an adopted conversation stops carrying both.
+func (c *Conversation) SetContextID(id string) {
+	c.Status.RuntimeContextID = id
+	c.Status.SessionID = ""
 }
 
 // ThreadFor returns the thread id bound for a channel, or nil.

@@ -418,6 +418,58 @@ Adding state to a component means adding its row. State that fits no row is a
 defect: it is either a cache of a Kubernetes object, derivable from Kubernetes
 objects, or declared lossy.
 
+### What carries a conversation's context
+
+Three records exist for one conversation, and conflating them is the first way to
+get this wrong:
+
+| Record | Where | Holds | Authoritative for |
+|---|---|---|---|
+| **Runtime context** | wherever the runtime keeps it — for the reference runtime, session files on `/data/home` | every message, tool call and model response | **the agent's memory** |
+| Thread transcript | the chat surface, via bound channels | what a human said and was told | the human-visible history |
+| Run history | `Conversation.status.runs[]` | outcome + result, truncated | what the operator knows |
+
+"Continue with full context" is a property of the **first** row only. The others
+are summaries, and neither can reconstruct it — which is why a lost context is
+never simulated from run history: 2000-character results with no tool outcomes
+would produce an agent that believes it remembers and gives a plausible, wrong
+account of what it did.
+
+`status.runtimeContextId` is the runtime's opaque handle for that context. The
+manager stores it, hands it back on the next unit, and interprets nothing —
+`session` is one backend's noun, not agent-ops'. It is **latest-wins**: a run may
+legitimately end in a different context than it was asked to continue, and
+keeping the first handle would name something that no longer exists, so every
+later message would repeat the same failed continuation and one recoverable loss
+would become permanent.
+
+**Continuity is promised only where it is possible.** `AgentRuntime.spec.contextStorage`
+declares where a runtime keeps context — `volume`, `external`, or `none` — and a
+runtime keeping it on a home volume the deployment does not provide can never
+continue anything. Such conversations are single-run **by declaration**: they
+answer each message fresh and say so, rather than failing every follow-up for a
+configuration the operator chose. A context that was promised and then lost is a
+different thing, and fails the run.
+
+#### Storage topologies for continuity
+
+Durable context does **not** require distributed storage:
+
+| topology | how | for |
+|---|---|---|
+| **Shared** | RWX claim, runtime pods anywhere | Longhorn, EBS-backed RWX, NFS |
+| **Single-node** | RWO claim — or a node-affine `local` PersistentVolume — plus `runtime.nodeSelector` pinning runtime pods to that node | clusters with no distributed provisioner |
+
+A `local` PV is the answer when there is no dynamic provisioner at all: create the
+PV and claim, set `persistence.existingClaim`, and pin the selector. Note the
+trap — an RWO claim with runtime pods *unpinned* works until a second
+conversation schedules elsewhere, then fails to attach, far from the setting that
+caused it.
+
+The runtime pod is deliberately **not** given a host filesystem path for this: it
+executes agent code, and reaching the node's filesystem should not follow from
+wanting durable context.
+
 ### The reply is a fact, not a queue entry
 
 `POST /work/done` records the run result and enqueues the reply — the fast path,

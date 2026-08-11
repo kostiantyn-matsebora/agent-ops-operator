@@ -195,6 +195,9 @@ func main() {
 		Router:    router,
 		Activity:  acts,
 		Version:   env("VERSION", "dev"),
+		// The same bootstrap config the reconciler builds pods from: dispatch
+		// asks it whether this deployment can carry conversation context.
+		Runtime: reconciler.Runtime,
 		// The backlog bound: the one capacity check that must live in ingest,
 		// because the point is not to create the object at all.
 		MaxQueuedConversations: envInt("MAX_QUEUED_CONVERSATIONS", 50),

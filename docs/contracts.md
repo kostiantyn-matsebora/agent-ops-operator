@@ -154,6 +154,44 @@ its topics exists (one broken channel never deadlocks it), and channel
 implementations must never re-ingest their own outbound posts as inbound
 (relayed messages would loop otherwise).
 
+**Conversation context travels as an OPAQUE HANDLE.** A work unit carries
+`runtimeContextId` — the runtime's own identifier for everything this
+conversation has accumulated — and the obligation is one sentence: **continue the
+context this handle names, or report that you could not.**
+
+Where that context lives is entirely yours: session files on a mounted volume, a
+thread id at a vendor API, rows in a database. The manager stores the handle,
+hands it back, and interprets nothing. `--resume` is one runtime's implementation
+of this and `session` is that runtime's word for it; neither appears in the
+contract.
+
+`POST /work/done` reports back:
+
+| field | meaning |
+|---|---|
+| `runtimeContextId` | the handle for the context this run leaves behind. **Latest-wins** — it replaces the stored one, including on a FAILED run, because a crash after a context was established should not strand it |
+| `continuity` | `continued`, `new`, or `unavailable` |
+| `continuityReason` | free text, recorded verbatim, when a context could not be reached |
+
+`continuity` exists because the manager cannot infer it: it sends a handle and
+receives a handle, and when they differ it has no way to tell an agent that
+branched deliberately from one that was forced to start over. **Absent means no
+claim** — a runtime that omits it keeps today's behaviour, because an addition to
+the contract must not make an existing runtime look broken. A runtime that cannot
+continue anything conforms by always reporting `new`.
+
+Reporting `unavailable` means the context was LOST. Do not answer without it: a
+conversation without its context is a new one wearing the same name and thread,
+and an agent asked to undo something it has no memory of will guess. Fail the run
+and say why — never with an empty result, which is what made answering-anyway
+look like the kinder option. Before declaring it, distinguish a store that says
+GONE from one that did not ANSWER: a shared filesystem can stall for seconds, and
+ending a conversation over that would be a correctness bug.
+
+`resumeSessionId` / `sessionId` are the retired spellings of the handle, sent and
+accepted for one release so a runtime image can be upgraded independently of the
+manager. Read `runtimeContextId`.
+
 **...and delivery is a recorded fact, not a queue entry.** `/work/done` writes
 the run into `Conversation.status.runs[]` and enqueues the reply, exactly as
 before — but it is no longer the only path that can produce it. The reply op id

@@ -141,7 +141,7 @@ function runClaude(unit) {
     // system prompt survives — and it says nothing about tools: the allowlist
     // above is the only permission authority.
     const args = [
-      ...(unit.resumeSessionId ? ['--resume', unit.resumeSessionId] : []),
+      ...(contextIdOf(unit) ? ['--resume', contextIdOf(unit)] : []),
       ...(unit.systemPrompt ? ['--append-system-prompt', unit.systemPrompt] : []),
       '-p', prompt,
       '--allowedTools', allowed.join(','),
@@ -152,10 +152,10 @@ function runClaude(unit) {
       '--strict-mcp-config',
       '--mcp-config', MCP_CONFIG,
     ];
-    console.log(`\n[runtime] run ${unit.runId}${unit.resumeSessionId ? ' resume=' + unit.resumeSessionId : ''} thread=${unit.threadId ?? 'general'}`);
+    console.log(`\n[runtime] run ${unit.runId}${contextIdOf(unit) ? ' continue=' + contextIdOf(unit) : ''} thread=${unit.threadId ?? 'general'}`);
     console.log(`[runtime] tools agent=${unit.agent || '-'} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${unit.toolsMode || 'merge'} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
     if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
-    resolve(spawnClaude(args, unit, Boolean(unit.resumeSessionId)));
+    resolve(spawnClaude(args, unit, Boolean(contextIdOf(unit))));
   });
 }
 
@@ -205,31 +205,107 @@ async function spawnClaude(args, unit, isResume) {
     });
 
   const first = await attempt(args);
-  if (!isResume || first.status === 'succeeded') return strip(first);
+  if (!isResume) return strip({ ...first, continuity: 'new' });
+  if (first.status === 'succeeded') return strip({ ...first, continuity: 'continued' });
 
   // A session that was found emits session_id early, even on a later failure.
   // No session id AND no result is what a missing session looks like; the
   // stderr text is the direct confirmation when the CLI gives one.
   const lost = !first.sessionId && !first.result;
   const saysSoOnStderr = /no conversation found|session .* not found|could not find session/i.test(first.stderr || '');
-  if (!lost && !saysSoOnStderr) return strip(first);
+  if (!lost && !saysSoOnStderr) return strip({ ...first, continuity: 'continued' });
 
-  console.log(
-    `[runtime] resume of session ${unit.resumeSessionId} produced no output — the session is gone ` +
-      `(is /data/home persisted? without a home PVC it dies with the pod). Retrying as a NEW session; ` +
-      `earlier context is lost.`,
-  );
-  const fresh = args.filter((a, i) => a !== '--resume' && args[i - 1] !== '--resume');
-  const second = await attempt(fresh);
-  if (second.status === 'succeeded') {
-    return strip({
-      ...second,
-      // Said in the ANSWER, not only the log: the person reading it needs to
-      // know the agent has no memory of what came before.
-      result: `⚠️ The previous session could not be resumed, so this was answered without its history.\n\n${second.result}`,
-    });
+  // GONE, or merely NOT ANSWERING? The two look identical from one attempt and
+  // must not be treated alike: a shared filesystem can fail to answer for
+  // seconds — a restarting share-manager, a stale handle after this pod moved,
+  // a listing that has not yet seen a file another node wrote — and ending a
+  // conversation over a lag of that kind would turn a storage nicety into a
+  // correctness bug. Only an answer of "not there" is unavailability.
+  const contextId = contextIdOf(unit);
+  if (!(await confirmContextMissing(contextId))) {
+    console.log('[runtime] context reappeared on re-check — the store was slow, not empty');
+    const retried = await attempt(args);
+    return strip({ ...retried, continuity: 'continued' });
   }
-  return strip(second);
+
+  // Genuinely gone. DO NOT answer without it: a conversation without its context
+  // is not that conversation, it is a new one wearing the same name and thread.
+  // Answering anyway presents the second as the first to the person replying,
+  // and an agent asked to undo something it has no memory of will guess. Fail,
+  // say why, and spend no second invocation on an answer that should not exist.
+  const reason =
+    'the stored context for this conversation could not be reached — no session files under ' +
+    `${SESSIONS_DIR} (is /data/home backed by a volume? without one it dies with the pod)`;
+  console.log(`[runtime] ${reason} — failing rather than answering without it`);
+  return strip({
+    status: 'failed',
+    exitCode: first.exitCode ?? 1,
+    // The handle is still surrendered when the CLI produced one: continuing a
+    // partial context beats starting over.
+    sessionId: first.sessionId,
+    continuity: 'unavailable',
+    continuityReason: reason,
+    // NEVER an empty result. Failing with nothing to read is precisely why this
+    // path used to answer without context instead, and reintroducing it as the
+    // fix would be the same mistake wearing the opposite decision.
+    result:
+      '⚠️ **This conversation cannot be continued.**\n\n' +
+      'Its stored context is no longer available, so answering now would mean answering with no ' +
+      'memory of what came before — including anything already done. Start a new conversation to ' +
+      `continue.\n\nReason: ${reason}`,
+    stderr: first.stderr,
+  });
+}
+
+/**
+ * confirmContextMissing re-checks after short delays, distinguishing a store
+ * that says the context is GONE from one that merely did not ANSWER.
+ *
+ * Bounded and short on purpose: a person is waiting on a chat reply, so the
+ * budget is seconds. Long enough for a share-manager restart or an attribute
+ * cache to settle; nowhere near long enough to read as a hung reply.
+ */
+async function confirmContextMissing(contextId) {
+  if (!contextId) return true;
+  for (const waitMs of [500, 1500, 3000]) {
+    await new Promise((r) => setTimeout(r, waitMs));
+    let found;
+    try {
+      found = await sessionFileExists(SESSIONS_DIR, contextId);
+    } catch {
+      // Unreadable is NOT absent: a stale mount throws here, and treating that
+      // as "gone" is exactly the conflation this exists to prevent.
+      return false;
+    }
+    if (found) return false;
+  }
+  return true;
+}
+
+/** sessionFileExists looks for a context's transcript anywhere under dir. */
+async function sessionFileExists(dir, contextId) {
+  const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => null);
+  if (entries === null) return false;
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      if (await sessionFileExists(`${dir}/${e.name}`, contextId)) return true;
+    } else if (e.name.includes(contextId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// SESSIONS_DIR is where this runtime keeps conversation context. It is
+// claude-code's layout, and it is the ONLY component that knows it — the
+// manager stores an opaque handle and assumes nothing about where it points.
+const SESSIONS_DIR = `${process.env.HOME || '/data/home'}/.claude/projects`;
+
+// contextIdOf reads the handle the manager sent. Prefers the current name and
+// falls back to the retired one for one release, so this image works against a
+// manager on either side of the rename.
+function contextIdOf(unit) {
+  return unit.runtimeContextId || unit.resumeSessionId || '';
 }
 
 /** strip removes the internal stderr capture from what is reported. */
@@ -259,7 +335,17 @@ function strip({ stderr, ...rest }) {
     try { await syncRepo(); } catch (e) { console.error(`[runtime] sync: ${e.message}`); }
     const out = await runClaude(unit);
     lastWork = Date.now();
-    const done = { convo: CONVO_ID, runId: unit.runId, ...out };
+    // Report the handle under BOTH names for one release: the current one, and
+    // the retired spelling so this image also works against an older manager.
+    // `continuity` rides along from spawnClaude — the manager cannot infer it,
+    // since it sends a handle and gets a handle back.
+    const { sessionId, ...rest } = out;
+    const done = {
+      convo: CONVO_ID,
+      runId: unit.runId,
+      ...rest,
+      ...(sessionId ? { runtimeContextId: sessionId, sessionId } : {}),
+    };
     for (let i = 0; i < 60; i++) {
       try {
         const r = await fetch(`${CONTROL_URL}/work/done`, {

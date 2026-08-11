@@ -69,13 +69,14 @@ type convView struct {
 		} `json:"inputs,omitempty"`
 	} `json:"spec"`
 	Status struct {
-		Phase        string          `json:"phase,omitempty"`
-		Threads      []ThreadBinding `json:"threads,omitempty"`
-		SessionID    string          `json:"sessionId,omitempty"`
-		RuntimePod   string          `json:"runtimePod,omitempty"`
-		Inflight     *Inflight       `json:"inflight,omitempty"`
-		Runs         []Run           `json:"runs,omitempty"`
-		LastActivity string          `json:"lastActivity,omitempty"`
+		Phase            string          `json:"phase,omitempty"`
+		Threads          []ThreadBinding `json:"threads,omitempty"`
+		RuntimeContextID string          `json:"runtimeContextId,omitempty"`
+		SessionID        string          `json:"sessionId,omitempty"`
+		RuntimePod       string          `json:"runtimePod,omitempty"`
+		Inflight         *Inflight       `json:"inflight,omitempty"`
+		Runs             []Run           `json:"runs,omitempty"`
+		LastActivity     string          `json:"lastActivity,omitempty"`
 	} `json:"status"`
 }
 

@@ -528,7 +528,7 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			Pipeline: pipeline.Name, Conversation: conv.Name,
 			Detail: conv.Spec.Title,
 		})
-	} else if conv.Status.SessionID != "" {
+	} else if conv.ContextID() != "" {
 		inputType = agentopsv1alpha1.InputRecurrence // same problem/job, resume with context
 	}
 

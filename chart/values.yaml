@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.26.0
+  tag: 0.28.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -74,7 +74,7 @@ runtime:
   # 0.2.0+ composes the allowlist with the agent definition's own `tools:` and
   # passes it verbatim — no substituted `Read` when nothing is declared.
   # Pinning an older tag keeps that substitution and ignores toolsets.mode.
-  image: kmatsebora/agentops-runtime-claude:0.5.0
+  image: kmatsebora/agentops-runtime-claude:0.6.0
   # Empty = follow runtimeIdleTtlMinutes above, so the release has ONE number.
   # Set it only to give THIS runtime a different one. (It is always written to
   # the CR: the CRD defaults this field to 10, so an omitted field is not unset

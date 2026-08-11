@@ -36,6 +36,15 @@ import (
 // LabelSignatureHash indexes conversations by grouping signature.
 const LabelSignatureHash = "agentops.dev/signature-hash"
 
+// ConditionContextContinuity reports whether this conversation still carries the
+// context it accumulated. False means a run could not reach it and the thread
+// restarted — the one failure that otherwise leaves a conversation looking
+// entirely healthy while answering without memory.
+//
+// The MESSAGE is whatever the runtime reported, verbatim: the manager does not
+// know where a given runtime keeps context, so it does not diagnose.
+const ConditionContextContinuity = "ContextContinuity"
+
 // ConditionToolingResolved reports whether a conversation's wiring-level
 // tooling bindings (mcpConfigs / toolsets) could be resolved. Only set on
 // conversations that carry a binding — binding-less conversations have nothing
@@ -730,22 +739,13 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 	}
 	r.setToolingCondition(ctx, conv, metav1.ConditionTrue, "Resolved", "")
 
-	// resolve the execution backend: profile.runtimeRef -> "default" CR -> bootstrap config
-	cfg := r.Runtime
-	runtimeName := "default"
-	explicit := false
-	if profile.Spec.RuntimeRef != nil {
-		runtimeName = profile.Spec.RuntimeRef.Name
-		explicit = true
-	}
-	var rt agentopsv1alpha1.AgentRuntime
-	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: runtimeName}, &rt); err == nil {
-		cfg = runtimepod.FromRuntime(&rt.Spec, r.Runtime)
-	} else if explicit {
-		return false, err // named runtime must exist
+	// resolve the execution backend: profile.runtimeRef -> "default" CR -> bootstrap
+	resolved, err := runtimepod.ResolveFor(ctx, r.Client, conv.Namespace, &profile, r.Runtime)
+	if err != nil {
+		return false, err
 	}
 
-	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, cfg)
+	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved.Config)
 	pod.Namespace = conv.Namespace
 	if err := controllerutil.SetControllerReference(conv, pod, r.Scheme); err != nil {
 		return false, err
