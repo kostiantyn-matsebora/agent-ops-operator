@@ -43,6 +43,11 @@ type InhibitRule struct {
 // Route is the Alertmanager half of the config.
 type Route struct {
 	InhibitRules []InhibitRule `json:"inhibitRules,omitempty"`
+	// TimeIntervals declares named windows; MuteTimeIntervals references them.
+	// Both are Alertmanager's own vocabulary — this is the TIME axis of
+	// suppression, and it belongs in the half that already speaks it.
+	TimeIntervals     []TimeInterval     `json:"timeIntervals,omitempty"`
+	MuteTimeIntervals []MuteTimeInterval `json:"muteTimeIntervals,omitempty"`
 }
 
 // defaultEscalateAfterObjects: one object misbehaving is churn, several at once
@@ -188,6 +193,9 @@ type compiledInhibit struct {
 type ruleSet struct {
 	rules    []compiledRule
 	inhibits []compiledInhibit
+	// mutes are the time windows silencing this source, resolved and ordered as
+	// written. Evaluated at EMIT, never at ingest.
+	mutes []compiledMute
 	// warnings are non-fatal problems (an unreachable rule) reported on the
 	// source's Ready condition without failing the source.
 	warnings []string
@@ -254,6 +262,14 @@ func compileRules(rules []Rule, route Route) (*ruleSet, error) {
 				"(an inhibit rule with an empty half would silence everything)", i)
 		}
 		rs.inhibits = append(rs.inhibits, compiledInhibit{source: src, target: tgt, equal: ir.Equal})
+	}
+
+	intervals, err := compileIntervals(route.TimeIntervals)
+	if err != nil {
+		return nil, err
+	}
+	if rs.mutes, err = compileMutes(route.MuteTimeIntervals, intervals); err != nil {
+		return nil, err
 	}
 
 	rs.warnings = shadowedRules(rs.rules)

@@ -446,6 +446,45 @@ func TestDefaultRulesShape(t *testing.T) {
 	}
 }
 
+// A maintenance window is opt-in. Muting is the one suppression axis that can
+// silence a source without any event matching a rule, so a default that shipped
+// one would be a cluster going quiet for reasons nobody configured.
+func TestNoMuteWindowsByDefault(t *testing.T) {
+	out := helmTemplate(t, "--set", "k8s-bundle.enabled=true")
+	src := stripComments(eventsSourceDoc(t, out))
+	for _, needle := range []string{"timeIntervals", "muteTimeIntervals"} {
+		if strings.Contains(src, needle) {
+			t.Errorf("the default source must declare no %s:\n%s", needle, src)
+		}
+	}
+}
+
+// The chart passes `route` through verbatim, so this pins that the time axis
+// actually REACHES the SignalSource — including the location, the field most
+// likely to be dropped by a re-spelling and the one whose absence is invisible
+// for six months until a daylight-saving change moves the window.
+func TestConfiguredMuteWindowReachesTheSource(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "k8s-bundle.enabled=true",
+		"--set", "k8s-bundle.eventsAdapter.source.route.timeIntervals[0].name=nightly",
+		"--set", "k8s-bundle.eventsAdapter.source.route.timeIntervals[0].location=Europe/Kyiv",
+		"--set", "k8s-bundle.eventsAdapter.source.route.timeIntervals[0].times[0].startTime=04:00",
+		"--set", "k8s-bundle.eventsAdapter.source.route.timeIntervals[0].times[0].endTime=04:20",
+		"--set", "k8s-bundle.eventsAdapter.source.route.muteTimeIntervals[0].name=nightly",
+		"--set", `k8s-bundle.eventsAdapter.source.route.muteTimeIntervals[0].matchers[0]=reason="NodeNotReady"`,
+	)
+	src := stripComments(eventsSourceDoc(t, out))
+	for _, needle := range []string{
+		"timeIntervals:", "name: nightly", "location: Europe/Kyiv",
+		"startTime: \"04:00\"", "endTime: \"04:20\"",
+		"muteTimeIntervals:", "NodeNotReady",
+	} {
+		if !strings.Contains(src, needle) {
+			t.Errorf("configured window missing %q from the rendered source:\n%s", needle, src)
+		}
+	}
+}
+
 // ---- runtime ownership ------------------------------------------------------
 
 // The substrate is the PARENT's: one AgentRuntime, one runtime ServiceAccount,

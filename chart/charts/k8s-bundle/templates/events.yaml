@@ -119,6 +119,72 @@ spec:
                   description: Labels that must be equal on cause and target.
                   items:
                     type: string
+          timeIntervals:
+            type: array
+            description: >-
+              Named time intervals, in Alertmanager's shape. The time axis of
+              suppression: `for` verifies a condition that a scheduled outage
+              genuinely satisfies, inhibition needs a cause event that a power
+              cut never produces, and matchers cannot select on the clock.
+            items:
+              type: object
+              properties:
+                name:
+                  type: string
+                times:
+                  type: array
+                  description: >-
+                    Clock ranges within a day; start inclusive, end exclusive.
+                    A window spanning midnight is two entries.
+                  items:
+                    type: object
+                    properties:
+                      startTime:
+                        type: string
+                      endTime:
+                        type: string
+                location:
+                  type: string
+                  description: >-
+                    IANA timezone, e.g. Europe/Kyiv. Defaults to UTC, which
+                    drifts against local time at each daylight-saving change.
+                weekdays:
+                  type: array
+                  items:
+                    type: string
+                daysOfMonth:
+                  type: array
+                  description: Negative values count back from the end of the month.
+                  items:
+                    type: string
+                months:
+                  type: array
+                  items:
+                    type: string
+                years:
+                  type: array
+                  items:
+                    type: string
+          muteTimeIntervals:
+            type: array
+            description: >-
+              Which named intervals mute, and what they mute. Evaluated at
+              EMIT — after the dwell, before the emit cap — so a problem
+              outliving the window is still reported once it closes.
+            items:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Name of an interval declared in timeIntervals.
+                matchers:
+                  type: array
+                  description: >-
+                    Narrows what the window silences. Absent = everything from
+                    this source for the interval's duration, which is the
+                    principal hazard of the feature.
+                  items:
+                    type: string
 {{- if $ea.rbac.create }}
 ---
 {{- if $ea.rbac.clusterWide }}

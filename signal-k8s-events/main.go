@@ -78,6 +78,9 @@ type adapter struct {
 	// clipped records the last reported clip count per source, so the
 	// condition is only rewritten when it changes.
 	clipped sync.Map
+	// muted records the active mute window and its running count per source, so
+	// the condition changes when the situation does rather than per batch.
+	muted sync.Map
 
 	mu       sync.Mutex
 	sources  map[string]*servedSource
@@ -475,6 +478,23 @@ func (a *adapter) deliver(ctx context.Context, events []Event, fromList bool) {
 // single exit from this adapter: both the immediate path and the dwell queue
 // go through it, so the cap cannot be bypassed by one of them.
 func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
+	// MUTE FIRST, and note WHERE this sits: after the dwell queue (both callers
+	// have already been through it) and before the emit cap.
+	//
+	// After the dwell, because Alertmanager's mute intervals mute NOTIFICATIONS
+	// rather than evaluation — which buys the property that makes the feature
+	// safe: a problem that starts inside the window and PERSISTS past it still
+	// surfaces, because the cluster keeps producing events for anything genuinely
+	// broken and the next one dwells and emits normally once the window closes.
+	// Only transient noise is lost, which is what the window was asked to lose.
+	//
+	// Before the cap, because muted signals were never emitted; charging them
+	// would make a maintenance window read as a runaway.
+	sigs, muted, window := a.applyMute(source, sigs, time.Now())
+	a.reportMute(ctx, source, muted, window)
+	if len(sigs) == 0 {
+		return false
+	}
 	allowed, clipped := a.cap.Allow(source, sigs)
 	a.reportClipping(ctx, source, clipped)
 	if len(allowed) == 0 {
@@ -488,6 +508,73 @@ func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 	}
 	log.Printf("posted %d event signal(s) for %s", len(allowed), source)
 	return true
+}
+
+
+// applyMute drops the signals a time window silences, returning what survives,
+// how many were muted, and the window that did it.
+func (a *adapter) applyMute(source string, sigs []Signal, now time.Time) ([]Signal, int, string) {
+	a.mu.Lock()
+	src, ok := a.sources[source]
+	a.mu.Unlock()
+	if !ok || src.filter == nil || src.filter.rules == nil || len(src.filter.rules.mutes) == 0 {
+		return sigs, 0, ""
+	}
+	kept := sigs[:0:0]
+	muted, window := 0, ""
+	for i := range sigs {
+		if w := src.filter.rules.MutedBy(&sigs[i], now); w != "" {
+			muted++
+			window = w
+			continue
+		}
+		kept = append(kept, sigs[i])
+	}
+	return kept, muted, window
+}
+
+// muteState is what a source has reported about muting, so the condition
+// changes when the situation does rather than on every batch.
+type muteState struct {
+	window string
+	count  int
+}
+
+// reportMute surfaces an ACTIVE window and, when it closes, what it cost.
+//
+// Muting is NEVER silent. A muted lane and an idle lane are indistinguishable
+// from outside and only one of them means the cluster is healthy, so "why has
+// nothing arrived since four?" is answerable from the source object rather than
+// from adapter logs. Same reasoning as emit-cap clipping, one axis over.
+func (a *adapter) reportMute(ctx context.Context, source string, muted int, window string) {
+	prev, _ := a.muted.Load(source)
+	cur, _ := prev.(muteState)
+
+	if muted > 0 {
+		next := muteState{window: window, count: cur.count + muted}
+		a.muted.Store(source, next)
+		if cur.window == window {
+			return // already reported this window; the count is summarised on close
+		}
+		msg := fmt.Sprintf("muted by time interval %q — events matching this window are being "+
+			"suppressed on purpose; this lane is configured, not idle", window)
+		log.Printf("%s: %s", source, msg)
+		// Ready stays TRUE: the source is doing exactly what it was told. Marking
+		// it unhealthy for obeying its own configuration would train an operator
+		// to ignore the condition.
+		go func() { _ = a.mgr.ReportStatus(ctx, source, true, "Muted", msg) }()
+		return
+	}
+
+	// Nothing muted in this batch: if a window was active, it has closed.
+	if cur.window == "" {
+		return
+	}
+	a.muted.Store(source, muteState{})
+	msg := fmt.Sprintf("time interval %q ended: %d event(s) were muted while it was active",
+		cur.window, cur.count)
+	log.Printf("%s: %s", source, msg)
+	go func() { _ = a.mgr.ReportStatus(ctx, source, true, "MuteEnded", msg) }()
 }
 
 // reportClipping surfaces a clipped window on the source's condition. Silent
