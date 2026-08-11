@@ -8,6 +8,63 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Authentication can move in front of the console — chart 5.7.0, console 0.8.1
+
+Additive; no action required. Every existing install keeps requiring its token.
+
+An install that fronts the console with oauth2-proxy, Cloudflare Access or an
+Envoy ext_authz filter used to authenticate twice: once at the proxy, then again
+with a shared token that identifies nobody. The second one adds no security — the
+request already got past the proxy — and costs a credential to distribute and
+rotate. The console already believed the proxy about **who** you are; it just
+still demanded a token to decide **whether** you get in.
+
+Two new values move the boundary outward:
+
+```yaml
+console:
+  auth:
+    enabled: false                        # the console authenticates nobody
+    externalAuthenticator: oauth2-proxy   # REQUIRED, or the render fails
+```
+
+- **`auth.enabled: false` alone FAILS the render.** Naming what authenticates
+  instead is mandatory, so "what protects this console?" is answerable from
+  `helm get values` rather than from an operator's memory. The chart cannot
+  verify the claim; it can insist you make it — and it costs one more deliberate
+  act than flipping a boolean, which is the point.
+- **An empty `uiToken` still authorizes nobody.** The two states — "no credential
+  configured" and "no credential required" — stay independent, because the whole
+  hazard is one being read as the other. Half a declaration (a `false` with
+  nothing named) leaves the console closed, in the chart AND in the pod.
+- **Writes then require a forwarded identity.** With token auth off there is no
+  `token` fallback: a write log naming a credential nobody presented is worse
+  than none, since it looks like an audit trail. A proxy that authenticates but
+  forwards no identity therefore yields a **read-only console** — reads served,
+  writes refused, the UI showing `unknown` and saying why. The fix is to forward
+  `X-Forwarded-Email` or `X-Auth-Request-User`, which a proxy in that position
+  should do anyway.
+- **The identity headers are BELIEVED.** The fronting proxy must strip
+  client-supplied copies of them, or a caller picks their own identity. The
+  console cannot tell the two apart — they arrive on the same connection — so
+  this is a deployment requirement of the mode, stated in the notes rather than
+  reimplemented weakly in the pod.
+- **The token Secret is still rendered.** The console Channel projects it with
+  `envFrom`, so removing it would turn "disable auth" into "the console will not
+  start". Re-enabling authentication stays one value.
+
+The SPA follows: no login form on a console that accepts no token, no sign-out
+button where there is no session to end, and the composer says why a reply is
+unavailable instead of failing on submit.
+
+The pod logs the mode twice, on purpose: `authDefault=` at startup is the process
+env, and `console auth: external:<name>` is the EFFECTIVE mode, logged when the
+served Channel's config resolves it. The startup line alone would report `token`
+on an externally-authenticated console — the config arrives after boot — which is
+the one state this setting must not be able to hide in.
+
+`docs/console.md#trust-boundary` carries the recipe.
+
 ### A maintenance window for cluster events — chart 5.6.0, signal-k8s-events 0.3.0
 
 Additive; no action required. Nothing changes unless you configure a window.
