@@ -8,6 +8,29 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### An answer describing its own tools reaches Telegram again — channel-telegram 0.7.1
+
+Bug fix; upgrade the image. No values change beyond the tag.
+
+Inline code was converted to `<code>` **in place**, and the emphasis regexes
+then ran over the tags it had just written. One `*` inside `` `.claude/agents/*.md` ``
+and another inside `` `mcp__kubernetes__*` `` paired with **each other**, across
+the prose between them — opening `<i>` inside one `<code>` and closing it inside
+the next. Telegram rejects a message with overlapping entities outright
+(`can't parse entities: Unmatched end tag ... expected "</i>", found "</code>"`),
+so the send op failed and the answer never arrived.
+
+The failure had a nasty shape: it needed TWO inline-code spans each containing a
+star, which is unremarkable prose for an agent describing its own tooling — glob
+patterns and tool allowlists are exactly where stars live. The console showed the
+answer (no HTML there) while the Telegram thread stayed silent, so it read as a
+Telegram-side problem.
+
+Inline code is now lifted out before emphasis, the same treatment fenced blocks
+already had, and restored afterwards. Emphasis *spanning* code still nests
+correctly. Both are pinned by tests, one of which checks tag NESTING rather than
+substrings — a "contains `<i>`" assertion cannot see the defect that broke this.
+
 ### Authentication can move in front of the console — chart 5.7.0, console 0.8.1
 
 Additive; no action required. Every existing install keeps requiring its token.
