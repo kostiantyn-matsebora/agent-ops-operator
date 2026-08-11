@@ -94,8 +94,18 @@ eventsAdapter:
       #   their own loop.
       # ContainerGCFailed / ImageGCFailed: node housekeeping — safe to drop
       #   ONLY because NodeHasDiskPressure below is tier 3 at for: 0.
+      # Evicted: reported from BOTH ends already, and per POD from neither.
+      #   A kubelet eviction is caused by node pressure, which tier 3 reports at
+      #   for: 0 as ONE node-level signal instead of one per displaced pod. An
+      #   API-initiated eviction is a drain — an operator doing what they were
+      #   told, exactly like NodeNotSchedulable above, and drains are routine and
+      #   UNATTENDED wherever a reboot manager runs. What actually deserves
+      #   waking someone is an evicted pod that does not come back, and that
+      #   arrives as FailedScheduling in tier 5 with a dwell to confirm it.
+      #   Dropping it costs the case where pods evict, reschedule cleanly, and
+      #   the node reports no pressure — which is a cluster working as designed.
       - matchers:
-          - reason=~"ProbeWarning|SandboxChanged|Preempting|NodeNotSchedulable|ExternalProvisioning|FailedToUpdateEndpoint.*|FailedPreStopHook|FailedKillPod|ContainerGCFailed|ImageGCFailed"
+          - reason=~"ProbeWarning|SandboxChanged|Preempting|NodeNotSchedulable|ExternalProvisioning|FailedToUpdateEndpoint.*|FailedPreStopHook|FailedKillPod|ContainerGCFailed|ImageGCFailed|Evicted"
         action: drop
 
       # 2 ── PAST TENSE: these already happened ────────────────────────────
@@ -103,7 +113,7 @@ eventsAdapter:
       # OOMKilling fires, the container restarts, and three minutes later the
       # pod is Ready. Never give these a dwell.
       - matchers:
-          - reason=~"OOMKilling|SystemOOM|Evicted|BackoffLimitExceeded|DeadlineExceeded|VolumeFailedDelete"
+          - reason=~"OOMKilling|SystemOOM|BackoffLimitExceeded|DeadlineExceeded|VolumeFailedDelete"
         for: "0"
 
       # 3 ── node-level: one event, many workloads affected ────────────────

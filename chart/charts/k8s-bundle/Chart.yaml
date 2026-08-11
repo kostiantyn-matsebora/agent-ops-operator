@@ -6,4 +6,4 @@ description: >-
   runtime and ServiceAccount, and that ServiceAccount's cluster RBAC
   (read-only by default). Demo mode is exactly this bundle with its defaults.
 type: application
-version: 0.1.0
+version: 0.2.0

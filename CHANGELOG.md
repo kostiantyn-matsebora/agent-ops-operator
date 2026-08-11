@@ -8,6 +8,112 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Signal sources are shareable, and bare chat messages stop being guessed — chart 5.10.0
+
+**Two behaviour changes. Both need action only if a `SignalSource` is listed by
+more than one Pipeline — a state that reads as broken today, so most installs
+have none. Check first:**
+
+```sh
+kubectl get pipelines -o json | jq -r '
+  .items[] | .metadata.name as $p | .spec.signalSourceRefs // [] | .[] |
+  "\(.name)\t\($p)"' | sort | awk '{c[$1]=c[$1]" "$2} END {for (s in c) if (split(c[s],a," ")>1) print s ":" c[s]}'
+```
+
+Anything printed is a source two or more Pipelines list. If nothing prints, this
+release changes no behaviour for you.
+
+**1. A shared source now routes to EVERY Pipeline listing it.** Exclusivity is
+gone: `sourceConflicts`, the `SourceConflict` condition, and the oldest-claimant
+tiebreak are deleted. A Pipeline that sat at `Ready=False, reason=SourceConflict`
+becomes `Ready=True` and starts answering, so one alert on a shared source now
+opens **two conversations — two agents, two runtimes, two LLM bills.**
+
+*Fix, if that is not what you want:* drop the source from every Pipeline but the
+intended one.
+
+```sh
+kubectl patch pipeline <the-one-that-should-not-answer> --type=json \
+  -p '[{"op":"remove","path":"/spec/signalSourceRefs/<index>"}]'
+```
+
+*If it IS what you want, nothing to do* — that is now a supported configuration.
+Per-source cooldown and signature grouping are evaluated once, above the fan-out,
+so a fingerprint is admitted once and delivered to each server; the ingest
+response reports `queued` (signals) and `conversations` (one per server)
+separately, and `receivedTotal` still counts signals.
+
+**2. A bare message on a chat surface several Pipelines serve is refused.** With
+one Pipeline serving the chat source, nothing changes. With several, an
+unaddressed message opens no conversation and the surface is answered with the
+Pipelines available and the `/<pipeline> <task>` form.
+
+*Fix:* address the agent — `/<pipeline> <task>` — or drop the source as above.
+**Thread replies are unaffected** and never needed a prefix; addressed messages
+are unaffected too.
+
+**`Conversation.spec.pipelineRef` is added** — provenance only, written at
+creation, never read to resolve wiring. It is what keeps two Pipelines fanning
+out from one source from appending to each other's conversation. Conversations
+created before this release carry none and nothing backfills them; such a
+conversation keeps grouping while one Pipeline serves its source, and is left
+alone once a second joins. **Apply the CRDs before the manager image** — the
+field is additive, so an older manager ignores it, but a newer one cannot write
+it against an un-updated CRD.
+
+**`/agents` now lists each Pipeline with its answering profile**, matching the
+console's new composer typeahead — typing `/` in "New conversation" lists the
+Ready Pipelines and inserts the addressed form. No new RBAC, no new manager
+endpoint, no console values to set.
+
+### Pod evictions stop opening conversations — chart 5.9.0
+
+**No action required. Behavior change: you will stop getting a conversation per
+evicted pod.** If you relied on that, see the restore snippet at the end.
+
+`Evicted` moves from the past-tense tier (`for: "0"`, one signal per displaced
+pod) into the tier-1 drop list. The reason is that an eviction was already
+reported from both ends, and per pod from neither:
+
+| Eviction | Still reported by |
+|---|---|
+| kubelet, under node pressure | `NodeHasMemoryPressure` / `NodeHasDiskPressure` — tier 3, `for: 0`, **one node-level signal** instead of one per pod |
+| API-initiated (a drain) | nothing, deliberately — a drain is an operator doing what they were told, and it is unattended wherever a reboot manager such as Kured runs |
+| a pod that does not come back | `FailedScheduling` — tier 5, `for: 5m`, confirmed by a dwell |
+
+What the drop costs is the case where pods evict, reschedule cleanly, and the
+node reports no pressure — a cluster working as designed. What it buys is that
+a node drain no longer produces one conversation per pod on that node.
+
+This is an application of the existing rule that a reason may be dropped only
+where its underlying problem is still caught by a reason that is not dropped —
+not an exception to the rule that past-tense reasons never dwell. `Evicted` is
+still never given a non-zero dwell; it is simply not emitted on its own.
+
+Because the drop leans on those two substitutes, the render test now pins them
+*together* with it: re-tuning node pressure or `FailedScheduling` cannot
+silently leave eviction unreported from every direction at once.
+
+**To restore per-pod eviction signals**, restate the whole `rules` list —
+Helm replaces list values rather than merging them, so overriding a single
+tier silently drops the other five:
+
+```yaml
+k8s-bundle:
+  eventsAdapter:
+    source:
+      rules:
+        # tier 1 without Evicted
+        - matchers:
+            - reason=~"ProbeWarning|SandboxChanged|Preempting|NodeNotSchedulable|ExternalProvisioning|FailedToUpdateEndpoint.*|FailedPreStopHook|FailedKillPod|ContainerGCFailed|ImageGCFailed"
+          action: drop
+        # tier 2 with Evicted back
+        - matchers:
+            - reason=~"OOMKilling|SystemOOM|Evicted|BackoffLimitExceeded|DeadlineExceeded|VolumeFailedDelete"
+          for: "0"
+        # ...tiers 3-6 unchanged from chart/charts/k8s-bundle/values.yaml
+```
+
 ### Generated credentials hold still — chart 5.8.0
 
 **ONE COMMAND REQUIRED before upgrading an existing install.** Annotate the two

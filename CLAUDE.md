@@ -534,11 +534,23 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   before its FIRST notification; `for:` does not exist in Alertmanager at all.
   Spelling dwell as `group_wait` would be an Alertmanager term meaning
   something Alertmanager does not mean. Two further rules the defaults depend
-  on: reasons describing a COMPLETED event (`OOMKilling`, `Evicted`,
-  `BackoffLimitExceeded`) must carry `for: 0` — a dwell finds the healthy
-  replacement and erases the incident; and the LAST rule must be a catch-all
-  with a dwell, never a drop, so an unanticipated reason is verified rather
-  than discarded. Both are pinned in `internal/integration/charttemplate_test.go`.
+  on: reasons describing a COMPLETED event (`OOMKilling`, `SystemOOM`,
+  `BackoffLimitExceeded`, `DeadlineExceeded`) must carry `for: 0` — a dwell
+  finds the healthy replacement and erases the incident; and the LAST rule must
+  be a catch-all with a dwell, never a drop, so an unanticipated reason is
+  verified rather than discarded. Both are pinned in
+  `internal/integration/charttemplate_test.go`.
+  **`Evicted` is the exception, and is DROPPED** as of chart 5.9.0 — it used to
+  sit in the past-tense set. An eviction is reported from both ends already and
+  per POD from neither: kubelet evictions are caused by node pressure, which
+  tier 3 reports at `for: 0` as ONE node-level signal rather than one per
+  displaced pod, and API-initiated evictions are drains — routine, and
+  UNATTENDED wherever a reboot manager runs. The case worth waking for is a pod
+  that does not come back, which arrives as `FailedScheduling` with a dwell to
+  confirm it. The drop is therefore only defensible while BOTH substitutes
+  survive, so the test pins node pressure at `for: 0` and `FailedScheduling`'s
+  presence TOGETHER with the drop; re-tuning one of them must not silently
+  leave eviction unreported from every direction at once.
   The TIME axis (`route.timeIntervals` + `route.muteTimeIntervals`) is
   Alertmanager vocabulary too, borrowed field-for-field — a scheduled outage is
   the one thing the other three axes cannot express, since `for:` verifies a

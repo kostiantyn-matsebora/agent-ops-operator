@@ -84,11 +84,31 @@ lookup flapped once still exists.
 
 ### Two rules that keep the defaults honest
 
-**Past-tense reasons must carry `for: 0`.** `OOMKilling`, `Evicted`,
+**Past-tense reasons must carry `for: 0`.** `OOMKilling`, `SystemOOM`,
 `BackoffLimitExceeded`, `DeadlineExceeded` describe something that already
 happened. A dwell would find the healthy *replacement* and delete the evidence.
 This is the easiest way to build a rule set that looks careful and loses the
 incidents that matter most.
+
+**`Evicted` is dropped, not dwelled** (chart 5.9.0; it was previously
+past-tense at `for: 0`). An eviction is already reported from both ends, and
+per pod from neither:
+
+| Eviction | Reported by | Why not per pod |
+|---|---|---|
+| kubelet, under node pressure | `NodeHasMemoryPressure` / `NodeHasDiskPressure`, tier 3, `for: 0` | one node-level signal beats one per displaced pod |
+| API-initiated (drain) | nothing, deliberately | a drain is an operator doing what they were told — and unattended wherever a reboot manager runs |
+| pod does not come back | `FailedScheduling`, tier 5, `for: 5m` | this is the half worth waking for, and it is confirmed by a dwell |
+
+What the drop costs is the case where pods evict, reschedule cleanly, and the
+node reports no pressure — a cluster working as designed. Because the drop
+leans on those two substitutes, the render test pins them *together* with it:
+re-tuning node pressure or `FailedScheduling` cannot silently leave eviction
+unreported from every direction at once.
+
+To restore per-pod eviction signals, move `Evicted` out of the tier-1 drop
+matcher and back into the tier-2 `for: "0"` rule — restating the whole `rules`
+list, since Helm replaces list values rather than merging them.
 
 **The last rule must be a catch-all with a dwell, not a drop.** That is the
 "do not miss issues" guarantee: a reason nobody anticipated — a third-party
