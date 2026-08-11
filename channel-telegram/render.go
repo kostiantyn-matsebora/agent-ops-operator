@@ -42,22 +42,36 @@ var (
 
 // markdownToHTML converts the contract's markdown subset to Telegram HTML.
 //
-// Order matters and is the whole trick: fenced blocks are lifted out FIRST and
-// restored last, so a `*` or `_` inside a code block is not read as emphasis —
-// which is exactly where they appear in log lines and shell snippets. Escaping
-// happens per segment, before any tag is introduced, so a `<` in the prose can
-// never be confused with markup we generated.
+// Order matters and is the whole trick: CODE IS LIFTED OUT FIRST — fenced AND
+// inline — and restored last, so a `*` inside it is not read as emphasis. That
+// is exactly where stars appear: glob patterns, tool allowlists, log lines.
+// Escaping happens per segment, before any tag is introduced, so a `<` in the
+// prose can never be confused with markup we generated.
+//
+// Inline code used to be converted in place, BEFORE emphasis rather than out of
+// its way, and the emphasis regexes then ran over the tags it had just written.
+// One star inside `*.md` and another inside `mcp__kubernetes__*` paired with
+// each other across the prose between them, opening <i> inside one <code> and
+// closing it inside the next. Telegram rejects the whole message for that
+// ("Unmatched end tag ... expected </i>, found </code>"), so the answer never
+// arrived — an agent describing its own tools could not report to a chat.
 func markdownToHTML(md string) string {
 	var blocks []string
-	// lift fenced code out of the way
-	withoutFences := fencedRe.ReplaceAllStringFunc(md, func(m string) string {
-		inner := fencedRe.FindStringSubmatch(m)[1]
-		blocks = append(blocks, "<pre>"+escape(strings.TrimRight(inner, "\n"))+"</pre>")
+	// stash swaps rendered HTML for a placeholder no markdown rule can match,
+	// so everything after it sees prose only.
+	stash := func(html string) string {
+		blocks = append(blocks, html)
 		return fmt.Sprintf("\x00%d\x00", len(blocks)-1)
+	}
+
+	withoutFences := fencedRe.ReplaceAllStringFunc(md, func(m string) string {
+		return stash("<pre>" + escape(strings.TrimRight(fencedRe.FindStringSubmatch(m)[1], "\n")) + "</pre>")
 	})
 
 	out := escape(withoutFences)
-	out = codeRe.ReplaceAllString(out, "<code>$1</code>")
+	out = codeRe.ReplaceAllStringFunc(out, func(m string) string {
+		return stash("<code>" + codeRe.FindStringSubmatch(m)[1] + "</code>")
+	})
 	out = boldRe.ReplaceAllString(out, "<b>$1</b>")
 	out = italicRe.ReplaceAllString(out, "$1<i>$2</i>")
 	out = linkRe.ReplaceAllString(out, `<a href="$2">$1</a>`)

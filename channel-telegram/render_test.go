@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -68,6 +70,71 @@ func TestFencedCodeIsNotTreatedAsEmphasis(t *testing.T) {
 	if !strings.Contains(out, "<pre>") || !strings.Contains(out, "rm -rf *.log &amp;&amp; echo *done*") {
 		t.Fatalf("fenced block not preserved verbatim: %q", out)
 	}
+}
+
+// INLINE code is lifted out for the same reason as a fence, and this is the
+// message that proved it: an agent describing its own tools writes `*.md` and
+// `mcp__kubernetes__*`, and those two stars used to pair with each other ACROSS
+// the prose between them. That opened <i> inside one <code> and closed it inside
+// the next, Telegram rejected the message whole, and the answer never arrived.
+//
+// The property is nesting, not the absence of emphasis: tags must close in the
+// order they opened, so the check is that no <i> is opened inside code at all.
+func TestStarsInsideInlineCodeDoNotPairAcrossIt(t *testing.T) {
+	out := markdownToHTML("No agent file (`.claude/agents/*.md`) was found, " +
+		"so I am limited to the `mcp__kubernetes__*` allowlist.")
+	if strings.Contains(out, "<i>") {
+		t.Fatalf("stars inside inline code became emphasis: %q", out)
+	}
+	for _, want := range []string{"<code>.claude/agents/*.md</code>", "<code>mcp__kubernetes__*</code>"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("inline code not preserved verbatim, want %q in %q", want, out)
+		}
+	}
+	if err := wellNested(out); err != nil {
+		t.Fatalf("%v in %q", err, out)
+	}
+}
+
+// Emphasis SPANNING inline code is legitimate and must still nest correctly —
+// the fix lifts code out of the way, it does not forbid a span around it.
+func TestEmphasisAroundInlineCodeStaysNested(t *testing.T) {
+	out := markdownToHTML("*use `kubectl get pods` first*")
+	if !strings.Contains(out, "<i>use <code>kubectl get pods</code> first</i>") {
+		t.Fatalf("emphasis around code lost its nesting: %q", out)
+	}
+	if err := wellNested(out); err != nil {
+		t.Fatalf("%v in %q", err, out)
+	}
+}
+
+// wellNested reports the first tag that closes out of order — the exact
+// complaint Telegram makes ("expected </i>, found </code>") and the one thing a
+// "contains the right substring" assertion cannot see.
+func wellNested(html string) error {
+	var stack []string
+	tagRe := regexp.MustCompile(`</?([a-z]+)[^>]*>`)
+	for _, m := range tagRe.FindAllStringSubmatch(html, -1) {
+		name := m[1]
+		if strings.HasPrefix(m[0], "</") {
+			if len(stack) == 0 {
+				return fmt.Errorf("closing </%s> with nothing open", name)
+			}
+			if top := stack[len(stack)-1]; top != name {
+				return fmt.Errorf("expected </%s>, found </%s>", top, name)
+			}
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		if name == "br" {
+			continue
+		}
+		stack = append(stack, name)
+	}
+	if len(stack) > 0 {
+		return fmt.Errorf("unclosed <%s>", stack[len(stack)-1])
+	}
+	return nil
 }
 
 func TestTopicNameFitsTelegramsLimit(t *testing.T) {
