@@ -495,6 +495,44 @@ func (a *API) handleSend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, msg)
 }
 
+// Agent is one addressable pipeline offered by the composer's typeahead.
+type Agent struct {
+	Name string `json:"name"`
+	// Profile is what tells two agents apart when their names do not.
+	Profile string `json:"profile,omitempty"`
+}
+
+// handleAgents lists the pipelines a message can address, for the composer
+// typeahead.
+//
+// READY ONLY, and that is not a detail: `/agents` filters the same way, so
+// filtering differently here would make the surface answer one question two
+// ways. An unready pipeline names wiring that does not resolve, so offering it
+// would invite a request that cannot be served.
+//
+// Everything comes from the cache the console already list/watches — no new
+// RBAC, no manager endpoint, no CRD field. The listing is ADVISORY: a stale
+// entry produces an addressed message to an unknown pipeline, which the router
+// already answers with "unknown agent".
+//
+// It is not scoped to the console's own signal source, because addressing is
+// not scoped either — a command resolves by NAME, with no claim check. Scoping
+// the list would hide agents that would in fact answer.
+func (a *API) handleAgents(w http.ResponseWriter, r *http.Request) {
+	out := []Agent{}
+	for _, p := range a.cache.List("pipelines") {
+		if c := p.Condition("Ready"); c == nil || c.Status != "True" {
+			continue
+		}
+		out = append(out, Agent{
+			Name:    p.Metadata.Name,
+			Profile: decodeSpec[pipelineSpec](p.Spec).ProfileRef.Name,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	writeJSON(w, http.StatusOK, map[string]any{"agents": out})
+}
+
 // plural renders "1 source" / "2 sources".
 func plural(n int, word string) string {
 	s := word

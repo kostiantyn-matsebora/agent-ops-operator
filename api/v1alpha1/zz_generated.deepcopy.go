@@ -675,6 +675,11 @@ func (in *ConversationSpec) DeepCopyInto(out *ConversationSpec) {
 		copy(*out, *in)
 	}
 	out.ProfileRef = in.ProfileRef
+	if in.PipelineRef != nil {
+		in, out := &in.PipelineRef, &out.PipelineRef
+		*out = new(ObjectRef)
+		**out = **in
+	}
 	if in.Toolsets != nil {
 		in, out := &in.Toolsets, &out.Toolsets
 		*out = new(ToolsetBinding)

@@ -147,29 +147,38 @@ func combineJoined(group []NormalizedSignal) string {
 // signals: cooldown by fingerprint, signature grouping, window-based
 // conversation reuse with recurrence-on-session, out-of-line payloads, and
 // source status bookkeeping (the single place lastReceived/receivedTotal are
-// updated). Wiring is pipeline-only: an unwired source drops the batch with a
-// reason BEFORE cooldown (so re-sent fingerprints route once a pipeline
-// claims the source). Returns fresh signals, conversations touched, and the
-// drop reason ("" when routed).
+// updated). Wiring is pipeline-only: a source no Ready pipeline lists drops the
+// batch with a reason BEFORE cooldown (so re-sent fingerprints route once one
+// does). Returns fresh signals, conversations touched, and the drop reason ("" when routed).
+//
+// A source is SHAREABLE, so this FANS OUT: every Ready pipeline listing the
+// source gets its own conversation for each group, with its own profile and
+// capabilities. Per-source policy — cooldown and signature grouping — is
+// deliberately evaluated ONCE, above the fan-out: a fingerprint is admitted
+// once and then delivered to each server. Moving either inside the loop would
+// let the first pipeline spend the cooldown and starve the rest.
 func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal, combine combineFunc) (int, int, string, error) {
-	pipeline := chat.PipelineForSource(ctx, s.Client, s.Namespace, source.Name)
-	if pipeline == nil {
-		reason := "source not claimed by a Ready pipeline (Wired=False) — signals dropped"
+	servers := chat.PipelinesForSource(ctx, s.Client, s.Namespace, source.Name)
+	if len(servers) == 0 {
+		reason := "source not served by any Ready pipeline (Wired=False) — signals dropped"
 		s.emitDropped(source, signals, activity.CodeUnclaimed, reason)
 		return 0, 0, reason, nil
 	}
 	// The claim is a decision about the BATCH and it happens here, before any
-	// conversation exists — so this event carries no conversation. That is not a
+	// conversation exists — so these events carry no conversation. That is not a
 	// gap: the chain a consumer walks is adapter -> source -> pipeline ->
 	// conversation, and the next hop (conversation.created) is where a
-	// conversation starts existing to be named.
-	s.Activity.Emit(activity.Event{
-		Kind:     activity.KindSignalClaimed,
-		From:     activity.Node(activity.NodeSignalSource, source.Name),
-		To:       activity.Node(activity.NodePipeline, pipeline.Name),
-		Pipeline: pipeline.Name,
-		Detail:   fmt.Sprintf("%d signal(s)", len(signals)),
-	})
+	// conversation starts existing to be named. One event PER server, because a
+	// shared source really is claimed by each of them.
+	for i := range servers {
+		s.Activity.Emit(activity.Event{
+			Kind:     activity.KindSignalClaimed,
+			From:     activity.Node(activity.NodeSignalSource, source.Name),
+			To:       activity.Node(activity.NodePipeline, servers[i].Name),
+			Pipeline: servers[i].Name,
+			Detail:   fmt.Sprintf("%d signal(s)", len(signals)),
+		})
+	}
 	cd := s.cooldown(source, signals)
 	var fps []string
 	byFP := map[string]NormalizedSignal{}
@@ -218,17 +227,32 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 
 	touched, landed, reason := 0, 0, ""
 	for key, group := range groups {
-		_, routed, err := s.routeSignalGroup(ctx, source, pipeline, key, group, combine)
-		if err != nil {
-			return 0, 0, "", err
+		// One conversation per serving pipeline. `landed` counts SIGNALS, so it
+		// moves once however many pipelines took the group; `touched` counts
+		// CONVERSATIONS, so it moves per pipeline. Conflating them would report
+		// a doubled intake on a shared source.
+		landedHere := false
+		for i := range servers {
+			_, routed, err := s.routeSignalGroup(ctx, source, &servers[i], key, group, combine, len(servers))
+			if err != nil {
+				return 0, 0, "", err
+			}
+			if !routed {
+				// Capacity is decided per conversation, so one pipeline can be
+				// refused while another takes the same group. Naming the refused
+				// pipeline is the difference between "we are full" and "this lane
+				// is full".
+				reason = ReasonAtCapacity
+				s.emitDropped(source, group, activity.CodeAtCapacity,
+					ReasonAtCapacity+" (pipeline "+servers[i].Name+")")
+				continue
+			}
+			touched++
+			landedHere = true
 		}
-		if !routed {
-			reason = ReasonAtCapacity
-			s.emitDropped(source, group, activity.CodeAtCapacity, ReasonAtCapacity)
-			continue
+		if landedHere {
+			landed += len(group)
 		}
-		landed += len(group)
-		touched++
 	}
 	if reason != "" {
 		log.FromContext(ctx).Info("signal batch declined: pending backlog is full",
@@ -327,11 +351,12 @@ func (s *Server) bumpReceived(ctx context.Context, source *agentopsv1alpha1.Sign
 // Everything else goes down the ordinary signal path, so chat gets the same
 // claim check, window reuse and observability as every other source.
 func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal) (int, int, string, error) {
-	if pipeline := chat.PipelineForSource(ctx, s.Client, s.Namespace, source.Name); pipeline == nil {
-		reason := "source not claimed by a Ready pipeline (Wired=False) — signals dropped"
+	servers := chat.PipelinesForSource(ctx, s.Client, s.Namespace, source.Name)
+	if len(servers) == 0 {
+		reason := "source not served by any Ready pipeline (Wired=False) — signals dropped"
 		s.emitDropped(source, signals, activity.CodeUnclaimed, reason)
 		s.tellOriginatingSurfaces(ctx, signals, fmt.Sprintf(
-			"⚠️ Nothing here is wired to answer. No Ready Pipeline claims the chat source **%s**, "+
+			"⚠️ Nothing here is wired to answer. No Ready Pipeline serves the chat source **%s**, "+
 				"so this message was dropped. Add it to a Pipeline's sources to give it an agent.", source.Name))
 		return 0, 0, reason, nil
 	}
@@ -361,6 +386,27 @@ func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.
 	if len(rest) == 0 {
 		return answered, 0, "", nil
 	}
+
+	// THE ONE PLACE CHAT DOES NOT FAN OUT. Every other lane opens a conversation
+	// on each serving pipeline, which is right when the consumer is a system:
+	// two investigations of one alert are two useful artifacts. Here the
+	// consumer is a person who asked one question on one surface and is owed ONE
+	// answer — and, unlike an alert, they can say which agent they meant. So an
+	// unaddressed message routes only while the answer is unambiguous, and
+	// otherwise is refused with the choices.
+	//
+	// The lane is told apart by the ARRIVING SIGNAL's kind, which ingest already
+	// holds. Nothing on the SignalSource or the SignalAdapter declares "this is
+	// a chat source", and nothing should: a reconciler would then need a handle
+	// that every adapter author and installer could get wrong, to serve one
+	// branch that lives here.
+	if len(servers) > 1 {
+		reason := "several Ready pipelines serve this chat source — the message names none of them"
+		s.emitDropped(source, rest, activity.CodeAmbiguous, reason)
+		s.tellOriginatingSurfaces(ctx, rest, ambiguousChatMessage(servers))
+		return answered, 0, reason, nil
+	}
+
 	queued, touched, reason, err := s.routeSignals(ctx, source, rest, combineJoined)
 	if reason == ReasonAtCapacity {
 		// A person is waiting on the surface they typed on; an alert can be
@@ -369,6 +415,25 @@ func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.
 			"an agent slot, so this message was dropped. Try again once the backlog clears.")
 	}
 	return queued + answered, touched, reason, err
+}
+
+// ambiguousChatMessage renders the refusal a bare message gets on a surface
+// several pipelines serve.
+//
+// It is the TEACHING MOMENT, not an error string: somebody who has never heard
+// of /agents finds out the addressed form exists at the one moment they need
+// it, so it names every server with the profile answering for it and shows the
+// form ready to copy. Prose in the manager's markdown subset — the adapter
+// renders it; nothing here knows a transport dialect.
+func ambiguousChatMessage(servers []agentopsv1alpha1.Pipeline) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🤔 **%d agents serve this chat, so I don't know who you meant.**\n\n", len(servers))
+	b.WriteString("Address one of them:\n")
+	for i := range servers {
+		fmt.Fprintf(&b, "• `/%s <task>` — %s\n", servers[i].Name, servers[i].Spec.ProfileRef.Name)
+	}
+	b.WriteString("\nYour message was not sent to anyone. `/agents` shows this list any time.")
+	return b.String()
 }
 
 // chatChannel resolves the Channel a chat signal came from.
@@ -420,13 +485,16 @@ func (s *Server) backlogFull(ctx context.Context) (bool, error) {
 }
 
 // routeSignalGroup lands one signature group as an input on the matching
-// conversation (window reuse; created on demand with the claiming pipeline's
+// conversation (window reuse; created on demand with the serving pipeline's
 // profile and channel set — the only wiring there is). Reports routed=false
 // when the pending backlog is full and the group would have needed a NEW
 // conversation — the bound gates creation only, so window reuse keeps appending
 // to a pending conversation however full the backlog is. Returns the
 // conversation the group landed on, so the caller can attribute the claim.
-func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, pipeline *agentopsv1alpha1.Pipeline, signature string, group []NormalizedSignal, combine combineFunc) (string, bool, error) {
+//
+// serverCount is how many Ready pipelines serve the source; it exists only for
+// the legacy-conversation rule in reusableBy.
+func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, pipeline *agentopsv1alpha1.Pipeline, signature string, group []NormalizedSignal, combine combineFunc, serverCount int) (string, bool, error) {
 	windowDays := source.Spec.Grouping.WindowDays
 	if windowDays <= 0 {
 		windowDays = 7
@@ -440,6 +508,13 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	cutoff := time.Now().Add(-time.Duration(windowDays) * 24 * time.Hour)
 	for i := range list.Items {
 		c := &list.Items[i]
+		// The signature hash alone is NOT enough once a source is shared: two
+		// pipelines fanning out produce two conversations with the SAME
+		// signature, and absorbing the other one's would run this group under
+		// the wrong profile with the wrong tools.
+		if !reusableBy(c, pipeline.Name, serverCount) {
+			continue
+		}
 		last := c.CreationTimestamp.Time
 		if c.Status.LastActivity != nil {
 			last = c.Status.LastActivity.Time
@@ -515,6 +590,9 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			ChannelRefs: append([]agentopsv1alpha1.ObjectRef{}, pipeline.Spec.ChannelRefs...),
 			Toolsets:    pipeline.Spec.Toolsets.DeepCopy(),
 			MCPConfigs:  pipeline.Spec.MCPConfigs.DeepCopy(),
+			// Provenance, written once here. Everything the conversation RUNS
+			// with is materialized above it; this names where that came from.
+			PipelineRef: &agentopsv1alpha1.ObjectRef{Name: pipeline.Name},
 			Title:       title,
 			Signature:   signature,
 		}
@@ -584,6 +662,28 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		return conv.Name, true, nil
 	}
 	return "", false, fmt.Errorf("conflict appending input to %s", conv.Name)
+}
+
+// reusableBy reports whether an existing conversation may absorb a group from
+// this pipeline — the provenance half of window reuse, on top of the signature
+// match the caller already made.
+//
+// A conversation carrying a pipelineRef is reusable by that pipeline alone.
+//
+// One with NO ref predates the field, and no timestamp can tell which pipeline
+// made it. Reusing it whenever the signature matched would hand it to whichever
+// pipeline happened to reconcile first once a source is shared — the invisible
+// pick this change exists to delete. Refusing it outright would instead
+// re-open every open investigation on upgrade. So it stays reusable exactly
+// while ONE pipeline serves the source, which IS the state every such
+// conversation was created in; the moment a second joins, it is left alone and
+// each pipeline opens its own. Nothing backfills the ref — inference is what
+// it replaces.
+func reusableBy(c *agentopsv1alpha1.Conversation, pipelineName string, serverCount int) bool {
+	if c.Spec.PipelineRef != nil {
+		return c.Spec.PipelineRef.Name == pipelineName
+	}
+	return serverCount == 1
 }
 
 // emitDropped records one signal.dropped per signal a batch lost, carrying the

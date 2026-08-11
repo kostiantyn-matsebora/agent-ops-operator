@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -15,16 +14,19 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 )
 
-// Pipeline condition types.
-const (
-	// ConditionSourceConflict: an older pipeline already claims a referenced
-	// signal source (one pipeline per source; oldest claimant wins).
-	ConditionSourceConflict = "SourceConflict"
-)
-
 // PipelineReconciler validates pipeline wiring and keeps its conditions
 // current. It creates nothing — routing reads Ready pipelines at decision
-// time (pipeline-first, source-level fallback).
+// time.
+//
+// There is NO source-exclusivity check here, and adding one back would be a
+// regression. A SignalSource is shareable exactly as a Channel is: any number
+// of Ready pipelines may list one, and a signal admitted there fans out to
+// every one of them, one conversation each. Whether two pipelines watch one
+// source is the ADOPTER's decision. The rule that used to live here
+// (`sourceConflicts`, oldest claimant wins, newer at Ready=False) existed to
+// keep a single invisible default for bare chat messages, and charged every
+// source kind for it; that ambiguity is now handled where it actually occurs,
+// in the chat lane, by refusing rather than guessing.
 type PipelineReconciler struct {
 	client.Client
 }
@@ -72,69 +74,30 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	conflicts, err := r.sourceConflicts(ctx, &p)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
 	patch := client.MergeFrom(p.DeepCopy())
-	conflictCond := metav1.Condition{Type: ConditionSourceConflict, Status: metav1.ConditionFalse, Reason: "NoConflict"}
-	if len(conflicts) > 0 {
-		conflictCond.Status = metav1.ConditionTrue
-		conflictCond.Reason = "SourceConflict"
-		conflictCond.Message = "sources already claimed by older pipelines: " + strings.Join(conflicts, "; ")
-	}
-	apimeta.SetStatusCondition(&p.Status.Conditions, conflictCond)
+	// MIGRATION (one release): clear a SourceConflict left by a manager that
+	// still enforced exclusivity. Deleting the writer does not delete what it
+	// already wrote, so without this the condition is IMMORTAL — and it lands
+	// exactly on the pipelines this change unblocks, which are the ones whose
+	// operators are most likely to look. Seen live on upgrade: a pipeline
+	// created seconds before the rollout kept `SourceConflict=True` beside a
+	// perfectly valid `Ready=True`.
+	apimeta.RemoveStatusCondition(&p.Status.Conditions, "SourceConflict")
 
 	ready := metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "WiringValid"}
-	switch {
-	case len(missing) > 0:
+	if len(missing) > 0 {
 		ready.Status = metav1.ConditionFalse
 		ready.Reason = "MissingReferences"
 		ready.Message = "unresolved references: " + strings.Join(missing, ", ")
-	case len(conflicts) > 0:
-		ready.Status = metav1.ConditionFalse
-		ready.Reason = "SourceConflict"
-		ready.Message = conflictCond.Message
 	}
 	apimeta.SetStatusCondition(&p.Status.Conditions, ready)
 	return ctrl.Result{}, r.Status().Patch(ctx, &p, patch)
 }
 
-// sourceConflicts lists sources of this pipeline already claimed by an OLDER
-// pipeline (creation time, name tiebreak).
-func (r *PipelineReconciler) sourceConflicts(ctx context.Context, p *agentopsv1alpha1.Pipeline) ([]string, error) {
-	var list agentopsv1alpha1.PipelineList
-	if err := r.List(ctx, &list, client.InNamespace(p.Namespace)); err != nil {
-		return nil, err
-	}
-	mine := map[string]bool{}
-	for _, ref := range p.Spec.SignalSourceRefs {
-		mine[ref.Name] = true
-	}
-	var conflicts []string
-	for i := range list.Items {
-		other := &list.Items[i]
-		if other.Name == p.Name {
-			continue
-		}
-		older := other.CreationTimestamp.Time.Before(p.CreationTimestamp.Time) ||
-			(other.CreationTimestamp.Time.Equal(p.CreationTimestamp.Time) && other.Name < p.Name)
-		if !older {
-			continue
-		}
-		for _, ref := range other.Spec.SignalSourceRefs {
-			if mine[ref.Name] {
-				conflicts = append(conflicts, fmt.Sprintf("%s (by %s)", ref.Name, other.Name))
-			}
-		}
-	}
-	return conflicts, nil
-}
-
 // SetupWithManager wires the controller: pipelines, plus referenced-kind
-// events mapped back to the pipelines naming them (and pipeline events to
-// same-source pipelines so conflicts converge when the older claimant goes).
+// events mapped back to the pipelines naming them. A pipeline no longer
+// watches its SIBLINGS — that watch existed so a conflict could converge when
+// the older claimant went away, and there are no conflicts left to converge.
 func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	allPipelines := func(ctx context.Context, namespace string) []ctrl.Request {
 		var list agentopsv1alpha1.PipelineList
@@ -158,6 +121,5 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&agentopsv1alpha1.AgentProfile{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.MCPToolset{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.MCPConfig{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
-		Watches(&agentopsv1alpha1.Pipeline{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Complete(r)
 }

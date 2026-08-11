@@ -88,7 +88,7 @@ func TestSignalInboundRouting(t *testing.T) {
 	rec0 := postSignal(t, h, testMasterToken, "sig-unwired", []map[string]any{{
 		"fingerprint": "u-1", "labels": map[string]string{"alertname": "x"},
 	}})
-	if rec0.Code != 200 || !strings.Contains(rec0.Body.String(), "not claimed by a Ready pipeline") {
+	if rec0.Code != 200 || !strings.Contains(rec0.Body.String(), "not served by any Ready pipeline") {
 		t.Fatalf("unwired drop reason expected: %d %s", rec0.Code, rec0.Body.String())
 	}
 

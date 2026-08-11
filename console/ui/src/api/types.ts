@@ -396,6 +396,17 @@ export interface SourcesResponse {
   writeEnabled: boolean
 }
 
+/** One addressable Pipeline, as offered by the composer's typeahead. */
+export interface Agent {
+  name: string
+  /** What tells two agents apart when their names do not. */
+  profile?: string
+}
+
+export interface AgentsResponse {
+  agents: Agent[]
+}
+
 export interface Session {
   authenticated: boolean
   configured: boolean

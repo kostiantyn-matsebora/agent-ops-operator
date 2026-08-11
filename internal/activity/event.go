@@ -58,6 +58,12 @@ const (
 	CodeUnclaimed = "unclaimed"
 	// CodeAtCapacity: the pending conversation backlog is full.
 	CodeAtCapacity = "at-capacity"
+	// CodeAmbiguous: a bare chat message on a surface SEVERAL Ready Pipelines
+	// serve. It has its own code because it is the one drop that is a correct
+	// outcome rather than a fault — the person was answered with the choices —
+	// and a surface that stops opening conversations must still be diagnosable
+	// without reading chat scrollback.
+	CodeAmbiguous = "ambiguous"
 )
 
 // Status values. Failure is RECORDED, never omitted: an operations console that

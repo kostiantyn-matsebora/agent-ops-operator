@@ -530,26 +530,41 @@ func activityByPipeline(c *Cache) map[string]activityCount {
 	return out
 }
 
-// LabelPipeline is honored when present, but nothing in this system writes it
-// today: a Conversation records the wiring it MATERIALIZED (profileRef,
-// channelRefs, toolsets), never the Pipeline that produced it. Attribution is
-// therefore inferred — see AttributePipeline.
+// LabelPipeline is honored when present, but nothing in this system writes it.
 const LabelPipeline = "agentops.dev/pipeline"
 
 // AttributePipeline maps a Conversation back to the Pipeline that originated
 // it, and returns "" when that cannot be established.
 //
-// A Conversation carries no pipelineRef by design, so this reconstructs the
-// link from the bindings it snapshotted: the profile must match and the
-// pipeline's channels must all be bound (the router appends the originating
-// channel, so the conversation's set can be a superset). An exact channel-set
-// match wins over a subset match; genuine ambiguity — two pipelines with the
-// same profile and channels — returns "" rather than guessing, and the UI
-// shows the conversation as unattributed.
+// A Conversation now RECORDS its origin in spec.pipelineRef, so the usual
+// answer is a read, not a guess. That matters most where inference was weakest:
+// a shared signal source fans out to several pipelines, and two of them with
+// the same profile and channels used to be indistinguishable here — both
+// conversations showed as unattributed.
 //
-// Re-wiring a pipeline detaches its older conversations here. That is honest:
-// they were started by wiring that no longer exists.
+// The fallback below is for conversations that predate the field, and it is
+// inference: the profile must match and the pipeline's channels must all be
+// bound (the router appends the originating channel, so the conversation's set
+// can be a superset). An exact channel-set match wins over a subset match;
+// genuine ambiguity returns "" rather than guessing, and the UI shows the
+// conversation as unattributed. Re-wiring a pipeline detaches its older
+// conversations from the fallback — honest, since they were started by wiring
+// that no longer exists — while a recorded ref keeps naming the pipeline it
+// really came from.
 func AttributePipeline(conv *Object, pipelines []*Object) string {
+	view := conversationView(conv)
+	if view.Spec.PipelineRef != nil && view.Spec.PipelineRef.Name != "" {
+		for _, p := range pipelines {
+			if p.Metadata.Name == view.Spec.PipelineRef.Name {
+				return p.Metadata.Name
+			}
+		}
+		// The pipeline is gone (or not visible). The conversation still came
+		// from it, but naming something the reader cannot open is worse than
+		// showing it unattributed — and the binding-based fallback would be
+		// answering a question the ref already answered.
+		return ""
+	}
 	if name := conv.Metadata.Labels[LabelPipeline]; name != "" {
 		for _, p := range pipelines {
 			if p.Metadata.Name == name {
@@ -557,7 +572,6 @@ func AttributePipeline(conv *Object, pipelines []*Object) string {
 			}
 		}
 	}
-	view := conversationView(conv)
 	convChannels := map[string]bool{}
 	for _, ref := range view.Spec.ChannelRefs {
 		convChannels[ref.Name] = true

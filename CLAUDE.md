@@ -20,10 +20,20 @@ viewer), `telegram-router/` (the single getUpdates consumer), and
   `Conversation` = session + serial input queue + one thread PER bound channel
   (`spec.channelRefs[]` / `status.threads[]{channel,threadId}`).
   `Conversation.spec.toolsets`/`.mcpConfigs` mirror the originating Pipeline's
-  bindings — MATERIALIZED state like `profileRef`/`channelRefs`, never hand-set,
-  no `pipelineRef` exists. REFS are snapshotted, CONTENT is not: every use
+  bindings — MATERIALIZED state like `profileRef`/`channelRefs`, never hand-set.
+  REFS are snapshotted, CONTENT is not: every use
   re-reads the CRs, so edits heal running conversations while re-wiring affects
-  only new ones. EVERY origination now has a Pipeline to mirror: signals of
+  only new ones.
+  `spec.pipelineRef` names the originating Pipeline as PROVENANCE, NEVER WIRING:
+  written once at creation, read for exactly two things — scoping conversation
+  REUSE and ATTRIBUTION in displays. Nothing resolves a profile, channel set or
+  capability through it; that is what keeps a Pipeline edit from re-wiring a
+  running conversation, and resolving anything through it would undo the whole
+  snapshot rule. It exists because sources are SHAREABLE: two Pipelines listing
+  one source open conversations with the SAME signature, so without it the
+  second's next signal lands on the first's conversation under the wrong profile.
+  Conversations predating it carry none and nothing backfills them — an empty ref
+  is reusable only while ONE Ready Pipeline serves the source. EVERY origination now has a Pipeline to mirror: signals of
   EVERY kind — `alert`, `job`, `task`, `chat` — from the one claiming the
   source, and a `/<pipeline> <task>` chat command from the one it addresses.
   Nothing creates a Conversation without wiring behind it.
@@ -51,12 +61,29 @@ viewer), `telegram-router/` (the single getUpdates consumer), and
   incident.
 - **`Pipeline`** = THE wiring, exclusively: sources[] × channels[] + profile
   + TOOL ACCESS. No other CR carries wiring (SignalSource has no
-  profile/channel refs, Channel has no default profile) — unclaimed sources
-  DROP signals (`Wired=False` + response reason; for a CHAT source the reason
-  also goes back to the surface the person typed on, because they are waiting).
-  Channels originate NOTHING, so there is no "unwired channel" behavior to
-  define: an unclaimed chat source is the unwired case. One pipeline per source
-  (older claimant wins), channels shareable, Ready pipelines only.
+  profile/channel refs, Channel has no default profile) — sources no Ready
+  Pipeline lists DROP signals (`Wired=False` + response reason; for a CHAT source
+  the reason also goes back to the surface the person typed on, because they are
+  waiting). Channels originate NOTHING, so there is no "unwired channel" behavior
+  to define: an unlisted chat source is the unwired case.
+  **SOURCES ARE SHAREABLE, exactly as channels are** — any number of Ready
+  Pipelines may list one, of any kind, with NO conflict condition and no effect
+  on `Ready`. Whether two agents watch one thing is the ADOPTER's call. A signal
+  admitted on a source N Pipelines serve opens N CONVERSATIONS, one each, with
+  their own profiles and capabilities; per-source policy (cooldown, signature
+  grouping) is evaluated ONCE ABOVE the fan-out, or the first Pipeline spends the
+  window and starves the rest. `Wired` names EVERY server: that count is how many
+  conversations one signal opens. Ready pipelines only. There is NO tiebreak left
+  anywhere — `sourceConflicts` and oldest-claimant are DELETED; re-adding either
+  is a regression, not a fix.
+  The ONE lane that does not fan out is a BARE chat message: a person asked one
+  question and is owed one answer, and unlike an alert they CAN name the agent.
+  One server routes it, several REFUSE it with the choices and the
+  `/<pipeline> <task>` form, none keeps the unwired drop. Addressed messages and
+  thread replies are untouched. The lane is told apart by the ARRIVING SIGNAL's
+  `kind` in ingest — no `SignalSource` or `SignalAdapter` field declares "chat
+  source", and no reconciler decides it; adding such a handle buys one `if` at
+  the price of a declaration every adapter author can get wrong.
   **Capabilities are wiring, exclusively**: two optional stanzas of ordered
   refs — `spec.toolsets` (→ `MCPToolset`, the allowlist) and `spec.mcpConfigs`
   (→ `MCPConfig`, the MCP servers).
@@ -206,7 +233,8 @@ internal/
                          (adapterworkload.go: ownership, credential projection,
                          type-conflict guard); Channel + SignalSource
                          reconcilers (Served condition); Pipeline reconciler
-                         (wiring validation, source-conflict guard)
+                         (wiring validation ONLY — no source-conflict guard;
+                         sources are shareable)
   httpapi/               /work long-poll dispatch, /work/done,
                          /channel/* + /signal/* adapter contracts
                          (bearer auth via ADAPTER_TOKEN env); the pending-backlog
@@ -449,15 +477,19 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   a previous process is `>= next` in the new one's sequence, so answering it
   with an empty list reads as "nothing happened" — the case eviction alone does
   not catch.
-- **CONVERSATIONS ORIGINATE ONLY FROM CLAIMED SIGNAL SOURCES.** A channel
+- **CONVERSATIONS ORIGINATE ONLY FROM SERVED SIGNAL SOURCES.** A channel
   CARRIES conversations; it never starts one. `/channel/inbound` is
   reply-only — `threadId` REQUIRED, unknown threads dropped, no adoption. A
   message on a chat's general surface arrives as a `kind: chat` signal from a
-  chat `SignalSource`, so who answers is DECLARED by the Pipeline claiming it.
+  chat `SignalSource`, so who answers is DECLARED by the Pipelines listing it —
+  ALL of them for any other kind, and for a bare chat message only when there is
+  exactly one (see the Pipeline entry above).
   There is no channel default profile and no `PipelineForChannel` — channels
   are shareable on purpose, so "which pipeline answers for this channel" has no
   defensible answer, and the oldest-Ready tiebreak that used to supply one is
-  gone. Chat lane: task inputs (never `job` — that resumes sessions), cooldown
+  gone. `PipelineForSource` is gone too, replaced by the plural
+  `PipelinesForSource`: a caller wanting ONE answer must now say what it does
+  with several. Chat lane: task inputs (never `job` — that resumes sessions), cooldown
   OFF by default, and NO signature grouping unless `signatureLabels` is set
   (chat keys on the fingerprint; the default alert labels would hash every
   message alike into one conversation). Commands whose whole result is a reply
@@ -500,8 +532,9 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   spray history into every open thread. Read the rule off the origin
   (`InputItem.PostToChannels`), never by enumerating input types. Card op ids
   are stable per conversation×input×channel or every reconcile reposts the
-  alert. Conversations still carry **no `pipelineRef`**: a card names its
-  pipeline from `chat.PipelineForConversation` and omits it when ambiguous.
+  alert. A card names its pipeline from `chat.PipelineForConversation`, which
+  now READS `spec.pipelineRef` and falls back to binding-matching only for
+  conversations predating it — omitting the name when even that is ambiguous.
 - **No relay loops**: channel implementations (adapters AND in-process
   providers) must never re-ingest their own outbound posts as inbound —
   cross-channel relay depends on it.

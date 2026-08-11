@@ -1,47 +1,4 @@
-# pipeline-model
-
-## Purpose
-
-The Pipeline CRD: a credential-free wiring layer binding N signal sources and M channels to one profile, and the SOLE source of its conversations' capabilities (`toolsets` refs plus their composition mode, and mode-less `mcpConfigs` refs) — with pipeline-only routing resolution, and shareable sources whose signals fan out to every pipeline listing them.
-## Requirements
-### Requirement: Pipeline CRD declares the wiring between sources, channels, and a profile
-The `Pipeline` CRD SHALL bind N `signalSourceRefs` and M `channelRefs` to one `profileRef`: signals from every referenced source SHALL become conversations bound to ALL referenced channels with the pipeline's profile, and conversations originated from any referenced channel SHALL be bound to all referenced channels. The Pipeline SHALL also be the SOLE source of its conversations' capabilities, via two optional stanzas of ordered refs: `spec.toolsets` (→ `MCPToolset` CRs, the allowlist) and `spec.mcpConfigs` (→ `MCPConfig` CRs, the MCP servers). `spec.toolsets` SHALL carry a `mode` (`merge` | `overwrite`, default `merge`) declaring how its tools compose with those the AGENT'S OWN DEFINITION declares — `merge` extends them, `overwrite` replaces them. `spec.mcpConfigs` SHALL carry no mode: an agent definition declares no MCP servers, so there is nothing there to compose against. Neither stanza has a default — a Pipeline that declares no bindings gives its conversations no wiring-level capabilities, and nothing supplies them elsewhere. A Pipeline SHALL be reachable two ways and no others: a signal posted to a source it LISTS, and a chat command NAMING it on a surface whose chat source is itself served. There SHALL be no HTTP addressing form that names a Pipeline — a caller selecting its own wiring is the shape this CRD exists to prevent, and the chat form is bounded by a person having to be on a wired surface to type it. A Pipeline with neither sources nor channels carries no special meaning; it is simply a route no signal feeds, still nameable by command. The Pipeline SHALL carry no credentials, no server or tool definitions, and no runtime selection (runtime stays `profile.runtimeRef → "default"`). A reconciler SHALL maintain a `Ready` condition (all references resolve, including toolset and mcpConfig refs) without creating any workload.
-
-#### Scenario: Signals fan out to every pipeline channel
-- **WHEN** a Pipeline binds source `alertmanager` to channels `home-ops` and `web` and an alert fires
-- **THEN** the resulting conversation carries channel bindings for both `home-ops` and `web` and uses the pipeline's profile
-
-#### Scenario: Chat-originated conversations are pipeline-bound
-- **WHEN** a user starts a conversation on a channel referenced by a Pipeline
-- **THEN** the conversation is bound to all the Pipeline's channels, not just the originating one
-
-#### Scenario: Dangling references surface on Ready
-- **WHEN** a Pipeline references a SignalSource that does not exist
-- **THEN** the Pipeline reports `Ready=False` naming the missing reference
-
-#### Scenario: Capabilities bind per route
-- **WHEN** two Ready Pipelines route to the same profile with different `toolsets`
-- **THEN** conversations from each carry exactly that Pipeline's tools, and the profile declares none
-
-#### Scenario: A mode declares how the route composes with the agent
-- **WHEN** a Pipeline binds `toolsets` in `overwrite` mode to a profile whose agent definition declares its own tools
-- **THEN** conversations from that route use the Pipeline's tools alone, while a `merge`-mode Pipeline to the same profile extends the agent's
-
-#### Scenario: An absent mode is merge
-- **WHEN** a Pipeline binds `toolsets` without naming a mode
-- **THEN** it composes as `merge`, so the route adds to what the agent declares rather than replacing it
-
-#### Scenario: A Pipeline is reached through the sources it claims
-- **WHEN** a `kind: task` signal is posted to a source a Ready Pipeline claims
-- **THEN** the created conversation uses that Pipeline's profile, channel set, and capabilities
-
-#### Scenario: A sourceless, channelless Pipeline is unremarkable
-- **WHEN** a Pipeline names only a `profileRef` and capability stanzas
-- **THEN** it is a route no signal feeds — it claims no source, so nothing resolves to it — while a chat command naming it still opens a conversation, and it carries no per-profile default meaning
-
-#### Scenario: Dangling tooling ref surfaces on Ready
-- **WHEN** a Pipeline's `toolsets.refs` or `mcpConfigs.refs` names a CR that does not exist
-- **THEN** the Pipeline reports `Ready=False` naming the missing reference
+## MODIFIED Requirements
 
 ### Requirement: Pipeline-only resolution
 Routing SHALL resolve wiring exclusively through Ready Pipelines: a source's signals route via EVERY Ready Pipeline that lists it, and a source no Ready Pipeline lists drops its signals with a visible reason and a `Wired=False` condition. Resolution SHALL NOT fall back to pipeline creation order in any lane: the "oldest claimant" tiebreak is REMOVED, because a source no longer has a single claimant to pick.
@@ -88,6 +45,15 @@ A `/<name> <task>` chat command SHALL address a PIPELINE by name — the Pipelin
 - **WHEN** a user replies inside an existing thread
 - **THEN** the input is appended to that thread's conversation with no pipeline lookup
 
+## REMOVED Requirements
+
+### Requirement: One pipeline per source
+**Reason**: Exclusivity existed to keep a single invisible default for bare chat messages, and it charged every source kind for it. Whether two Pipelines watch one source is the adopter's decision; the ambiguity it guarded against is now handled where it actually occurs, in the chat lane, by refusing rather than guessing.
+
+**Migration**: A Pipeline previously reporting `SourceConflict=True` becomes `Ready=True` and its sources begin routing to it. An install that relied on the younger Pipeline being inert MUST drop the contested source from every Pipeline but the intended one.
+
+## ADDED Requirements
+
 ### Requirement: Sources are shareable and signals fan out
 A `SignalSource` MAY be listed by any number of Ready Pipelines, of any signal kind. Doing so SHALL NOT produce a conflict condition and SHALL NOT affect any Pipeline's `Ready`. Listing a source means "I watch this" — it makes the source wired and, on a chat surface, makes the Pipeline addressable there — not "I own this".
 
@@ -129,49 +95,3 @@ Attribution displays SHALL read the recorded origin rather than inferring it fro
 #### Scenario: Attribution is read, not guessed
 - **WHEN** two Pipelines with identical bindings each originate a conversation
 - **THEN** each conversation is attributed to its own Pipeline rather than left blank as ambiguous
-
-### Requirement: Chart-managed wiring is declared once, at the top
-A chart that ships components as subcharts SHALL NOT render `Pipeline` objects
-from any subchart. Wiring names a profile, signal sources and channels that
-routinely originate in DIFFERENT components, and a subchart can see only itself
-— so a component that shipped wiring could only wire its own lane, producing one
-Pipeline per lane where the install wanted one route.
-
-Wiring SHALL instead be declared at the parent scope, which is the only one that
-sees every component. A declaration SHALL require a profile and MAY name signal
-sources, channels, toolsets and MCP configs; a declaration naming no profile
-SHALL fail the render, because a Pipeline with no profile has no agent to run.
-
-#### Scenario: One route spanning several components
-- **WHEN** an install combines a cluster-events source from one component with a
-  chat surface from another, answered by one agent
-- **THEN** a single Pipeline declared at the parent scope claims both sources
-  and delivers to the channel, and no component renders wiring of its own
-
-#### Scenario: A component's source is inert until claimed
-- **WHEN** a component renders a signal source and the install declares no
-  Pipeline claiming it
-- **THEN** the source reports `Wired=False` and drops its signals, exactly as an
-  unclaimed source always does
-
-#### Scenario: A profile-less declaration is refused
-- **WHEN** a wiring entry omits its profile
-- **THEN** the render fails naming the entry
-
-### Requirement: Pipelines are named for their purpose, not their transport
-A `Channel` is shareable across Pipelines by design — one chat surface carries
-many jobs, so that operators need not run a bot and a group per route. A
-`SignalSource` is shareable too. Naming SHALL follow from what a Pipeline IS: it
-is named for the JOB it does, never for the channel it answers on, because the
-channel will carry other jobs — and never for the source it watches, because
-another Pipeline may watch the same one for a different purpose.
-
-#### Scenario: Several pipelines share one chat surface
-- **WHEN** two Pipelines with different purposes both deliver to one Channel
-- **THEN** both are valid, and each carries its own profile and capabilities
-
-#### Scenario: Two purposes may watch one source
-- **WHEN** two Pipelines with different purposes both list one SignalSource
-- **THEN** both are valid and neither is preferred, so each name must say which
-  job it does rather than which source it reads
-

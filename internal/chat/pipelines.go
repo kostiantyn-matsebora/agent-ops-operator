@@ -10,27 +10,31 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 )
 
-// Pipeline resolution. EVERY origination resolves the same way: by the
-// pipeline that CLAIMS the signal source, against READY pipelines only — a
-// broken pipeline never silently swallows routing; its sources behave as
-// unclaimed until it is fixed.
+// Pipeline resolution. EVERY origination resolves the same way: through the
+// READY pipelines listing the signal source — a broken pipeline never silently
+// swallows routing; its sources behave as unwatched until it is fixed.
 //
-// There is deliberately no PipelineForChannel. Channels are shareable across
-// pipelines on purpose, so "which pipeline answers for this channel" has no
-// defensible answer — the oldest-Ready tiebreak that used to supply one is
-// gone along with channel origination itself. A channel carries conversations;
-// a claimed source starts them.
+// A source is SHAREABLE, like a channel. Several Ready pipelines may list one,
+// and a signal admitted there opens a conversation on EVERY one of them. So
+// resolution is plural by nature and there is no tiebreak anywhere: the
+// oldest-claimant rule that used to pick a winner is gone, because there is no
+// longer a single winner to pick.
+//
+// There is deliberately no PipelineForChannel. Channels are shareable too, so
+// "which pipeline answers for this channel" has no defensible answer — a
+// channel carries conversations; a watched source starts them.
 
-// ReadyPipelines lists Ready pipelines oldest-first (name tiebreak) — the
-// deterministic claim order for a source with more than one claimant. Exported
-// so a caller attributing MANY conversations (a metrics scrape) can list once
-// instead of once per conversation.
+// ReadyPipelines lists Ready pipelines oldest-first (name tiebreak). The order
+// is for STABLE OUTPUT — listings, messages, fan-out order — never for
+// choosing between pipelines. Exported so a caller attributing MANY
+// conversations (a metrics scrape) can list once instead of once per
+// conversation.
 func ReadyPipelines(ctx context.Context, c client.Reader, namespace string) []agentopsv1alpha1.Pipeline {
 	return readyPipelines(ctx, c, namespace)
 }
 
-// readyPipelines lists Ready pipelines oldest-first (name tiebreak) — the
-// deterministic claim order for a source with more than one claimant.
+// readyPipelines lists Ready pipelines oldest-first (name tiebreak), for
+// stable output order only.
 func readyPipelines(ctx context.Context, c client.Reader, namespace string) []agentopsv1alpha1.Pipeline {
 	var list agentopsv1alpha1.PipelineList
 	if err := c.List(ctx, &list, client.InNamespace(namespace)); err != nil {
@@ -51,29 +55,35 @@ func readyPipelines(ctx context.Context, c client.Reader, namespace string) []ag
 	return ready
 }
 
-// PipelineForSource returns the Ready pipeline claiming a signal source
-// (oldest claimant), or nil.
-func PipelineForSource(ctx context.Context, c client.Reader, namespace, source string) *agentopsv1alpha1.Pipeline {
+// PipelinesForSource returns EVERY Ready pipeline listing a signal source, in
+// stable order — empty when none does (the unwatched case, Wired=False).
+//
+// Plural is the whole point. It replaced a PipelineForSource that returned the
+// oldest claimant, which silently decided who answered; a caller that wants one
+// answer must now say what it does with several, and the two that do are the
+// signal fan-out (all of them) and the bare chat message (refuse unless there
+// is exactly one).
+func PipelinesForSource(ctx context.Context, c client.Reader, namespace, source string) []agentopsv1alpha1.Pipeline {
+	var out []agentopsv1alpha1.Pipeline
 	for _, p := range readyPipelines(ctx, c, namespace) {
 		for _, ref := range p.Spec.SignalSourceRefs {
 			if ref.Name == source {
-				cp := p
-				return &cp
+				out = append(out, p)
+				break
 			}
 		}
 	}
-	return nil
+	return out
 }
 
-// PipelineForConversation INFERS which pipeline a conversation came from, by
-// matching the bindings the conversation materialized against the pipelines
-// that could have produced them. It returns nil when nothing matches or when
-// more than one does.
+// PipelineForConversation resolves which pipeline a conversation came from.
+// It returns nil when that cannot be established.
 //
-// A Conversation carries no pipelineRef — the bindings are materialized state,
-// the wiring is not snapshotted — so attribution is inference and MUST stay
-// honest about it: ambiguous means nil, never "the first plausible one". The
-// only use is labelling (telemetry, the console); nothing routes on it, so a
+// A conversation RECORDS its origin (spec.pipelineRef, provenance), so the
+// usual answer is a read. The binding-matching below is the fallback for
+// conversations predating that field, and it MUST stay honest about being
+// inference: ambiguous means nil, never "the first plausible one". The only use
+// either way is labelling (telemetry, the console); nothing routes on it, so a
 // blank answer costs a label rather than a decision.
 func PipelineForConversation(ctx context.Context, c client.Reader, namespace string,
 	conv *agentopsv1alpha1.Conversation) *agentopsv1alpha1.Pipeline {
@@ -84,6 +94,18 @@ func PipelineForConversation(ctx context.Context, c client.Reader, namespace str
 // MatchPipeline is PipelineForConversation over an already-listed candidate set.
 func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *agentopsv1alpha1.Conversation) *agentopsv1alpha1.Pipeline {
 	if conv == nil {
+		return nil
+	}
+	// Recorded origin wins. Inference cannot beat it and must not second-guess
+	// it: two pipelines sharing a source and a profile are indistinguishable to
+	// the matcher below, which is exactly the case the ref exists for.
+	if ref := conv.Spec.PipelineRef; ref != nil && ref.Name != "" {
+		for i := range candidates {
+			if candidates[i].Name == ref.Name {
+				cp := candidates[i]
+				return &cp
+			}
+		}
 		return nil
 	}
 	var match *agentopsv1alpha1.Pipeline

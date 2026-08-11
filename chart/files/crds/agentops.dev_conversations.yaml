@@ -183,6 +183,36 @@ spec:
                 required:
                 - refs
                 type: object
+              pipelineRef:
+                description: |-
+                  PipelineRef names the Pipeline that ORIGINATED this conversation.
+
+                  PROVENANCE, NEVER WIRING. It is written once at creation and read for
+                  exactly two things: scoping conversation REUSE, and ATTRIBUTION in
+                  displays. Nothing resolves a profile, a channel set or a capability
+                  through it — those come from the materialized fields beside it, which is
+                  what keeps editing or deleting the Pipeline from re-wiring a conversation
+                  already running. Resolving anything through this ref would undo that.
+
+                  It exists because a source is SHAREABLE: two Pipelines listing one source
+                  both open a conversation per signal, and those conversations carry the
+                  same signature. Without the ref, the second Pipeline's next signal would
+                  be absorbed by the first Pipeline's conversation and run under the wrong
+                  profile with the wrong tools. It also replaces attribution-by-inference,
+                  which went blank exactly when two Pipelines wired identically.
+
+                  Absent on conversations predating the field. Nothing backfills it —
+                  inference is what it replaces — so an empty ref is read conservatively
+                  (see routeSignalGroup: reusable only while ONE Ready Pipeline serves the
+                  source).
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               profileRef:
                 description: ObjectRef references another object by name (same namespace).
                 properties:

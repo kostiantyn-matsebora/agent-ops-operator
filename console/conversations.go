@@ -60,6 +60,7 @@ type convView struct {
 	Spec struct {
 		ChannelRefs []Ref       `json:"channelRefs,omitempty"`
 		ProfileRef  Ref         `json:"profileRef"`
+		PipelineRef *Ref        `json:"pipelineRef,omitempty"`
 		Title       string      `json:"title,omitempty"`
 		Toolsets    *refBinding `json:"toolsets,omitempty"`
 		MCPConfigs  *refBinding `json:"mcpConfigs,omitempty"`

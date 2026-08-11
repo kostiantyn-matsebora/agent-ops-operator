@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,13 +56,22 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Wired: pipeline-only wiring — a source routes signals only while a Ready
-	// Pipeline claims it.
+	// Pipeline lists it. The message names ALL of them, never just the first:
+	// a source several pipelines watch fans each signal out to every one, so
+	// the COUNT is what an operator needs to predict behaviour — how many
+	// conversations one signal opens, and (on a chat source) whether a bare
+	// message is unambiguous or gets refused with the choices.
 	wired := metav1.Condition{Type: ConditionWired, Status: metav1.ConditionFalse, Reason: "NoPipelineClaim",
 		Message: "no Ready Pipeline references this source — signals are dropped until one does"}
-	if p := chat.PipelineForSource(ctx, r.Client, src.Namespace, src.Name); p != nil {
+	if servers := chat.PipelinesForSource(ctx, r.Client, src.Namespace, src.Name); len(servers) > 0 {
+		names := make([]string, 0, len(servers))
+		for i := range servers {
+			names = append(names, strconv.Quote(servers[i].Name))
+		}
 		wired.Status = metav1.ConditionTrue
 		wired.Reason = "PipelineClaim"
-		wired.Message = fmt.Sprintf("wired by Pipeline %q", p.Name)
+		wired.Message = fmt.Sprintf("wired by %d Pipeline(s): %s — each opens its own conversation per signal",
+			len(names), strings.Join(names, ", "))
 	}
 
 	servedSame := false

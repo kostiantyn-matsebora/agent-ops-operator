@@ -11,9 +11,11 @@ import (
 // Runtime selection stays profile.runtimeRef — the Pipeline binds no runtime,
 // credentials, or config.
 type PipelineSpec struct {
-	// SignalSourceRefs: the sources feeding this pipeline. A source may be
-	// claimed by at most ONE pipeline (the older claimant wins; the newer
-	// reports SourceConflict).
+	// SignalSourceRefs: the sources feeding this pipeline. A source is
+	// SHAREABLE exactly as a channel is — any number of pipelines may list
+	// one, and a signal admitted there opens a conversation on EVERY Ready
+	// pipeline listing it, each with its own profile and capabilities. Listing
+	// a source means "I watch this", not "I own this".
 	// +optional
 	SignalSourceRefs []ObjectRef `json:"signalSourceRefs,omitempty"`
 	// ChannelRefs: every conversation of this pipeline is mirrored on all of
@@ -21,8 +23,8 @@ type PipelineSpec struct {
 	// +optional
 	ChannelRefs []ObjectRef `json:"channelRefs,omitempty"`
 	// ProfileRef: the agent answering the conversations this pipeline
-	// originates — those from the signal sources it CLAIMS, and those a task
-	// or chat command addresses to it by name. Channels supply no default.
+	// originates — those from the signal sources it WATCHES, and those a chat
+	// command addresses to it by name. Channels supply no default.
 	ProfileRef ObjectRef `json:"profileRef"`
 	// Toolsets binds MCPToolset CRs contributing to the allowlist of this
 	// wiring's conversations, plus the mode composing them with what the
@@ -38,8 +40,9 @@ type PipelineSpec struct {
 
 // PipelineStatus reports wiring validity.
 type PipelineStatus struct {
-	// Conditions: Ready (all references resolve, no conflict), SourceConflict
-	// (another older pipeline already claims a referenced source).
+	// Conditions: Ready (all references resolve). There is no SourceConflict
+	// condition — sources are shareable, so listing one another pipeline also
+	// lists is a valid configuration, not a conflict.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

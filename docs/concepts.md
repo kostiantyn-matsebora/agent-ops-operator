@@ -79,6 +79,24 @@ markers. Together they make the reply derivable rather than queue-resident — s
 [Restart resilience](#restart-resilience). Both are materialized state; nothing
 sets them by hand.
 
+`spec.pipelineRef` names the Pipeline that **originated** the conversation. It is
+**provenance, never wiring**: written once at creation and read for exactly two
+things — scoping conversation reuse, and attribution in displays. What a
+conversation RUNS with keeps coming from the materialized fields beside it
+(`profileRef`, `channelRefs`, `toolsets`, `mcpConfigs`), so editing or deleting
+the Pipeline still cannot re-wire a conversation already running.
+
+It exists because [sources are shareable](#sharing-a-source): two Pipelines
+listing one source both open a conversation per signal, and those conversations
+carry the same signature — without the ref, the second Pipeline's next signal
+would be absorbed by the first Pipeline's conversation and run under the wrong
+profile with the wrong tools. It also replaces attribution-by-inference, which
+went blank exactly when two Pipelines wired identically.
+
+Conversations created before this field have no ref, and nothing backfills one.
+Such a conversation stays reusable only while exactly one Ready Pipeline serves
+its source — the state it was created in — and is left alone once a second joins.
+
 ### ConversationInput
 
 Out-of-line payloads (full alert JSON) so Conversation objects stay small in etcd.
@@ -93,7 +111,7 @@ Chat surface, split in two parts: **implementation-agnostic metadata** (`adapter
 
 ### SignalSource
 
-Ingest lane, split like `Channel`: **implementation-agnostic metadata** (`adapter`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Pipeline must claim it (`Wired` condition; unclaimed sources drop signals with an explicit reason). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports.
+Ingest lane, split like `Channel`: **implementation-agnostic metadata** (`adapter`, `grouping`, `credentialsSecretRef`) and an **opaque `config`** only the serving signal implementation interprets. Carries **no wiring** — a Ready Pipeline must list it (`Wired` condition; sources no Pipeline lists drop signals with an explicit reason). A source is **shareable**: several Pipelines may list one, the `Wired` condition names them all, and a signal opens a conversation on each — see [Sharing a source](#sharing-a-source). Grouping stays manager-side for every type: signature grouping (same problem → same conversation; recurrence resumes the session) and fingerprint cooldown. **Every signal type is adapter-served** — the manager hosts no signal transports.
 
 `status.cooldown[]` records fingerprint suppression for this source —
 `{fingerprint, at}` per admitted signal, pruned past the window and bounded. The
@@ -153,7 +171,23 @@ that claims it**.
 
 ### Pipeline
 
-**The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is reached two ways and no others: a signal posted to a source it CLAIMS, and a chat command NAMING it on a wired surface — there is no HTTP form that names a Pipeline. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until claimed. One pipeline per source (older claimant wins); channels are shareable — one chat surface carries many jobs, so name a Pipeline for its PURPOSE, never for the channel it answers on. **No chart bundle ships a Pipeline**: wiring spans bundles, so the chart declares it once at the top, under `pipelines:`.
+**The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is reached two ways and no others: a signal posted to a source it LISTS, and a chat command NAMING it on a wired surface — there is no HTTP form that names a Pipeline. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until a Ready Pipeline lists them.
+
+**Sources are shareable, exactly as channels are** — see [Sharing a source](#sharing-a-source). Name a Pipeline for its PURPOSE, never for the channel it answers on: one chat surface carries many jobs. **No chart bundle ships a Pipeline**: wiring spans bundles, so the chart declares it once at the top, under `pipelines:`.
+
+#### Sharing a source
+
+Listing a `SignalSource` means "I watch this", not "I own this". Any number of Ready Pipelines may list one, of any signal kind, and none of them reports a conflict or loses `Ready`. Whether two agents watch one thing is the adopter's decision.
+
+A signal admitted on a source served by N Ready Pipelines opens **N conversations — one per Pipeline**, each with that Pipeline's own profile, channels and capabilities. Two agents investigating one alert from two angles is a configuration, not a fault.
+
+Per-source ingest policy is evaluated **once, before the fan-out**: a fingerprint passes cooldown once and is then delivered to every server, so the first Pipeline cannot spend the window and starve the rest. `receivedTotal` counts signals received; the ingest response reports `queued` (signals) and `conversations` (one per server) separately.
+
+The `Wired` condition names **every** serving Pipeline, and that count is what to read: it is how many conversations one signal will open, and — on a chat source — whether a bare message is unambiguous.
+
+**Chat is the one lane that does not fan out.** A person asked one question on one surface and is owed one answer, and unlike an alert they can say which agent they meant. So an unaddressed message on a channel's general surface routes only while exactly ONE Ready Pipeline serves the chat source; with several it opens nothing and the surface is answered with the Pipelines available and the `/<pipeline> <task>` form. With none, it drops with the `Wired=False` reason as before. An **addressed** message resolves by name and is unaffected by how many Pipelines serve the source — and thread replies never travel this path at all.
+
+That distinction comes from the arriving signal's `kind`, which ingest already holds. Nothing on a `SignalSource` or a `SignalAdapter` declares "this is a chat source", and no reconciler decides it.
 
 ### MCPConfig
 
@@ -310,11 +344,12 @@ The chart ships the built-in tool vocabulary as `MCPToolset` CRs, split by risk
 therefore serve a route that observes and a route that executes, with no
 profile edit and no cloning.
 
-**A task addresses a SOURCE; the Pipeline claiming it answers.** Programmatic
+**A task addresses a SOURCE; the Pipelines listing it answer.** Programmatic
 work is an ordinary signal — `POST /signal/inbound {"source":"...","signals":
-[{"fingerprint":"...","kind":"task","payload":"..."}]}` — and the Ready Pipeline
-that claims that source originates the conversation, supplying the profile, the
-mirrored channel set, and the capabilities. There is no endpoint that names a
+[{"fingerprint":"...","kind":"task","payload":"..."}]}` — and every Ready Pipeline
+listing that source originates a conversation, supplying the profile, the
+mirrored channel set, and the capabilities. A source two Pipelines list produces
+two conversations, exactly as it does for an alert. There is no endpoint that names a
 Pipeline and no profile-addressed form: a caller picking its own wiring is what
 this model exists to prevent, and a request naming only a profile would have no
 wiring and therefore nothing to grant. A posted task inherits the target
