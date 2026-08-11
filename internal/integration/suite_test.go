@@ -108,6 +108,11 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 	ops := &chat.OpQueue{Client: k8sClient, Namespace: ns, Registry: chat.NewRegistry(), Activity: acts}
 	return &httpapi.Server{
 		Client: k8sClient, Reader: k8sClient, Namespace: ns,
+		// A deployment that CAN carry context: continuity is now promised only
+		// where the runtime has somewhere to keep it, so a fixture with no home
+		// volume would (correctly) withhold every handle and make the resume
+		// tests assert the wrong thing.
+		Runtime: runtimepod.Config{HomePVC: "test-home"},
 		Ops:                    ops,
 		Router:                 &chat.Router{Client: k8sClient, Reader: k8sClient, Namespace: ns, Ops: ops, Activity: acts},
 		AdapterToken:           "test-adapter-token",
@@ -200,7 +205,7 @@ func TestConversationLifecycle(t *testing.T) {
 
 	var after agentopsv1alpha1.Conversation
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-1"}, &after)
-	if after.Status.SessionID != "sess-life" || after.Status.Inflight != nil ||
+	if after.ContextID() != "sess-life" || after.Status.Inflight != nil ||
 		after.Status.Phase != agentopsv1alpha1.ConversationIdle || len(after.Status.Runs) != 1 {
 		t.Fatalf("status after done: %+v", after.Status)
 	}

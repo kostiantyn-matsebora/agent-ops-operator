@@ -27,6 +27,28 @@ viewer), `telegram-router/` (the single getUpdates consumer), and
   EVERY kind — `alert`, `job`, `task`, `chat` — from the one claiming the
   source, and a `/<pipeline> <task>` chat command from the one it addresses.
   Nothing creates a Conversation without wiring behind it.
+- **`runtimeContextId`** = agent-ops' name for the RUNTIME's opaque handle on a
+  conversation's accumulated context. NEVER "session" — that is claude-code's
+  noun, another backend calls it a thread, another has none; a vendor's word in
+  this API teaches the next reader that the manager knows what is inside the
+  handle, which it does not. The manager stores it, hands it back on the next
+  work unit, and interprets nothing; `--resume` is one runtime's implementation
+  and appears nowhere in the contract.
+  **LATEST-WINS.** It was write-once, which was unsound: a run may legitimately
+  end in a different context than it was asked to continue, so the first handle
+  then named something gone — and because dispatch AND ingest both key off it,
+  every later message repeated the same failed continuation. One recoverable
+  loss became permanent. `Conversation.ContextID()` is the only place the
+  retired `sessionId` is read (dual-read for one release; a rename that merely
+  moved the field would have stranded every in-flight handle on upgrade).
+  Continuity is PROMISED ONLY WHERE POSSIBLE — `AgentRuntime.spec.contextStorage`
+  (`volume`|`external`|`none`) versus the configured home volume — and
+  never-promised (answer fresh, say so) is not the same as promised-and-lost
+  (FAIL the run: a conversation without its context is a new one wearing its
+  name). Unavailability is an OUTAGE before it is a LOSS: bounded retry in the
+  runtime, then a manager-side breaker that HOLDS work, because failing fast on
+  every report would destroy every active conversation's context in one storage
+  incident.
 - **`Pipeline`** = THE wiring, exclusively: sources[] × channels[] + profile
   + TOOL ACCESS. No other CR carries wiring (SignalSource has no
   profile/channel refs, Channel has no default profile) — unclaimed sources

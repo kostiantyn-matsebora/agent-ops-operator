@@ -30,7 +30,9 @@ var now = time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 // is the caller's job now (it holds the client that reads the bound toolsets),
 // so these tests pin prompt/lane behavior only.
 func dispatchNext(c *agentopsv1alpha1.Conversation, p *agentopsv1alpha1.AgentProfile) (WorkUnit, []string, bool, error) {
-	return Next(c, p, Tooling{AllowedTools: "Read,Bash", Mode: agentopsv1alpha1.ToolsModeMerge}, inlineResolver, now)
+	// Passing c.ContextID() is what the manager does, so tests that set the
+	// RETIRED field also prove the dual-read fallback keeps working.
+	return Next(c, p, Tooling{AllowedTools: "Read,Bash", Mode: agentopsv1alpha1.ToolsModeMerge}, inlineResolver, now, c.ContextID())
 }
 
 func TestTaskUsesBuiltinTemplate(t *testing.T) {
@@ -179,7 +181,7 @@ func TestToolsModeIsCarriedThrough(t *testing.T) {
 func TestWorkUnitCarriesToolsModeAndAgent(t *testing.T) {
 	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
 	u, _, ok, err := Next(c, profile(),
-		Tooling{AllowedTools: "Bash", Mode: agentopsv1alpha1.ToolsModeOverwrite}, inlineResolver, now)
+		Tooling{AllowedTools: "Bash", Mode: agentopsv1alpha1.ToolsModeOverwrite}, inlineResolver, now, c.ContextID())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
 	}

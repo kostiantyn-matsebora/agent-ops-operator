@@ -748,3 +748,68 @@ func TestWorkspacePersistenceIsWiredFromOneValue(t *testing.T) {
 		t.Error("the AgentRuntime must reference the existing claim")
 	}
 }
+
+// helmNotes renders the post-install notes, which `helm template` omits.
+func helmNotes(t *testing.T, args ...string) string {
+	t.Helper()
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	// NOTES render ONLY through `helm install --dry-run`, and helm insists on
+	// reaching a cluster for it: `helm template` omits them, and `--show-only`
+	// cannot address a non-manifest. So this skips without one rather than
+	// failing — the same posture as the missing-helm skip above.
+	//
+	// crds.enabled=false because this chart ships CRDs as gated TEMPLATES, so a
+	// dry-run install otherwise trips the ownership check against CRDs a real
+	// release already owns. The notes do not depend on them.
+	cmd := exec.Command("helm", append([]string{"install", "notes-test", "../../chart", "--dry-run", "--set", "crds.enabled=false"}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "cluster unreachable") {
+			t.Skip("no cluster reachable; NOTES cannot be rendered")
+		}
+		t.Fatalf("helm install --dry-run failed: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+// Durable context must not require distributed storage — but a single-attach
+// claim with unpinned runtime pods works until a SECOND conversation schedules
+// elsewhere, then fails to attach, far from the setting that caused it. That is
+// a note, not a render failure: on a single-node cluster pinning is pointless.
+func TestSingleAttachWithoutPinningIsCalledOut(t *testing.T) {
+	out := helmNotes(t, "--set", "persistence.accessModes={ReadWriteOnce}")
+	if !strings.Contains(out, "attached by ONE node") {
+		t.Fatal("an unpinned single-attach claim must be called out in the notes")
+	}
+
+	// Pinned: the operator has said where runtime pods go, so there is nothing
+	// to warn about.
+	pinned := helmNotes(t, "--set", "persistence.accessModes={ReadWriteOnce}",
+		"--set", `runtime.nodeSelector.kubernetes\.io/hostname=node-1`)
+	if strings.Contains(pinned, "attached by ONE node") {
+		t.Fatal("pinning runtime pods resolves it — the warning must go")
+	}
+
+	// RWX: many nodes may attach, so the whole concern is absent.
+	if strings.Contains(helmNotes(t), "attached by ONE node") {
+		t.Fatal("the default RWX claim must not warn")
+	}
+}
+
+// An install that cannot carry context says so plainly, rather than letting
+// every follow-up discover it.
+func TestEphemeralInstallSaysConversationsCannotContinue(t *testing.T) {
+	out := helmNotes(t, "--set", "persistence.enabled=false")
+	if !strings.Contains(out, "CANNOT BE CONTINUED") {
+		t.Fatal("an install with no durable home must say conversations cannot be continued")
+	}
+	// ...and it names the way to have it without distributed storage.
+	if !strings.Contains(out, "single-node") {
+		t.Fatal("the notes must name the single-node topology as the remedy")
+	}
+	if strings.Contains(helmNotes(t), "CANNOT BE CONTINUED") {
+		t.Fatal("the default install CAN continue conversations")
+	}
+}

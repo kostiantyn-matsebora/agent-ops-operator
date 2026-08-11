@@ -34,6 +34,29 @@ type WorkspaceVolume struct {
 	EmptyDir bool `json:"emptyDir,omitempty"`
 }
 
+// ContextStorage declares WHERE a runtime keeps a conversation's accumulated
+// context, which is what decides whether continuity is possible in a given
+// deployment.
+//
+// The RUNTIME declares it rather than the chart inferring it: the chart would
+// have to know which images need a volume, and a runtime that keeps context at a
+// vendor API needs none and must not be told otherwise.
+// +kubebuilder:validation:Enum=volume;external;none
+type ContextStorage string
+
+const (
+	// ContextOnVolume: context lives on the runtime's home volume, so continuity
+	// requires that volume to outlive the pod. claude-code's session files are
+	// this case.
+	ContextOnVolume ContextStorage = "volume"
+	// ContextExternal: context lives somewhere the operator does not provide — a
+	// vendor API, a database. Continuity does not depend on any volume here.
+	ContextExternal ContextStorage = "external"
+	// ContextNone: the runtime cannot continue anything. Every run starts fresh,
+	// and saying so is what stops it looking identical to one that lost context.
+	ContextNone ContextStorage = "none"
+)
+
 // AgentRuntimeSpec defines HOW agents execute: the worker image implementing
 // the operator's work contract, and its pod-level defaults. Adopters bring
 // their own agent backend (claude-code, aider, custom) by supplying an image
@@ -76,6 +99,15 @@ type AgentRuntimeSpec struct {
 	// restart and skips the re-clone.
 	// +optional
 	Workspace *WorkspaceVolume `json:"workspace,omitempty"`
+	// ContextStorage declares where this runtime keeps a conversation's context,
+	// so the manager can tell whether continuity is possible here BEFORE
+	// promising it. A runtime keeping context on its home volume, in a
+	// deployment that provides none, can never continue anything — and saying
+	// that up front is what stops every follow-up failing for a reason the
+	// operator already chose.
+	// +kubebuilder:default=volume
+	// +optional
+	ContextStorage ContextStorage `json:"contextStorage,omitempty"`
 	// Resources default for runtime pods (AgentProfile.resources overrides).
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`

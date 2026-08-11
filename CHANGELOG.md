@@ -8,6 +8,62 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### A conversation either continues or it fails — chart 5.4.0, manager 0.27.0
+
+**BREAKING (API): `Conversation.status.sessionId` is renamed to
+`runtimeContextId`.** "session" is claude-code's noun; agent-ops has
+Conversations, and what a runtime returns is its own handle for one. Both fields
+are READ for one release — preferring the new, adopting the old — and only the
+new is written, so no in-flight conversation loses its handle on upgrade. The
+work unit carries both names for the same period, so a runtime image upgrades
+independently of the manager. Anything reading `sessionId` (including the
+console) should move.
+
+**The bug this fixes.** The handle was recorded write-once:
+
+```go
+if d.SessionID != "" && conv.Status.SessionID == "" {   // before
+```
+
+When a continuation failed, the runtime correctly started a new context — and
+that handle was never recorded, because the field was already set. The
+conversation then named a context that no longer existed, so **every subsequent
+message** repeated the same failed continuation. One transient loss became
+permanent. The handle is now latest-wins, and is recorded on FAILED runs too, so
+a crash after a context was established does not strand it.
+
+**A context that cannot be continued now FAILS the run.** The runtime no longer
+retries without its context and answers anyway: a conversation without its
+context is a new one wearing the same name and thread, and an agent asked to undo
+something it has no memory of will guess. The failure is articulate — a stated
+reason, a message on the thread naming the remedy — which is what the old
+fallback existed to avoid. A failed run's result now reaches bound threads
+instead of a bare "run failed".
+
+**Unavailability is an outage before it is a loss.** Bounded retry in the runtime
+distinguishes a store that says GONE from one that did not ANSWER; a manager-side
+circuit breaker then holds work rather than failing it when many conversations
+report unavailability at once. Without it, one two-minute storage incident would
+permanently destroy every active conversation's context.
+
+**Continuity is promised only where possible.** New
+`AgentRuntime.spec.contextStorage` (`volume` | `external` | `none`, default
+`volume`). A runtime keeping context on a home volume the deployment does not
+provide can never continue anything, so no handle is issued and the conversation
+is single-run **by declaration** — answering each message fresh instead of
+failing every follow-up for a configuration you chose. `NOTES.txt` says so, and
+names the single-node topology (RWO or a `local` PV + `runtime.nodeSelector`) for
+clusters without distributed storage.
+
+New `ContextContinuity` condition carries the runtime's own reason, verbatim —
+the manager does not know where a given runtime keeps context and does not guess.
+
+**Upgrade order: manager first, runtime after.** The manager is compatible with
+the current runtime image (which simply makes no continuity claim); the new
+runtime works against either. Do not remove the dual read until no conversation
+can still carry only `sessionId`.
+
+
 ### The runtime image drops kubectl — chart 5.3.0, runtime-claude 0.5.0
 
 **BREAKING for anything that shelled out to `kubectl` inside a runtime pod.**

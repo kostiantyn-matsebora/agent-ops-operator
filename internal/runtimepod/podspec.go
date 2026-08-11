@@ -4,9 +4,13 @@
 package runtimepod
 
 import (
+	"context"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/mcpcompile"
@@ -75,6 +79,60 @@ func FromRuntime(rt *agentopsv1alpha1.AgentRuntimeSpec, fallback Config) Config 
 
 // PodName for a conversation.
 func PodName(convName string) string { return "agentops-conv-" + convName }
+
+// Resolved is the execution backend chosen for a profile: the pod config, plus
+// the facts about it that callers other than the pod builder need.
+type Resolved struct {
+	Config Config
+	// ContextStorage declares where the runtime keeps conversation context.
+	// Empty when no AgentRuntime CR was found, i.e. the bootstrap fallback.
+	ContextStorage agentopsv1alpha1.ContextStorage
+}
+
+// ResolveFor picks the execution backend for a profile — its `runtimeRef`, else
+// the CR named `default`, else the manager's bootstrap config — and reports
+// whether a named runtime was missing.
+//
+// ONE resolution rule, in one place: the reconciler builds pods from it and the
+// dispatch path asks it whether continuity is possible here, and those two
+// answering differently would mean a conversation promised continuity by one
+// component and denied it by the other.
+func ResolveFor(ctx context.Context, r client.Reader, namespace string,
+	profile *agentopsv1alpha1.AgentProfile, fallback Config) (Resolved, error) {
+
+	name, explicit := "default", false
+	if profile != nil && profile.Spec.RuntimeRef != nil {
+		name, explicit = profile.Spec.RuntimeRef.Name, true
+	}
+	var rt agentopsv1alpha1.AgentRuntime
+	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &rt); err != nil {
+		if explicit {
+			return Resolved{}, err // a named runtime must exist
+		}
+		return Resolved{Config: fallback}, nil
+	}
+	return Resolved{Config: FromRuntime(&rt.Spec, fallback), ContextStorage: rt.Spec.ContextStorage}, nil
+}
+
+// ContinuityPossible reports whether a conversation on this backend can carry
+// context between runs at all.
+//
+// A runtime keeping context on its home volume, in a deployment that provides
+// none, can never continue anything: the pod exits on its idle timeout — a
+// minute by default — and takes the context with it. Saying so BEFORE promising
+// continuity is what separates a configuration the operator chose from a loss,
+// and stops every follow-up failing for the former.
+func (r Resolved) ContinuityPossible() bool {
+	switch r.ContextStorage {
+	case agentopsv1alpha1.ContextNone:
+		return false
+	case agentopsv1alpha1.ContextExternal:
+		return true // stored somewhere the operator does not provide
+	default:
+		// `volume`, and the empty bootstrap case which is the reference runtime
+		return r.Config.HomePVC != ""
+	}
+}
 
 // Build renders the runtime pod (namespace + ownerRef are set by the caller).
 // mcpCM names the ConfigMap holding the compiled mcp.json — the shared

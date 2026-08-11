@@ -45,9 +45,22 @@ const deliverySection = "Your final printed answer IS the deliverable — it is 
 // that is — the runtime is the only component holding the repository, so it
 // needs the name to find the file.
 type WorkUnit struct {
-	RunID           string            `json:"runId"`
-	Convo           string            `json:"convo"`
-	ThreadID        *string           `json:"threadId,omitempty"`
+	RunID    string  `json:"runId"`
+	Convo    string  `json:"convo"`
+	ThreadID *string `json:"threadId,omitempty"`
+	// RuntimeContextID is the runtime's OWN handle for this conversation's
+	// accumulated context, echoed back from the last run. Continue that context,
+	// or report that you could not — where it is stored is the runtime's
+	// business and the manager assumes nothing about it.
+	//
+	// Empty means "start fresh, nothing is being continued", which is also what
+	// a deployment that cannot carry context sends every time, deliberately.
+	RuntimeContextID string `json:"runtimeContextId,omitempty"`
+	// ResumeSessionID is the former name of RuntimeContextID, sent alongside it
+	// for ONE release so a runtime image can be upgraded independently of the
+	// manager. Runtimes must read RuntimeContextID.
+	//
+	// DEPRECATED.
 	ResumeSessionID string            `json:"resumeSessionId,omitempty"`
 	PromptFile      string            `json:"promptFile,omitempty"` // repo-relative; worker renders PromptVars
 	PromptText      string            `json:"promptText,omitempty"` // fully rendered by the manager
@@ -55,10 +68,10 @@ type WorkUnit struct {
 	Agent           string            `json:"agent,omitempty"`
 	// SystemPrompt is inline role text the runtime APPENDS to the agent's
 	// system prompt. Identity only — it never affects the allowlist.
-	SystemPrompt    string            `json:"systemPrompt,omitempty"`
-	AllowedTools    string            `json:"allowedTools,omitempty"`
-	ToolsMode       string            `json:"toolsMode,omitempty"`
-	MaxTurns        int32             `json:"maxTurns,omitempty"`
+	SystemPrompt string `json:"systemPrompt,omitempty"`
+	AllowedTools string `json:"allowedTools,omitempty"`
+	ToolsMode    string `json:"toolsMode,omitempty"`
+	MaxTurns     int32  `json:"maxTurns,omitempty"`
 }
 
 // PayloadResolver returns the payload for an input (inline or via ConversationInput).
@@ -158,8 +171,12 @@ func ToolsModeOf(b *agentopsv1alpha1.ToolsetBinding) string {
 
 // Next resolves the next work unit. Returns the unit and the consumed input
 // ids, or ok=false when there is nothing to dispatch (inflight or empty).
+// contextID is the handle to continue, or "" to start fresh. The CALLER decides
+// it, because whether continuity is possible depends on the execution backend —
+// which runtime, and whether this deployment gives it somewhere to keep context
+// — and resolving that here would put runtime knowledge in the prompt builder.
 func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile, tools Tooling,
-	resolve PayloadResolver, now time.Time) (WorkUnit, []string, bool, error) {
+	resolve PayloadResolver, now time.Time, contextID string) (WorkUnit, []string, bool, error) {
 
 	if c.Status.Inflight != nil {
 		return WorkUnit{}, nil, false, nil
@@ -220,8 +237,11 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 		return unit, []string{first.ID}, true, nil
 
 	case agentopsv1alpha1.InputReply, agentopsv1alpha1.InputRecurrence:
-		if c.Status.SessionID == "" {
-			// no session yet — degrade to a task around the text (v0.6 behavior)
+		if contextID == "" {
+			// nothing to continue — degrade to a task around the text (v0.6
+			// behavior). Reached both before the first run has produced a handle
+			// and in a deployment that cannot carry context at all, where the
+			// handle is withheld deliberately.
 			payload, err := resolve(first)
 			if err != nil {
 				return WorkUnit{}, nil, false, err
@@ -255,7 +275,10 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 				joined + "\n```\nRe-assess with your previous context: has anything changed? Update the diagnosis or proposed fix if needed; keep it short if nothing changed."
 		}
 		unit.RunID = runID + "-resume"
-		unit.ResumeSessionID = c.Status.SessionID
+		// Both names for one release: the current one, and the retired spelling
+		// so a runtime image upgrades independently of the manager.
+		unit.RuntimeContextID = contextID
+		unit.ResumeSessionID = contextID
 		vars := map[string]string{"USER_REPLY": joined, "AGENT_NAME": agentName, "DELIVERY_INSTRUCTIONS": deliverySection}
 		if profile.Spec.ReplyPrompt != "" {
 			unit.PromptFile = profile.Spec.ReplyPrompt

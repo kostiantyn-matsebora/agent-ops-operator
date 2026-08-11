@@ -73,6 +73,20 @@ spec:
                 items:
                   type: string
                 type: array
+              contextStorage:
+                default: volume
+                description: |-
+                  ContextStorage declares where this runtime keeps a conversation's context,
+                  so the manager can tell whether continuity is possible here BEFORE
+                  promising it. A runtime keeping context on its home volume, in a
+                  deployment that provides none, can never continue anything — and saying
+                  that up front is what stops every follow-up failing for a reason the
+                  operator already chose.
+                enum:
+                - volume
+                - external
+                - none
+                type: string
               env:
                 description: 'Env: extra environment for every worker of this runtime.'
                 items:

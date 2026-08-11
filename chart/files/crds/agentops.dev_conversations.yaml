@@ -394,10 +394,37 @@ spec:
                   - status
                   type: object
                 type: array
+              runtimeContextId:
+                description: |-
+                  RuntimeContextID is the RUNTIME's opaque handle for this conversation's
+                  accumulated context — every message, tool call and model response it has
+                  built up. The manager stores it and hands it back on the next work unit;
+                  it never interprets it and never assumes where the context lives (session
+                  files on a volume, a thread id at a vendor API, rows in a database are all
+                  valid, and none of them are distinguishable from here).
+
+                  Named for what agent-ops means, not for one backend's word: "session" is
+                  claude-code's noun, and a vendor's noun in this API would teach every later
+                  reader that the operator knows what is inside the handle.
+
+                  LATEST-WINS. Every completed run's reported handle replaces this one. It
+                  was write-once, which was unsound: a run may legitimately end in a
+                  different context than it was asked to continue, and keeping the first
+                  handle then named something that no longer existed — so every later
+                  message repeated the same failed continuation and one recoverable loss
+                  became permanent.
+                type: string
               runtimePod:
                 type: string
               sessionId:
-                description: Agent session id (resume handle).
+                description: |-
+                  SessionID is the former name of RuntimeContextID.
+
+                  DEPRECATED, and retained for exactly one release so the rename cannot do
+                  the harm this field exists to prevent: it is still DECODED, so a
+                  conversation written by an older manager is adopted rather than losing its
+                  handle at the moment of upgrade. Readers must prefer RuntimeContextID and
+                  fall back to this; writers must only ever set RuntimeContextID.
                 type: string
               threads:
                 description: 'Threads: one binding per bound channel whose topic has

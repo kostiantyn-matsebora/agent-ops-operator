@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,6 +45,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/ingest"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
 )
 
 // StateAnnotationPrefix namespaces adapter cursor state kept as Channel
@@ -56,6 +58,12 @@ type Server struct {
 	Reader    client.Reader // APIReader: strong reads for dispatch state
 	Namespace string
 	Addr      string
+
+	// Runtime is the bootstrap execution config, the same fallback the
+	// reconciler builds pods from. Dispatch needs it to answer ONE question
+	// before promising continuity: does this deployment give the runtime
+	// anywhere to keep a conversation's context?
+	Runtime runtimepod.Config
 
 	// Channel adapter contract. AdapterToken guards /channel/*; empty
 	// disables the surface (503) — the manager reads it from env, never from
@@ -83,6 +91,9 @@ type Server struct {
 	MaxQueuedConversations int
 
 	cooldowns map[string]*ingest.Cooldown
+
+	breakerOnce sync.Once
+	continuity  *continuityBreaker
 }
 
 // defaultMaxQueuedConversations is the pending-backlog bound when unset.
@@ -320,7 +331,30 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
-	unit, ids, ok, err := dispatch.Next(&conv, &profile, tools, s.resolvePayload(ctx, s.Namespace), time.Now())
+	// Continuity is PROMISED ONLY WHERE IT IS POSSIBLE. A runtime that keeps
+	// context on its home volume, in a deployment providing none, can never
+	// continue anything — the pod exits on its idle timeout and takes the context
+	// with it. Withholding the handle makes that conversation single-run by
+	// declaration: it answers each message fresh and says so, instead of failing
+	// every follow-up for a configuration the operator deliberately chose.
+	contextID := ""
+	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Namespace, &profile, s.Runtime)
+	if err != nil {
+		return dispatch.WorkUnit{}, false, err
+	}
+	if resolved.ContinuityPossible() {
+		contextID = conv.ContextID()
+	}
+	// While contexts are unreachable across the install, dispatching a
+	// continuation only reproduces the failure and spends the message. Hold it:
+	// the input stays pending and goes out with its context once the store
+	// answers again. A conversation with nothing to continue is unaffected.
+	if contextID != "" {
+		if open, _ := s.breaker().Open(); open {
+			return dispatch.WorkUnit{}, false, nil
+		}
+	}
+	unit, ids, ok, err := dispatch.Next(&conv, &profile, tools, s.resolvePayload(ctx, s.Namespace), time.Now(), contextID)
 	if err != nil || !ok {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -385,13 +419,49 @@ func (s *Server) runtimeName(ctx context.Context, profile *agentopsv1alpha1.Agen
 }
 
 type workDone struct {
-	Convo     string `json:"convo"`
-	RunID     string `json:"runId"`
-	Status    string `json:"status"`
-	ExitCode  *int32 `json:"exitCode,omitempty"`
+	Convo    string `json:"convo"`
+	RunID    string `json:"runId"`
+	Status   string `json:"status"`
+	ExitCode *int32 `json:"exitCode,omitempty"`
+	// RuntimeContextID is the handle for the context this run leaves behind —
+	// the one to continue next time. Runtimes may report it on a FAILED run too:
+	// a crash after the context was established should not strand it.
+	RuntimeContextID string `json:"runtimeContextId,omitempty"`
+	// SessionID is the retired spelling, accepted for one release so an older
+	// runtime image keeps working. DEPRECATED.
 	SessionID string `json:"sessionId,omitempty"`
-	Result    string `json:"result,omitempty"`
+	// Continuity says what happened to the context this run was asked to
+	// continue: "continued", "new", or "unavailable" (a new one was needed
+	// because the named context could not be reached).
+	//
+	// The manager cannot infer this. It sends a handle and receives a handle;
+	// when they differ it has no way to tell an agent that branched deliberately
+	// from one that was forced to start over. The runtime knows, because it is
+	// the component that tried.
+	//
+	// ABSENT MEANS NO CLAIM: a runtime that does not implement it keeps today's
+	// behaviour, because an addition to the contract must not make an existing
+	// runtime look broken.
+	Continuity string `json:"continuity,omitempty"`
+	// ContinuityReason is free text from the runtime explaining why a context
+	// could not be continued. Recorded VERBATIM — the manager does not know
+	// where any given runtime keeps its context, so any explanation it invented
+	// would be confident and sometimes wrong.
+	ContinuityReason string `json:"continuityReason,omitempty"`
+	Result           string `json:"result,omitempty"`
 }
+
+// Continuity report values. Runtime-agnostic by construction: they describe what
+// happened to a CONTEXT, naming no session, no flag and no storage medium.
+const (
+	// ContinuityContinued: the run continued the context it was given.
+	ContinuityContinued = "continued"
+	// ContinuityNew: the run started a new context, having been given none.
+	ContinuityNew = "new"
+	// ContinuityUnavailable: the run was given a handle and could not reach the
+	// context it named. This is the one that means context was LOST.
+	ContinuityUnavailable = "unavailable"
+)
 
 func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -412,13 +482,75 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// reported by the runtime: a runtime that lies or has a skewed clock would
 	// otherwise put a fiction on the graph.
 	var latencyMs int64
+	// An unavailable context during an OUTAGE holds its work instead of losing
+	// it: the input stays pending so it can be dispatched once contexts are
+	// reachable again, with the context it was always meant to continue.
+	// Consuming it here would spend the message on a failure the infrastructure
+	// caused.
+	hold := false
+	if d.Continuity == ContinuityUnavailable {
+		hold = s.breaker().Report()
+	}
 	if conv.Status.Inflight != nil && conv.Status.Inflight.RunID == d.RunID {
 		latencyMs = now.Sub(conv.Status.Inflight.DispatchedAt.Time).Milliseconds()
-		conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
+		if !hold {
+			conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
+		}
 		conv.Status.Inflight = nil
 	}
-	if d.SessionID != "" && conv.Status.SessionID == "" {
-		conv.Status.SessionID = d.SessionID
+	// LATEST-WINS, and recorded on a FAILED run too.
+	//
+	// This was write-once, which was unsound: a run may legitimately end in a
+	// different context than it was asked to continue, and keeping the first
+	// handle then named something that no longer existed. Because dispatch and
+	// ingest both key off it, every later message repeated the same failed
+	// continuation — one recoverable loss became permanent. Recording on failure
+	// matters for the same reason: a crash after the context was established
+	// otherwise strands it, and the next message starts over.
+	// Both spellings on the wire too, for the same one release: a runtime image
+	// upgrades independently of the manager, so an older one still reporting the
+	// retired name must not have its handle silently dropped.
+	reported := d.RuntimeContextID
+	if reported == "" {
+		reported = d.SessionID
+	}
+	if reported != "" {
+		conv.SetContextID(reported)
+	}
+	// Context continuity, recorded where anyone can see it. This is the one
+	// failure that leaves a conversation looking entirely healthy — same phase,
+	// same run history, answers still arriving — while every answer is given
+	// without memory. Every other health fact about a conversation is a
+	// condition, so this is one too.
+	//
+	// ABSENT report = no claim: a runtime that does not implement it leaves the
+	// condition untouched rather than appearing to have lost something.
+	switch d.Continuity {
+	case ContinuityUnavailable:
+		reason := d.ContinuityReason
+		if reason == "" {
+			reason = "the runtime could not reach the context it was given"
+		}
+		condReason := "ContextUnavailable"
+		if hold {
+			// Not this conversation's loss: contexts are unreachable across the
+			// install, so the work waits rather than being written off.
+			condReason = "ContextStoreUnavailable"
+			reason = "held: contexts are unreachable across this install, so this " +
+				"message waits rather than being answered without its history — " + reason
+		}
+		apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
+			Type: controller.ConditionContextContinuity, Status: metav1.ConditionFalse,
+			Reason: condReason, Message: reason,
+		})
+	case ContinuityContinued:
+		s.breaker().Continued()
+		// Recovered: the condition describes the present, not a history of every
+		// hiccup the conversation ever had.
+		apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
+			Type: controller.ConditionContextContinuity, Status: metav1.ConditionTrue,
+			Reason: "Continued", Message: "the run continued this conversation's context",
+		})
 	}
 	result := d.Result
 	if len(result) > 2000 {
