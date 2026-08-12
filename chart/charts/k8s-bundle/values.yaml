@@ -1,8 +1,9 @@
 # Kubernetes agent bundle: cluster Events → conversations, the agent that
-# answers them, and its Kubernetes tooling. Three independently toggleable
-# components. The WHOLE bundle is off by default and is turned on either
-# directly (`enabled: true`) or by demo mode (`global.demo.enabled: true`) —
-# demo mode means exactly "this bundle with its defaults", nothing more.
+# answers them, its Kubernetes tooling, and the route that connects the three.
+# Four independently toggleable components. The WHOLE bundle is off by default
+# and is turned on either directly (`enabled: true`) or by demo mode
+# (`global.demo.enabled: true`) — demo mode means exactly "this bundle with its
+# defaults", nothing more.
 # Override under the `k8s-bundle:` key of the parent chart's values.
 #
 # The bundle ships NO SUBSTRATE: no AgentRuntime, no runtime ServiceAccount, no
@@ -13,8 +14,9 @@
 enabled: false
 
 # The cluster Events ingest lane: adapter implementation, the RBAC its
-# ServiceAccount needs, and the source. NOT the wiring — see `pipelines:` in
-# the parent chart.
+# ServiceAccount needs, and the source. NOT the wiring — that is the
+# `pipelines:` component at the bottom of this file (off unless you or demo mode
+# ask for it), or the parent chart's own `pipelines:`.
 eventsAdapter:
   enabled: true
   # SignalAdapter CR name — also the ROUTING KEY: SignalSources select this
@@ -40,10 +42,10 @@ eventsAdapter:
     # false = a namespaced Role instead, limiting the adapter to events in the
     # release namespace.
     clusterWide: true
-  # The cluster Events source. It is INERT until a Pipeline claims it —
-  # wiring is pipeline-only and no bundle ships wiring, so declare the claim
-  # under the parent chart's `pipelines:` or the source drops every event with
-  # Wired=False.
+  # The cluster Events source. It is INERT until a Pipeline claims it — wiring
+  # is pipeline-only, so either turn the `pipelines:` component below on (demo
+  # mode does) or declare the claim under the parent chart's `pipelines:`.
+  # Unclaimed, the source drops every event with Wired=False.
   source:
     create: true
     # SignalSource CR name — name it in a pipeline's signalSources.
@@ -223,8 +225,8 @@ profile:
   enabled: true
   name: k8s-engineer
   # Identity only, and identity ONLY: no repository, no capabilities. What this
-  # agent may do comes from whichever Pipeline originates the conversation, and
-  # Pipelines are declared under the parent chart's `pipelines:`.
+  # agent may do comes from whichever Pipeline originates the conversation —
+  # the `pipelines:` component below, or one declared in the parent chart.
   #
   # This profile has NO repository, so `agent` can name no
   # .claude/agents/<name>.md — there is nothing checked out to read. Without the
@@ -265,8 +267,9 @@ profile:
 
 # Structured Kubernetes access as MCP tools — the same two halves vm-bundle
 # ships for VictoriaMetrics: an MCPConfig (the server) and an MCPToolset (the
-# permission to call it). Name both from a `pipelines:` entry in the parent
-# chart — servers without the toolset give an agent tools it may not call.
+# permission to call it). The `pipelines:` component below binds both when it
+# renders; any other route must name them itself, because a server without the
+# toolset gives an agent tools it may not call.
 #
 # REQUIRED for cluster access, not an optimisation. Runtime image 0.5.0 dropped
 # kubectl, so with this component off the agent cannot see the cluster at all,
@@ -411,3 +414,57 @@ mcpServers:
   # Extra env passthrough (the flags above are passed as args, not env).
   env: []
   resources: {}
+
+# The bundle's OWN wiring — the one component that spends money and touches the
+# cluster by itself. It renders a Pipeline claiming the source above with the
+# profile above, so an install that turns this bundle on answers events instead
+# of dropping them at Wired=False.
+#
+# OFF unless you ask, with ONE exception: demo mode turns it on, because a demo
+# whose whole promise is "one flag, a working install" cannot end with a
+# hand-written CR. Everywhere else the parent chart's `pipelines:` stays the
+# normal place an install declares routes — a bundle enabled for its adapter and
+# profile must never silently acquire a second route beside the one you wrote.
+#
+# `null` = that rule (off; on under demo mode). An explicit boolean is absolute
+# in BOTH directions, and `false` is the documented opt-out for a demo install
+# that wants the parts without the route.
+#
+# The bundle may ship this at all only because it owns the whole lane: it renders
+# the source, the profile and both toolsets, so the only object it does not
+# render is a channel — and that is values-supplied and omitted when unset. A
+# bundle whose route spanned other components could not, and telegram-bundle and
+# vm-bundle still ship none.
+pipelines:
+  enabled: null
+  # TWO routes, differing in exactly one binding — the mutating toolset. At most
+  # one renders by default.
+  #
+  # `enabled: null` on each DERIVES from global.agentops.runtime.rbacMode, the
+  # same value mcpServers.readOnly, the server SA's RBAC mode and the k8s-admin
+  # toolset already follow: `full` renders the acting route, every other mode —
+  # readonly, none and unset — renders the observing one. One posture, four
+  # consistent effects, rather than a knob to keep in sync by hand.
+  #
+  # An explicit boolean wins in both directions, and BOTH may be true at once:
+  # that is allowed, not blocked, because signal sources are shareable. Know
+  # what it costs — two Ready Pipelines claiming one source open TWO
+  # conversations per admitted event, under two profiles' worth of capability,
+  # and both agents act. Two bills, two blast radii, one event.
+  observe:
+    enabled: null
+    # Reads the cluster, changes nothing.
+    name: k8s-observe
+  admin:
+    enabled: null
+    # Named k8s-operate, not k8s-admin: k8s-admin is already the MCPToolset this
+    # route binds, and "bind k8s-admin on k8s-admin" is a sentence nobody should
+    # have to parse.
+    name: k8s-operate
+  # Channels to deliver to, BY NAME — the one class of object this bundle does
+  # not render, so it is values-supplied and the key is omitted entirely when
+  # this list is empty. Empty is a working configuration, not a degraded one:
+  # with no thread to wait for, the conversation dispatches immediately and the
+  # answer is read from status.runs[].result. Name one (say the console's
+  # channel) to have it delivered somewhere a person is looking.
+  channels: []

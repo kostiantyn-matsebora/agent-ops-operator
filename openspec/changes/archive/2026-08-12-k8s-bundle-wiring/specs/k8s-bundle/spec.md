@@ -1,9 +1,84 @@
-# k8s-bundle
+## ADDED Requirements
 
-## Purpose
+### Requirement: The wiring component ships at most one claiming Pipeline, off by default
+The bundle SHALL offer a fourth component — its own wiring — rendering a
+`Pipeline` that claims the bundle's `cluster-events` source and names the
+bundle's `k8s-engineer` profile. `pipelines.enabled` SHALL default to `false`,
+and SHALL be forced on by `global.demo.enabled` exactly as every other bundle
+template is self-gated. The component SHALL render only when the profile
+component renders, since a Pipeline with no profile has no agent to run.
 
-The Kubernetes agent Helm subchart composition at `chart/charts/k8s-bundle/`: packages the k8s events signal source, the `k8s-engineer` profile, and the Kubernetes MCP tooling as three individually toggleable components. It ships no execution substrate: the runtime, its ServiceAccount, its credential and that SA's RBAC are the parent chart's (`agent-runtime-ownership`). Self-gated and off by default, it is also what demo mode turns on — demo mode is an enablement path for the bundle's read-only defaults, not a distinct feature set.
-## Requirements
+The component SHALL offer TWO routes, differing in one binding:
+
+- an OBSERVING route binding the built-in observation toolset, the bundle's read
+  toolset and the bundle's `MCPConfig` — an agent that reads the cluster and
+  changes nothing;
+- an ACTING route binding the same plus the bundle's mutating toolset.
+
+Which route renders SHALL DERIVE from `global.agentops.runtime.rbacMode`, the
+same value the MCP server's read-only flag, the server SA's RBAC mode and the
+mutating toolset already follow: `full` renders the acting route, and every
+other mode — `readonly`, `none`, and unset — renders the observing route.
+Explicit per-route values SHALL win in both directions.
+
+Rendering both routes SHALL be possible and SHALL NOT fail: two Ready Pipelines
+claiming one source is a supported shape. It SHALL be documented for what it
+is — one event opening two conversations, under two profiles, with two agents
+acting.
+
+Every reference the Pipeline makes to an object the bundle does not itself
+render SHALL be a values-supplied name, omitted when unset. Channels SHALL be
+such a list and SHALL default to empty; with none bound, the conversation
+dispatches without waiting and its answer is readable from
+`status.runs[].result`. A ref to a bundle component that is turned off SHALL be
+omitted rather than dangling, so a route with the MCP component disabled renders
+without cluster tooling instead of naming an MCPConfig nobody created.
+
+#### Scenario: Default install renders no wiring
+- **WHEN** the bundle is enabled with `k8s-bundle.enabled=true` and defaults
+- **THEN** no `Pipeline` renders, the source reports `Wired=False`, and the
+  install's own `pipelines:` remain the only routes
+
+#### Scenario: Demo mode renders the observing route
+- **WHEN** the chart is installed with `global.demo.enabled=true` and nothing
+  else
+- **THEN** exactly one `Pipeline` renders, claiming `cluster-events` with the
+  read toolset and the `MCPConfig` and WITHOUT the mutating toolset
+- **AND** an admitted event opens a conversation with no further configuration
+
+#### Scenario: A write-capable release renders the acting route
+- **WHEN** wiring is active and `global.agentops.runtime.rbacMode` is `full`
+- **THEN** the acting route renders instead of the observing one, binding the
+  mutating toolset that the write-mode server registers
+- **AND** exactly one Pipeline claims the source
+
+#### Scenario: An explicit route value overrides the derivation
+- **WHEN** an operator sets the acting route's enable value explicitly under a
+  `readonly` release, or disables it explicitly under `full`
+- **THEN** the explicit value decides, in both directions
+
+#### Scenario: Both routes are asked for
+- **WHEN** an operator enables both routes explicitly
+- **THEN** both Pipelines render and one admitted event opens two conversations,
+  and the render does not fail
+
+#### Scenario: Wiring is declined while the bundle stays on
+- **WHEN** `pipelines.enabled=false` is set under `global.demo.enabled=true`
+- **THEN** no Pipeline renders and every other bundle component is unaffected
+
+#### Scenario: A channel is named
+- **WHEN** `pipelines.channels` names an existing Channel
+- **THEN** the rendered Pipeline carries that `channelRefs` entry; with the list
+  empty the field is absent, not empty-valued
+
+#### Scenario: The install also claims the source
+- **WHEN** bundle wiring is active and an install-declared Pipeline also lists
+  the bundle's source
+- **THEN** both render, and the chart's post-install notes state that each event
+  now opens two conversations
+
+## MODIFIED Requirements
+
 ### Requirement: The k8s bundle ships as a self-gated subchart, off by default and on in demo mode
 A Helm subchart at `chart/charts/k8s-bundle/` SHALL package the Kubernetes agent experience as four components — events signal source, k8s-engineer profile, its MCP tooling, and its own wiring. Every bundle template SHALL gate on `enabled OR global.demo.enabled` (self-gating, not a Helm `condition:`), with `k8s-bundle.enabled` defaulting to `false`. The parent chart's demo toggle SHALL live at `global.demo.enabled` and there SHALL be no `chart/templates/demo.yaml` — demo mode means exactly "the bundle with its defaults", which includes read-only RBAC resolved by the parent AND the bundle's observing route. Explicit `k8s-bundle.*` values SHALL still apply when enabled via demo.
 
@@ -131,109 +206,3 @@ Because the profile has NO repository, no agent definition file can be resolved 
 #### Scenario: The repo-less agent still has a role
 - **WHEN** the bundle renders with defaults
 - **THEN** the AgentProfile carries an inline role describing the agent's job and how to act on a cluster, which the runtime appends to its system prompt
-
-### Requirement: Demo values migrate to bundle paths
-The pre-bundle demo values SHALL move: `demo.enabled` → `global.demo.enabled`, `demo.readOnlyRbac` → `global.agentops.runtime.rbacMode` (true ≙ `readonly`). The runtime-shaped demo values SHALL land in the parent's `runtime:` block rather than in this bundle: `demo.runtimeImage` → `runtime.image`, `demo.credentialsSecret.*` → `runtime.credentialsSecret.*`, inherited `persistence` → automatic, inherited `runtimeIdleTtlMinutes` → the manager default with `runtime.idleTtlMinutes` as an override.
-
-The chart major version SHALL be bumped and the README SHALL carry a migration table covering BOTH hops, so an operator who moved a value into `k8s-bundle.profile.runtime.*` in 2.x can find where it went. That table SHALL lead with the two upgrade-visible effects that are not value renames: the runtime ServiceAccount changes name (bundle-named bindings are replaced by global-named ones), and an install that enabled the bundle without configuring MCP gains an MCP server workload.
-
-Upgrading SHALL preserve semantics: the `AgentRuntime` named `default` re-renders equivalently from the parent, so existing conversations keep resolving their runtime.
-
-#### Scenario: Upgraded demo release keeps working
-- **WHEN** a release running chart 3.x with the bundle enabled upgrades and adopts the new values paths
-- **THEN** the agent flow works unchanged — now reached by posting a `kind: task` signal to the bundle's events source, which the install's Pipeline claims — the `default` runtime re-renders from the parent, and the bundle-named ServiceAccount and its bindings are removed by the upgrade
-
-#### Scenario: Both migration hops are findable
-- **WHEN** an operator looks up a value they set at `k8s-bundle.profile.runtime.*`
-- **THEN** the migration table names its 4.0 location, rather than only documenting the 1.x → 2.x hop
-
-### Requirement: The events component exposes maintenance windows as values
-The bundle SHALL expose the events source's time intervals and mute references as chart values, so a recurring maintenance window is release configuration rather than a hand-edited CR that the next upgrade overwrites.
-
-The shipped example SHALL name an IANA location rather than relying on the UTC default, because the value most likely to be copied unchanged is the one that must not be wrong.
-
-#### Scenario: A maintenance window survives an upgrade
-- **WHEN** an operator declares a nightly window in the bundle's values and upgrades the release
-- **THEN** the rendered SignalSource carries the window, unchanged by the upgrade
-
-#### Scenario: No window is configured by default
-- **WHEN** the bundle renders with default values
-- **THEN** the source declares no time intervals and nothing is muted
-
-### Requirement: The wiring component ships at most one claiming Pipeline, off by default
-The bundle SHALL offer a fourth component — its own wiring — rendering a
-`Pipeline` that claims the bundle's `cluster-events` source and names the
-bundle's `k8s-engineer` profile. `pipelines.enabled` SHALL default to `false`,
-and SHALL be forced on by `global.demo.enabled` exactly as every other bundle
-template is self-gated. The component SHALL render only when the profile
-component renders, since a Pipeline with no profile has no agent to run.
-
-The component SHALL offer TWO routes, differing in one binding:
-
-- an OBSERVING route binding the built-in observation toolset, the bundle's read
-  toolset and the bundle's `MCPConfig` — an agent that reads the cluster and
-  changes nothing;
-- an ACTING route binding the same plus the bundle's mutating toolset.
-
-Which route renders SHALL DERIVE from `global.agentops.runtime.rbacMode`, the
-same value the MCP server's read-only flag, the server SA's RBAC mode and the
-mutating toolset already follow: `full` renders the acting route, and every
-other mode — `readonly`, `none`, and unset — renders the observing route.
-Explicit per-route values SHALL win in both directions.
-
-Rendering both routes SHALL be possible and SHALL NOT fail: two Ready Pipelines
-claiming one source is a supported shape. It SHALL be documented for what it
-is — one event opening two conversations, under two profiles, with two agents
-acting.
-
-Every reference the Pipeline makes to an object the bundle does not itself
-render SHALL be a values-supplied name, omitted when unset. Channels SHALL be
-such a list and SHALL default to empty; with none bound, the conversation
-dispatches without waiting and its answer is readable from
-`status.runs[].result`. A ref to a bundle component that is turned off SHALL be
-omitted rather than dangling, so a route with the MCP component disabled renders
-without cluster tooling instead of naming an MCPConfig nobody created.
-
-#### Scenario: Default install renders no wiring
-- **WHEN** the bundle is enabled with `k8s-bundle.enabled=true` and defaults
-- **THEN** no `Pipeline` renders, the source reports `Wired=False`, and the
-  install's own `pipelines:` remain the only routes
-
-#### Scenario: Demo mode renders the observing route
-- **WHEN** the chart is installed with `global.demo.enabled=true` and nothing
-  else
-- **THEN** exactly one `Pipeline` renders, claiming `cluster-events` with the
-  read toolset and the `MCPConfig` and WITHOUT the mutating toolset
-- **AND** an admitted event opens a conversation with no further configuration
-
-#### Scenario: A write-capable release renders the acting route
-- **WHEN** wiring is active and `global.agentops.runtime.rbacMode` is `full`
-- **THEN** the acting route renders instead of the observing one, binding the
-  mutating toolset that the write-mode server registers
-- **AND** exactly one Pipeline claims the source
-
-#### Scenario: An explicit route value overrides the derivation
-- **WHEN** an operator sets the acting route's enable value explicitly under a
-  `readonly` release, or disables it explicitly under `full`
-- **THEN** the explicit value decides, in both directions
-
-#### Scenario: Both routes are asked for
-- **WHEN** an operator enables both routes explicitly
-- **THEN** both Pipelines render and one admitted event opens two conversations,
-  and the render does not fail
-
-#### Scenario: Wiring is declined while the bundle stays on
-- **WHEN** `pipelines.enabled=false` is set under `global.demo.enabled=true`
-- **THEN** no Pipeline renders and every other bundle component is unaffected
-
-#### Scenario: A channel is named
-- **WHEN** `pipelines.channels` names an existing Channel
-- **THEN** the rendered Pipeline carries that `channelRefs` entry; with the list
-  empty the field is absent, not empty-valued
-
-#### Scenario: The install also claims the source
-- **WHEN** bundle wiring is active and an install-declared Pipeline also lists
-  the bundle's source
-- **THEN** both render, and the chart's post-install notes state that each event
-  now opens two conversations
-

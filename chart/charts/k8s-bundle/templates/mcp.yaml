@@ -1,7 +1,7 @@
 {{- /*
 MCP component: the two halves of Kubernetes tooling, both referencable by name
-from any Pipeline (the bundle's own events Pipeline binds them automatically —
-see events.yaml).
+from any Pipeline (the bundle's own wiring binds them when it renders — see
+pipelines.yaml).
 
   MCPConfig  k8s-api            -> the server the agent connects to
   MCPToolset k8s-observability  -> permission to call mcp__kubernetes__*

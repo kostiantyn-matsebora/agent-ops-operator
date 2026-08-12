@@ -65,6 +65,65 @@ the two-identity design exists to offer. */ -}}
 {{- end -}}
 {{- end -}}
 
+{{- /* Whether the bundle renders wiring of its own. Returns "true" or "".
+
+Bundles normally ship none: a route names objects from several components and
+only the parent sees them all. This bundle is the exception because it owns its
+whole lane — source, profile and both toolsets — so the ONLY foreign name a
+route needs is a channel, which is values-supplied and omitted when unset.
+
+It still defaults OFF, and that default is the load-bearing part: enabling this
+bundle for its adapter and profile must never silently add a second route beside
+the one the install declared. Demo mode is the one path that forces it on,
+because "one flag, a working install" is the whole promise, and an install that
+answers nothing until you hand-write a CR does not keep it.
+
+`null` means that rule; an explicit boolean is absolute in both directions, so
+`pipelines.enabled: false` is the opt-out even under demo mode. That is why this
+value is nullable and `enabled` on the other components is not — theirs never
+have to disagree with demo mode. */ -}}
+{{- define "k8s-bundle.wiringActive" -}}
+{{- if include "k8s-bundle.active" . -}}
+{{- if kindIs "bool" .Values.pipelines.enabled -}}
+{{- if .Values.pipelines.enabled }}true{{ end -}}
+{{- else if dig "demo" "enabled" false (.Values.global | default dict) -}}
+true
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* Whether the OBSERVING route renders. Returns "true" or "".
+
+Explicit wins; otherwise it derives from the release's single posture value, for
+the same reason mcpServers.readOnly does: the two routes differ in one binding,
+so rendering both by default would make every event open two conversations, one
+of which can mutate the cluster. Deriving picks exactly one and keeps it
+consistent with the server and the toolset the same mode already decided. */ -}}
+{{- define "k8s-bundle.observePipelineEnabled" -}}
+{{- $o := .Values.pipelines.observe -}}
+{{- if kindIs "bool" $o.enabled -}}
+{{- if $o.enabled }}true{{ end -}}
+{{- else if ne (include "agentops.runtimeRbacMode" .) "full" -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{- /* Whether the ACTING route renders. Returns "true" or "". The mirror of the
+above: derived on only under `full`, where the server registers mutating tools
+and the k8s-admin toolset exists for a route to bind.
+
+Explicit true under a read-only release still renders the route — the value is
+absolute in both directions — but it binds no mutating toolset, because none was
+created. Degraded and honest beats a ref to an object nobody rendered. */ -}}
+{{- define "k8s-bundle.adminPipelineEnabled" -}}
+{{- $a := .Values.pipelines.admin -}}
+{{- if kindIs "bool" $a.enabled -}}
+{{- if $a.enabled }}true{{ end -}}
+{{- else if eq (include "agentops.runtimeRbacMode" .) "full" -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- /* Whether the mutating toolset exists. Explicit values win; otherwise it
 follows the deployed server, because granting tool names a --read-only server
 never registers is how an allowlist rots into fiction. With the derivation

@@ -19,8 +19,8 @@ metadata:
     app.kubernetes.io/name: agentops-k8s-bundle
 spec:
   # Identity only — no repository, and no capabilities. What this agent may DO
-  # comes from the Pipelines routing it, declared under the parent chart's
-  # `pipelines:` — this bundle ships none.
+  # comes from the Pipelines routing it: the bundle's own wiring component when
+  # it is on, otherwise whatever the install declared.
   maxTurns: {{ $p.maxTurns }}
   {{- with $p.systemPrompt }}
   # Inline role, because this profile has no repository to hold a definition

@@ -4,16 +4,18 @@ The Kubernetes subchart: cluster Events, the agent that answers them, and its MC
 
 
 `chart/charts/k8s-bundle/` packages the whole "watch my cluster and let an agent
-act on what it sees" experience as three independently toggleable components.
+act on what it sees" experience as four independently toggleable components.
 Off by default; `global.demo.enabled=true` and `k8s-bundle.enabled=true` are
-equivalent ways to turn it on.
+equivalent ways to turn it on — except for the wiring component, which demo mode
+turns on and `enabled: true` does not.
 
 | Component | Flag | What it renders |
 |---|---|---|
-| Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), RBAC bound to its ServiceAccount (`events get/list/watch` plus read-only `pods`/`replicasets`), and — under `source.create` — a `SignalSource`. **Not the Pipeline**: claim it under `pipelines:` |
+| Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), RBAC bound to its ServiceAccount (`events get/list/watch` plus read-only `pods`/`replicasets`), and — under `source.create` — a `SignalSource`. **Not the claim on it**: that is the wiring component, or your own `pipelines:` |
 | Profile | `profile.enabled` | Exactly one object: the `k8s-engineer` `AgentProfile` (identity only, with an inline `systemPrompt` role) |
-| MCP tooling | `mcp.enabled` (**on**) | An `MCPConfig` (`k8s-api`, server key `kubernetes`) and an `MCPToolset` (`k8s-observability`), bound by whichever Pipeline you declare — see below |
+| MCP tooling | `mcp.enabled` (**on**) | An `MCPConfig` (`k8s-api`, server key `kubernetes`) and an `MCPToolset` (`k8s-observability`), bound by the wiring component or by whichever Pipeline you declare — see below |
 | MCP server | `mcpServers.enabled` (**on**) | The MCP server workload itself: `Deployment` + `Service` (`agentops-mcp-k8s`), **its own `ServiceAccount`**, and that SA's RBAC |
+| Wiring | `pipelines.enabled` (**off**, on under demo) | One `Pipeline` claiming the source above with the profile above and both toolsets — see [The bundle's own wiring](#the-bundles-own-wiring) |
 
 **The bundle ships no substrate.** There is no `AgentRuntime`, no runtime
 ServiceAccount, no LLM credential Secret and no runtime RBAC here: those are
@@ -26,21 +28,96 @@ points it at a different one you applied yourself.
 
 Two things worth knowing:
 
-- **The source renders without wiring.** Claim it under the parent chart's
-  `pipelines:`, or it reports `Wired=False` and drops every event. Wiring is
-  pipeline-only, so a `SignalSource` nobody claims reports `Wired=False` and
-  drops every event. Shipping the source alone would look installed and do
-  nothing.
+- **The source is inert until something claims it.** Wiring is pipeline-only, so
+  a `SignalSource` nobody claims reports `Wired=False` and drops every event.
+  Either turn the wiring component on (demo mode does) or declare the claim
+  under the parent chart's `pipelines:` — the latter is what you want when one
+  agent should answer this source *and* a chat surface.
 - **`global.agentops.runtime.rbacMode: full` is cluster-admin.** It binds
   unrestricted cluster control to an LLM-driven agent, and — because the MCP
-  server derives from it — hands the same power to the second identity too. It
-  is never a default and never what demo mode selects. `readonly` plus targeted
-  grants under the parent chart's `rbac.runtime` block is almost always the
-  better answer.
+  server and the bundle's own route both derive from it — hands the same power to
+  the second identity and picks the mutating route too. It is never a default and
+  never what demo mode selects. `readonly` plus targeted grants under the parent
+  chart's `rbac.runtime` block is almost always the better answer.
 - **Withholding shell is per-route**: bind
   `toolsets: {refs: [{name: agentops-observe}]}` on one Pipeline and only that
   route loses `Bash`, while every other route sharing the profile keeps it.
-  The bundle ships no Pipeline, so every route is one you declared.
+
+## The bundle's own wiring
+
+Bundles normally ship no `Pipeline`: a route names a profile, sources and
+channels that routinely come from *different* components, and a subchart sees
+only itself, so one that shipped wiring could only ever wire itself.
+`telegram-bundle` and `vm-bundle` therefore ship none.
+
+This bundle is the exception, because it owns its whole lane — it renders the
+source, the profile, the `MCPConfig` and both toolsets. The only class of object
+a route needs and this bundle cannot see is a channel, and that is supplied by
+name and omitted when unset.
+
+It is still **off unless you ask**, with one exception: `global.demo.enabled`
+turns it on, because "one flag, a working install" is the whole promise and an
+install that answers nothing until you hand-write a CR does not keep it.
+
+```sh
+# demo: the route comes with it
+--set global.demo.enabled=true
+# demo without the route — the parts, none of the spend
+--set global.demo.enabled=true --set k8s-bundle.pipelines.enabled=false
+# a non-demo install that wants the bundle to wire itself anyway
+--set k8s-bundle.enabled=true --set k8s-bundle.pipelines.enabled=true
+```
+
+`pipelines.enabled` is `null` by default, meaning "off, except under demo". An
+explicit boolean is absolute in **both** directions — which is why `false` is a
+working opt-out under demo mode, and the one in the CHANGELOG.
+
+### Which route renders
+
+Two routes, differing in exactly one binding, selected by the same posture value
+everything else in this bundle already follows:
+
+| `global.agentops.runtime.rbacMode` | route | binds | what it can do |
+|---|---|---|---|
+| `readonly`, `none`, `""` (incl. demo) | `k8s-observe` | `agentops-observe`, `k8s-observability`, `k8s-api` | reads the cluster, changes nothing |
+| `full` | `k8s-operate` | the same **plus `k8s-admin`** | mutates the cluster |
+
+`pipelines.observe.enabled` / `pipelines.admin.enabled` are explicit booleans
+that win in both directions. The derivation exists for the same reason
+`mcpServers.readOnly` derives: an operator who sets `full`, gets a write-capable
+server and a rendered `k8s-admin` toolset, and a route binding neither, has been
+granted cluster-admin they cannot use.
+
+The CR is named `k8s-operate` rather than `k8s-admin` because `k8s-admin` is
+already the `MCPToolset` it binds, and "bind `k8s-admin` on `k8s-admin`" is a
+sentence nobody should have to parse.
+
+**Both at once is allowed, and it fans out.** Sources are shareable — there is
+no conflict condition and no tiebreak — so two Ready Pipelines claiming
+`cluster-events` open **two conversations per admitted event**, under two
+profiles' worth of capability, and both agents act. Two bills, two blast radii,
+one event. The same applies when the bundle's wiring and a Pipeline you declared
+in the parent's `pipelines:` both claim the source; the post-install notes name
+the pipelines involved rather than failing the render, because refusing it would
+be the deleted `sourceConflicts` guard returning one layer up.
+
+### Channels, and what happens without one
+
+`pipelines.channels` is a list of names, empty by default, and the `channelRefs`
+key is **absent** — not empty-valued — when nothing is named. Empty is a working
+configuration: with no thread to wait for, the conversation dispatches
+immediately and the answer is read from the CR.
+
+```sh
+kubectl get conversations -o jsonpath='{.items[*].status.runs[*].result}'
+# or bind a surface
+--set k8s-bundle.pipelines.channels={console}
+```
+
+Every other reference the route makes is to an object this bundle rendered, and
+each one disappears with its component: `mcp.enabled=false` yields a route with
+built-in observation tools and no cluster reach — degraded and honest, not a
+render failure — and never a ref to an `MCPConfig` nobody created.
 
 ## Event suppression (`eventsAdapter.source.rules`)
 

@@ -159,10 +159,16 @@ global:
       # ordinary upgrade grants nothing it did not grant before. `full` is
       # never selected by any default or inferred path.
       #
-      # DERIVED ELSEWHERE: k8s-bundle's MCP server follows this value (read-only
-      # server under a readonly SA for every mode but `full`). Widening this to
-      # `full` widens the MCP server too unless you set
-      # `k8s-bundle.mcpServers.readOnly: true` explicitly.
+      # DERIVED ELSEWHERE — widening this to `full` changes THREE things in
+      # k8s-bundle, not one, and they are meant to move together:
+      #   1. the MCP server drops --read-only (mcpServers.readOnly)
+      #   2. its ServiceAccount's RBAC widens (mcpServers.rbac.mode)
+      #   3. the k8s-admin mutating toolset renders, and — where the bundle's
+      #      own wiring is on — the route that renders is the ACTING one
+      #      (k8s-operate) instead of the observing k8s-observe
+      # Each has an explicit override that wins; `mcpServers.readOnly: true`
+      # under `full` is the useful one, leaving broad grants nothing can
+      # exercise.
       rbacMode: ""
 
   # The built-in tool vocabulary as MCPToolset CRs, so profiles and pipelines can
@@ -496,10 +502,12 @@ resources:
     memory: 256Mi
 
 # Kubernetes agent bundle (embedded subchart, OFF by default; demo mode turns
-# it on with these defaults). Three independent components — the cluster Events
-# lane, the k8s-engineer profile, and its MCP tooling. The bundle ships NO
-# runtime, no runtime ServiceAccount and no runtime RBAC: those are the
-# `runtime:` block and `global.agentops.runtime.*` above. See
+# it on with these defaults). Four independent components — the cluster Events
+# lane, the k8s-engineer profile, its MCP tooling, and its own wiring, which is
+# the only bundle component that is off inside an active bundle and is turned on
+# by demo mode alone. The bundle ships NO runtime, no runtime ServiceAccount and
+# no runtime RBAC: those are the `runtime:` block and
+# `global.agentops.runtime.*` above. See
 # chart/charts/k8s-bundle/values.yaml for the full surface. Typical enablement
 # WITHOUT demo mode:
 # global:

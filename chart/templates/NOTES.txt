@@ -208,11 +208,19 @@ bot token. If anything else still polls it (an older single-container adapter,
 another system), stop it now: two consumers means 409s and stolen updates.
 {{- if $tb.surface.enabled }}
 {{- $src := $tb.surface.source.name | default $tb.surface.name }}
+{{- /* Only say this where it is TRUE. An install that already claims the chat
+source from its own `pipelines:` is finished, and telling it "nothing answers
+yet" sends someone to fix what is not broken. */ -}}
+{{- $claimed := false }}
+{{- range .Values.pipelines }}
+{{- if has $src (.signalSources | default list) }}{{ $claimed = true }}{{ end }}
+{{- end }}
+{{- if not $claimed }}
 
-ONE STEP LEFT — nothing answers yet. No bundle ships a Pipeline, and wiring
-lives ONLY on Pipelines, so the chat source drops every message (Wired=False)
-until you claim it. Declare it under the parent chart's `pipelines:` values, or
-apply this directly:
+ONE STEP LEFT — nothing answers yet. This bundle ships no Pipeline (its route
+would span components it cannot see), and wiring lives ONLY on Pipelines, so the
+chat source drops every message (Wired=False) until you claim it. Declare it
+under the parent chart's `pipelines:` values, or apply this directly:
 
   apiVersion: agentops.dev/v1alpha1
   kind: Pipeline
@@ -231,6 +239,7 @@ apply this directly:
         - name: agentops-observe
 
 Then check:  kubectl -n {{ .Release.Namespace }} get signalsource {{ $src }} -o wide
+{{- end }}
 {{- else }}
 
 The two adapters are installed (the router comes with the surface, since
@@ -257,5 +266,58 @@ runtime.image — see docs/concepts.md#runtime-images-are-generic.
 Note also that global.agentops.runtime.rbacMode=full currently grants
 cluster-admin to an identity nothing can exercise.
 {{- end }}
+{{- end }}
+{{- /* The bundle's own wiring, re-derived through its OWN helpers so this
+report cannot drift from what actually rendered. A subchart helper needs a
+subchart context, which is this dict — the parent's globals plus the bundle's
+values. */ -}}
+{{- $kbCtx := dict "Values" (merge (dict "global" .Values.global) $kb) "Release" .Release }}
+{{- $src := $kb.eventsAdapter.source.name }}
+{{- $wired := and $kb.eventsAdapter.enabled $kb.eventsAdapter.source.create }}
+{{- /* Pipelines the INSTALL declared that claim the same source. Read once and
+used twice: two claimants is a fan-out note, and NO claimant anywhere is the
+only case that should tell anyone something is missing. */ -}}
+{{- $alsoClaim := list }}
+{{- range .Values.pipelines }}
+{{- if has $src (.signalSources | default list) }}{{ $alsoClaim = append $alsoClaim .name }}{{ end }}
+{{- end }}
+{{- if and (include "k8s-bundle.wiringActive" $kbCtx) $kb.profile.enabled }}
+
+Kubernetes bundle — this release WIRED it, so it answers on its own:
+{{- if include "k8s-bundle.observePipelineEnabled" $kbCtx }}
+  Pipeline {{ $kb.pipelines.observe.name }}{{ if $wired }} claims SignalSource {{ $src }}{{ end }} — reads the cluster, changes nothing.
+{{- end }}
+{{- if include "k8s-bundle.adminPipelineEnabled" $kbCtx }}
+  Pipeline {{ $kb.pipelines.admin.name }}{{ if $wired }} claims SignalSource {{ $src }}{{ end }} — CAN MUTATE the cluster
+  (it binds {{ $kb.mcp.toolsets.admin.name }}, the six mutating MCP tools).
+{{- end }}
+{{- if $wired }}
+Every admitted Warning event now opens a conversation and spends LLM credits.
+{{- end }}
+Decline it without giving up the rest of the bundle:
+  --set k8s-bundle.pipelines.enabled=false
+{{- if not $kb.pipelines.channels }}
+No channel is bound, so answers are not posted anywhere — read them with:
+  kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
+Bind one with k8s-bundle.pipelines.channels={<channel>}.
+{{- end }}
+{{- if and $wired $alsoClaim }}
+
+HEADS UP — {{ $src }} is claimed TWICE: by this bundle's wiring and by
+your own pipeline{{ if gt (len $alsoClaim) 1 }}s{{ end }} {{ join ", " $alsoClaim }}.
+That is allowed — signal sources are shareable — and it means each admitted
+event opens a conversation PER claiming Pipeline, under each one's own profile
+and capabilities. Two conversations, two bills, and both agents act.
+If you meant only your own route:
+  --set k8s-bundle.pipelines.enabled=false
+{{- end }}
+{{- else if and $wired (not $alsoClaim) }}
+
+ONE STEP LEFT — nothing answers cluster events yet. SignalSource {{ $src }} drops
+every event (Wired=False) until a Pipeline claims it. Either let the bundle wire
+itself:
+  --set k8s-bundle.pipelines.enabled=true
+or declare the route yourself under the parent chart's `pipelines:` — which is
+what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
