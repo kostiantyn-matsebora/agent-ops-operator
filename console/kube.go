@@ -225,11 +225,16 @@ type Object struct {
 
 // Metadata is the object metadata the console displays or keys on.
 type Metadata struct {
-	Name              string            `json:"name"`
-	Namespace         string            `json:"namespace,omitempty"`
-	UID               string            `json:"uid,omitempty"`
-	ResourceVersion   string            `json:"resourceVersion,omitempty"`
-	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
+	Name              string `json:"name"`
+	Namespace         string `json:"namespace,omitempty"`
+	UID               string `json:"uid,omitempty"`
+	ResourceVersion   string `json:"resourceVersion,omitempty"`
+	CreationTimestamp string `json:"creationTimestamp,omitempty"`
+	// DeletionTimestamp is set once an object is being deleted and a finalizer
+	// still holds it. For a Conversation that is the close-topics finalizer
+	// draining, which can hold the object for up to two minutes — long enough
+	// for a closed conversation to keep reading as an open one.
+	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
 	Annotations       map[string]string `json:"annotations,omitempty"`
 }

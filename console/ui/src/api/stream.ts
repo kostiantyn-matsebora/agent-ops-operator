@@ -57,6 +57,49 @@ let source: EventSource | undefined
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 let stopped = false
 
+/**
+ * How long delta bumps are gathered before the revision moves, in ms.
+ *
+ * DELTAS ARRIVE IN BURSTS. Closing fifty conversations writes fifty statuses and
+ * fifty deletions within a couple of seconds, and a revision is folded into a
+ * query KEY — so an uncoalesced burst is fifty cold cache entries, fifty
+ * refetches, and a list that flips to its loading state between each one. One
+ * bump per kind per window carries the same information: a revision says "this
+ * kind moved", never how many times.
+ *
+ * The cost is bounded and known: a delta can take a quarter second longer to
+ * show. Snapshots stay authoritative, so that is the same staleness the design
+ * already accepts for a dropped event.
+ */
+const DELTA_COALESCE_MS = 250
+
+let pendingKinds: Set<string> | null = null
+let coalesceTimer: ReturnType<typeof setTimeout> | undefined
+
+/** flushDeltas bumps every kind seen during the window exactly once. */
+function flushDeltas() {
+  coalesceTimer = undefined
+  const kinds = pendingKinds
+  pendingKinds = null
+  if (!kinds || kinds.size === 0) return
+  useStream.setState((s) => {
+    const revisions = { ...s.revisions }
+    for (const kind of kinds) {
+      revisions[kind] = (revisions[kind] ?? 0) + 1
+    }
+    return { revisions }
+  })
+}
+
+/** noteDelta records that a kind moved. Exported for the coalescing test. */
+export function noteDelta(kind: string) {
+  if (!pendingKinds) pendingKinds = new Set()
+  pendingKinds.add(kind)
+  if (coalesceTimer === undefined) {
+    coalesceTimer = setTimeout(flushDeltas, DELTA_COALESCE_MS)
+  }
+}
+
 /** Reconnect backoff bounds, in ms. */
 const RETRY_MIN = 1_000
 const RETRY_MAX = 30_000
@@ -107,6 +150,9 @@ export function connectStream(onResync: () => void): () => void {
     stopped = true
     if (retryTimer) clearTimeout(retryTimer)
     retryTimer = undefined
+    if (coalesceTimer) clearTimeout(coalesceTimer)
+    coalesceTimer = undefined
+    pendingKinds = null
     source?.close()
     source = undefined
     useStream.setState({ connected: false })
@@ -124,9 +170,7 @@ function wire(es: EventSource, onResync: () => void) {
 
   es.addEventListener('delta', (ev) => {
     const d = JSON.parse((ev as MessageEvent).data) as { kind: string }
-    useStream.setState((s) => ({
-      revisions: { ...s.revisions, [d.kind]: (s.revisions[d.kind] ?? 0) + 1 },
-    }))
+    noteDelta(d.kind)
   })
 
   es.addEventListener('activity', (ev) => {

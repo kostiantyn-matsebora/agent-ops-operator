@@ -175,6 +175,9 @@ func (a *API) Handler(ui http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/conversations/{name}", a.auth(a.handleConversation))
 	mux.HandleFunc("GET /api/conversations/{name}/graph", a.auth(a.handleConversationGraph))
 	mux.HandleFunc("POST /api/conversations", a.write("start-conversation", a.handleStart))
+	// registered BEFORE the {name} routes it cannot collide with: closing is a
+	// batch over named conversations, not an action on one
+	mux.HandleFunc("POST /api/conversations/close", a.write("bulk-close", a.handleBulkClose))
 	mux.HandleFunc("POST /api/conversations/{name}/messages", a.write("send-message", a.handleSend))
 
 	mux.HandleFunc("GET /api/stream", a.auth(a.handleStream))

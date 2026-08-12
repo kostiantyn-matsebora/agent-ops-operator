@@ -295,7 +295,7 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.9.0
+    tag: 0.10.1
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:

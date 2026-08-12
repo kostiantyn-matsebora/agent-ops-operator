@@ -1,8 +1,8 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { api } from './client'
 import { connectStream, useStream } from './stream'
-import type { Health } from './types'
+import type { CloseRequest, Health } from './types'
 
 // Query hooks. Each names the resource kinds it depends on, so a CR delta for
 // that kind invalidates exactly the queries showing it — the alternative,
@@ -83,6 +83,29 @@ export function useConversations(params: URLSearchParams) {
   return useQuery({
     queryKey: ['conversations', params.toString(), rev],
     queryFn: () => api.conversations(params),
+    // The revision is part of the KEY, so every delta asks for a cache entry
+    // that has never been filled — `data` undefined, `isLoading` true, and the
+    // page swaps its table for a spinner. Keeping the previous page on screen
+    // is what makes a live list update instead of blink; without it a batch
+    // close (fifty deltas) strobes.
+    placeholderData: keepPreviousData,
+  })
+}
+
+/**
+ * Closing a batch of conversations.
+ *
+ * Invalidated on SETTLE rather than on success: a partially applied batch still
+ * changed the cluster, so the list must be re-read either way. The closed
+ * conversations do not vanish immediately — the close-topics finalizer holds
+ * them while the threads are archived — so what the refetch shows is them
+ * turning `closing`, which is the honest state.
+ */
+export function useCloseConversations() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (req: CloseRequest) => api.closeConversations(req),
+    onSettled: () => client.invalidateQueries({ queryKey: ['conversations'] }),
   })
 }
 

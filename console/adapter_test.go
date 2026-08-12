@@ -26,11 +26,14 @@ type fakeManager struct {
 	inbound  []map[string]any
 	channels []ChannelInfo
 	server   *httptest.Server
+	// failInbound refuses posts to these thread ids, so a test can make ONE
+	// item of a batch fail while its neighbours succeed.
+	failInbound map[string]bool
 }
 
 func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
 	t.Helper()
-	f := &fakeManager{channels: channels}
+	f := &fakeManager{channels: channels, failInbound: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /channel/ops", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -58,9 +61,17 @@ func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
 	mux.HandleFunc("POST /channel/inbound", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		thread, _ := body["threadId"].(string)
 		f.mu.Lock()
-		f.inbound = append(f.inbound, body)
+		fail := f.failInbound[thread]
+		if !fail {
+			f.inbound = append(f.inbound, body)
+		}
 		f.mu.Unlock()
+		if fail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /channel/channels", func(w http.ResponseWriter, r *http.Request) {

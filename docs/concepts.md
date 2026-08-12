@@ -552,3 +552,12 @@ slot goes to whatever is waiting. Chat threads are archived first, by the
 bound thread and lets go once they complete, or after a bounded 2-minute grace
 so an adapter that is down can never wedge a deletion. `kubectl delete
 conversation` takes the same path.
+
+**One gesture, not one implementation per surface.** A surface that ends several
+conversations at once — the console's [bulk close](console.md#closing-a-batch) —
+sends each of them the same `/close` on the thread it holds, so all of the above
+happens per conversation, identically. There is deliberately **no remote close
+verb**: no HTTP endpoint, no adapter contract operation and no CRD field ends a
+conversation, and a surface's reach is therefore exactly the threads it holds. A
+conversation it merely observes cannot be closed from it, because
+`/channel/inbound` is reply-only and there is nowhere to post the command.
