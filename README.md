@@ -46,31 +46,27 @@ Eleven kinds, one line each; the full reference is [docs/concepts.md](docs/conce
 ## Behaviors that matter
 
 - **One workflow: a signal originates, a channel carries.** Every Conversation
-  starts from a signal routed against a `SignalSource` some Ready `Pipeline`
-  claims — an alert, a cron job, or a person typing on chat, all one path.
-  Channels never start conversations, so "who answers this?" is always declared
-  by a claim, never inferred.
+  starts from a signal on a `SignalSource` some Ready `Pipeline` claims — an
+  alert, a cron job, or a person typing on chat, all one path.
 - **Conversation = topic = session.** Replying in a topic resumes the same agent
   session; a repeat alert signature within its window reuses the conversation.
-- **Per-conversation pods, on demand.** A runtime pod spawns when work arrives,
-  stays warm, exits after its idle TTL (default 1 min), respawns with full
-  context. `kubectl logs agentops-conv-<name> -f` streams the transcript.
-- **[Bounded concurrency, queued not dropped](docs/concepts.md#capacity-how-many-run-at-once).**
-  At most `maxActiveConversations` (default 5) conversations hold a pod at once;
-  over-cap work waits in phase `Pending` — nothing provisioned, not even the chat
-  topic — admitted oldest-first. `/close` deletes the CR and frees the slot.
-- **Least privilege by construction.** The manager holds no cluster powers beyond
-  its own CRDs + pod lifecycle in its namespace, and never reads a Secret (all
-  `valueFrom`). No cluster CLI in the runtime image — reach is [wiring](docs/concepts.md#runtime-images-are-generic).
-- **See it, and answer it, on one screen.** The optional
-  [console](docs/console.md) draws the wiring as a graph coloured by the
-  conditions the reconcilers already write, plus live runs — and is itself a
-  channel, so a pipeline listing it lets you reply from the run you are watching.
-- **Threads open with the event**, so a thread reads event → work → answer and a
-  run that hangs still says what happened. The manager sends MEANING; each
-  adapter renders its own surface (escaping, length limits, topic names).
+- **Per-conversation pods, on demand.** A pod spawns when work arrives, exits
+  after its idle TTL, respawns with full context;
+  `kubectl logs agentops-conv-<name> -f` streams the transcript.
+- **[Bounded concurrency, queued not dropped](docs/concepts.md#capacity-how-many-run-at-once)** —
+  over-cap work waits in phase `Pending` with nothing provisioned, admitted
+  oldest-first.
+- **Least privilege by construction.** The manager holds no cluster powers
+  beyond its own CRDs plus pod lifecycle in its namespace, and never reads a
+  Secret. No cluster CLI in the runtime image — reach is
+  [wiring](docs/concepts.md#runtime-images-are-generic).
+- **[See it, and answer it, on one screen](docs/console.md)** — the optional
+  console draws the wiring as a graph and is itself a channel, so you can reply
+  from the run you are watching.
+- **Threads open with the event**, so a thread reads event → work → answer. The
+  manager sends MEANING; each adapter renders its own surface.
 - **Structured chat.** Built-in lane prompts embed a six-template message format
-  spec — no stream-of-consciousness walls. Custom prompts set their own.
+  spec — no stream-of-consciousness walls.
 
 ## Try it in five minutes (demo advisor)
 
@@ -93,14 +89,12 @@ kubectl -n agent-ops logs -f agentops-conv-<name>       # live agent transcript
 kubectl -n agent-ops get conversation <name> -o jsonpath='{.status.runs[0].result}'
 ```
 
-Demo mode is exactly **the k8s bundle with its defaults** plus the read-only RBAC
-it resolves — nothing demo-specific exists. It binds only `view` (+ node/namespace/
-metrics reads) to the release's one runtime SA, gated by `global.demo.enabled`.
+Demo mode is exactly [the k8s bundle with its defaults](docs/k8s-bundle.md) plus
+the read-only RBAC it resolves — nothing demo-specific exists.
 
-> **It also watches your cluster.** Unlike the pre-2.0 demo, this ingests
-> `Warning` events and answers them itself (LLM credits on a noisy cluster;
-> cooldown, grouping and the cap bound it).
-> `--set k8s-bundle.eventsAdapter.enabled=false` restores ask-only.
+> **It also watches your cluster**, ingesting `Warning` events and answering them
+> itself (LLM credits on a noisy cluster; cooldown, grouping and the cap bound
+> it). `--set k8s-bundle.eventsAdapter.enabled=false` restores ask-only.
 
 ## Install (current state)
 
@@ -108,26 +102,22 @@ metrics reads) to the release's one runtime SA, gated by `global.demo.enabled`.
 helm install agent-ops ./chart -n agent-ops --create-namespace
 # Agent sessions persist by default (an RWX PVC at /data/home). No default
 # StorageClass or no RWX provisioner? --set persistence.enabled=false.
-# CRDs install/upgrade with the release and carry helm.sh/resource-policy: keep —
-# uninstall deletes neither your CRs nor the session PVC.
+# CRDs carry helm.sh/resource-policy: keep — uninstall deletes neither your CRs
+# nor the session PVC.
 # Then your site config: profiles, Channel, SignalSource, pipelines (config/samples/)
 ```
 
-**The chart owns the substrate; bundles contribute domain.** `runtime:` renders
-the one `AgentRuntime` named `default` (image, credential, idle TTL, `home.pvcRef`
-wired from `persistence`), so an install with no bundle — or only a chat bundle —
-still executes conversations; `global.agentops.runtime.rbacMode` (`none` |
-`readonly` | `full`, empty = readonly under demo) governs what an MCP-independent
-path could do. [Full reference](docs/concepts.md#the-substrate-runtime-and-globalagentopsruntime).
-
-For alert ingestion, enable the [VictoriaMetrics bundle](docs/vm-bundle.md) and
-point an Alertmanager-compatible sender at the adapter's webhook Service
-(`continue: true` route).
+**The chart owns the substrate; bundles contribute domain** — `runtime:` renders
+the one `AgentRuntime` every conversation executes on, so an install with no
+bundle still works.
+[Full reference](docs/concepts.md#the-substrate-runtime-and-globalagentopsruntime).
+For alert ingestion, enable the [VictoriaMetrics bundle](docs/vm-bundle.md).
 
 ## Documentation
 
 | | |
 |---|---|
+| [Documentation site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) | The adopter hub: what this is, where to start, and every path onward |
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, and how a route's tools are resolved |
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
 | [docs/console.md](docs/console.md) | The console: topology, live runs, and the channel it also is |

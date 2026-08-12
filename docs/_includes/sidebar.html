@@ -1,0 +1,23 @@
+{%- comment -%}
+Navigation is declared once, in _data/nav.yml. Adding a page to the site is a
+line in that file — this markup is not written a second time.
+
+Entries name site pages only: a page reachable from here is a site deliverable,
+and the reference pages are not yet. Off-site paths belong in the body of a
+page, where the reader can see where they lead.
+{%- endcomment -%}
+<nav class="ao-sidebar" aria-label="Documentation">
+  {%- for group in site.data.nav.groups %}
+  <div class="ao-nav-group">
+    <h2 class="ao-nav-title">{{ group.title }}</h2>
+    <ul class="ao-nav-list">
+      {%- for entry in group.entries %}
+      <li>
+        <a class="ao-nav-link" href="{{ entry.url | relative_url }}"
+           {% if page.url == entry.url %}aria-current="page"{% endif %}>{{ entry.title }}</a>
+      </li>
+      {%- endfor %}
+    </ul>
+  </div>
+  {%- endfor %}
+</nav>

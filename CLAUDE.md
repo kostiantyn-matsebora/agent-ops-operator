@@ -323,9 +323,22 @@ console/                 the agent-ops console (own module, no deps) — a
                          the materialized bindings and left blank when
                          ambiguous — never guessed
 chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
-                         SignalSource — the CLAIM lives in the parent chart's
-                         `pipelines:`, since NO bundle ships wiring), and the
-                         k8s-engineer profile — ONE object, identity only. NO
+                         SignalSource — the events component renders the source,
+                         never the claim on it), and the
+                         k8s-engineer profile — ONE object, identity only. Plus
+                         the `pipelines` WIRING component — the one bundle that
+                         ships a route, because it owns its whole lane: at most
+                         ONE Pipeline claiming its own source with its own
+                         profile and toolsets, channels values-supplied and
+                         omitted when unset. OFF inside an active bundle and
+                         forced on by `global.demo.enabled` ALONE, which is why
+                         `pipelines.enabled` is nullable: an explicit `false`
+                         must decline the route under demo too. WHICH route is a
+                         fourth derivation from `global.agentops.runtime.rbacMode`
+                         — `full` renders the acting `k8s-operate` (binds
+                         `k8s-admin`), everything else the observing
+                         `k8s-observe`; per-route booleans win both ways and both
+                         at once is ALLOWED and fans out. NO
                          substrate: no AgentRuntime, no runtime SA, no
                          credential, no runtime RBAC (all of that is the parent's
                          `runtime:` + `global.agentops.runtime.*`). The profile
@@ -391,7 +404,27 @@ config/samples/          example CRs (the only config/ content — deployment-sp
                          config belongs with the deployment, never in this module)
 docs/                    reference pages: concepts.md (CRDs + capability
                          resolution), contracts.md (work + adapter contracts +
-                         HTTP API), and one page per bundle subchart
+                         HTTP API), and one page per bundle subchart — AND the
+                         published site's Jekyll source: _config.yml, _layouts/,
+                         _includes/, _data/nav.yml, assets/ (css, js, vendored
+                         Red Hat fonts, the exported diagram). diagrams/ holds
+                         the drawio SOURCE plus export.py — run that, never the
+                         exporter by hand: it writes BOTH theme variants and
+                         repaints the dark one's icon ink, which drawio cannot
+                         do because the icons are embedded images.
+                         GitHub Pages builds this directory
+                         directly from master (Deploy from a branch → /docs), so
+                         there is NO workflow, NO Gemfile and no Ruby in anyone's
+                         path — a feature needing a plugin Pages does not enable
+                         is implemented in the theme's own assets or dropped.
+                         index.md is the site's landing page; the reference pages
+                         above are NOT yet site deliverables. Carrying no front
+                         matter they are STATIC FILES to Jekyll — copied verbatim,
+                         never converted, never given a layout — so they serve as
+                         raw markdown at their URLs and nothing links to them.
+                         _layouts/page.html is for the change that publishes
+                         them: front matter makes a file a page, and then a
+                         missing layout DOES fail the build
 CHANGELOG.md             every chart-version migration guide, newest first —
                          the ONLY place upgrade steps live
 ```
@@ -639,12 +672,27 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   to be an adapter with a signal-free `SignalSource` purely to carry that
   credential — which then sat at `Wired=False` until some Pipeline faked a
   claim. Modelling plumbing as an adapter is what produced that whole chain.
-- **NO bundle ships a Pipeline.** Wiring names a profile, sources and channels
-  that come from DIFFERENT bundles, so only the parent chart sees all of it:
-  declare routes in the top-level `pipelines:` values. A Channel is shareable
-  across pipelines (one bot, one group, many purposes) but a SignalSource is
-  claimed by exactly ONE pipeline — name pipelines for their JOB, not for the
-  channel they answer on.
+- **THE PARENT CHART IS WHERE WIRING IS DECLARED; a bundle ships it only under
+  the four conditions.** Wiring names a profile, sources and channels that
+  routinely come from DIFFERENT bundles, and a subchart sees only itself, so one
+  that shipped wiring could only ever wire ITSELF — declare routes in the
+  top-level `pipelines:` values. A bundle MAY ship its own only when ALL of:
+  rendering is behind an explicit wiring flag; every reference to an object the
+  bundle does not itself render is a values-supplied NAME, omitted when unset;
+  each Pipeline renders only with its own profile; and the flag DEFAULTS OFF —
+  forced on by nothing but a values path whose declared purpose is a turnkey
+  install (`global.demo.enabled`), and then only the LEAST-PRIVILEGED route.
+  `k8s-bundle.pipelines` is the case that qualifies: it owns its whole lane
+  (source, profile, both toolsets), so channels are the only foreign name. Its
+  `enabled` is NULLABLE for exactly one reason — an explicit `false` must decline
+  the route even under demo mode, which a plain `false` default cannot express.
+  `telegram-bundle` and `vm-bundle` still ship NONE and are the counter-examples:
+  their routes genuinely span bundles. Name pipelines for their JOB, not for the
+  channel they answer on. And a SignalSource is NOT claimed by exactly one
+  pipeline — sources are shareable, so a bundle's route and an install's route
+  claiming one source both render and the source fans out to both. That is
+  reported in NOTES.txt, never refused: refusing it would be the deleted
+  `sourceConflicts` guard returning one layer up.
 
 ## After changes
 
@@ -661,9 +709,29 @@ three documents wearing one filename — so the routing is explicit:
 | Terminology, invariants, hard-won gotchas | this file |
 | The console's views, values, or trust boundary | `docs/console.md` |
 | The pitch, the kind list, the demo, the install command | `README.md` |
+| How the site LOOKS or navigates | `docs/_layouts/`, `_includes/`, `_data/nav.yml`, `assets/` |
+| What the site SAYS to an adopter | a markdown page under `docs/` |
+
+The last two rows are one rule read both ways: **the theme holds no prose and
+the pages hold no theme.** A layout or include that starts explaining a CRD is in
+the wrong file, and so is a markdown page that opens with a `<div>` or an inline
+style. Adding a page to the site is a page plus one line in `_data/nav.yml` —
+never navigation markup written a second time.
+
+**The site's `--ao-*` palette is COPIED from `console/ui/src/theme/theme.css`**
+into the token blocks at the head of `docs/assets/css/agentops.css` — so
+changing a token is a TWO-FILE change. The copy is deliberate and
+one-directional (a Jekyll site must not need a Node build to publish a
+paragraph); what makes it survivable is that no colour is stated literally
+anywhere else in the site CSS, so the sync is one block, not a hunt:
+`grep -n '#[0-9a-fA-F]\{3,6\}' docs/assets/css/agentops.css` must return hits
+only inside those blocks. The mark (`_includes/logo.svg` from
+`console/ui/src/components/Logo.tsx`) and the theme-choice semantics
+(`assets/js/theme.js` from `theme/useTheme.ts`) are copied on the same terms.
 
 **README.md has a budget: 150 lines** (`wc -l README.md`). It holds the pitch and
 diagram, one line per CRD kind, the behaviors that matter, the demo, install, the
-Documentation index, development and status — nothing else. Reference material
-and migration guides do not belong in it; if it is over budget, something is in
-the wrong file.
+Documentation index — the site first — development and status, nothing else. A
+distinguishing behavior is named in a LINE and the document that owns it is
+linked; reference material and migration guides do not belong in it. If it is
+over budget, something is in the wrong file.

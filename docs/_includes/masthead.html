@@ -1,0 +1,16 @@
+<header class="ao-masthead">
+  <label class="ao-nav-toggle-label" for="ao-nav-toggle" title="Navigation">
+    <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
+    </svg>
+  </label>
+
+  <a class="ao-brand" href="{{ '/' | relative_url }}">
+    {% include logo.svg %}
+    <span>agent-ops</span>
+  </a>
+
+  <span class="ao-masthead-spacer"></span>
+
+  {% include theme-switcher.html %}
+</header>
