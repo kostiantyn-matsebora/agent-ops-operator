@@ -1,0 +1,25 @@
+---
+layout: default
+---
+{%- comment -%}
+The minimal layout, and deliberately nothing more.
+
+It is not what the reference pages under docs/ use: this change does not treat
+them, they carry no front matter, and a markdown file with no front matter is a
+STATIC FILE to Jekyll — copied verbatim, never converted, never given a layout.
+They are served as raw markdown at their own URLs and nothing on the site links
+to one.
+
+This exists for the change that publishes them: the moment a page gains front
+matter, `jekyll-default-layout` assigns it `page`, and a layout named but
+missing fails the build. A heading and a content slot is the whole of it — the
+on-page contents and the edit link belong to that change, not this one.
+
+The title comes from front matter when a page has any; a page that opens with
+its own H1 sets none, and nothing is emitted for it.
+{%- endcomment -%}
+{%- if page.title %}
+<h1>{{ page.title }}</h1>
+{%- endif %}
+
+{{ content }}

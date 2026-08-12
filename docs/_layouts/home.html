@@ -1,0 +1,73 @@
+---
+layout: default
+---
+{%- comment -%}
+The landing layout.
+
+Every word on this page comes from the page's own front matter or its body —
+the hero line, the diagram's alt text, the stat tiles. This file decides only
+how those are arranged, which is what keeps the theme free of product prose.
+
+The diagram ships as two exports, one per theme, because drawio pins each one's
+palette with `color-scheme` on the SVG root and an <img> does not inherit the
+page's. Both are lazy: the hidden one is never rendered, so it is never fetched.
+{%- endcomment -%}
+{%- comment -%}
+The hero is real text, not part of the drawing: the site's diagram page has its
+masthead removed precisely so the headline is selectable, translatable, and
+readable by a screen reader without going through alt text.
+{%- endcomment -%}
+<div class="ao-hero">
+  {%- if page.eyebrows %}
+  <p class="ao-eyebrows">
+    {%- for eyebrow in page.eyebrows %}
+    <span class="ao-pill{% if forloop.first %} ao-pill--solid{% endif %}">{{ eyebrow }}</span>
+    {%- endfor %}
+  </p>
+  {%- endif %}
+  <h1>{{ page.title | default: site.title }}</h1>
+  {%- if page.lede %}
+  <p class="ao-lede">{{ page.lede }}</p>
+  {%- endif %}
+</div>
+
+{%- comment -%}
+Collapsible, and OPEN by default — a reader who came to understand the product
+should not have to ask for the picture. `<details>` rather than a script: it
+folds with no JavaScript, is a tab stop and a space-bar toggle for free, and a
+reader who collapses it gets the paths onward one screen sooner.
+{%- endcomment -%}
+{%- if page.diagram %}
+<details class="ao-diagram-details" open>
+  <summary class="ao-diagram-summary">{{ page.diagram_label | default: 'Diagram' }}</summary>
+  <a class="ao-diagram-link" href="{{ page.diagram | append: '-light.svg' | prepend: '/assets/img/' | relative_url }}">
+    <img class="ao-diagram ao-diagram--light" loading="lazy"
+         src="{{ page.diagram | append: '-light.svg' | prepend: '/assets/img/' | relative_url }}"
+         alt="{{ page.diagram_alt }}">
+    <img class="ao-diagram ao-diagram--dark" loading="lazy"
+         src="{{ page.diagram | append: '-dark.svg' | prepend: '/assets/img/' | relative_url }}"
+         alt="{{ page.diagram_alt }}">
+    <span class="ao-diagram-hint">Open the diagram full size</span>
+  </a>
+</details>
+{%- endif %}
+
+{%- if page.stats %}
+<ul class="ao-stats">
+  {%- for stat in page.stats %}
+  <li class="ao-stat">
+    <div class="ao-stat-head">
+      {% include stat-icon.html name=stat.icon %}
+      <span class="ao-stat-value">{{ stat.value }}</span>
+    </div>
+    <span class="ao-stat-label">{{ stat.label }}</span>
+    <p class="ao-stat-note">{{ stat.note }}</p>
+  </li>
+  {%- endfor %}
+</ul>
+{%- if page.stats_kicker %}
+<p class="ao-stat-kicker">{{ page.stats_kicker }}</p>
+{%- endif %}
+{%- endif %}
+
+{{ content }}

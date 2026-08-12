@@ -1,0 +1,13 @@
+# Site navigation: groups of entries, each a title and a site-root-relative
+# path. The sidebar include renders this and nothing else, so publishing a page
+# is one line here — not a second navigation written by hand.
+#
+# Only site deliverables belong in this list. The reference pages under docs/
+# are built by the branch deploy but are not treated by this change, so they
+# have no entry until the change that publishes them adds one. An entry
+# pointing at a page that does not exist is a defect, not a placeholder.
+groups:
+  - title: Start here
+    entries:
+      - title: Overview
+        url: /

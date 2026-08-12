@@ -1,0 +1,43 @@
+# Site config for the agent-ops documentation site.
+#
+# docs/ IS the site root: GitHub Pages is set to "Deploy from a branch ->
+# master / /docs", so there is no workflow file, no Gemfile and no local Ruby
+# in any contributor's path. Plugins are therefore limited to the set GitHub
+# Pages enables by default — a feature needing more gets implemented in this
+# theme's own CSS/JS or dropped, never by switching the build to Actions.
+
+title: agent-ops
+# jekyll-seo-tag builds the home page's <title> as "title | tagline"; without
+# one it would paste the whole description in there.
+tagline: Kubernetes operator for agents you can address
+description: >-
+  A Kubernetes operator for agents you can address — monitoring signals and
+  chat tasks become Conversations, each executed by its own agent pod.
+
+url: https://kostiantyn-matsebora.github.io
+baseurl: /agent-ops-operator
+repository: kostiantyn-matsebora/agent-ops-operator
+
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false
+
+plugins:
+  - jekyll-seo-tag
+  - jekyll-default-layout
+
+# The drawio source is an editable document, not a site asset. The font licence
+# is NOT excluded: OFL-1.1 requires it to travel with the fonts it covers.
+exclude:
+  - diagrams/
+
+defaults:
+  - scope:
+      path: index.md
+    values:
+      layout: home

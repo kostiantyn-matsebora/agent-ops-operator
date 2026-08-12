@@ -1,0 +1,921 @@
+/*
+ * The agent-ops documentation site.
+ *
+ * ONE SOURCE OF TRUTH FOR THE PALETTE. The two `--ao-*` blocks below are copied
+ * VERBATIM from `console/ui/src/theme/theme.css`; changing a token there is a
+ * two-file change. Every other rule in this file is written against those
+ * tokens, and no colour is stated literally anywhere else — that is what keeps
+ * the sync to one block instead of a hunt.
+ *
+ * The class names (`pf-v6-theme-light` / `pf-v6-theme-dark`) are PatternFly's,
+ * because the copied block keys off exactly those and the theme script stamps
+ * the same ones the console stamps. No PatternFly CSS or JS is loaded: a prose
+ * site renders headings, paragraphs, tables and code, and needs no component
+ * library to do it.
+ *
+ * With JavaScript disabled no class is stamped and the light palette applies.
+ * That is the documented cost of holding the palette in ONE pair of blocks: an
+ * OS-follow fallback would need a third copy of the dark tokens, which is the
+ * drift this file exists to prevent.
+ */
+
+/* --- palette: copied from console/ui/src/theme/theme.css (light) ---------- */
+:root,
+.pf-v6-theme-light {
+  --ao-brand: #0d7d76;
+  --ao-brand-strong: #0a615c;
+  --ao-brand-soft: #d3ece9;
+  --ao-accent: #6b4bd6;
+  --ao-accent-soft: #e9e3fb;
+
+  --ao-success: #1f7a4d;
+  --ao-warning: #a86400;
+  --ao-danger: #b32c3f;
+  --ao-neutral: #6a7178;
+
+  --ao-surface: #ffffff;
+  --ao-surface-alt: #f3f5f6;
+  --ao-canvas: #eef1f2;
+  --ao-border: #cfd6da;
+  --ao-border-strong: #9aa4ab;
+  --ao-text: #16191c;
+  --ao-text-subtle: #5c656d;
+
+  --ao-edge-idle: #b6c0c6;
+  --ao-lane-fill: #ffffff;
+  --ao-lane-border: #d5dcdf;
+  --ao-code-bg: #f6f8f8;
+}
+
+/* --- palette: copied from console/ui/src/theme/theme.css (dark) ----------- */
+.pf-v6-theme-dark {
+  --ao-brand: #43c9bd;
+  --ao-brand-strong: #7fded5;
+  --ao-brand-soft: #123b39;
+  --ao-accent: #a996f5;
+  --ao-accent-soft: #2a2350;
+
+  --ao-success: #55c98a;
+  --ao-warning: #e0a63c;
+  --ao-danger: #f2708a;
+  --ao-neutral: #9aa4ab;
+
+  --ao-surface: #1b1f22;
+  --ao-surface-alt: #23282c;
+  --ao-canvas: #14171a;
+  --ao-border: #3a4247;
+  --ao-border-strong: #5c666d;
+  --ao-text: #e8ecee;
+  --ao-text-subtle: #a5b0b7;
+
+  --ao-edge-idle: #4a545b;
+  --ao-lane-fill: #1f2427;
+  --ao-lane-border: #363f44;
+  --ao-code-bg: #14181b;
+}
+
+/* --- non-colour tokens ---------------------------------------------------- */
+:root {
+  --ao-font-display: 'Red Hat Display', 'Red Hat Text', system-ui, -apple-system,
+    'Segoe UI', sans-serif;
+  --ao-font-text: 'Red Hat Text', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ao-font-mono: 'Red Hat Mono', ui-monospace, 'SFMono-Regular', 'Cascadia Mono',
+    Consolas, monospace;
+
+  --ao-masthead-h: 3.5rem;
+  --ao-sidebar-w: 16rem;
+  --ao-measure: 62rem;
+  --ao-radius: 6px;
+}
+
+/* --- type: self-hosted, no third-party request ---------------------------- */
+/* Variable fonts — one file per family instead of one per weight. Italics are
+   not vendored; documentation prose barely uses them and the synthesised slant
+   is acceptable at the size it does. */
+@font-face {
+  font-family: 'Red Hat Display';
+  src: url('../fonts/RedHatDisplayVF.woff2') format('woff2-variations'),
+       url('../fonts/RedHatDisplayVF.woff2') format('woff2');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Red Hat Text';
+  src: url('../fonts/RedHatTextVF.woff2') format('woff2-variations'),
+       url('../fonts/RedHatTextVF.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Red Hat Mono';
+  src: url('../fonts/RedHatMonoVF.woff2') format('woff2-variations'),
+       url('../fonts/RedHatMonoVF.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* --- base ----------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ao-canvas);
+  color: var(--ao-text);
+  font-family: var(--ao-font-text);
+  font-size: 1rem;
+  line-height: 1.65;
+  /* The page body never scrolls sideways; wide content scrolls in its own
+     frame instead (see the overflow rules below). */
+  overflow-x: hidden;
+}
+
+a {
+  color: var(--ao-brand);
+  text-decoration-color: color-mix(in srgb, var(--ao-brand) 40%, transparent);
+  text-underline-offset: 0.15em;
+}
+
+a:hover {
+  color: var(--ao-brand-strong);
+  text-decoration-color: currentColor;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ao-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Visible to a screen reader, not to the eye — the icon buttons carry their
+   name this way rather than by a title attribute alone. */
+.ao-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- skip link ------------------------------------------------------------ */
+.ao-skip {
+  position: absolute;
+  left: 0.5rem;
+  top: -4rem;
+  z-index: 100;
+  padding: 0.5rem 0.9rem;
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  border: 1px solid var(--ao-border-strong);
+  border-radius: var(--ao-radius);
+  font-weight: 500;
+  transition: top 0.15s ease;
+}
+
+.ao-skip:focus {
+  top: 0.5rem;
+}
+
+/* --- masthead ------------------------------------------------------------- */
+.ao-masthead {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 30;
+  height: var(--ao-masthead-h);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 1rem;
+  background: var(--ao-surface);
+  border-bottom: 1px solid var(--ao-border);
+}
+
+.ao-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--ao-font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ao-text);
+  text-decoration: none;
+}
+
+.ao-brand:hover {
+  color: var(--ao-text);
+}
+
+.ao-logo {
+  flex: 0 0 auto;
+  display: block;
+}
+
+.ao-masthead-spacer {
+  flex: 1 1 auto;
+}
+
+/* --- sidebar toggle: a checkbox, so navigation works without JavaScript ---- */
+.ao-nav-toggle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ao-nav-toggle-label {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  color: var(--ao-text);
+  cursor: pointer;
+}
+
+/* The checkbox is a body-level sibling of the shell (that is what lets it open
+   the sidebar with no script); its label lives in the masthead, so focus is
+   forwarded across the sibling, not the adjacent, combinator. */
+.ao-nav-toggle:focus-visible ~ .ao-masthead .ao-nav-toggle-label {
+  outline: 2px solid var(--ao-accent);
+  outline-offset: 2px;
+}
+
+.ao-nav-toggle:checked ~ .ao-masthead .ao-nav-toggle-label {
+  background: var(--ao-brand-soft);
+  border-color: var(--ao-brand);
+  color: var(--ao-brand-strong);
+}
+
+.ao-nav-toggle-label svg {
+  display: block;
+}
+
+/* --- theme switcher ------------------------------------------------------- */
+.ao-theme {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  background: var(--ao-surface-alt);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+}
+
+.ao-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 1.75rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ao-text-subtle);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.ao-theme-btn:hover {
+  color: var(--ao-text);
+  background: var(--ao-surface);
+}
+
+.ao-theme-btn[aria-pressed='true'] {
+  background: var(--ao-brand-soft);
+  color: var(--ao-brand-strong);
+}
+
+.ao-theme-btn svg {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+}
+
+/* --- shell: masthead over sidebar over content, not a centred column ------ */
+.ao-shell {
+  display: grid;
+  grid-template-columns: var(--ao-sidebar-w) minmax(0, 1fr);
+  padding-top: var(--ao-masthead-h);
+  min-height: 100vh;
+}
+
+.ao-sidebar {
+  position: sticky;
+  top: var(--ao-masthead-h);
+  align-self: start;
+  height: calc(100vh - var(--ao-masthead-h));
+  overflow-y: auto;
+  padding: 1.25rem 0.75rem 2rem;
+  background: var(--ao-surface-alt);
+  border-right: 1px solid var(--ao-border);
+}
+
+.ao-nav-group + .ao-nav-group {
+  margin-top: 1.25rem;
+}
+
+.ao-nav-title {
+  margin: 0 0 0.4rem;
+  padding: 0 0.6rem;
+  font-family: var(--ao-font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+}
+
+.ao-nav-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ao-nav-link {
+  display: block;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--ao-radius);
+  border-left: 2px solid transparent;
+  color: var(--ao-text);
+  text-decoration: none;
+  font-size: 0.94rem;
+}
+
+.ao-nav-link:hover {
+  background: var(--ao-surface);
+  color: var(--ao-text);
+}
+
+.ao-nav-link[aria-current='page'] {
+  background: var(--ao-brand-soft);
+  border-left-color: var(--ao-brand);
+  color: var(--ao-brand-strong);
+  font-weight: 500;
+}
+
+.ao-nav-external::after {
+  content: '\2197';
+  margin-left: 0.3em;
+  font-size: 0.85em;
+  color: var(--ao-text-subtle);
+}
+
+.ao-main {
+  min-width: 0;
+  padding: 2rem 2rem 4rem;
+  /* The skip link targets this element, and the masthead is fixed: without a
+     scroll margin, skipping to the content parks the first heading underneath
+     it. Headings carry the same margin for in-page anchors. */
+  scroll-margin-top: var(--ao-masthead-h);
+}
+
+.ao-main:focus {
+  outline: none;
+}
+
+.ao-content {
+  max-width: var(--ao-measure);
+}
+
+/* --- footer --------------------------------------------------------------- */
+.ao-footer {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--ao-border);
+  color: var(--ao-text-subtle);
+  font-size: 0.88rem;
+}
+
+.ao-footer p {
+  margin: 0.25rem 0;
+}
+
+/* --- prose ---------------------------------------------------------------- */
+.ao-content h1,
+.ao-content h2,
+.ao-content h3,
+.ao-content h4 {
+  font-family: var(--ao-font-display);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--ao-text);
+  scroll-margin-top: calc(var(--ao-masthead-h) + 1rem);
+}
+
+.ao-content h1 {
+  margin: 0 0 1rem;
+  font-size: 2.1rem;
+}
+
+.ao-content h2 {
+  margin: 2.5rem 0 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--ao-border);
+  font-size: 1.5rem;
+}
+
+.ao-content h3 {
+  margin: 1.75rem 0 0.5rem;
+  font-size: 1.18rem;
+}
+
+.ao-content h4 {
+  margin: 1.4rem 0 0.4rem;
+  font-size: 1rem;
+}
+
+.ao-content p {
+  margin: 0 0 1rem;
+}
+
+.ao-content ul,
+.ao-content ol {
+  margin: 0 0 1rem;
+  padding-left: 1.4rem;
+}
+
+.ao-content li + li {
+  margin-top: 0.3rem;
+}
+
+.ao-content blockquote {
+  margin: 1.25rem 0;
+  padding: 0.5rem 1rem;
+  border-left: 3px solid var(--ao-brand);
+  background: var(--ao-surface-alt);
+  border-radius: 0 var(--ao-radius) var(--ao-radius) 0;
+  color: var(--ao-text-subtle);
+}
+
+.ao-content blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.ao-content hr {
+  margin: 2rem 0;
+  border: 0;
+  border-top: 1px solid var(--ao-border);
+}
+
+.ao-content img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* The exported diagram, one variant per theme.
+   drawio bakes a light-dark() pair into every fill and then PINS the resolution
+   with `color-scheme` on the SVG root — so the two exports really are two
+   palettes of one drawing, not one drawing shown twice. An <img> is its own
+   document and does not inherit the page's colour scheme, which is why this is
+   a swap rather than a single self-adjusting asset.
+   Both carry loading="lazy": the hidden one is never rendered, so it is never
+   fetched, and only the theme in use costs its megabyte. */
+/* No plate, no frame: both exports have a transparent ground, so each one sits
+   directly on the page canvas and reads as part of the page rather than as an
+   image pasted into it.
+   It is deliberately NOT full-bleed. The drawing is a dense poster at 1778px
+   wide; shown at the content column's full width it swallows the page, and
+   shrunk far enough to be small its 15px labels stop being readable. So it is
+   capped at a size that still reads, and the whole thing links to the SVG for
+   anyone who wants to inspect it. */
+.ao-diagram-details {
+  margin: 0 0 2.5rem;
+}
+
+/* The default disclosure triangle is replaced by a chevron that turns, so the
+   control reads the same in both themes and at both states. */
+.ao-diagram-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.6rem 0.3rem 0.25rem;
+  margin-bottom: 0.75rem;
+  border-radius: var(--ao-radius);
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ao-diagram-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ao-diagram-summary::before {
+  content: '';
+  width: 0.42rem;
+  height: 0.42rem;
+  margin-left: 0.35rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.ao-diagram-details[open] > .ao-diagram-summary::before {
+  transform: rotate(45deg);
+}
+
+.ao-diagram-summary:hover {
+  color: var(--ao-brand);
+}
+
+.ao-diagram-link {
+  display: block;
+  width: 100%;
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Past the prose measure where there is room for it. The drawing is 1778px
+   native and its labels are 12–15px, so every pixel of width is legibility —
+   but it must never buy that by making the BODY scroll sideways, hence the
+   viewport-aware cap and the query that only fires once the sidebar and the
+   gutters are already paid for. */
+@media (min-width: 78rem) {
+  .ao-diagram-link,
+  .ao-hero {
+    width: min(78rem, calc(100vw - var(--ao-sidebar-w) - 7rem));
+    max-width: none;
+  }
+}
+
+.ao-diagram {
+  display: block;
+  width: 100%;
+  background: transparent;
+}
+
+.ao-diagram-hint {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--ao-text-subtle);
+}
+
+.ao-diagram-link:hover .ao-diagram-hint {
+  color: var(--ao-brand);
+  text-decoration: underline;
+}
+
+.ao-diagram--dark,
+.pf-v6-theme-dark .ao-diagram--light {
+  display: none;
+}
+
+.pf-v6-theme-dark .ao-diagram--dark {
+  display: block;
+}
+
+/* --- tables --------------------------------------------------------------- */
+.ao-table-scroll,
+.ao-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ao-content table {
+  margin: 0 0 1.25rem;
+  border-collapse: collapse;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  font-size: 0.94rem;
+}
+
+.ao-content th,
+.ao-content td {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--ao-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ao-content th {
+  background: var(--ao-surface-alt);
+  font-family: var(--ao-font-display);
+  font-weight: 700;
+}
+
+/* --- code ----------------------------------------------------------------- */
+.ao-content code,
+.ao-content kbd,
+.ao-content samp {
+  font-family: var(--ao-font-mono);
+  font-size: 0.88em;
+}
+
+.ao-content :not(pre) > code {
+  padding: 0.12em 0.35em;
+  background: var(--ao-code-bg);
+  border: 1px solid var(--ao-border);
+  border-radius: 4px;
+  color: var(--ao-text);
+  word-break: break-word;
+}
+
+.ao-content pre {
+  margin: 0 0 1.25rem;
+  padding: 0.85rem 1rem;
+  background: var(--ao-code-bg);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  overflow-x: auto;
+  line-height: 1.55;
+}
+
+.ao-content pre code {
+  padding: 0;
+  background: none;
+  border: 0;
+  font-size: 0.86rem;
+}
+
+.ao-content div.highlight,
+.ao-content figure.highlight {
+  margin: 0 0 1.25rem;
+}
+
+.ao-content div.highlight pre,
+.ao-content figure.highlight pre {
+  margin: 0;
+}
+
+/* --- syntax highlighting: one scheme from the tokens, both themes ---------- */
+/* Rouge classes, mapped to palette roles rather than to literal colours — so
+   the dark palette recolours the code with no second stylesheet. */
+.highlight .c,
+.highlight .c1,
+.highlight .cm,
+.highlight .cs,
+.highlight .cd,
+.highlight .cp {
+  color: var(--ao-text-subtle);
+  font-style: italic;
+}
+
+.highlight .s,
+.highlight .s1,
+.highlight .s2,
+.highlight .sb,
+.highlight .sc,
+.highlight .sd,
+.highlight .se,
+.highlight .sh,
+.highlight .si,
+.highlight .sx,
+.highlight .sr,
+.highlight .ss {
+  color: var(--ao-success);
+}
+
+.highlight .k,
+.highlight .kc,
+.highlight .kd,
+.highlight .kn,
+.highlight .kp,
+.highlight .kr,
+.highlight .kt,
+.highlight .nb,
+.highlight .ow {
+  color: var(--ao-accent);
+}
+
+.highlight .na,
+.highlight .nt,
+.highlight .nf,
+.highlight .nc,
+.highlight .nn {
+  color: var(--ao-brand);
+}
+
+.highlight .m,
+.highlight .mi,
+.highlight .mf,
+.highlight .mh,
+.highlight .mo,
+.highlight .l,
+.highlight .no,
+.highlight .nv {
+  color: var(--ao-brand-strong);
+}
+
+.highlight .o,
+.highlight .p {
+  color: var(--ao-text-subtle);
+}
+
+.highlight .err {
+  color: var(--ao-danger);
+}
+
+.highlight .gd {
+  color: var(--ao-danger);
+}
+
+.highlight .gi {
+  color: var(--ao-success);
+}
+
+.highlight .ge {
+  font-style: italic;
+}
+
+.highlight .gs {
+  font-weight: 700;
+}
+
+/* --- landing page --------------------------------------------------------- */
+.ao-hero {
+  margin-bottom: 1.75rem;
+}
+
+.ao-hero h1 {
+  margin-bottom: 0.5rem;
+}
+
+/* The eyebrow pills the diagram used to carry, in real text. Same pairing the
+   drawing used: one solid, one outlined. */
+.ao-eyebrows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.9rem;
+}
+
+.ao-pill {
+  display: inline-block;
+  padding: 0.25rem 0.8rem;
+  border: 1px solid var(--ao-brand);
+  border-radius: 999px;
+  color: var(--ao-brand-strong);
+  font-family: var(--ao-font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.ao-pill--solid {
+  background: var(--ao-brand);
+  border-color: var(--ao-brand);
+  color: var(--ao-surface);
+}
+
+.ao-lede {
+  font-size: 1.12rem;
+  color: var(--ao-text-subtle);
+}
+
+/* --- stat tiles ----------------------------------------------------------
+   A KPI row, not four hero figures: the values stay well under hero size, and
+   they wear INK rather than the brand colour — identity is carried by the rule
+   beside them, so the number never has to be read as a swatch. Proportional
+   figures (no tabular-nums): these are standalone values, not a column that
+   has to align. The words live in the page's front matter; only the markup is
+   the layout's. */
+.ao-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 1rem;
+  margin: 0 0 2.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.ao-stat {
+  padding: 0.9rem 1.1rem;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border);
+  border-left: 3px solid var(--ao-brand);
+  border-radius: var(--ao-radius);
+}
+
+.ao-stat-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.ao-stat-icon {
+  flex: 0 0 auto;
+  width: 1.4rem;
+  height: 1.4rem;
+  color: var(--ao-brand);
+}
+
+.ao-stat-value {
+  display: block;
+  font-family: var(--ao-font-text);
+  font-size: 2.1rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--ao-text);
+}
+
+.ao-stat-label {
+  display: block;
+  margin-top: 0.1rem;
+  font-family: var(--ao-font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ao-text);
+}
+
+.ao-stat-note {
+  margin: 0.3rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ao-text-subtle);
+}
+
+.ao-stat-kicker {
+  margin: -1.5rem 0 2.5rem;
+  font-family: var(--ao-font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ao-brand-strong);
+}
+
+/* Otherwise the landing page's grouped paths are ordinary markdown lists,
+   styled as prose above — pages carry no class attributes of their own. */
+
+/* --- narrow viewports ----------------------------------------------------- */
+@media (max-width: 60rem) {
+  .ao-nav-toggle-label {
+    display: inline-flex;
+  }
+
+  .ao-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ao-sidebar {
+    display: none;
+    position: static;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--ao-border);
+  }
+
+  /* The toggle lives in the masthead and the sidebar is later in the DOM, so
+     the sibling combinator is what opens it — no script involved. */
+  .ao-nav-toggle:checked ~ .ao-shell .ao-sidebar {
+    display: block;
+  }
+
+  .ao-main {
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  .ao-content h1 {
+    font-size: 1.7rem;
+  }
+
+  .ao-content h2 {
+    font-size: 1.32rem;
+  }
+}
+
+/* --- motion --------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}

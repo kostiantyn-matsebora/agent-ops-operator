@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  {%- comment -%}
+  Theme, applied BEFORE first paint.
+
+  This blocking script is the mechanism, not an optimisation: a multi-page site
+  has no rehydration hook, so without it every navigation flashes light before
+  the stored dark choice lands. It reads the CHOICE and resolves it here;
+  theme.js then wires the control and the live matchMedia subscription.
+  {%- endcomment -%}
+  <script>
+    (function () {
+      try {
+        var choice = localStorage.getItem('agentops-docs-theme') || 'system';
+        var theme = choice === 'system'
+          ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : choice;
+        var root = document.documentElement;
+        root.classList.remove('pf-v6-theme-light', 'pf-v6-theme-dark');
+        root.classList.add('pf-v6-theme-' + theme);
+        root.setAttribute('data-theme', theme);
+        root.style.colorScheme = theme;
+      } catch (e) { /* private mode, storage denied: the light default stands */ }
+    })();
+  </script>
+
+  {%- seo -%}
+
+  <link rel="preload" href="{{ '/assets/fonts/RedHatTextVF.woff2' | relative_url }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ '/assets/fonts/RedHatDisplayVF.woff2' | relative_url }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ '/assets/css/agentops.css' | relative_url }}">
+  <script src="{{ '/assets/js/theme.js' | relative_url }}" defer></script>
+</head>
+<body>
+  <a class="ao-skip" href="#ao-content">Skip to content</a>
+
+  {%- comment -%}
+  Body-level so the sidebar opens from it with no script: the shell is its
+  sibling, and the label that operates it sits in the masthead.
+  {%- endcomment -%}
+  <input class="ao-nav-toggle" id="ao-nav-toggle" type="checkbox" aria-label="Show navigation">
+
+  {% include masthead.html %}
+
+  <div class="ao-shell">
+    {% include sidebar.html %}
+    <main class="ao-main" id="ao-content" tabindex="-1">
+      <div class="ao-content">
+        {{ content }}
+        {% include footer.html %}
+      </div>
+    </main>
+  </div>
+</body>
+</html>
