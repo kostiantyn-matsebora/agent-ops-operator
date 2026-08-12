@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { connectStream, useStream } from './stream'
+import { connectStream, noteDelta, useStream } from './stream'
 
 // The masthead chip reads `connected` from this store. It used to be able to
 // stick on "stream disconnected" until the page was reloaded, because
@@ -52,6 +52,51 @@ function reset() {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+// A revision says "this kind moved" — never how many times. That distinction is
+// what keeps a burst of deltas from being a burst of refetches: the revision is
+// part of a query KEY, so one bump per event means one cold cache entry per
+// event, and every list showing that kind flips to its loading state between
+// them. Closing fifty conversations is exactly such a burst.
+describe('delta coalescing', () => {
+  it('bumps a kind once for a burst, not once per delta', () => {
+    vi.useFakeTimers()
+    useStream.setState({ revisions: {} })
+
+    for (let i = 0; i < 50; i++) noteDelta('conversations')
+    // nothing yet: the window is still open
+    expect(useStream.getState().revisions.conversations).toBeUndefined()
+
+    vi.advanceTimersByTime(250)
+    expect(useStream.getState().revisions.conversations).toBe(1)
+  })
+
+  it('bumps each kind that moved, and only those', () => {
+    vi.useFakeTimers()
+    useStream.setState({ revisions: {} })
+
+    noteDelta('conversations')
+    noteDelta('pipelines')
+    noteDelta('conversations')
+    vi.advanceTimersByTime(250)
+
+    const { revisions } = useStream.getState()
+    expect(revisions).toEqual({ conversations: 1, pipelines: 1 })
+  })
+
+  it('opens a fresh window for the next burst', () => {
+    vi.useFakeTimers()
+    useStream.setState({ revisions: {} })
+
+    noteDelta('conversations')
+    vi.advanceTimersByTime(250)
+    noteDelta('conversations')
+    vi.advanceTimersByTime(250)
+
+    // A later change must still be seen — coalescing delays a bump, never drops one.
+    expect(useStream.getState().revisions.conversations).toBe(2)
+  })
 })
 
 describe('connectStream', () => {

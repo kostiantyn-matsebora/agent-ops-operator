@@ -337,6 +337,37 @@ export interface ConversationSummary {
   ageSeconds: number
   toolsets?: string[]
   mcpConfigs?: string[]
+  /** Deleted and held by its close-topics finalizer while threads are archived. */
+  closing: boolean
+}
+
+// ---- closing a batch ---------------------------------------------------------
+
+/**
+ * What a close batch asks for: NAMES the operator selected, and the opt-in that
+ * abandons in-progress runs. No filter and no "everything matching" — what may
+ * be closed is what was on screen.
+ */
+export interface CloseRequest {
+  names: string[]
+  includeWorking?: boolean
+}
+
+/** `closed` happened, `skipped` was declined and says why, `failed` was tried. */
+export type CloseOutcome = 'closed' | 'skipped' | 'failed'
+
+export interface CloseResult {
+  name: string
+  outcome: CloseOutcome
+  reason?: string
+}
+
+/** A mixed batch is the NORMAL outcome, so the result is per conversation. */
+export interface CloseResponse {
+  results: CloseResult[]
+  closed: number
+  skipped: number
+  failed: number
 }
 
 export interface ConversationPage {

@@ -1,6 +1,7 @@
 import type {
-  AgentsResponse, ChartResponse, ConversationDetail, ConversationGraph, ConversationPage, Detail,
-  Finding, KindInfo, InventoryRow, Overview, Queues, Session, SourcesResponse, TopologyResponse,
+  AgentsResponse, ChartResponse, CloseRequest, CloseResponse, ConversationDetail, ConversationGraph,
+  ConversationPage, Detail, Finding, KindInfo, InventoryRow, Overview, Queues, Session,
+  SourcesResponse, TopologyResponse,
 } from './types'
 
 /** Raised for a non-2xx response, carrying the server's own explanation. */
@@ -61,6 +62,14 @@ export const api = {
     request<{ source: string; note: string }>('/api/conversations', {
       method: 'POST',
       body: JSON.stringify({ task, source }),
+    }),
+  // ONE request for the whole batch: the write gate, the identity and the cap
+  // then live server-side rather than in the browser, and the manager's inbound
+  // path never sees fifty unordered posts.
+  closeConversations: (req: CloseRequest) =>
+    request<CloseResponse>('/api/conversations/close', {
+      method: 'POST',
+      body: JSON.stringify(req),
     }),
   send: (name: string, text: string) =>
     request<unknown>(`/api/conversations/${name}/messages`, {

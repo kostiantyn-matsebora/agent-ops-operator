@@ -216,6 +216,47 @@ Detail is tabbed:
   the view a graph cannot replace.
 - **YAML** — the Conversation object.
 
+### Closing a batch
+
+Select rows and press **Close selected**. The confirmation names the count, how
+many of them are working, and that closing cannot be undone.
+
+**It is `/close`, fanned out.** Each selected conversation is sent the literal
+text `/close` on its own console thread, exactly as a person typing it would.
+The manager intercepts it on the reply path, posts the farewell to every bound
+thread, archives them through the `agentops.dev/close-topics` finalizer and
+deletes the `Conversation`; owner references then reclaim the runtime pod and the
+MCP ConfigMap, and the freed slot admits a waiting conversation. No manager
+endpoint, no adapter contract verb and no Kubernetes write is added — the
+console's only write anywhere is still `POST /channel/inbound`. There is exactly
+one implementation of closing, so a batch cannot drift from a typed close.
+
+What that costs, and why each cost is the right one:
+
+- **Reach is the threads the console holds.** A conversation the console merely
+  *observes* has no console thread and so nowhere to post; it comes back
+  `skipped` with the fix — add the console channel to that conversation's
+  pipeline `channels[]`. This is the joined/observed distinction made visible,
+  not a permission gap.
+- **Working conversations are left alone** unless the confirmation's
+  *include working — abandons in-progress runs* toggle is turned on. The phase is
+  read server-side from the conversation's own state; nothing the browser asserts
+  decides it.
+- **The result is per conversation** — closed / skipped / failed with a reason
+  for anything not closed. A mixed batch is a successful request; "12 of 15
+  closed" is the honest summary and a single verdict cannot carry the reasons.
+- **The batch is bounded at 50**, the list page size, enforced by the server. The
+  selection is over the rows on screen: there is no "close everything matching
+  the filter", because a mis-set filter would then close far more than was ever
+  visible.
+- **A closing conversation shows as `closing`** and cannot be re-selected. Its
+  finalizer holds it for up to two minutes while the threads archive, so without
+  this the list would look untouched after a successful batch.
+- **It is a write**: authentication, the install-wide write gate
+  (`console.write.enabled`) and a forwarded identity all apply, and each close is
+  logged against the identity that ordered it. A read-only console renders no
+  close action, and refuses the request if one is made anyway.
+
 ## Starting a conversation
 
 **The console originates the way everything else does: by emitting a chat signal

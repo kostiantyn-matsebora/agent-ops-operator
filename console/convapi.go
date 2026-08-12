@@ -495,6 +495,130 @@ func (a *API) handleSend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, msg)
 }
 
+// ---- bulk close ---------------------------------------------------------------
+
+// closeRequest is POST /api/conversations/close. It carries NAMES and a flag,
+// and nothing else: no filter, no query, no "everything matching". What may be
+// closed is what the operator selected, so a mis-set filter can never close more
+// than one screen of conversations.
+//
+// IncludeWorking is the opt-in that abandons in-progress runs. It is the only
+// thing the caller decides — the phase itself is read server-side, because a
+// phase asserted by the browser is stale by definition and would make the caller
+// the author of its own authorization.
+type closeRequest struct {
+	Names          []string `json:"names"`
+	IncludeWorking bool     `json:"includeWorking,omitempty"`
+}
+
+// Close outcomes. `skipped` is a conversation this console could not or would
+// not close and said why; `failed` is one it tried to close and could not.
+const (
+	closeOutcomeClosed  = "closed"
+	closeOutcomeSkipped = "skipped"
+	closeOutcomeFailed  = "failed"
+)
+
+// CloseResult is one conversation's outcome. A batch reports one of these per
+// requested name — "12 of 15 closed" is the only honest summary of a batch, and
+// a single verdict cannot carry the reasons.
+type CloseResult struct {
+	Name    string `json:"name"`
+	Outcome string `json:"outcome"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// handleBulkClose ends a batch of conversations by posting `/close` on each
+// one's console thread — the same command, the same code path, the same
+// archiving and teardown a person typing it gets.
+//
+// It is a FAN-OUT OF `/close`, deliberately, and not a manager-side batch verb:
+// a second implementation of ending a conversation would be free to drift from
+// the first, and the first divergence (a farewell not posted, a finalizer not
+// run, a slot not released) would be found in production. It also keeps the
+// console's defining invariant literally true — its only write anywhere is
+// POST /channel/inbound.
+//
+// The walk is sequential and never aborts: a failing name is recorded and the
+// walk continues, because a batch that stops on its first bad row is a batch
+// nobody can reason about.
+func (a *API) handleBulkClose(w http.ResponseWriter, r *http.Request) {
+	var in closeRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `need {"names":["…"]}`})
+		return
+	}
+	if len(in.Names) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "names is required"})
+		return
+	}
+	// The cap is the list page size, enforced HERE and not only in the selection
+	// UI: the blast radius must equal one screen of conversations regardless of
+	// what the client sends.
+	if len(in.Names) > conversationPageSize {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "a close batch is limited to " + strconv.Itoa(conversationPageSize) + " conversations",
+		})
+		return
+	}
+
+	identity := Identity(r)
+	results := make([]CloseResult, 0, len(in.Names))
+	for _, name := range in.Names {
+		results = append(results, a.closeOne(r, name, in.IncludeWorking, identity))
+	}
+	totals := map[string]int{closeOutcomeClosed: 0, closeOutcomeSkipped: 0, closeOutcomeFailed: 0}
+	for _, res := range results {
+		totals[res.Outcome]++
+	}
+	// 200 for a mixed batch: the request was executed, and a partial result is
+	// the normal outcome rather than a transport failure.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"results": results,
+		"closed":  totals[closeOutcomeClosed],
+		"skipped": totals[closeOutcomeSkipped],
+		"failed":  totals[closeOutcomeFailed],
+	})
+}
+
+// closeOne decides and performs one conversation's close. Every decision is
+// taken from cached CR state — the client supplies names and a flag, nothing
+// else.
+func (a *API) closeOne(r *http.Request, name string, includeWorking bool, identity string) CloseResult {
+	obj := a.cache.Get("conversations", name)
+	if obj == nil {
+		return CloseResult{Name: name, Outcome: closeOutcomeFailed,
+			Reason: "no such conversation — it may already have been closed"}
+	}
+	if obj.Metadata.DeletionTimestamp != "" {
+		return CloseResult{Name: name, Outcome: closeOutcomeSkipped,
+			Reason: "already closing"}
+	}
+	if !includeWorking && strings.EqualFold(conversationView(obj).Status.Phase, "Working") {
+		return CloseResult{Name: name, Outcome: closeOutcomeSkipped,
+			Reason: "working — closing it would abandon the run in progress"}
+	}
+	if _, _, ok := a.adapter.ThreadFor(name); !ok {
+		return CloseResult{Name: name, Outcome: closeOutcomeSkipped, Reason: notJoinedReason}
+	}
+	if _, err := a.adapter.Send(r.Context(), name, identity, "/close"); err != nil {
+		if errors.Is(err, errNotJoined) {
+			// lost the thread between the check and the post — the same answer
+			return CloseResult{Name: name, Outcome: closeOutcomeSkipped, Reason: notJoinedReason}
+		}
+		log.Printf("bulk close %s: %v", name, err)
+		return CloseResult{Name: name, Outcome: closeOutcomeFailed, Reason: "closing failed"}
+	}
+	log.Printf("console write: action=bulk-close identity=%s conversation=%s", identity, name)
+	return CloseResult{Name: name, Outcome: closeOutcomeClosed}
+}
+
+// notJoinedReason names the FIX rather than the failure: reach is bounded by
+// the threads this console holds, and the binding that would extend it is the
+// pipeline's channels[].
+const notJoinedReason = "the console holds no thread on this conversation — " +
+	"add the console channel to its pipeline's channels[] to join it"
+
 // Agent is one addressable pipeline offered by the composer's typeahead.
 type Agent struct {
 	Name string `json:"name"`

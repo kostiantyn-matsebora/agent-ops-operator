@@ -119,6 +119,10 @@ type ConversationSummary struct {
 	Joined bool `json:"joined"`
 	// ConsoleThread is the thread id to post replies against when joined.
 	ConsoleThread string `json:"consoleThread,omitempty"`
+	// Closing: the Conversation is deleted and held by its close-topics
+	// finalizer while the threads are archived. Without this the list looks
+	// untouched after a close, the operator concludes it failed, and re-closes.
+	Closing bool `json:"closing"`
 
 	// Errored: the most recent run did not succeed. A filter facet, so "show me
 	// what went wrong" is one click rather than a scan.
@@ -146,6 +150,7 @@ func summarize(obj *Object, pipelines []*Object, consoleChannel string) Conversa
 		Queued:     len(v.Spec.Inputs),
 		Toolsets:   v.Spec.Toolsets.refs(),
 		MCPConfigs: v.Spec.MCPConfigs.refs(),
+		Closing:    obj.Metadata.DeletionTimestamp != "",
 	}
 	// RunCount is set HERE, not only on the list path: the detail view carries
 	// Runs too, and a summary that reported 0 runs beside a populated list was
