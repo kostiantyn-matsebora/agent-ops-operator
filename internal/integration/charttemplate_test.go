@@ -3,6 +3,7 @@ package integration
 import (
 	"encoding/base64"
 	"os/exec"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -863,6 +864,195 @@ func TestMCPServerRefusesTheRuntimeIdentity(t *testing.T) {
 	}
 }
 
+// ---- k8s-bundle wiring ------------------------------------------------------
+
+// bundlePipelines returns the Pipelines the BUNDLE rendered, by name. Anchored
+// on the bundle label: an install-declared Pipeline carries
+// app.kubernetes.io/name: agentops, and the CRD document names the kind too.
+func bundlePipelines(rendered string) map[string]string {
+	out := map[string]string{}
+	for _, doc := range splitDocs(rendered) {
+		if !strings.Contains(doc, "\nkind: Pipeline\n") ||
+			!strings.Contains(doc, "app.kubernetes.io/name: agentops-k8s-bundle") {
+			continue
+		}
+		i := strings.Index(doc, "metadata:\n  name: ")
+		if i < 0 {
+			continue
+		}
+		rest := doc[i+len("metadata:\n  name: "):]
+		out[strings.TrimSpace(rest[:strings.Index(rest, "\n")])] = stripComments(doc)
+	}
+	return out
+}
+
+func pipelineNames(rendered string) []string {
+	var names []string
+	for n := range bundlePipelines(rendered) {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// The default-off rule is the load-bearing half of "a bundle may ship wiring":
+// enabling this bundle for its adapter and profile must never silently add a
+// route beside the one the install declared under the parent's `pipelines:`.
+func TestBundleShipsNoWiringUnlessAsked(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"default install", nil},
+		{"bundle enabled directly", []string{"--set", "k8s-bundle.enabled=true"}},
+		{"wiring declined under demo", []string{
+			"--set", "global.demo.enabled=true",
+			"--set", "k8s-bundle.pipelines.enabled=false"}},
+		{"no profile, no route", []string{
+			"--set", "global.demo.enabled=true",
+			"--set", "k8s-bundle.profile.enabled=false"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pipelineNames(helmTemplate(t, tc.args...)); len(got) != 0 {
+				t.Errorf("the bundle must render no Pipeline here, got %v", got)
+			}
+		})
+	}
+}
+
+// Declining the route must cost nothing else — the opt-out in CHANGELOG.md is
+// one value, and it has to leave a bundle that still watches, profiles and tools.
+func TestDecliningWiringLeavesTheRestOfTheBundle(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "k8s-bundle.pipelines.enabled=false")
+	for _, needle := range []string{
+		"kind: SignalAdapter", "name: cluster-events", "kind: AgentProfile",
+		"name: k8s-engineer", "kind: MCPConfig", "name: k8s-observability",
+	} {
+		if !strings.Contains(out, needle) {
+			t.Errorf("declining wiring must not remove %q", needle)
+		}
+	}
+}
+
+// Demo mode's whole promise is one flag and a working install. Before this it
+// rendered an events lane, a profile and tooling that answered nothing.
+func TestDemoModeWiresTheObservingRoute(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.demo.enabled=true")
+	pipes := bundlePipelines(out)
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe" {
+		t.Fatalf("demo mode must render exactly k8s-observe, got %v", got)
+	}
+	doc := pipes["k8s-observe"]
+	for _, needle := range []string{
+		"name: k8s-engineer",      // the bundle's profile
+		"name: cluster-events",    // claims the bundle's source
+		"name: agentops-observe",  // built-in reads
+		"name: k8s-observability", // cluster reads
+		"name: k8s-api",           // the MCPConfig
+	} {
+		if !strings.Contains(doc, needle) {
+			t.Errorf("the observing route must bind %q:\n%s", needle, doc)
+		}
+	}
+	if strings.Contains(doc, "name: k8s-admin") {
+		t.Errorf("the observing route must NOT bind the mutating toolset:\n%s", doc)
+	}
+}
+
+// One posture, four consistent effects. Widening to `full` already drops
+// --read-only, widens the server SA and renders k8s-admin; the route that binds
+// it has to move with them, or `full` grants a power no route can exercise.
+func TestFullModePromotesTheRouteToActing(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "global.agentops.runtime.rbacMode=full")
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-operate" {
+		t.Fatalf("rbacMode=full must render exactly k8s-operate, got %v", got)
+	}
+	doc := bundlePipelines(out)["k8s-operate"]
+	for _, needle := range []string{"name: k8s-observability", "name: k8s-admin"} {
+		if !strings.Contains(doc, needle) {
+			t.Errorf("the acting route must bind %q:\n%s", needle, doc)
+		}
+	}
+}
+
+// Derivation is a default, never a ceiling or a floor: the explicit value
+// decides in both directions, exactly as mcpServers.readOnly does.
+func TestExplicitRouteValuesBeatTheDerivation(t *testing.T) {
+	// acting route asked for under a read-only release
+	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "k8s-bundle.pipelines.admin.enabled=true",
+		"--set", "k8s-bundle.pipelines.observe.enabled=false")
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-operate" {
+		t.Fatalf("an explicit acting route must render under readonly, got %v", got)
+	}
+	// ...but it binds no toolset the read-only server never registered
+	if doc := bundlePipelines(out)["k8s-operate"]; strings.Contains(doc, "name: k8s-admin") {
+		t.Errorf("no ref to a toolset that was not rendered:\n%s", doc)
+	}
+
+	// observing route asked for under `full`
+	out = helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "global.agentops.runtime.rbacMode=full",
+		"--set", "k8s-bundle.pipelines.observe.enabled=true",
+		"--set", "k8s-bundle.pipelines.admin.enabled=false")
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe" {
+		t.Fatalf("an explicit observing route must win under full, got %v", got)
+	}
+}
+
+// Two Ready Pipelines on one source is a SUPPORTED shape — sources are
+// shareable and sourceConflicts was deleted. Failing the render here would be
+// that guard returning one layer up.
+func TestBothRoutesRenderWithoutConflict(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "k8s-bundle.pipelines.observe.enabled=true",
+		"--set", "k8s-bundle.pipelines.admin.enabled=true")
+	got := pipelineNames(out)
+	if len(got) != 2 || got[0] != "k8s-observe" || got[1] != "k8s-operate" {
+		t.Fatalf("both routes must render, got %v", got)
+	}
+	for _, name := range got {
+		if !strings.Contains(bundlePipelines(out)[name], "name: cluster-events") {
+			t.Errorf("%s must claim the shared source", name)
+		}
+	}
+}
+
+// A bundle may ship wiring only because every foreign name is values-supplied
+// and omitted when unset, and every ref to its own components disappears with
+// them. A ref to an object nobody rendered is how an allowlist rots.
+func TestWiringNamesOnlyWhatWasRendered(t *testing.T) {
+	// no channel named: the key is ABSENT, not empty-valued
+	bare := bundlePipelines(helmTemplate(t, "--set", "global.demo.enabled=true"))["k8s-observe"]
+	if strings.Contains(bare, "channelRefs") {
+		t.Errorf("an empty channel list must omit the key entirely:\n%s", bare)
+	}
+
+	named := helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "k8s-bundle.pipelines.channels={console}")
+	if doc := bundlePipelines(named)["k8s-observe"]; !strings.Contains(doc, "channelRefs:\n    - name: console") {
+		t.Errorf("a named channel must reach the Pipeline:\n%s", doc)
+	}
+
+	// every component the route would reference, turned off at once
+	off := helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "k8s-bundle.mcp.enabled=false",
+		"--set", "k8s-bundle.mcpServers.enabled=false",
+		"--set", "global.builtinToolsets.enabled=false",
+		"--set", "k8s-bundle.eventsAdapter.source.create=false")
+	doc := bundlePipelines(off)["k8s-observe"]
+	if doc == "" {
+		t.Fatal("the route still renders — it is gated on the profile, not on tooling")
+	}
+	for _, dangling := range []string{"signalSourceRefs", "toolsets", "mcpConfigs"} {
+		if strings.Contains(doc, dangling) {
+			t.Errorf("%s must be omitted when nothing rendered it:\n%s", dangling, doc)
+		}
+	}
+}
+
 func eventsSourceDoc(t *testing.T, rendered string) string {
 	t.Helper()
 	for _, doc := range splitDocs(rendered) {
@@ -1036,6 +1226,76 @@ func TestSingleAttachWithoutPinningIsCalledOut(t *testing.T) {
 	// RWX: many nodes may attach, so the whole concern is absent.
 	if strings.Contains(helmNotes(t), "attached by ONE node") {
 		t.Fatal("the default RWX claim must not warn")
+	}
+}
+
+// The notes speak about the bundle's route only where they have something true
+// to say. The failure worth pinning is the middle row: an install that declared
+// its own claim under the parent's `pipelines:` is fully wired, and telling it
+// "nothing answers cluster events yet" sends someone to fix what is not broken.
+func TestWiringNotesReadTheActualClaims(t *testing.T) {
+	claimsIt := []string{
+		"--set", "pipelines[0].name=k8s-ops",
+		"--set", "pipelines[0].profile=k8s-engineer",
+		"--set", "pipelines[0].signalSources={cluster-events}",
+	}
+	// A dry-run INSTALL adopts nothing, but helm still refuses cluster-scoped
+	// objects another release owns — and these cases are the first to turn the
+	// bundle on, whose RBAC is cluster-scoped by default. Nothing in the notes
+	// reads it, so switch it off rather than requiring a cluster with no
+	// agent-ops release on it.
+	noClusterRBAC := []string{
+		"--set", "k8s-bundle.eventsAdapter.rbac.create=false",
+		"--set", "k8s-bundle.mcpServers.rbac.create=false",
+	}
+	// surface.name defaults to k8s-ops, and the chat SignalSource takes it too —
+	// that name is what a claiming pipeline has to list.
+	chatSurface := []string{
+		"--set", "telegram-bundle.enabled=true",
+		"--set", "telegram-bundle.surface.enabled=true",
+		"--set", "telegram-bundle.surface.chatId=-100",
+		"--set", "telegram-bundle.surface.credentials.botToken=x",
+	}
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		want, notWant []string
+	}{
+		{"bundle on, nobody claims", []string{"--set", "k8s-bundle.enabled=true"},
+			[]string{"ONE STEP LEFT — nothing answers cluster events"}, nil},
+		{"bundle on, the install claims",
+			append([]string{"--set", "k8s-bundle.enabled=true"}, claimsIt...),
+			nil, []string{"ONE STEP LEFT — nothing answers cluster events", "claimed TWICE"}},
+		{"demo wires it", []string{"--set", "global.demo.enabled=true"},
+			[]string{"this release WIRED it", "k8s-observe"},
+			[]string{"ONE STEP LEFT — nothing answers cluster events", "claimed TWICE"}},
+		{"both claim it — a note, never a failure",
+			append([]string{"--set", "global.demo.enabled=true"}, claimsIt...),
+			[]string{"claimed TWICE", "k8s-ops"}, nil},
+		// The same rule one lane over. telegram-bundle genuinely ships no
+		// Pipeline, so its prompt stays — but only while nobody has answered it.
+		{"chat surface nobody claims", chatSurface,
+			[]string{"ONE STEP LEFT — nothing answers yet"}, nil},
+		{"chat surface the install claims",
+			append(append([]string{}, chatSurface...),
+				"--set", "pipelines[0].name=chat",
+				"--set", "pipelines[0].profile=k8s-engineer",
+				"--set", "pipelines[0].signalSources={k8s-ops}"),
+			nil, []string{"ONE STEP LEFT — nothing answers yet"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := helmNotes(t, append(tc.args, noClusterRBAC...)...)
+			for _, needle := range tc.want {
+				if !strings.Contains(out, needle) {
+					t.Errorf("the notes must say %q", needle)
+				}
+			}
+			for _, needle := range tc.notWant {
+				if strings.Contains(out, needle) {
+					t.Errorf("the notes must NOT say %q", needle)
+				}
+			}
+		})
 	}
 }
 

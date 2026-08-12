@@ -1,0 +1,97 @@
+{{- /*
+Wiring component: the bundle's OWN route, claiming the source it renders with
+the profile it renders.
+
+Bundles normally ship no Pipeline. This one may because it owns the whole lane —
+the source, the profile, the MCPConfig and both toolsets are all rendered here,
+so the single class of object a route needs and this bundle cannot see is a
+channel, and that is a values-supplied name omitted when unset. A bundle whose
+sources and channels came from elsewhere could only ever wire itself, which is
+how an install ends up with one Pipeline per lane instead of one route.
+
+It is OFF unless asked for, and demo mode is the only thing that asks on your
+behalf. Gated on the profile too: a Pipeline with no profile has no agent to run.
+
+At most one of the two routes renders by default — they differ in exactly one
+binding, and rendering both would open two conversations per event with one of
+them able to mutate the cluster. Both together is allowed, deliberately (sources
+are shareable, and there is no conflict guard to reinstate), but it is asked for
+explicitly.
+*/ -}}
+{{- if and (include "k8s-bundle.wiringActive" .) .Values.profile.enabled }}
+{{- $p := .Values.pipelines }}
+{{- $g := .Values.global | default dict }}
+{{- $ea := .Values.eventsAdapter }}
+{{- $mcp := .Values.mcp }}
+{{- /* Every ref below is emitted only when the object it names is rendered:
+a ref to a toolset nobody created is how an allowlist rots into fiction. */ -}}
+{{- $sources := list }}
+{{- if and $ea.enabled $ea.source.create }}{{ $sources = append $sources $ea.source.name }}{{ end }}
+{{- $readTools := list }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $readTools = append $readTools (dig "builtinToolsets" "observe" "name" "agentops-observe" $g) }}
+{{- end }}
+{{- $mcpConfigs := list }}
+{{- if $mcp.enabled }}
+{{- $readTools = append $readTools $mcp.toolsets.observe.name }}
+{{- $mcpConfigs = append $mcpConfigs $mcp.name }}
+{{- end }}
+{{- $writeTools := list }}
+{{- if and $mcp.enabled (include "k8s-bundle.mcpAdminEnabled" .) }}
+{{- $writeTools = append $writeTools $mcp.toolsets.admin.name }}
+{{- end }}
+{{- $routes := list }}
+{{- if include "k8s-bundle.observePipelineEnabled" . }}
+{{- $routes = append $routes (dict "name" $p.observe.name "tools" $readTools) }}
+{{- end }}
+{{- if include "k8s-bundle.adminPipelineEnabled" . }}
+{{- $routes = append $routes (dict "name" $p.admin.name "tools" (concat $readTools $writeTools)) }}
+{{- end }}
+{{- range $routes }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+spec:
+  profileRef:
+    name: {{ $.Values.profile.name }}
+  {{- with $sources }}
+  # Wiring is pipeline-only: without this claim the source reports Wired=False
+  # and DROPS every event it admits.
+  signalSourceRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $p.channels }}
+  # The one class of object this bundle does not render, so it is named from
+  # values and the key is absent when nobody named one. With no channel the
+  # conversation dispatches immediately and its answer lands in
+  # status.runs[].result.
+  channelRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with .tools }}
+  # Declared, not inherited: profiles carry no capabilities and nothing supplies
+  # a default, so this stanza IS the agent's allowlist.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with $mcpConfigs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

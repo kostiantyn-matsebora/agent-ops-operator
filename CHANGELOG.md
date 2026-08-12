@@ -8,6 +8,61 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Demo mode wires itself — chart 5.12.0, k8s-bundle 0.3.0
+
+**Action needed only if you run `global.demo.enabled=true`, or enable
+`k8s-bundle` and already claim `cluster-events` from your own `pipelines:`.**
+
+The k8s bundle gains a fourth component: its own wiring. Until now it rendered
+the events adapter, the source, the profile and the MCP tooling — everything
+except the one object that makes them do anything — so `global.demo.enabled` put
+a complete Kubernetes agent in the cluster that answered nothing until you read
+NOTES.txt and applied a Pipeline by hand.
+
+**What changes for a demo install.** It now renders `Pipeline/k8s-observe`,
+claiming `cluster-events` with the read toolsets and the `k8s-api` MCPConfig. The
+source goes `Wired=True` and **every admitted Warning event opens a conversation
+and spends LLM credits**, where before it dropped them. That is the fix, and it
+is a real bill: on a noisy cluster, check the shipped suppression rules
+(`docs/k8s-bundle.md`) before upgrading.
+
+*Keep the old behaviour — the parts without the route:*
+
+```sh
+helm upgrade ... --set k8s-bundle.pipelines.enabled=false
+```
+
+That value is absolute: it declines the route even under demo mode, and every
+other bundle component is untouched.
+
+**What changes for everyone else: nothing.** The flag is OFF outside demo mode.
+Enabling the bundle for its adapter and profile still renders no Pipeline, and
+the parent chart's `pipelines:` stays where an install declares routes.
+
+**If you already claim `cluster-events` yourself** and also turn this on, both
+Pipelines render and the source **fans out** — one event, two conversations, two
+profiles' worth of capability, two bills. That is legal (sources have been
+shareable since 5.10.0) and deliberately not refused; the post-install notes name
+the pipelines involved when it happens. If you meant only your own route, set
+`k8s-bundle.pipelines.enabled=false`.
+
+**Which route renders derives from `global.agentops.runtime.rbacMode`**, the same
+value the MCP server's `--read-only` flag, the server SA's RBAC and the
+`k8s-admin` toolset already follow:
+
+| `rbacMode` | route | what it can do |
+|---|---|---|
+| `readonly`, `none`, `""` (incl. demo) | `k8s-observe` | reads the cluster, changes nothing |
+| `full` | `k8s-operate` | binds `k8s-admin` — **mutates the cluster** |
+
+So widening to `full` now promotes the route as well. `pipelines.observe.enabled`
+and `pipelines.admin.enabled` are explicit booleans that win in both directions,
+and both may be true at once.
+
+**No channel is bound by default**, so answers land in
+`status.runs[].result` — `pipelines.channels: [<name>]` delivers them to a
+surface instead.
+
 ### Signal sources are shareable, and bare chat messages stop being guessed — chart 5.10.0
 
 **Two behaviour changes. Both need action only if a `SignalSource` is listed by

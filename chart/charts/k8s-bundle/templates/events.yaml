@@ -1,12 +1,11 @@
 {{- /*
 Events component: the adapter implementation, the Events permissions its
-ServiceAccount needs, and (optionally) the turnkey lane — a SignalSource AND the
-Pipeline claiming it.
+ServiceAccount needs, and (under source.create) the SignalSource itself.
 
-The source and the Pipeline are rendered together on purpose. Wiring is
-pipeline-only: a SignalSource nobody claims reports Wired=False and DROPS every
-signal, so shipping the source alone would look installed and quietly do
-nothing.
+NOT the claim on that source. Wiring is pipeline-only — an unclaimed
+SignalSource reports Wired=False and DROPS every signal — but the Pipeline is
+its own component (pipelines.yaml), so an events lane can be rendered for a
+route declared anywhere, including in the parent chart's own `pipelines:`.
 */ -}}
 {{- if and (include "k8s-bundle.active" .) .Values.eventsAdapter.enabled }}
 {{- $ea := .Values.eventsAdapter }}

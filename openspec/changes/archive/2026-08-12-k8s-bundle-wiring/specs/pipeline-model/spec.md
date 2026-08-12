@@ -1,17 +1,5 @@
 ## MODIFIED Requirements
 
-<!-- Reconciled with the `k8s-bundle-wiring` change, which modifies this same
-requirement and lands first. The text below is that change's version verbatim,
-plus one scenario of this change's own. Whichever archives second folds rather
-than restates — so if `k8s-bundle-wiring` has already archived, this delta is
-additive against the synced requirement and nothing here re-argues the rule.
-
-This bundle's wiring flag defaults ON, which the general rule forbids. That
-exception is carried EXPLICITLY by this change's own `ha-bundle` spec
-("The bundle ships its wiring behind a flag that defaults on"), under the clause
-below permitting a subchart that substantially owns its lane to document one.
-The general requirement does not carry it. -->
-
 ### Requirement: Chart-managed wiring is declared once, at the top
 Wiring names a profile, signal sources and channels that routinely originate in
 DIFFERENT components, and a subchart can see only itself. The parent scope is
@@ -80,8 +68,3 @@ has nothing to gain from it.
   source
 - **THEN** both Pipelines render and the source fans out to both, because
   sources are shareable and no conflict guard exists to reinstate
-
-#### Scenario: A bundle never names what nobody rendered
-- **WHEN** a subchart renders wiring while an optional channel name is unset
-- **THEN** the rendered Pipeline omits that reference entirely rather than
-  naming an object that does not exist
