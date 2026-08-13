@@ -441,13 +441,62 @@ a second source of truth beside the CRs.
 | Component | State it holds | Home | A restart costs |
 |---|---|---|---|
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | nothing |
-| Manager — op queue | outbound channel ops | derived from CR state | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker. `close-topic` is the one exception ([below](#ending-a-conversation)) |
+| Manager — op queue | outbound channel ops | derived from CR state | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
 | Manager — ingest cooldown | fingerprint suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
 | Manager — admission | active/pending counts | live pod list + `Conversation` phase | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history; clients are told to resync rather than handed silence |
 | Runtime pod | agent session files, repo checkout | PVC when enabled, else ephemeral | with `persistence.enabled` off, conversational context; with it on, nothing |
 | Channel / signal adapters | transport cursors | annotations on `Channel` / `SignalSource` | nothing |
 | Console | config cache, activity index | rebuilt by list→watch and cursor replay | nothing authoritative; it mounts no volume by design |
+| Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
+
+### What reclaims what, and why the manager cannot
+
+The two-stage lifecycle reclaims the **Kubernetes API** half: autoclose ends a
+conversation, autodelete removes the object, and owner references take its
+`ConversationInput` objects and MCP ConfigMap with it. Both live in the manager,
+which already holds `delete` on conversations and needs no disk to do any of it.
+
+The **disk** half cannot live there. The manager mounts no PersistentVolume by
+invariant — a claim would pin it to a node, defeat rescheduling and become a
+second source of truth beside the CRs — and reclaiming a workspace directory
+requires mounting the claim ROOT, which is exactly the reach `subPath` isolation
+denies runtime pods. So an opt-in `housekeeping` CronJob does it, under its own
+ServiceAccount with **read-only** access to conversations and no agent code in
+its image.
+
+It reclaims two things:
+
+- **Orphan workspace directories** — `<claim>/<name>` where no `Conversation` of
+  that name exists.
+- **Orphan session transcripts** — files whose session id appears in no
+  conversation and which are older than a grace period.
+
+The orderings differ, and each is a correctness argument rather than a
+precaution. For workspaces the job scans the disk **first** and lists
+conversations **second**: a directory is created by the kubelet mounting a
+`subPath` for a runtime pod, and that pod exists only for a conversation that
+already exists, so the CR always predates its directory — anything visible in
+the scan had a CR before it, and a later listing sees it unless it was genuinely
+deleted. Reversing the order would let a conversation created in between look
+like an orphan.
+
+For transcripts that argument runs backwards: a conversation's context handle is
+written by `POST /work/done`, i.e. **after** the file exists, so a transcript
+for a run in flight is unreferenced and perfectly alive. Both a later listing
+**and** a grace period longer than the longest plausible run are required.
+
+**A closed conversation is protected for free**, and this is the property the
+split rests on: it still has a CR, so the same rule that identifies an orphan
+retains its workspace and its transcripts. The job's listing is therefore
+**phase-blind on purpose** — an "optimisation" that skipped closed conversations
+to look only at live ones would reclaim the state of every conversation an
+operator was deliberately keeping.
+
+The two halves never coordinate. Autodelete removes the object, the directory
+becomes an orphan, and the job reclaims it on its next run. Enabling autodelete
+**without** the job reclaims the API half and leaves the disk — correct with
+persistence off, a silent leak with it on.
 
 Adding state to a component means adding its row. State that fits no row is a
 defect: it is either a cache of a Kubernetes object, derivable from Kubernetes
@@ -545,13 +594,99 @@ in-progress work was abandoned, because an agent that has gone off the rails is
 exactly when the command is wanted. On a channel's general surface, where there
 is no conversation to end, it answers with usage and creates nothing.
 
-Deletion does the rest through machinery that already exists: owner references
-GC the runtime pod and the `agentops-mcp-conv-<name>` ConfigMap, and the freed
-slot goes to whatever is waiting. Chat threads are archived first, by the
-`agentops.dev/close-topics` finalizer: it enqueues one `close-topic` op per
-bound thread and lets go once they complete, or after a bounded 2-minute grace
-so an adapter that is down can never wedge a deletion. `kubectl delete
-conversation` takes the same path.
+**Closing is not deletion.** A closed conversation reaches phase `Closed` and
+stays there: inert, but intact. The transition tears down the runtime pod and
+the `agentops-mcp-conv-<name>` ConfigMap, archives every bound thread with one
+`close-topic` op, and releases the capacity slot to whatever is waiting — while
+the object, its `status.runs[].result`, its `runtimeContextId` and its volume
+state are all left alone. That is what makes it **reopenable**, and it is why
+closing is cheap enough to use: the old `/close` destroyed the record, so nobody
+reached for it.
+
+Exhaustively, `Closed` means: no runtime pod, no MCP ConfigMap, no dispatch and
+no work units; no capacity consumed and no place in the pending backlog; absent
+from conversation **reuse**, so a signal whose signature matches opens a NEW
+conversation; absent from every pipeline; and `status.closedAt` stamped, which
+is the origin of the delete clock. A reply typed into a closed thread is
+answered with "this conversation is closed" and creates nothing — an input there
+would never dispatch.
+
+Deletion is a **second verb** with its own trigger, window and flag. `kubectl
+delete conversation` still works, and the `agentops.dev/close-topics` finalizer
+still covers it: it enqueues one `close-topic` op per bound thread that is not
+already archived and lets go once they complete, or after a bounded 2-minute
+grace so an adapter that is down can never wedge a deletion. Deleting a
+conversation that was properly closed finds its threads archived and releases
+immediately.
+
+`close-topic` used to be the one operation not derivable from CR state. It no
+longer is, and the reason it WAS is worth keeping: it was enqueued while the
+object was disappearing, so there was nothing left to record against and a
+failure had to be terminal or deletion would wedge. Now that the object survives
+its close, `status.threadsArchived` records which threads are done, an
+unarchived thread is simply an archive still owed, and reconciliation re-derives
+it. Only the deleting path keeps the old protection, from the finalizer's grace.
+
+### Reopening
+
+A reopen sets the phase back to `Idle`, clears `status.closedAt` — which stops
+the delete clock — and leaves every materialized ref **exactly as it was**. The
+refs are snapshots whose content is re-read at every use, so a reopen that
+re-resolved wiring would do the one thing the snapshot rule forbids: let a
+Pipeline edit re-wire a conversation that already exists. A reopened
+conversation is the same conversation with the same profile and the same
+capabilities, or it is a new conversation wearing an old name.
+
+Continuity is restored where it was **promised**. Under
+`AgentRuntime.spec.contextStorage: volume` the workspace directory and the
+context handle are both still there, so the agent resumes; under `none` it
+answers fresh and says so, exactly as a resume already does. If a referenced
+`AgentProfile` or `Channel` no longer exists the reopen fails and names the
+missing one, rather than producing a conversation that looks alive and can never
+dispatch.
+
+Threads are re-established through an ordinary `ensure-topic` carrying the
+archived thread id as a **hint**. An adapter whose transport can un-archive
+returns the same id and the conversation continues where it left off (Telegram
+does); one that cannot ignores the hint and returns a new id, which is already
+correct. A reopened conversation may therefore continue in its old thread on one
+channel and a fresh thread on another — that is what those two transports can
+actually do, and both are recorded in `status.threads[]`.
+
+### The two windows
+
+Both are off by default, and they measure different things from different
+origins:
+
+| Setting | Closes/deletes | Measured from |
+|---|---|---|
+| `retention.autoclose.idleAge` | a **finished** conversation | **last activity** — the most recent run or input |
+| `retention.autodelete.closedAge` | a **closed** conversation | `status.closedAt` |
+
+"Finished" means all of: phase `Idle`, no pending inputs, no inflight run, no
+runtime pod, and every recorded run delivered to every bound thread. That last
+clause is not decoration — a conversation goes `Idle` the moment its result is
+recorded, while the reply may still be an unclaimed `send` op, so closing on
+`Idle` alone can archive a thread out from under its own answer.
+
+**The autoclose window is idle time, never lifetime.** A conversation created
+last week that answered an hour ago is busy, not old. There is deliberately no
+"close as soon as the answer is delivered" mode: the person who just received an
+answer is the most likely person to reply to it, and a closed conversation sends
+their reply to a new conversation with none of the context. The idle window
+protects the follow-up question.
+
+**The record argument belongs to the DELETE window.** `status.runs[].result` is
+the only place an answer lives in the Kubernetes API — the console projects its
+transcript from the CR, and metrics keep aggregates only — so choose
+`closedAge` as "how long do I want to be able to read this", not "how long until
+it is tidy". A conversation bound to no channel has no transport copy anywhere.
+
+Both timers are self-scheduled requeues rather than sweeps: the reconciler is
+already invoked per conversation with the state the decision needs, so a
+periodic list would re-read everything to act on almost nothing. Each spreads
+its first pass with jitter, because enabling either on an established install
+makes everything eligible at once.
 
 **One gesture, not one implementation per surface.** A surface that ends several
 conversations at once — the console's [bulk close](console.md#closing-a-batch) —

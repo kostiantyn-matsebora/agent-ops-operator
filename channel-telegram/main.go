@@ -242,6 +242,22 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		if op.Topic == nil {
 			return "", "ensure-topic without a topic descriptor"
 		}
+		// A REOPEN carries the archived topic as a hint. Telegram can
+		// un-archive, so honour it: the conversation continues in the thread it
+		// already had, with its history above the new messages. Returning the
+		// SAME id is what makes that continuity visible to the manager.
+		//
+		// Falling through to a fresh topic when un-archiving fails is
+		// deliberate — the topic may have been deleted by hand, and a reopen
+		// that failed outright would strand a conversation the manager has
+		// already moved back to Idle.
+		if prev := op.Topic.PreviousThreadID; prev != "" {
+			if n, err := strconv.ParseInt(prev, 10, 64); err == nil {
+				if err := tg.ReopenTopic(ctx, sc.cfg.ChatID, n); err == nil {
+					return prev, ""
+				}
+			}
+		}
 		id, err := tg.CreateTopic(ctx, sc.cfg.ChatID, renderTopicName(*op.Topic))
 		if err != nil {
 			return "", err.Error()

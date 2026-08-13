@@ -78,6 +78,12 @@ type TopicDescriptor struct {
 	Title        string            `json:"title,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	Kind         string            `json:"kind,omitempty"`
+	// PreviousThreadID is set when a closed conversation is reopened: the topic
+	// this conversation used before it was archived. Telegram CAN un-archive,
+	// so this adapter honours it and the conversation continues where it left
+	// off. An adapter whose transport cannot would ignore it and open a fresh
+	// entity, which is equally valid — the manager holds no opinion.
+	PreviousThreadID string `json:"previousThreadId,omitempty"`
 }
 
 // Op mirrors the manager's outbound operation shape.

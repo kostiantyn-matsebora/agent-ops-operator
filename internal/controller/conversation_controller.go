@@ -308,19 +308,29 @@ func allRunsDelivered(conv *agentopsv1alpha1.Conversation) bool {
 // outcome nobody asks for. This is the same instant the console shows as the
 // conversation's age, so the list and the behaviour agree.
 func lastActivity(conv *agentopsv1alpha1.Conversation) time.Time {
-	last := conv.CreationTimestamp.Time
-	if conv.Status.LastActivity != nil && conv.Status.LastActivity.After(last) {
-		last = conv.Status.LastActivity.Time
-	}
-	for i := range conv.Spec.Inputs {
-		if t := conv.Spec.Inputs[i].ReceivedAt.Time; t.After(last) {
+	var last time.Time
+	note := func(t time.Time) {
+		if t.After(last) {
 			last = t
 		}
 	}
+	if conv.Status.LastActivity != nil {
+		note(conv.Status.LastActivity.Time)
+	}
+	for i := range conv.Spec.Inputs {
+		note(conv.Spec.Inputs[i].ReceivedAt.Time)
+	}
 	for i := range conv.Status.Runs {
-		if f := conv.Status.Runs[i].FinishedAt; f != nil && f.After(last) {
-			last = f.Time
+		if f := conv.Status.Runs[i].FinishedAt; f != nil {
+			note(f.Time)
 		}
+	}
+	// Creation is the FALLBACK, not a floor: a conversation that has run is
+	// measured from its work, never from when it was opened. Taking the max
+	// with creation instead would make a freshly-adopted conversation look busy
+	// for a whole window because the object is young.
+	if last.IsZero() {
+		return conv.CreationTimestamp.Time
 	}
 	return last
 }

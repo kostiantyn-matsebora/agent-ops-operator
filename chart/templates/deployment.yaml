@@ -38,6 +38,18 @@ spec:
               value: {{ .Values.maxActiveConversations | quote }}
             - name: MAX_QUEUED_CONVERSATIONS
               value: {{ .Values.maxQueuedConversations | quote }}
+            {{- if .Values.retention.autoclose.enabled }}
+            - name: CONVERSATION_AUTOCLOSE_ENABLED
+              value: "true"
+            - name: CONVERSATION_AUTOCLOSE_IDLE_AGE
+              value: {{ required "retention.autoclose.idleAge is required when autoclose is enabled" .Values.retention.autoclose.idleAge | quote }}
+            {{- end }}
+            {{- if .Values.retention.autodelete.enabled }}
+            - name: CONVERSATION_AUTODELETE_ENABLED
+              value: "true"
+            - name: CONVERSATION_AUTODELETE_CLOSED_AGE
+              value: {{ required "retention.autodelete.closedAge is required when autodelete is enabled" .Values.retention.autodelete.closedAge | quote }}
+            {{- end }}
             {{- if .Values.maxRuntimes }}
             # deprecated alias; the manager prefers MAX_ACTIVE_CONVERSATIONS and
             # logs that this one is on its way out

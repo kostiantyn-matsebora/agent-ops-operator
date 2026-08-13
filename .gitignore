@@ -15,3 +15,4 @@ signal-k8s-events/signal-k8s-events
 console/console
 signal-telegram/signal-telegram
 telegram-router/telegram-router
+housekeeping/housekeeping

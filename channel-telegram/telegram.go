@@ -91,6 +91,18 @@ func (t *Telegram) CloseTopic(ctx context.Context, chatID string, threadID int64
 	return err
 }
 
+// ReopenTopic un-archives a forum topic so a reopened conversation continues in
+// the thread it already had. An already-open topic is NOT an error, for the
+// same reason CloseTopic tolerates an already-closed one: ops are at-least-once.
+func (t *Telegram) ReopenTopic(ctx context.Context, chatID string, threadID int64) error {
+	_, err := t.API(ctx, "reopenForumTopic",
+		map[string]any{"chat_id": chatID, "message_thread_id": threadID})
+	if err == nil || alreadyClosed(err) {
+		return nil
+	}
+	return err
+}
+
 // alreadyClosed reports whether a closeForumTopic error means the topic was
 // already archived.
 func alreadyClosed(err error) bool {

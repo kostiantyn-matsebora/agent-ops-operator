@@ -313,6 +313,19 @@ signal-k8s-events/       cluster Events signal adapter (own module, no deps) —
                          events RBAC (the operator grants adapters nothing).
                          Fingerprint keys on involved OBJECT+reason, never the
                          Event object — k8s recreates those per recurrence
+housekeeping/            the disk half of conversation retention (own module,
+                         no deps) — a CronJob, not a daemon: scans the claim
+                         ROOTS for workspace directories and session transcripts
+                         no Conversation backs, and removes them. READ-ONLY on
+                         the API (both etcd-side stages are the manager's), its
+                         OWN SA, no agent code in the image. Its own workload
+                         because THE MANAGER MOUNTS NOTHING and mounting the
+                         claim root is the reach subPath isolation denies
+                         agents. Every run is bounded (maxDeletions) and
+                         dryRun-able; the listing is PHASE-BLIND (see the
+                         invariant). Named agentops-housekeeping so
+                         signal-k8s-events' prefix self-exclusion catches it — a
+                         CronJob fails on a SCHEDULE
 console/                 the agent-ops console (own module, no deps) — a
                          ChannelAdapter that is ALSO the viewer. Config from
                          read-only list/watch of the eight agentops kinds
@@ -511,15 +524,57 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   (default 50), checked in INGEST rather than the reconciler because the point
   is not to create the object at all; it gates CREATION only, so window reuse
   keeps appending to a pending conversation.
-- **`/close` deletes the Conversation; the `agentops.dev/close-topics`
-  finalizer archives the threads first.** One `close-topic` op per bound thread,
-  released once they complete or after a 2-minute grace — a down adapter can
-  never wedge a deletion. `close-topic` is the ONE op whose failure is logged
-  rather than written as a condition and is never regenerated: the CR carrying
-  the condition is on its way out. The finalizer is what keeps "every op is
-  derivable from CR state" true while one is outstanding. `/close` is
-  intercepted on the REPLY path before the text could become an input, and
-  answers with usage on a general surface (no conversation there to end).
+- **`/close` sets a PHASE; DELETION IS A SECOND VERB.** Closing writes phase
+  `Closed` + `status.closedAt` and tears down the pod, the MCP ConfigMap and the
+  capacity slot, archiving every bound thread at the TRANSITION — the object,
+  its `status.runs[].result`, its `runtimeContextId` and its volume state all
+  survive, which is what makes REOPEN mean anything. Closing used to delete, and
+  that is exactly why nobody closed anything: the only tidying tool cost more
+  than the backlog.
+  A closed conversation is INERT: no dispatch, no capacity, no place in the FIFO
+  waiting set, **absent from conversation REUSE** (a matching signature opens a
+  NEW conversation — this is the rule that makes closing mean anything), and
+  absent from every pipeline. A reply typed into a closed thread is ANSWERED
+  ("closed, reopen it") and creates nothing; appending an input there would be a
+  black hole, and an implicit reopen would re-materialise threads on every bound
+  channel because someone typed "thanks".
+  **REOPEN NEVER RE-RESOLVES REFS.** Phase → `Idle`, `closedAt` cleared,
+  materialized refs left EXACTLY as they are — refs are snapshots whose content
+  is re-read at every use, so re-resolving would let a Pipeline edit re-wire an
+  existing conversation. Missing profile or channel FAILS the reopen naming it,
+  never partially. Threads come back through an ordinary `ensure-topic` carrying
+  `previousThreadId` as a HINT: an adapter that can un-archive returns the same
+  id, one that cannot returns a new one and is already correct. `status.reopens`
+  exists so each reopen's ensure-topic op id is distinct — the ids are stable
+  per conversation×channel, so without it the re-establish dedups against the
+  original topic creation and never reaches the adapter.
+  **`close-topic` IS NOW DERIVABLE.** It was the exception only because it was
+  enqueued while the object was disappearing, leaving nothing to record against;
+  now `status.threadsArchived[]` marks the done threads and an unarchived one is
+  an archive still owed. Do not re-add the "one non-derivable op" clause.
+  The `agentops.dev/close-topics` finalizer survives for the ONE path where the
+  object really does go away — a direct `kubectl delete` of a conversation
+  nobody closed — with its 2-minute grace so a down adapter can never wedge a
+  deletion. `/close` is intercepted on the REPLY path before the text could
+  become an input, and answers with usage on a general surface.
+  **Delete and reopen are MANAGER VERBS whose reach is the BINDING**
+  (`spec.channelRefs`, read off the conversation, never off the request), and
+  delete REFUSES anything not already `Closed`. That is what the retired
+  "no remote close verb exists" rule was actually protecting — you may only end
+  a conversation you are PART of — and holding a live thread was the proof;
+  a closed conversation has none, so the binding is the next-strongest.
+- **THE RECLAIMING JOB'S LISTING IS PHASE-BLIND, ON PURPOSE.** `housekeeping/`
+  removes workspace directories and session transcripts with no `Conversation`
+  behind them. A CLOSED conversation still HAS a CR, so its state is protected
+  by the same rule that identifies an orphan — the job needs no phase knowledge
+  at all, and an "only look at live ones" optimisation would reclaim the state
+  of every conversation an operator was keeping. Two orderings, each a
+  correctness argument: workspaces scan the disk FIRST and list SECOND (the CR
+  always predates its directory, since the pod that creates it exists only for a
+  conversation that already exists); transcripts need the OPPOSITE plus a grace
+  period, because the context handle is written AFTER the file exists. It runs
+  under its own SA — mounting the claim ROOT is the reach `subPath` isolation
+  denies agents — and the render fails if that SA equals the runtime's.
 - **FILESYSTEM STATE GOES ON A PVC; EVERYTHING ELSE GOES IN THE KUBERNETES API,
   and THE MANAGER MOUNTS NOTHING.** A claim would pin it to one node, defeat
   rescheduling, and be a second source of truth beside the CRs — which is the
@@ -541,7 +596,10 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   **Cooldown lives on `SignalSource.status.cooldown[]`**, written only when a
   fingerprint is ADMITTED — a suppressed re-delivery must stay free, or the
   high-volume case cooldown exists for becomes a write storm.
-  **`close-topic` stays the ONE non-derivable op** (above).
+  **`close-topic` is DERIVABLE now** — from a bound thread missing from
+  `status.threadsArchived[]` (above). It stopped being the exception when
+  closing stopped deleting: the object survives, so there is something to
+  record against.
   Telemetry is the declared-lossy class and must REPORT its gaps: a cursor from
   a previous process is `>= next` in the new one's sequence, so answering it
   with an empty list reads as "nothing happened" — the case eviction alone does

@@ -47,6 +47,9 @@ func TestNamePrefixRuleWorksWithColdCache(t *testing.T) {
 		"agentops-conv-xyz",
 		"agentops-adapter-console-7f9c8d4-xk2p9",
 		"agentops-signal-k8s-events-abc",
+		// A CronJob fails on a SCHEDULE, so an unexcluded housekeeping pod
+		// would wake an agent about agent-ops' own maintenance over and over.
+		"agentops-housekeeping-29010240-xk2p9",
 	} {
 		if excluded, _ := s.Excludes(ev("apps", "Pod", name), false); !excluded {
 			t.Fatalf("%s must be excluded with no cache present", name)
