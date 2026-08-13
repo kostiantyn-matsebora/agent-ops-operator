@@ -49,7 +49,12 @@ describe('the confirmation', () => {
     )
     expect(screen.getByText(/4 conversation\(s\) will be closed/)).toBeInTheDocument()
     expect(screen.getByTestId('close-working-count')).toHaveTextContent('2 of them are working')
-    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument()
+    // Closing is REVERSIBLE now, and the confirmation has to say so: this used
+    // to assert "cannot be undone", which was true when closing deleted. A
+    // dialog that still warned of permanence would make the cheap, reversible
+    // action feel like the destructive one — and the destructive one is a
+    // separate dialog.
+    expect(screen.getByText(/it can be reopened/i)).toBeInTheDocument()
 
     // The toggle names what it costs, and starts off: abandoning a live run is
     // right for a deliberate single close and wrong as a batch's silent default.

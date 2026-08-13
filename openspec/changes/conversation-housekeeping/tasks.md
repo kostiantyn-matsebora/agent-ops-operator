@@ -47,11 +47,11 @@
 
 ## 7. Console
 
-- [ ] 7.1 Present `Closed` as a state rather than an absence: closed rows listed, labelled, and distinguished from a conversation held by its finalizer
-- [ ] 7.2 Add per-row reopen; no bulk reopen — a batch would re-materialise threads on surfaces nobody is watching
-- [ ] 7.3 Add bulk delete beside bulk close, same 50-name bound, same explicit selection, same per-item outcomes (`deleted` / `skipped` / `failed`) and totals; a non-closed name is `skipped` with "close it first"
-- [ ] 7.4 Confirmation for delete names the count AND that the conversation's recorded results and volume state both go, and that it cannot be undone
-- [ ] 7.5 Tests: closed rows render and offer reopen; a mixed delete batch reports per-item outcomes; a live conversation in a delete batch is skipped; the bound is server-enforced
+- [x] 7.1 Present `Closed` as a state rather than an absence: closed rows listed, labelled, and distinguished from a conversation held by its finalizer
+- [x] 7.2 Add per-row reopen; no bulk reopen — a batch would re-materialise threads on surfaces nobody is watching
+- [x] 7.3 Add bulk delete beside bulk close, same 50-name bound, same explicit selection, same per-item outcomes (`deleted` / `skipped` / `failed`) and totals; a non-closed name is `skipped` with "close it first"
+- [x] 7.4 Confirmation for delete names the count AND that the conversation's recorded results and volume state both go, and that it cannot be undone
+- [x] 7.5 Tests: closed rows render and offer reopen; a mixed delete batch reports per-item outcomes; a live conversation in a delete batch is skipped; the bound is server-enforced
 
 ## 8. The reclaiming workload
 
@@ -84,14 +84,14 @@
 - [x] 11.1 Document the two-stage lifecycle in `docs/concepts.md` next to conversation lifecycle: the two flags, the two windows and what each is measured from, what `Closed` means exhaustively, and that reopening restores wiring without re-resolving it
 - [x] 11.2 Document what reclaims what, and why the manager cannot, in the restart-resilience/storage section of `docs/concepts.md`
 - [x] 11.3 Document the `ensure-topic` hint and the two console-reachable verbs in `docs/contracts.md`, including that ignoring the hint is a valid implementation
-- [ ] 11.4 Document `Closed` rows, reopen and bulk delete in `docs/console.md`, and that the console still holds no Kubernetes write path
+- [x] 11.4 Document `Closed` rows, reopen and bulk delete in `docs/console.md`, and that the console still holds no Kubernetes write path
 - [x] 11.5 Record in `CLAUDE.md` the rules that are easy to get wrong: closing sets a phase and deletion is a second verb; a closed conversation is excluded from reuse and from every pipeline; the reclaiming job's listing is PHASE-BLIND on purpose; reopen never re-resolves refs; delete/reopen reach is the BINDING, which is what the retired no-remote-close-verb rule was actually protecting
 - [x] 11.6 Retire the "`close-topic` is the ONE op not derivable from CR state" clause in `CLAUDE.md` and `docs/concepts.md`, replacing it with why it WAS the exception (it was enqueued while the object was disappearing) and why it no longer is (the object survives the close, so an unarchived thread is still readable) — leaving the clause standing would send the next reader looking for an exception the code no longer has
 
 ## 12. Verification
 
-- [ ] 12.1 `go build ./... && go vet ./...` at the root and in every satellite module, including the new one
-- [ ] 12.2 Full test run with `KUBEBUILDER_ASSETS` (unit + envtest)
+- [x] 12.1 `go build ./... && go vet ./...` at the root and in every satellite module, including the new one
+- [x] 12.2 Full test run with `KUBEBUILDER_ASSETS` (unit + envtest)
 - [x] 12.3 Integration test through a real API server: autoclose closes an idle finished conversation and leaves a working one; the closed one is skipped by reuse; reopen restores it; autodelete removes it only after `closedAge` from the close
 - [x] 12.4 Chart render tests: both flags off by default, the runtime-SA guard fires, claims mount only when persistence is on
 - [ ] 12.5 Live smoke on a cluster with persistence enabled: close a conversation, confirm its directory SURVIVES a dry-run and a real housekeeping run, reopen it and confirm the agent resumes with its workspace

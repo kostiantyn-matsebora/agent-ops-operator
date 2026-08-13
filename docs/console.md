@@ -219,17 +219,17 @@ Detail is tabbed:
 ### Closing a batch
 
 Select rows and press **Close selected**. The confirmation names the count, how
-many of them are working, and that closing cannot be undone.
+many of them are working, and that the conversation stays and **can be
+reopened** — closing is reversible.
 
 **It is `/close`, fanned out.** Each selected conversation is sent the literal
 text `/close` on its own console thread, exactly as a person typing it would.
 The manager intercepts it on the reply path, posts the farewell to every bound
-thread, archives them through the `agentops.dev/close-topics` finalizer and
-deletes the `Conversation`; owner references then reclaim the runtime pod and the
-MCP ConfigMap, and the freed slot admits a waiting conversation. No manager
-endpoint, no adapter contract verb and no Kubernetes write is added — the
-console's only write anywhere is still `POST /channel/inbound`. There is exactly
-one implementation of closing, so a batch cannot drift from a typed close.
+thread, archives them and moves the conversation to phase `Closed` — inert, but
+intact. The runtime pod and the MCP ConfigMap go, the freed slot admits a
+waiting conversation, and the conversation's recorded answers, context handle
+and workspace all stay. There is exactly one implementation of closing, so a
+batch cannot drift from a typed close.
 
 What that costs, and why each cost is the right one:
 
@@ -249,13 +249,62 @@ What that costs, and why each cost is the right one:
   selection is over the rows on screen: there is no "close everything matching
   the filter", because a mis-set filter would then close far more than was ever
   visible.
-- **A closing conversation shows as `closing`** and cannot be re-selected. Its
-  finalizer holds it for up to two minutes while the threads archive, so without
-  this the list would look untouched after a successful batch.
+- **A closed conversation shows as `Closed`, not as an absence.** It stays in the
+  list, keeps its answers, costs no runtime pod and no capacity, and offers
+  **Reopen**. A conversation held by its finalizer on its way out shows as
+  `closing` instead and cannot be re-selected.
 - **It is a write**: authentication, the install-wide write gate
   (`console.write.enabled`) and a forwarded identity all apply, and each close is
   logged against the identity that ordered it. A read-only console renders no
   close action, and refuses the request if one is made anyway.
+
+### Reopening one
+
+A `Closed` row offers **Reopen**. It goes back to `Idle` with its wiring, its
+recorded runs and its context handle exactly as they were — the materialized
+refs are not re-resolved, so a Pipeline edit made in the meantime does not leak
+into a conversation that already exists. Under `contextStorage: volume` the
+agent resumes with its workspace; under `none` it answers fresh and says so.
+
+Threads come back through an ordinary `ensure-topic` carrying the archived
+thread id as a hint: Telegram un-archives and you continue in the same topic, an
+adapter whose transport cannot opens a fresh one. A reopen whose profile or
+channel no longer exists fails and **names the missing object** rather than
+producing a conversation that looks alive and can never dispatch.
+
+**There is no bulk reopen, deliberately.** Reopening re-materialises threads on
+every bound channel, so a batch of them would announce itself on surfaces nobody
+is watching. It is a decision about one conversation.
+
+### Deleting a batch
+
+Select closed rows and press **Delete selected**. This is the irreversible half
+of the lifecycle, and the confirmation says what goes: **the recorded answers**,
+which are the only durable copy of what the agent said, and **the workspace on
+disk**.
+
+- **Only `Closed` conversations are candidates.** A live one named in a batch
+  anyway comes back `skipped` with *close it first* — never closed on the way
+  through. One call doing the irreversible thing to a conversation that was
+  still working, behind a confirmation that named only the delete, is exactly
+  what the two-step prevents.
+- **Everything else mirrors closing**: the same 50-name bound enforced
+  server-side, the same explicit selection over rows on screen, the same
+  per-item outcomes (`deleted` / `skipped` / `failed`) with reasons, and the
+  same write gate, identity and logging.
+
+**Delete and reopen are manager verbs the console calls**, not Kubernetes
+writes — the console still has no write path to the API. Their reach is the
+**binding**: a surface may act on a conversation whose `spec.channelRefs` names
+its channel, read from the conversation and never taken from the request. That
+is the amendment the archived-thread case forces on "no remote close verb
+exists": holding a live thread was how membership was proven, and a closed
+conversation has none, so the binding that put the thread there stands in.
+
+Disk is **not** reclaimed by deleting. The conversation's workspace directory
+and session transcripts become orphans, and the opt-in housekeeping CronJob
+removes them on its next run — see
+[concepts](concepts.md#what-reclaims-what-and-why-the-manager-cannot).
 
 ## Starting a conversation
 

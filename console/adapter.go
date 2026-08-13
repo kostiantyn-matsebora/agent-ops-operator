@@ -334,6 +334,30 @@ func (a *Adapter) Send(ctx context.Context, conversation, sender, text string) (
 	return a.transcripts.AppendLocal("local:"+nowRFC3339(), thread, sender, strings.TrimSpace(text)), nil
 }
 
+// Reopen and Delete reach a conversation through its BINDING rather than
+// through a thread it holds, because a closed conversation holds none. The
+// manager enforces the reach; this side supplies the channel it serves and
+// nothing else.
+//
+// PrimaryChannel rather than ThreadFor: a closed conversation's thread is
+// archived and may be gone, so asking for one would refuse every conversation
+// these two verbs exist for.
+func (a *Adapter) Reopen(ctx context.Context, conversation string) error {
+	channel := a.PrimaryChannel()
+	if channel == "" {
+		return errNotJoined
+	}
+	return a.mgr.Reopen(ctx, channel, conversation)
+}
+
+func (a *Adapter) Delete(ctx context.Context, conversation string) error {
+	channel := a.PrimaryChannel()
+	if channel == "" {
+		return errNotJoined
+	}
+	return a.mgr.Delete(ctx, channel, conversation)
+}
+
 // errNotJoined: the conversation has no console thread, so there is nowhere to
 // post. Observed conversations are read-only by construction, not by a UI rule.
 var errNotJoined = &consoleError{"conversation is not joined to the console channel"}

@@ -178,7 +178,13 @@ func (a *API) Handler(ui http.Handler) http.Handler {
 	// registered BEFORE the {name} routes it cannot collide with: closing is a
 	// batch over named conversations, not an action on one
 	mux.HandleFunc("POST /api/conversations/close", a.write("bulk-close", a.handleBulkClose))
+	// Delete is a batch for the same reason close is; reopen deliberately is
+	// NOT. Reopening re-materialises threads on every bound channel, so a batch
+	// of them would announce itself on surfaces nobody is watching — it is a
+	// decision about one conversation.
+	mux.HandleFunc("POST /api/conversations/delete", a.write("bulk-delete", a.handleBulkDelete))
 	mux.HandleFunc("POST /api/conversations/{name}/messages", a.write("send-message", a.handleSend))
+	mux.HandleFunc("POST /api/conversations/{name}/reopen", a.write("reopen", a.handleReopen))
 
 	mux.HandleFunc("GET /api/stream", a.auth(a.handleStream))
 	mux.Handle("/", ui)

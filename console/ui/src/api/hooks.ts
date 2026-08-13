@@ -109,6 +109,25 @@ export function useCloseConversations() {
   })
 }
 
+export function useDeleteConversations() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (req: CloseRequest) => api.deleteConversations(req),
+    onSettled: () => client.invalidateQueries({ queryKey: ['conversations'] }),
+  })
+}
+
+// Per conversation, and no bulk equivalent: reopening re-materialises threads
+// on every bound channel, so a batch would announce itself on surfaces nobody
+// is watching.
+export function useReopenConversation() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => api.reopenConversation(name),
+    onSettled: () => client.invalidateQueries({ queryKey: ['conversations'] }),
+  })
+}
+
 export function useConversation(name: string) {
   const rev = useRevision(['conversations'])
   const messageRevision = useStream((s) => s.messageRevision)

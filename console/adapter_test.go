@@ -29,6 +29,12 @@ type fakeManager struct {
 	// failInbound refuses posts to these thread ids, so a test can make ONE
 	// item of a batch fail while its neighbours succeed.
 	failInbound map[string]bool
+	// verbs records the manager-side reopen/delete calls as "<verb>:<name>".
+	// They are the only console calls that are not /channel/inbound, because a
+	// CLOSED conversation holds no thread to post a command on.
+	verbs []string
+	// failVerb refuses the verb for these conversation names.
+	failVerb map[string]bool
 }
 
 func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
@@ -74,6 +80,24 @@ func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	verb := func(kind string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			name := r.PathValue("name")
+			f.mu.Lock()
+			fail := f.failVerb[name]
+			if !fail {
+				f.verbs = append(f.verbs, kind+":"+name)
+			}
+			f.mu.Unlock()
+			if fail {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": kind + " refused for " + name})
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+		}
+	}
+	mux.HandleFunc("POST /channel/conversations/{name}/reopen", verb("reopen"))
+	mux.HandleFunc("POST /channel/conversations/{name}/delete", verb("delete"))
 	mux.HandleFunc("GET /channel/channels", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -98,6 +122,14 @@ func (f *fakeManager) completions() []map[string]string {
 	defer f.mu.Unlock()
 	out := make([]map[string]string, len(f.done))
 	copy(out, f.done)
+	return out
+}
+
+func (f *fakeManager) calledVerbs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.verbs))
+	copy(out, f.verbs)
 	return out
 }
 

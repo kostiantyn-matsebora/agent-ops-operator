@@ -213,6 +213,30 @@ func (m *Manager) Inbound(ctx context.Context, channel, threadID, sender, text s
 	return err
 }
 
+// Reopen brings a closed conversation back to Idle. The manager decides
+// whether this surface may: reach is the conversation's own channelRefs, read
+// there and never taken from this request.
+//
+// This and Delete below are the only calls the console makes that are not
+// /channel/inbound, and they exist because a CLOSED conversation has no thread
+// to post a command on. The console still performs no Kubernetes write — both
+// are manager verbs over the same authenticated adapter path as everything else
+// here.
+func (m *Manager) Reopen(ctx context.Context, channel, conversation string) error {
+	_, err := m.do(ctx, "POST", "/channel/conversations/"+url.PathEscape(conversation)+"/reopen",
+		map[string]any{"channel": channel}, nil)
+	return err
+}
+
+// Delete reclaims a conversation the manager has already closed. It refuses
+// anything not already Closed, which is what keeps the irreversible step
+// something an operator ordered twice.
+func (m *Manager) Delete(ctx context.Context, channel, conversation string) error {
+	_, err := m.do(ctx, "POST", "/channel/conversations/"+url.PathEscape(conversation)+"/delete",
+		map[string]any{"channel": channel}, nil)
+	return err
+}
+
 // Channels lists the channels this adapter serves.
 func (m *Manager) Channels(ctx context.Context, adapter string) ([]ChannelInfo, error) {
 	var out []ChannelInfo
