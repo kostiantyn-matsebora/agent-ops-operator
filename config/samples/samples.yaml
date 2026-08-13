@@ -312,7 +312,7 @@ spec:
       - input
 ---
 # VM Alertmanager webhook source — spec.adapter names the serving SignalAdapter
-# CR (the vm-bundle subchart renders one named vm-alertmanager; its reconciler
+# CR (the prometheus-bundle subchart renders one named alertmanager; its reconciler
 # owns the workload AND the webhook Service). VMAlertmanager posts the
 # standard Alertmanager webhook format to
 #   http://agentops-signal-vm-alertmanager.<ns>.svc:8080/webhook/vm-alerts

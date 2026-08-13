@@ -397,7 +397,7 @@ console:
   resources: {}
 
 # Telegram — shipped as the embedded `telegram-bundle` subchart
-# (chart/charts/telegram-bundle), the same shape as vm-bundle and k8s-bundle.
+# (chart/charts/telegram-bundle), same shape as prometheus-bundle and k8s-bundle.
 # Off by default. Its full values live in that subchart's values.yaml; set them
 # under this key.
 #
@@ -523,27 +523,32 @@ resources:
 #       namespaces: []                  # empty = cluster-wide
 #       channels: [<your-channel>]      # optional: mirror to chat
 
-# VictoriaMetrics bundle (embedded subchart, OFF by default; never enabled by
-# demo mode — it needs your VM endpoints). See chart/charts/vm-bundle/values.yaml
-# for the full surface. Typical enablement:
-# vm-bundle:
+# Prometheus/Alertmanager bundle (embedded subchart, OFF by default; never
+# enabled by demo mode — it needs your own metrics and Alertmanager endpoints).
+# Named for the payload format and query API it speaks; VictoriaMetrics is one
+# supported backend, not the subject. See
+# chart/charts/prometheus-bundle/values.yaml for the full surface. Typical
+# enablement:
+# prometheus-bundle:
 #   enabled: true
 #   alertmanager:
 #     defaultSource:
-#       enabled: true                   # SignalSource + wiring Pipeline
-#       profileRef: <your-profile>      # your alert-handling profile
-#       channels: [<your-channel>]
-#   # EITHER point at existing MCP servers:
+#       enabled: true                   # SignalSource (INERT until claimed)
+#   # EITHER point at an existing Prometheus MCP server:
 #   mcp:
-#     vmlogs:    { url: http://mcp-victorialogs.<ns>.svc/sse }
-#     vmmetrics: { url: http://mcp-victoriametrics.<ns>.svc/sse }
-#   # OR deploy them (mcp.*.url left empty then defaults to these):
+#     enabled: true
+#     url: http://mcp-prometheus.<ns>.svc/sse
+#   # OR deploy one (mcp.url left empty then defaults to it):
 #   mcpServers:
 #     enabled: true
-#     vmlogs:    { backend: http://<victorialogs>:9428 }
-#     vmmetrics: { backend: http://<victoriametrics>:8429 }
-#   # No bundled profile: bind mcpConfigs [vm-logs, vm-metrics] + toolsets
-#   # [vm-observability] on the Pipeline routing these alerts (see docs/vm-bundle.md).
+#     backend: http://<prometheus-or-vmsingle>:9090
+#   # The bundle's own route — OFF by default, the one component that spends
+#   # money and acts on its own:
+#   pipelines:
+#     enabled: true
+#     channels: [<your-channel>]        # optional; omitted when unset
+# MIGRATION from `vm-bundle:` — every value must be restated under the new key,
+# and the render FAILS while the old key is present. See CHANGELOG.md.
 
 # CRD management (cert-manager pattern): templated, so upgrades work.
 crds:

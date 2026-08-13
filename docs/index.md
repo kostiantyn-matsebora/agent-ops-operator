@@ -92,8 +92,8 @@ Documented HTTP contracts, no fork.
   — the events lane, the agent that answers it, and Kubernetes MCP tooling.
 - [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram-bundle.md)
   — the ingest stack and the chat surface.
-- [VictoriaMetrics](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/vm-bundle.md)
-  — the Alertmanager-format alert lane.
+- [Prometheus](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus-bundle.md)
+  — the Alertmanager alert lane, its metrics tooling and the agent that answers.
 
 ## Keep it current
 

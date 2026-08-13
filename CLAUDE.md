@@ -241,7 +241,7 @@ internal/
                          bound lives here, in signals.go. NO origination
                          endpoint: `POST /task` is deleted, and the signature
                          fallback in signals.go splits on LANE — alert/job keep
-                         ingest.DefaultSignatureLabels (vm-bundle and
+                         ingest.DefaultSignatureLabels (prometheus-bundle and
                          signal-cron depend on it), task/chat key on the
                          fingerprint. Do not collapse it into one rule
   chat/                  channel-type-agnostic core: Provider+Registry
@@ -298,9 +298,14 @@ signal-cron/             reference signal adapter (own module, no deps) —
                          /signal contract; five-field cron parser + scheduler
 signal-vmalertmanager/   webhook-receiving signal adapter (own module, no
                          deps) — hosts /webhook/{source} for Alertmanager-
-                         format posts; vm-bundle subchart ships it + Service
+                         format posts; prometheus-bundle subchart ships it
                          (pod label agentops.dev/signal-adapter is a CHART
-                         CONTRACT, pinned by integration test)
+                         CONTRACT, pinned by integration test). KEEPS its
+                         vendor name on purpose: the module, image and spec
+                         were never VM-specific except register.go, and
+                         renaming a published image is churn with a migration
+                         attached. The CHART is what an operator reads, so the
+                         CHART is what got renamed
 signal-k8s-events/       cluster Events signal adapter (own module, no deps) —
                          in-cluster API over net/http (no client-go): SA token
                          re-read, list+watch per namespace scope, 410 relist.
@@ -373,6 +378,37 @@ chart/charts/k8s-bundle/ subchart: cluster Events lane (adapter + RBAC +
                          readonly). Explicit wins — `readOnly: true` under
                          `full` is a strictly observing agent: broad grants on
                          the runtime SA that nothing can exercise
+chart/charts/prometheus-bundle/
+                         subchart (WAS vm-bundle through chart 5.12.0): the
+                         Alertmanager ingest lane, ONE metrics MCP component
+                         (`MCPConfig` server key FIXED at `prometheus`, plus a
+                         WILDCARD `MCPToolset` — all six tools the server
+                         registers are read-only, so unlike k8s-bundle there is
+                         no risk split to enumerate; the PINNED tag is what
+                         keeps the wildcard honest), its deployable server under
+                         a SECOND SA, the `alert-investigator` profile (identity
+                         only, inline role — no repository, so no agent
+                         definition resolves), and ONE default-off route.
+                         NAMED FOR THE PROTOCOL, NOT A VENDOR: the ingest core
+                         reads the standard Alertmanager payload, and VM answers
+                         the Prometheus query API (buildinfo reports a
+                         Prometheus version; MetricsQL is a PromQL superset), so
+                         one server key serves both backends. The LOGS component
+                         is DELETED, not ported — VictoriaLogs speaks LogsQL and
+                         no Prometheus server reaches it. Self-registration is
+                         KEPT and labelled VICTORIAMETRICS-ONLY: it writes a
+                         VMAlertmanagerConfig, and vanilla Alertmanager's config
+                         is a file, so there is no object to write — NOTES.txt
+                         prints the receiver stanza instead, with
+                         `send_resolved: false` because the adapter drops
+                         non-firing alerts. The backend URL is NEVER derived
+                         (single-node VM, cluster mode and Prometheus each serve
+                         the query API under a different path). NEVER enabled by
+                         demo mode — every component needs an endpoint no demo
+                         cluster has, which is why `active` has no demo branch.
+                         The retired `vm-bundle:` key FAILS the render: helm
+                         never reports an unread values key, so the rename would
+                         otherwise install nothing and look successful
 chart/charts/telegram-bundle/
                          subchart: the three-component Telegram stack (router +
                          signal adapter + channel adapter) as adapter CRs, and
@@ -649,6 +685,22 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   the Secret from base64 rather than shell `--from-literal` interpolation.
 - envtest needs `KUBEBUILDER_ASSETS`; `kubectl auth can-i` misparses the
   `pods/eviction` slash form — use `--subresource=eviction`.
+- **Tearing down a throwaway release: UNINSTALL FIRST, then clear the
+  `agentops.dev/close-topics` finalizer.** Clearing it while the manager still
+  runs achieves nothing — the reconciler re-adds it within a second, and then
+  `helm uninstall` removes the only thing that could ever release it, so the
+  namespace hangs in `Terminating` forever. The order is the whole trick, and
+  getting it backwards looks identical right up until it wedges. Conversations
+  carry the finalizer even with NO channels bound, so "no chat, no problem" is
+  not a reason to skip this.
+- **A rendered pod is not a running one, and a chart render test cannot tell the
+  difference.** `mcpServers` shipped `PROMETHEUS_MCP_TRANSPORT` for a whole
+  implementation pass: the real variable is `PROMETHEUS_MCP_SERVER_TRANSPORT`,
+  the server silently fell back to stdio, and a stdio process in a pod prints a
+  banner and exits — a `Completed` pod behind a Service that answers nothing.
+  Every guard, every assertion and `--dry-run=server` all passed. Only starting
+  the thing found it. Pin env-var NAMES third-party images read, and smoke any
+  new workload before believing its values.
 - **`helm.sh/resource-policy: keep` protects nothing retroactively.** Helm reads
   it off the LIVE object when a resource leaves the manifest, not off the
   manifest dropping it, so adding the annotation in the same release that stops
@@ -686,8 +738,13 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   (source, profile, both toolsets), so channels are the only foreign name. Its
   `enabled` is NULLABLE for exactly one reason — an explicit `false` must decline
   the route even under demo mode, which a plain `false` default cannot express.
-  `telegram-bundle` and `vm-bundle` still ship NONE and are the counter-examples:
-  their routes genuinely span bundles. Name pipelines for their JOB, not for the
+  `prometheus-bundle.pipelines` qualifies on the same grounds and ships one
+  route; its `enabled` is a plain `false` rather than nullable, because demo
+  mode never enables that bundle at all, so there is nothing for an explicit
+  `false` to have to beat. `telegram-bundle` still ships NONE and is the
+  counter-example: its routes genuinely span bundles, because a chat surface is
+  answered by an agent from somewhere else.
+  Name pipelines for their JOB, not for the
   channel they answer on. And a SignalSource is NOT claimed by exactly one
   pipeline — sources are shareable, so a bundle's route and an install's route
   claiming one source both render and the source fans out to both. That is

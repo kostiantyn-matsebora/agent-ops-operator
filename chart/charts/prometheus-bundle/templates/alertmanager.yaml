@@ -1,15 +1,14 @@
 {{- /*
-VM Alertmanager component: the webhook-receiving signal adapter. The chart
-renders the SignalAdapter CR ONLY — pure implementation. The operator's
-reconciler owns the workload AND the connectivity: spec.port makes it render
-the Service agentops-signal-<name> and inject LISTEN_ADDR. Gated on the
-bundle flag alone: demo mode never enables this bundle.
+Alertmanager ingest component: the webhook-receiving signal adapter. The chart
+renders the SignalAdapter CR ONLY — the reconciler owns the workload and, via
+spec.port, the Service agentops-signal-<name> and LISTEN_ADDR.
 
-With registration enabled the adapter also configures the SENDER (it writes a
-VMAlertmanagerConfig pointing at its own webhook), so the permissions for that
-are rendered here — by the chart, never by the operator.
+Registration is VICTORIAMETRICS-ONLY and cannot be generalized: it configures
+the sender by writing a VMAlertmanagerConfig, and vanilla Alertmanager's config
+is a file or a Secret, not an object an adapter can write. Vanilla senders use
+the receiver stanza NOTES.txt prints instead.
 */ -}}
-{{- if and .Values.enabled .Values.alertmanager.enabled }}
+{{- if and (include "prometheus-bundle.active" .) .Values.alertmanager.enabled }}
 {{- $name := .Values.alertmanager.name }}
 {{- $reg := .Values.alertmanager.registration }}
 {{- /* default the registration namespace to the release's own: no cross-namespace grant */ -}}
@@ -122,6 +121,10 @@ metadata:
 spec:
   # names the implementation serving this source: the SignalAdapter above
   adapter: {{ $name }}
+  {{- with $src.credentialsSecretRef }}
+  credentialsSecretRef:
+    name: {{ . }}
+  {{- end }}
   {{- with $src.grouping }}
   grouping:
 {{ toYaml . | indent 4 }}

@@ -265,8 +265,8 @@ profile:
   # falls back to `default`, which the parent renders whenever runtime.enabled.
   runtimeRef: ""
 
-# Structured Kubernetes access as MCP tools — the same two halves vm-bundle
-# ships for VictoriaMetrics: an MCPConfig (the server) and an MCPToolset (the
+# Structured Kubernetes access as MCP tools — the same two halves
+# prometheus-bundle ships for metrics: an MCPConfig (the server) and an MCPToolset (the
 # permission to call it). The `pipelines:` component below binds both when it
 # renders; any other route must name them itself, because a server without the
 # toolset gives an agent tools it may not call.
@@ -433,8 +433,8 @@ mcpServers:
 # The bundle may ship this at all only because it owns the whole lane: it renders
 # the source, the profile and both toolsets, so the only object it does not
 # render is a channel — and that is values-supplied and omitted when unset. A
-# bundle whose route spanned other components could not, and telegram-bundle and
-# vm-bundle still ship none.
+# bundle whose route spanned other components could not, and telegram-bundle
+# still ships none.
 pipelines:
   enabled: null
   # TWO routes, differing in exactly one binding — the mutating toolset. At most

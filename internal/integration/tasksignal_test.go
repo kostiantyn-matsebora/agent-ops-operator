@@ -61,7 +61,7 @@ func convsForProfile(t *testing.T, profile string) []agentopsv1alpha1.Conversati
 	return out
 }
 
-// 3.1 — the vm-bundle shape: an Alertmanager source ships `grouping: {}` and
+// 3.1 — the prometheus-bundle shape: an Alertmanager source ships `grouping: {}` and
 // relies entirely on the default labels. Two distinct fingerprints describing
 // the same alert must share one investigation.
 func TestAlertsWithNoSignatureLabelsStillGroup(t *testing.T) {

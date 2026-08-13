@@ -8,6 +8,106 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### vm-bundle is now prometheus-bundle — chart 5.13.0, prometheus-bundle 0.2.0
+
+**Action needed if you set any `vm-bundle.*` value. The render FAILS until you
+rename the key** — deliberately: Helm never reports an unread values key, so an
+unguarded rename would present as a successful upgrade that installed nothing.
+
+The bundle was named for a vendor it does not depend on. Its ingest core parses
+the standard Alertmanager webhook payload and nothing else, so any Prometheus
+Alertmanager could always post to it; and VictoriaMetrics answers the Prometheus
+HTTP query API (`/api/v1/query`, and `buildinfo` reports a Prometheus version)
+with MetricsQL as a PromQL superset, so one query server serves both backends.
+VictoriaMetrics is now a supported backend rather than the subject.
+
+**1 — rename the values key.** Every `vm-bundle.*` value moves to
+`prometheus-bundle.*`. Nothing else about the ingest lane changed.
+
+**2 — the adapter CR name default changed** from `vm-alertmanager` to
+`alertmanager`, and the default source's from `vm-alerts` to `alerts`. The
+adapter name is the ROUTING KEY every `SignalSource` names in `spec.adapter`, and
+the source name is the `{source}` segment of the webhook URL. Restore both with
+one value each rather than editing hand-written sources or reconfiguring your
+sender:
+
+```yaml
+prometheus-bundle:
+  alertmanager:
+    name: vm-alertmanager
+    defaultSource:
+      name: vm-alerts
+```
+
+**3 — the logs component is REMOVED, not ported.** `mcp.vmlogs` and the
+`mcp-victorialogs` workload are gone: VictoriaLogs speaks LogsQL over its own
+endpoints, and no Prometheus query server can reach it, so there was nothing to
+generalize. If you used it, apply these two objects by hand — the same pair the
+bundle used to render — and keep binding them from your Pipeline:
+
+```yaml
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: vm-logs
+spec:
+  servers:
+    victorialogs:
+      type: sse
+      url: http://mcp-victorialogs.<ns>.svc:8080/sse   # your old mcp.vmlogs.url
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: vm-logs-tools
+spec:
+  tools:
+    - "mcp__victorialogs__*"
+```
+
+You also need the server itself, which the bundle no longer deploys:
+`ghcr.io/victoriametrics/mcp-victorialogs`, env `MCP_SERVER_MODE=sse`,
+`MCP_LISTEN_ADDR=:8080`, `VL_INSTANCE_ENTRYPOINT=<your VictoriaLogs URL>`.
+
+**4 — `mcp__victoriametrics__*` stops resolving.** The metrics server key is now
+`prometheus`, so allowlists naming the old namespace keep rendering and quietly
+grant nothing — the allowlist-rot failure this project names elsewhere. Find
+every affected Pipeline and toolset:
+
+```sh
+kubectl get pipelines,mcptoolsets -A -o yaml | grep -n "victoriametrics\|victorialogs"
+```
+
+Rebind to the bundle's new pair — `MCPToolset/prometheus-observability` and
+`MCPConfig/prometheus-api`. The toolset is wildcarded (`mcp__prometheus__*`)
+because all six tools the server registers are read-only; there is no read/mutate
+split to preserve, unlike `k8s-bundle`'s.
+
+**5 — new: the bundle ships a profile and its own wiring.**
+`AgentProfile/alert-investigator` renders by default (identity only, with an
+inline role — it has no repository, so no agent definition file can be resolved
+for it). `pipelines.enabled` defaults **false** and nothing forces it on; demo
+mode never enables this bundle at all. Turning it on renders one
+`Pipeline/alert-triage` claiming the bundle's own source, and **every admitted
+alert then opens a conversation and spends LLM credits**.
+
+Sources are shareable, so the bundle's route and one you declared under the
+parent chart's `pipelines:` may both claim `alerts` — that fans out to one
+conversation per claiming Pipeline. NOTES.txt reports it; it is never refused.
+
+**6 — self-registration is unchanged but now labelled VictoriaMetrics-only.** It
+configures the sender by writing a `VMAlertmanagerConfig`, and vanilla
+Alertmanager's configuration is a file or a Secret, not an object an adapter can
+write. With registration off, NOTES.txt prints the exact `receivers:` stanza to
+paste into your Alertmanager configuration — including `send_resolved: false`,
+because the adapter drops non-firing alerts and a sender left at its default
+posts resolutions that are silently discarded.
+
+**No effect on the manager, the CRDs or any Go module.** The
+`signal-vmalertmanager` module, its image and its spec keep their names: the
+payload handling was always vendor-neutral, and renaming a published image would
+be churn with a migration attached and no benefit.
+
 ### Demo mode wires itself — chart 5.12.0, k8s-bundle 0.3.0
 
 **Action needed only if you run `global.demo.enabled=true`, or enable

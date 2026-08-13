@@ -1,0 +1,61 @@
+{{- /* Wiring component: the bundle's OWN route, claiming the source it renders
+with the profile it renders. Permitted because the bundle owns its whole lane —
+a channel is the only foreign name, and that is values-supplied. ONE route: a
+query server is read-only, so there is no second posture to express. */ -}}
+{{- if and (include "prometheus-bundle.wiringActive" .) .Values.profile.enabled }}
+{{- $p := .Values.pipelines }}
+{{- $g := .Values.global | default dict }}
+{{- $am := .Values.alertmanager }}
+{{- $mcp := .Values.mcp }}
+{{- /* Every ref is emitted only when the object it names is rendered. */ -}}
+{{- $sources := list }}
+{{- if and $am.enabled $am.defaultSource.enabled }}{{ $sources = append $sources $am.defaultSource.name }}{{ end }}
+{{- $tools := list }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $tools = append $tools (dig "builtinToolsets" "observe" "name" "agentops-observe" $g) }}
+{{- end }}
+{{- $mcpConfigs := list }}
+{{- if $mcp.enabled }}
+{{- $tools = append $tools $mcp.toolset.name }}
+{{- $mcpConfigs = append $mcpConfigs $mcp.name }}
+{{- end }}
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-prometheus-bundle
+spec:
+  profileRef:
+    name: {{ .Values.profile.name }}
+  {{- with $sources }}
+  # Without this claim the source reports Wired=False and DROPS every alert.
+  signalSourceRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $p.channels }}
+  # Values-supplied: the key is absent when nobody named a channel.
+  channelRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $tools }}
+  # Declared, not inherited: profiles carry no capabilities.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with $mcpConfigs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}

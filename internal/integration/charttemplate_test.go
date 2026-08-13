@@ -870,10 +870,20 @@ func TestMCPServerRefusesTheRuntimeIdentity(t *testing.T) {
 // on the bundle label: an install-declared Pipeline carries
 // app.kubernetes.io/name: agentops, and the CRD document names the kind too.
 func bundlePipelines(rendered string) map[string]string {
+	return labelledPipelines(rendered, "agentops-k8s-bundle")
+}
+
+// labelledPipelines returns the Pipelines a given BUNDLE rendered, keyed by
+// name. Keying on the bundle label rather than on the kind alone is what keeps
+// these assertions honest once more than one bundle ships wiring: a route the
+// install declared under the parent's `pipelines:` must never be mistaken for
+// one the bundle shipped, or "the bundle renders no Pipeline" passes for the
+// wrong reason.
+func labelledPipelines(rendered, label string) map[string]string {
 	out := map[string]string{}
 	for _, doc := range splitDocs(rendered) {
 		if !strings.Contains(doc, "\nkind: Pipeline\n") ||
-			!strings.Contains(doc, "app.kubernetes.io/name: agentops-k8s-bundle") {
+			!strings.Contains(doc, "app.kubernetes.io/name: "+label) {
 			continue
 		}
 		i := strings.Index(doc, "metadata:\n  name: ")

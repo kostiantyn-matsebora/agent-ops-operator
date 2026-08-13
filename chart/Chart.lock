@@ -1,12 +1,12 @@
 dependencies:
-- name: vm-bundle
+- name: prometheus-bundle
   repository: ""
-  version: 0.1.0
+  version: 0.2.0
 - name: k8s-bundle
   repository: ""
   version: 0.3.0
 - name: telegram-bundle
   repository: ""
   version: 0.1.0
-digest: sha256:07a9c24c38f2cb5be0dc5904f407ec5f21a709b3b10deebaa63e7b9f66912c61
-generated: "2026-08-12T23:26:35.0065145+03:00"
+digest: sha256:3094dde8ff2827ed14d3b0ee8696fb5e2f91dd30253952e17297b51fbcd8cfd3
+generated: "2026-08-13T10:16:53.1618998+03:00"
