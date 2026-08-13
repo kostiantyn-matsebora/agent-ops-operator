@@ -1,0 +1,25 @@
+{{- /* Profile component: WHO the agent is. Identity only — one object. The
+runtime, its SA, its credential and that SA's RBAC are the parent chart's. */ -}}
+{{- if and (include "prometheus-bundle.active" .) .Values.profile.enabled }}
+{{- $p := .Values.profile }}
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-prometheus-bundle
+spec:
+  # Identity only — no repository, no capabilities. What this agent may DO comes
+  # from the Pipelines routing it.
+  maxTurns: {{ $p.maxTurns }}
+  {{- with $p.systemPrompt }}
+  # Inline role: with no repository there is no definition file to read.
+  systemPrompt: |
+{{ . | trim | indent 4 }}
+  {{- end }}
+  {{- with $p.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+{{- end }}

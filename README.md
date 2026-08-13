@@ -111,7 +111,7 @@ helm install agent-ops ./chart -n agent-ops --create-namespace
 the one `AgentRuntime` every conversation executes on, so an install with no
 bundle still works.
 [Full reference](docs/concepts.md#the-substrate-runtime-and-globalagentopsruntime).
-For alert ingestion, enable the [VictoriaMetrics bundle](docs/vm-bundle.md).
+For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).
 
 ## Documentation
 
@@ -123,7 +123,7 @@ For alert ingestion, enable the [VictoriaMetrics bundle](docs/vm-bundle.md).
 | [docs/console.md](docs/console.md) | The console: topology, live runs, and the channel it also is |
 | [docs/k8s-bundle.md](docs/k8s-bundle.md) | Cluster events, the agent that answers them, Kubernetes MCP tooling |
 | [docs/telegram-bundle.md](docs/telegram-bundle.md) | The Telegram ingest stack and chat surface |
-| [docs/vm-bundle.md](docs/vm-bundle.md) | The VictoriaMetrics alert lane |
+| [docs/prometheus-bundle.md](docs/prometheus-bundle.md) | The Alertmanager alert lane and its metrics tooling |
 | [CHANGELOG.md](CHANGELOG.md) | Every chart-version upgrade guide, newest first |
 | [CLAUDE.md](CLAUDE.md) | Working notes: terminology, invariants, the gotchas that cost debugging |
 

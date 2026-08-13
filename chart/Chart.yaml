@@ -4,15 +4,15 @@ description: >-
   Kubernetes operator for agents you can address — monitoring signals and chat
   tasks become Conversations executed by per-conversation agent runtime pods.
 type: application
-version: 5.12.0
+version: 5.13.0
 appVersion: "0.29.1"
 dependencies:
-  # embedded subchart (chart/charts/vm-bundle); templates are additionally
-  # self-gated on vm-bundle.enabled
-  - name: vm-bundle
-    version: 0.1.0
+  # embedded subchart (chart/charts/prometheus-bundle); templates are
+  # additionally self-gated on prometheus-bundle.enabled
+  - name: prometheus-bundle
+    version: 0.2.0
     repository: ""
-    condition: vm-bundle.enabled
+    condition: prometheus-bundle.enabled
   # embedded subchart (chart/charts/k8s-bundle). NO condition: the bundle turns
   # on via `enabled` OR `global.demo.enabled`, and a Helm condition evaluates
   # only the first existing path — it could never express the OR. Every template

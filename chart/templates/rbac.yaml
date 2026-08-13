@@ -1,6 +1,9 @@
 {{- if .Values.serviceAccounts.runtime }}
 {{- fail "serviceAccounts.runtime moved to global.agentops.runtime.serviceAccountName in chart 4.0 (a subchart can read no other parent scope) — move the value and leave this key empty" }}
 {{- end }}
+{{- if index .Values "vm-bundle" }}
+{{- fail "the `vm-bundle:` values key was renamed to `prometheus-bundle:` in chart 5.13.0 — the bundle is named for the Alertmanager payload format and the Prometheus query API it speaks, not for one backend. Helm never reports an unread values key, so without this guard the upgrade would succeed and render nothing at all. Restate every value under `prometheus-bundle:` (the logs component is GONE and the metrics server key is now `prometheus` — see CHANGELOG.md for both), then upgrade again" }}
+{{- end }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:

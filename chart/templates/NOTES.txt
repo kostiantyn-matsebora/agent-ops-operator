@@ -180,24 +180,101 @@ Pipelines:
     -p '[{"op":"add","path":"/spec/channelRefs/-","value":{"name":"{{ $ch }}"}}]'
 Existing conversations keep their current bindings; new ones get a console thread.
 {{- end }}
-{{- $vb := index .Values "vm-bundle" }}
-{{- if and $vb $vb.enabled $vb.alertmanager.enabled }}
+{{- $pb := index .Values "prometheus-bundle" }}
+{{- if and $pb $pb.enabled }}
+{{- /* Subchart context so the bundle's own helpers decide what this reports —
+the report cannot then drift from what actually rendered. */ -}}
+{{- $pbCtx := dict "Values" (merge (dict "global" .Values.global) $pb) "Release" .Release }}
+{{- $psrc := $pb.alertmanager.defaultSource.name }}
+{{- $pwired := and $pb.alertmanager.enabled $pb.alertmanager.defaultSource.enabled }}
+{{- $pAlsoClaim := list }}
+{{- range .Values.pipelines }}
+{{- if has $psrc (.signalSources | default list) }}{{ $pAlsoClaim = append $pAlsoClaim .name }}{{ end }}
+{{- end }}
+{{- if $pb.alertmanager.enabled }}
+{{- $webhook := printf "http://agentops-signal-%s.%s.svc:8080/webhook/%s" $pb.alertmanager.name .Release.Namespace (ternary $psrc "<your-signalsource-name>" $pb.alertmanager.defaultSource.enabled) }}
+{{- if $pb.alertmanager.registration.enabled }}
 
-{{- $webhook := printf "http://agentops-signal-%s.%s.svc:8080/webhook/%s" $vb.alertmanager.name .Release.Namespace (ternary $vb.alertmanager.defaultSource.name "<your-signalsource-name>" $vb.alertmanager.defaultSource.enabled) }}
-{{- if $vb.alertmanager.registration.enabled }}
-VictoriaMetrics bundle — the adapter registers itself by writing
-VMAlertmanagerConfig agentops-<source> in namespace {{ default .Release.Namespace $vb.alertmanager.registration.namespace }}, so alerts push to:
+Prometheus bundle — self-registration is ON. This is VICTORIAMETRICS-ONLY: the
+adapter configures the sender by writing VMAlertmanagerConfig agentops-<source>
+in namespace {{ default .Release.Namespace $pb.alertmanager.registration.namespace }}, and vanilla Alertmanager has no such object.
+Alerts push to:
   {{ $webhook }}
 Watch it land:  kubectl -n {{ .Release.Namespace }} get signalsource -o wide
 If the Ready message says RegistrationManual, it names the cause and the
 manual step — the adapter retries every 15s, so fixing it needs no restart.
 Cluster-wide routing needs disableNamespaceMatcher on your VMAlertmanager.
+Running vanilla Alertmanager? Turn this off and these notes print the exact
+receiver stanza to paste into your Alertmanager configuration instead.
 {{- else }}
-VictoriaMetrics bundle — point your Alertmanager-compatible sender at:
-  {{ $webhook }}
+
+Prometheus bundle — add this receiver to your Alertmanager configuration:
+
+  receivers:
+    - name: agentops
+      webhook_configs:
+        - url: {{ $webhook }}
+          # the adapter drops non-firing alerts, so resolutions would be discarded
+          send_resolved: false
+{{- with $pb.alertmanager.defaultSource.credentialsSecretRef }}
+          http_config:
+            authorization:
+              type: Bearer
+              # same value as key `token` in Secret {{ . }}
+              credentials: <token>
+{{- end }}
+  route:
+    receiver: agentops
+
 (Service owned by the SignalAdapter reconciler — no chart-side connectivity.
-Set vm-bundle.alertmanager.registration.enabled=true to have the adapter
-configure VMAlertmanager for you.)
+On VictoriaMetrics you can skip this entirely with
+prometheus-bundle.alertmanager.registration.enabled=true.)
+{{- end }}
+{{- end }}
+{{- if and $pb.profile.enabled (not $pb.mcp.enabled) }}
+
+ACTION NEEDED — the {{ $pb.profile.name }} agent cannot query metrics. The
+mcp__prometheus__* tools are its only evidence source and
+prometheus-bundle.mcp.enabled is false, so it will answer alerts by guessing.
+Either:
+  --set prometheus-bundle.mcp.enabled=true --set prometheus-bundle.mcpServers.enabled=true \
+    --set prometheus-bundle.mcpServers.backend=<your prometheus/vmsingle URL>
+or point it at an MCP server you already run:
+  --set prometheus-bundle.mcp.enabled=true --set prometheus-bundle.mcp.url=<your endpoint>
+{{- end }}
+{{- if and (include "prometheus-bundle.wiringActive" $pbCtx) $pb.profile.enabled }}
+
+Prometheus bundle — this release WIRED it, so it answers on its own:
+  Pipeline {{ $pb.pipelines.name }}{{ if $pwired }} claims SignalSource {{ $psrc }}{{ end }} — reads metrics, changes nothing
+  (the MCP server registers query tools only; there is no acting route).
+{{- if $pwired }}
+Every admitted alert now opens a conversation and spends LLM credits.
+{{- end }}
+Decline it without giving up the rest of the bundle:
+  --set prometheus-bundle.pipelines.enabled=false
+{{- if not $pb.pipelines.channels }}
+No channel is bound, so answers are not posted anywhere — read them with:
+  kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
+Bind one with prometheus-bundle.pipelines.channels={<channel>}.
+{{- end }}
+{{- if and $pwired $pAlsoClaim }}
+
+HEADS UP — {{ $psrc }} is claimed TWICE: by this bundle's wiring and by
+your own pipeline{{ if gt (len $pAlsoClaim) 1 }}s{{ end }} {{ join ", " $pAlsoClaim }}.
+That is allowed — signal sources are shareable — and it means each admitted
+alert opens a conversation PER claiming Pipeline, under each one's own profile
+and capabilities. Two conversations, two bills.
+If you meant only your own route:
+  --set prometheus-bundle.pipelines.enabled=false
+{{- end }}
+{{- else if and $pwired (not $pAlsoClaim) }}
+
+ONE STEP LEFT — nothing answers alerts yet. SignalSource {{ $psrc }} drops every
+alert (Wired=False) until a Pipeline claims it. Either let the bundle wire
+itself:
+  --set prometheus-bundle.pipelines.enabled=true
+or declare the route yourself under the parent chart's `pipelines:` — which is
+what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
 {{- $tb := index .Values "telegram-bundle" }}

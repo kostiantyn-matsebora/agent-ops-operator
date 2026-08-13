@@ -48,7 +48,7 @@ Two things worth knowing:
 Bundles normally ship no `Pipeline`: a route names a profile, sources and
 channels that routinely come from *different* components, and a subchart sees
 only itself, so one that shipped wiring could only ever wire itself.
-`telegram-bundle` and `vm-bundle` therefore ship none.
+`telegram-bundle` therefore ships none.
 
 This bundle is the exception, because it owns its whole lane — it renders the
 source, the profile, the `MCPConfig` and both toolsets. The only class of object
@@ -357,7 +357,7 @@ one. No configuration can re-admit agent-ops' own pods.
 
 ## Kubernetes as MCP tools (`mcp` / `mcpServers`)
 
-Same two halves `vm-bundle` ships for VictoriaMetrics, for the cluster itself:
+Same two halves `prometheus-bundle` ships for metrics, for the cluster itself:
 an `MCPConfig` (the server the agent connects to) and an `MCPToolset`
 (permission to call it). Both halves matter — a config without the toolset gives
 the agent a server it may not call.
