@@ -1,5 +1,6 @@
 import type {
-  AgentsResponse, ChartResponse, CloseRequest, CloseResponse, ConversationDetail, ConversationGraph,
+  AgentsResponse, ChartResponse, CloseRequest, CloseResponse,
+  DeleteResponse, ConversationDetail, ConversationGraph,
   ConversationPage, Detail, Finding, KindInfo, InventoryRow, Overview, Queues, Session,
   SourcesResponse, TopologyResponse,
 } from './types'
@@ -70,6 +71,17 @@ export const api = {
     request<CloseResponse>('/api/conversations/close', {
       method: 'POST',
       body: JSON.stringify(req),
+    }),
+  deleteConversations: (req: CloseRequest) =>
+    request<DeleteResponse>('/api/conversations/delete', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  // Per conversation, never a batch: a reopen re-materialises threads on every
+  // bound channel, which is a decision rather than a bulk operation.
+  reopenConversation: (name: string) =>
+    request<{ outcome: string; name: string }>(`/api/conversations/${name}/reopen`, {
+      method: 'POST',
     }),
   send: (name: string, text: string) =>
     request<unknown>(`/api/conversations/${name}/messages`, {

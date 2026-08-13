@@ -11,6 +11,8 @@ import type { ConversationSummary } from '../api/types'
 // past it.
 
 const mutate = vi.fn()
+const deleteMutate = vi.fn()
+const reopenMutate = vi.fn()
 // The server's own answer to "may this browser write" — flipped by the
 // read-only test below.
 let canWrite = true
@@ -20,6 +22,20 @@ vi.mock('../api/hooks', () => ({
   useSession: () => ({ data: { canWrite } }),
   useCloseConversations: () => ({
     mutate,
+    data: undefined,
+    error: null,
+    isPending: false,
+    reset: vi.fn(),
+  }),
+  useDeleteConversations: () => ({
+    mutate: deleteMutate,
+    data: undefined,
+    error: null,
+    isPending: false,
+    reset: vi.fn(),
+  }),
+  useReopenConversation: () => ({
+    mutate: reopenMutate,
     data: undefined,
     error: null,
     isPending: false,

@@ -9,9 +9,10 @@ import type { CloseResponse, ConversationSummary } from '../api/types'
 // Closing a selected batch.
 //
 // The action is a FAN-OUT OF `/close` — the same command a person types in a
-// thread, posted on each selected conversation's console thread. Nothing here
-// deletes anything: the console has no write path to the Kubernetes API, and
-// this is not the place to grow one.
+// thread, posted on each selected conversation's console thread. Closing is a
+// STATE now, not a deletion: the conversation stays, inert but intact, and can
+// be reopened. Deleting is a separate batch (DeleteConversations) that refuses
+// anything not already closed.
 //
 // Two properties are load-bearing and both live in this file so they can be
 // tested without the whole page:
@@ -105,8 +106,9 @@ export function CloseSelectedModal({
           <>
             <p>
               {names.length} conversation(s) will be closed. Each is sent <code>/close</code> on its
-              console thread: the agent says goodbye, the threads are archived and the conversation
-              is deleted. <b>This cannot be undone.</b>
+              console thread: the agent says goodbye and the threads are archived. The conversation
+              itself stays — its answers and its workspace are kept — and{' '}
+              <b>it can be reopened</b>.
             </p>
             {working > 0 && (
               <>

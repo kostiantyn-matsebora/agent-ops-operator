@@ -665,3 +665,110 @@ func plural(n int, word string) string {
 	}
 	return strconv.Itoa(n) + " " + s
 }
+
+// ---- delete and reopen --------------------------------------------------------
+//
+// Both exist because closing stopped deleting. A CLOSED conversation is inert
+// but intact: it holds no thread, so neither verb can be a command posted on
+// one, and both are manager verbs the console CALLS. The console still performs
+// no Kubernetes write.
+
+const deleteOutcomeDeleted = "deleted"
+
+// handleBulkDelete reclaims a batch of CLOSED conversations.
+//
+// Mirrors bulk close in every mechanical respect — the same page-size bound
+// enforced server-side, the same explicit names, the same per-item outcomes and
+// totals, the same never-abort walk. What it does NOT mirror is implicitness: a
+// name that is not already Closed is SKIPPED with "close it first", never
+// closed on the way through. A close-then-delete batch would do the
+// irreversible thing to conversations that were still working, behind a
+// confirmation that named only the delete.
+func (a *API) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
+	var in closeRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `need {"names":["…"]}`})
+		return
+	}
+	if len(in.Names) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "names is required"})
+		return
+	}
+	if len(in.Names) > conversationPageSize {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "a delete batch is limited to " + strconv.Itoa(conversationPageSize) + " conversations",
+		})
+		return
+	}
+
+	identity := Identity(r)
+	results := make([]CloseResult, 0, len(in.Names))
+	for _, name := range in.Names {
+		results = append(results, a.deleteOne(r, name, identity))
+	}
+	totals := map[string]int{deleteOutcomeDeleted: 0, closeOutcomeSkipped: 0, closeOutcomeFailed: 0}
+	for _, res := range results {
+		totals[res.Outcome]++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"results": results,
+		"deleted": totals[deleteOutcomeDeleted],
+		"skipped": totals[closeOutcomeSkipped],
+		"failed":  totals[closeOutcomeFailed],
+	})
+}
+
+// deleteOne decides and performs one conversation's deletion. Every decision is
+// taken from cached CR state; the client supplies names and nothing else.
+func (a *API) deleteOne(r *http.Request, name, identity string) CloseResult {
+	obj := a.cache.Get("conversations", name)
+	if obj == nil {
+		return CloseResult{Name: name, Outcome: closeOutcomeFailed,
+			Reason: "no such conversation — it may already have been deleted"}
+	}
+	if obj.Metadata.DeletionTimestamp != "" {
+		return CloseResult{Name: name, Outcome: closeOutcomeSkipped, Reason: "already deleting"}
+	}
+	if phase := conversationView(obj).Status.Phase; !strings.EqualFold(phase, "Closed") {
+		return CloseResult{Name: name, Outcome: closeOutcomeSkipped,
+			Reason: "close it first — deleting removes its recorded answers, which is not something to do to a live conversation"}
+	}
+	if err := a.adapter.Delete(r.Context(), name); err != nil {
+		if errors.Is(err, errNotJoined) {
+			return CloseResult{Name: name, Outcome: closeOutcomeSkipped, Reason: notJoinedReason}
+		}
+		log.Printf("bulk delete %s: %v", name, err)
+		return CloseResult{Name: name, Outcome: closeOutcomeFailed, Reason: "deleting failed"}
+	}
+	log.Printf("console write: action=bulk-delete identity=%s conversation=%s", identity, name)
+	return CloseResult{Name: name, Outcome: deleteOutcomeDeleted}
+}
+
+// handleReopen brings ONE closed conversation back. Per-row on purpose: a bulk
+// reopen would re-materialise threads across every bound channel at once.
+func (a *API) handleReopen(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	obj := a.cache.Get("conversations", name)
+	if obj == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such conversation"})
+		return
+	}
+	if phase := conversationView(obj).Status.Phase; !strings.EqualFold(phase, "Closed") {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "only a closed conversation can be reopened; this one is " + strings.ToLower(phase)})
+		return
+	}
+	if err := a.adapter.Reopen(r.Context(), name); err != nil {
+		if errors.Is(err, errNotJoined) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": notJoinedReason})
+			return
+		}
+		// The manager refuses a reopen whose wiring is gone and NAMES the
+		// missing object; pass that through rather than flattening it, because
+		// "reopen failed" sends nobody anywhere.
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("console write: action=reopen identity=%s conversation=%s", Identity(r), name)
+	writeJSON(w, http.StatusOK, map[string]string{"outcome": "reopened", "name": name})
+}

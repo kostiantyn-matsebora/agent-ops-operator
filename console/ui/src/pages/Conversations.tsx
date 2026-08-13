@@ -6,10 +6,14 @@ import {
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../App'
-import { useCloseConversations, useConversations, useSession } from '../api/hooks'
+import {
+  useCloseConversations, useConversations, useDeleteConversations,
+  useReopenConversation, useSession,
+} from '../api/hooks'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'
 import { CloseSelectedModal, selectableNames, workingCount } from './CloseConversations'
+import { DeleteSelectedModal, deletableNames } from './DeleteConversations'
 import { ApiError } from '../api/client'
 
 // The list. Filtering, sorting and pagination are all SERVER-side: an event
@@ -22,6 +26,9 @@ const PHASE_COLOR: Record<string, 'blue' | 'green' | 'orange' | 'grey' | 'red'> 
   Pending: 'orange',
   Idle: 'green',
   Failed: 'red',
+  // A STATE, not an absence: the conversation is still here with its answers
+  // and its workspace, and it can be reopened.
+  Closed: 'grey',
 }
 
 function age(seconds: number): string {
@@ -44,6 +51,7 @@ export function ConversationsPage() {
   // than was ever visible.
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [closeOpen, setCloseOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const params = useMemo(() => {
     const p = new URLSearchParams()
@@ -60,6 +68,8 @@ export function ConversationsPage() {
   const { data, isLoading, error } = useConversations(params)
   const session = useSession()
   const close = useCloseConversations()
+  const del = useDeleteConversations()
+  const reopen = useReopenConversation()
 
   // What is selected must never outlive what was on screen when it was picked.
   const scope = params.toString()
@@ -76,6 +86,11 @@ export function ConversationsPage() {
   // worse than none. `canWrite` folds in the missing-identity case too.
   const canClose = session.data?.canWrite ?? false
   const selectable = selectableNames(data.items)
+  // Deleting is offered only when the SELECTION is entirely closed: the
+  // two-step is the safety property, so a mixed batch must not be one click.
+  const deletable = deletableNames(data.items)
+  const selectedAllClosed =
+    selected.size > 0 && [...selected].every((n) => deletable.includes(n))
   const names = data.items.map((c) => c.name).filter((n) => selected.has(n))
   const allSelected = selectable.length > 0 && selectable.every((n) => selected.has(n))
 
@@ -104,6 +119,15 @@ export function ConversationsPage() {
   function dismissClose() {
     setCloseOpen(false)
     close.reset()
+  }
+
+  function runDelete() {
+    del.mutate({ names }, { onSuccess: () => setSelected(new Set()) })
+  }
+
+  function dismissDelete() {
+    setDeleteOpen(false)
+    del.reset()
   }
 
   return (
@@ -200,6 +224,23 @@ export function ConversationsPage() {
                   </Button>
                 </ToolbarItem>
               )}
+              {canClose && (
+                <ToolbarItem>
+                  {/* Enabled only for a selection that is entirely CLOSED. A
+                      mixed batch is skipped server-side anyway, but offering
+                      it would make the two-step feel like a nag rather than
+                      the safety property it is. */}
+                  <Button
+                    variant="secondary"
+                    isDanger
+                    isDisabled={!selectedAllClosed}
+                    onClick={() => setDeleteOpen(true)}
+                    data-testid="delete-selected"
+                  >
+                    Delete selected{names.length > 0 ? ` (${names.length})` : ''}
+                  </Button>
+                </ToolbarItem>
+              )}
               <ToolbarItem variant="pagination">
                 <Pagination
                   itemCount={data.total}
@@ -243,6 +284,7 @@ export function ConversationsPage() {
                   <Th>Queued</Th>
                   <Th>Last activity</Th>
                   <Th>Console</Th>
+                  <Th screenReaderText="reopen" />
                 </Tr>
               </Thead>
               <Tbody>
@@ -294,6 +336,24 @@ export function ConversationsPage() {
                     <Td dataLabel="Console">
                       {c.joined ? <Label color="blue">joined</Label> : <small>observed</small>}
                     </Td>
+                    <Td dataLabel="Reopen">
+                      {/* Per row, and only where it means something. Closed is a
+                          STATE, not an absence: the conversation is still here
+                          with its answers and its workspace, and this is how it
+                          comes back. No bulk equivalent — a batch would
+                          re-materialise threads on surfaces nobody is watching. */}
+                      {canClose && c.phase === 'Closed' && !c.closing && (
+                        <Button
+                          variant="link"
+                          isInline
+                          isDisabled={reopen.isPending}
+                          onClick={() => reopen.mutate(c.name)}
+                          data-testid={`reopen-${c.name}`}
+                        >
+                          Reopen
+                        </Button>
+                      )}
+                    </Td>
                   </Tr>
                 ))}
               </Tbody>
@@ -306,6 +366,17 @@ export function ConversationsPage() {
           </small>
         </StackItem>
         </Stack>
+        {deleteOpen && (
+          <DeleteSelectedModal
+            isOpen
+            names={names}
+            result={del.data}
+            error={del.error ? (del.error as ApiError).message : undefined}
+            busy={del.isPending}
+            onConfirm={runDelete}
+            onClose={dismissDelete}
+          />
+        )}
         {closeOpen && (
           <CloseSelectedModal
             isOpen

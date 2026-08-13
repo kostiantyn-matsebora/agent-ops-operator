@@ -354,7 +354,7 @@ export interface CloseRequest {
 }
 
 /** `closed` happened, `skipped` was declined and says why, `failed` was tried. */
-export type CloseOutcome = 'closed' | 'skipped' | 'failed'
+export type CloseOutcome = 'closed' | 'deleted' | 'skipped' | 'failed'
 
 export interface CloseResult {
   name: string
@@ -366,6 +366,21 @@ export interface CloseResult {
 export interface CloseResponse {
   results: CloseResult[]
   closed: number
+  skipped: number
+  failed: number
+}
+
+/**
+ * Deleting reclaims a conversation the manager has already CLOSED. `deleted`
+ * replaces `closed` in the totals; the per-item shape is shared, because a
+ * partial batch is the normal outcome of both.
+ *
+ * There is no bulk reopen: reopening re-materialises threads on every bound
+ * channel, so it is a decision about one conversation.
+ */
+export interface DeleteResponse {
+  results: CloseResult[]
+  deleted: number
   skipped: number
   failed: number
 }
