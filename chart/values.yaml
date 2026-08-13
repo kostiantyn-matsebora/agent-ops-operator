@@ -551,6 +551,53 @@ resources:
 # and the render FAILS while the old key is present. See CHANGELOG.md.
 
 # CRD management (cert-manager pattern): templated, so upgrades work.
+# Conversation retention — TWO STAGES, two clocks, both OFF by default.
+# Closing is reversible and keeps the record; deleting is neither. Stage 2 is
+# NOT "stage 1 but tidier" — see CHANGELOG.md and docs/concepts.md.
+retention:
+  # Close a FINISHED conversation once it has been idle this long.
+  # Idle time, never lifetime: measured from the last run or input.
+  # Closing tears down the pod and archives the threads; the object, its
+  # answers and its volume state stay, and it can be reopened.
+  autoclose:
+    enabled: false
+    idleAge: 168h
+  # Delete a CLOSED conversation this long after it was closed.
+  # IRREVERSIBLE, and status.runs[].result is the only durable copy of what the
+  # agent answered — choose this as "how long do I want to be able to read
+  # this", not "how long until it is tidy".
+  # Without the housekeeping job below this reclaims the API half and LEAVES
+  # THE DISK: fine with persistence off, a silent leak with it on.
+  autodelete:
+    enabled: false
+    closedAge: 720h
+
+# The disk half of retention: a CronJob reclaiming what deleted conversations
+# left behind. Separate workload because the manager mounts no volume, and
+# mounting the claim ROOT is the reach subPath isolation denies agents.
+housekeeping:
+  enabled: false
+  schedule: "17 3 * * *"
+  image:
+    repository: kmatsebora/agentops-housekeeping
+    tag: 0.1.0
+  # Reports what it would remove and removes nothing. Take it off only after a
+  # run has named no directory belonging to a conversation you are keeping.
+  dryRun: true
+  # Bounds ONE run, so a first pass on an old install cannot reclaim everything.
+  maxDeletions: 50
+  # Reclaim <workspace-claim>/<conversation> with no Conversation of that name.
+  workspaces: true
+  # Reclaim transcripts whose session id no conversation references.
+  sessions: true
+  # Must exceed the longest plausible run: a transcript is unreferenced until
+  # the run that produces it finishes, so this is what protects a live one.
+  sessionGrace: 168h
+  # Its OWN identity, never the runtime SA — setting them equal fails the render.
+  serviceAccountName: agentops-housekeeping
+  resources: {}
+  nodeSelector: {}
+
 crds:
   # Install/upgrade the agentops.dev CRDs with this release.
   enabled: true

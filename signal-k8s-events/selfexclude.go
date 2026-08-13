@@ -36,12 +36,19 @@ import (
 // cluster.
 
 // ownedNamePrefixes are the workload names agent-ops gives its own pods:
-// runtime pods (runtimepod.PodName), channel adapter workloads, and signal
-// adapter workloads. Matching on the name alone requires no API read.
+// runtime pods (runtimepod.PodName), channel adapter workloads, signal adapter
+// workloads, and the housekeeping CronJob's pods. Matching on the name alone
+// requires no API read.
+//
+// The housekeeping entry matters more than its size suggests: a CronJob fails
+// on a SCHEDULE, so without it every failed cleanup run emits a Warning event,
+// that event becomes a signal, and the signal wakes an agent about agent-ops'
+// own maintenance — repeatedly. agent-ops' own health is STATUS, not SIGNAL.
 var ownedNamePrefixes = []string{
 	"agentops-conv-",
 	"agentops-adapter-",
 	"agentops-signal-",
+	"agentops-housekeeping-",
 }
 
 // ownedAppLabels are the `app.kubernetes.io/name` values agent-ops stamps on

@@ -50,6 +50,26 @@ credentials never leave the adapter:
 4. Read your channels + opaque `spec.config` from `GET /channel/channels?adapter=`,
    persist cursors (e.g. poll offsets) via `GET/PUT /channel/state/{channel}/{key}`,
    report config problems via `POST /channel/channels/{name}/status`.
+5. Optionally act on a conversation your channel is bound to:
+   `POST /channel/conversations/{name}/reopen` and
+   `POST /channel/conversations/{name}/delete`, both `{"channel":"…"}`.
+
+**Reach for those two verbs is the BINDING**, read from the conversation's
+`spec.channelRefs` and never taken from the request: a surface may act on a
+conversation whose bindings name its channel, and no other. That is narrower
+than it sounds, and it is the amendment the archived-thread case forces on "no
+remote close verb exists". That rule protected a property rather than a syntax —
+*you may only end a conversation you are part of* — and holding a live thread
+was how membership was PROVEN, because posting `/close` on a thread is only
+possible for a surface that has one. A closed conversation has no thread, so
+that proof is unavailable and the binding that put the thread there is the
+next-strongest.
+
+`delete` additionally refuses anything not already `Closed`, with a reason
+naming the missing step. It never closes first: one call doing the irreversible
+thing to a conversation that was still working, behind a confirmation that named
+only the delete, is exactly what the refusal prevents. Closing itself is still
+`/close` on a thread — there is no close endpoint.
 
 ### The manager composes meaning; the adapter composes presentation
 
@@ -76,6 +96,17 @@ facts, so an adapter can choose not to repeat itself.
 materialized bindings and left blank when several Ready Pipelines could claim
 it — blank means "not determinable", so render it as absent rather than
 inventing a name.
+
+`previousThreadId` is an optional **hint**, present only when a closed
+conversation is being reopened: the thread this conversation used before its
+topics were archived. **Ignoring it is a valid implementation.** If your
+transport can un-archive, honour it and return that same id — the conversation
+then continues where it left off, with its history above the new messages. If it
+cannot, open a fresh thread and return the new id; the manager records whatever
+comes back. That asymmetry is why this is a hint on an existing operation rather
+than a `reopen-topic` kind: most transports have no un-archive, so most
+implementations of a new kind would be a second name for `ensure-topic`. Whether
+un-archiving is possible is transport knowledge, and the manager holds none.
 
 **Prose fields are markdown**, in one deliberately small subset:
 

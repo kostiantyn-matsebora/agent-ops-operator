@@ -1,0 +1,134 @@
+{{- if .Values.housekeeping.enabled }}
+{{- $h := .Values.housekeeping }}
+{{- $p := .Values.persistence }}
+{{- $homeClaim := $p.existingClaim | default $p.name }}
+{{- $wsClaim := $p.workspace.existingClaim | default $p.workspace.name }}
+{{- /* A claim is mounted only when the persistence block that owns it is on:
+there is nothing to reclaim from a volume this release does not have. */ -}}
+{{- $mountWs := and $h.workspaces $p.workspace.enabled }}
+{{- $mountHome := and $h.sessions $p.enabled }}
+{{- if eq $h.serviceAccountName (include "agentops.runtimeServiceAccount" .) }}
+{{- fail "housekeeping.serviceAccountName must differ from global.agentops.runtime.serviceAccountName — this workload mounts the claim ROOTS, which is exactly the reach subPath isolation denies runtime pods; sharing the identity would hand every agent the ability to read and delete every other conversation's tree" }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $h.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-housekeeping
+---
+# READ-ONLY, and only conversations. This job performs no API writes at all:
+# both etcd-side stages of the lifecycle are the manager's.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $h.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-housekeeping
+rules:
+  - apiGroups: ["agentops.dev"]
+    resources: ["conversations"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $h.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-housekeeping
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $h.serviceAccountName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $h.serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+---
+# Named agentops-housekeeping so signal-k8s-events' name-prefix self-exclusion
+# applies: a CronJob fails on a schedule, and an unexcluded failure would wake
+# an agent about agent-ops' own maintenance, repeatedly.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: agentops-housekeeping
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-housekeeping
+spec:
+  schedule: {{ $h.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: agentops-housekeeping
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ $h.serviceAccountName }}
+          {{- with $h.nodeSelector }}
+          nodeSelector:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          containers:
+            - name: housekeeping
+              image: {{ printf "%s:%s" $h.image.repository (toString $h.image.tag) | quote }}
+              env:
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: DRY_RUN
+                  value: {{ $h.dryRun | quote }}
+                - name: MAX_DELETIONS
+                  value: {{ $h.maxDeletions | quote }}
+                - name: SESSION_GRACE
+                  value: {{ $h.sessionGrace | quote }}
+                {{- if $mountWs }}
+                - name: WORKSPACE_ROOT
+                  value: /reclaim/workspace
+                {{- end }}
+                {{- if $mountHome }}
+                # claude-code keys transcripts by session id under the shared
+                # projects directory; /data/home is mounted with no subPath.
+                - name: SESSIONS_ROOT
+                  value: /reclaim/home/.claude/projects/-data-workspace
+                {{- end }}
+              {{- if or $mountWs $mountHome }}
+              volumeMounts:
+                {{- if $mountWs }}
+                # The claim ROOT, with no subPath — that is the whole reason
+                # this runs under its own identity.
+                - name: workspace
+                  mountPath: /reclaim/workspace
+                {{- end }}
+                {{- if $mountHome }}
+                - name: home
+                  mountPath: /reclaim/home
+                {{- end }}
+              {{- end }}
+              {{- with $h.resources }}
+              resources:
+{{ toYaml . | indent 16 }}
+              {{- end }}
+          {{- if or $mountWs $mountHome }}
+          volumes:
+            {{- if $mountWs }}
+            - name: workspace
+              persistentVolumeClaim:
+                claimName: {{ $wsClaim }}
+            {{- end }}
+            {{- if $mountHome }}
+            - name: home
+              persistentVolumeClaim:
+                claimName: {{ $homeClaim }}
+            {{- end }}
+          {{- end }}
+{{- end }}

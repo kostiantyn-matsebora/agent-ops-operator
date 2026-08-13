@@ -120,6 +120,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /channel/ops", s.adapterAuth(s.handleChannelOps))
 	mux.HandleFunc("POST /channel/ops/{id}/done", s.adapterAuth(s.handleChannelOpDone))
 	mux.HandleFunc("POST /channel/inbound", s.adapterAuth(s.handleChannelInbound))
+	mux.HandleFunc("POST /channel/conversations/{name}/reopen", s.adapterAuth(s.handleConversationReopen))
+	mux.HandleFunc("POST /channel/conversations/{name}/delete", s.adapterAuth(s.handleConversationDelete))
 	mux.HandleFunc("GET /channel/channels", s.adapterAuth(s.handleChannelList))
 	mux.HandleFunc("GET /channel/state/{channel}/{key}", s.adapterAuth(s.handleStateGet))
 	mux.HandleFunc("PUT /channel/state/{channel}/{key}", s.adapterAuth(s.handleStatePut))
@@ -779,6 +781,97 @@ type inboundReq struct {
 // Origination goes through the signal path: a general-surface message is a
 // chat signal from a chat SignalSource, claimed by a Pipeline that declares who
 // answers — instead of a channel picking whichever pipeline was created first.
+// reachConversation resolves the conversation a surface is asking to act on,
+// and decides whether it MAY.
+//
+// Reach is the BINDING: a surface may act on a conversation whose
+// spec.channelRefs names its channel, and the binding is read from the
+// CONVERSATION, never taken from the request. This does not reopen the door
+// that "no remote close verb exists" shut — that rule protected a property, not
+// a syntax: you may only end a conversation you are part of, and reach had to
+// be PROVEN rather than asserted by naming one. Holding a live thread was the
+// proof, because posting a command on a thread is only possible for a surface
+// that has one. A CLOSED conversation has no thread, so that proof is
+// unavailable, and the binding that put the thread there is the next-strongest.
+func (s *Server) reachConversation(w http.ResponseWriter, r *http.Request) (*agentopsv1alpha1.Conversation, bool) {
+	name := r.PathValue("name")
+	var in struct {
+		Channel string `json:"channel"`
+	}
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err := json.Unmarshal(body, &in); err != nil || in.Channel == "" {
+		writeJSON(w, 400, map[string]string{"error": `need {"channel"}`})
+		return nil, false
+	}
+	ctx := r.Context()
+	var ch agentopsv1alpha1.Channel
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: in.Channel}, &ch); err != nil {
+		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown channel %q", in.Channel)})
+		return nil, false
+	}
+	if !scopeAllows(r, ch.Spec.Adapter) {
+		forbidScope(w)
+		return nil, false
+	}
+	var conv agentopsv1alpha1.Conversation
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &conv); err != nil {
+		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown conversation %q", name)})
+		return nil, false
+	}
+	for _, ref := range conv.Spec.ChannelRefs {
+		if ref.Name == ch.Name {
+			return &conv, true
+		}
+	}
+	writeJSON(w, 403, map[string]string{"error": fmt.Sprintf(
+		"conversation %q is not bound to channel %q — a surface may act only on a conversation it is bound to; "+
+			"bind the channel on the Pipeline that originates these conversations", name, ch.Name)})
+	return nil, false
+}
+
+func (s *Server) handleConversationReopen(w http.ResponseWriter, r *http.Request) {
+	conv, ok := s.reachConversation(w, r)
+	if !ok {
+		return
+	}
+	if err := s.Router.ReopenConversation(r.Context(), conv); err != nil {
+		writeJSON(w, 409, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 202, map[string]bool{"ok": true})
+}
+
+// handleConversationDelete reclaims a CLOSED conversation for good.
+//
+// It refuses anything not already closed rather than closing it first: a
+// close-then-delete verb would let one call do the irreversible thing to a
+// conversation that was still working, with the confirmation naming only the
+// delete. Refusing makes the destructive step something ordered twice.
+func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request) {
+	conv, ok := s.reachConversation(w, r)
+	if !ok {
+		return
+	}
+	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		writeJSON(w, 409, map[string]string{"error": fmt.Sprintf(
+			"conversation %q is %s, not Closed — close it first. Deleting removes its recorded results, "+
+				"which are the only durable copy of what the agent answered", conv.Name, phaseOrOpen(conv))})
+		return
+	}
+	if err := s.Client.Delete(r.Context(), conv); err != nil && !apierrors.IsNotFound(err) {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 202, map[string]bool{"ok": true})
+}
+
+func phaseOrOpen(conv *agentopsv1alpha1.Conversation) string {
+	if conv.Status.Phase == "" {
+		return "open"
+	}
+	return string(conv.Status.Phase)
+}
+
 func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var in inboundReq

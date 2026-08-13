@@ -8,6 +8,99 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Closing a conversation no longer deletes it — chart 5.14.0
+
+**Action needed by nobody at upgrade time, but `/close` means something
+different from the moment you upgrade.** Both new windows are off by default, so
+nothing is reclaimed that was not reclaimed before — and nothing is DESTROYED
+that was destroyed before either.
+
+Closing and reclaiming used to be one act. `/close` deleted the `Conversation`,
+and with it `status.runs[].result`, the context handle and eventually the
+workspace directory. That made closing irreversible, which is precisely why
+nobody closed anything and why conversations accumulated without bound.
+
+**What changes.** A closed conversation now sits at phase `Closed`: no runtime
+pod, no MCP ConfigMap, no dispatch, no capacity consumed, absent from
+conversation reuse and from every pipeline — with its object, its recorded
+answers, its context handle and its volume state all intact. It shows up in
+`kubectl get conversations` as a `Closed` row until you delete it or enable
+autodelete.
+
+```sh
+kubectl -n <ns> get conversations --field-selector status.phase=Closed
+```
+
+**It can be reopened**, from the console, back to `Idle` with its wiring and its
+history — the materialized refs are left exactly as they are, so no Pipeline
+edit leaks into a conversation that already exists. Threads are re-established
+through the ordinary `ensure-topic`, carrying the archived thread id as a hint:
+an adapter that can un-archive continues in the same thread, one that cannot
+opens a fresh one, and ignoring the hint is a valid implementation.
+
+**To get the old behaviour** — closing that reclaims — enable autodelete with a
+short window. That is the old semantics with a window bolted on:
+
+```yaml
+retention:
+  autodelete:
+    enabled: true
+    closedAge: 1h
+```
+
+**Two windows, two clocks, both off by default:**
+
+```yaml
+retention:
+  autoclose:                 # close a FINISHED conversation after it goes quiet
+    enabled: true
+    idleAge: 168h            # measured from LAST ACTIVITY, never from creation
+  autodelete:                # delete a CLOSED conversation
+    enabled: true
+    closedAge: 720h          # measured from status.closedAt; a reopen resets it
+```
+
+`autoclose` closes only a conversation that is genuinely finished: `Idle`, no
+pending inputs, no inflight run, no runtime pod, **and** every recorded run
+delivered to every bound thread. That last clause is not decoration — a
+conversation goes `Idle` the moment its result is recorded, while the reply may
+still be an unclaimed `send` op, so closing on `Idle` alone can archive a thread
+out from under its own answer.
+
+**Choose `closedAge` as "how long do I want to be able to read this", not "how
+long until it is tidy".** `status.runs[].result` is the only place an answer
+lives in the Kubernetes API; the console projects its transcript from the CR,
+and metrics keep aggregates only. For a conversation bound to no channel there
+is no transport copy anywhere.
+
+**New: an opt-in housekeeping CronJob reclaims disk.** Only something that
+mounts the claim roots can, and the manager mounts no volume by invariant:
+
+```yaml
+housekeeping:
+  enabled: true
+  dryRun: true               # take this off only after a run looks right
+```
+
+It removes workspace directories with no `Conversation` of that name, and
+session transcripts no conversation references that are older than
+`sessionGrace`. A **closed** conversation still has a CR, so its state is
+protected by the same rule that identifies an orphan — the job is phase-blind on
+purpose, and a "only look at live ones" optimisation would reclaim the workspace
+of every conversation you were keeping.
+
+It runs under its own ServiceAccount with read-only access to conversations,
+never the runtime SA — mounting the claim root is exactly the reach `subPath`
+isolation denies agents, and the render fails if the two identities are set
+equal.
+
+**Enabling autodelete without the job reclaims the API half and leaves the
+disk.** That is correct with persistence off and a silent leak with it on.
+
+**Recommended order:** upgrade, watch the `Closed` rows for a while, use reopen
+once to confirm it works, then turn autoclose on with a long window, then the
+job with `dryRun`, and autodelete last.
+
 ### vm-bundle is now prometheus-bundle — chart 5.13.0, prometheus-bundle 0.2.0
 
 **Action needed if you set any `vm-bundle.*` value. The render FAILS until you
