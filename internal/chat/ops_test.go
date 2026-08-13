@@ -192,21 +192,34 @@ func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
 	}
 }
 
-func TestFailedCloseTopicIsTerminal(t *testing.T) {
+// A failed close-topic is now RE-DERIVABLE, which is the reverse of what this
+// test used to pin — and the reversal is the point of the two-stage lifecycle.
+//
+// close-topic was the one op not derivable from CR state only because it was
+// enqueued while the object was disappearing: there was nothing left to record
+// against, so a failure had to be terminal or deletion would wedge. Closing no
+// longer deletes, so the object survives, status.threadsArchived records what
+// actually got archived, and a failure is simply an archive still owed.
+//
+// The deleting path keeps its old protection from the finalizer's grace, not
+// from this op being terminal.
+func TestFailedCloseTopicIsReDerivable(t *testing.T) {
 	q := &OpQueue{Registry: NewRegistry()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 	q.EnqueueCloseTopic(ctx, ch, "9876", "conv-1")
 	op := q.Claim("slack")
-	// an adapter that cannot archive reports it; deletion must still proceed,
-	// so the op is not eligible for regeneration the way ensure-topic is
 	q.Complete(ctx, op.ID, OpResult{Error: "closeForumTopic: chat not found"})
 	if q.Pending(op.ID) {
 		t.Fatal("failed close-topic must not stay pending")
 	}
 	q.EnqueueCloseTopic(ctx, ch, "9876", "conv-1")
-	if again := q.Claim("slack"); again != nil {
-		t.Fatalf("failed close-topic was regenerated: %+v", again)
+	again := q.Claim("slack")
+	if again == nil {
+		t.Fatal("a failed close-topic must be re-derivable: the thread is still owed an archive")
+	}
+	if again.ID != CloseTopicOpID("conv-1", "c1") {
+		t.Fatalf("re-derived op must keep the stable id: %+v", again)
 	}
 }
 

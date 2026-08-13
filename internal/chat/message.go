@@ -151,6 +151,21 @@ type TopicDescriptor struct {
 	// Kind is the originating signal kind (alert | job | task | chat), so an
 	// adapter can prefix or icon a topic by lane.
 	Kind string `json:"kind,omitempty"`
+	// PreviousThreadID is a HINT, set only when a closed conversation is
+	// reopened: the thread this conversation used before its topics were
+	// archived.
+	//
+	// The adapter decides what it means. One whose transport can un-archive
+	// returns this same id and the conversation continues where it left off;
+	// one whose transport has no such notion ignores it and returns a new id,
+	// which is already correct — that asymmetry is why this is a hint on an
+	// existing op rather than a `reopen-topic` kind every adapter would have to
+	// implement, most of them as a second name for ensure-topic.
+	//
+	// Whether a transport can un-archive is TRANSPORT KNOWLEDGE, and the
+	// manager holds none — the same rule that keeps parse_mode and message
+	// length limits out of internal/.
+	PreviousThreadID string `json:"previousThreadId,omitempty"`
 }
 
 // SignalMessage builds the card for an input that reached the manager as a

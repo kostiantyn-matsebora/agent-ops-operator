@@ -738,6 +738,15 @@ func (in *ConversationStatus) DeepCopyInto(out *ConversationStatus) {
 		in, out := &in.LastActivity, &out.LastActivity
 		*out = (*in).DeepCopy()
 	}
+	if in.ClosedAt != nil {
+		in, out := &in.ClosedAt, &out.ClosedAt
+		*out = (*in).DeepCopy()
+	}
+	if in.ThreadsArchived != nil {
+		in, out := &in.ThreadsArchived, &out.ThreadsArchived
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))

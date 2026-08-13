@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"sort"
 	"time"
 
@@ -74,6 +75,23 @@ type ConversationReconciler struct {
 	// CloseTopicGrace overrides how long deletion waits on close-topic ops;
 	// zero means DefaultCloseTopicGrace.
 	CloseTopicGrace time.Duration
+	// Router closes conversations. The reconciler depends on it so the TIMER
+	// closes through the same path /close does — a farewell on every bound
+	// thread, and one implementation of the close. The alternative is a second
+	// farewell, which is exactly what the one-implementation rule forbids.
+	// Nil disables autoclose.
+	Router *chat.Router
+	// AUTOCLOSE: a finished conversation is closed once it has been INACTIVE
+	// this long. Measured from last activity, never from creation — a
+	// conversation created last week that answered an hour ago is busy, not old.
+	AutoCloseEnabled bool
+	AutoCloseIdleAge time.Duration
+	// AUTODELETE: a CLOSED conversation is deleted this long after ClosedAt.
+	// A separate flag rather than "delete when both are set": autoclose with
+	// autodelete off — a lane that tidies itself and keeps its record — is the
+	// common configuration, and must not require declining the destructive half.
+	AutoDeleteEnabled   bool
+	AutoDeleteClosedAge time.Duration
 }
 
 // Reconcile implements the reconciliation loop.
@@ -96,6 +114,15 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err := r.Patch(ctx, &conv, patch); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// CLOSED IS INERT. Everything below this line provisions something — a
+	// topic, a ConfigMap, a pod, a work unit — and a closed conversation gets
+	// none of it. Placed before the signature label and the input pruning on
+	// purpose: a closed conversation is not a place work can land, so there is
+	// nothing to keep groupable or to prune toward.
+	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		return r.reconcileClosed(ctx, &conv)
 	}
 
 	// signature label for grouping lookups
@@ -208,7 +235,94 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if needsWorker {
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
-	return ctrl.Result{}, nil
+	return r.autoClose(ctx, &conv, podExists)
+}
+
+// autoClose closes a FINISHED conversation that has been idle for the window,
+// and requeues for the moment it expires when it has not.
+//
+// Self-scheduled rather than swept: the reconciler is already invoked per
+// conversation with exactly the state this decision needs, so a periodic List
+// would re-read everything to act on almost nothing — and would produce the
+// burst the requeue avoids.
+func (r *ConversationReconciler) autoClose(ctx context.Context, conv *agentopsv1alpha1.Conversation, podExists bool) (ctrl.Result, error) {
+	if !r.AutoCloseEnabled || r.AutoCloseIdleAge <= 0 || r.Router == nil {
+		return ctrl.Result{}, nil
+	}
+	if !finished(conv, podExists) {
+		return ctrl.Result{}, nil
+	}
+	idle := time.Since(lastActivity(conv))
+	if idle < r.AutoCloseIdleAge {
+		return ctrl.Result{RequeueAfter: jitter(r.AutoCloseIdleAge - idle)}, nil
+	}
+	log.FromContext(ctx).Info("auto-closing an idle finished conversation",
+		"conversation", conv.Name, "idleFor", idle.Round(time.Minute), "window", r.AutoCloseIdleAge)
+	return ctrl.Result{}, r.Router.AutoCloseConversation(ctx, conv, idle)
+}
+
+// finished reports whether a conversation has nothing left to do. It gates
+// autoclose and nothing else.
+//
+// The delivery clause is not decoration: a conversation reaches Idle the
+// instant POST /work/done records the result, while the reply may still be an
+// unclaimed send op. A long window makes that unlikely, not impossible — an
+// adapter down for the length of the window is exactly when it happens — and
+// closing then archives the thread out from under the answer.
+func finished(conv *agentopsv1alpha1.Conversation, podExists bool) bool {
+	if conv.Status.Phase != agentopsv1alpha1.ConversationIdle {
+		return false
+	}
+	if needsWorker(conv) || podExists {
+		return false
+	}
+	return allRunsDelivered(conv)
+}
+
+// allRunsDelivered reports whether every recorded run reached every bound
+// channel. A conversation with no bound channels is trivially delivered — there
+// is no thread for an answer to be owed to.
+func allRunsDelivered(conv *agentopsv1alpha1.Conversation) bool {
+	if len(conv.Spec.ChannelRefs) == 0 {
+		return true
+	}
+	for i := range conv.Status.Runs {
+		run := &conv.Status.Runs[i]
+		if !run.DeliveryTracked {
+			continue // pre-upgrade run: backfilled as delivered, never sent
+		}
+		for _, ref := range conv.Spec.ChannelRefs {
+			if !run.DeliveredTo(ref.Name) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// lastActivity is the autoclose window's origin: the most recent thing that
+// happened, falling back to creation only for a conversation that never ran.
+//
+// Idle time, never lifetime. A creation clock would close a conversation that
+// answered an hour ago simply because it was opened last week, which is the one
+// outcome nobody asks for. This is the same instant the console shows as the
+// conversation's age, so the list and the behaviour agree.
+func lastActivity(conv *agentopsv1alpha1.Conversation) time.Time {
+	last := conv.CreationTimestamp.Time
+	if conv.Status.LastActivity != nil && conv.Status.LastActivity.After(last) {
+		last = conv.Status.LastActivity.Time
+	}
+	for i := range conv.Spec.Inputs {
+		if t := conv.Spec.Inputs[i].ReceivedAt.Time; t.After(last) {
+			last = t
+		}
+	}
+	for i := range conv.Status.Runs {
+		if f := conv.Status.Runs[i].FinishedAt; f != nil && f.After(last) {
+			last = f.Time
+		}
+	}
+	return last
 }
 
 // FinalizerCloseTopics holds a deleting conversation just long enough to
@@ -228,13 +342,102 @@ func (r *ConversationReconciler) closeGrace() time.Duration {
 	return DefaultCloseTopicGrace
 }
 
+// reconcileClosed is the whole of a closed conversation's lifecycle: tear down
+// what costs something, archive the threads, and stop.
+//
+// The teardown is the SAME teardown deletion used to get for free through
+// ownerRef GC — the runtime pod and the MCP ConfigMap — done explicitly now
+// that the object survives its close. Releasing the pod is what returns the
+// capacity slot, so a Pending conversation is admitted on the next pass.
+//
+// Archiving here rather than in the finalizer is what retires close-topic's
+// status as the one non-derivable op. It was the exception only because it was
+// enqueued while the object was disappearing; the object now survives, so a
+// thread missing from status.threadsArchived is an archive still owed, and this
+// pass re-derives it after any restart. The op id is stable per
+// conversation×channel, so enqueueing on every pass dedups.
+func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ctrl.Result, error) {
+	// Grace 0: the run, if any, was abandoned at the close and nobody is
+	// waiting for its output, so a graceful shutdown would only hold the slot.
+	pod := &corev1.Pod{}
+	pod.Namespace, pod.Name = conv.Namespace, runtimepod.PodName(conv.Name)
+	if err := r.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+	cm := &corev1.ConfigMap{}
+	cm.Namespace, cm.Name = conv.Namespace, convMCPConfigMapName(conv.Name)
+	if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+	if conv.Status.Inflight != nil || conv.Status.RuntimePod != "" {
+		patch := client.MergeFrom(conv.DeepCopy())
+		conv.Status.Inflight = nil
+		conv.Status.RuntimePod = ""
+		if err := r.Status().Patch(ctx, conv, patch); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if r.Ops != nil {
+		for _, t := range conv.Status.Threads {
+			if conv.Status.ThreadArchived(t.Channel) {
+				continue
+			}
+			var ch agentopsv1alpha1.Channel
+			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil {
+				continue // channel gone: nothing left to archive on it
+			}
+			if ch.Spec.Adapter == "" {
+				continue
+			}
+			r.Ops.EnqueueCloseTopic(ctx, &ch, t.ThreadID, conv.Name)
+		}
+	}
+	return r.autoDelete(ctx, conv)
+}
+
+// autoDelete reclaims a conversation that has been CLOSED for longer than the
+// window, and requeues for the moment it expires when it has not.
+//
+// Measured from status.closedAt, so a reopen — which clears that stamp — stops
+// the clock. Applies to Closed conversations only: a never-closed conversation
+// is never auto-deleted however idle it is, because the two stages are separate
+// decisions with separate flags.
+func (r *ConversationReconciler) autoDelete(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ctrl.Result, error) {
+	if !r.AutoDeleteEnabled || r.AutoDeleteClosedAge <= 0 || conv.Status.ClosedAt == nil {
+		return ctrl.Result{}, nil
+	}
+	elapsed := time.Since(conv.Status.ClosedAt.Time)
+	if elapsed < r.AutoDeleteClosedAge {
+		return ctrl.Result{RequeueAfter: jitter(r.AutoDeleteClosedAge - elapsed)}, nil
+	}
+	log.FromContext(ctx).Info("auto-deleting a long-closed conversation",
+		"conversation", conv.Name, "closedFor", elapsed.Round(time.Minute), "window", r.AutoDeleteClosedAge)
+	return ctrl.Result{}, client.IgnoreNotFound(r.Delete(ctx, conv))
+}
+
+// jitter spreads a requeue by up to 10%, so an install whose conversations all
+// become eligible at manager start does not act on them in one instant. The
+// first pass on an established backlog is the dangerous one: every close
+// enqueues a farewell and a close-topic op per bound thread.
+func jitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return time.Second
+	}
+	return d + time.Duration(rand.Int63n(int64(d/10)+1))
+}
+
 // finalizeClose archives the threads of a deleting conversation, then lets go.
 //
-// The finalizer is what keeps "every op is derivable from CR state" true for
-// close-topic: while it holds, the CR is still there to regenerate the op from
-// after a manager restart. Enqueueing on every pass is safe — the op id is
-// stable per conversation×channel, so it dedups against both the pending op and
-// the completed one.
+// Since closing stopped deleting, this covers exactly ONE case: a Conversation
+// deleted without having been closed — a direct `kubectl delete`, or the
+// autodelete of a conversation whose archive never completed. A conversation
+// deleted after a proper close finds every thread already in
+// status.threadsArchived and releases immediately, archiving nothing twice.
+//
+// Enqueueing on every pass is safe — the op id is stable per
+// conversation×channel, so it dedups against both the pending op and the
+// completed one.
 func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if !controllerutil.ContainsFinalizer(conv, FinalizerCloseTopics) {
@@ -255,6 +458,9 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agento
 	outstanding := false
 	if r.Ops != nil {
 		for _, t := range conv.Status.Threads {
+			if conv.Status.ThreadArchived(t.Channel) {
+				continue // archived at the close: nothing owed, nothing to wait for
+			}
 			var ch agentopsv1alpha1.Channel
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil {
 				continue // channel gone: nothing left to archive on it
@@ -348,6 +554,14 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alph
 		if !c.DeletionTimestamp.IsZero() || hasPod[c.Name] || !needsWorker(c) {
 			continue
 		}
+		// Closed is inert: it will never be given a pod, so leaving it in the
+		// waiting set would let a conversation nobody will ever admit sit ahead
+		// of a Pending one in FIFO order and starve it. Its inputs, if it was
+		// closed holding any, stay on the object untouched — they are part of
+		// the record a reopen restores, not work owed.
+		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			continue
+		}
 		waiting = append(waiting, *c)
 	}
 	sort.Slice(waiting, func(i, j int) bool {
@@ -433,7 +647,13 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 	pending := false
 	var firstErr error
 	for _, ref := range conv.Spec.ChannelRefs {
-		if conv.ThreadFor(ref.Name) != nil {
+		existing := conv.ThreadFor(ref.Name)
+		archived := conv.Status.ThreadArchived(ref.Name)
+		// A thread that exists and is not archived is a live thread: nothing to
+		// do. A thread that exists and IS archived belongs to a conversation
+		// that was closed and reopened, and needs re-establishing — carrying
+		// its old id as a hint the adapter may honour or ignore.
+		if existing != nil && !archived {
 			continue
 		}
 		var ch agentopsv1alpha1.Channel
@@ -446,7 +666,11 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 		if ch.Spec.Adapter == "" {
 			continue
 		}
-		r.Ops.EnqueueEnsureTopic(ctx, &ch, conv, r.topicDescriptor(ctx, conv))
+		d := r.topicDescriptor(ctx, conv)
+		if existing != nil {
+			d.PreviousThreadID = *existing
+		}
+		r.Ops.EnqueueEnsureTopic(ctx, &ch, conv, d)
 		pending = true
 	}
 	return pending, firstErr

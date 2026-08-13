@@ -86,6 +86,20 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if isCloseCommand(text) {
 		return r.CloseConversation(ctx, conv)
 	}
+	// A CLOSED conversation is inert, so an input appended here would sit
+	// forever and never dispatch — a silent black hole on a surface where
+	// somebody is waiting for an answer. Say so instead, and create nothing:
+	// the same shape every command whose whole result is a reply already takes.
+	//
+	// Deliberately NOT an implicit reopen: reopening re-materialises threads on
+	// every bound channel, which is a decision, not something a stray "thanks"
+	// in an archived topic should trigger.
+	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		r.Ops.EnqueueMessage(ctx, ch, msg.ThreadID, Notice(
+			"This conversation is closed, so nothing here reaches the agent. "+
+				"Reopen it from the console to continue with its history."))
+		return nil
+	}
 	busy := conv.Status.Inflight != nil || len(conv.Spec.Inputs) > 0
 	inputID := newInputID()
 	if err := r.appendInput(ctx, conv, agentopsv1alpha1.InputItem{
@@ -132,23 +146,116 @@ func isCloseCommand(text string) bool {
 	return ok && cmd.Profile == CloseCommand && cmd.Agent == "" && cmd.Rest == ""
 }
 
-// CloseConversation says goodbye on every bound thread and deletes the
-// Conversation. Deletion does the rest through machinery that already exists:
-// ownerRefs GC the runtime pod and the MCP ConfigMap, the close-topics
-// finalizer archives the threads, and input pruning cleans the payload objects.
+// CloseConversation says goodbye on every bound thread and closes the
+// Conversation — /close, the console batch and the manager's timer all arrive
+// here, which is what keeps the farewell, the teardown and the capacity release
+// from drifting between originators.
 //
 // No authorization check: no surface in this system authorizes individual
 // senders, and inventing one here would be the only such check in it.
 func (r *Router) CloseConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	text := "👋 Conversation closed. This thread is archived."
+	text := "👋 Conversation closed. This thread is archived — reply here and I " +
+		"will start a fresh conversation, or reopen this one from the console to " +
+		"continue with its history."
 	if conv.Status.Inflight != nil {
 		// Honored mid-run on purpose: /close is most wanted for an agent that
 		// has gone off the rails, and refusing then would make it useless.
 		text = "👋 Conversation closed while a run was in progress — " +
-			conv.Status.Inflight.RunID + " was abandoned. This thread is archived."
+			conv.Status.Inflight.RunID + " was abandoned. This thread is archived, " +
+			"and the conversation can be reopened from the console."
 	}
-	r.FanOutSend(ctx, conv, Notice(text))
-	return client.IgnoreNotFound(r.Client.Delete(ctx, conv))
+	return r.closeConversation(ctx, conv, text)
+}
+
+// AutoCloseConversation is the timer's entry point. It differs from a manual
+// close in WORDS ONLY — a conversation ended by a timer needs the farewell more
+// than one ended by hand, and it has to name the window so the person reading it
+// can find the setting responsible.
+func (r *Router) AutoCloseConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation, idleFor time.Duration) error {
+	return r.closeConversation(ctx, conv, fmt.Sprintf(
+		"👋 Closed automatically after %s with no activity. This thread is "+
+			"archived and nothing was lost — the conversation and its answers are "+
+			"still readable, and it can be reopened from the console to continue "+
+			"with its history.", idleFor.Round(time.Minute)))
+}
+
+// closeConversation is the ONE implementation. Its final step is a STATUS
+// WRITE, not a delete: a closed conversation is inert but intact, so its
+// recorded runs, its context handle and its volume state all survive and it can
+// be reopened. Deletion is a second verb with its own flag and its own clock,
+// measured from the ClosedAt stamped here.
+//
+// The teardown that used to ride on deletion — runtime pod, MCP ConfigMap,
+// close-topic ops, capacity — is the reconciler's, driven off the phase. Doing
+// it here as well would be a second implementation of it.
+func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation, farewell string) error {
+	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		return nil // already closed: no second farewell
+	}
+	r.FanOutSend(ctx, conv, Notice(farewell))
+	patch := client.MergeFrom(conv.DeepCopy())
+	now := metav1.Now()
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	conv.Status.ClosedAt = &now
+	return client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch))
+}
+
+// ReopenConversation brings a closed conversation back to Idle.
+//
+// The materialized refs are left EXACTLY as they are. That is the whole design:
+// refs are snapshots and their CONTENT is re-read at every use, so a reopen that
+// "re-resolved" wiring would do the one thing the snapshot rule forbids — let a
+// Pipeline edit re-wire a conversation that already exists. A reopened
+// conversation is the SAME conversation with the same profile and the same
+// capabilities, or it is a new conversation wearing an old name.
+//
+// Continuity is restored where it was PROMISED: under contextStorage: volume the
+// workspace and the context handle are both still there, so the agent resumes;
+// under none it answers fresh and says so, exactly as a resume already does.
+//
+// Threads are re-established by the reconciler's ordinary ensure-topic pass,
+// which carries the archived thread id as a hint (see TopicDescriptor).
+func (r *Router) ReopenConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		return fmt.Errorf("conversation %s is not closed", conv.Name)
+	}
+	if err := r.validateRefs(ctx, conv); err != nil {
+		return err
+	}
+	patch := client.MergeFrom(conv.DeepCopy())
+	conv.Status.Phase = agentopsv1alpha1.ConversationIdle
+	conv.Status.ClosedAt = nil
+	conv.Status.Reopens++
+	now := metav1.Now()
+	conv.Status.LastActivity = &now
+	return r.Client.Status().Patch(ctx, conv, patch)
+}
+
+// validateRefs fails a reopen that would produce a conversation which cannot
+// dispatch, NAMING the missing object. Never partially reopen and never
+// silently drop a binding: a conversation reopened without its profile is one
+// that looks alive and answers nothing.
+func (r *Router) validateRefs(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	if conv.Spec.ProfileRef.Name == "" {
+		return fmt.Errorf("conversation %s names no profile", conv.Name)
+	}
+	var profile agentopsv1alpha1.AgentProfile
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("cannot reopen %s: AgentProfile %q no longer exists", conv.Name, conv.Spec.ProfileRef.Name)
+		}
+		return err
+	}
+	for _, ref := range conv.Spec.ChannelRefs {
+		var ch agentopsv1alpha1.Channel
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil {
+			if apierrors.IsNotFound(err) {
+				return fmt.Errorf("cannot reopen %s: Channel %q no longer exists", conv.Name, ref.Name)
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // boundChannels resolves the channel set a new conversation binds to: the

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -44,6 +46,27 @@ func envInt(key string, def int) int {
 		return v
 	}
 	return def
+}
+
+// envBool reads an explicit opt-in. Anything that is not a recognised true
+// value is false: both retention flags are destructive in their own way, so a
+// typo must decline them rather than enable them.
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// envDuration reads a Go duration ("720h", "30m"). An unparseable or
+// non-positive value yields zero, which every caller reads as "off".
+func envDuration(key string) time.Duration {
+	d, err := time.ParseDuration(strings.TrimSpace(os.Getenv(key)))
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
 }
 
 // maxActiveConversations resolves the cap on simultaneously ACTIVE
@@ -170,6 +193,16 @@ func main() {
 		Scheme:                 mgr.GetScheme(),
 		MaxActiveConversations: maxActive,
 		Ops:                    ops,
+		// The timer closes through the SAME path /close does, which is why the
+		// reconciler holds the router at all.
+		Router: router,
+		// Both OFF by default and independent: autoclose with autodelete off —
+		// a lane that tidies itself and keeps its record — is the common
+		// configuration, so enabling one must never imply the other.
+		AutoCloseEnabled:    envBool("CONVERSATION_AUTOCLOSE_ENABLED"),
+		AutoCloseIdleAge:    envDuration("CONVERSATION_AUTOCLOSE_IDLE_AGE"),
+		AutoDeleteEnabled:   envBool("CONVERSATION_AUTODELETE_ENABLED"),
+		AutoDeleteClosedAge: envDuration("CONVERSATION_AUTODELETE_CLOSED_AGE"),
 		Runtime: runtimepod.Config{
 			Image:          env("RUNTIME_IMAGE", ""),
 			ServiceAccount: env("RUNTIME_SA", "agentops-runtime"),

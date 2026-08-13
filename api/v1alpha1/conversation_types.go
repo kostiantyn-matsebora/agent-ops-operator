@@ -151,7 +151,7 @@ type ConversationSpec struct {
 }
 
 // ConversationPhase is the coarse conversation state.
-// +kubebuilder:validation:Enum=Pending;Idle;Queued;Working
+// +kubebuilder:validation:Enum=Pending;Idle;Queued;Working;Closed
 type ConversationPhase string
 
 const (
@@ -164,6 +164,20 @@ const (
 	ConversationIdle    ConversationPhase = "Idle"
 	ConversationQueued  ConversationPhase = "Queued"
 	ConversationWorking ConversationPhase = "Working"
+	// ConversationClosed: INERT BUT INTACT. Closing stopped being deletion —
+	// the object, its recorded runs, its context handle and its volume state
+	// all survive, which is what makes reopening mean anything.
+	//
+	// Exhaustively, a Closed conversation has: no runtime pod, no MCP
+	// ConfigMap, no dispatch and no work units; no capacity consumed and no
+	// place in the pending backlog; no membership in conversation REUSE, so a
+	// matching signature opens a NEW conversation; and no place in any
+	// pipeline. Everything else — spec, materialized refs, runtimeContextID,
+	// runs — is untouched on purpose.
+	//
+	// Deletion is a SECOND verb with its own flag and its own clock, measured
+	// from ClosedAt. Nothing here deletes.
+	ConversationClosed ConversationPhase = "Closed"
 )
 
 // RunStatus records one completed agent run.
@@ -279,8 +293,51 @@ type ConversationStatus struct {
 	ProcessedInputIDs []string `json:"processedInputIds,omitempty"`
 	// +optional
 	LastActivity *metav1.Time `json:"lastActivity,omitempty"`
+	// ClosedAt stamps the transition into phase Closed, and is the ORIGIN of the
+	// delete clock — the only thing that reads it.
+	//
+	// A dedicated timestamp rather than the Closed condition's
+	// lastTransitionTime: a condition's transition time is rewritten by any
+	// reason change on the same condition, so a clock built on it can be reset
+	// by an unrelated status update. This is written once, at the transition,
+	// and CLEARED by a reopen — which is what stops the delete clock.
+	// +optional
+	ClosedAt *metav1.Time `json:"closedAt,omitempty"`
+	// ThreadsArchived names the bound channels whose thread has already been
+	// archived by a completed close-topic op.
+	//
+	// This is what retires "close-topic is the ONE op not derivable from CR
+	// state". It was the exception only because it was enqueued while the
+	// object was disappearing, leaving nothing to record against. Closing no
+	// longer deletes, so the object survives — and a Closed conversation whose
+	// thread is missing from this list is an archive still owed, re-derivable
+	// on the next reconcile exactly as runs[].delivered[] makes a reply
+	// derivable. Per-THREAD for the same reason: a fan-out interrupted after
+	// one channel must not re-archive that one or abandon the rest.
+	// +optional
+	ThreadsArchived []string `json:"threadsArchived,omitempty"`
+	// Reopens counts how many times this conversation has been reopened.
+	//
+	// It is not decoration: ensure-topic op ids are STABLE per
+	// conversation×channel so reconciliation can re-derive them, which means a
+	// reopen's request to re-establish a thread would otherwise dedup against
+	// the original topic creation and never reach the adapter. The count makes
+	// each reopen's op distinct while keeping every one of them derivable.
+	// +optional
+	Reopens int32 `json:"reopens,omitempty"`
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// ThreadArchived reports whether this conversation's thread on a channel has
+// already been archived.
+func (s *ConversationStatus) ThreadArchived(channel string) bool {
+	for _, c := range s.ThreadsArchived {
+		if c == channel {
+			return true
+		}
+	}
+	return false
 }
 
 // +kubebuilder:object:root=true

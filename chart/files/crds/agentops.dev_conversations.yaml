@@ -280,6 +280,18 @@ spec:
           status:
             description: ConversationStatus is the observed state.
             properties:
+              closedAt:
+                description: |-
+                  ClosedAt stamps the transition into phase Closed, and is the ORIGIN of the
+                  delete clock — the only thing that reads it.
+
+                  A dedicated timestamp rather than the Closed condition's
+                  lastTransitionTime: a condition's transition time is rewritten by any
+                  reason change on the same condition, so a clock built on it can be reset
+                  by an unrelated status update. This is written once, at the transition,
+                  and CLEARED by a reopen — which is what stops the delete clock.
+                format: date-time
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -362,12 +374,24 @@ spec:
                 - Idle
                 - Queued
                 - Working
+                - Closed
                 type: string
               processedInputIds:
                 description: IDs of processed inputs (bounded; used to prune spec.inputs).
                 items:
                   type: string
                 type: array
+              reopens:
+                description: |-
+                  Reopens counts how many times this conversation has been reopened.
+
+                  It is not decoration: ensure-topic op ids are STABLE per
+                  conversation×channel so reconciliation can re-derive them, which means a
+                  reopen's request to re-establish a thread would otherwise dedup against
+                  the original topic creation and never reach the adapter. The count makes
+                  each reopen's op distinct while keeping every one of them derivable.
+                format: int32
+                type: integer
               runs:
                 description: Last runs, newest last (bounded).
                 items:
@@ -475,6 +499,22 @@ spec:
                   - channel
                   - threadId
                   type: object
+                type: array
+              threadsArchived:
+                description: |-
+                  ThreadsArchived names the bound channels whose thread has already been
+                  archived by a completed close-topic op.
+
+                  This is what retires "close-topic is the ONE op not derivable from CR
+                  state". It was the exception only because it was enqueued while the
+                  object was disappearing, leaving nothing to record against. Closing no
+                  longer deletes, so the object survives — and a Closed conversation whose
+                  thread is missing from this list is an archive still owed, re-derivable
+                  on the next reconcile exactly as runs[].delivered[] makes a reply
+                  derivable. Per-THREAD for the same reason: a fan-out interrupted after
+                  one channel must not re-archive that one or abandon the rest.
+                items:
+                  type: string
                 type: array
             type: object
         type: object

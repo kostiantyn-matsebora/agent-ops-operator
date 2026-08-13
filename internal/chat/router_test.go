@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -38,7 +37,13 @@ func closeTestScheme(t *testing.T) *runtime.Scheme {
 // closeFixture builds a conversation bound to two channels, each with a thread.
 func closeFixture(t *testing.T, objs ...client.Object) (*Router, *OpQueue, client.Client) {
 	t.Helper()
-	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(objs...).Build()
+	// WithStatusSubresource: closing is a STATUS write now, and the fake client
+	// silently drops status patches for types it does not know have the
+	// subresource — which would make every assertion here pass for the wrong
+	// reason.
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(objs...).Build()
 	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
 	return &Router{Client: c, Reader: c, Namespace: testNS, Ops: q}, q, c
 }
@@ -72,7 +77,11 @@ func drain(q *OpQueue, adapter string) []*Op {
 	}
 }
 
-func TestCloseInThreadDeletesAndSaysGoodbyeOnEveryChannel(t *testing.T) {
+// Closing is a state transition now, not a deletion: the object survives at
+// phase Closed with its runs, its context handle and its volume state intact,
+// which is what makes it reopenable. Deletion is a second verb with its own
+// flag and its own clock.
+func TestCloseInThreadClosesAndSaysGoodbyeOnEveryChannel(t *testing.T) {
 	conv := boundConv("conv-1", "c1", "c2")
 	r, q, c := closeFixture(t, nsChannel("c1", "slack"), nsChannel("c2", "teams"), conv)
 
@@ -83,9 +92,14 @@ func TestCloseInThreadDeletesAndSaysGoodbyeOnEveryChannel(t *testing.T) {
 	}
 
 	var got agentopsv1alpha1.Conversation
-	err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "conv-1"}, &got)
-	if !apierrors.IsNotFound(err) {
-		t.Fatalf("conversation must be deleted, got err=%v inputs=%d", err, len(got.Spec.Inputs))
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "conv-1"}, &got); err != nil {
+		t.Fatalf("closing must NOT delete the conversation: %v", err)
+	}
+	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Fatalf("phase must be Closed, got %q", got.Status.Phase)
+	}
+	if got.Status.ClosedAt == nil {
+		t.Fatal("closedAt must be stamped — it is the origin of the delete clock")
 	}
 
 	// the farewell reaches BOTH bound threads — closing ends the conversation,
@@ -115,8 +129,14 @@ func TestCloseIsNotHandedToTheAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got agentopsv1alpha1.Conversation
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "conv-1"}, &got); !apierrors.IsNotFound(err) {
-		t.Fatalf("bot-suffixed /close must close too: err=%v", err)
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "conv-1"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Fatalf("bot-suffixed /close must close too, got phase %q", got.Status.Phase)
+	}
+	if len(got.Spec.Inputs) != 0 {
+		t.Fatalf("the command must not become an input: %+v", got.Spec.Inputs)
 	}
 }
 
