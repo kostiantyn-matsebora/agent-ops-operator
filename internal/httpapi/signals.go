@@ -508,6 +508,13 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	cutoff := time.Now().Add(-time.Duration(windowDays) * 24 * time.Hour)
 	for i := range list.Items {
 		c := &list.Items[i]
+		// A CLOSED conversation is not reusable, and this is the rule that
+		// makes closing mean anything: without it a matching signature would
+		// wake the conversation somebody just tidied away, re-materialising a
+		// thread they archived. A match opens a NEW conversation instead.
+		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			continue
+		}
 		// The signature hash alone is NOT enough once a source is shared: two
 		// pipelines fanning out produce two conversations with the SAME
 		// signature, and absorbing the other one's would run this group under

@@ -1,41 +1,41 @@
 ## 1. The API: a phase and a timestamp
 
-- [ ] 1.1 Add phase `Closed` and `status.closedAt` to `api/v1alpha1` — status only; closing is something the manager DOES, never something a client asserts, so no spec field is added
-- [ ] 1.2 Regenerate deepcopy and CRDs (`controller-gen object` + `crd`), and check the CRD YAML into `chart/files/crds/`
+- [x] 1.1 Add phase `Closed` and `status.closedAt` to `api/v1alpha1` — status only; closing is something the manager DOES, never something a client asserts, so no spec field is added
+- [x] 1.2 Regenerate deepcopy and CRDs (`controller-gen object` + `crd`), and check the CRD YAML into `chart/files/crds/`
 
 ## 2. Closing stops deleting
 
-- [ ] 2.1 Change the ONE close implementation's final step from `Delete` to a status write: phase `Closed`, `status.closedAt` stamped — every originator (`/close`, console batch, the timer) keeps calling it unchanged
-- [ ] 2.2 Move the `close-topic` enqueue from the deletion finalizer to the close TRANSITION, one op per bound thread, with a "topics archived" marker on the conversation so the ops become re-derivable after a restart instead of staying the one non-derivable kind
-- [ ] 2.3 Keep the `agentops.dev/close-topics` finalizer as the guard for a direct `kubectl delete` of a conversation nobody closed; deleting an already-`Closed` conversation finds its threads archived and releases immediately
-- [ ] 2.4 Tear down the runtime pod and the MCP ConfigMap at the close, and release capacity so a `Pending` conversation is admitted — unchanged in effect, moved to the transition
+- [x] 2.1 Change the ONE close implementation's final step from `Delete` to a status write: phase `Closed`, `status.closedAt` stamped — every originator (`/close`, console batch, the timer) keeps calling it unchanged
+- [x] 2.2 Move the `close-topic` enqueue from the deletion finalizer to the close TRANSITION, one op per bound thread, with a "topics archived" marker on the conversation so the ops become re-derivable after a restart instead of staying the one non-derivable kind
+- [x] 2.3 Keep the `agentops.dev/close-topics` finalizer as the guard for a direct `kubectl delete` of a conversation nobody closed; deleting an already-`Closed` conversation finds its threads archived and releases immediately
+- [x] 2.4 Tear down the runtime pod and the MCP ConfigMap at the close, and release capacity so a `Pending` conversation is admitted — unchanged in effect, moved to the transition
 - [ ] 2.5 Tests: `/close` leaves a `Closed` conversation rather than deleting it; topics are archived at the close; a direct `kubectl delete` of a never-closed conversation still archives through the finalizer; deleting a `Closed` one does not archive twice
 
 ## 3. A closed conversation is inert
 
-- [ ] 3.1 Skip `Closed` in dispatch — no work units, ever
-- [ ] 3.2 Skip `Closed` in the admission gate: not counted active (it has no pod, which already holds) and not a member of the FIFO waiting set, so it can neither consume capacity nor starve a `Pending` conversation
-- [ ] 3.3 Skip `Closed` in conversation REUSE in `internal/ingest` — a matching signature opens a NEW conversation; this is the rule that makes closing mean anything
-- [ ] 3.4 Skip `Closed` wherever a Pipeline resolves conversations, so a closed conversation is not somewhere work can land
+- [x] 3.1 Skip `Closed` in dispatch — no work units, ever
+- [x] 3.2 Skip `Closed` in the admission gate: not counted active (it has no pod, which already holds) and not a member of the FIFO waiting set, so it can neither consume capacity nor starve a `Pending` conversation
+- [x] 3.3 Skip `Closed` in conversation REUSE in `internal/ingest` — a matching signature opens a NEW conversation; this is the rule that makes closing mean anything
+- [x] 3.4 Skip `Closed` wherever a Pipeline resolves conversations, so a closed conversation is not somewhere work can land
 - [ ] 3.5 Tests: a signal matching a closed conversation's signature opens a new one; a closed conversation receives no dispatch; a closed conversation does not occupy a capacity slot
 
 ## 4. Reopening
 
-- [ ] 4.1 Implement reopen: phase → `Idle`, `status.closedAt` cleared, materialized refs left EXACTLY as they are — no re-resolution, or a Pipeline edit re-wires an existing conversation
-- [ ] 4.2 Validate the refs at reopen and fail naming the missing one; never partially reopen and never silently drop a binding
-- [ ] 4.3 Add the optional previous-thread-id hint to `ensure-topic` and enqueue one per bound channel on reopen; update `status.threads[]` from whatever the adapter returns, same as today
+- [x] 4.1 Implement reopen: phase → `Idle`, `status.closedAt` cleared, materialized refs left EXACTLY as they are — no re-resolution, or a Pipeline edit re-wires an existing conversation
+- [x] 4.2 Validate the refs at reopen and fail naming the missing one; never partially reopen and never silently drop a binding
+- [x] 4.3 Add the optional previous-thread-id hint to `ensure-topic` and enqueue one per bound channel on reopen; update `status.threads[]` from whatever the adapter returns, same as today
 - [ ] 4.4 Honour the hint in `channel-telegram` by un-archiving the topic and returning the same thread id; confirm an adapter that ignores the hint stays correct
 - [ ] 4.5 Tests: reopen restores wiring and runs unchanged; reopen with a deleted profile fails naming it; the hint honoured returns the same thread and ignored returns a new one; a two-channel reopen records one continued and one fresh thread
 
 ## 5. The two timers
 
-- [ ] 5.1 Add both config blocks to the reconciler and wire them from env in `cmd/manager/main.go`: `CONVERSATION_AUTOCLOSE_ENABLED` / `CONVERSATION_AUTOCLOSE_IDLE_AGE`, `CONVERSATION_AUTODELETE_ENABLED` / `CONVERSATION_AUTODELETE_CLOSED_AGE` — both flags default false, and enabling one must not enable the other
-- [ ] 5.2 Implement the `finished` predicate — phase `Idle`, no pending inputs, no inflight run, no runtime pod — reusing the existing `needsWorker` helpers rather than restating them
-- [ ] 5.3 Add `delivered to every bound channel` to that predicate, over `status.runs[].delivered[]`, treating a conversation with no bound channels as trivially delivered; it gates CLOSING only, because it is about a message reaching a thread
-- [ ] 5.4 Resolve LAST ACTIVITY as the close window's origin — most recent run or input, falling back to creation only when the conversation never ran — and confirm it agrees with the `ageSeconds` the console already computes
-- [ ] 5.5 Close on expiry through the ONE close implementation, passing a reason that names the automatic close, the elapsed window AND that the conversation can be reopened
-- [ ] 5.6 Delete on expiry of `closedAge` measured from `status.closedAt`, applying to `Closed` conversations only; a reopen clears the timestamp and therefore the clock
-- [ ] 5.7 Schedule both by requeue rather than by sweep, with jitter on each timer's first pass so an install whose conversations are all eligible at startup does not act on them in one instant
+- [x] 5.1 Add both config blocks to the reconciler and wire them from env in `cmd/manager/main.go`: `CONVERSATION_AUTOCLOSE_ENABLED` / `CONVERSATION_AUTOCLOSE_IDLE_AGE`, `CONVERSATION_AUTODELETE_ENABLED` / `CONVERSATION_AUTODELETE_CLOSED_AGE` — both flags default false, and enabling one must not enable the other
+- [x] 5.2 Implement the `finished` predicate — phase `Idle`, no pending inputs, no inflight run, no runtime pod — reusing the existing `needsWorker` helpers rather than restating them
+- [x] 5.3 Add `delivered to every bound channel` to that predicate, over `status.runs[].delivered[]`, treating a conversation with no bound channels as trivially delivered; it gates CLOSING only, because it is about a message reaching a thread
+- [x] 5.4 Resolve LAST ACTIVITY as the close window's origin — most recent run or input, falling back to creation only when the conversation never ran — and confirm it agrees with the `ageSeconds` the console already computes
+- [x] 5.5 Close on expiry through the ONE close implementation, passing a reason that names the automatic close, the elapsed window AND that the conversation can be reopened
+- [x] 5.6 Delete on expiry of `closedAge` measured from `status.closedAt`, applying to `Closed` conversations only; a reopen clears the timestamp and therefore the clock
+- [x] 5.7 Schedule both by requeue rather than by sweep, with jitter on each timer's first pass so an install whose conversations are all eligible at startup does not act on them in one instant
 - [ ] 5.8 Tests: both disabled do nothing; each window respected; the close window measured from last activity so a recently-active old conversation survives; working/queued/inflight survives its window; an undelivered run holds a conversation open; a never-closed conversation is never auto-deleted however idle; reopening before the delete window prevents the delete
 
 ## 6. Delete and reopen as manager verbs

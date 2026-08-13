@@ -144,9 +144,17 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 	if topic.Title == "" {
 		topic.Title = conv.Name
 	}
-	// ':' keeps the id a single URL path segment for /channel/ops/{id}/done
+	// ':' keeps the id a single URL path segment for /channel/ops/{id}/done.
+	// The reopen counter keeps the id STABLE (so reconciliation re-derives it)
+	// while making each reopen's request distinct — without it a reopen's
+	// ensure-topic dedups against the original topic creation and never reaches
+	// the adapter.
+	id := "topic:" + conv.Name + ":" + ch.Name
+	if conv.Status.Reopens > 0 {
+		id += ":r" + strconv.Itoa(int(conv.Status.Reopens))
+	}
 	q.enqueue(ctx, &Op{
-		ID: "topic:" + conv.Name + ":" + ch.Name, Channel: ch.Name, Conversation: conv.Name,
+		ID: id, Channel: ch.Name, Conversation: conv.Name,
 		Kind: OpEnsureTopic, Topic: &topic, channelType: ch.Spec.Adapter, stable: true,
 	})
 }
@@ -166,6 +174,17 @@ func (q *OpQueue) EnqueueCloseTopic(ctx context.Context, ch *agentopsv1alpha1.Ch
 // channel. Exported because the finalizer asks whether it is still outstanding.
 func CloseTopicOpID(conversation, channel string) string {
 	return "close:" + conversation + ":" + channel
+}
+
+// ParseCloseTopicOpID splits a close-topic op id back into its parts. Channel
+// names cannot contain ":" (they are Kubernetes object names), so the split is
+// unambiguous.
+func ParseCloseTopicOpID(id string) (conversation, channel string, ok bool) {
+	parts := strings.Split(id, ":")
+	if len(parts) != 3 || parts[0] != "close" {
+		return "", "", false
+	}
+	return parts[1], parts[2], true
 }
 
 // Settled reports whether an op id has already completed within the dedup
@@ -412,14 +431,29 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 			q.mu.Unlock()
 		}
 	case op.Kind == OpCloseTopic:
-		// Terminal either way: an empty body means archived, an error means the
-		// thread stays open. No condition is written — the Conversation is being
-		// deleted, so there is no object left to carry one — and the op is NOT
-		// regenerated. The finalizer releases regardless.
-		if res.Error != "" {
-			log.FromContext(ctx).Info("close-topic op failed; leaving the thread open",
-				"channel", op.Channel, "conversation", op.Conversation, "error", res.Error)
+		// Archiving became a FACT on the conversation when closing stopped
+		// deleting. The object survives the close, so there is something to
+		// record against — which is what retires close-topic's old status as
+		// the one op not derivable from CR state.
+		if res.Error == "" {
+			if err := q.markThreadArchived(ctx, op); err != nil {
+				log.FromContext(ctx).Error(err, "mark thread archived",
+					"conversation", op.Conversation, "op", op.ID)
+				q.mu.Lock()
+				delete(q.recent, id)
+				q.mu.Unlock()
+			}
+			break
 		}
+		// Failed: release the dedup entry so reconciliation re-derives it. A
+		// conversation being DELETED has no marker to gain and no object left
+		// to re-derive from — the finalizer's grace covers that path and
+		// releases regardless, so this costs it nothing.
+		log.FromContext(ctx).Info("close-topic op failed; leaving the thread open",
+			"channel", op.Channel, "conversation", op.Conversation, "error", res.Error)
+		q.mu.Lock()
+		delete(q.recent, id)
+		q.mu.Unlock()
 	case res.Error != "":
 		log.FromContext(ctx).Info("send op failed", "channel", op.Channel, "error", res.Error)
 	}
@@ -429,6 +463,38 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 func isRunReply(id string) bool {
 	_, _, _, ok := ParseRunReplyOpID(id)
 	return ok
+}
+
+// markThreadArchived records that one bound thread has been archived, so
+// reconciliation stops re-deriving its close-topic op. Mirrors markDelivered,
+// including the conflict retry: a close races the next status write.
+//
+// A conversation on its way out is tolerated as NotFound — the finalizer path
+// has no object to mark and does not need one.
+func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
+	_, channel, ok := ParseCloseTopicOpID(op.ID)
+	if !ok || q.Client == nil {
+		return nil
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		var conv agentopsv1alpha1.Conversation
+		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: q.Namespace, Name: op.Conversation}, &conv); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if conv.Status.ThreadArchived(channel) {
+			return nil
+		}
+		patch := client.MergeFrom(conv.DeepCopy())
+		conv.Status.ThreadsArchived = append(conv.Status.ThreadsArchived, channel)
+		err := q.Client.Status().Patch(ctx, &conv, patch)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return client.IgnoreNotFound(err)
+		}
+	}
+	return nil
 }
 
 // markDelivered records that a run's reply reached one channel's thread, so
@@ -489,10 +555,31 @@ func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) e
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "AdapterError"
 		cond.Message = "channel " + op.Channel + ": adapter completed ensure-topic without a thread id"
-	} else if conv.ThreadFor(op.Channel) == nil {
+	} else if existing := conv.ThreadFor(op.Channel); existing == nil {
 		conv.Status.Threads = append(conv.Status.Threads, agentopsv1alpha1.ThreadBinding{
 			Channel: op.Channel, ThreadID: res.ThreadID,
 		})
+	} else {
+		// A REOPEN re-establishing an archived thread. Whatever came back is
+		// the thread now: an adapter that honoured the hint returns the same id
+		// and the conversation continues where it left off, one that could not
+		// returns a fresh one. Both are recorded the same way, because both are
+		// the truth about that transport.
+		for i := range conv.Status.Threads {
+			if conv.Status.Threads[i].Channel == op.Channel {
+				conv.Status.Threads[i].ThreadID = res.ThreadID
+			}
+		}
+	}
+	if res.Error == "" && res.ThreadID != "" {
+		// No longer archived: there is a live thread here again.
+		kept := conv.Status.ThreadsArchived[:0]
+		for _, c := range conv.Status.ThreadsArchived {
+			if c != op.Channel {
+				kept = append(kept, c)
+			}
+		}
+		conv.Status.ThreadsArchived = kept
 	}
 	apimeta.SetStatusCondition(&conv.Status.Conditions, cond)
 	if err := q.Client.Status().Patch(ctx, &conv, patch); err != nil {
