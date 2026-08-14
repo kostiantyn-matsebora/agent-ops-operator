@@ -6,4 +6,4 @@ description: >-
   channel adapter for continuation and delivery) and — when the chat surface is
   configured — the Channel, the chat SignalSource, and the Pipeline claiming it.
 type: application
-version: 0.1.0
+version: 0.2.0

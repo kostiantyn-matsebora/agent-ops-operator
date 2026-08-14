@@ -198,6 +198,14 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.Error(err, "ensureTopics enqueue (continuing chat-less)")
 		}
 		topicPending = waiting
+		// A reopened conversation announces itself on every bound thread. After
+		// ensureTopics on purpose: ops are FIFO per adapter, so the un-archive
+		// is claimed before this notice and it lands somewhere that can take
+		// it. The op id is stable per reopen, so re-deriving it every pass is
+		// what makes it survive a restart mid-reopen without saying it twice.
+		if conv.Status.Reopens > 0 && r.Router != nil {
+			r.Router.FanOutReopenNotice(ctx, &conv)
+		}
 		// Input cards, posted PARALLEL to dispatch rather than sequenced with
 		// it: the human reads the event while the agent is already working, and
 		// a run that hangs or dies still leaves the thread saying what happened.

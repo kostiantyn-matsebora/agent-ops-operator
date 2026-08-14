@@ -273,7 +273,16 @@ func (a *Adapter) ThreadFor(conversation string) (channel, thread string, ok boo
 func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) {
 	switch op.Kind {
 	case "ensure-topic":
-		return a.threadID(op.Conversation), ""
+		tid := a.threadID(op.Conversation)
+		// A REOPEN arrives as an ordinary ensure-topic, and this console's
+		// thread id is deterministic, so the reopened conversation lands back
+		// in the thread it already had. Clearing the archived flag is what
+		// makes it typeable again — the UI derives "you cannot reply here"
+		// from it — and it puts a line in the transcript saying the thread is
+		// live, so the reopen is visible rather than inferred from a composer
+		// quietly reappearing. Silent for a thread that was never archived.
+		a.transcripts.Reopen(tid)
+		return tid, ""
 	case "send":
 		if op.Message == nil {
 			return "", "send without a message"

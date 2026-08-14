@@ -164,10 +164,25 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	summary := summarize(obj, a.cache.List("pipelines"), a.adapter.PrimaryChannel())
 	var messages []Message
-	archived := false
+	// Archived — "there is nothing here to reply to" — is read from the
+	// CONVERSATION's phase first, and only then from this console's own
+	// transcript state.
+	//
+	// The transcript flag is set when a close-topic op is handled and lives in
+	// memory for one console session. That was sufficient while closing DELETED
+	// the conversation: the row disappeared, so nothing had to survive a
+	// restart. Closing is now a state the object keeps, and a console restart
+	// wiped the flag off every closed conversation and put the composer back —
+	// so a closed conversation looked typeable, and the manager answered each
+	// message with "this conversation is closed".
+	//
+	// The CR is the source of truth and survives everything; the flag stays as
+	// the transitional signal for a thread archived before the phase was
+	// observed.
+	archived := strings.EqualFold(summary.Phase, "Closed")
 	if summary.ConsoleThread != "" {
 		messages = a.transcripts.Thread(summary.ConsoleThread)
-		archived = a.transcripts.Archived(summary.ConsoleThread)
+		archived = archived || a.transcripts.Archived(summary.ConsoleThread)
 	}
 	out := map[string]any{
 		"conversation": summary,

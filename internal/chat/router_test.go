@@ -225,3 +225,40 @@ func opBody(op *Op) string {
 	}
 	return op.Message.Body
 }
+
+// A reopen is announced by the MANAGER on every bound thread — not synthesized
+// by whichever adapter happens to implement it, which would leave the other
+// surfaces silently starting to work again.
+func TestReopenNoticeReachesEveryBoundThread(t *testing.T) {
+	conv := boundConv("conv-1", "c1", "c2")
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	conv.Status.Reopens = 1
+	r, q, _ := closeFixture(t, nsChannel("c1", "slack"), nsChannel("c2", "teams"), conv)
+
+	r.FanOutReopenNotice(context.Background(), conv)
+
+	for _, tc := range []struct{ adapter, thread string }{{"slack", "thread-c1"}, {"teams", "thread-c2"}} {
+		ops := drain(q, tc.adapter)
+		if len(ops) != 1 {
+			t.Fatalf("%s: want one reopen notice, got %d", tc.adapter, len(ops))
+		}
+		if ops[0].ThreadID == nil || *ops[0].ThreadID != tc.thread {
+			t.Fatalf("%s: notice went to %v", tc.adapter, ops[0].ThreadID)
+		}
+		if !strings.Contains(opBody(ops[0]), "reopened") {
+			t.Fatalf("%s: notice text %q", tc.adapter, opBody(ops[0]))
+		}
+	}
+
+	// Re-derived on every reconcile, so it must dedup — and a SECOND reopen
+	// must get its own.
+	r.FanOutReopenNotice(context.Background(), conv)
+	if again := drain(q, "slack"); len(again) != 0 {
+		t.Fatalf("a re-derived notice must dedup: %d", len(again))
+	}
+	conv.Status.Reopens = 2
+	r.FanOutReopenNotice(context.Background(), conv)
+	if second := drain(q, "slack"); len(second) != 1 {
+		t.Fatalf("a second reopen is owed its own notice, got %d", len(second))
+	}
+}

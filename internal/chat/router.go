@@ -264,6 +264,20 @@ func (r *Router) validateRefs(ctx context.Context, conv *agentopsv1alpha1.Conver
 	return nil
 }
 
+// FanOutReopenNotice tells every bound thread the conversation is live again.
+//
+// Enqueued by the reconciler AFTER topics are ensured, not by the reopen verb
+// itself: a reopened thread may still be archived on its transport, and ops are
+// FIFO per adapter, so letting ensure-topic go first is what makes this land in
+// a thread that can receive it.
+func (r *Router) FanOutReopenNotice(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
+	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
+		r.Ops.EnqueueReopenNotice(ctx, ch, conv, tid, Notice(
+			"↩️ Conversation reopened — this thread is live again, with everything above it intact. "+
+				"Reply here to continue."))
+	})
+}
+
 // boundChannels resolves the channel set a new conversation binds to: the
 // originating Pipeline's channels, with the originating channel guaranteed
 // included (it is where the user is looking).

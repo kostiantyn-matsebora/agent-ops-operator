@@ -196,6 +196,27 @@ func (t *Transcripts) Archive(thread string) {
 	}, false)
 }
 
+// Reopen clears a thread's archived flag, because the conversation it belongs
+// to came back.
+//
+// UI STATE ONLY — it posts no message. The console derives "you cannot type
+// here" from this flag, so without clearing it a reopened conversation renders
+// alive with no composer. The reopen ANNOUNCEMENT is the manager's: it fans a
+// notice to every bound thread, which arrives here as an ordinary send and
+// lands in the transcript like any other message. Saying it here as well would
+// put it on this surface and no other, and would be a second author of a fact
+// the manager already owns.
+//
+// Idempotent, and silent when the thread was not archived: ensure-topic is
+// at-least-once and is also delivered for threads that were never closed.
+func (t *Transcripts) Reopen(thread string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if log := t.threads[thread]; log != nil {
+		log.archived = false
+	}
+}
+
 // Archived reports whether a thread has been closed.
 func (t *Transcripts) Archived(thread string) bool {
 	t.mu.Lock()
