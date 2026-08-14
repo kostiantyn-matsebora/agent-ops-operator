@@ -267,3 +267,32 @@ func TestALiveConversationStaysTypeable(t *testing.T) {
 		t.Fatal("a live conversation must not be reported archived")
 	}
 }
+
+// A deleted conversation's console transcript keeps the tombstone and stops
+// offering a composer. The CR is about to vanish from the watch cache; the
+// transcript is not, so whoever was reading can still see how it ended.
+func TestDeleteConversationLeavesAReadableArchivedTranscript(t *testing.T) {
+	f := newFakeManager(t)
+	adapter, transcripts, _ := consoleUnderTest(t, f, closedConversation("conv-1"))
+	tid := adapter.threadID("conv-1")
+
+	msg := OpMessage{Kind: "notice", Body: "This conversation has been deleted."}
+	if _, opErr := adapter.execute(context.Background(), &Op{
+		ID: "gone:conv-1:console", Kind: "delete-conversation", Conversation: "conv-1",
+		ThreadID: &tid, Message: &msg,
+	}); opErr != "" {
+		t.Fatalf("delete-conversation: %s", opErr)
+	}
+	if !transcripts.Archived(tid) {
+		t.Fatal("a deleted conversation's thread must be archived — there is nothing to reply to")
+	}
+	var tombstone bool
+	for _, m := range transcripts.Thread(tid) {
+		if strings.Contains(m.Text, "deleted") {
+			tombstone = true
+		}
+	}
+	if !tombstone {
+		t.Fatal("the transcript must keep the notice saying the conversation was deleted")
+	}
+}

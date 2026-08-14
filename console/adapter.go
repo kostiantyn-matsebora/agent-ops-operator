@@ -298,6 +298,18 @@ func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		}
 		a.transcripts.AppendOp(op.ID, thread, op.Message)
 		return "", ""
+	case "delete-conversation":
+		// The CR is about to vanish from the watch cache. The transcript is
+		// NOT: it stays for this console session with the tombstone at the end,
+		// so whoever was reading can still see how it ended — and archived, so
+		// there is no composer offering to reply to something that is gone.
+		if op.ThreadID != nil {
+			if op.Message != nil {
+				a.transcripts.AppendOp(op.ID, *op.ThreadID, op.Message)
+			}
+			a.transcripts.Archive(*op.ThreadID)
+		}
+		return "", ""
 	case "close-topic":
 		// The Conversation is being deleted and its CR is about to vanish from
 		// the watch cache. The transcript is NOT: it stays for this console

@@ -246,7 +246,11 @@ internal/
                          fingerprint. Do not collapse it into one rule
   chat/                  channel-type-agnostic core: Provider+Registry
                          (in-process built-ins), OpQueue (outbound ops,
-                         at-least-once: ensure-topic | send | close-topic),
+                         at-least-once: ensure-topic | send | close-topic |
+                         delete-conversation — the last REPLACES close-topic on
+                         the deletion path, reports a FACT rather than a thread
+                         instruction, and is named for the conversation because
+                         that is what ended),
                          Router (transport-neutral inbound; /close intercepted
                          on the reply path)
   dispatch/              input → work-unit resolution + built-in lane templates

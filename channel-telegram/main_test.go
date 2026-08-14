@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -186,4 +187,74 @@ func TestAlreadyClosedTopicIsNotAFailure(t *testing.T) {
 			t.Errorf("must report %q as a failure", msg)
 		}
 	}
+}
+
+// delete-conversation: un-archive → post → re-archive.
+//
+// Every step is forced by the transport. A CLOSED forum topic refuses
+// sendMessage, so the tombstone cannot be posted without reopening first; and
+// leaving the topic open afterwards would invite replies into a conversation
+// that no longer exists, which the manager drops because the thread maps to
+// nothing.
+func TestDeleteConversationReopensPostsAndClosesAgain(t *testing.T) {
+	var calls []string
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1,"message_thread_id":42}}`))
+	}))
+	defer tg.Close()
+
+	a, _ := testAdapter(t, map[string]channelConfig{"tg": {ChatID: "-100"}})
+	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+
+	tid := "42"
+	msg := Message{Kind: MsgNotice, Body: "This conversation has been deleted."}
+	_, opErr := a.execute(context.Background(), &Op{
+		Kind: "delete-conversation", Channel: "tg", Conversation: "conv-1",
+		ThreadID: &tid, Message: &msg,
+	})
+	if opErr != "" {
+		t.Fatalf("delete-conversation: %s", opErr)
+	}
+	want := []string{"reopenForumTopic", "sendMessage", "closeForumTopic"}
+	if len(calls) != len(want) {
+		t.Fatalf("want %v, got %v", want, calls)
+	}
+	for i, c := range want {
+		if calls[i] != c {
+			t.Fatalf("call %d: want %s, got %s (all: %v)", i, c, calls[i], calls)
+		}
+	}
+	// The topic itself must SURVIVE: the transcript above the tombstone is what
+	// a person scrolls back to after an incident.
+	for _, c := range calls {
+		if c == "deleteForumTopic" {
+			t.Fatal("the forum topic must not be deleted")
+		}
+	}
+}
+
+// A thread id is required: without one there is nothing to mark.
+func TestDeleteConversationWithoutAThreadIsReported(t *testing.T) {
+	a, _ := testAdapter(t, map[string]channelConfig{"tg": {ChatID: "-100"}})
+	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: http.DefaultClient}
+	if _, opErr := a.execute(context.Background(), &Op{
+		Kind: "delete-conversation", Channel: "tg", Conversation: "conv-1",
+	}); opErr == "" {
+		t.Fatal("a delete-conversation with no thread id must be reported, not silently ignored")
+	}
+}
+
+// routeTo sends every Bot API call to a stub server. The client builds the
+// api.telegram.org URL itself, so the interception is at the transport.
+func routeTo(base string) *http.Client {
+	u, _ := url.Parse(base)
+	return &http.Client{Transport: rewrite{host: u.Host, scheme: u.Scheme}}
+}
+
+type rewrite struct{ host, scheme string }
+
+func (r rewrite) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.URL.Host, req.URL.Scheme = r.host, r.scheme
+	return http.DefaultTransport.RoundTrip(req)
 }

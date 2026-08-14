@@ -318,7 +318,12 @@ func TestBacklogBoundRefusesCreation(t *testing.T) {
 
 // TestCloseArchivesThreadsThenReleases: deletion by any means archives the
 // bound threads first, and a silent adapter can delay that but never wedge it.
-func TestCloseArchivesThreadsThenReleases(t *testing.T) {
+// Renamed and re-aimed: DELETION now sends delete-conversation, not
+// close-topic. The two say different things — a closed conversation's thread is
+// archived and may come back, a deleted one's is neither — and a conversation
+// being deleted gets one operation, never both, so no adapter has to work out
+// whether a pair means one ending or two.
+func TestDeletionTellsThreadsThenReleases(t *testing.T) {
 	clearRuntimePods(t)
 	ctx := context.Background()
 	mkProfile(t, "prof-close")
@@ -355,12 +360,19 @@ func TestCloseArchivesThreadsThenReleases(t *testing.T) {
 	reconcileWith(t, rc, "close-1")
 
 	for _, tc := range []struct{ adapter, thread string }{{"tg-close-a", "9876"}, {"tg-close-b", "T-42"}} {
-		op := findOp(t, srv, tc.adapter, chat.OpCloseTopic, "close-1")
+		op := findOp(t, srv, tc.adapter, chat.OpDeleteConversation, "close-1")
 		if op == nil {
-			t.Fatalf("%s: no close-topic op reached the adapter", tc.adapter)
+			t.Fatalf("%s: no delete-conversation op reached the adapter", tc.adapter)
 		}
 		if op.ThreadID == nil || *op.ThreadID != tc.thread {
-			t.Fatalf("%s: close-topic op %+v", tc.adapter, op)
+			t.Fatalf("%s: delete-conversation op %+v", tc.adapter, op)
+		}
+		if op.Message == nil {
+			t.Fatalf("%s: it must carry the notice the thread is owed", tc.adapter)
+		}
+		// and NOT close-topic: one lifecycle event, one operation
+		if stale := findOp(t, srv, tc.adapter, chat.OpCloseTopic, "close-1"); stale != nil {
+			t.Fatalf("%s: deletion must not also send close-topic", tc.adapter)
 		}
 	}
 
@@ -377,7 +389,8 @@ func TestCloseArchivesThreadsThenReleases(t *testing.T) {
 
 // TestCloseCompletesFinalizerOnAdapterAck: the happy path releases as soon as
 // every bound thread reports archived, without waiting out the grace.
-func TestCloseCompletesFinalizerOnAdapterAck(t *testing.T) {
+// Same re-aim: the operation the finalizer waits on is delete-conversation.
+func TestDeletionCompletesFinalizerOnAdapterAck(t *testing.T) {
 	clearRuntimePods(t)
 	ctx := context.Background()
 	mkProfile(t, "prof-close-ack")
@@ -400,9 +413,9 @@ func TestCloseCompletesFinalizerOnAdapterAck(t *testing.T) {
 	}
 	reconcileWith(t, rc, "close-ack-1")
 
-	op := findOp(t, srv, "tg-close-ack", chat.OpCloseTopic, "close-ack-1")
+	op := findOp(t, srv, "tg-close-ack", chat.OpDeleteConversation, "close-ack-1")
 	if op == nil {
-		t.Fatal("no close-topic op reached the adapter")
+		t.Fatal("no delete-conversation op reached the adapter")
 	}
 	// an EMPTY body is how an adapter says "archived"
 	rec := adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", op.ID), nil, "test-adapter-token")

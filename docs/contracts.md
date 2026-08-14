@@ -97,6 +97,24 @@ materialized bindings and left blank when several Ready Pipelines could claim
 it — blank means "not determinable", so render it as absent rather than
 inventing a name.
 
+`delete-conversation` carries the target thread id and a `notice`, and reports
+that the conversation is **gone for good** — not that a thread should be closed.
+What ending means for your transport is YOUR decision: post the tombstone,
+archive the thread, rename it, delete it. It is named for the conversation
+because that is what ended; `ensure-topic` and `close-topic` instruct you about
+a thread, this one informs you about a lifecycle event.
+
+It REPLACES `close-topic` on the deletion path — a conversation being deleted
+gets one or the other, never both — so you never have to work out whether a pair
+means one ending or two. Do not silently ignore it: an adapter that cannot act
+should complete it with an error. Not implementing the kind at all is still
+correct; the operation is reported failed and the deletion proceeds.
+
+`channel-telegram` un-archives the topic, posts the notice and closes it again,
+because a closed forum topic refuses `sendMessage` and an open one would invite
+replies into a conversation that no longer exists. It does not delete the topic:
+the history above the tombstone is what a person scrolls back to.
+
 `previousThreadId` is an optional **hint**, present only when a closed
 conversation is being reopened: the thread this conversation used before its
 topics were archived. **Ignoring it is a valid implementation.** If your

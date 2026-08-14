@@ -8,6 +8,34 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### A deleted conversation tells its threads — chart 5.15.0
+
+**No action needed.** Nothing is configured, nothing changes default.
+
+A closed conversation's threads are told it can be reopened. Deleting it made
+that false and said nothing, so the last message a chat thread carried was a
+promise nobody could keep — and on an already-closed conversation the deletion
+was completely silent, because its topics were already archived.
+
+Deletion now sends a new outbound operation, `delete-conversation`, once per
+bound thread: the conversation and its record are gone, and a new message starts
+a new one. It **replaces** `close-topic` on the deletion path, so a conversation
+being deleted gets one operation, never both.
+
+It is named for the conversation rather than the topic because a conversation is
+what ended; what that means for a thread is the adapter's decision.
+`channel-telegram` un-archives the topic, posts the notice and closes it again —
+a closed forum topic refuses `sendMessage`, and an open one would invite replies
+into a conversation that no longer exists. It does **not** delete the topic: the
+history above the tombstone is what a person scrolls back to.
+
+**For adapter authors:** implementing the kind is optional. An adapter that does
+not is reported failed, the 2-minute grace expires and deletion proceeds — the
+same posture `close-topic` always had. Implement it if your transport can say
+something useful; the notice arrives as an ordinary `notice` message.
+
+Images: manager `0.31.0`, `channel-telegram` `0.9.0`, console `0.12.0`.
+
 ### Closing a conversation no longer deletes it — chart 5.14.0
 
 **Action needed by nobody at upgrade time, but `/close` means something
