@@ -4,7 +4,7 @@ description: >-
   Kubernetes operator for agents you can address — monitoring signals and chat
   tasks become Conversations executed by per-conversation agent runtime pods.
 type: application
-version: 5.15.0
+version: 5.16.0
 appVersion: "0.31.0"
 dependencies:
   # embedded subchart (chart/charts/prometheus-bundle); templates are
@@ -23,6 +23,6 @@ dependencies:
   # embedded subchart (chart/charts/telegram-bundle); templates are
   # additionally self-gated on telegram-bundle.enabled
   - name: telegram-bundle
-    version: 0.3.0
+    version: 0.4.0
     repository: ""
     condition: telegram-bundle.enabled

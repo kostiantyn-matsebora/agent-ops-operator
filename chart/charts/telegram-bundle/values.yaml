@@ -27,7 +27,7 @@ channelAdapter:
   name: telegram
   image:
     repository: kmatsebora/agentops-channel-telegram
-    tag: 0.9.0
+    tag: 0.11.0
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
@@ -100,6 +100,10 @@ surface:
   # Telegram user ids allowed to talk to the agent; empty = anyone in the chat.
   # Applied by both adapters (origination and continuation).
   approvers: []
+  # Delete the forum topic when its conversation is DELETED, instead of leaving
+  # it archived with a tombstone. Destroys the transcript; needs the bot to hold
+  # can_delete_messages. Off = the thread and its history survive.
+  deleteTopicOnDelete: false
 
   # The chat SignalSource: general-surface messages become chat signals.
   #

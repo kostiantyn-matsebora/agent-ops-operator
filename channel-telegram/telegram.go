@@ -103,6 +103,22 @@ func (t *Telegram) ReopenTopic(ctx context.Context, chatID string, threadID int6
 	return err
 }
 
+// DeleteTopic removes a forum topic and everything in it. Needs the bot to hold
+// can_delete_messages; without it the Bot API refuses and the caller reports the
+// operation failed rather than quietly doing something else.
+//
+// A topic that is already gone is NOT an error, for the same reason CloseTopic
+// tolerates an already-closed one: ops are at-least-once, so a redelivery must
+// succeed.
+func (t *Telegram) DeleteTopic(ctx context.Context, chatID string, threadID int64) error {
+	_, err := t.API(ctx, "deleteForumTopic",
+		map[string]any{"chat_id": chatID, "message_thread_id": threadID})
+	if err == nil || alreadyClosed(err) {
+		return nil
+	}
+	return err
+}
+
 // alreadyClosed reports whether a closeForumTopic error means the topic was
 // already archived.
 func alreadyClosed(err error) bool {
