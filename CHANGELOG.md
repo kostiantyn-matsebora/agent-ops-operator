@@ -8,6 +8,51 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### `/exit` releases a conversation's runtime — chart 5.17.0
+
+**Additive. No CRD change, no contract change, nothing to do on upgrade.**
+
+A runtime pod holds its slot until it times out. Eviction covers half of that —
+when a conversation is WAITING for capacity, the longest-idle pod is taken. The
+half with no answer was when nothing is waiting: nobody is blocked, so nothing
+evicts, and the pod goes on holding its slot, its checkout and whatever its
+runtime keeps resident until the idle TTL expires. Installs that RAISE that TTL,
+to avoid re-cloning a large repository or re-warming a local model on every
+message, are exactly the ones where that wait is longest.
+
+`/exit`, in a conversation's own thread, deletes that conversation's runtime pod
+and nothing else. The conversation, its threads, its inputs, its run history and
+its context handle all survive; the next message admits it again with a fresh
+pod.
+
+**It is not `/close`.** One word apart, and the difference is a thread:
+
+| | releases the pod | ends the conversation | archives the thread |
+|---|---|---|---|
+| `/exit` | yes | no | no |
+| `/close` | yes | yes | yes |
+
+`/agents` now lists both with that distinction.
+
+It refuses rather than forces. A `/exit` during a run is declined, naming the run
+and offering `/close`; a `/exit` with queued input is declined because the pod
+would be recreated immediately. The mid-run refusal is correctness, not manners:
+deleting a pod mid-run creates the replacement at once, hands it nothing from
+`/work`, idles it out the LONG TTL and reaps it — which clears the inflight
+state, makes the input pending again, and re-runs work that may already have
+acted.
+
+The reply says what the release cost, using the same computation dispatch uses to
+decide whether to hand back a context handle at all: where the runtime can carry
+context across a pod loss it says so, and where it cannot it warns that the next
+message starts fresh — the loss the idle TTL would have caused anyway, said while
+somebody is choosing it.
+
+One consequence worth knowing: a Pipeline named after a manager command (`exit`,
+`close`, `agents`, `help`, `start`) is not reachable by that command. The
+interception precedes the Pipeline lookup, which is what makes the commands
+reliable.
+
 ### Telegram may delete a conversation's topic — chart 5.16.0
 
 **Opt-in, off by default. Nothing changes on upgrade.**

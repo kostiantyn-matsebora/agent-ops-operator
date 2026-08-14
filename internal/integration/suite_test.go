@@ -105,6 +105,7 @@ func apiServer() *httpapi.Server {
 // or blocks fails a test about something else, which is where it should fail.
 func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 	acts := activity.New(512)
+	rt := runtimepod.Config{HomePVC: "test-home"}
 	ops := &chat.OpQueue{Client: k8sClient, Namespace: ns, Registry: chat.NewRegistry(), Activity: acts}
 	return &httpapi.Server{
 		Client: k8sClient, Reader: k8sClient, Namespace: ns,
@@ -112,9 +113,12 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		// where the runtime has somewhere to keep it, so a fixture with no home
 		// volume would (correctly) withhold every handle and make the resume
 		// tests assert the wrong thing.
-		Runtime: runtimepod.Config{HomePVC: "test-home"},
+		Runtime: rt,
 		Ops:                    ops,
-		Router:                 &chat.Router{Client: k8sClient, Reader: k8sClient, Namespace: ns, Ops: ops, Activity: acts},
+		// The router carries the SAME runtime config, exactly as main.go wires
+		// it: /exit reports whether a released conversation keeps its context,
+		// and it must not answer that differently from dispatch.
+		Router:                 &chat.Router{Client: k8sClient, Reader: k8sClient, Namespace: ns, Ops: ops, Activity: acts, Runtime: rt},
 		AdapterToken:           "test-adapter-token",
 		Activity:               acts,
 		Version:                "test",

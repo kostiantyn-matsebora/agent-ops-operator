@@ -71,6 +71,23 @@ thing to a conversation that was still working, behind a confirmation that named
 only the delete, is exactly what the refusal prevents. Closing itself is still
 `/close` on a thread — there is no close endpoint.
 
+**Commands the manager answers itself**, before any Pipeline lookup — an adapter
+forwards them as ordinary text and does not implement them:
+
+| Command | Where | What it does |
+|---|---|---|
+| `/agents`, `/help`, `/start` | general surface | lists Ready pipelines and their profiles |
+| `/<pipeline> <task>` | general surface | originates a conversation ([above](#the-channel-adapter-contract)) |
+| `/close` | a conversation's thread | ends the conversation, archives the thread |
+| `/exit` | a conversation's thread | releases the runtime pod, keeps the conversation |
+
+Both thread commands are intercepted on the REPLY path, before the text could
+become an input, and both answer with usage when typed on a general surface where
+there is no conversation to act on. `/exit` refuses while a run is inflight or
+input is queued; see [concepts](concepts.md#releasing-a-runtime-by-hand--exit).
+A Pipeline whose name collides with any of these is not reachable by that
+command.
+
 ### The manager composes meaning; the adapter composes presentation
 
 An op carries STRUCTURE, never rendered text. There is no `op.text` and no

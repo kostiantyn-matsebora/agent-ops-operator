@@ -55,12 +55,27 @@ No new scheduling path, priority, or reservation SHALL be introduced. A
 conversation waiting in `Pending` SHALL be admitted by the ordinary FIFO rule
 once the slot is genuinely free.
 
-#### Scenario: A waiting conversation is promoted
+The value of the release is the case where NOTHING is waiting. Automatic
+eviction already frees an idle pod for a conversation that IS waiting — at the
+cap, admission evicts the longest-idle evictable pod — so promoting a waiter is
+not a property `/exit` adds, and must not be claimed as one. What `/exit` adds is
+the interval no waiter ends: with nobody blocked, nothing evicts, and the pod
+holds its slot, its checkout and whatever its runtime keeps resident until the
+idle TTL expires.
+
+#### Scenario: A slot is released with nothing waiting
+
+- **WHEN** an idle conversation holds the only slot, nothing is `Pending`, and
+  `/exit` is sent in its thread
+- **THEN** its pod is deleted immediately, and the next conversation created is
+  admitted outright rather than parked
+
+#### Scenario: Promotion is undisturbed
 
 - **WHEN** the cap is reached, one conversation is `Pending`, and an idle
   conversation is released with `/exit`
-- **THEN** the pending conversation is admitted and provisioned without waiting
-  for the released pod's idle TTL
+- **THEN** the pending conversation is admitted by the ordinary path — a
+  non-regression on the interaction, not evidence for the command
 
 #### Scenario: FIFO order is unchanged
 
