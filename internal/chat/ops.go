@@ -227,6 +227,23 @@ func (q *OpQueue) EnqueueFarewell(ctx context.Context, ch *agentopsv1alpha1.Chan
 	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
 }
 
+// EnqueueReopenNotice announces that a conversation is live again, on every
+// bound thread.
+//
+// The MANAGER says this, not each adapter. A closing thread already gets a
+// farewell from here, and a reopen is the same kind of fact — so synthesizing
+// it adapter-side would put it on whichever surface happened to implement it
+// and leave the others with a thread that silently starts working again. It is
+// also the rule: the manager composes meaning, adapters compose presentation.
+//
+// Stable per reopen, so reconciliation may re-derive it on every pass and it
+// still lands once — and a SECOND reopen gets its own.
+func (q *OpQueue) EnqueueReopenNotice(ctx context.Context, ch *agentopsv1alpha1.Channel,
+	conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
+	id := fmt.Sprintf("reopened:%s:%s:%d", conv.Name, ch.Name, conv.Status.Reopens)
+	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
+}
+
 // EnqueueInputCard queues the card for one input on one channel. Unlike an
 // ordinary send its id is STABLE per conversation×input×channel, so the
 // reconciler re-deriving it on every pass dedups against both the pending map

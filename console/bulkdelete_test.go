@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -181,5 +182,88 @@ func TestVerbsRequireTheWriteGate(t *testing.T) {
 	}
 	if got := f.calledVerbs(); len(got) != 0 {
 		t.Fatalf("nothing may reach the manager: %v", got)
+	}
+}
+
+// A reopened conversation must be TYPEABLE again, and must say so.
+//
+// Found live: closing marks the console transcript archived, the UI derives
+// "you cannot reply here" from that flag, and nothing ever cleared it. A
+// reopened conversation therefore rendered alive with no composer — and with
+// no line in the transcript explaining why it had gone quiet in the first
+// place, or that it was back.
+func TestReopenMakesTheConsoleThreadLiveAgain(t *testing.T) {
+	f := newFakeManager(t)
+	adapter, transcripts, _ := consoleUnderTest(t, f, closedConversation("conv-1"))
+	tid := adapter.threadID("conv-1")
+
+	// close: the thread is archived and says so
+	adapter.execute(context.Background(), &Op{Kind: "close-topic", Conversation: "conv-1", ThreadID: &tid})
+	if !transcripts.Archived(tid) {
+		t.Fatal("close-topic must archive the console thread")
+	}
+
+	// reopen arrives as an ordinary ensure-topic
+	got, opErr := adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-1"})
+	if opErr != "" || got != tid {
+		t.Fatalf("reopen must return the same thread: %q %q", got, opErr)
+	}
+	if transcripts.Archived(tid) {
+		t.Fatal("a reopened thread must not stay archived — the composer is derived from this")
+	}
+}
+
+// ensure-topic is at-least-once and is delivered for threads that were never
+// closed: it must not announce a reopen that did not happen.
+func TestEnsureTopicOnALiveThreadSaysNothing(t *testing.T) {
+	f := newFakeManager(t)
+	adapter, transcripts, _ := consoleUnderTest(t, f, joinedConversation("conv-2"))
+	tid := adapter.threadID("conv-2")
+
+	adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-2"})
+	adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-2"})
+	if transcripts.Archived(tid) {
+		t.Fatal("a live thread must stay live")
+	}
+}
+
+// A CLOSED conversation is not typeable, and that must not depend on this
+// console process having witnessed the close.
+//
+// The transcript's archived flag is per console SESSION. It was enough while
+// closing deleted the conversation — the row vanished — but a closed
+// conversation now persists, and a console restart put the composer back on
+// every one of them. The phase is on the CR and survives everything.
+func TestAClosedConversationIsNotTypeableAfterAConsoleRestart(t *testing.T) {
+	// A fresh console that has never seen the close-topic op for this thread:
+	// its transcript state is empty, exactly as after a restart.
+	api, _, _, _ := apiWithOptions(t, "tok", true, closedConversation("done"))
+	h := api.Handler(http.NotFoundHandler())
+
+	rec := authed(t, h, "GET", "/api/conversations/done", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("detail: %d %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if archived, _ := out["archived"].(bool); !archived {
+		t.Fatal("a Closed conversation must report archived from its PHASE, not from in-memory state")
+	}
+}
+
+// ...and a live one stays typeable, or the fix would disable every composer.
+func TestALiveConversationStaysTypeable(t *testing.T) {
+	api, _, _, _ := apiWithOptions(t, "tok", true, joinedConversation("live"))
+	h := api.Handler(http.NotFoundHandler())
+
+	rec := authed(t, h, "GET", "/api/conversations/live", "")
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if archived, _ := out["archived"].(bool); archived {
+		t.Fatal("a live conversation must not be reported archived")
 	}
 }
