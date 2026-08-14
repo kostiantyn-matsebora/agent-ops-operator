@@ -14,10 +14,16 @@ person to reach it. From the code:
   longest-idle pod whose conversation `!needsWorker`, and the conversation
   survives to get a fresh pod on its next input.
 - **`/close` is intercepted on the reply path**, before the text becomes an
-  input, and deletes the Conversation — the finalizer archives threads, ownerRefs
-  GC the pod and ConfigMap.
+  input, and CLOSES the Conversation — phase `Closed`, threads archived, pod and
+  ConfigMap torn down, the object and its context handle intact. (This document
+  was drafted while `/close` still deleted; the distinction `/exit` draws is
+  unaffected — `/close` still ends the conversation and archives the thread,
+  `/exit` ends neither.)
 
-The gap is narrow and specific: eviction only runs when something is waiting.
+The gap is narrow and specific, and CONFIRMED against the code while
+implementing: `createRuntimePod` evicts the longest-idle evictable pod whenever
+an admission finds the cap reached, so a conversation that IS waiting never needs
+this command. Eviction only runs when something is waiting.
 With nothing waiting, an idle pod holds its slot, its checkout and its runtime's
 resident memory until `RUNTIME_IDLE_TTL_M` expires — and the installs that
 raise that TTL (large repositories, local models worth keeping warm) are exactly
@@ -31,7 +37,7 @@ the long one — exits, is reaped as `Succeeded`, which clears `Inflight`, which
 makes the input pending again and **re-runs work that may already have acted**.
 A long stall followed by a duplicate execution. That is why `/exit` refuses while
 a run is in flight rather than "just killing it": `/close` already owns
-abandonment, and it owns it by deleting the conversation so nothing re-dispatches.
+abandonment, and it owns it by ending the conversation so nothing re-dispatches.
 
 ## Goals / Non-Goals
 

@@ -146,7 +146,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	pending := dispatch.PendingInputs(&conv)
-	needsWorker := len(pending) > 0 || conv.Status.Inflight != nil
+	needsWorker := dispatch.NeedsWorker(&conv)
 
 	// runtime pod state. Reaping an exited pod comes FIRST: it is what stops
 	// the conversation counting against the cap.
@@ -281,7 +281,7 @@ func finished(conv *agentopsv1alpha1.Conversation, podExists bool) bool {
 	if conv.Status.Phase != agentopsv1alpha1.ConversationIdle {
 		return false
 	}
-	if needsWorker(conv) || podExists {
+	if dispatch.NeedsWorker(conv) || podExists {
 		return false
 	}
 	return allRunsDelivered(conv)
@@ -523,13 +523,6 @@ func (r *ConversationReconciler) liveRuntimePods(ctx context.Context, ns string)
 	return live, nil
 }
 
-// needsWorker reports whether a conversation has work that requires a runtime
-// pod. It is the same question everywhere: something queued, or something
-// already dispatched.
-func needsWorker(c *agentopsv1alpha1.Conversation) bool {
-	return len(dispatch.PendingInputs(c)) > 0 || c.Status.Inflight != nil
-}
-
 // admit decides whether this conversation may take a capacity slot now.
 //
 // Both halves come from the same two lists every conversation reads — the live
@@ -571,7 +564,7 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alph
 	var waiting []agentopsv1alpha1.Conversation
 	for i := range list.Items {
 		c := &list.Items[i]
-		if !c.DeletionTimestamp.IsZero() || hasPod[c.Name] || !needsWorker(c) {
+		if !c.DeletionTimestamp.IsZero() || hasPod[c.Name] || !dispatch.NeedsWorker(c) {
 			continue
 		}
 		// Closed is inert: it will never be given a pod, so leaving it in the
@@ -611,7 +604,7 @@ func (r *ConversationReconciler) evictableCount(ctx context.Context, ns string, 
 		if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: p.Labels[runtimepod.LabelConversation]}, &c); err != nil {
 			continue
 		}
-		if !needsWorker(&c) {
+		if !dispatch.NeedsWorker(&c) {
 			n++
 		}
 	}
@@ -945,7 +938,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: cn}, &c); err != nil {
 				continue
 			}
-			if !needsWorker(&c) {
+			if !dispatch.NeedsWorker(&c) {
 				last := c.CreationTimestamp.Time
 				if c.Status.LastActivity != nil {
 					last = c.Status.LastActivity.Time

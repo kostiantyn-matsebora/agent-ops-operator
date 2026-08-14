@@ -567,6 +567,30 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   "no remote close verb exists" rule was actually protecting — you may only end
   a conversation you are PART of — and holding a live thread was the proof;
   a closed conversation has none, so the binding is the next-strongest.
+- **`/exit` RELEASES THE RUNTIME; `/close` ENDS THE CONVERSATION.** One word
+  apart and not interchangeable: `/exit` deletes the runtime POD and nothing
+  else — object, threads, inputs, runs and `runtimeContextId` all survive, and
+  the next input admits it again with a fresh pod. It exists for the half
+  eviction cannot serve: eviction only runs when something is WAITING, so with
+  nothing waiting an idle pod holds its slot, its checkout and whatever the
+  runtime keeps resident until the idle TTL — longest on exactly the installs
+  that RAISE that TTL for a big checkout or a warm local model.
+  **`dispatch.NeedsWorker` is THE ONE definition of idle**, shared by the
+  command and the eviction path; the controller's private `needsWorker` is gone
+  and restating it either side is the regression to avoid, because the two
+  disagreeing surfaces as a bug report about the cap, far from both.
+  **REFUSED MID-RUN, on correctness grounds, not politeness**: an inflight run
+  still needs a worker, so the replacement pod is created AT ONCE, gets nothing
+  from `/work`, idles out the LONG TTL, and is reaped as `Succeeded` — which
+  clears `Inflight`, makes the input pending again and RE-RUNS work that may
+  already have acted. `/close` owns abandonment and owns it safely. Queued input
+  is refused too, merely because the pod would come straight back.
+  What the release COSTS is computed, never guessed:
+  `ResolveFor(...).ContinuityPossible()` — the same call dispatch uses — decides
+  whether the reply promises the context or warns it starts fresh.
+  A Pipeline named after a manager command (`exit`, `close`, `agents`, `help`,
+  `start`) is unreachable by that command: interception precedes the Pipeline
+  lookup, which is what makes the commands reliable.
 - **THE RECLAIMING JOB'S LISTING IS PHASE-BLIND, ON PURPOSE.** `housekeeping/`
   removes workspace directories and session transcripts with no `Conversation`
   behind them. A CLOSED conversation still HAS a CR, so its state is protected

@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,6 +43,8 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/addressing"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/dispatch"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
 )
 
 // InboundMessage is one user message, already stripped of transport framing.
@@ -63,6 +66,10 @@ type Router struct {
 	Ops       *OpQueue
 	// Activity records the inbound hop. Nil is inert.
 	Activity *activity.Log
+	// Runtime is the bootstrap runtime config — the same value httpapi.Server
+	// holds — used ONLY to answer whether a released conversation keeps its
+	// context. The router builds no pods.
+	Runtime runtimepod.Config
 }
 
 // HandleMessage routes one inbound message arriving on a channel. Reply-only:
@@ -99,6 +106,14 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 			"This conversation is closed, so nothing here reaches the agent. "+
 				"Reopen it from the console to continue with its history."))
 		return nil
+	}
+	// /exit releases the runtime and keeps the conversation. Intercepted for the
+	// same reason /close is — the command must not become an input — but placed
+	// AFTER the closed check on purpose: a closed conversation's pod is already
+	// gone, so answering "nothing to release" would be technically true and
+	// useless. Everything typed into a closed thread gets one answer.
+	if isExitCommand(text) {
+		return r.ReleaseRuntime(ctx, conv)
 	}
 	busy := conv.Status.Inflight != nil || len(conv.Spec.Inputs) > 0
 	inputID := newInputID()
@@ -145,6 +160,118 @@ func isCloseCommand(text string) bool {
 	cmd, ok := addressing.Parse(text)
 	return ok && cmd.Profile == CloseCommand && cmd.Agent == "" && cmd.Rest == ""
 }
+
+// ExitCommand is the name /exit parses to — a "pipeline" that releases a
+// conversation's runtime rather than starting one.
+//
+// One word from /close and a world away from it: /exit frees the pod and leaves
+// the conversation open, /close ends the conversation and archives its thread.
+// That is why both are named in the /agents listing and in every reply either
+// one produces.
+const ExitCommand = "exit"
+
+// isExitCommand recognises /exit and its bot-suffixed form, with the same
+// strictness as /close: "/exit the maintenance window once the rollout drains"
+// is an instruction for the agent.
+func isExitCommand(text string) bool {
+	cmd, ok := addressing.Parse(text)
+	return ok && cmd.Profile == ExitCommand && cmd.Agent == "" && cmd.Rest == ""
+}
+
+// ReleaseRuntime deletes a conversation's runtime pod and NOTHING else — the
+// conversation, its threads, its inputs, its run history and its context handle
+// all survive, and the next input admits it again with a fresh pod.
+//
+// This is eviction, reached by hand. Automatic eviction only runs when something
+// is WAITING for capacity; with nothing waiting, an idle pod holds its slot, its
+// checkout and whatever its runtime keeps resident until the idle TTL expires —
+// and the installs that raise that TTL (large repositories, local models worth
+// keeping warm) are exactly the ones where the wait is longest.
+//
+// The pod is deleted directly rather than flagged for the reconciler. Immediacy
+// is the whole feature, and a field whose only purpose is to defer the thing
+// being asked for would be state standing in for an action.
+func (r *Router) ReleaseRuntime(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	// The SAME predicate that makes a pod evictable, called rather than
+	// restated — see dispatch.NeedsWorker. The two refusals below differ because
+	// the reasons differ: one is dangerous, the other merely pointless.
+	if conv.Status.Inflight != nil {
+		// Refused, not honored. Deleting a pod mid-run is doubly harmful: the
+		// replacement is created immediately (Inflight makes NeedsWorker true) but
+		// /work hands it nothing, so it idles out its TTL — the LONG one — and is
+		// reaped as Succeeded, which clears Inflight, which makes the input
+		// pending again and RE-RUNS work that may already have acted. /close
+		// already owns abandonment, and owns it safely.
+		r.FanOutSend(ctx, conv, Warn(fmt.Sprintf(
+			"⚠️ Not released — run `%s` is still in progress, and releasing the runtime "+
+				"now would stall it and then repeat it. Wait for it to finish, or use "+
+				"`/close` to abandon the run and end the conversation.",
+			conv.Status.Inflight.RunID)))
+		return nil
+	}
+	if dispatch.NeedsWorker(conv) {
+		r.FanOutSend(ctx, conv, Warn(
+			"⚠️ Not released — there is still queued work, so the runtime would be "+
+				"recreated immediately and nothing would be freed. Try again once the "+
+				"agent has caught up."))
+		return nil
+	}
+	var pod corev1.Pod
+	name := types.NamespacedName{Namespace: conv.Namespace, Name: runtimepod.PodName(conv.Name)}
+	if err := r.Client.Get(ctx, name, &pod); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		// The desired state already holds. Not an error, and worth saying: the
+		// difference between "released it" and "there was nothing running" is the
+		// difference between a command that worked and one that was ignored.
+		r.FanOutSend(ctx, conv, Notice(
+			"💤 Nothing to release — this conversation has no runtime running. "+
+				"It stays open; the next message starts one."))
+		return nil
+	}
+	if err := client.IgnoreNotFound(r.Client.Delete(ctx, &pod)); err != nil {
+		return err
+	}
+	r.FanOutSend(ctx, conv, Notice(r.releaseText(ctx, conv)))
+	return nil
+}
+
+// releaseText says what the release COST. Continuity is not a guess: the
+// manager already computes whether this conversation's runtime can carry context
+// across a pod loss, and the dispatch path uses the same answer to decide
+// whether to hand back a context handle at all.
+//
+// Where it cannot, the warning is not announcing a new loss — the idle TTL would
+// have caused exactly the same one — but a release somebody CHOSE should state
+// its price while they are choosing it, rather than leaving it to be discovered
+// as a fault later.
+func (r *Router) releaseText(ctx context.Context, conv *agentopsv1alpha1.Conversation) string {
+	const kept = "♻️ Runtime released — the slot is free. This conversation and its thread " +
+		"stay open, and it keeps its context: the next message picks up where this left off."
+	const fresh = "♻️ Runtime released — the slot is free. This conversation and its thread " +
+		"stay open, but this runtime does not keep context between runs, so the next " +
+		"message starts fresh."
+	var profile agentopsv1alpha1.AgentProfile
+	if err := r.Reader.Get(ctx, types.NamespacedName{
+		Namespace: conv.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
+		// Degrade to the neutral wording rather than failing: the pod is already
+		// gone, and refusing to report a completed release because a Get failed
+		// would be the worst of both outcomes.
+		return neutralRelease
+	}
+	resolved, err := runtimepod.ResolveFor(ctx, r.Reader, conv.Namespace, &profile, r.Runtime)
+	if err != nil {
+		return neutralRelease
+	}
+	if resolved.ContinuityPossible() {
+		return kept
+	}
+	return fresh
+}
+
+const neutralRelease = "♻️ Runtime released — the slot is free. This conversation and its " +
+	"thread stay open; send a message to continue."
 
 // CloseConversation says goodbye on every bound thread and closes the
 // Conversation — /close, the console batch and the manager's timer all arrive
@@ -323,9 +450,14 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 			lines = append(lines, line)
 		}
 		sort.Strings(lines)
+		// Both thread commands are named TOGETHER, with the difference spelled
+		// out. Two commands one word apart, one of which archives a thread, are
+		// exactly the pair nobody should have to guess between.
 		r.Ops.EnqueueMessage(ctx, ch, nil, Notice("🤖 **Agents**\n"+strings.Join(lines, "\n")+
 			"\n\nUsage: `/<agent> <task>` — each call gets its own topic. "+
-			"`/<agent>:<role>` picks a role inside the agent's repo."))
+			"`/<agent>:<role>` picks a role inside the agent's repo.\n"+
+			"Inside a conversation's own thread: `/exit` releases its runtime and keeps "+
+			"the conversation, `/close` ends the conversation and archives the thread."))
 		return nil
 	}
 	if cmd.Profile == CloseCommand {
@@ -334,6 +466,13 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		// agent": typing it here is an obvious mistake, not a typo'd pipeline.
 		r.Ops.EnqueueMessage(ctx, ch, nil, Warn("⚠️ `/close` ends a conversation — send it inside that "+
 			"conversation's own thread. Nothing was closed."))
+		return nil
+	}
+	if cmd.Profile == ExitCommand {
+		// Same shape as /close's: there is no conversation on a general surface,
+		// so there is no runtime to release. Usage, not "unknown agent".
+		r.Ops.EnqueueMessage(ctx, ch, nil, Warn("⚠️ `/exit` releases a conversation's runtime — send it "+
+			"inside that conversation's own thread. Nothing was released."))
 		return nil
 	}
 	// A command addresses a PIPELINE: it originates the conversation, so it

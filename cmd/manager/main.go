@@ -214,6 +214,11 @@ func main() {
 			Command:        commandFromEnv(),
 		},
 	}
+	// Assigned rather than passed at construction: the router is built before the
+	// reconciler that owns this value, and copying the literal into both would be
+	// two spellings of one fact. /exit uses it for exactly one question — whether
+	// a released conversation keeps its context.
+	router.Runtime = reconciler.Runtime
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "conversation controller")
 		os.Exit(1)

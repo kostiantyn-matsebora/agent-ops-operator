@@ -70,7 +70,7 @@ handed over whole — one wall, where the MCP path has the server's own identity
 
 ### Conversation
 
-One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. Phases: `Pending` (waiting for a capacity slot — nothing provisioned, see [below](#capacity-how-many-run-at-once)), `Queued` (admitted, work waiting its turn), `Working`, `Idle`. Ends with `/close` in its thread, or `kubectl delete` — both archive the chat threads first.
+One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. Phases: `Pending` (waiting for a capacity slot — nothing provisioned, see [below](#capacity-how-many-run-at-once)), `Queued` (admitted, work waiting its turn), `Working`, `Idle`. Ends with `/close` in its thread, or `kubectl delete` — both archive the chat threads first. `/exit` is the other thread command and is not an ending: it [releases the runtime](#releasing-a-runtime-by-hand--exit) and keeps the conversation.
 
 `status.runs[]` records each completed run and **who has been told about it**:
 `delivered[]` names the bound channels whose thread already carries the reply,
@@ -420,6 +420,55 @@ Two bounds keep this honest:
   resumes with its context. An idle pod may also be evicted early to admit
   waiting work — that deletes the pod only; the conversation resumes on its
   next input.
+
+### Releasing a runtime by hand — `/exit`
+
+Eviction covers one half of this: something is waiting, so the longest-idle pod
+is taken. The half it cannot cover is when **nothing is waiting yet** — nobody is
+blocked, so nothing evicts, and the pod holds its slot, its checkout and whatever
+its runtime keeps resident until the idle TTL expires. Installs that *raise* that
+TTL, to avoid re-cloning a large repository or re-warming a local model on every
+message, are exactly the ones where that wait is longest.
+
+`/exit`, sent in a conversation's own thread, deletes that conversation's runtime
+pod and nothing else. The conversation, its threads, its inputs, its run history
+and its context handle all survive, and the next message admits it again with a
+fresh pod — the same outcome an eviction already produces, reachable by a person.
+
+It is the same release in both directions: `/exit` and eviction share one
+definition of idle (`dispatch.NeedsWorker` — nothing inflight, nothing queued),
+so a conversation releasable by one is releasable by the other.
+
+It refuses rather than forces:
+
+| Situation | What happens |
+|---|---|
+| Nothing inflight, nothing queued | Pod deleted; the reply says whether the context survives |
+| A run in flight | **Refused**, naming the run and offering `/close` |
+| Input queued | **Refused** — the pod would be recreated immediately |
+| No pod running | Reported as nothing to release; not an error |
+
+The mid-run refusal is not politeness. Deleting a pod mid-run creates the
+replacement at once (the inflight run still needs a worker), hands it nothing
+from `/work`, and then idles it out the *long* TTL until it is reaped — which
+clears the inflight state, makes the input pending again, and **re-runs work that
+may already have acted**. Abandoning a run is `/close`'s job, and `/close` does it
+safely by ending the conversation so nothing re-dispatches.
+
+The reply states what the release cost: where the runtime can carry context
+across a pod loss (`contextStorage` against the configured home volume) it says
+the conversation keeps its memory, and where it cannot it warns that the next
+message starts fresh. That is the same loss the idle TTL would have caused — said
+at the moment somebody chooses it rather than discovered later.
+
+**`/exit` and `/close` are one word apart and not interchangeable**: `/exit`
+releases the runtime and keeps the conversation, `/close` ends the conversation
+and archives the thread. `/agents` lists both with that difference.
+
+Consequence worth knowing: a Pipeline named after a manager command (`exit`,
+`close`, `agents`, `help`, `start`) cannot be reached by that command. The
+interception happens before the Pipeline lookup, which is what makes the commands
+reliable.
 
 ## Restart resilience
 

@@ -149,6 +149,19 @@ func PendingInputs(c *agentopsv1alpha1.Conversation) []agentopsv1alpha1.InputIte
 	return out
 }
 
+// NeedsWorker reports whether a conversation has work that requires a runtime
+// pod: something queued, or something already running.
+//
+// THE ONE DEFINITION OF BUSY. Two callers depend on it meaning the same thing
+// in both directions: the reconciler creates a pod when it is true and evicts an
+// idle one when it is false, and `/exit` releases a pod only when it is false.
+// Restating it on either side would let a conversation an operator was told is
+// releasable be one the manager refuses to release — a disagreement that
+// surfaces as a bug report about the cap, far from either definition.
+func NeedsWorker(c *agentopsv1alpha1.Conversation) bool {
+	return len(PendingInputs(c)) > 0 || c.Status.Inflight != nil
+}
+
 // Tooling is the wiring's half of a work unit's tool access: the resolved
 // contribution of the bound toolsets and the mode composing it with the agent
 // definition's own declaration. The caller holds the client that reads the
