@@ -7,8 +7,12 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
 )
 
 // The two manager-side verbs a surface can reach: reopen and delete.
@@ -199,5 +203,55 @@ func TestDeleteReclaimsAClosedConversation(t *testing.T) {
 	// Either gone, or held by the close-topics finalizer with a deletion stamp.
 	if err == nil && got.DeletionTimestamp.IsZero() {
 		t.Fatal("delete must remove the conversation")
+	}
+}
+
+// Deletion tells every bound thread that the conversation is gone — whether or
+// not it was closed first. A closed conversation's threads were told it could
+// be reopened; deletion makes that false, and correcting it is the point.
+func TestDeletionTellsEveryBoundThread(t *testing.T) {
+	ops := testOps()
+	r := &controller.ConversationReconciler{
+		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
+	}
+	mkChannel(t, "gone-ch", "tg")
+	conv := mkVerbConv(t, "gone-conv", []string{"gone-ch"}, agentopsv1alpha1.ConversationClosed)
+	// already archived by its close: deletion must still speak
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "gone-ch", ThreadID: "77"}}
+	conv.Status.ThreadsArchived = []string{"gone-ch"}
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "gone-conv"}}
+	// One pass first so the close-topics finalizer is on the object; without it
+	// the API server removes the conversation immediately and there is nobody
+	// left to tell.
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Delete(context.Background(), getConv(t, "gone-conv")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+
+	op := ops.Claim("tg")
+	if op == nil {
+		t.Fatal("deletion must enqueue an operation for the bound thread")
+	}
+	if op.Kind != chat.OpDeleteConversation {
+		t.Fatalf("deletion must send delete-conversation, got %q", op.Kind)
+	}
+	if op.ThreadID == nil || *op.ThreadID != "77" {
+		t.Fatalf("it must carry the thread id: %+v", op.ThreadID)
+	}
+	if op.Message == nil || !strings.Contains(op.Message.Body, "deleted") {
+		t.Fatalf("it must carry the notice: %+v", op.Message)
+	}
+	// and NOT close-topic: one lifecycle event, one operation
+	if again := ops.Claim("tg"); again != nil {
+		t.Fatalf("deletion must send exactly one operation per thread, also got %q", again.Kind)
 	}
 }

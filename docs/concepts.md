@@ -627,6 +627,17 @@ its close, `status.threadsArchived` records which threads are done, an
 unarchived thread is simply an archive still owed, and reconciliation re-derives
 it. Only the deleting path keeps the old protection, from the finalizer's grace.
 
+**Deletion tells the threads.** A closed conversation's threads were told it
+could be reopened; deleting it makes that false. Every deletion — autodelete, the
+console's verb, or `kubectl delete` — therefore enqueues one
+`delete-conversation` operation per bound thread before the finalizer releases,
+carrying a notice that the conversation and its record are gone and that a new
+message starts a new one. It replaces `close-topic` on that path, so a
+conversation being deleted receives one operation, not two. Like `close-topic`
+before it, the operation is not re-derivable — the object is disappearing — and
+the finalizer's 2-minute grace releases regardless, because a deletion must
+never be wedged by an adapter that is down.
+
 ### Reopening
 
 A reopen sets the phase back to `Idle`, clears `status.closedAt` — which stops

@@ -33,14 +33,31 @@ const (
 	// OpCloseTopic asks the channel implementation to archive/close a
 	// conversation's thread; completed with an empty body.
 	//
-	// Unlike every other op, the CR it belongs to is on its way out. That is
-	// why the deleting Conversation holds a finalizer while this op is
-	// outstanding: it keeps "every op is derivable from CR state" true across a
-	// manager restart. Failure is TERMINAL — logged, never written as a
-	// condition (there is no object left to carry one) and never regenerated
-	// after the finalizer's grace expires. An adapter that ignores the kind
-	// leaves an open topic behind, which a person can close by hand.
+	// Enqueued when a conversation reaches phase Closed, and recorded in
+	// status.threadsArchived[] — which is what makes it re-derivable, since the
+	// object survives its close. An adapter that ignores the kind leaves an
+	// open topic behind, which a person can close by hand.
 	OpCloseTopic OpKind = "close-topic"
+	// OpDeleteConversation reports that a Conversation is gone for good;
+	// completed with an empty body. Carries the thread id and a notice.
+	//
+	// It REPORTS A FACT rather than instructing an adapter about a thread,
+	// which is why it is named for the conversation: what ending means for a
+	// thread is the adapter's decision — post a tombstone, archive, rename,
+	// delete. Telegram cannot even post into an archived topic without
+	// un-archiving first, and that is precisely the knowledge the manager does
+	// not have.
+	//
+	// It REPLACES close-topic on the deletion path. A conversation being
+	// deleted gets one or the other, never both, so no adapter has to work out
+	// whether a pair means one ending or two.
+	//
+	// Unlike close-topic this is NOT derivable: the CR it belongs to is
+	// disappearing, so there is nowhere to record what is owed. The deleting
+	// Conversation holds a finalizer while it is outstanding, and failure is
+	// TERMINAL — logged, never a condition, never regenerated once the grace
+	// expires. A deletion must never wedge on a down adapter.
+	OpDeleteConversation OpKind = "delete-conversation"
 )
 
 // ConditionTopicReady reports the outcome of the latest ensure-topic op.
@@ -174,6 +191,31 @@ func (q *OpQueue) EnqueueCloseTopic(ctx context.Context, ch *agentopsv1alpha1.Ch
 // channel. Exported because the finalizer asks whether it is still outstanding.
 func CloseTopicOpID(conversation, channel string) string {
 	return "close:" + conversation + ":" + channel
+}
+
+// EnqueueDeleteConversation tells one bound thread that its conversation is
+// gone for good.
+//
+// The MESSAGE is composed here and rendered by the adapter, like every other
+// message: the manager states what happened, and escaping, splitting and
+// placement belong to whoever knows the transport. An adapter is free to ignore
+// the text and express the ending structurally instead.
+func (q *OpQueue) EnqueueDeleteConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID, conversation string) {
+	tid := threadID
+	msg := Notice("🗑 This conversation has been deleted, along with everything it recorded. " +
+		"The thread stays here to read. A new message starts a NEW conversation — it will not continue this one.")
+	q.enqueue(ctx, &Op{
+		ID: DeleteConversationOpID(conversation, ch.Name), Channel: ch.Name, Conversation: conversation,
+		Kind: OpDeleteConversation, ThreadID: &tid, Message: &msg,
+		channelType: ch.Spec.Adapter, stable: true,
+	})
+}
+
+// DeleteConversationOpID is the stable id of a conversation's
+// delete-conversation op on one channel. The finalizer asks whether it is still
+// outstanding.
+func DeleteConversationOpID(conversation, channel string) string {
+	return "gone:" + conversation + ":" + channel
 }
 
 // ParseCloseTopicOpID splits a close-topic op id back into its parts. Channel
@@ -466,6 +508,14 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 			q.mu.Lock()
 			delete(q.recent, id)
 			q.mu.Unlock()
+		}
+	case op.Kind == OpDeleteConversation:
+		// Terminal either way, and never regenerated: the Conversation is on
+		// its way out, so there is no object left to carry a condition and
+		// nothing to re-derive from. The finalizer's grace releases regardless.
+		if res.Error != "" {
+			log.FromContext(ctx).Info("delete-conversation op failed; the thread was not told",
+				"channel", op.Channel, "conversation", op.Conversation, "error", res.Error)
 		}
 	case op.Kind == OpCloseTopic:
 		// Archiving became a FACT on the conversation when closing stopped

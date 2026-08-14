@@ -91,11 +91,11 @@ type Op struct {
 	ID           string  `json:"id"`
 	Channel      string  `json:"channel"`
 	Conversation string  `json:"conversation,omitempty"`
-	Kind         string  `json:"kind"` // "ensure-topic" | "send" | "close-topic"
+	Kind         string  `json:"kind"` // "ensure-topic" | "send" | "close-topic" | "delete-conversation"
 	ThreadID     *string `json:"threadId,omitempty"`
 
 	Topic   *TopicDescriptor `json:"topic,omitempty"`   // ensure-topic
-	Message *Message         `json:"message,omitempty"` // send
+	Message *Message         `json:"message,omitempty"` // send, delete-conversation
 }
 
 // ChannelInfo is one channel served by this adapter, with its opaque config.

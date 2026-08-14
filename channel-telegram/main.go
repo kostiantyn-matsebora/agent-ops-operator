@@ -294,6 +294,41 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			}
 		}
 		return "", ""
+	case "delete-conversation":
+		// Three calls where one would do, and each is required by the
+		// transport: a CLOSED forum topic refuses sendMessage, so the tombstone
+		// cannot be posted without un-archiving first — and leaving the topic
+		// open afterwards would invite replies into a conversation that no
+		// longer exists, which the manager drops because the thread maps to
+		// nothing.
+		//
+		// deleteForumTopic is deliberately NOT used: the transcript above the
+		// tombstone is what a person scrolls back to after an incident, and an
+		// archived topic already refuses replies without destroying it.
+		if op.ThreadID == nil {
+			return "", "delete-conversation without a thread id"
+		}
+		tid, err := strconv.ParseInt(*op.ThreadID, 10, 64)
+		if err != nil {
+			return "", "delete-conversation: thread id " + *op.ThreadID + " is not a topic id"
+		}
+		if err := tg.ReopenTopic(ctx, sc.cfg.ChatID, tid); err != nil {
+			return "", err.Error()
+		}
+		if op.Message != nil {
+			for _, chunk := range splitHTML(renderMessage(*op.Message)) {
+				if err := tg.Send(ctx, sc.cfg.ChatID, &tid, chunk); err != nil {
+					// Close it again even so: a topic left open after a failed
+					// tombstone is worse than a missing tombstone.
+					_ = tg.CloseTopic(ctx, sc.cfg.ChatID, tid)
+					return "", err.Error()
+				}
+			}
+		}
+		if err := tg.CloseTopic(ctx, sc.cfg.ChatID, tid); err != nil {
+			return "", err.Error()
+		}
+		return "", ""
 	case "close-topic":
 		// The conversation is gone; archive its topic. A failure is REPORTED,
 		// never retried here — the manager treats a failed close-topic as

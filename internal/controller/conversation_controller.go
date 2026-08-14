@@ -445,13 +445,13 @@ func jitter(d time.Duration) time.Duration {
 	return d + time.Duration(rand.Int63n(int64(d/10)+1))
 }
 
-// finalizeClose archives the threads of a deleting conversation, then lets go.
+// finalizeClose tells a deleting conversation's threads that it is gone, then
+// lets go.
 //
-// Since closing stopped deleting, this covers exactly ONE case: a Conversation
-// deleted without having been closed — a direct `kubectl delete`, or the
-// autodelete of a conversation whose archive never completed. A conversation
-// deleted after a proper close finds every thread already in
-// status.threadsArchived and releases immediately, archiving nothing twice.
+// EVERY deletion takes this path — autodelete, a surface's delete verb, and a
+// direct `kubectl delete` — and every one of them owes the bound threads a
+// correction, because a closed conversation's last word to them was that it
+// could be reopened.
 //
 // Enqueueing on every pass is safe — the op id is stable per
 // conversation×channel, so it dedups against both the pending op and the
@@ -476,18 +476,20 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agento
 	outstanding := false
 	if r.Ops != nil {
 		for _, t := range conv.Status.Threads {
-			if conv.Status.ThreadArchived(t.Channel) {
-				continue // archived at the close: nothing owed, nothing to wait for
-			}
 			var ch agentopsv1alpha1.Channel
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil {
-				continue // channel gone: nothing left to archive on it
+				continue // channel gone: nobody left to tell
 			}
 			if ch.Spec.Adapter == "" {
 				continue
 			}
-			r.Ops.EnqueueCloseTopic(ctx, &ch, t.ThreadID, conv.Name)
-			if r.Ops.Pending(chat.CloseTopicOpID(conv.Name, t.Channel)) {
+			// delete-conversation, NOT close-topic — whether or not this
+			// conversation was closed first. A closed conversation's threads
+			// were told it could be reopened; deletion makes that false, and
+			// correcting it is the whole point. Sending both would leave an
+			// adapter guessing whether the pair meant one ending or two.
+			r.Ops.EnqueueDeleteConversation(ctx, &ch, t.ThreadID, conv.Name)
+			if r.Ops.Pending(chat.DeleteConversationOpID(conv.Name, t.Channel)) {
 				outstanding = true
 			}
 		}
