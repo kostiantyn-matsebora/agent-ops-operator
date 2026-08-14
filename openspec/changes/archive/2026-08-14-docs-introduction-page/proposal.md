@@ -15,19 +15,21 @@ reference material legible, not to replace it.
 ## What Changes
 
 - **A new site page, `docs/introduction.md`**, published at `/introduction/` and
-  written for an adopter evaluating the operator. It orients rather than
-  specifies:
-  - what agent-ops is, and the one structural idea that separates it from a bot
-    or a runbook — identity, wiring and execution are separate objects, so what
-    an agent MAY DO comes from the routing and never from the agent;
-  - the model's parts in one or two sentences each, grouped by the question each
-    answers, every one linked to the document that owns its detail;
-  - **what happens when something fires** — signal to grouped-and-admitted to a
-    conversation with a thread to an isolated pod to an answer posted back. This
-    is the part a newcomer most needs and the part no CRD reference states;
-  - the three seams that are swappable, and what stays fixed across a swap;
-  - a **next steps** section that hands the reader to the install, the kinds, the
-    contracts and the bundles in the order they will want them.
+  written for an adopter evaluating the operator. A short opening and **two
+  sections**, deliberately:
+  - the opening states what agent-ops is and the one structural idea that
+    separates it from a bot or a runbook — identity, wiring and execution are
+    separate objects, so what an agent MAY DO comes from the routing and never
+    from the agent;
+  - **Understand the concepts** — the model's parts as blocks, one per part, each
+    answering a single question in a sentence or two, with the reference linked
+    for the detail;
+  - **Follow the guides** — the task-shaped walkthroughs, grouped, so a reader
+    leaves knowing what to read next. **None is written yet**, so none is a link
+    and the page says so; a roadmap that looks clickable is worse than none.
+  - Nothing else. Material that fits neither section belongs in a guide or a
+    reference page — including the signal-to-answer lifecycle, which is the first
+    guide to write rather than a wall of prose in an introduction.
 - **One navigation entry** in `docs/_data/nav.yml`, under *Start here*.
 - **The landing page points at it**: `docs/index.md`'s *Where to start* leads with
   the Introduction rather than with the README.
@@ -40,9 +42,14 @@ Explicitly NOT in this change:
 
 - **No reference prose.** The Introduction states no CRD field, no HTTP endpoint,
   no install command, and no values key. Where it would have to, it links.
-- **No theme work.** Prose styling, the `page` layout and the sidebar already
-  exist; adding a page is a markdown file plus one navigation line, and if this
-  change needed a layout edit that would be the signal it had grown.
+- **No content in the theme.** The site gains two presentational components — a
+  card grid and a callout — because a list of seven concepts reads as a wall.
+  Pages name them with the markdown engine's attribute syntax (`{: .ao-cards}`),
+  so the words stay in the page and the rules stay wordless. They are components
+  any later page can use, not styling for this one; no layout or include is
+  touched.
+- **No guides.** They are listed, not written. Writing them is the next change,
+  and the listing is what says which order to write them in.
 - **No on-page contents and no edit link.** Both belong to the change that
   publishes the reference pages, where a long page makes them earn their place.
 
@@ -63,8 +70,9 @@ None. The published site is one capability and this page belongs to it.
 
 - **New** — `docs/introduction.md`.
 - **Edited** — `docs/_data/nav.yml` (one entry), `docs/index.md` (the first path
-  onward), `CLAUDE.md` (the `docs/` map line naming the site's pages).
-- **Untouched** — every layout, include, data file and stylesheet under `docs/`;
+  onward), `docs/assets/css/agentops.css` (the three components),
+  `CLAUDE.md` (the `docs/` map line naming the site's pages).
+- **Untouched** — every layout, include and data file other than the navigation;
   every reference page; `README.md`; the chart; all Go modules.
 - **Build** — none. GitHub Pages builds `docs/` from `master`, the page takes the
   layout `jekyll-default-layout` already assigns, and no plugin, workflow or Ruby

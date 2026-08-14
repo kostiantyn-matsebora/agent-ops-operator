@@ -1,0 +1,14 @@
+{%- comment -%}
+The on-this-page column. Empty by design: it is filled from the rendered
+headings by assets/js/toc.js, because GitHub Pages enables no table-of-contents
+plugin and a feature needing one is implemented in this theme's own assets
+rather than by switching the build to a workflow.
+
+It carries a UI label and no product prose, like the skip link. Hidden until the
+script finds enough headings to be worth showing, so a short page gets no empty
+rail and a reader with JavaScript off sees nothing rather than a broken shell.
+{%- endcomment -%}
+<aside class="ao-toc" id="ao-toc" aria-labelledby="ao-toc-title" hidden>
+  <h2 class="ao-toc-title" id="ao-toc-title">On this page</h2>
+  <nav class="ao-toc-nav" aria-labelledby="ao-toc-title"></nav>
+</aside>
