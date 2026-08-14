@@ -265,3 +265,43 @@ func TestInProcessProviderServesRegisteredType(t *testing.T) {
 		t.Fatalf("in-process op leaked to adapter queue: %+v", op)
 	}
 }
+
+// A close that is RETRIED must say goodbye once, not once per attempt.
+//
+// Found by a live smoke: the CRD in that cluster did not yet allow phase
+// `Closed`, so every close attempt posted its farewell and then failed its
+// status write, and the reconciler retried for seven hours. Four farewells
+// landed in one thread. The farewell still goes first — a thread that stops
+// with no word is indistinguishable from a fault — so the fix is a stable id.
+func TestFarewellIsPostedOncePerClose(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+	conv := testConv("conv-1")
+	tid := "9876"
+
+	for i := 0; i < 3; i++ {
+		q.EnqueueFarewell(ctx, ch, conv, &tid, Notice("goodbye"))
+	}
+	if ops := len(drainOps(q, "slack")); ops != 1 {
+		t.Fatalf("a retried close must post ONE farewell, got %d", ops)
+	}
+
+	// ...but a conversation closed, REOPENED and closed again is owed a second.
+	conv.Status.Reopens = 1
+	q.EnqueueFarewell(ctx, ch, conv, &tid, Notice("goodbye again"))
+	if ops := len(drainOps(q, "slack")); ops != 1 {
+		t.Fatalf("a close after a reopen must post its own farewell, got %d", ops)
+	}
+}
+
+func drainOps(q *OpQueue, adapter string) []*Op {
+	var out []*Op
+	for {
+		op := q.Claim(adapter)
+		if op == nil {
+			return out
+		}
+		out = append(out, op)
+	}
+}

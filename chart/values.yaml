@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.29.1
+  tag: 0.30.1
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -580,7 +580,7 @@ housekeeping:
   schedule: "17 3 * * *"
   image:
     repository: kmatsebora/agentops-housekeeping
-    tag: 0.1.0
+    tag: 0.1.1
   # Reports what it would remove and removes nothing. Take it off only after a
   # run has named no directory belonging to a conversation you are keeping.
   dryRun: true

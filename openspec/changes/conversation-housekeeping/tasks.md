@@ -94,5 +94,5 @@
 - [x] 12.2 Full test run with `KUBEBUILDER_ASSETS` (unit + envtest)
 - [x] 12.3 Integration test through a real API server: autoclose closes an idle finished conversation and leaves a working one; the closed one is skipped by reuse; reopen restores it; autodelete removes it only after `closedAge` from the close
 - [x] 12.4 Chart render tests: both flags off by default, the runtime-SA guard fires, claims mount only when persistence is on
-- [ ] 12.5 Live smoke on a cluster with persistence enabled: close a conversation, confirm its directory SURVIVES a dry-run and a real housekeeping run, reopen it and confirm the agent resumes with its workspace
-- [ ] 12.6 Live smoke for the full lifecycle with short windows: the farewell names the window and says it can be reopened, the topic is archived, the conversation stays readable in the console, and only after `closedAge` do the object and then the directory go
+- [x] 12.5 Live smoke on a cluster with persistence enabled: close a conversation, confirm its directory SURVIVES a dry-run and a real housekeeping run, reopen it and confirm the agent resumes with its workspace
+- [x] 12.6 Live smoke for the full lifecycle with short windows: the farewell names the window and says it can be reopened, the topic is archived, the conversation stays readable in the console, and only after `closedAge` do the object and then the directory go

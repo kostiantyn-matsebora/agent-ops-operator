@@ -207,6 +207,26 @@ func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Chann
 	q.enqueueMessage(ctx, "send:"+strconv.FormatInt(sendSeq.Add(1), 36), ch, "", threadID, msg, false)
 }
 
+// EnqueueFarewell posts a conversation's closing notice with a STABLE id, so a
+// close that is attempted more than once says goodbye exactly once.
+//
+// This is not hypothetical tidiness. The farewell is posted before the status
+// write — deliberately, because a conversation whose thread simply stops is
+// indistinguishable from a fault, so a lost farewell is worse than a repeated
+// one — and a close whose status write FAILS is retried. A live smoke against a
+// cluster whose CRD did not yet allow phase `Closed` put four farewells in one
+// thread over seven hours of retries. An ephemeral id makes every retry a new
+// message; a stable one makes them the same message.
+//
+// Keyed on the reopen count as well, for the same reason ensure-topic is: a
+// conversation closed, reopened and closed again is owed a SECOND farewell, and
+// a genuinely stable id would suppress it.
+func (q *OpQueue) EnqueueFarewell(ctx context.Context, ch *agentopsv1alpha1.Channel,
+	conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
+	id := fmt.Sprintf("farewell:%s:%s:%d", conv.Name, ch.Name, conv.Status.Reopens)
+	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
+}
+
 // EnqueueInputCard queues the card for one input on one channel. Unlike an
 // ordinary send its id is STABLE per conversation×input×channel, so the
 // reconciler re-deriving it on every pass dedups against both the pending map

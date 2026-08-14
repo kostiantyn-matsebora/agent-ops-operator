@@ -242,3 +242,50 @@ func TestMissingRootIsNotAnError(t *testing.T) {
 		t.Fatalf("nothing to do: %+v", rep)
 	}
 }
+
+// A real volume is not an empty directory. Longhorn (ext4) puts `lost+found` at
+// the root, and the first live run of this job would have deleted it as an
+// orphan — no Conversation is called that, so nothing in the listing matched.
+//
+// The rule is "we only remove what we could have created": a directory whose
+// name is not a valid Kubernetes object name was not made by a subPath mount.
+func TestFilesystemEntriesAreNotOrphans(t *testing.T) {
+	root := t.TempDir()
+	mkDirs(t, root, "lost+found", ".snapshot", "conv-gone", "UPPERCASE")
+	lister := &stubLister{}
+
+	rep, err := ReclaimWorkspaces(context.Background(), root, lister, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Removed) != 1 || rep.Removed[0] != "conv-gone" {
+		t.Fatalf("only a plausible conversation directory may be reclaimed: %+v", rep.Removed)
+	}
+	for _, keep := range []string{"lost+found", ".snapshot", "UPPERCASE"} {
+		if !dirExists(t, filepath.Join(root, keep)) {
+			t.Errorf("%s is not ours and must survive", keep)
+		}
+	}
+	// and it is not even SCANNED, so it cannot show up in a dry run's report
+	// as something the job intends to remove
+	if rep.Scanned != 1 {
+		t.Errorf("filesystem entries must not be counted as candidates, scanned=%d", rep.Scanned)
+	}
+}
+
+func TestCouldBeConversation(t *testing.T) {
+	for name, want := range map[string]bool{
+		"task-8kjc6":  true,
+		"alert-2wfc8": true,
+		"a.b-c9":      true,
+		"lost+found":  false,
+		".snapshot":   false,
+		"Upper":       false,
+		"has space":   false,
+		"":            false,
+	} {
+		if got := couldBeConversation(name); got != want {
+			t.Errorf("couldBeConversation(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
