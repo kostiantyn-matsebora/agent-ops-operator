@@ -7,6 +7,6 @@ dependencies:
   version: 0.3.0
 - name: telegram-bundle
   repository: ""
-  version: 0.3.0
-digest: sha256:4dfb4c4e78000faa8fa8438e1e3eec8fe0e06b7d88c5ba20547e7f9f375848db
-generated: "2026-08-14T21:30:18.17225+03:00"
+  version: 0.4.0
+digest: sha256:0d863ff63f54890a2a9cc3816ff9b2c6560230e5c07090c49bd8260f780a9eab
+generated: "2026-08-14T23:28:34.3048625+03:00"

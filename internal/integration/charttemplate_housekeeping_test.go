@@ -158,3 +158,47 @@ func cronJobDoc(t *testing.T, rendered string) string {
 	t.Fatal("no CronJob rendered")
 	return ""
 }
+
+// The Telegram surface's opt-out of keeping a deleted conversation's topic.
+//
+// It lives on the CHANNEL, not the ChannelAdapter: the adapter CR carries
+// implementation only, and whether a group's threads should outlive their
+// conversations is a property of that group.
+func TestTelegramTopicDeletionIsOptInAndPerChannel(t *testing.T) {
+	surface := []string{
+		"--set", "telegram-bundle.enabled=true",
+		"--set", "telegram-bundle.surface.enabled=true",
+		"--set", "telegram-bundle.surface.chatId=-100",
+		"--set", "telegram-bundle.surface.credentials.botToken=x",
+	}
+	// default: the key is absent, so the transcript survives
+	if out := helmTemplate(t, surface...); strings.Contains(out, "deleteTopicOnConversationDelete: true") {
+		t.Error("topic deletion must be off by default — upgrading may not destroy a transcript")
+	}
+	// opted in: it reaches the CHANNEL's config
+	on := helmTemplate(t, append(surface, "--set", "telegram-bundle.surface.deleteTopicOnDelete=true")...)
+	var channel string
+	for _, doc := range splitDocs(on) {
+		if strings.Contains(doc, "kind: Channel\n") && strings.Contains(doc, "adapter: telegram") {
+			channel = doc
+		}
+	}
+	if channel == "" {
+		t.Fatal("no telegram Channel rendered")
+	}
+	if !strings.Contains(channel, "deleteTopicOnConversationDelete: true") {
+		t.Errorf("the flag must land in the Channel's config:\n%s", channel)
+	}
+	// ...and NOT on the ChannelAdapter, which carries no configuration
+	for _, doc := range splitDocs(on) {
+		if strings.Contains(doc, "kind: ChannelAdapter\n") &&
+			strings.Contains(doc, "deleteTopicOnConversationDelete: true") {
+			t.Errorf("configuration must not land on the adapter CR:\n%s", doc)
+		}
+	}
+	// the declared schema names it, so a misspelling is reported rather than
+	// silently reading as false
+	if !strings.Contains(on, "deleteTopicOnConversationDelete:\n        type: boolean") {
+		t.Error("the adapter's configSchema must declare the key")
+	}
+}

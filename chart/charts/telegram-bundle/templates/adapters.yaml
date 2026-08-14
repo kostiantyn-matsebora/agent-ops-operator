@@ -41,6 +41,12 @@ spec:
         items:
           type: integer
         description: Telegram user ids allowed to talk to the agent.
+      deleteTopicOnConversationDelete:
+        type: boolean
+        description: >-
+          Delete the forum topic when its conversation is deleted, instead of
+          leaving it archived with a tombstone. Destroys the transcript and
+          needs the bot to hold can_delete_messages. Absent = false.
     required:
       - chatId
   credentialKeys:

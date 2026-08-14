@@ -8,6 +8,34 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Telegram may delete a conversation's topic — chart 5.16.0
+
+**Opt-in, off by default. Nothing changes on upgrade.**
+
+Deleting a conversation leaves its forum topic archived with a tombstone, which
+keeps the transcript and costs one dead topic per conversation. A busy group can
+now trade the other way:
+
+```yaml
+telegram-bundle:
+  surface:
+    deleteTopicOnDelete: true
+```
+
+The topic is deleted instead, and no tombstone is posted. **This destroys the
+transcript.** The bot needs `can_delete_messages`; without it the operation is
+reported failed rather than quietly falling back to archiving, and the
+conversation is still deleted once the grace expires.
+
+The setting lives on the `Channel`, so two Telegram surfaces served by one
+adapter can differ. Closing is unaffected — a closed conversation can be
+reopened into its topic, so that topic must survive.
+
+A line naming the conversation goes to the chat general surface, so a vanished
+topic is attributable to agent-ops rather than looking like a hand deletion.
+
+Image: `channel-telegram` `0.11.0`.
+
 ### A deleted conversation tells its threads — chart 5.15.0
 
 **No action needed.** Nothing is configured, nothing changes default.

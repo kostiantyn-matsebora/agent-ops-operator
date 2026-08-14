@@ -59,6 +59,9 @@ spec:
     approvers:
 {{ toYaml . | indent 6 }}
     {{- end }}
+    {{- if $s.deleteTopicOnDelete }}
+    deleteTopicOnConversationDelete: true
+    {{- end }}
 ---
 # Chat ORIGINATION: this chat's general surface, as a signal source.
 # CLAIM THIS in a Pipeline or it answers nobody.

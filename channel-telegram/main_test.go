@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -257,4 +258,177 @@ type rewrite struct{ host, scheme string }
 func (r rewrite) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.URL.Host, req.URL.Scheme = r.host, r.scheme
 	return http.DefaultTransport.RoundTrip(req)
+}
+
+// The opt-in: this surface would rather lose the thread than accumulate one
+// archived topic per conversation forever.
+func TestDeleteConversationDeletesTheTopicWhenOptedIn(t *testing.T) {
+	var calls []string
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer tg.Close()
+
+	a, _ := testAdapter(t, map[string]channelConfig{
+		"tg": {ChatID: "-100", DeleteTopicOnConversationDelete: true},
+	})
+	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+
+	tid := "42"
+	msg := Message{Kind: MsgNotice, Body: "gone"}
+	if _, opErr := a.execute(context.Background(), &Op{
+		Kind: "delete-conversation", Channel: "tg", Conversation: "conv-1",
+		ThreadID: &tid, Message: &msg,
+	}); opErr != "" {
+		t.Fatalf("delete-conversation: %s", opErr)
+	}
+	// The topic is deleted, then ONE note goes to the general surface — see
+	// TestDeletingTheTopicLeavesATraceOnTheGeneralSurface for why.
+	if len(calls) != 2 || calls[0] != "deleteForumTopic" || calls[1] != "sendMessage" {
+		t.Fatalf("want deleteForumTopic then the general-surface note, got %v", calls)
+	}
+	// Deleting REPLACES the tombstone: the topic is never marked and archived.
+	for _, c := range calls {
+		if c == "reopenForumTopic" || c == "closeForumTopic" {
+			t.Fatalf("an opted-in surface must not mark and archive: %v", calls)
+		}
+	}
+}
+
+// A missing can_delete_messages is REPORTED, never softened into
+// mark-and-archive — otherwise the setting means "delete it, or maybe not".
+func TestDeleteTopicFailureIsReportedNotSoftened(t *testing.T) {
+	var calls []string
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		_, _ = w.Write([]byte(`{"ok":false,"description":"Bad Request: not enough rights to delete the topic"}`))
+	}))
+	defer tg.Close()
+
+	a, _ := testAdapter(t, map[string]channelConfig{
+		"tg": {ChatID: "-100", DeleteTopicOnConversationDelete: true},
+	})
+	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+
+	tid := "42"
+	_, opErr := a.execute(context.Background(), &Op{
+		Kind: "delete-conversation", Channel: "tg", Conversation: "conv-1", ThreadID: &tid,
+	})
+	if opErr == "" {
+		t.Fatal("a refused deleteForumTopic must be reported as an op failure")
+	}
+	if !strings.Contains(opErr, "rights") {
+		t.Fatalf("the reason must survive: %q", opErr)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("it must not fall back to archiving: %v", calls)
+	}
+}
+
+// Two surfaces, one adapter, different answers — which is why the setting is on
+// the CHANNEL and not on the ChannelAdapter.
+func TestEachSurfaceFollowsItsOwnConfig(t *testing.T) {
+	var calls []string
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	}))
+	defer tg.Close()
+
+	a, _ := testAdapter(t, map[string]channelConfig{
+		"keeps":   {ChatID: "-100"},
+		"deletes": {ChatID: "-101", DeleteTopicOnConversationDelete: true},
+	})
+	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+
+	tid := "42"
+	msg := Message{Kind: MsgNotice, Body: "gone"}
+	op := func(ch string) *Op {
+		return &Op{Kind: "delete-conversation", Channel: ch, Conversation: "c", ThreadID: &tid, Message: &msg}
+	}
+	a.execute(context.Background(), op("keeps"))
+	keepCalls := len(calls)
+	if keepCalls != 3 {
+		t.Fatalf("the default surface must mark and archive (3 calls), got %v", calls)
+	}
+	a.execute(context.Background(), op("deletes"))
+	got := calls[keepCalls:]
+	if len(got) != 2 || got[0] != "deleteForumTopic" || got[1] != "sendMessage" {
+		t.Fatalf("the opted-in surface must delete and leave a note: %v", got)
+	}
+}
+
+// A Channel's config must reach the adapter without a pod restart.
+//
+// refreshChannels used to run once at startup, and again only when an op named
+// a channel the adapter had never seen — so editing an EXISTING channel's
+// config changed nothing until the pod cycled. Found live: enabling
+// deleteTopicOnConversationDelete on a running surface did nothing at all.
+func TestServedChannelConfigIsRefreshed(t *testing.T) {
+	cfg := `{"chatId":"-100"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/channel/channels" {
+			_, _ = w.Write([]byte(`[{"name":"tg","config":` + cfg + `}]`))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	a := &adapter{
+		mgr: NewManager(srv.URL, "t"), channelType: "telegram", fallbackToken: "bot-token",
+		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+	}
+	a.refreshChannels(context.Background())
+	if sc, _ := a.channel("tg"); sc.cfg.DeleteTopicOnConversationDelete {
+		t.Fatal("flag should start off")
+	}
+
+	// the operator edits the Channel; no pod restarts
+	cfg = `{"chatId":"-100","deleteTopicOnConversationDelete":true}`
+	a.refreshChannels(context.Background())
+	sc, ok := a.channel("tg")
+	if !ok || !sc.cfg.DeleteTopicOnConversationDelete {
+		t.Fatal("a config edit must reach the adapter on the next refresh, not on the next restart")
+	}
+}
+
+// Deleting the topic destroys the only place the conversation was visible, and
+// its CR is gone too — so without a line on the GENERAL surface a thread simply
+// vanishes and nothing says agent-ops did it.
+func TestDeletingTheTopicLeavesATraceOnTheGeneralSurface(t *testing.T) {
+	var calls []string
+	var bodies []string
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer tg.Close()
+
+	a, _ := testAdapter(t, map[string]channelConfig{
+		"tg": {ChatID: "-100", DeleteTopicOnConversationDelete: true},
+	})
+	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+
+	tid := "42"
+	if _, opErr := a.execute(context.Background(), &Op{
+		Kind: "delete-conversation", Channel: "tg", Conversation: "alert-abc123", ThreadID: &tid,
+	}); opErr != "" {
+		t.Fatalf("delete-conversation: %s", opErr)
+	}
+	if len(calls) != 2 || calls[0] != "deleteForumTopic" || calls[1] != "sendMessage" {
+		t.Fatalf("want deleteForumTopic then sendMessage, got %v", calls)
+	}
+	note := bodies[1]
+	if !strings.Contains(note, "alert-abc123") {
+		t.Errorf("the note must name the conversation, since the topic that carried it is gone: %s", note)
+	}
+	// on the GENERAL surface: no thread id, or it would land in a topic that
+	// no longer exists
+	if strings.Contains(note, "message_thread_id") {
+		t.Errorf("the note must go to the general surface, not a thread: %s", note)
+	}
 }

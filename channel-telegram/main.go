@@ -56,6 +56,15 @@ type channelConfig struct {
 	ChatID       string  `json:"chatId"`
 	FeedThreadID *int64  `json:"feedThreadId,omitempty"`
 	Approvers    []int64 `json:"approvers,omitempty"`
+	// DeleteTopicOnConversationDelete opts this SURFACE out of keeping the
+	// forum topic when its conversation is deleted. Absent = false = the topic
+	// survives with a tombstone, which is the default because the transcript
+	// above it is what a person scrolls back to.
+	//
+	// On the CHANNEL rather than the adapter: whether a group's threads should
+	// outlive their conversations is a property of the group, and two surfaces
+	// served by one adapter may reasonably differ.
+	DeleteTopicOnConversationDelete bool `json:"deleteTopicOnConversationDelete,omitempty"`
 }
 
 // servedChannel is one validated channel with its resolved credentials.
@@ -107,6 +116,7 @@ func main() {
 	log.Printf("channel-telegram adapter starting (adapter=%s, listen=%s)", channelType, listen)
 
 	go a.opsLoop(ctx)
+	go a.refreshLoop(ctx)
 
 	srv := &http.Server{Addr: listen, Handler: a.handler()}
 	go func() {
@@ -228,6 +238,24 @@ func (a *adapter) opsLoop(ctx context.Context) {
 	}
 }
 
+// refreshLoop re-reads served channels on a timer.
+//
+// Without it a Channel's spec.config is read ONCE at startup and again only
+// when an op names a channel this adapter has never seen — so an edit to an
+// EXISTING channel's config never reached the adapter until its pod restarted.
+// That made every config change silently require a restart, which is not how
+// any other part of this system behaves; the console adapter has had this loop
+// all along. Found when a newly enabled deleteTopicOnConversationDelete did
+// nothing on a live surface.
+func (a *adapter) refreshLoop(ctx context.Context) {
+	for ctx.Err() == nil {
+		sleepCtx(ctx, 60*time.Second)
+		if ctx.Err() == nil {
+			a.refreshChannels(ctx)
+		}
+	}
+}
+
 func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) {
 	sc, ok := a.channel(op.Channel)
 	if !ok {
@@ -311,6 +339,40 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		tid, err := strconv.ParseInt(*op.ThreadID, 10, 64)
 		if err != nil {
 			return "", "delete-conversation: thread id " + *op.ThreadID + " is not a topic id"
+		}
+		// This SURFACE may have opted out of keeping the thread. Deleting
+		// REPLACES the tombstone rather than following it: a topic about to
+		// disappear has nobody to tell, and posting first would write into a
+		// topic the next call removes.
+		//
+		// A failure here is REPORTED, never softened into mark-and-archive.
+		// deleteForumTopic needs can_delete_messages, and falling back would
+		// make the setting mean "delete the topic, or maybe not" — leaving an
+		// operator who enabled it for tidiness with archived topics piling up
+		// and no signal that anything was wrong.
+		if sc.cfg.DeleteTopicOnConversationDelete {
+			if err := tg.DeleteTopic(ctx, sc.cfg.ChatID, tid); err != nil {
+				return "", err.Error()
+			}
+			// Leave a trace on the GENERAL surface. Deleting the topic destroys
+			// the only place this conversation was visible, and its CR is gone
+			// too — so without this line a thread simply vanishes and nothing
+			// anywhere says agent-ops did it. A person would reasonably assume
+			// somebody deleted it by hand, or that Telegram lost it.
+			//
+			// Posted AFTER the delete, never before: announcing a removal that
+			// then failed would be worse than saying nothing. One line, naming
+			// the conversation, because the topic that carried the name is what
+			// just went away.
+			if err := tg.Send(ctx, sc.cfg.ChatID, nil,
+				"🗑 Conversation <code>"+escape(op.Conversation)+
+					"</code> was deleted, and its topic removed with it."); err != nil {
+				// The topic is already gone; failing the op would ask the
+				// manager to retry a deletion that succeeded.
+				log.Printf("delete-conversation %s: topic deleted but the general-surface note failed: %v",
+					op.Conversation, err)
+			}
+			return "", ""
 		}
 		if err := tg.ReopenTopic(ctx, sc.cfg.ChatID, tid); err != nil {
 			return "", err.Error()

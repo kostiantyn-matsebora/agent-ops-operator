@@ -50,6 +50,44 @@ telegram-bundle:
 That renders the `Channel`, the chat `SignalSource` (same name as the Channel —
 one name for the whole surface), the bot `Secret`, and the **router Deployment**.
 
+### Deleting a conversation's topic
+
+By default, deleting a conversation leaves its forum topic in place: the adapter
+un-archives it, posts a tombstone saying the conversation is gone, and closes it
+again. The transcript above that line is what a person scrolls back to after an
+incident.
+
+A busy group pays for that in clutter — one archived topic per conversation,
+forever. Opt out per surface:
+
+```yaml
+telegram-bundle:
+  surface:
+    deleteTopicOnDelete: true
+```
+
+The topic is then **deleted** instead, and no tombstone is posted into it — a
+thread about to disappear has nobody to tell. **It destroys the transcript**,
+which is why it is off by default and why the setting is worth a second thought
+on a group whose history anyone might want.
+
+One line does go to the chat's **general surface**, naming the conversation.
+Without it a topic simply vanishes: the conversation object is gone too, so
+nothing anywhere would record that agent-ops removed it, and a reader would
+reasonably assume someone deleted it by hand.
+
+Two practical notes. The bot must hold **`can_delete_messages`**; without it the
+operation is reported as failed — deliberately, rather than falling back to
+archiving, because a silent fallback would leave you with a growing list of
+archived topics and no sign that the setting was doing nothing. The conversation
+is still deleted either way, once the manager's grace expires.
+
+And the setting is on the **Channel**, not the `ChannelAdapter`: whether a
+group's threads should outlive their conversations is a property of that group,
+so two surfaces served by one adapter can differ. Only DELETION is affected —
+closing still archives the topic, because a closed conversation can be reopened
+into it.
+
 The router is the odd one out of the three components: it is the only
 `getUpdates` consumer, but it produces no signals, so it is **not an adapter**.
 It has no `SignalAdapter` CR and no served CR — the bundle owns its Deployment
