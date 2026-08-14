@@ -36,7 +36,13 @@ plugins:
 exclude:
   - diagrams/
 
+# Every page gets the on-this-page column. It is a default rather than an opt-in
+# because a forgotten flag is invisible — the page simply lacks the column.
 defaults:
+  - scope:
+      path: ""
+    values:
+      toc: true
   - scope:
       path: index.md
     values:

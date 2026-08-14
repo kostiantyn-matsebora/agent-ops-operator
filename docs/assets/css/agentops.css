@@ -83,8 +83,22 @@
     Consolas, monospace;
 
   --ao-masthead-h: 3.5rem;
-  --ao-sidebar-w: 16rem;
-  --ao-measure: 62rem;
+  /* Read off the reference's own stylesheet rather than guessed from a
+     screenshot: BOTH rails are one width and the text column is fixed, and the
+     leftover is split evenly between the gutter and the right container. */
+  --ao-sidebar-w: 18.75rem;
+  --ao-toc-w: 18.75rem;
+  /* The content column's own gutters. The LEFT one is wider on a large display
+     so the text is not pinned to the navigation's edge — it is a token because
+     the shell's middle column is sized from it, and a padding the grid did not
+     know about would push the content past its track. */
+  --ao-main-pad-x: 2.5rem;
+  --ao-main-pad-l: 1.5rem;
+  /* The content column, and the line length with it: 720px at 17px type is
+     about 85 characters. Nothing on the page is wider — a narrow-prose-inside-a-
+     wide-box scheme leaves dead space between the last word and the rail, which
+     reads as an inflated right column. Cards and the diagram ARE the column. */
+  --ao-measure: 45rem;
   --ao-radius: 6px;
 }
 
@@ -135,7 +149,11 @@ body {
   background: var(--ao-canvas);
   color: var(--ao-text);
   font-family: var(--ao-font-text);
-  font-size: 1rem;
+  /* 17px, not 16. Red Hat Text is narrow, so at 16px a comfortable column of
+     720px runs to ~99 characters; a step up puts the same width at ~85, which
+     is where the reference layout sits. The type carries the line length here,
+     not the column. */
+  font-size: 1.0625rem;
   line-height: 1.65;
   /* The page body never scrolls sideways; wide content scrolls in its own
      frame instead (see the overflow rules below). */
@@ -325,6 +343,135 @@ a:hover {
   min-height: 100vh;
 }
 
+/* Three columns when the page carries an on-this-page rail.
+   The CONTENT column is capped at the measure and the rail takes everything
+   left over, so on a wide display the extra width goes to the right column
+   rather than stretching prose past the line length it is set for. The rail
+   keeps a floor so it never becomes a squeezed sliver, and the middle may
+   shrink below the measure before that floor is given up.
+   The rail is still the first thing to go when width really runs out: it is a
+   convenience, where the left navigation is the way between pages. */
+/* Three tracks: navigation and rail both FIXED, the middle one flexible.
+   Which track flexes is the whole layout. With the rail on `1fr` it swallowed
+   every spare pixel — half the window at 2000px — while the gutter stayed thin.
+   The reference does the opposite: the rail is a fixed strip, the middle track
+   takes the surplus, and the text sits flush against the rail (`.ao-content`),
+   so what actually grows is the GUTTER between the navigation and the prose.
+
+   The shell then stops at a maximum, so past that width the surplus falls off
+   the right of the rail rather than stretching the gutter forever. */
+/* Three tracks, sized the way the reference's own stylesheet does it: both
+   rails one fixed width, the text column fixed, and the LEFTOVER SPLIT EVENLY
+   between the gutter and the right container. Two `1fr` tracks over different
+   minimums is exactly that split — grid satisfies the minimums first, then
+   halves what remains.
+
+   The rail panel keeps its own width at the left of its track, so its half of
+   the leftover becomes empty space PAST the rail rather than a wider rail. And
+   because the content is flush right in its track (`margin-left: auto`), the
+   middle half becomes the gutter. Which track flexes, and where each track's
+   contents sit inside it, is the entire layout. */
+.ao-shell--toc {
+  /* What is left once both rails and the text column have been paid for. */
+  --ao-leftover: max(0px, calc(
+    100% - var(--ao-sidebar-w) - var(--ao-toc-w) - var(--ao-measure) - var(--ao-main-pad-x)
+  ));
+  grid-template-columns:
+    var(--ao-sidebar-w)
+    minmax(0, 1fr)
+    calc(var(--ao-toc-w) + var(--ao-leftover) / 2);
+}
+
+.ao-shell--toc .ao-content {
+  margin-left: auto;
+}
+
+/* 72rem is where the reference drops to two columns; matched rather than
+   invented, so the two layouts behave the same at the same widths. */
+@media (max-width: 72rem) {
+  .ao-shell--toc {
+    grid-template-columns: var(--ao-sidebar-w) minmax(0, 1fr);
+  }
+
+  .ao-toc {
+    display: none;
+  }
+
+  /* The class comes from front matter, not from the viewport, so the flush-right
+     rule has to be undone here — otherwise the text stays pressed against a rail
+     that is no longer rendered. */
+  .ao-shell--toc .ao-content {
+    margin-left: 0;
+  }
+}
+
+/* A column, mirroring the left sidebar: full viewport height, sticky, with its
+   own edge. A rail that is only as tall as its list reads as a floating block
+   beside the text rather than as part of the page's structure. */
+.ao-toc {
+  position: sticky;
+  top: var(--ao-masthead-h);
+  align-self: start;
+  /* Its OWN width at the left of a track that may be wider — the surplus is
+     space past the rail, never a fatter rail. */
+  width: var(--ao-toc-w);
+  height: calc(100vh - var(--ao-masthead-h));
+  overflow-y: auto;
+  padding: 2rem 1.5rem 2rem 1.5rem;
+  border-left: 1px solid var(--ao-border);
+}
+
+.ao-toc[hidden] {
+  display: none;
+}
+
+.ao-toc-title {
+  margin: 0 0 0.6rem;
+  font-family: var(--ao-font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+}
+
+.ao-toc-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-left: 1px solid var(--ao-border);
+}
+
+.ao-toc-item {
+  margin: 0;
+}
+
+.ao-toc-link {
+  display: block;
+  padding: 0.3rem 0.75rem;
+  margin-left: -1px;
+  border-left: 2px solid transparent;
+  color: var(--ao-text-subtle);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.ao-toc-item--h3 .ao-toc-link {
+  padding-left: 1.5rem;
+  font-size: 0.84rem;
+}
+
+.ao-toc-link:hover {
+  color: var(--ao-text);
+}
+
+.ao-toc-link.is-current {
+  border-left-color: var(--ao-brand);
+  color: var(--ao-brand-strong);
+  font-weight: 500;
+}
+
 .ao-sidebar {
   position: sticky;
   top: var(--ao-masthead-h);
@@ -388,7 +535,7 @@ a:hover {
 
 .ao-main {
   min-width: 0;
-  padding: 2rem 2rem 4rem;
+  padding: 2rem var(--ao-main-pad-x) 4rem var(--ao-main-pad-l);
   /* The skip link targets this element, and the masthead is fixed: without a
      scroll margin, skipping to the content parks the first heading underneath
      it. Headings carry the same margin for in-page anchors. */
@@ -478,6 +625,17 @@ a:hover {
   margin-bottom: 0;
 }
 
+/* A callout is a blockquote that EMPHASISES rather than sets aside. The plain
+   blockquote is subdued on purpose — an aside — so a statement the page is
+   built around must not use it: it reads as a footnote at exactly the moment it
+   should carry weight. Named by the page with `{: .ao-callout}`. */
+.ao-content blockquote.ao-callout {
+  padding: 0.9rem 1.15rem;
+  border-left-width: 4px;
+  background: var(--ao-brand-soft);
+  color: var(--ao-text);
+}
+
 .ao-content hr {
   margin: 2rem 0;
   border: 0;
@@ -558,18 +716,14 @@ a:hover {
   color: inherit;
 }
 
-/* Past the prose measure where there is room for it. The drawing is 1778px
-   native and its labels are 12–15px, so every pixel of width is legibility —
-   but it must never buy that by making the BODY scroll sideways, hence the
-   viewport-aware cap and the query that only fires once the sidebar and the
-   gutters are already paid for. */
-@media (min-width: 78rem) {
-  .ao-diagram-link,
-  .ao-hero {
-    width: min(78rem, calc(100vw - var(--ao-sidebar-w) - 7rem));
-    max-width: none;
-  }
-}
+/* The diagram and the hero fill their column and no more.
+   There WAS a breakout here, widening both past the prose measure to
+   `100vw - sidebar - gutters`. That subtraction knew about the sidebar and
+   nothing else, so once every page gained an on-this-page column it overshot by
+   exactly that column's width and drew the diagram underneath it. A breakout is
+   only ever as wide as the column it breaks out of, and with the content column
+   capped at the measure there is no room left to break into. The drawing's
+   detail lives behind its own full-size link. */
 
 .ao-diagram {
   display: block;
@@ -596,6 +750,149 @@ a:hover {
 
 .pf-v6-theme-dark .ao-diagram--dark {
   display: block;
+}
+
+/* --- card grid ------------------------------------------------------------ */
+/* A page names this with a kramdown attribute list on an ordinary markdown
+   list — `{: .ao-cards}` — so the content stays in the page and the rule stays
+   wordless. Each item is a card: its first paragraph is the heading, the rest
+   is the body. */
+/* A card names a thing and describes it: the first paragraph is the title, the
+   rest is the description. When the title is a link the WHOLE card is
+   clickable, and an arrow says so.
+
+   TWO columns, stated rather than derived. `auto-fit` with a minimum used to
+   decide the count, which meant the widest displays got three and the shape of
+   the section changed with the window. Two is the shape.
+
+   An odd card count leaves the last one alone in the first column at its normal
+   width. That is correct and deliberate: stretching it to fill the row makes it
+   look like a summary of the cards above rather than one more of them. */
+.ao-content ul.ao-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin: 0 0 1.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 48rem) {
+  .ao-content ul.ao-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ao-content ul.ao-cards > li {
+  position: relative;
+  margin: 0;
+  padding: 1.15rem 1.35rem 1.3rem;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface-alt);
+  color: var(--ao-text-subtle);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ao-content ul.ao-cards > li:hover {
+  border-color: var(--ao-brand);
+  background: var(--ao-surface);
+}
+
+.ao-content ul.ao-cards > li > p:first-child {
+  margin: 0 0 0.5rem;
+  padding-right: 1.75rem;
+  font-family: var(--ao-font-display);
+  font-weight: 700;
+  font-size: 1.12rem;
+  line-height: 1.3;
+  color: var(--ao-text);
+}
+
+/* The kind glyphs, COPIED from console/ui/src/graph/shapes.tsx — the same
+   silhouettes the console draws, so a reader who has used it recognises a
+   concept before reading its name. One-directional and deliberate, on the same
+   terms as the palette and the mark: a Jekyll site must not need a Node build
+   to publish a paragraph. Changing a glyph is a two-file change.
+
+   Drawn as a MASK, not a background image: a data-URI image cannot inherit
+   currentColor, and these have to follow the theme. A card names its icon with
+   an attribute list; this decides what that looks like. */
+.ao-content ul.ao-cards > li > p:first-child[class*='ao-icon-']::before {
+  content: "";
+  display: inline-block;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-right: 0.5rem;
+  vertical-align: -0.17rem;
+  background-color: var(--ao-brand);
+  -webkit-mask: var(--ao-glyph) center / contain no-repeat;
+  mask: var(--ao-glyph) center / contain no-repeat;
+}
+
+.ao-icon-profile {
+  --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 a4 4 0 1 1 0 8 a4 4 0 0 1 0-8 M4 21 a8 8 0 0 1 16 0 z'/%3E%3C/svg%3E");
+}
+
+.ao-icon-source {
+  --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13 2 L4 14 h6 l-1 8 9-12 h-6 z'/%3E%3C/svg%3E");
+}
+
+.ao-icon-toolset {
+  --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 5 a5 5 0 0 1 -6.5 6.5 L5 20 l-1-1 8.5-8.5 A5 5 0 0 1 19 4 l-3 3 1 1 3-3 z'/%3E%3C/svg%3E");
+}
+
+.ao-icon-channel {
+  --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 4 h16 v11 h-9 l-5 4 v-4 h-2 z'/%3E%3C/svg%3E");
+}
+
+.ao-icon-runtime {
+  --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 3 v2 M15 3 v2 M9 19 v2 M15 19 v2 M3 9 h2 M3 15 h2 M19 9 h2 M19 15 h2 M5 5 h14 v14 h-14 z M9 9 h6 v6 h-6 z'/%3E%3C/svg%3E");
+}
+
+.ao-icon-conversation {
+  --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3 h9 l4 4 v14 h-13 z M15 3 v4 h4 M9 12 h7 M9 16 h5'/%3E%3C/svg%3E");
+}
+
+.ao-icon-pipeline {
+  --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6 h7 a4 4 0 0 1 4 4 v4 a4 4 0 0 0 4 4 h3 M18 15 l3 3 -3 3'/%3E%3C/svg%3E");
+}
+
+/* The title carries the card's colour, not the link colour: the whole card is
+   the affordance, so a teal underlined phrase inside it would read as a second,
+   narrower target. */
+.ao-content ul.ao-cards > li > p:first-child a {
+  color: inherit;
+  text-decoration: none;
+  border: 0;
+}
+
+/* The overlay is what makes the card clickable rather than the words. */
+.ao-content ul.ao-cards > li > p:first-child a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--ao-radius);
+}
+
+/* Drawn on the LINKED title only — an arrow on a card that goes nowhere
+   promises a destination that does not exist. */
+.ao-content ul.ao-cards > li > p:first-child:has(a)::after {
+  content: "→";
+  position: absolute;
+  top: 1.15rem;
+  right: 1.35rem;
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-text);
+  font-weight: 400;
+}
+
+.ao-content ul.ao-cards > li:hover > p:first-child:has(a)::after {
+  color: var(--ao-brand);
+}
+
+.ao-content ul.ao-cards > li > :last-child {
+  margin-bottom: 0;
 }
 
 /* --- tables --------------------------------------------------------------- */

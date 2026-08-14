@@ -69,6 +69,9 @@ Documented HTTP contracts, no fork.
 
 ## Where to start
 
+- **[Introduction]({{ '/introduction/' | relative_url }})** — how the pieces fit
+  together, and what happens between a signal firing and an answer arriving in a
+  thread.
 - **[What it is and how to install it](https://github.com/kostiantyn-matsebora/agent-ops-operator#readme)** —
   the pitch, the architecture, and a five-minute demo that needs one credential
   and one flag.

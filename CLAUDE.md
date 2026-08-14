@@ -470,14 +470,52 @@ docs/                    reference pages: concepts.md (CRDs + capability
                          there is NO workflow, NO Gemfile and no Ruby in anyone's
                          path — a feature needing a plugin Pages does not enable
                          is implemented in the theme's own assets or dropped.
-                         index.md is the site's landing page; the reference pages
-                         above are NOT yet site deliverables. Carrying no front
+                         index.md (landing) and introduction.md (the adopter's
+                         orientation — the model, the lifecycle, the seams, and
+                         NO reference detail: a sentence a field rename would
+                         break belongs in concepts.md) are the site's pages; the
+                         reference pages above are NOT yet site deliverables.
+                         Carrying no front
                          matter they are STATIC FILES to Jekyll — copied verbatim,
                          never converted, never given a layout — so they serve as
-                         raw markdown at their URLs and nothing links to them.
-                         _layouts/page.html is for the change that publishes
-                         them: front matter makes a file a page, and then a
-                         missing layout DOES fail the build
+                         raw markdown at their URLs and nothing links to them AS
+                         SITE PAGES. _layouts/page.html is what introduction.md
+                         uses, via jekyll-default-layout: front matter makes a
+                         file a page, and then a missing layout DOES fail the
+                         build. Publishing a page is the file plus ONE line in
+                         _data/nav.yml — and the page DECLARES its permalink,
+                         because no permalink style is configured and the
+                         sidebar marks the current entry by comparing URLs.
+                         introduction.md is TWO SECTIONS — understand the
+                         concepts, follow the guides — and stays that way;
+                         anything else is a guide or a reference page (the
+                         signal-to-answer lifecycle is the first guide owed, not
+                         a section here).
+                         The SHELL is Astro Starlight's geometry, read off that
+                         site's own stylesheet and verified against it live:
+                         BOTH rails 18.75rem, text 45rem FIXED, and the leftover
+                         SPLIT EVENLY between the left gutter and the right
+                         container — the rail keeps its width at that container's
+                         left, so its half is empty space PAST the rail, never a
+                         fatter rail. Reproduced with an explicit
+                         `--ao-leftover`, because `minmax(base, 1fr)` on two
+                         tracks does NOT share a remainder: `fr` sizes against
+                         the whole free space, so both tracks come out the same
+                         WIDTH (that is what once gave an 810px rail beside a
+                         66px gutter). Body type is 17px on purpose — Red Hat
+                         Text is narrow, and at 16px that 45rem column reads 99
+                         characters.
+                         A page needing more than prose NAMES a component with a
+                         kramdown attribute list — `{: .ao-cards}` (a TWO-column
+                         grid, stated not derived; an odd count leaves the last
+                         card at normal width) or
+                         `{: .ao-callout}` (a blockquote that EMPHASISES — the
+                         plain one is an ASIDE in --ao-text-subtle, so rendering
+                         a load-bearing claim in it puts a footnote where the
+                         weight belongs). That attribute is the ONLY presentation
+                         a page may carry: no <div>, no inline style — and the
+                         content never moves to _includes/ or _data/ to get a
+                         look, which is the same rule read the other way
 CHANGELOG.md             every chart-version migration guide, newest first —
                          the ONLY place upgrade steps live
 ```
