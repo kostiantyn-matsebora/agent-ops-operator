@@ -419,6 +419,9 @@ a:hover {
   overflow-y: auto;
   padding: 2rem 1.5rem 2rem 1.5rem;
   border-left: 1px solid var(--ao-border);
+  /* A column, so the what-next card can be pushed to the foot of the rail. */
+  display: flex;
+  flex-direction: column;
 }
 
 .ao-toc[hidden] {
@@ -470,6 +473,65 @@ a:hover {
   border-left-color: var(--ao-brand);
   color: var(--ao-brand-strong);
   font-weight: 500;
+}
+
+/* The what-next card sits at the FOOT of the rail — `margin-top: auto` in a
+   flex column, so it stays there whether the contents above it is two entries
+   or twenty. Its words come from the page's front matter; this only places and
+   dresses them. */
+.ao-toc-next {
+  display: block;
+  margin-top: auto;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface-alt);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ao-toc-next:hover {
+  border-color: var(--ao-brand);
+  background: var(--ao-surface);
+}
+
+.ao-toc-next-eyebrow {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-family: var(--ao-font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+}
+
+.ao-toc-next-title {
+  display: block;
+  font-family: var(--ao-font-display);
+  font-weight: 700;
+  font-size: 0.98rem;
+  line-height: 1.3;
+  color: var(--ao-text);
+}
+
+/* The arrow says it leads somewhere, matching the concept cards. */
+.ao-toc-next-title::after {
+  content: " →";
+  color: var(--ao-text-subtle);
+}
+
+.ao-toc-next:hover .ao-toc-next-title::after {
+  color: var(--ao-brand);
+}
+
+.ao-toc-next-body {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--ao-text-subtle);
 }
 
 .ao-sidebar {

@@ -68,12 +68,13 @@ Eleven kinds, one line each; the full reference is [docs/concepts.md](docs/conce
 - **Structured chat.** Built-in lane prompts embed a six-template message format
   spec — no stream-of-consciousness walls.
 
-## Try it in five minutes (demo advisor)
+## Get started
 
 A project-agnostic, **read-only k8s-engineer** agent — no chat, no repository,
 no MCP setup. One credential, one flag:
 
 ```sh
+kubectl create namespace agent-ops
 kubectl -n agent-ops create secret generic agentops-claude \
   --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
 helm install agent-ops ./chart -n agent-ops --create-namespace --set global.demo.enabled=true
@@ -85,27 +86,17 @@ kubectl -n agent-ops run q --rm -i --image=curlimages/curl --restart=Never -- \
   -d '{"source":"cluster-events","signals":[{"fingerprint":"ask-1","kind":"task","payload":"any pods crashlooping?"}]}'
 
 kubectl -n agent-ops get conversations                  # watch it work
-kubectl -n agent-ops logs -f agentops-conv-<name>       # live agent transcript
-kubectl -n agent-ops get conversation <name> -o jsonpath='{.status.runs[0].result}'
 ```
 
-Demo mode is exactly [the k8s bundle with its defaults](docs/k8s-bundle.md) plus
-the read-only RBAC it resolves — nothing demo-specific exists.
+**[Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/)**
+is the walkthrough: what each command is for, what a good run looks like, what to
+check when nothing happens, and how to write your first route. Demo mode is
+exactly [the k8s bundle with its defaults](docs/k8s-bundle.md) plus the read-only
+RBAC it resolves — nothing demo-specific exists.
 
 > **It also watches your cluster**, ingesting `Warning` events and answering them
-> itself (LLM credits on a noisy cluster; cooldown, grouping and the cap bound
-> it). `--set k8s-bundle.eventsAdapter.enabled=false` restores ask-only.
-
-## Install (current state)
-
-```sh
-helm install agent-ops ./chart -n agent-ops --create-namespace
-# Agent sessions persist by default (an RWX PVC at /data/home). No default
-# StorageClass or no RWX provisioner? --set persistence.enabled=false.
-# CRDs carry helm.sh/resource-policy: keep — uninstall deletes neither your CRs
-# nor the session PVC.
-# Then your site config: profiles, Channel, SignalSource, pipelines (config/samples/)
-```
+> itself — LLM credits on a noisy cluster, with cooldown, grouping and the
+> conversation cap as the bounds.
 
 **The chart owns the substrate; bundles contribute domain** — `runtime:` renders
 the one `AgentRuntime` every conversation executes on, so an install with no
@@ -118,6 +109,7 @@ For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).
 | | |
 |---|---|
 | [Documentation site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) | The adopter hub: what this is, where to start, and every path onward |
+| [Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/) | Install, ask an agent a question, and write your first route |
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, and how a route's tools are resolved |
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
 | [docs/console.md](docs/console.md) | The console: topology, live runs, and the channel it also is |
