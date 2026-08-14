@@ -70,11 +70,9 @@ Documented HTTP contracts, no fork.
 ## Where to start
 
 - **[Introduction]({{ '/introduction/' | relative_url }})** — how the pieces fit
-  together, and what happens between a signal firing and an answer arriving in a
-  thread.
-- **[What it is and how to install it](https://github.com/kostiantyn-matsebora/agent-ops-operator#readme)** —
-  the pitch, the architecture, and a five-minute demo that needs one credential
-  and one flag.
+  together: what wakes an agent, what decides what it may touch, what runs it.
+- **[Getting started]({{ '/getting-started/' | relative_url }})** — install it,
+  ask an agent a question, and write the one route that grants it reach.
 - **[The kinds you will declare](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)** —
   every CRD in full, and how a route's tool access is resolved.
 

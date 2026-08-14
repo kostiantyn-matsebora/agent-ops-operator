@@ -470,10 +470,17 @@ docs/                    reference pages: concepts.md (CRDs + capability
                          there is NO workflow, NO Gemfile and no Ruby in anyone's
                          path — a feature needing a plugin Pages does not enable
                          is implemented in the theme's own assets or dropped.
-                         index.md (landing) and introduction.md (the adopter's
-                         orientation — the model, the lifecycle, the seams, and
-                         NO reference detail: a sentence a field rename would
-                         break belongs in concepts.md) are the site's pages; the
+                         index.md (landing), introduction.md (the adopter's
+                         orientation — the model, the seams, and NO reference
+                         detail: a sentence a field rename would break belongs in
+                         concepts.md) and getting-started.md (THE walkthrough —
+                         install and a first answer IN THE CONSOLE, ending where
+                         a getting-started page should: at something working.
+                         Wiring is the NEXT card, not its last section — which owns every
+                         expectation, flag and failure mode, so README keeps only
+                         the commands; its test is "would the reader TYPE it or
+                         READ it": what they type is on the page, what they read
+                         ABOUT is a link) are the site's pages; the
                          reference pages above are NOT yet site deliverables.
                          Carrying no front
                          matter they are STATIC FILES to Jekyll — copied verbatim,
@@ -515,7 +522,13 @@ docs/                    reference pages: concepts.md (CRDs + capability
                          weight belongs). That attribute is the ONLY presentation
                          a page may carry: no <div>, no inline style — and the
                          content never moves to _includes/ or _data/ to get a
-                         look, which is the same rule read the other way
+                         look, which is the same rule read the other way.
+                         FRONT MATTER is the other half of that division: a page
+                         declaring `next:` (eyebrow/title/body/url) gets the
+                         what-next card at the FOOT of the on-this-page rail, and
+                         a page declaring none gets no card — every word is the
+                         page's, the include only places it. Same shape as the
+                         landing page's `stats:` and its stat-icon include
 CHANGELOG.md             every chart-version migration guide, newest first —
                          the ONLY place upgrade steps live
 ```

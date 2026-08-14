@@ -11,4 +11,22 @@ rail and a reader with JavaScript off sees nothing rather than a broken shell.
 <aside class="ao-toc" id="ao-toc" aria-labelledby="ao-toc-title" hidden>
   <h2 class="ao-toc-title" id="ao-toc-title">On this page</h2>
   <nav class="ao-toc-nav" aria-labelledby="ao-toc-title"></nav>
+
+  {%- comment -%}
+  The what-next card, at the foot of the rail. Every word of it comes from the
+  page's own front matter — the theme decides where it sits and what it looks
+  like, and holds no prose of its own, which is the same division the card grid
+  and the stat tiles already use.
+  {%- endcomment -%}
+  {%- if page.next %}
+  <a class="ao-toc-next" href="{{ page.next.url }}">
+    {%- if page.next.eyebrow %}
+    <span class="ao-toc-next-eyebrow">{{ page.next.eyebrow }}</span>
+    {%- endif %}
+    <span class="ao-toc-next-title">{{ page.next.title }}</span>
+    {%- if page.next.body %}
+    <span class="ao-toc-next-body">{{ page.next.body }}</span>
+    {%- endif %}
+  </a>
+  {%- endif %}
 </aside>

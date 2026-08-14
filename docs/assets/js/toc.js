@@ -17,8 +17,12 @@
     .filter(function (h) { return !toc.contains(h); });
 
   // One heading is not a contents — it is the page. Leave the rail hidden
-  // rather than showing a list of one.
-  if (headings.length < 2) return;
+  // rather than showing a list of one — unless the page put a what-next card
+  // there, which is worth the rail on its own.
+  if (headings.length < 2) {
+    if (toc.querySelector('.ao-toc-next')) toc.hidden = false;
+    return;
+  }
 
   var list = document.createElement('ul');
   list.className = 'ao-toc-list';
