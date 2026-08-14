@@ -5,7 +5,7 @@ description: >-
   tasks become Conversations executed by per-conversation agent runtime pods.
 type: application
 version: 5.14.0
-appVersion: "0.29.1"
+appVersion: "0.30.1"
 dependencies:
   # embedded subchart (chart/charts/prometheus-bundle); templates are
   # additionally self-gated on prometheus-bundle.enabled

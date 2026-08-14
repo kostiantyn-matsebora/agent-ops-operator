@@ -10,6 +10,32 @@ import (
 	"time"
 )
 
+// couldBeConversation reports whether a directory name could ever have been a
+// Conversation's — i.e. whether it is a valid Kubernetes object name (RFC 1123
+// subdomain).
+//
+// WE ONLY REMOVE WHAT WE COULD HAVE CREATED. Anything else on the claim was put
+// there by something other than a subPath mount and is not ours to reclaim: a
+// real volume has `lost+found` at its root, which no Conversation can be called
+// (object names admit no '+') and which this job would otherwise have deleted
+// as an orphan on its very first run against a real filesystem. Found by a live
+// smoke on a Longhorn volume; a t.TempDir() has no such entry, which is exactly
+// why the unit tests missed it.
+func couldBeConversation(name string) bool {
+	if name == "" || len(name) > 253 || name[0] == '.' {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // Lister is the API half, injected so the tests can create a conversation
 // mid-scan — the one race the ordering below exists to eliminate.
 type Lister interface {
@@ -92,7 +118,7 @@ func ReclaimWorkspaces(ctx context.Context, root string, lister Lister, opts Opt
 	}
 	var dirs []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() && couldBeConversation(e.Name()) {
 			dirs = append(dirs, e.Name())
 		}
 	}

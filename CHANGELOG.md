@@ -15,6 +15,22 @@ different from the moment you upgrade.** Both new windows are off by default, so
 nothing is reclaimed that was not reclaimed before — and nothing is DESTROYED
 that was destroyed before either.
 
+**APPLY THE CRDs BEFORE THE MANAGER IMAGE.** `Conversation` gains phase `Closed`
+plus `status.closedAt`, `status.threadsArchived[]` and `status.reopens`. A
+manager on this version against the previous CRD cannot close anything: the API
+server rejects the phase, and because closing is retried, it fails in a loop —
+
+```
+status.phase: Unsupported value: "Closed": supported values: "Pending", "Idle", "Queued", "Working"
+```
+
+A normal `helm upgrade` handles this on its own (the chart ships CRDs as
+templates and `crds.enabled` defaults `true`). It bites installs that manage
+CRDs out of band — `crds.enabled: false`, a separate GitOps stage, or a cluster
+where several releases share one set. The schema change is purely additive (a
+wider enum and three optional fields), so applying it early is safe: an older
+manager never writes any of them.
+
 Closing and reclaiming used to be one act. `/close` deleted the `Conversation`,
 and with it `status.runs[].result`, the context handle and eventually the
 workspace directory. That made closing irreversible, which is precisely why

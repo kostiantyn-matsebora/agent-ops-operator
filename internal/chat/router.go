@@ -192,7 +192,13 @@ func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.C
 	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
 		return nil // already closed: no second farewell
 	}
-	r.FanOutSend(ctx, conv, Notice(farewell))
+	// A STABLE op id, so a close whose status write fails and is retried says
+	// goodbye once rather than once per attempt. The farewell still goes FIRST:
+	// a thread that simply stops is indistinguishable from a fault, so a lost
+	// farewell is worse than a suppressed duplicate.
+	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
+		r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
+	})
 	patch := client.MergeFrom(conv.DeepCopy())
 	now := metav1.Now()
 	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
