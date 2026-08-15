@@ -63,9 +63,9 @@ Documented HTTP contracts, no fork.
 - **Your own signal source** — Datadog, Dynatrace, Sentry, a sensor on your
   bench.
 - **Your own agent runtime** — Codex, Gemini, Copilot or a script of your own.
-  Swap the image; the work contract does not change.
+  Swap the image. The work contract does not change.
 - **Your own channel** — Slack, Teams, Discord, e-mail. The operator sends
-  meaning; your adapter renders it.
+  meaning, your adapter renders it.
 
 ## Where to start
 
@@ -105,4 +105,4 @@ Documented HTTP contracts, no fork.
 
 > The reference pages above are read on GitHub today. Bringing them onto this
 > site — with navigation, cross-page links and their own contents — is the next
-> change; this one lands the site itself.
+> change. This one lands the site itself.

@@ -2,8 +2,8 @@
 title: Getting started
 permalink: /getting-started/
 description: >-
-  Install agent-ops, ask an agent a question about your cluster from the
-  console, and see what a first run looks like.
+  Install the read-only demo, ask an agent about your cluster from the console,
+  and see what a first run looks like. A first look, not a deployment.
 
 next:
   eyebrow: Next
@@ -18,102 +18,107 @@ next:
 Install the operator and get your first question answered, in the console. About
 fifteen minutes, most of it the install.
 
+{: .ao-callout}
+> **A demo, not a deployment.** It exists to show you the product quickly. Do
+> not build on it — a page for real installs comes later.
+>
+> The agent is **read-only** and cannot change your cluster. Three walls, not
+> one: the MCP server runs `--read-only`, its identity holds only `view`, and
+> the route grants observing tools alone.
+
 ## Before you begin
 
 - A cluster you can `kubectl` into, and Helm.
 - A model credential — a Claude subscription token or an Anthropic API key.
-- **RWX storage, or one flag.** Sessions persist on a `ReadWriteMany` claim. No
-  RWX provisioner? Add `--set persistence.enabled=false` below — otherwise the
-  claim sits `Pending`, no runtime pod ever starts, and nothing says why.
+
+**Storage.** Sessions live on a `ReadWriteMany` claim.
+
+| Your cluster | What to do |
+|---|---|
+| Has an RWX provisioner | Nothing. |
+| Has none | Add `--set persistence.enabled=false` below. Without it the claim sits `Pending` and no pod ever starts. |
+
+**The trade: with persistence off, conversations do not remember.** Every run
+starts fresh. The operator tells you that up front rather than failing a
+follow-up later.
 
 ## Install
 
-```sh
-kubectl create namespace agent-ops
+1. **Create the namespace and the model credential.**
 
-kubectl -n agent-ops create secret generic agentops-claude \
-  --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   ```sh
+   kubectl create namespace agent-ops
 
-helm install agent-ops ./chart -n agent-ops --create-namespace \
-  --set global.demo.enabled=true \
-  --set console.auth.uiToken=demo \
-  --set 'k8s-bundle.pipelines.channels[0]=console'
+   kubectl -n agent-ops create secret generic agentops-claude \
+     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   ```
 
-kubectl -n agent-ops rollout status deploy/agentops-manager
-```
+2. **Install the chart.** The flag brings up
+   [the k8s bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md),
+   wired to the console. The token is just to sign in — pick a real one outside
+   a laptop.
 
-`global.demo.enabled` installs [the k8s bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md)
-with its defaults. The other two make the console usable: a sign-in token you can
-actually type, and the console bound as the channel the agent answers on. Pick a
-real token for anything but a laptop — whoever holds it can instruct the agent.
+   ```sh
+   helm install agent-ops ./chart -n agent-ops --create-namespace \
+     --set global.demo.enabled=true \
+     --set console.auth.uiToken=demo
+   ```
+
+3. **Wait for the manager.**
+
+   ```sh
+   kubectl -n agent-ops rollout status deploy/agentops-manager
+   ```
 
 Four objects matter here:
 
-| | |
+| Object | What it is |
 |---|---|
-| `SignalSource/cluster-events` | where cluster events arrive |
+| `SignalSource/console` | where your questions enter |
 | `AgentProfile/k8s-engineer` | who the agent is. Identity only, no tools |
-| `Pipeline/k8s-observe` | the wiring: that source, that profile, a read-only toolset |
+| `Pipeline/k8s-observe` | the wiring: those sources, that profile, a read-only toolset |
 | `AgentRuntime/default` | the image it runs in, and the credential it uses |
-
-One more step, and it is the whole idea of the product in one command. The
-console can *show* conversations, but starting one means posting a signal from
-its own source — and nothing claims that source yet. Let the route claim it:
-
-```sh
-kubectl -n agent-ops patch pipeline k8s-observe --type=json \
-  -p '[{"op":"add","path":"/spec/signalSourceRefs/-","value":{"name":"console"}}]'
-```
-
-Without that, the console loads and its composer is unavailable, saying exactly
-this.
 
 ## Ask it something
 
-```sh
-kubectl -n agent-ops port-forward svc/agentops-adapter-console 8080:8080
-```
+1. **Forward the console's port.**
 
-Open **<http://localhost:8080>**, sign in with `demo`, and press **New
-conversation**. Ask it something about the cluster:
+   ```sh
+   kubectl -n agent-ops port-forward svc/agentops-adapter-console 8080:8080
+   ```
 
-> How many nodes does this cluster have?
+2. **Open <http://localhost:8080>** and sign in with `demo`.
 
-Your question is not a special API call — the console posts it as an ordinary
-signal to its own source, and the Pipelines claiming that source decide who
-answers ([contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md)).
-The answer comes back into the same thread, because the install bound the console
-as a channel.
+3. **Press New conversation** and ask:
+
+   > How many nodes does this cluster have?
+
+No special API is involved. Your question is an ordinary signal, and the route
+claiming the console decides who answers
+([contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md)).
 
 ## What a good run looks like
 
-Expect a pause before anything happens — a pod has to start and an image to
-pull. The conversation appears in the console and moves through:
+Expect a pause first — a pod has to start and an image to pull. Then, in the
+console:
 
-| | |
+| Phase | Meaning |
 |---|---|
 | `Working` | input admitted, runtime pod created |
 | `Idle` | run finished, nothing queued |
 
-Then the answer arrives in the thread. Ask a follow-up in the same thread and it
-keeps its context.
+The answer lands in the thread. Follow-ups in the same thread keep their context.
 
-The same thing from the outside, if you want to watch it land:
-
-```sh
-kubectl -n agent-ops get conversations -w
-```
-
-The name is generated — `chat-` or `task-` plus a suffix. Its runtime pod is
-`agentops-conv-<name>`, which goes `1/1 Running` and **stays running after the
-answer**, so a follow-up does not pay for a cold start; it exits on its own after
-the runtime's idle TTL.
-
-Live transcript:
+From the outside:
 
 ```sh
-kubectl -n agent-ops logs -f agentops-conv-<name>
+kubectl -n agent-ops get conversations -w              # names are generated
+kubectl -n agent-ops logs -f agentops-conv-<name>      # live transcript
+kubectl -n agent-ops get conversation <name> \
+  -o jsonpath='{.status.runs[0].result}'               # the answer, durably
 ```
+
+The transcript names the tools the route granted, then every call:
 
 ```
 [runtime] tools agent=- declared=0 wiring=24 mode=merge -> Read,Grep,Glob,Bash,mcp__kubernetes__…
@@ -123,19 +128,16 @@ kubectl -n agent-ops logs -f agentops-conv-<name>
 === RESULT (success, 3 turns, 8s) ===
 ```
 
-The durable copy — read it after the pod is gone:
-
-```sh
-kubectl -n agent-ops get conversation <name> -o jsonpath='{.status.runs[0].result}'
-```
+The pod outlives the answer on purpose, so a follow-up skips the cold start. It
+exits on the idle TTL.
 
 ## When nothing happens
 
 | Cause | Where it shows |
 |---|---|
-| Bad or missing credential | `status.runs[].status: failed` with a non-zero exit code; reason in `kubectl logs` |
-| No RWX storage class | `agentops-home` PVC `Pending`; conversation exists, never gets a pod |
-| Nothing claims the source | the source's `Wired` condition is `False` with a reason; the console says its composer is unavailable, and signals are dropped rather than queued |
+| Bad or missing credential | the run fails — `status.runs[].status: failed`, non-zero exit code, reason in `kubectl logs` |
+| No RWX storage class | the `agentops-home` PVC sits `Pending`. The conversation exists but never gets a pod |
+| Nothing claims the source | the source's `Wired` condition is `False` with a reason. The console reports its composer unavailable, and signals are dropped |
 | At capacity | phase `Pending`, no pod, no thread. Five run at once by default |
 
 ## Where to go next

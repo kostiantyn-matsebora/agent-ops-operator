@@ -498,6 +498,17 @@ docs/                    reference pages: concepts.md (CRDs + capability
                          anything else is a guide or a reference page (the
                          signal-to-answer lifecycle is the first guide owed, not
                          a section here).
+                         The DEMO WIRES THE CONSOLE: where k8s-bundle renders a
+                         route, that route claims the console's source and binds
+                         it as a channel, from `global.agentops.console`
+                         (a subchart reads no other parent scope, and helm cannot
+                         derive a value from a value). Those names DUPLICATE
+                         `console.signalSourceName`/`channelName`, so the render
+                         FAILS when they disagree — scoped to demo mode, because
+                         `console.enabled: false` is pinned to remove every
+                         console object with ONE value. The claim rides the
+                         EXISTING route: a second claimant makes every
+                         unaddressed console message ambiguous.
                          The SHELL is Astro Starlight's geometry, read off that
                          site's own stylesheet and verified against it live:
                          BOTH rails 18.75rem, text 45rem FIXED, and the leftover
@@ -911,6 +922,30 @@ the pages hold no theme.** A layout or include that starts explaining a CRD is i
 the wrong file, and so is a markdown page that opens with a `<div>` or an inline
 style. Adding a page to the site is a page plus one line in `_data/nav.yml` —
 never navigation markup written a second time.
+
+**ADOPTER DOCUMENTATION IS STRUCTURE OVER PROSE.** Everything an adopter reads —
+the site pages above all — is written to be SCANNED, and the markdown is the
+structure:
+
+- **Structure first.** A procedure is NUMBERED STEPS. A mapping is a TABLE. A
+  set is BULLETS. The one claim a page rests on is a callout. A paragraph that
+  enumerates is a list that has not been written yet.
+- **Short sentences, one idea each.** A sentence with three clauses is three
+  sentences. If it has to be read twice, it is wrong.
+- **NO SEMICOLONS.** A `;` is a full stop that lost its nerve — it is the tell of
+  a sentence that should have been two. Forbidden in adopter prose, whatever the
+  grammar allows.
+- **Small paragraphs.** Past about three lines, it stops being read — break it,
+  or make it a list.
+- **Emphasise the load-bearing phrase**, not the sentence around it. Everything
+  bold means nothing bold.
+- **Cut what earns nothing.** The reasoning belongs in the reference page that
+  owns it, in this file, or in the commit message — not in the walkthrough.
+
+The failure mode is recognisable and has been shipped here more than once: long
+compound sentences, every point explained twice, nothing scannable — prose doing
+a table's job. Reference pages under `docs/` may be dense, a page an adopter
+meets first may not.
 
 **The site's `--ao-*` palette is COPIED from `console/ui/src/theme/theme.css`**
 into the token blocks at the head of `docs/assets/css/agentops.css` — so

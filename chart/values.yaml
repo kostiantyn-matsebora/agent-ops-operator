@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.32.0
+  tag: 0.33.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -171,6 +171,23 @@ global:
       # exercise.
       rbacMode: ""
 
+    # What a subchart needs to know about the console, in the ONE scope it can
+    # read. A bundle that ships a route claims this source and binds this
+    # channel, so an install that deploys the console can start a conversation
+    # in it without an operator wiring that up by hand — the console shipped
+    # inert otherwise, which is a working demo in every part except the one
+    # anybody opens first.
+    #
+    # These MIRROR `console.enabled` / `console.signalSourceName` /
+    # `console.channelName` and the render FAILS if they disagree: values cannot
+    # be derived from other values, so the duplication is real and is made safe
+    # by being checked rather than trusted. Setting `console.enabled: false`
+    # means clearing `signalSource` and `channel` here too, and the failure says
+    # exactly that.
+    console:
+      signalSource: console
+      channel: console
+
   # The built-in tool vocabulary as MCPToolset CRs, so profiles and pipelines can
   # NAME tools instead of inlining comma strings. Split by risk on purpose — that
   # is what lets one route observe while another executes:
@@ -301,7 +318,7 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.12.0
+    tag: 0.13.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:

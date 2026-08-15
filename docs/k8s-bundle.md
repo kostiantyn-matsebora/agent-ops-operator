@@ -101,10 +101,29 @@ in the parent's `pipelines:` both claim the source; the post-install notes name
 the pipelines involved rather than failing the render, because refusing it would
 be the deleted `sourceConflicts` guard returning one layer up.
 
+### The console is claimed by default
+
+Where the route renders, it also claims the console's signal source and binds the
+console as a channel. That is what makes a turnkey install usable from the
+browser: without the claim the console's source sits `Wired=False`, its composer
+reports itself unavailable, and no answer reaches it.
+
+Both names come from `global.agentops.console` — a subchart reads no other parent
+scope, and Helm cannot derive one value from another. The names therefore
+duplicate `console.signalSourceName` / `console.channelName`, and the parent
+**fails the render** when the two disagree, rather than leaving a route claiming
+a source nothing rendered. Turning the console off under demo mode means
+clearing both, and the failure says so.
+
+The claim rides the route the bundle already ships. A second route claiming the
+console source would make every unaddressed console message ambiguous, since a
+bare chat message with more than one claimant is refused.
+
 ### Channels, and what happens without one
 
-`pipelines.channels` is a list of names, empty by default, and the `channelRefs`
-key is **absent** — not empty-valued — when nothing is named. Empty is a working
+`pipelines.channels` is a list of names the operator supplies, merged with the
+console rather than replacing it. With no console and none named, the
+`channelRefs` key is **absent** — not empty-valued. Empty is a working
 configuration: with no thread to wait for, the conversation dispatches
 immediately and the answer is read from the CR.
 
