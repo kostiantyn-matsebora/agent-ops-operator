@@ -27,6 +27,21 @@ explicitly.
 a ref to a toolset nobody created is how an allowlist rots into fiction. */ -}}
 {{- $sources := list }}
 {{- if and $ea.enabled $ea.source.create }}{{ $sources = append $sources $ea.source.name }}{{ end }}
+{{- /* The console's chat source, claimed so the console can START a conversation
+and not merely display ones something else began. A values-supplied NAME for an
+object this bundle does not render — the same terms `channels` is on — read from
+`global.` because that is the only parent scope a subchart sees, and omitted when
+the parent clears it (which the parent's own render guard requires whenever the
+console is disabled). Without this claim the console installs inert: its source
+sits Wired=False and its composer reports itself unavailable. */ -}}
+{{- $gc := dig "agentops" "console" dict $g }}
+{{- with get $gc "signalSource" | default "" }}{{ $sources = append $sources . }}{{ end }}
+{{- /* And the console as a channel, so the answer comes back into the thread the
+question was asked in. Values-named channels still win a place beside it. */ -}}
+{{- $channels := $p.channels | default list }}
+{{- with get $gc "channel" | default "" }}
+{{- if not (has . $channels) }}{{ $channels = append $channels . }}{{ end }}
+{{- end }}
 {{- $readTools := list }}
 {{- if dig "builtinToolsets" "enabled" false $g }}
 {{- $readTools = append $readTools (dig "builtinToolsets" "observe" "name" "agentops-observe" $g) }}
@@ -67,9 +82,9 @@ spec:
     - name: {{ . }}
     {{- end }}
   {{- end }}
-  {{- with $p.channels }}
-  # The one class of object this bundle does not render, so it is named from
-  # values and the key is absent when nobody named one. With no channel the
+  {{- with $channels }}
+  # A class of object this bundle does not render, so each is named from values
+  # and the key is absent when nobody named one. With no channel the
   # conversation dispatches immediately and its answer lands in
   # status.runs[].result.
   channelRefs:

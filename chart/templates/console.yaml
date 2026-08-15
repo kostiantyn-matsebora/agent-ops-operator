@@ -24,6 +24,37 @@ Pipelines would be a new and worse pattern. Until the source is claimed the
 console cannot start conversations and says so, with the patch. The post-install
 notes print it.
 */ -}}
+{{- /*
+The console's identity is duplicated into `global.agentops.console` so subcharts
+can see it — a subchart reads no other parent scope, and Helm cannot derive one
+value from another. Duplication that cannot be removed is made SAFE by being
+checked: a bundle route claiming a source this release does not render is a
+dangling ref that reports Wired=True and drops every signal, which is the exact
+failure a render guard is cheap enough to prevent.
+*/ -}}
+{{- $gc := dig "agentops" "console" dict (.Values.global | default dict) }}
+{{- $gSource := get $gc "signalSource" | default "" }}
+{{- $gChannel := get $gc "channel" | default "" }}
+{{- /* Only under the turnkey flag. `console.enabled: false` is pinned to remove
+every console object with ONE value, and a guard that demanded two more would
+break that promise for every ordinary install. Demo mode is the one place the
+claim is made, so it is the only place the names have to agree. */ -}}
+{{- if .Values.global.demo.enabled }}
+{{- if .Values.console.enabled }}
+{{- $wantSource := .Values.console.signalSourceName | default .Values.console.name }}
+{{- $wantChannel := .Values.console.channelName | default .Values.console.name }}
+{{- if and $gSource (ne $gSource $wantSource) }}
+{{- fail (printf "global.agentops.console.signalSource is %q but the console originates from %q — set global.agentops.console.signalSource=%s" $gSource $wantSource $wantSource) }}
+{{- end }}
+{{- if and $gChannel (ne $gChannel $wantChannel) }}
+{{- fail (printf "global.agentops.console.channel is %q but the console Channel is %q — set global.agentops.console.channel=%s" $gChannel $wantChannel $wantChannel) }}
+{{- end }}
+{{- else }}
+{{- if or $gSource $gChannel }}
+{{- fail "demo mode with console.enabled=false still names global.agentops.console.signalSource/.channel — the demo route would claim a source this release does not render. Set global.agentops.console.signalSource=\"\" and .channel=\"\", or leave the console on" }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if .Values.console.enabled }}
 {{- $c := .Values.console }}
 {{- $sa := printf "agentops-adapter-%s" $c.name }}

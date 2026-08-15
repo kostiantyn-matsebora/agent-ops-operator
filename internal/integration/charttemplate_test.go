@@ -1034,32 +1034,71 @@ func TestBothRoutesRenderWithoutConflict(t *testing.T) {
 // and omitted when unset, and every ref to its own components disappears with
 // them. A ref to an object nobody rendered is how an allowlist rots.
 func TestWiringNamesOnlyWhatWasRendered(t *testing.T) {
-	// no channel named: the key is ABSENT, not empty-valued
+	// The console is deployed by default and the route claims it, so a turnkey
+	// install can start a conversation in the surface it just installed.
 	bare := bundlePipelines(helmTemplate(t, "--set", "global.demo.enabled=true"))["k8s-observe"]
-	if strings.Contains(bare, "channelRefs") {
-		t.Errorf("an empty channel list must omit the key entirely:\n%s", bare)
+	if !strings.Contains(bare, "channelRefs:\n    - name: console") {
+		t.Errorf("the console must be bound as a channel by default:\n%s", bare)
+	}
+	if !strings.Contains(bare, "- name: console\n") || !strings.Contains(bare, "signalSourceRefs") {
+		t.Errorf("the console's source must be claimed by default:\n%s", bare)
 	}
 
+	// A named channel joins the console rather than replacing it.
 	named := helmTemplate(t, "--set", "global.demo.enabled=true",
-		"--set", "k8s-bundle.pipelines.channels={console}")
-	if doc := bundlePipelines(named)["k8s-observe"]; !strings.Contains(doc, "channelRefs:\n    - name: console") {
-		t.Errorf("a named channel must reach the Pipeline:\n%s", doc)
+		"--set", "k8s-bundle.pipelines.channels={home-ops}")
+	if doc := bundlePipelines(named)["k8s-observe"]; !strings.Contains(doc, "- name: home-ops") ||
+		!strings.Contains(doc, "- name: console") {
+		t.Errorf("a named channel must join the console, not replace it:\n%s", doc)
 	}
 
-	// every component the route would reference, turned off at once
+	// Every component the route would reference, turned off at once — INCLUDING
+	// the console, whose names the parent must clear when it is not deployed.
 	off := helmTemplate(t, "--set", "global.demo.enabled=true",
 		"--set", "k8s-bundle.mcp.enabled=false",
 		"--set", "k8s-bundle.mcpServers.enabled=false",
 		"--set", "global.builtinToolsets.enabled=false",
-		"--set", "k8s-bundle.eventsAdapter.source.create=false")
+		"--set", "k8s-bundle.eventsAdapter.source.create=false",
+		"--set", "console.enabled=false",
+		"--set", "global.agentops.console.signalSource=",
+		"--set", "global.agentops.console.channel=")
 	doc := bundlePipelines(off)["k8s-observe"]
 	if doc == "" {
 		t.Fatal("the route still renders — it is gated on the profile, not on tooling")
 	}
-	for _, dangling := range []string{"signalSourceRefs", "toolsets", "mcpConfigs"} {
+	for _, dangling := range []string{"signalSourceRefs", "channelRefs", "toolsets", "mcpConfigs"} {
 		if strings.Contains(doc, dangling) {
 			t.Errorf("%s must be omitted when nothing rendered it:\n%s", dangling, doc)
 		}
+	}
+}
+
+// The console's identity is duplicated into `global.` so subcharts can read it,
+// and Helm cannot derive one value from another — so the render FAILS when the
+// two disagree rather than leaving a route claiming a source nothing renders.
+func TestConsoleWiringGuard(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "disabled console still published",
+			args: []string{"--set", "global.demo.enabled=true", "--set", "console.enabled=false"},
+			want: "still names global.agentops.console.signalSource",
+		},
+		{
+			name: "renamed source not republished",
+			args: []string{"--set", "global.demo.enabled=true", "--set", "console.signalSourceName=console-k8s"},
+			want: "global.agentops.console.signalSource",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := helmTemplateErr(t, tc.args...)
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("failure must name the value to set, got:\n%s", out)
+			}
+		})
 	}
 }
 

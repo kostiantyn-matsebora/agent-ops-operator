@@ -958,14 +958,22 @@ a:hover {
 }
 
 /* --- tables --------------------------------------------------------------- */
-.ao-table-scroll,
-.ao-content table {
+/* A table is a TABLE, so its cells divide the column. It used to be
+   `display: block` for the scroll frame — which makes a table shrink to its
+   content and leave a ragged empty gutter beside it, reading as a rendering
+   accident. Anything genuinely too wide gets the scroll frame by name
+   (`{: .ao-table-scroll}` on a wrapper), rather than every table paying for it. */
+.ao-table-scroll {
   display: block;
   max-width: 100%;
   overflow-x: auto;
 }
 
 .ao-content table {
+  display: table;
+  width: 100%;
+  max-width: 100%;
+  table-layout: auto;
   margin: 0 0 1.25rem;
   border-collapse: collapse;
   border: 1px solid var(--ao-border);

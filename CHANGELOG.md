@@ -8,6 +8,33 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### The demo wires the console — chart 5.18.0
+
+**No action for an ordinary install.** Where the k8s bundle renders a route, that
+route now also claims the console's signal source and binds the console as a
+channel. A turnkey install (`global.demo.enabled=true`) can therefore start a
+conversation in the console immediately. It previously installed the console
+inert: source `Wired=False`, composer unavailable, no answer ever delivered to
+it.
+
+The names come from a new `global.agentops.console` block, because a subchart
+reads no other parent scope and Helm cannot derive one value from another. They
+duplicate `console.signalSourceName` / `console.channelName`, so the render
+**fails** when the two disagree rather than leaving a route claiming a source
+nothing rendered.
+
+**One combination now fails the render:** demo mode with the console disabled.
+
+```sh
+# demo + console.enabled=false must also clear the published names
+--set console.enabled=false \
+--set global.agentops.console.signalSource= \
+--set global.agentops.console.channel=
+```
+
+Outside demo mode nothing changed, and `console.enabled=false` still removes
+every console object with one value.
+
 ### `/exit` releases a conversation's runtime — chart 5.17.0
 
 **Additive. No CRD change, no contract change, nothing to do on upgrade.**

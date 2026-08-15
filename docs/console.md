@@ -190,11 +190,12 @@ its activity index by cursor replay.
 
 ### Conversations
 
-Server-side filtering (phase, pipeline, profile, channel, errored, search),
-sorting by last activity, and pagination with a total match count — an event storm
-makes thousands, and shipping them all so the browser can hide most is how a
-viewer becomes an API-server problem. Run history is dropped from list rows; a
-result is a whole agent message.
+Server-side filtering (phase, pipeline, profile, channel, errored, unread,
+search), sorting by last activity, and pagination with a total match count — an
+event storm makes thousands, and shipping them all so the browser can hide most
+is how a viewer becomes an API-server problem. Run history is dropped from list
+rows; a result is a whole agent message, and each row carries its read state
+instead.
 
 Detail is tabbed:
 
@@ -215,6 +216,52 @@ Detail is tabbed:
   latency. This is where "why did that take 40 seconds" gets answered, and it is
   the view a graph cannot replace.
 - **YAML** — the Conversation object.
+
+### Unread
+
+Conversations whose console thread has activity newer than its watermark are
+marked in the list, an **Unread only** switch narrows to them, and the count
+rides on the *Conversations* navigation item. Opening a conversation reports its
+console thread read; **Mark read** over a selection clears a batch of them.
+
+**Read is per CHANNEL, not per person.** The watermark lives on the
+conversation's thread binding ([concepts](concepts.md#read-state-per-thread)),
+so two operators sharing one console share one mark: whoever opens a
+conversation clears it for both. That is the chosen model, not a defect — a
+per-person mark would need a per-user identity store the console does not have
+and will not grow. Its useful half is the other direction: reading a
+conversation in Telegram does **not** clear it here, and reading it here does not
+clear it there.
+
+The rest of what it does, and why:
+
+- **Only conversations the console holds a thread on.** An *observed* one is
+  never unread: the console has no watermark on it and no standing to call it
+  new. Same reach boundary as closing, and a batch naming one comes back
+  `skipped` with the same fix.
+- **The count is computed before any filter**, over every conversation, so
+  narrowing the view never moves it — a count that shrank because you filtered
+  would let a filter hide a backlog without saying so.
+- **The browser never invents a timestamp.** A read is reported with the
+  watermark the server read off the conversation's own state, and nothing is
+  sent when it would not advance. The manager clamps and enforces monotonicity
+  on top of that, so a stale page cannot un-read a thread.
+- **The batch is bounded at 50**, the list page size, enforced by the server —
+  the selection is over the rows on screen, and there is no "mark everything
+  matching the filter", for the reason there is no close-everything.
+- **It is authenticated and attributed, but NOT behind the write gate.**
+  `console.write.enabled` makes the console a strict viewer by removing its
+  ability to instruct an agent or start work; a read watermark does neither. A
+  read-only console still selects rows and marks them read — one that could show
+  a backlog and never clear it would be broken in the way the unread mark exists
+  to fix.
+- **The mark only moves forward.** There is no "mark as unread": a watermark
+  that could go backwards is a different mechanism, and reading a conversation
+  again is what makes it read.
+
+Threads bound before this existed are treated as **read** — see the backfill
+rule in [concepts](concepts.md#read-state-per-thread). Right after the upgrade
+the list is therefore quiet, and fills as new activity arrives.
 
 ### Closing a batch
 
@@ -328,11 +375,17 @@ Four things fall out of that:
    channel set includes the console Channel, so the result already has a console
    thread. No pipeline edit, no copy-paste patch.
 
-**It requires a claim.** The chart ships the `SignalSource` and **no Pipeline** —
-wiring names a profile, sources and channels from different bundles, so only the
-installer sees all of it. Until a Ready Pipeline claims the console source it
-sits at `Wired=False`, the picker is unavailable, and the UI shows that reason
-with the patch:
+**It requires a claim** — which a bundle that ships a route now makes for you.
+Where the k8s bundle renders its route, that route claims the console source and
+binds the console as a channel, so a turnkey install can start a conversation in
+the console with no wiring step. The names come from `global.agentops.console`,
+and the render fails if they disagree with the console's own
+(see [the k8s bundle](k8s-bundle.md)).
+
+Nothing else claims it for you. Wiring names a profile, sources and channels from
+different bundles, so only the installer sees all of it. Until a Ready Pipeline
+claims the console source it sits at `Wired=False`, the picker is unavailable,
+and the UI shows that reason with the patch:
 
 ```sh
 kubectl patch pipeline <name> --type=json \
