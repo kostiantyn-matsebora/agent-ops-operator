@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert, Button, Card, CardBody, CardTitle, ClipboardCopy,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
@@ -8,7 +8,7 @@ import {
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useParams } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../App'
-import { useConversation, useConversationGraph, useSession } from '../api/hooks'
+import { useConversation, useConversationGraph, useMarkRead, useSession } from '../api/hooks'
 import { PlainText } from '../components/Text'
 import { Graph } from '../graph/Graph'
 import { api, ApiError } from '../api/client'
@@ -21,6 +21,30 @@ export function ConversationPage() {
   const { name = '' } = useParams()
   const { data, isLoading, error, refetch } = useConversation(name)
   const [tab, setTab] = useState<string | number>(0)
+
+  // Opening a conversation reports its CONSOLE thread read, and reports again
+  // as activity arrives while the view stays open.
+  //
+  // The watermark is never generated here — the server reads it off the
+  // conversation's own state, and `unread` is what says the report would
+  // advance anything at all, so a re-opened, already-read conversation sends
+  // nothing. Observed conversations are skipped: no console thread, no
+  // watermark to move.
+  const markRead = useMarkRead()
+  const summary = data?.conversation
+  const reported = useRef('')
+  const activity = summary?.lastActivity ?? summary?.created ?? ''
+  const joinedUnread = Boolean(summary?.joined && summary?.unread)
+  useEffect(() => {
+    if (!summary || !joinedUnread) return
+    const stamp = `${summary.name}:${activity}`
+    if (reported.current === stamp) return
+    reported.current = stamp
+    markRead.mutate({ names: [summary.name] })
+    // Deliberately keyed on the conversation and its activity, not on the
+    // mutation handle: re-running on the handle would report on every render.
+  }, [summary?.name, joinedUnread, activity])
+
   if (isLoading && !data) return <Loading />
   if (error || !data) return <ErrorState title="Conversation not found">{String(error)}</ErrorState>
 

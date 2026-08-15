@@ -18,6 +18,12 @@
 //	GET  /channel/state/{channel}/{key} adapter cursor state (annotation-backed)
 //	PUT  /channel/state/{channel}/{key}
 //	POST /channel/channels/{name}/status  {"ready","reason"?,"message"?}
+//	POST /channel/read                  {"channel","reads":[{"threadId","readAt"}]}
+//
+// /channel/read is OPTIONAL: an adapter that never calls it stays fully
+// conformant and its threads simply carry no watermark. The manager owns the
+// write — the adapter reports how far a thread has been seen and issues no
+// Kubernetes write of its own.
 package httpapi
 
 import (
@@ -126,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /channel/state/{channel}/{key}", s.adapterAuth(s.handleStateGet))
 	mux.HandleFunc("PUT /channel/state/{channel}/{key}", s.adapterAuth(s.handleStatePut))
 	mux.HandleFunc("POST /channel/channels/{name}/status", s.adapterAuth(s.handleChannelStatus))
+	mux.HandleFunc("POST /channel/read", s.adapterAuth(s.handleChannelRead))
 	mux.HandleFunc("POST /signal/inbound", s.signalAuth(s.handleSignalInbound))
 	mux.HandleFunc("GET /signal/sources", s.signalAuth(s.handleSignalSources))
 	mux.HandleFunc("GET /signal/state/{source}/{key}", s.signalAuth(s.handleSignalStateGet))

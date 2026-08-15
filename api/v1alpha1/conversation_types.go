@@ -132,6 +132,21 @@ type ConversationSpec struct {
 	// (e.g. alertgroup/alertname/namespace, job:<name>).
 	// +optional
 	Signature string `json:"signature,omitempty"`
+	// OriginReader records WHO started this conversation, so their own read
+	// watermark can be stamped the moment their thread is created — the person
+	// who typed the request has by definition seen it, and presenting it back
+	// to them as unread before any answer exists is the one case the watermark
+	// rule gets plainly wrong.
+	//
+	// Written once at creation and read EXACTLY ONCE, when the binding on its
+	// channel is established. It is provenance in the same sense as
+	// PipelineRef: nothing resolves anything through it, and it grants nothing.
+	//
+	// The key is OPAQUE — the originating surface's own salted hash, in that
+	// surface's key space, which is why the channel is recorded beside it. No
+	// identity is stored, here or anywhere else on this object.
+	// +optional
+	OriginReader *OriginReader `json:"originReader,omitempty"`
 	// Toolsets / MCPConfigs are the originating Pipeline's tooling bindings,
 	// snapshotted at creation like ChannelRefs and ProfileRef: materialized
 	// per-conversation state, NOT wiring — nothing sets them by hand, and
@@ -237,6 +252,15 @@ type InflightRun struct {
 	DispatchedAt metav1.Time `json:"dispatchedAt,omitempty"`
 }
 
+// OriginReader names the reader who started a conversation, in the key space of
+// the channel they started it from. Keys are per-channel by construction — each
+// surface salts its own — so the channel is not decoration: stamping this key
+// on another channel's binding would record a reader nothing can match.
+type OriginReader struct {
+	Channel string `json:"channel"`
+	Key     string `json:"key"`
+}
+
 // ThreadBinding pins one bound channel to its conversation thread.
 type ThreadBinding struct {
 	// Channel name (same namespace).
@@ -244,6 +268,97 @@ type ThreadBinding struct {
 	// ThreadID — an opaque string in the channel type's own id space (e.g. a
 	// Telegram forum topic id in decimal, a Slack ts).
 	ThreadID string `json:"threadId"`
+	// ReadAt is how far this thread has been SEEN — reported by the adapter that
+	// serves the channel, never inferred. MONOTONIC: it only moves forward, and
+	// the manager clamps it to its own clock, so neither a stale client nor a
+	// skewed one can un-read a thread or mark future activity read.
+	//
+	// Per THREAD, therefore per CHANNEL: a conversation bound to Telegram and the
+	// console has two audiences reading it in two places, and one shared mark
+	// would let a Telegram reader clear the console's.
+	// +optional
+	ReadAt *metav1.Time `json:"readAt,omitempty"`
+	// ReadTracked marks a binding created by a manager that tracks reads. It is
+	// what tells a NEVER-READ binding from a PRE-UPGRADE one — both look like "a
+	// binding with no readAt", and no timestamp can separate them, exactly as
+	// with status.runs[].deliveryTracked.
+	//
+	// Absent (an older manager bound the thread): treated as READ, so upgrading
+	// never presents the whole namespace as new.
+	// Set with no ReadAt: genuinely unseen, and unread.
+	// +optional
+	ReadTracked bool `json:"readTracked,omitempty"`
+	// Readers is the PER-IDENTITY watermark, for transports that can tell one
+	// reader from another. ReadAt above stays the CHANNEL-WIDE mark and is not
+	// replaced by this: a Telegram topic is read or it is not, and there is
+	// nobody to attribute that to — so an adapter reporting no reader keeps
+	// reporting only the channel-wide mark and stays fully conformant.
+	//
+	// BOUNDED at MaxReadersPerThread, oldest watermark evicted first, because
+	// this list grows with readers × conversations. Eviction is not a loss: an
+	// evicted reader falls back to the channel-wide mark, exactly as a reader
+	// who has never reported does.
+	// +optional
+	Readers []ReaderMark `json:"readers,omitempty"`
+}
+
+// MaxReadersPerThread bounds the per-identity overlay on one binding.
+const MaxReadersPerThread = 50
+
+// ReaderMark is one identity's watermark on a thread.
+type ReaderMark struct {
+	// Key identifies the reader and is OPAQUE to the manager — a salted hash
+	// the reporting adapter computed. The manager never derives it, never
+	// interprets it, and stores no identity it was derived from, so a
+	// conversation records THAT someone read it without recording WHO. Same
+	// contract as ThreadID and RuntimeContextID.
+	Key string `json:"key"`
+	// +optional
+	ReadAt *metav1.Time `json:"readAt,omitempty"`
+}
+
+// Watermark returns how far a reader has seen this thread: their own mark when
+// they have one, and the CHANNEL-WIDE mark otherwise.
+//
+// The fallback is the whole reason eviction is safe. A reader who has never
+// reported and one whose entry was evicted are indistinguishable here, and both
+// inherit where the channel as a whole got to — so a teammate joining today is
+// not handed a namespace-sized backlog they can act on none of, which is the
+// ReadTracked backfill argument one level down.
+func (t *ThreadBinding) Watermark(reader string) *metav1.Time {
+	if reader != "" {
+		for i := range t.Readers {
+			if t.Readers[i].Key == reader {
+				return t.Readers[i].ReadAt
+			}
+		}
+	}
+	return t.ReadAt
+}
+
+// Unread reports whether this thread has activity newer than its watermark,
+// given the conversation's last activity. It is the one implementation of the
+// rule — the manager, the console and the tests all read it from here.
+//
+// A binding without ReadTracked predates the mechanism and is READ. A tracked
+// binding with no watermark is bound and never seen, so it is UNREAD. Otherwise
+// activity strictly after the watermark is unread.
+//
+// reader is the OPAQUE key of the identity asking; empty asks the channel-wide
+// question ("has this thread been seen at all"), which is the only question a
+// transport with no reader identity can answer.
+func (t *ThreadBinding) Unread(lastActivity *metav1.Time, reader string) bool {
+	if !t.ReadTracked {
+		return false
+	}
+	at := t.Watermark(reader)
+	if at == nil {
+		return true
+	}
+	if lastActivity == nil {
+		return false
+	}
+	return lastActivity.Time.After(at.Time)
 }
 
 // ConversationStatus is the observed state.
@@ -327,6 +442,30 @@ type ConversationStatus struct {
 	Reopens int32 `json:"reopens,omitempty"`
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// Thread returns this conversation's binding on a channel, or nil when the
+// channel holds no thread here.
+func (s *ConversationStatus) Thread(channel string) *ThreadBinding {
+	for i := range s.Threads {
+		if s.Threads[i].Channel == channel {
+			return &s.Threads[i]
+		}
+	}
+	return nil
+}
+
+// UnreadFor reports whether a channel's thread on this conversation has activity
+// the given reader has not been reported read up to. A channel with NO binding
+// is never unread: with no thread there is no watermark and no claim to make.
+//
+// An empty reader asks the channel-wide question.
+func (s *ConversationStatus) UnreadFor(channel, reader string) bool {
+	t := s.Thread(channel)
+	if t == nil {
+		return false
+	}
+	return t.Unread(s.LastActivity, reader)
 }
 
 // ThreadArchived reports whether this conversation's thread on a channel has

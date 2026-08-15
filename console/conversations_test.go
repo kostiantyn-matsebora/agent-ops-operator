@@ -8,13 +8,13 @@ import "testing"
 // the close failed, and closes again.
 func TestSummarizeReportsAClosingConversation(t *testing.T) {
 	open := obj("conversations", "open", "1", `{"profileRef":{"name":"ops"}}`, `{"phase":"Idle"}`)
-	if summarize(open, nil, "console").Closing {
+	if summarize(open, nil, "console", "").Closing {
 		t.Fatal("an ordinary conversation must not report closing")
 	}
 
 	closing := obj("conversations", "closing", "1", `{"profileRef":{"name":"ops"}}`, `{"phase":"Idle"}`)
 	closing.Metadata.DeletionTimestamp = "2026-08-12T10:00:00Z"
-	if !summarize(closing, nil, "console").Closing {
+	if !summarize(closing, nil, "console", "").Closing {
 		t.Fatal("a deleted conversation held by its finalizer must report closing")
 	}
 }

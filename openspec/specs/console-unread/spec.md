@@ -1,10 +1,16 @@
-## ADDED Requirements
+# console-unread Specification
 
+## Purpose
+The console's unread surface: how unreadness is derived for the viewer asking,
+the server-side filter and pre-filter count, the selection-scoped bulk
+mark-as-read, and marking read on open and on your own actions.
+
+## Requirements
 ### Requirement: The console marks conversations with unseen activity
 The conversation list SHALL distinguish conversations whose console thread has
-activity newer than its watermark from those it does not, and each row SHALL
-carry its read state. Unreadness SHALL be derived from the console's OWN thread
-binding and no other channel's.
+activity newer than the viewer's watermark from those it does not, and each row
+SHALL carry its read state. Unreadness SHALL be derived from the console's OWN
+thread binding and no other channel's.
 
 A conversation the console merely observes — one with no console thread — SHALL
 NOT be shown as unread. The console holds no watermark on it and has no standing
@@ -21,6 +27,51 @@ to call it new; this is the same reach boundary the close action draws.
 #### Scenario: An observed conversation is never unread
 - **WHEN** a conversation has no console thread
 - **THEN** it is not shown as unread regardless of its activity
+
+### Requirement: Unreadness is answered for the viewer, not for the console
+Unreadness SHALL be derived from the watermark of the IDENTITY making the
+request, where the console can resolve one, and from the console channel's own
+watermark otherwise.
+
+The console SHALL derive the reader key by hashing the resolved identity with a
+salt supplied to it as a credential, and SHALL send only that key upstream. It
+SHALL NOT send an address, and no identity SHALL be recoverable from what is
+stored.
+
+Where authentication proves only possession of a shared token, all holders
+SHALL resolve to one identity and therefore share one watermark.
+
+#### Scenario: One operator reading does not clear it for another
+- **WHEN** two operators are authenticated as different identities and one opens an unread conversation
+- **THEN** it is read for that one and still unread for the other
+
+#### Scenario: A shared token is one reader
+- **WHEN** two people are authenticated by the same static token
+- **THEN** they share one watermark, and either one reading clears it for both
+
+#### Scenario: No address is stored
+- **WHEN** a read is reported for an authenticated operator
+- **THEN** the conversation records an opaque key from which the operator's identity cannot be recovered
+
+### Requirement: A reader's own actions mark a conversation read for that reader
+Starting a conversation from the console, and sending a message in one, SHALL
+advance the acting reader's own watermark, and SHALL NOT advance any other
+reader's.
+
+A conversation SHALL therefore never be presented as unread to the person who
+just created it, and SHALL remain unread to colleagues who have not seen it.
+
+#### Scenario: Starting a conversation does not make it unread for you
+- **WHEN** an operator starts a conversation from the console and returns to the list before any answer arrives
+- **THEN** it is not marked unread for them
+
+#### Scenario: …but it is new to everybody else
+- **WHEN** another operator views the list after that conversation is created
+- **THEN** it is unread for them
+
+#### Scenario: Replying keeps it read for the replier
+- **WHEN** an operator sends a message in a conversation
+- **THEN** their own watermark advances past their message rather than the conversation becoming unread to them
 
 ### Requirement: Unread is a server-side filter, and its count is computed before filtering
 The list SHALL offer an unread-only filter evaluated server-side alongside the

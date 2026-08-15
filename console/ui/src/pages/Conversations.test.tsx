@@ -13,12 +13,19 @@ import type { ConversationSummary } from '../api/types'
 const mutate = vi.fn()
 const deleteMutate = vi.fn()
 const reopenMutate = vi.fn()
+const markReadMutate = vi.fn()
+// The query string the page actually asked the server for — filtering is
+// server-side, so what the switch does is put a parameter on the request.
+let lastParams = ''
 // The server's own answer to "may this browser write" — flipped by the
 // read-only test below.
 let canWrite = true
 
 vi.mock('../api/hooks', () => ({
-  useConversations: () => ({ data: page(), isLoading: false, error: null }),
+  useConversations: (params: URLSearchParams) => {
+    lastParams = params.toString()
+    return { data: page(), isLoading: false, error: null }
+  },
   useSession: () => ({ data: { canWrite } }),
   useCloseConversations: () => ({
     mutate,
@@ -41,20 +48,28 @@ vi.mock('../api/hooks', () => ({
     isPending: false,
     reset: vi.fn(),
   }),
+  useMarkRead: () => ({
+    mutate: markReadMutate,
+    data: undefined,
+    error: null,
+    isPending: false,
+    reset: vi.fn(),
+  }),
 }))
 
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
-    name, runCount: 0, queued: 0, joined: true, errored: false, ageSeconds: 1, closing: false,
-    phase: 'Idle', ...over,
+    name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
+    ageSeconds: 1, closing: false, phase: 'Idle', ...over,
   }
 }
 
 // One PAGE of a larger result: 3 shown, 120 matching.
 function page() {
   return {
-    items: [conv('a'), conv('going', { closing: true }), conv('b')],
+    items: [conv('a', { unread: true }), conv('going', { closing: true }), conv('b')],
     total: 120,
+    unreadTotal: 7,
     offset: 0,
     limit: 50,
     facets: {},
@@ -111,18 +126,53 @@ describe('closing a selection', () => {
 })
 
 describe('a read-only console', () => {
-  it('renders no close action and nothing to select', () => {
+  it('renders no close action, but keeps the selection so it can still mark read', () => {
     // canWrite false is the server's own answer — the write gate is off, or
-    // nobody forwarded an identity to attribute the close against. The action
-    // is hidden rather than disabled, consistent with the other write surfaces.
+    // nobody forwarded an identity to attribute the close against. The close
+    // action is hidden rather than disabled, consistent with the other write
+    // surfaces. Marking read is NOT one of them: it instructs no agent and
+    // starts no work, and a console that could show a backlog but never clear
+    // it is exactly what the unread mark exists to fix.
     canWrite = false
     try {
       renderList()
       expect(screen.queryByTestId('close-selected')).toBeNull()
-      expect(screen.queryByLabelText(SELECT_ALL)).toBeNull()
-      expect(screen.queryByLabelText(ROW(0))).toBeNull()
+      expect(screen.getByLabelText(SELECT_ALL)).toBeInTheDocument()
+      expect(screen.getByLabelText(ROW(0))).toBeInTheDocument()
+      expect(screen.getByTestId('mark-read')).toBeInTheDocument()
     } finally {
       canWrite = true
     }
+  })
+})
+
+describe('unread', () => {
+  it('marks the unread rows and leaves the read ones alone', () => {
+    renderList()
+    expect(screen.getByTestId('unread-a')).toBeInTheDocument()
+    expect(screen.queryByTestId('unread-b')).toBeNull()
+  })
+
+  it('puts the filter on the request rather than hiding rows in the browser', async () => {
+    renderList()
+    expect(lastParams).not.toContain('unread=true')
+    await userEvent.click(screen.getByLabelText('Unread only'))
+    expect(lastParams).toContain('unread=true')
+  })
+
+  it('offers nothing to mark until something is selected', () => {
+    renderList()
+    expect(screen.getByTestId('mark-read')).toBeDisabled()
+  })
+
+  it('posts the selection and clears it', async () => {
+    renderList()
+    await userEvent.click(screen.getByLabelText(ROW(0)))
+    await userEvent.click(screen.getByTestId('mark-read'))
+
+    expect(markReadMutate).toHaveBeenCalledWith({ names: ['a'] }, expect.anything())
+    // the selection is cleared by the success callback the page passes in
+    const onSuccess = markReadMutate.mock.calls[0][1] as { onSuccess: () => void }
+    expect(typeof onSuccess.onSuccess).toBe('function')
   })
 })

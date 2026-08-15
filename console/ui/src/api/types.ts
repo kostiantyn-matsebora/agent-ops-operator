@@ -304,6 +304,10 @@ export interface Detail {
 export interface ThreadBinding {
   channel: string
   threadId: string
+  /** How far this CHANNEL has read the thread — reading it elsewhere never clears it here. */
+  readAt?: string
+  /** A binding created after read reporting existed; one without it is treated as read. */
+  readTracked?: boolean
 }
 
 export interface Run {
@@ -334,6 +338,11 @@ export interface ConversationSummary {
   joined: boolean
   consoleThread?: string
   errored: boolean
+  /** The CONSOLE's own thread has activity newer than its watermark. Observed
+   * conversations — no console thread — are never unread. */
+  unread: boolean
+  /** The console thread's watermark, so a read is reported only when it advances. */
+  readAt?: string
   ageSeconds: number
   toolsets?: string[]
   mcpConfigs?: string[]
@@ -388,9 +397,38 @@ export interface DeleteResponse {
 export interface ConversationPage {
   items: ConversationSummary[]
   total: number
+  /** Unread across ALL conversations, counted BEFORE any filter — a count that
+   * moved because the view narrowed would let a filter hide a backlog. */
+  unreadTotal: number
   offset: number
   limit: number
   facets: Record<string, string[]>
+}
+
+// ---- marking a batch read ----------------------------------------------------
+
+/**
+ * Marking read takes NAMES from the selection, like closing. The watermark is
+ * not sent: the server reads each conversation's own activity, so the browser
+ * can never mark activity it did not render.
+ */
+export interface MarkReadRequest {
+  names: string[]
+}
+
+export type ReadOutcome = 'marked' | 'skipped' | 'failed'
+
+export interface ReadResult {
+  name: string
+  outcome: ReadOutcome
+  reason?: string
+}
+
+export interface MarkReadResponse {
+  results: ReadResult[]
+  marked: number
+  skipped: number
+  failed: number
 }
 
 export interface Message {

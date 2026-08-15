@@ -35,11 +35,17 @@ type fakeManager struct {
 	verbs []string
 	// failVerb refuses the verb for these conversation names.
 	failVerb map[string]bool
+	// reads records every {threadId, readAt} the console reported, and
+	// skipReads names threads the fake answers `skipped` for — the manager's
+	// monotonic rule, from the console's side of the wire.
+	reads     []ReadEntry
+	skipReads map[string]bool
+	failRead  bool
 }
 
 func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
 	t.Helper()
-	f := &fakeManager{channels: channels, failInbound: map[string]bool{}}
+	f := &fakeManager{channels: channels, failInbound: map[string]bool{}, skipReads: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /channel/ops", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -106,6 +112,30 @@ func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
 	mux.HandleFunc("POST /channel/channels/{name}/status", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /channel/read", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Channel string      `json:"channel"`
+			Reads   []ReadEntry `json:"reads"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		if f.failRead {
+			f.mu.Unlock()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "read refused"})
+			return
+		}
+		f.reads = append(f.reads, body.Reads...)
+		out := make([]ReadOutcome, 0, len(body.Reads))
+		for _, e := range body.Reads {
+			o := ReadOutcome{ThreadID: e.ThreadID, Outcome: "marked"}
+			if f.skipReads[e.ThreadID] {
+				o.Outcome, o.Reason = "skipped", "the watermark would not advance"
+			}
+			out = append(out, o)
+		}
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"results": out})
+	})
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
 	return f
@@ -122,6 +152,14 @@ func (f *fakeManager) completions() []map[string]string {
 	defer f.mu.Unlock()
 	out := make([]map[string]string, len(f.done))
 	copy(out, f.done)
+	return out
+}
+
+func (f *fakeManager) reported() []ReadEntry {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]ReadEntry, len(f.reads))
+	copy(out, f.reads)
 	return out
 }
 

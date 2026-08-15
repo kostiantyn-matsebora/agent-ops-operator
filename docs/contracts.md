@@ -53,6 +53,62 @@ credentials never leave the adapter:
 5. Optionally act on a conversation your channel is bound to:
    `POST /channel/conversations/{name}/reopen` and
    `POST /channel/conversations/{name}/delete`, both `{"channel":"…"}`.
+6. Optionally report how far your threads have been **read**:
+   `POST /channel/read` ([below](#post-channelread)).
+
+### POST /channel/read
+
+**Optional.** An adapter that never calls it stays fully conformant; its threads
+simply carry no watermark, which is inert for every surface that does not render
+unreadness.
+
+```jsonc
+POST /channel/read
+{"channel":"console",
+ "reads":[{"threadId":"console-uid-abc","readAt":"2026-08-13T10:12:04Z",
+           "reader":"sha256:9f2a…"}]}
+
+200
+{"results":[{"threadId":"console-uid-abc","outcome":"marked"}],
+ "marked":1,"skipped":0,"failed":0}
+```
+
+The manager resolves each `threadId` to its conversation and writes the
+watermark to `status.threads[].readAt`. **The manager owns the write** — the
+adapter reports and issues no Kubernetes write of its own, exactly as with
+`POST /channel/channels/{name}/status`.
+
+`threadId` rather than a conversation name on purpose: an adapter knows thread
+ids, `/channel/inbound` already addresses a thread, and the mapping from one to
+the other is the manager's to own. Naming conversations here would hand adapters
+a Kubernetes identifier they have no other reason to hold.
+
+`reader` is OPTIONAL and OPAQUE: the adapter's own key for whoever read the
+thread, and the manager records that reader's watermark rather than the
+channel-wide one. Omit it and the behaviour is exactly what it was before the
+field existed — which is what every adapter but the console does, since a
+Telegram topic is read or it is not and there is nobody to attribute it to.
+
+**Never send an identity in it.** The manager stores the value verbatim and
+cannot tell a hash from an address, so a conversation would end up recording who
+read it. Compute a SALTED hash — an unsalted digest of a known address is
+confirmable by anyone holding the CR. A key containing `@` is refused with 400.
+
+| Rule | Behaviour |
+|---|---|
+| Auth and scope | The same adapter token and channel scope as every other `/channel/*` route — 401 unauthenticated, 403 for a channel served by another adapter |
+| Bound | At most **50** entries, enforced by the manager; more is 400 and nothing is written. An empty list is 400 |
+| Monotonic | A watermark at or before the stored one is `skipped` — no write, no error. Per READER when one is named, so one reader is never skipped because another is ahead |
+| Bounded readers | At most 50 readers per binding, oldest watermark evicted first; an evicted reader falls back to the channel-wide mark |
+| Clamped | A watermark ahead of the manager's clock is written as its `now` |
+| Per entry | One `marked` / `skipped` / `failed` outcome per requested thread, with a reason for anything not marked, plus totals |
+| Mixed batch | Still 200, and one bad entry never stops the rest — an unknown thread is `failed` and its neighbours are still marked |
+
+Entries resolving to the same conversation are grouped into ONE status patch,
+and a report that would not advance the watermark writes nothing at all — so
+re-opening a quiet conversation costs no API write. See
+[Read state](concepts.md#read-state-per-thread) for the field and the backfill
+rule.
 
 **Reach for those two verbs is the BINDING**, read from the conversation's
 `spec.channelRefs` and never taken from the request: a surface may act on a

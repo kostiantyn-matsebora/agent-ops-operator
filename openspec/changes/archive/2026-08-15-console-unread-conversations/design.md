@@ -31,10 +31,12 @@ already pins one binding per bound channel, and the watermark belongs on it.
 
 **Non-Goals:**
 
-- **Per-person read state.** Read is per channel: the console has seen this, not
-  *you* have seen it. Two operators share one console thread and therefore one
-  watermark. Per-user state would need a per-user identity store the console does
-  not have and will not grow.
+- ~~**Per-person read state.**~~ **Reversed — see decision 8.** The original
+  reasoning was that per-user state needs an identity store the console does not
+  have. That was wrong on the facts: the console already resolves an identity for
+  every request and logs writes against it. What it lacked was somewhere to keep
+  per-reader state, which decision 8 supplies. The per-channel mark is kept as
+  the fallback rather than removed.
 - **Unread for observed conversations.** No console thread, no watermark, no
   claim about newness.
 - **Read receipts in other adapters.** The verb is available to every adapter;
@@ -197,16 +199,104 @@ literally. If that reading wins, this becomes one line — route it through
 `a.write(...)` like bulk close — and a read-only console then shows unread
 without being able to clear it.
 
+### 8. Per-identity marks live on the binding, keyed by an opaque hash
+
+`ThreadBinding` gains a bounded overlay beside `readAt`:
+
+```go
+// Readers is the per-IDENTITY watermark, for transports that can tell one
+// reader from another. ReadAt stays the CHANNEL-WIDE mark: a Telegram topic is
+// read or it is not, and there is nobody to attribute that to.
+// +optional
+Readers []ReaderMark `json:"readers,omitempty"`
+
+type ReaderMark struct {
+    // Key is OPAQUE to the manager — a salted hash the reporting adapter
+    // computed. Never an address.
+    Key    string       `json:"key"`
+    ReadAt *metav1.Time `json:"readAt,omitempty"`
+}
+```
+
+*Why on the binding and not a per-reader cursor CR:* read state stays on the
+object it is about, the derivation stays one function, and nothing needs a ninth
+CRD or a new RBAC grant. The cost is real and named below: the list grows with
+readers × conversations, so it is capped at 50 per binding with the oldest
+`readAt` evicted first.
+
+*Why an overlay rather than a replacement:* a transport with no reader identity
+would otherwise need a synthetic one. `readAt` answers "has this thread been
+seen at all", `readers[]` answers "have *you* seen it", and a channel that
+cannot answer the second keeps answering only the first.
+
+*Fallback, in both directions:* a reader with no entry — a teammate who joined
+today, or one the LRU evicted — reads the channel-wide mark. This is the
+`readTracked` backfill argument one level down: the alternative announces a
+namespace-sized backlog to somebody who has just arrived and can act on none of
+it.
+
+*Per IDENTITY, not per person:* `admit()` returns the forward-auth header when a
+proxy supplied one and the literal string `token` otherwise. Under a shared
+token every holder hashes to one key and shares one mark — which is exactly the
+behaviour before this decision, reached without a special case.
+
+### 9. The console hashes; the manager stores a string it cannot read
+
+`POST /channel/read` gains an optional `reader`. The console computes it as a
+salted hash of the resolved identity, with the salt projected into its pod
+through `Channel.credentialsSecretRef` like every other adapter credential.
+
+The manager therefore never sees the address **or** the salt. It stores an
+opaque key exactly as it stores `threadId` and `runtimeContextId` — which keeps
+**the manager reads no Secrets** literally true, and keeps this from being the
+one place the operator learns something private about the people using it.
+
+*Why the salt is not optional:* email addresses are low-entropy and guessable. A
+bare `sha256(alice@example.com)` is confirmable by anyone holding the CR and a
+list of colleagues, which is the disclosure the hash existed to prevent.
+
+*What is still visible:* that N distinct readers have seen a conversation, and
+when. That is unavoidable for a feature whose whole job is to say whether *you*
+have read something, and it names nobody.
+
+### 10. Your own actions mark it read for you
+
+Originating a conversation from the console, and sending a message in one, both
+advance the acting reader's watermark — nobody else's.
+
+This is what fixes a conversation showing unread the moment you start it, before
+any answer could exist. Decision 4 accepted that `lastActivity` moves on your own
+input and leaned on the open detail view to re-clear it; at conversation birth
+that defence is weakest, because there is definitionally nothing to read.
+
+It is only defensible **because** marks are per identity now. Stamping the
+channel-wide mark on origination would clear the badge for every other operator,
+who never saw it — which is why this fix was rejected when it was first proposed.
+
 ## Risks / Trade-offs
 
 - **Write amplification: one status patch per marked thread.** → Bounded at 50
   per request; skipped when the watermark would not advance, so re-opening a
   quiet conversation writes nothing; and merge-patched onto status, which the
   manager already patches on every run.
-- **Two operators share one console watermark.** → This is the chosen model, not
-  a defect: read is per channel. It is stated plainly in `docs/console.md`,
-  because an operator who expects per-person unread would otherwise read a
-  cleared badge as a bug.
+- ~~**Two operators share one console watermark.**~~ → Resolved by decision 8
+  where an identity is available, and still true under a shared static token,
+  where every holder is one identity. `docs/console.md` says which install is
+  which, because an operator who expects per-person unread would otherwise read
+  a cleared badge as a bug.
+- **`readers[]` grows with readers × conversations.** → Capped at 50 per binding,
+  oldest `readAt` evicted first; entries are small, and a busy install is
+  bounded by how many people actually open the console rather than by traffic.
+  Eviction is not data loss — it degrades to the channel-wide mark.
+- **A conversation's status now records how many distinct people read it.** →
+  Keyed by an unreversible salted hash, so it names nobody; but the *count* and
+  the *times* are visible to anyone with read RBAC on conversations. That is
+  inherent to answering "have you seen this" durably, and it is called out in
+  `docs/console.md` rather than left to be discovered.
+- **A rotated salt orphans every existing key.** → Every reader falls back to the
+  channel-wide mark and re-marks from there, which is the same graceful path as
+  eviction. Worth knowing before rotating it, so the chart generates the salt on
+  INSTALL only and never regenerates on upgrade.
 - **Upgrading without re-applying the CRDs silently drops the field.** → The API
   server prunes unknown fields, so reports would 200 and change nothing, and
   every conversation would read as unread forever. Called out in `CHANGELOG.md`

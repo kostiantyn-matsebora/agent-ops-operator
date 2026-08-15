@@ -48,6 +48,16 @@ type NormalizedSignal struct {
 	// a one-off ask from a machine), or "chat" (task lane, from a human on a
 	// chat surface).
 	Kind string `json:"kind,omitempty"`
+	// Reader is the OPAQUE key of the person who sent this — a salted hash the
+	// originating surface computed, never an identity. Its only use is stamping
+	// their own read watermark when their thread is created, so a conversation
+	// somebody just started is not shown back to them as unread.
+	//
+	// NOT a label, deliberately: labels feed signature grouping and are
+	// rendered on signal cards, and a per-person value has no business in
+	// either.
+	// +optional
+	Reader string `json:"reader,omitempty"`
 }
 
 // KindChat marks a signal that is a person talking on a chat surface rather
@@ -602,6 +612,15 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			PipelineRef: &agentopsv1alpha1.ObjectRef{Name: pipeline.Name},
 			Title:       title,
 			Signature:   signature,
+		}
+		// Only for a person on a chat surface: an alert has no reader, and a
+		// machine posting a task is not owed a read mark.
+		if kind == KindChat && group[0].Reader != "" {
+			if chatChannel := group[0].Labels[LabelChatChannel]; chatChannel != "" {
+				conv.Spec.OriginReader = &agentopsv1alpha1.OriginReader{
+					Channel: chatChannel, Key: group[0].Reader,
+				}
+			}
 		}
 		if err := s.Client.Create(ctx, conv); err != nil {
 			return "", false, err

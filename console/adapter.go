@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"os"
@@ -63,6 +65,13 @@ type Adapter struct {
 	channels map[string]consoleChannelConfig
 	reported map[string]string
 	uiToken  string
+	// readerSalt turns a resolved identity into the OPAQUE key sent upstream.
+	// Projected as a channel credential, so it never leaves this pod — the
+	// manager stores hashes it cannot reverse and never learns who read what.
+	readerSalt string
+	// saltLogged records that the missing-salt degradation has been reported,
+	// so a console without one says so once rather than every refresh.
+	saltLogged bool
 	// authLogged is the last auth mode written to the log, so a mode that has
 	// not changed is not restated every refresh.
 	authLogged string
@@ -127,7 +136,7 @@ func (a *Adapter) refreshChannels(ctx context.Context) {
 		return
 	}
 	next := map[string]consoleChannelConfig{}
-	token := ""
+	token, salt := "", ""
 	for _, info := range infos {
 		var cfg consoleChannelConfig
 		problem := ""
@@ -138,6 +147,9 @@ func (a *Adapter) refreshChannels(ctx context.Context) {
 		}
 		if info.CredentialEnvPrefix != "" && token == "" {
 			token = os.Getenv(info.CredentialEnvPrefix + "uiToken")
+		}
+		if info.CredentialEnvPrefix != "" && salt == "" {
+			salt = os.Getenv(info.CredentialEnvPrefix + "readerSalt")
 		}
 		a.mu.Lock()
 		last := a.reported[info.Name]
@@ -164,7 +176,23 @@ func (a *Adapter) refreshChannels(ctx context.Context) {
 	if token != "" {
 		a.uiToken = token
 	}
+	if salt != "" {
+		a.readerSalt = salt
+	}
+	degraded := a.readerSalt == "" && !a.saltLogged
+	if degraded {
+		a.saltLogged = true
+	}
 	a.mu.Unlock()
+	if degraded {
+		// DEGRADE, never crash and never hash unsalted: addresses are
+		// low-entropy, so an unsalted digest of a known one is confirmable by
+		// anyone holding the CR — which is the disclosure the hash exists to
+		// prevent. Without a salt the console falls back to channel-wide marks,
+		// which is simply the behaviour it had before per-identity read state.
+		log.Printf("console: no reader salt projected (AGENTOPS_CRED_<CHANNEL>_readerSalt); read state " +
+			"falls back to channel-wide marks — everyone using this console shares one watermark")
+	}
 	a.reportAuthMode()
 }
 
@@ -369,6 +397,87 @@ func (a *Adapter) Reopen(ctx context.Context, conversation string) error {
 		return errNotJoined
 	}
 	return a.mgr.Reopen(ctx, channel, conversation)
+}
+
+// ReaderKey turns a resolved identity into the opaque key sent upstream.
+//
+// Salted, because addresses are low-entropy: a bare sha256 of a known address
+// is confirmable by anyone holding the CR and a list of colleagues, which is
+// exactly the disclosure hashing exists to prevent. With no salt projected this
+// returns "" and every read falls back to the channel-wide mark — degraded, not
+// silently unsalted.
+//
+// An empty identity also returns "": under static-token auth the console
+// resolves everyone to "token", so all holders share one key. That is not a
+// special case to write, it is what per-IDENTITY means when the credential
+// proves possession rather than personhood.
+func (a *Adapter) ReaderKey(identity string) string {
+	if identity == "" {
+		return ""
+	}
+	a.mu.Lock()
+	salt := a.readerSalt
+	a.mu.Unlock()
+	if salt == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(salt + "\x00" + identity))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// ReadReport is one conversation the browser has seen, with the watermark it
+// read off that conversation's own state. The console never invents a "now" —
+// the manager clamps anyway, but a client reporting a timestamp it never
+// rendered would be marking activity nobody looked at.
+type ReadReport struct {
+	Conversation string
+	ReadAt       string
+}
+
+// ReadResult is one conversation's outcome, named for the CONVERSATION rather
+// than the thread: names are what the browser sent and what it can act on.
+type ReadResult struct {
+	Name    string `json:"name"`
+	Outcome string `json:"outcome"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// ReportRead marks this console's threads read up to the reported watermarks.
+//
+// Conversations the console merely OBSERVES are skipped here rather than sent:
+// with no console thread there is nothing to report against, and it is the same
+// reach boundary bulk close draws.
+func (a *Adapter) ReportRead(ctx context.Context, reader string, reports []ReadReport) ([]ReadResult, error) {
+	channel := a.PrimaryChannel()
+	results := make([]ReadResult, 0, len(reports))
+	entries := make([]ReadEntry, 0, len(reports))
+	byThread := map[string]string{}
+	for _, rep := range reports {
+		_, thread, ok := a.ThreadFor(rep.Conversation)
+		if !ok || channel == "" {
+			results = append(results, ReadResult{Name: rep.Conversation,
+				Outcome: closeOutcomeSkipped, Reason: notJoinedReason})
+			continue
+		}
+		if rep.ReadAt == "" {
+			results = append(results, ReadResult{Name: rep.Conversation,
+				Outcome: closeOutcomeSkipped, Reason: "this conversation has no activity to have been read"})
+			continue
+		}
+		byThread[thread] = rep.Conversation
+		entries = append(entries, ReadEntry{ThreadID: thread, ReadAt: rep.ReadAt, Reader: reader})
+	}
+	if len(entries) == 0 {
+		return results, nil
+	}
+	outcomes, err := a.mgr.ReportRead(ctx, channel, entries)
+	if err != nil {
+		return results, err
+	}
+	for _, o := range outcomes {
+		results = append(results, ReadResult{Name: byThread[o.ThreadID], Outcome: o.Outcome, Reason: o.Reason})
+	}
+	return results, nil
 }
 
 func (a *Adapter) Delete(ctx context.Context, conversation string) error {

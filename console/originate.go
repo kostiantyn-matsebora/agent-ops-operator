@@ -79,7 +79,7 @@ type signalResponse struct {
 // Start emits one chat signal. It returns the manager's drop reason when the
 // source is not claimed, rather than an error: nothing failed — the system is
 // telling the operator what is missing.
-func (o *Originator) Start(ctx context.Context, channel, sender, task string) (reason string, err error) {
+func (o *Originator) Start(ctx context.Context, channel, sender, reader, task string) (reason string, err error) {
 	if o == nil {
 		return "", fmt.Errorf("this console holds no signal identity: declare a SignalAdapter with " +
 			"servedBy pointing at this ChannelAdapter, and set SIGNAL_SOURCE_NAME")
@@ -98,6 +98,9 @@ func (o *Originator) Start(ctx context.Context, channel, sender, task string) (r
 			"fingerprint": fingerprint,
 			"kind":        "chat",
 			"payload":     task,
+			// Opaque, and only so the manager can mark it read for the person
+			// who asked. Empty when this console has no salt projected.
+			"reader": reader,
 			"labels": map[string]string{
 				labelChatChannel: channel,
 				labelChatSender:  sender,

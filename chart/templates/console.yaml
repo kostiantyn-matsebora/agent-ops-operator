@@ -113,11 +113,31 @@ authentication one value rather than a reinstall.
 {{- $explicit := $auth.uiToken | default "" }}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName }}
 {{- $existingVal := "" }}
+{{- $existingSalt := "" }}
 {{- if and $existing $existing.data }}
 {{- $existingVal = index $existing.data "uiToken" | default "" }}
+{{- $existingSalt = index $existing.data "readerSalt" | default "" }}
 {{- end }}
+{{- $explicitSalt := $auth.readerSalt | default "" }}
+{{- /*
+THE SALT, and the one case that renders this Secret on an UPGRADE.
+
+readerSalt turns a console viewer's identity into the opaque key stored on a
+Conversation, so read state can be per person without an address ever reaching
+etcd. An install generates one. An UPGRADE from a release that predates it would
+otherwise never get one at all — the Secret renders on install only — leaving
+per-identity read state permanently off on exactly the installs that have people
+using it.
+
+So it also renders when a lookup FOUND the Secret and that Secret has no salt.
+That inverts the usual lookup hazard rather than repeating it: a renderer with no
+cluster (helm template, CI, --dry-run=client, a GitOps differ) finds nothing,
+renders nothing, and therefore invents no credential. The uiToken is adopted from
+the existing object in that path, so adding a salt never signs a browser out.
+*/}}
+{{- $needSalt := and (not .Release.IsInstall) $existing (not $existingSalt) (not $explicitSalt) }}
 {{- include "agentops.generatedSecretGuard" (dict "root" . "name" $secretName "explicit" $explicit "existing" $existing "existingVal" $existingVal "key" "uiToken" "setting" "console.auth.uiToken") }}
-{{- if or $explicit .Release.IsInstall }}
+{{- if or $explicit .Release.IsInstall $needSalt }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -139,6 +159,15 @@ data:
   uiToken: {{ $existingVal }}
   {{- else }}
   uiToken: {{ randAlphaNum 40 | b64enc }}
+  {{- end }}
+  {{- if $explicitSalt }}
+  readerSalt: {{ $explicitSalt | b64enc }}
+  {{- else if $existingSalt }}
+  {{- /* NEVER regenerated: rotating the salt orphans every stored key, and
+         every reader silently falls back to the channel-wide watermark */}}
+  readerSalt: {{ $existingSalt }}
+  {{- else }}
+  readerSalt: {{ randAlphaNum 40 | b64enc }}
   {{- end }}
 ---
 {{- end }}
@@ -207,6 +236,15 @@ spec:
         Bearer token the browser signs in with. Projected into the console pod
         by the reconciler as AGENTOPS_CRED_<CHANNEL>_uiToken; anyone holding it
         sees everything the console's ServiceAccount can read.
+    - key: readerSalt
+      required: false
+      description: >-
+        Salts the hash that turns a viewer's identity into the opaque read-state
+        key stored on a Conversation, so read marks can be per person while no
+        address reaches etcd. Absent means read state stays per CHANNEL — every
+        viewer shares one watermark. Never rotate it casually: a new salt
+        orphans every stored key and silently resets everyone to the
+        channel-wide mark.
 ---
 # The console surface itself. A Channel CARRIES conversations and originates
 # nothing, so there is no wiring here either.

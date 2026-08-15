@@ -183,6 +183,30 @@ spec:
                 required:
                 - refs
                 type: object
+              originReader:
+                description: |-
+                  OriginReader records WHO started this conversation, so their own read
+                  watermark can be stamped the moment their thread is created — the person
+                  who typed the request has by definition seen it, and presenting it back
+                  to them as unread before any answer exists is the one case the watermark
+                  rule gets plainly wrong.
+
+                  Written once at creation and read EXACTLY ONCE, when the binding on its
+                  channel is established. It is provenance in the same sense as
+                  PipelineRef: nothing resolves anything through it, and it grants nothing.
+
+                  The key is OPAQUE — the originating surface's own salted hash, in that
+                  surface's key space, which is why the channel is recorded beside it. No
+                  identity is stored, here or anywhere else on this object.
+                properties:
+                  channel:
+                    type: string
+                  key:
+                    type: string
+                required:
+                - channel
+                - key
+                type: object
               pipelineRef:
                 description: |-
                   PipelineRef names the Pipeline that ORIGINATED this conversation.
@@ -490,6 +514,59 @@ spec:
                     channel:
                       description: Channel name (same namespace).
                       type: string
+                    readAt:
+                      description: |-
+                        ReadAt is how far this thread has been SEEN — reported by the adapter that
+                        serves the channel, never inferred. MONOTONIC: it only moves forward, and
+                        the manager clamps it to its own clock, so neither a stale client nor a
+                        skewed one can un-read a thread or mark future activity read.
+
+                        Per THREAD, therefore per CHANNEL: a conversation bound to Telegram and the
+                        console has two audiences reading it in two places, and one shared mark
+                        would let a Telegram reader clear the console's.
+                      format: date-time
+                      type: string
+                    readTracked:
+                      description: |-
+                        ReadTracked marks a binding created by a manager that tracks reads. It is
+                        what tells a NEVER-READ binding from a PRE-UPGRADE one — both look like "a
+                        binding with no readAt", and no timestamp can separate them, exactly as
+                        with status.runs[].deliveryTracked.
+
+                        Absent (an older manager bound the thread): treated as READ, so upgrading
+                        never presents the whole namespace as new.
+                        Set with no ReadAt: genuinely unseen, and unread.
+                      type: boolean
+                    readers:
+                      description: |-
+                        Readers is the PER-IDENTITY watermark, for transports that can tell one
+                        reader from another. ReadAt above stays the CHANNEL-WIDE mark and is not
+                        replaced by this: a Telegram topic is read or it is not, and there is
+                        nobody to attribute that to — so an adapter reporting no reader keeps
+                        reporting only the channel-wide mark and stays fully conformant.
+
+                        BOUNDED at MaxReadersPerThread, oldest watermark evicted first, because
+                        this list grows with readers × conversations. Eviction is not a loss: an
+                        evicted reader falls back to the channel-wide mark, exactly as a reader
+                        who has never reported does.
+                      items:
+                        description: ReaderMark is one identity's watermark on a thread.
+                        properties:
+                          key:
+                            description: |-
+                              Key identifies the reader and is OPAQUE to the manager — a salted hash
+                              the reporting adapter computed. The manager never derives it, never
+                              interprets it, and stores no identity it was derived from, so a
+                              conversation records THAT someone read it without recording WHO. Same
+                              contract as ThreadID and RuntimeContextID.
+                            type: string
+                          readAt:
+                            format: date-time
+                            type: string
+                        required:
+                        - key
+                        type: object
+                      type: array
                     threadId:
                       description: |-
                         ThreadID — an opaque string in the channel type's own id space (e.g. a

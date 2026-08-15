@@ -20,7 +20,7 @@ func TestOriginatorAbsentWithoutASignalIdentity(t *testing.T) {
 		t.Fatal("no source name must mean no originator")
 	}
 	var o *Originator
-	_, err := o.Start(context.Background(), "console-chan", "alice", "hi")
+	_, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "hi")
 	if err == nil || !strings.Contains(err.Error(), "servedBy") {
 		t.Fatalf("the error must name the fix, got %v", err)
 	}
@@ -44,7 +44,7 @@ func TestOriginatorPostsAChatSignal(t *testing.T) {
 	defer srv.Close()
 
 	o := NewOriginator(srv.URL, "signal-token", "console")
-	reason, err := o.Start(context.Background(), "console-chan", "alice", "check the nodes")
+	reason, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "check the nodes")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestOriginatorPostsAChatSignal(t *testing.T) {
 
 	// two messages must not dedup: a person asking twice means it twice
 	first, _ := signals[0].(map[string]any)["fingerprint"].(string)
-	if _, err := o.Start(context.Background(), "console-chan", "alice", "check the nodes"); err != nil {
+	if _, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "check the nodes"); err != nil {
 		t.Fatal(err)
 	}
 	signals, _ = body["signals"].([]any)
@@ -96,7 +96,7 @@ func TestOriginatorSurfacesTheDropReason(t *testing.T) {
 	defer srv.Close()
 
 	o := NewOriginator(srv.URL, "signal-token", "console")
-	reason, err := o.Start(context.Background(), "console-chan", "alice", "anyone there?")
+	reason, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "anyone there?")
 	if err != nil {
 		t.Fatalf("an unclaimed source is a reported reason, not a transport error: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestOriginatorSurfacesTheDropReason(t *testing.T) {
 // refuses before posting rather than letting the manager reject it.
 func TestOriginatorRefusesWithoutAChannel(t *testing.T) {
 	o := NewOriginator("http://unused", "signal-token", "console")
-	if _, err := o.Start(context.Background(), "", "alice", "hi"); err == nil {
+	if _, err := o.Start(context.Background(), "", "alice", "sha256:alice", "hi"); err == nil {
 		t.Fatal("origination without a channel must be refused")
 	}
 }

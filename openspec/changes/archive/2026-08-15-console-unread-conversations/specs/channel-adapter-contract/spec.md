@@ -7,8 +7,24 @@ SHALL name the channel and carry a list of `{threadId, readAt}` entries; the
 manager SHALL resolve each thread to its conversation and write the watermark to
 that conversation's status.
 
-The verb SHALL be OPTIONAL. An adapter that never calls it SHALL remain fully
-conformant, and its threads SHALL simply carry no watermark.
+Each entry MAY additionally carry a `reader` — an OPAQUE key identifying who
+read it, computed by the adapter. When present the manager SHALL record that
+reader's own watermark; when absent it SHALL advance the channel-wide one. The
+manager SHALL NOT derive, interpret or reverse the key, and an adapter SHALL NOT
+send an address or any other identity in it.
+
+The verb SHALL be OPTIONAL, and so SHALL the `reader` field within it. An adapter
+that never calls it SHALL remain fully conformant, and its threads SHALL simply
+carry no watermark; one that calls it without a reader SHALL remain fully
+conformant, and its threads SHALL carry only the channel-wide mark.
+
+#### Scenario: An adapter reports a read for one reader
+- **WHEN** an adapter posts a read naming an opaque reader key
+- **THEN** that reader's watermark advances and no other reader's does
+
+#### Scenario: A reader-less report still works
+- **WHEN** an adapter posts a read with no reader
+- **THEN** the channel-wide watermark advances, exactly as before the field existed
 
 The route SHALL be guarded by the same adapter authentication and channel scope
 as every other `/channel/*` route: an adapter SHALL be able to report reads only
