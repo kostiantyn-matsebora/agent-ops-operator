@@ -131,14 +131,19 @@ heading in that file.
 
 `CLAUDE.md` SHALL state which document receives which kind of update —
 concepts to `docs/concepts.md`, contracts to `docs/contracts.md`, a bundle's
-components or values to that bundle's own `docs/<bundle>.md` page, upgrade steps
-to `CHANGELOG.md`, README only for pitch, kind list, demo, or install — and SHALL
-state the README line budget as a number.
+components or values to that bundle's own `docs/<bundle>.md` page, **the parent
+chart's values, installation, upgrade and uninstall to `docs/installation.md`**,
+upgrade steps to `CHANGELOG.md`, README only for pitch, kind list, demo, or
+install — and SHALL state the README line budget as a number.
 
 The routing rule SHALL name bundle pages by the bundle they document, so renaming
 a subchart renames its page and the rule together. `docs/prometheus-bundle.md` is
 the destination for the Alertmanager and Prometheus bundle's content;
 `docs/vm-bundle.md` no longer exists.
+
+The split between the parent chart's values and a bundle's SHALL be stated, since
+both are "values": the parent chart's belong to the installation page, and a
+subchart's belong to that subchart's page. Neither restates the other.
 
 It SHALL further record that `docs/` is a Jekyll source directory published by
 GitHub Pages, and route the two kinds of site change separately: site
@@ -152,6 +157,13 @@ It SHALL record that the site's `--ao-*` palette is copied from
 - **WHEN** a contributor consults `CLAUDE.md` for what to document after a change
 - **THEN** the routing rule names the destination file for that kind of content
 - **AND** the README line budget is stated numerically so overrun is checkable
+
+#### Scenario: A chart value is added or changed
+
+- **WHEN** a value is added to the parent chart, or an existing one changes
+  meaning
+- **THEN** the routing rule sends it to `docs/installation.md`, and a value
+  belonging to a subchart to that subchart's page instead
 
 #### Scenario: A subchart is renamed
 

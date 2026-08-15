@@ -15,3 +15,5 @@ groups:
         url: /introduction/
       - title: Getting started
         url: /getting-started/
+      - title: Installation
+        url: /installation/

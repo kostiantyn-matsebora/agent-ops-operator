@@ -957,6 +957,48 @@ a:hover {
   margin-bottom: 0;
 }
 
+/* --- platform tabs -------------------------------------------------------- */
+/* Built by assets/js/tabs.js from two adjacent code fences. With no JavaScript
+   both blocks simply render in sequence, labelled by their own syntax — the
+   commands are still there, which is the only thing that matters. */
+.ao-tabs {
+  margin: 0 0 1.25rem;
+}
+
+.ao-tablist {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--ao-border);
+}
+
+.ao-tab {
+  padding: 0.35rem 0.85rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.ao-tab:hover {
+  color: var(--ao-text);
+}
+
+.ao-tab.is-current {
+  border-bottom-color: var(--ao-brand);
+  color: var(--ao-brand-strong);
+  font-weight: 500;
+}
+
+.ao-tabs .ao-tabpanel {
+  margin: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
 /* --- tables --------------------------------------------------------------- */
 /* A table is a TABLE, so its cells divide the column. It used to be
    `display: block` for the scroll frame — which makes a table shrink to its
@@ -987,6 +1029,25 @@ a:hover {
   border: 1px solid var(--ao-border);
   text-align: left;
   vertical-align: top;
+}
+
+/* A key is not two keys. Auto table layout will happily break
+   `persistence.storageClassName` across lines to save a few pixels, which
+   invents a token that does not exist — so code never wraps in a table and the
+   column widens instead. */
+.ao-content table code {
+  white-space: nowrap;
+}
+
+/* Where the column cannot widen any further, the TABLE scrolls in its own
+   frame rather than the key breaking or the page scrolling sideways. */
+@media (max-width: 60rem) {
+  .ao-content table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+  }
 }
 
 .ao-content th {

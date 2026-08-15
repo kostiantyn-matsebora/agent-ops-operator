@@ -35,6 +35,8 @@ plugins:
 # is NOT excluded: OFL-1.1 requires it to travel with the fonts it covers.
 exclude:
   - diagrams/
+  # Contributor rules for this directory, not site content.
+  - CLAUDE.md
 
 # Every page gets the on-this-page column. It is a default rather than an opt-in
 # because a forgotten flag is invisible — the page simply lacks the column.

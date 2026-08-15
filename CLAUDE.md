@@ -478,9 +478,17 @@ docs/                    reference pages: concepts.md (CRDs + capability
                          a getting-started page should: at something working.
                          Wiring is the NEXT card, not its last section — which owns every
                          expectation, flag and failure mode, so README keeps only
-                         the commands; its test is "would the reader TYPE it or
+                         the commands. Its test is "would the reader TYPE it or
                          READ it": what they type is on the page, what they read
-                         ABOUT is a link) are the site's pages; the
+                         ABOUT is a link) and installation.md (THE REAL install,
+                         and the only home the PARENT chart's values have —
+                         decisions before commands, values grouped by the
+                         decision they serve, bundle values left to their own
+                         pages) are the site's pages. Every command block on any
+                         of them is given for BOTH platforms, as two adjacent
+                         fences (`sh` then `powershell`) that assets/js/tabs.js
+                         pairs into tabs — the page writes no tab markup.
+                         The
                          reference pages above are NOT yet site deliverables.
                          Carrying no front
                          matter they are STATIC FILES to Jekyll — copied verbatim,
@@ -901,6 +909,19 @@ CHANGELOG.md             every chart-version migration guide, newest first —
 
 ## After changes
 
+**DOCUMENTATION IS PART OF THE CHANGE, NOT A FOLLOW-UP.** Before a change is
+committed, and certainly before it is ARCHIVED, every document the change made
+untrue is already updated — in the same commit, not a later one. Archiving a
+change whose docs still describe the old behaviour records the work as finished
+when the half a reader meets is not.
+
+That explicitly INCLUDES the adopter pages on the site. It is the half most often
+skipped, because a behaviour change feels done once `concepts.md` is right — and
+the adopter never reads `concepts.md`. Ask of every change: does the landing
+page, the Introduction, Getting started or Installation now say something that is
+no longer true, or fail to mention something an adopter must now decide? A page
+promising a step the chart just automated is as wrong as a stale field name.
+
 Keep commits scoped to this directory, and write documentation to the file that
 OWNS that kind of content. "Update README.md" is what grew it to 969 lines —
 three documents wearing one filename — so the routing is explicit:
@@ -910,12 +931,23 @@ three documents wearing one filename — so the routing is explicit:
 | CRD fields, semantics, how capabilities resolve | `docs/concepts.md` |
 | Work contract, adapter contracts, HTTP endpoints | `docs/contracts.md` |
 | A subchart's components or values | `docs/<bundle>.md` |
+| The PARENT chart's values, install, upgrade, uninstall | `docs/installation.md` |
 | Breaking change + upgrade steps | `CHANGELOG.md`, newest first |
 | Terminology, invariants, hard-won gotchas | this file |
 | The console's views, values, or trust boundary | `docs/console.md` |
 | The pitch, the kind list, the demo, the install command | `README.md` |
 | How the site LOOKS or navigates | `docs/_layouts/`, `_includes/`, `_data/nav.yml`, `assets/` |
 | What the site SAYS to an adopter | a markdown page under `docs/` |
+
+Both value rows are "values", so the split is stated: the PARENT chart's belong
+to `docs/installation.md`, a SUBCHART's to that bundle's own page, and neither
+restates the other. installation.md carries the values an operator must DECIDE,
+grouped by the decision they serve — `helm show values` is the exhaustive list
+and a hand-copied inventory rots.
+
+**`docs/CLAUDE.md` holds the rules for WRITING a page** — structure over prose,
+the command tabs, the components a page may name, the table rules and the
+pre-flight lint. This file routes what goes where, that one governs how it reads.
 
 The last two rows are one rule read both ways: **the theme holds no prose and
 the pages hold no theme.** A layout or include that starts explaining a CRD is in
@@ -946,6 +978,21 @@ The failure mode is recognisable and has been shipped here more than once: long
 compound sentences, every point explained twice, nothing scannable — prose doing
 a table's job. Reference pages under `docs/` may be dense, a page an adopter
 meets first may not.
+
+**CHECK IT, do not remember it.** These rules were written and then broken on the
+very next page, twice, and caught each time by the reader rather than the writer.
+So the mechanical ones are a command, run before any adopter page is called done:
+
+```sh
+awk '/^---$/{fm=!fm;next} fm{next} /^```/{b=!b;next} b{next}
+     /;/ && !/&[a-z]+;/ {printf "%s:%d SEMICOLON\n", FILENAME, NR}
+     /^\|/||/^[0-9]+\./||/^ /||/^>/{next}
+     /^$/{if(n>45)printf "%s:%d LONG PARAGRAPH (%d words)\n",FILENAME,s,n;n=0;next}
+     {if(n==0)s=NR;n+=NF}' docs/*.md
+```
+
+Silence is the pass. Then BUILD it and look — the squeezed column, the wrapped
+key and the headerless table were each invisible until rendered.
 
 **The site's `--ao-*` palette is COPIED from `console/ui/src/theme/theme.css`**
 into the token blocks at the head of `docs/assets/css/agentops.css` — so
