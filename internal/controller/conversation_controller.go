@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -51,6 +52,18 @@ const ConditionContextContinuity = "ContextContinuity"
 // conversations that carry a binding — binding-less conversations have nothing
 // to resolve and stay condition-free.
 const ConditionToolingResolved = "ToolingResolved"
+
+// ConditionDeliveryPending reports that a run's answer is recorded on the
+// conversation but has not reached every bound thread.
+//
+// It exists because the failure it names was INVISIBLE: on 2026-08-13 rejected
+// sends left 22 threads empty for four and a half hours while the answers sat
+// in status.runs[].result and the operator reported itself healthy. The reply
+// was already derivable; nothing said it was owed.
+//
+// Derived on every reconcile from the same walk that re-enqueues, so it adds no
+// second source of truth — it is a reading of runs[].delivered[], not a record.
+const ConditionDeliveryPending = "DeliveryPending"
 
 // MCPConfigMapName returns the ConfigMap holding a conversation's compiled
 // mcp.json. Always conversation-keyed: capabilities come from the wiring, so
@@ -806,6 +819,7 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 	// nowhere to receive the reply, and the reconcile its binding triggers will
 	// come back here.
 	var backfill []string
+	owed := map[string]bool{}
 	for i := range conv.Status.Runs {
 		run := &conv.Status.Runs[i]
 		if !run.DeliveryTracked {
@@ -817,6 +831,7 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 			if run.DeliveredTo(t.Channel) || !conv.BoundTo(t.Channel) {
 				continue
 			}
+			owed[t.Channel] = true
 			var ch agentopsv1alpha1.Channel
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil ||
 				ch.Spec.Adapter == "" {
@@ -826,10 +841,47 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 			r.Ops.EnqueueRunReply(ctx, &ch, conv.Name, run.RunID, &tid, msg)
 		}
 	}
+	r.setDeliveryPendingCondition(ctx, conv, owed)
 	if len(backfill) == 0 {
 		return nil
 	}
 	return r.backfillDelivered(ctx, conv, backfill)
+}
+
+// setDeliveryPendingCondition names the channels still owed an answer.
+//
+// True carries the channel names, because "delivery is pending" without saying
+// where is not actionable — one wedged transport among three bound channels
+// looks identical to all three being down.
+func (r *ConversationReconciler) setDeliveryPendingCondition(ctx context.Context,
+	conv *agentopsv1alpha1.Conversation, owed map[string]bool) {
+
+	cond := metav1.Condition{
+		Type: ConditionDeliveryPending, Status: metav1.ConditionFalse,
+		Reason: "AllDelivered", Message: "every recorded run has reached every bound thread",
+	}
+	if len(owed) > 0 {
+		names := make([]string, 0, len(owed))
+		for c := range owed {
+			names = append(names, c)
+		}
+		sort.Strings(names) // stable: a condition that reshuffles reads as a change
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = "Undelivered"
+		cond.Message = "answers recorded but not yet posted to: " + strings.Join(names, ", ")
+	}
+	// Nothing to say about a conversation that has never produced an answer.
+	if cond.Status == metav1.ConditionFalse &&
+		apimeta.FindStatusCondition(conv.Status.Conditions, ConditionDeliveryPending) == nil {
+		return
+	}
+	patch := client.MergeFrom(conv.DeepCopy())
+	if !apimeta.SetStatusCondition(&conv.Status.Conditions, cond) {
+		return // unchanged: do not spend a write per reconcile
+	}
+	if err := r.Status().Patch(ctx, conv, patch); err != nil {
+		log.FromContext(ctx).Error(err, "patching DeliveryPending condition", "conversation", conv.Name)
+	}
 }
 
 // backfillDelivered records pre-upgrade runs as delivered to every bound

@@ -19,6 +19,11 @@ credentials never leave the adapter:
    400 naming the current one. Version 1 carried rendered `text`; an adapter
    still reading that field would post empty messages and look healthy doing it,
    so the handshake fails at the door rather than downstream.
+   A claimed op also carries **`reclaimAfterSeconds`** — how long the manager
+   leaves the claim with you before returning the op to the queue. Additive and
+   optional: ignore it and nothing changes. Honour it if you absorb transport
+   backpressure in-process (below), because finishing after it expires means a
+   second claimant posts the same message again.
 2. Complete each op with `POST /channel/ops/{id}/done` — `{"threadId":"…"}`
    for `ensure-topic` (an opaque string in your id space), an **empty body**
    for `close-topic`, `{"error":"…"}` on failure (surfaced as a Conversation
@@ -126,6 +131,24 @@ naming the missing step. It never closes first: one call doing the irreversible
 thing to a conversation that was still working, behind a confirmation that named
 only the delete, is exactly what the refusal prevents. Closing itself is still
 `/close` on a thread — there is no close endpoint.
+
+### Backpressure is yours to absorb
+
+A transport that says "slow down" — HTTP 429, a `retry_after`, a token-bucket
+rejection — is **not** an operation failure. Absorb it inside your claim window:
+wait the interval the transport stated (never a backoff you computed instead of
+one it gave you) and retry the same call. Report the op failed only when the
+condition is terminal, or when riding it out would overrun the claim.
+
+The manager's recovery path is for operations that genuinely could not be
+performed. Reporting a retryable condition as a failure makes that path
+load-bearing for something you could have waited out, and every re-derivation
+arrives into the same backpressure.
+
+Budget your total in-process wait **strictly below** `reclaimAfterSeconds`, and
+pace your own sending so bursts are spread rather than rejected. Pace before you
+CLAIM, not before you send: work you cannot yet deliver should stay queued in
+the manager, where it is still derivable from CR state and survives your restart.
 
 **Commands the manager answers itself**, before any Pipeline lookup — an adapter
 forwards them as ordinary text and does not implement them:

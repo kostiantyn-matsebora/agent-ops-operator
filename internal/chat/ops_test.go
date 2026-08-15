@@ -305,3 +305,90 @@ func drainOps(q *OpQueue, adapter string) []*Op {
 		out = append(out, op)
 	}
 }
+
+// THE 2026-08-13 REGRESSION TEST. A rejected send left its stable id in the
+// completed window, so every reconcile-driven re-derivation deduped against it
+// and the answer — already a fact in status.runs[].result — could never be
+// enqueued again. No restart helped: the re-derivation was what was suppressed.
+func TestFailedSendIsReDerivable(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+	tid := "t1"
+	msg := AnswerMessage("the answer", "succeeded")
+
+	q.EnqueueRunReply(ctx, ch, "conv-1", "run-1", &tid, msg)
+	op := q.Claim("slack")
+	if op == nil {
+		t.Fatal("no reply queued")
+	}
+	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: Too Many Requests: retry after 30"})
+	if q.Pending(op.ID) {
+		t.Fatal("a failed send must not stay pending")
+	}
+
+	q.EnqueueRunReply(ctx, ch, "conv-1", "run-1", &tid, msg) // the reconciler backstop
+	again := q.Claim("slack")
+	if again == nil {
+		t.Fatal("a failed send must be re-derivable: the answer is still owed to the thread")
+	}
+	if again.ID != op.ID {
+		t.Fatalf("re-derived reply must keep the stable id: %s != %s", again.ID, op.ID)
+	}
+
+	// ...and a SUCCESSFUL one still dedups, or the backstop would repost every
+	// answer on every reconcile.
+	q.Complete(ctx, again.ID, OpResult{})
+	q.EnqueueRunReply(ctx, ch, "conv-1", "run-1", &tid, msg)
+	if dup := q.Claim("slack"); dup != nil {
+		t.Fatalf("a delivered reply must stay deduped: %+v", dup)
+	}
+}
+
+// The same rule on the card path, pinned independently: a card and a reply are
+// both stable sends, but they are derived by different passes, and one covering
+// the other is exactly the assumption that let this bug hide.
+func TestFailedInputCardIsReDerivable(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+	tid := "t1"
+	card := SignalMessage("k8s-ops", "cluster-events", "PodCrashLooping", "i1", nil, "the alert body")
+
+	q.EnqueueInputCard(ctx, ch, "conv-1", "i1", &tid, card)
+	op := q.Claim("slack")
+	if op == nil {
+		t.Fatal("no card queued")
+	}
+	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: Too Many Requests: retry after 30"})
+
+	q.EnqueueInputCard(ctx, ch, "conv-1", "i1", &tid, card)
+	again := q.Claim("slack")
+	if again == nil {
+		t.Fatal("a failed input card must be re-derivable: the thread never opened with its event")
+	}
+	if again.ID != op.ID {
+		t.Fatalf("re-derived card must keep the stable id: %s != %s", again.ID, op.ID)
+	}
+}
+
+// delete-conversation is the ONE exemption, and for a reason the others lack:
+// its Conversation is being deleted, so there is no object to re-derive from
+// and no marker to gain. The finalizer's grace releases regardless.
+func TestFailedDeleteConversationIsNotReDerivable(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+
+	q.EnqueueDeleteConversation(ctx, ch, "9876", "conv-1")
+	op := q.Claim("slack")
+	if op == nil {
+		t.Fatal("no delete-conversation queued")
+	}
+	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: chat not found"})
+
+	q.EnqueueDeleteConversation(ctx, ch, "9876", "conv-1")
+	if again := q.Claim("slack"); again != nil {
+		t.Fatalf("a failed delete-conversation is TERMINAL and must stay suppressed: %+v", again)
+	}
+}

@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
-### Requirement: Outbound operations other than close-topic are derivable from CR state
-Every outbound channel operation except `close-topic` SHALL be re-derivable from
+### Requirement: Outbound operations other than delete-conversation are derivable from CR state
+Every outbound channel operation except `delete-conversation` SHALL be re-derivable from
 Kubernetes state after a manager restart. A run whose result is recorded in
 `Conversation.status` but not yet delivered to a bound thread SHALL be
 re-enqueued by reconciliation. The in-memory operation queue SHALL remain the
@@ -16,9 +16,14 @@ leaves its id in the window is indistinguishable from one that was delivered,
 which converts a transient transport error into permanent, unrecoverable loss of
 a reply the CR still records as owed.
 
-`close-topic` SHALL keep its terminal semantics: it is not regenerated, because
-the object that would carry the obligation is being deleted. It is the only
-exemption.
+`delete-conversation` SHALL keep its terminal semantics: it is not regenerated,
+because the object that would carry the obligation is being deleted. It is the
+only exemption.
+
+`close-topic` SHALL NOT be exempt. It was, while closing a conversation deleted
+it; the object now survives its close and `status.threadsArchived[]` records
+which threads are done, so an unarchived bound thread is an archive still owed
+and is re-derivable like any other operation.
 
 A reply that remains undelivered to a bound thread after its operation failed
 SHALL be observable on the Conversation rather than only in manager logs.
@@ -51,9 +56,13 @@ SHALL be observable on the Conversation rather than only in manager logs.
 - **WHEN** a transport rejects a batch of `ensure-topic` and `send` operations with a retryable error and later accepts them
 - **THEN** every created thread eventually carries both its opening card and its run replies, and no conversation is left with a thread that has a recorded result but no posted message
 
-#### Scenario: Failed close-topic is still not regenerated
-- **WHEN** a `close-topic` op completes with an error while the conversation's finalizer is releasing
-- **THEN** the op is not re-derived and the finalizer releases regardless, leaving the thread open
+#### Scenario: Failed close-topic is re-derived like any other operation
+- **WHEN** a `close-topic` op completes with an error and its conversation still exists
+- **THEN** the dedup entry is released and reconciliation re-derives the op, because the thread is still owed an archive
+
+#### Scenario: Failed delete-conversation is still not regenerated
+- **WHEN** a `delete-conversation` op completes with an error while the conversation's finalizer is releasing
+- **THEN** the op is not re-derived and the finalizer releases regardless, because the object that would carry the obligation is gone
 
 #### Scenario: An owed reply is visible on the object
 - **WHEN** a run's reply has failed delivery to a bound thread and has not yet succeeded

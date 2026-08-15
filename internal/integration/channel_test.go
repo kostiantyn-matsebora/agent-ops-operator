@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -19,6 +21,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
 )
 
@@ -271,4 +274,115 @@ func opBody(op chat.Op) string {
 		return ""
 	}
 	return op.Message.Body
+}
+
+// The claim window is ADVERTISED, not guessed. An adapter that sleeps out a
+// transport's backpressure must finish inside it or the manager reclaims the op
+// and a second claimant posts the same message twice — an inequality spanning
+// two dependency-free modules, which is exactly the kind of constant that drifts
+// the first time someone tunes ReclaimAfter.
+func TestClaimedOpAdvertisesTheReclaimInterval(t *testing.T) {
+	ctx := context.Background()
+	mkProfile(t, "prof-reclaim")
+	mkChannel(t, "chan-reclaim", "tg-reclaim")
+	srv := apiServer()
+
+	conv := &agentopsv1alpha1.Conversation{}
+	conv.Name, conv.Namespace = "conv-reclaim", ns
+	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-reclaim"}
+	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "chan-reclaim"}}
+	conv.Spec.Title = "needs a topic"
+	if err := k8sClient.Create(ctx, conv); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupConversation(t, "conv-reclaim") })
+
+	rc := reconcilerWithOps(srv.Ops)
+	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "conv-reclaim"}}); err != nil {
+		t.Fatal(err)
+	}
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-reclaim&contract=2&wait=0", nil, "test-adapter-token")
+	if rec.Code != 200 {
+		t.Fatalf("expected a claimed op: %d", rec.Code)
+	}
+	var got struct {
+		ID                  string `json:"id"`
+		Kind                string `json:"kind"`
+		ReclaimAfterSeconds int    `json:"reclaimAfterSeconds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if want := int(chat.ReclaimAfter.Seconds()); got.ReclaimAfterSeconds != want {
+		t.Fatalf("reclaimAfterSeconds=%d, want %d", got.ReclaimAfterSeconds, want)
+	}
+	// the op itself still marshals as before — the field is ADDITIVE
+	if got.ID == "" || got.Kind != string(chat.OpEnsureTopic) {
+		t.Fatalf("the op payload changed shape: %+v", got)
+	}
+}
+
+// An answer recorded on the conversation but not yet on the thread is now
+// VISIBLE. The 2026-08-13 incident ran four and a half hours with 22 threads
+// empty and the operator reporting itself healthy, because nothing said the
+// replies were owed.
+func TestDeliveryPendingSurfacesAnOwedReply(t *testing.T) {
+	ctx := context.Background()
+	mkProfile(t, "prof-owed")
+	mkChannel(t, "chan-owed", "tg-owed")
+	srv := apiServer()
+
+	conv := &agentopsv1alpha1.Conversation{}
+	conv.Name, conv.Namespace = "conv-owed", ns
+	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-owed"}
+	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "chan-owed"}}
+	if err := k8sClient.Create(ctx, conv); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupConversation(t, "conv-owed") })
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "chan-owed", ThreadID: "42", ReadTracked: true}}
+	conv.Status.Runs = []agentopsv1alpha1.RunStatus{{
+		RunID: "run-1", Status: "succeeded", Result: "the answer", DeliveryTracked: true,
+	}}
+	if err := k8sClient.Status().Update(ctx, conv); err != nil {
+		t.Fatal(err)
+	}
+
+	rc := reconcilerWithOps(srv.Ops)
+	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "conv-owed"}}); err != nil {
+		t.Fatal(err)
+	}
+	cond := conversationCondition(t, "conv-owed", controller.ConditionDeliveryPending)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("an undelivered answer must be visible: %+v", cond)
+	}
+	if !strings.Contains(cond.Message, "chan-owed") {
+		t.Fatalf("the condition must name where delivery is owed: %q", cond.Message)
+	}
+
+	// The adapter takes it and succeeds; the next reconcile clears the condition.
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=tg-owed&contract=2&wait=0", nil, "test-adapter-token")
+	if rec.Code != 200 {
+		t.Fatalf("expected the reply op: %d", rec.Code)
+	}
+	var op chat.Op
+	_ = json.Unmarshal(rec.Body.Bytes(), &op)
+	if rec := adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", op.ID), chat.OpResult{}, "test-adapter-token"); rec.Code != 200 {
+		t.Fatalf("done: %d", rec.Code)
+	}
+	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "conv-owed"}}); err != nil {
+		t.Fatal(err)
+	}
+	if cond := conversationCondition(t, "conv-owed", controller.ConditionDeliveryPending); cond == nil || cond.Status != metav1.ConditionFalse {
+		t.Fatalf("a delivered answer must clear the condition: %+v", cond)
+	}
+}
+
+func conversationCondition(t *testing.T, name, condType string) *metav1.Condition {
+	t.Helper()
+	var conv agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &conv); err != nil {
+		t.Fatal(err)
+	}
+	return apimeta.FindStatusCondition(conv.Status.Conditions, condType)
 }

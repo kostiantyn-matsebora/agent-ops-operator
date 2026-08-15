@@ -79,10 +79,29 @@ type adapter struct {
 	fallbackToken string
 	listen        string
 
+	// pace spreads outbound work across the Bot API's budgets. Telegram
+	// REJECTS rather than queues, so without this a burst is lost, not delayed.
+	pace *pacer
+
 	mu       sync.Mutex
 	channels map[string]servedChannel // validated, by channel name
 	reported map[string]string        // last status message per channel (avoid spam)
 	clients  map[string]*Telegram     // bot client per token
+}
+
+// chatIDs lists the chats this adapter currently serves.
+func (a *adapter) chatIDs() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	seen := map[string]bool{}
+	out := make([]string, 0, len(a.channels))
+	for _, sc := range a.channels {
+		if id := sc.cfg.ChatID; id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func mustEnv(key string) string {
@@ -107,6 +126,7 @@ func main() {
 		channelType:   channelType,
 		fallbackToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
 		listen:        listen,
+		pace:          newPacer(),
 		channels:      map[string]servedChannel{},
 		reported:      map[string]string{},
 		clients:       map[string]*Telegram{},
@@ -220,6 +240,14 @@ func (a *adapter) client(token string) *Telegram {
 func (a *adapter) opsLoop(ctx context.Context) {
 	a.refreshChannels(ctx)
 	for ctx.Err() == nil {
+		// PACE BEFORE CLAIMING, not before sending. Work this adapter cannot
+		// yet deliver stays queued in the manager, where it is still derivable
+		// from CR state and survives an adapter restart. Gating the send
+		// instead would hold a claim while waiting, and a crash mid-wait would
+		// strand the op until ReclaimAfter.
+		if !a.pace.wait(ctx, a.chatIDs()) {
+			continue
+		}
 		op, err := a.mgr.NextOp(ctx, a.channelType, 25)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -231,7 +259,10 @@ func (a *adapter) opsLoop(ctx context.Context) {
 		if op == nil {
 			continue
 		}
-		threadID, opErr := a.execute(ctx, op)
+		// The claim window is the manager's to state and ours to respect: every
+		// Bot API call this op makes shares one retry budget, bounded well
+		// inside it.
+		threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
 		if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
 			log.Printf("complete op %s: %v", op.ID, err)
 		}
@@ -547,9 +578,13 @@ func containsID(list []int64, id int64) bool {
 	return false
 }
 
-func sleepCtx(ctx context.Context, d time.Duration) {
+// sleepCtx waits, reporting false when the context ended first — which is how
+// a retry loop tells "the interval elapsed" from "we are shutting down".
+func sleepCtx(ctx context.Context, d time.Duration) bool {
 	select {
 	case <-ctx.Done():
+		return false
 	case <-time.After(d):
+		return true
 	}
 }

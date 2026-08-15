@@ -96,6 +96,23 @@ type Op struct {
 
 	Topic   *TopicDescriptor `json:"topic,omitempty"`   // ensure-topic
 	Message *Message         `json:"message,omitempty"` // send, delete-conversation
+
+	// ReclaimAfterSeconds is how long the manager leaves this claim with us
+	// before returning the op to its queue. Absent (0) means an older manager.
+	ReclaimAfterSeconds int `json:"reclaimAfterSeconds,omitempty"`
+}
+
+// RetryBudget is how long this op may spend absorbing transport backpressure.
+//
+// HALF the advertised claim window, deliberately. The op still has to be sent
+// and completed after the last retry, and a budget equal to the window would
+// finish exactly as the manager reclaims it — handing a second claimant the
+// same message. Half leaves room for the work either side of the waiting.
+func (o *Op) RetryBudget() time.Duration {
+	if o.ReclaimAfterSeconds <= 0 {
+		return defaultRetryBudget
+	}
+	return time.Duration(o.ReclaimAfterSeconds) * time.Second / 2
 }
 
 // ChannelInfo is one channel served by this adapter, with its opaque config.

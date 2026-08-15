@@ -726,6 +726,23 @@ func forbidScope(w http.ResponseWriter) {
 	writeJSON(w, 403, map[string]string{"error": "token is scoped to another channel type"})
 }
 
+// claimedOp is one claimed operation plus how long the adapter holds the claim.
+//
+// An adapter that rides out transport backpressure in-process — sleeping a
+// Telegram `retry_after`, say — must finish INSIDE the claim window, or the
+// manager reclaims the op, a second claimant takes it, and the message posts
+// twice. That makes the adapter's retry budget and this constant an inequality
+// spanning two dependency-free modules, which is a drift bug waiting for the
+// first person to tune ReclaimAfter down.
+//
+// So the manager states it rather than the adapter guessing. Additive and
+// optional: an older adapter ignores the field, and a newer one against an
+// older manager falls back to its own conservative default.
+type claimedOp struct {
+	*chat.Op
+	ReclaimAfterSeconds int `json:"reclaimAfterSeconds"`
+}
+
 func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	channelType, ok := adapterParam(w, r)
 	if !ok {
@@ -745,7 +762,7 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	for {
 		if op := s.Ops.Claim(channelType); op != nil {
-			writeJSON(w, 200, op)
+			writeJSON(w, 200, claimedOp{Op: op, ReclaimAfterSeconds: int(chat.ReclaimAfter.Seconds())})
 			return
 		}
 		if time.Now().After(deadline) {

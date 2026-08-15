@@ -50,6 +50,31 @@ telegram-bundle:
 That renders the `Channel`, the chat `SignalSource` (same name as the Channel —
 one name for the whole surface), the bot `Secret`, and the **router Deployment**.
 
+### Bursts are paced, not dropped
+
+Telegram **rejects** rather than queues. A 44-alert burst on 2026-08-13 produced
+105 `createForumTopic` and 74 `sendMessage` rejections in four minutes, and the
+messages were lost rather than delayed.
+
+The adapter now paces itself against two budgets, and honours a `retry_after`
+exactly when it still gets one:
+
+| Budget | Limit |
+|---|---|
+| per bot, global | 30 sends/second |
+| per `chat_id` | 20 sends/minute |
+
+**Expect an alert burst to take minutes to appear in full.** Every topic in a
+forum shares one `chat_id`, so cards, replies and topic creations for the whole
+surface contend for the same 20/minute — a 44-alert burst is roughly 144 calls,
+which is over seven minutes of drain. That is Telegram's limit rather than a
+tuning choice, and the alternative is the old behaviour, which lost the messages
+outright. A single alert is unaffected.
+
+Pacing gates the **claim**, not the send: work the adapter cannot yet deliver
+stays queued in the manager, still derivable from conversation state, so an
+adapter restart mid-burst loses nothing.
+
 ### Deleting a conversation's topic
 
 By default, deleting a conversation leaves its forum topic in place: the adapter

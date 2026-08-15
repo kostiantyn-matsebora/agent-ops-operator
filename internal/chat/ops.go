@@ -120,8 +120,15 @@ var sendSeq atomic.Int64
 // fire-and-forget UX (acks, notices) whose loss costs nothing. Queue loss on
 // restart is therefore regenerated or safely dropped.
 //
-// `close-topic` is the one exception, and it is exceptional because the object
-// that would carry the obligation is being deleted. See OpCloseTopic.
+// `delete-conversation` is the one exception, and it is exceptional because the
+// object that would carry the obligation is being deleted. See
+// OpDeleteConversation — close-topic stopped being the exception when closing
+// stopped deleting, since status.threadsArchived[] gives it something to record
+// against.
+//
+// A FAILED op is not a completed one: Complete releases its dedup entry so
+// reconciliation can re-derive it. Recording an attempt would let one transient
+// transport error suppress that op's recovery permanently.
 type OpQueue struct {
 	Client    client.Client
 	Namespace string
@@ -487,11 +494,36 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 	}
 	q.Activity.Emit(done)
 
+	// THE COMPLETED WINDOW RECORDS WHAT SUCCEEDED, NOT WHAT WAS ATTEMPTED.
+	//
+	// enqueue() suppresses a stable id present in that window, and every
+	// derivable op is stable — a run reply, an input card, a close-topic. So an
+	// op that is recorded on failure disables its OWN recovery: reconciliation
+	// re-derives it on the next pass, dedup drops it, and nothing ever posts.
+	// No restart fixes that, because the re-derivation is what is suppressed.
+	//
+	// This cost us the 2026-08-13 incident. Telegram rate-limited a 44-alert
+	// burst; every ensure-topic recovered, because ITS failure path already
+	// released the entry, while 74 rejected sends did not — 22 topics stayed
+	// empty for four and a half hours with the answers sitting delivered-nowhere
+	// in status.runs[].result. Releasing here is that one special case
+	// generalised to the rule it always was.
+	//
+	// delete-conversation is the single exemption, and a real one: its
+	// Conversation is being deleted, so there is no object to re-derive from and
+	// no marker to gain. The finalizer's grace releases regardless.
+	if res.Error != "" && op.Kind != OpDeleteConversation {
+		q.mu.Lock()
+		delete(q.recent, id)
+		q.mu.Unlock()
+	}
+
 	switch {
 	case op.Kind == OpEnsureTopic:
 		if err := q.finishEnsureTopic(ctx, op, res); err != nil {
 			log.FromContext(ctx).Error(err, "complete ensure-topic", "conversation", op.Conversation)
-			// drop the dedup entry so reconciliation can regenerate the op
+			// The call SUCCEEDED and the Kubernetes write failed — a case the
+			// rule above does not cover, since it keys on the transport result.
 			q.mu.Lock()
 			delete(q.recent, id)
 			q.mu.Unlock()
@@ -503,8 +535,9 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 		// before a restart is not.
 		if err := q.markDelivered(ctx, op); err != nil {
 			log.FromContext(ctx).Error(err, "mark run reply delivered", "conversation", op.Conversation, "op", op.ID)
-			// Unmark the dedup entry: an undelivered marker with a suppressed op
-			// would leave the answer owed and unenqueueable.
+			// The post SUCCEEDED and the marker write failed — not covered by
+			// the transport-result rule above. An undelivered marker with a
+			// suppressed op would leave the answer owed and unenqueueable.
 			q.mu.Lock()
 			delete(q.recent, id)
 			q.mu.Unlock()
@@ -532,17 +565,17 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 			}
 			break
 		}
-		// Failed: release the dedup entry so reconciliation re-derives it. A
-		// conversation being DELETED has no marker to gain and no object left
-		// to re-derive from — the finalizer's grace covers that path and
-		// releases regardless, so this costs it nothing.
+		// Failed: the dedup entry was already released above, so an unarchived
+		// thread stays an archive still owed and reconciliation re-derives it.
 		log.FromContext(ctx).Info("close-topic op failed; leaving the thread open",
 			"channel", op.Channel, "conversation", op.Conversation, "error", res.Error)
-		q.mu.Lock()
-		delete(q.recent, id)
-		q.mu.Unlock()
 	case res.Error != "":
-		log.FromContext(ctx).Info("send op failed", "channel", op.Channel, "error", res.Error)
+		// NAME THE OP. The incident that produced the rule above was
+		// diagnosable only by correlating counts across two systems, because
+		// this line said neither which op nor which kind had failed.
+		log.FromContext(ctx).Info("channel op failed; released for re-derivation",
+			"op", op.ID, "kind", string(op.Kind), "channel", op.Channel,
+			"conversation", op.Conversation, "error", res.Error)
 	}
 }
 
@@ -589,7 +622,10 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 // next run's status write compete for the same subresource.
 func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 	_, channel, runID, ok := ParseRunReplyOpID(op.ID)
-	if !ok {
+	if !ok || q.Client == nil {
+		// Same guard markThreadArchived carries: a queue with no client marks
+		// nothing rather than panicking. The asymmetry was invisible because no
+		// test had ever completed a run reply SUCCESSFULLY without one.
 		return nil
 	}
 	for attempt := 0; attempt < 5; attempt++ {
