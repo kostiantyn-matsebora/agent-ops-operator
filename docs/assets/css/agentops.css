@@ -965,10 +965,22 @@ a:hover {
   margin: 0 0 1.25rem;
 }
 
+/* Scrolls rather than wraps: a wrapped strip reads as two rows of unrelated
+   buttons, and a one-line strip that runs off the edge says there is more. */
 .ao-tablist {
   display: flex;
   gap: 0.25rem;
   border-bottom: 1px solid var(--ao-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ao-tablist::-webkit-scrollbar {
+  display: none;
+}
+
+.ao-tab {
+  white-space: nowrap;
 }
 
 .ao-tab {
@@ -997,6 +1009,45 @@ a:hover {
   margin: 0;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
+}
+
+/* --- tabbed panels -------------------------------------------------------- */
+/* The same strip, over a list the page writes: `{: .ao-tabs}` on an ordinary
+   markdown list, one item per panel, exactly as `{: .ao-cards}` names a grid.
+   assets/js/tabs.js takes each item's leading <strong> as the label.
+
+   WITHOUT JAVASCRIPT the list is the content: every label, every sentence and
+   every image, in order. The rules below are what that list looks like, and the
+   script never sees them — it removes the list once it has built the strip. */
+.ao-content ul.ao-tabs {
+  margin: 0 0 1.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.ao-content ul.ao-tabs > li + li {
+  margin-top: 1.25rem;
+}
+
+.ao-tabs--panels .ao-tabpanel {
+  padding: 1rem 0 0;
+}
+
+.ao-tabs--panels .ao-tabpanel > :last-child {
+  margin-bottom: 0;
+}
+
+/* A screenshot is a picture of a UI: it needs the frame the UI has on screen,
+   or it reads as a fragment that escaped its window. */
+.ao-content ul.ao-tabs img,
+.ao-tabs--panels .ao-tabpanel img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 0.75rem;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface-alt);
 }
 
 /* --- tables --------------------------------------------------------------- */

@@ -110,10 +110,11 @@ For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).
 |---|---|
 | [Documentation site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) | The adopter hub: what this is, where to start, and every path onward |
 | [Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/) | The read-only demo: install it and ask an agent about your cluster |
+| [The console](https://kostiantyn-matsebora.github.io/agent-ops-operator/console/) | A tour of its six views, and how to decide who may reach it |
 | [Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/) | The real install: what to decide, what to configure, how to wire a route |
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, and how a route's tools are resolved |
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
-| [docs/console.md](docs/console.md) | The console: topology, live runs, and the channel it also is |
+| [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
 | [docs/k8s-bundle.md](docs/k8s-bundle.md) | Cluster events, the agent that answers them, Kubernetes MCP tooling |
 | [docs/telegram-bundle.md](docs/telegram-bundle.md) | The Telegram ingest stack and chat surface |
 | [docs/prometheus-bundle.md](docs/prometheus-bundle.md) | The Alertmanager alert lane and its metrics tooling |

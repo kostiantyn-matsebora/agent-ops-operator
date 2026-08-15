@@ -7,11 +7,11 @@ description: >-
 
 next:
   eyebrow: Next
-  title: Install it for real
+  title: The screen you are looking at
   body: >-
-    The decisions to make before a real install, the values that matter, how to
-    enable a bundle, and the one route without which nothing answers.
-  url: /agent-ops-operator/installation/
+    A tour of the console's six views, what each one answers, and the one
+    decision to make before you let anyone else reach it.
+  url: /agent-ops-operator/console/
 ---
 
 Install the operator and get your first question answered, in the console. About
@@ -178,7 +178,5 @@ exits on the idle TTL.
   [cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md),
   [Prometheus alerts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus-bundle.md),
   [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram-bundle.md).
-- **[The console](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/console.md)**
-  — the same conversations as a live graph, and a channel you can reply from.
 - **[Contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md)**
   — bring your own signal source, runtime or channel.

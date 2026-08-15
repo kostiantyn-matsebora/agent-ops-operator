@@ -73,6 +73,8 @@ Documented HTTP contracts, no fork.
   together: what wakes an agent, what decides what it may touch, what runs it.
 - **[Getting started]({{ '/getting-started/' | relative_url }})** — a read-only
   demo in fifteen minutes: install it and ask an agent about your cluster.
+- **[The console]({{ '/console/' | relative_url }})** — see the product before
+  you install it: six views, and how to decide who may reach them.
 - **[Installation]({{ '/installation/' | relative_url }})** — the real install:
   what to decide first, what to configure, and how to wire your first route.
 - **[The kinds you will declare](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)** —
@@ -89,7 +91,7 @@ Documented HTTP contracts, no fork.
 
 ## Run it
 
-- [The console](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/console.md)
+- [The console]({{ '/console/' | relative_url }})
   — the wiring as a graph, live runs, and the channel it also is.
 - [Cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md)
   — the events lane, the agent that answers it, and Kubernetes MCP tooling.
