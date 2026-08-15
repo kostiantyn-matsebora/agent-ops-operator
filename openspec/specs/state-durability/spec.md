@@ -27,15 +27,33 @@ node and defeat rescheduling.
 - **WHEN** a component holds state in process memory
 - **THEN** that state is either a cache of a Kubernetes object, derivable from Kubernetes objects, or declared lossy telemetry
 
-### Requirement: Outbound operations other than close-topic are derivable from CR state
-Every outbound channel operation except `close-topic` SHALL be re-derivable from
+### Requirement: Outbound operations other than delete-conversation are derivable from CR state
+Every outbound channel operation except `delete-conversation` SHALL be re-derivable from
 Kubernetes state after a manager restart. A run whose result is recorded in
 `Conversation.status` but not yet delivered to a bound thread SHALL be
 re-enqueued by reconciliation. The in-memory operation queue SHALL remain the
 hot path and SHALL NOT become the record of what is owed.
 
-`close-topic` SHALL keep its terminal semantics: it is not regenerated, because
-the object that would carry the obligation is being deleted.
+Re-derivation SHALL NOT depend on a restart. The manager's completed-operation
+window exists to suppress duplicates and SHALL therefore record operations that
+**succeeded**, never operations that were merely **attempted**. When a derivable
+operation completes with an error, the manager SHALL release that operation's
+dedup entry so the next reconciliation re-derives it. An operation whose failure
+leaves its id in the window is indistinguishable from one that was delivered,
+which converts a transient transport error into permanent, unrecoverable loss of
+a reply the CR still records as owed.
+
+`delete-conversation` SHALL keep its terminal semantics: it is not regenerated,
+because the object that would carry the obligation is being deleted. It is the
+only exemption.
+
+`close-topic` SHALL NOT be exempt. It was, while closing a conversation deleted
+it; the object now survives its close and `status.threadsArchived[]` records
+which threads are done, so an unarchived bound thread is an archive still owed
+and is re-derivable like any other operation.
+
+A reply that remains undelivered to a bound thread after its operation failed
+SHALL be observable on the Conversation rather than only in manager logs.
 
 #### Scenario: Reply survives a restart between completion and delivery
 - **WHEN** the manager restarts after `POST /work/done` recorded a run result but before any adapter claimed the resulting `send` op
@@ -52,6 +70,30 @@ the object that would carry the obligation is being deleted.
 #### Scenario: Upgrading does not re-post history
 - **WHEN** the manager is upgraded to a version that tracks delivery and first observes conversations whose runs completed before it started
 - **THEN** those runs are recorded as delivered without enqueueing any `send`, and no bound thread receives an old answer again
+
+#### Scenario: Failed reply is re-derived without a restart
+- **WHEN** an adapter reports a `send` op for a run reply as failed and the manager keeps running
+- **THEN** the operation's dedup entry is released and the next reconciliation re-enqueues the same stable op id, so the reply reaches the thread without operator intervention
+
+#### Scenario: Failed opening card is re-derived without a restart
+- **WHEN** an adapter reports a conversation's input `signal` card op as failed
+- **THEN** the card is re-derived on the next reconciliation, because a card is derivable from the conversation's inputs and carries no CR-side delivery marker of its own
+
+#### Scenario: Rate-limited burst leaves no thread permanently empty
+- **WHEN** a transport rejects a batch of `ensure-topic` and `send` operations with a retryable error and later accepts them
+- **THEN** every created thread eventually carries both its opening card and its run replies, and no conversation is left with a thread that has a recorded result but no posted message
+
+#### Scenario: Failed close-topic is re-derived like any other operation
+- **WHEN** a `close-topic` op completes with an error and its conversation still exists
+- **THEN** the dedup entry is released and reconciliation re-derives the op, because the thread is still owed an archive
+
+#### Scenario: Failed delete-conversation is still not regenerated
+- **WHEN** a `delete-conversation` op completes with an error while the conversation's finalizer is releasing
+- **THEN** the op is not re-derived and the finalizer releases regardless, because the object that would carry the obligation is gone
+
+#### Scenario: An owed reply is visible on the object
+- **WHEN** a run's reply has failed delivery to a bound thread and has not yet succeeded
+- **THEN** the Conversation reports the undelivered thread in its status, so an empty chat thread can be diagnosed without reading manager logs
 
 ### Requirement: Suppression windows survive a manager restart
 Fingerprint cooldown state SHALL be durable for the lifetime of its window. The

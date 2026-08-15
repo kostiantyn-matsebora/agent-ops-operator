@@ -8,6 +8,51 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Rate-limited replies are no longer lost — chart 5.20.0
+
+**No action on upgrade.** No CRD change, no values change: `helm upgrade` with
+the new image tags, and rolling back is reverting them.
+
+On 2026-08-13 a 44-alert burst was rate-limited by Telegram. Every forum topic
+was created, and 22 of them stayed **completely empty** for four and a half
+hours while the answers sat in `status.runs[].result` — with the operator
+reporting itself healthy.
+
+The cause was one line of asymmetry. The manager's completed-operation window
+recorded operations that were **attempted**, and `enqueue` suppresses any stable
+id in that window — which is every derivable op. So a failed send disabled its
+own recovery: reconciliation re-derived it, dedup dropped it, nothing posted, and
+no restart helped, because the re-derivation was what was being suppressed.
+`ensure-topic` recovered only because its failure path had been releasing the
+entry all along.
+
+- **The window now records what SUCCEEDED.** A failed derivable op releases its
+  dedup entry and reconciliation re-derives it. `delete-conversation` is the one
+  exemption — its Conversation is disappearing, so there is nothing to re-derive
+  from.
+- **An owed answer is now visible**: the new `DeliveryPending` condition on a
+  Conversation names the channels a recorded run has not reached, and clears
+  when they all have.
+
+  ```sh
+  kubectl get conv -o json | jq -r '.items[] | select(.status.conditions[]?
+    | select(.type=="DeliveryPending" and .status=="True")) | .metadata.name'
+  ```
+- **Telegram paces itself** — 30 sends/second per bot, 20/minute per chat — and
+  honours `retry_after` exactly, retrying in-process instead of reporting a
+  failure. Expect a burst to take **minutes** to appear in full: every topic in
+  a forum shares one `chat_id`, so ~144 calls against 20/minute is over seven
+  minutes. That is Telegram's limit, and the alternative is the old behaviour,
+  which lost the messages.
+- **`/channel/ops` advertises `reclaimAfterSeconds`**, so an adapter absorbing
+  backpressure can bound its waiting inside the claim window rather than
+  hardcoding a constant that drifts from the manager's. Additive and optional —
+  every existing adapter ignores it.
+
+Rolling this out **re-posts what the incident lost**, including cards to topics
+that did receive their answer. Those were never posted, so it is correct, but it
+will look like a flood — roll during a quiet window.
+
 ### Read state becomes per person — chart 5.19.0
 
 **Additive, and the CRDs must be re-applied again** — `status.threads[]` gains

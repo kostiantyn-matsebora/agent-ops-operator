@@ -28,33 +28,98 @@ type tgResponse struct {
 	OK          bool            `json:"ok"`
 	Description string          `json:"description"`
 	Result      json.RawMessage `json:"result"`
+	Parameters  struct {
+		// RetryAfter is Telegram TELLING US how long to wait. Honour it
+		// exactly — never substitute a backoff we computed for an interval the
+		// transport stated.
+		RetryAfter int `json:"retry_after"`
+	} `json:"parameters"`
 }
 
-// API calls a Bot API method with a JSON body.
+// retryBudgetKey scopes one operation's total in-process retry allowance.
+//
+// Per OPERATION rather than per client: the client is shared across ops (one
+// per bot token) and the budget comes from the claim the manager handed us, so
+// a field on Telegram would race between concurrent ops and outlive the claim
+// it belongs to.
+type retryBudgetKey struct{}
+
+// defaultRetryBudget applies when the manager advertised no reclaim interval —
+// an older manager. Deliberately well under the 5-minute ReclaimAfter that has
+// been the constant for as long as there has been one.
+const defaultRetryBudget = 60 * time.Second
+
+// WithRetryBudget bounds how long API may spend sleeping out `retry_after`
+// before it gives up and reports the operation failed.
+//
+// THE INEQUALITY THAT MATTERS: this must stay strictly below the manager's
+// reclaim interval. Overrun it and the manager hands the op to a second
+// claimant while we are still working on it, and the message posts twice.
+func WithRetryBudget(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, retryBudgetKey{}, d)
+}
+
+func retryBudget(ctx context.Context) time.Duration {
+	if d, ok := ctx.Value(retryBudgetKey{}).(time.Duration); ok && d > 0 {
+		return d
+	}
+	return defaultRetryBudget
+}
+
+// API calls a Bot API method with a JSON body, absorbing rate limiting.
+//
+// A 429 is BACKPRESSURE, not a failure: Telegram states how long to wait, we
+// wait exactly that, and we retry the same call. Reporting it to the manager
+// instead makes the manager's recovery path load-bearing for a condition we
+// could have ridden out — and the re-derivation arrives into the same limit.
+//
+// Retrying is safe because a rejected call posted nothing: there is no
+// half-sent message to duplicate.
+//
+// The budget bounds the whole thing, so an operation always completes or fails
+// while its claim is still ours. See WithRetryBudget.
 func (t *Telegram) API(ctx context.Context, method string, body any) (json.RawMessage, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.telegram.org/bot"+t.Token+"/"+method, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
+	spent := time.Duration(0)
+	budget := retryBudget(ctx)
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			"https://api.telegram.org/bot"+t.Token+"/"+method, bytes.NewReader(b))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := t.HTTP.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		var out tgResponse
+		decErr := json.NewDecoder(resp.Body).Decode(&out)
+		resp.Body.Close()
+		if decErr != nil {
+			return nil, decErr
+		}
+		if out.OK {
+			return out.Result, nil
+		}
+		wait := time.Duration(out.Parameters.RetryAfter) * time.Second
+		if wait <= 0 {
+			return nil, fmt.Errorf("telegram %s: %s", method, out.Description)
+		}
+		if spent+wait > budget {
+			// Give the op back while the claim is still valid: the manager
+			// re-derives it, paced, rather than a second claimant duplicating it.
+			return nil, fmt.Errorf("telegram %s: %s (retry_after %ds would exceed the %s claim budget)",
+				method, out.Description, out.Parameters.RetryAfter, budget)
+		}
+		spent += wait
+		if !sleepCtx(ctx, wait) {
+			return nil, ctx.Err()
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := t.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var out tgResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	if !out.OK {
-		return nil, fmt.Errorf("telegram %s: %s", method, out.Description)
-	}
-	return out.Result, nil
 }
 
 // CreateTopic creates a forum topic and returns its thread id.
