@@ -1,8 +1,8 @@
 import type {
   AgentsResponse, ChartResponse, CloseRequest, CloseResponse,
   DeleteResponse, ConversationDetail, ConversationGraph,
-  ConversationPage, Detail, Finding, KindInfo, InventoryRow, Overview, Queues, Session,
-  SourcesResponse, TopologyResponse,
+  ConversationPage, Detail, Finding, KindInfo, InventoryRow, MarkReadRequest,
+  MarkReadResponse, Overview, Queues, Session, SourcesResponse, TopologyResponse,
 } from './types'
 
 /** Raised for a non-2xx response, carrying the server's own explanation. */
@@ -69,6 +69,13 @@ export const api = {
   // path never sees fifty unordered posts.
   closeConversations: (req: CloseRequest) =>
     request<CloseResponse>('/api/conversations/close', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  // Names only: the server reads each conversation's own watermark, so the
+  // browser cannot report having seen activity it never rendered.
+  markRead: (req: MarkReadRequest) =>
+    request<MarkReadResponse>('/api/conversations/read', {
       method: 'POST',
       body: JSON.stringify(req),
     }),

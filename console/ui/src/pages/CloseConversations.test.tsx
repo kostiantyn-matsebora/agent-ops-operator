@@ -9,8 +9,8 @@ import type { CloseResponse, ConversationSummary } from '../api/types'
 
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
-    name, runCount: 0, queued: 0, joined: true, errored: false, ageSeconds: 1, closing: false,
-    ...over,
+    name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
+    ageSeconds: 1, closing: false, ...over,
   }
 }
 

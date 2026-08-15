@@ -237,6 +237,38 @@ func (m *Manager) Delete(ctx context.Context, channel, conversation string) erro
 	return err
 }
 
+// ReadEntry reports one thread as seen up to a point in its activity.
+type ReadEntry struct {
+	ThreadID string `json:"threadId"`
+	ReadAt   string `json:"readAt"`
+	// Reader is the OPAQUE key of whoever read it — a salted hash, never an
+	// identity. Empty reports the channel-wide mark, which is what a console
+	// with no salt projected falls back to.
+	Reader string `json:"reader,omitempty"`
+}
+
+// ReadOutcome is the manager's per-thread verdict on a read report.
+type ReadOutcome struct {
+	ThreadID string `json:"threadId"`
+	Outcome  string `json:"outcome"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// ReportRead records how far this console's threads have been seen. The manager
+// writes the watermark; the console performs no Kubernetes write, exactly as
+// with every other verb here.
+//
+// The watermark is monotonic and clamped manager-side, so a report that would
+// not advance comes back skipped rather than as an error.
+func (m *Manager) ReportRead(ctx context.Context, channel string, reads []ReadEntry) ([]ReadOutcome, error) {
+	var out struct {
+		Results []ReadOutcome `json:"results"`
+	}
+	_, err := m.do(ctx, "POST", "/channel/read",
+		map[string]any{"channel": channel, "reads": reads}, &out)
+	return out.Results, err
+}
+
 // Channels lists the channels this adapter serves.
 func (m *Manager) Channels(ctx context.Context, adapter string) ([]ChannelInfo, error) {
 	var out []ChannelInfo

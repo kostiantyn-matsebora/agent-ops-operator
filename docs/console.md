@@ -224,14 +224,31 @@ marked in the list, an **Unread only** switch narrows to them, and the count
 rides on the *Conversations* navigation item. Opening a conversation reports its
 console thread read; **Mark read** over a selection clears a batch of them.
 
-**Read is per CHANNEL, not per person.** The watermark lives on the
-conversation's thread binding ([concepts](concepts.md#read-state-per-thread)),
-so two operators sharing one console share one mark: whoever opens a
-conversation clears it for both. That is the chosen model, not a defect — a
-per-person mark would need a per-user identity store the console does not have
-and will not grow. Its useful half is the other direction: reading a
-conversation in Telegram does **not** clear it here, and reading it here does not
-clear it there.
+**Read is per PERSON where the console can tell people apart, and per console
+otherwise.** Which install you have depends on one thing — whether a request
+arrives with a forwarded identity:
+
+| Authentication | Who a "reader" is | Effect |
+|---|---|---|
+| A proxy forwards an identity (oauth2-proxy et al.) | each person | your badge is yours; a colleague reading does not clear it |
+| The shared UI token | everyone, as one reader | whoever reads clears it for all holders — there is one credential and no person behind it |
+| No reader salt projected | everyone, as one reader | per-channel marks, exactly as before this existed |
+
+Reading a conversation in Telegram never clears it here, and reading it here
+never clears it there — that part is per channel in every install.
+
+**No identity is stored.** The console hashes the resolved identity with a salt
+projected as a channel credential and sends only that opaque key; the manager
+stores it verbatim and can neither reverse it nor tell whose it is. So a
+conversation records that N people read it and when, and never who. The salt is
+generated on install (and added on the first upgrade that finds the Secret
+without one) — don't rotate it casually: a new salt orphans every stored key and
+silently resets everyone to the channel-wide mark.
+
+**Starting a conversation marks it read for you** — and for nobody else. The
+opaque key travels with the chat signal, and the manager stamps that reader's
+watermark the moment it creates their thread. Without it a conversation you had
+just typed came straight back as unread, before an answer could exist.
 
 The rest of what it does, and why:
 

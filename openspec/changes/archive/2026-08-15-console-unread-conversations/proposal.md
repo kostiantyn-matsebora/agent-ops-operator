@@ -20,6 +20,28 @@ lives, and the read mark belongs beside the thread it is about.
   Read state is **per thread, therefore per channel**: reading a conversation in
   Telegram does not mark it read in the console, and vice versa. That is the
   point of putting it on the binding rather than on the conversation.
+- **…and, where the transport knows who is reading, per IDENTITY** — a bounded
+  `readers[]` list of `{key, readAt}` beside it. `readAt` remains the
+  channel-wide mark for transports that cannot tell one reader from another
+  (Telegram: a topic is read or it is not), so the per-identity list is an
+  overlay rather than a replacement, and every existing adapter is untouched.
+  - The key is an **opaque salted hash computed by the console**, never an
+    address. The manager stores a string it does not interpret — the same shape
+    as `threadId` and `runtimeContextId` — so no email reaches etcd, a backup,
+    or the console's own YAML tab.
+  - A reader with no entry falls back to the channel-wide mark, which is also
+    what an evicted reader falls back to. Neither a teammate joining nor an LRU
+    eviction invents a namespace-sized backlog — the same rule, for the same
+    reason, as `readTracked`.
+  - Per **identity**, not per person: under static-token auth every holder
+    resolves to the identity `token` and therefore shares one key, which is
+    exactly today's behaviour and needs no special case.
+- **A reader's own actions advance that reader's own watermark.** Originating a
+  conversation from the console, or sending a message in one, marks it read for
+  the person who did it and for nobody else. Without per-identity marks this was
+  indefensible — a shared mark would clear the badge for operators who never saw
+  it — which is why a conversation you had just started showed up unread before
+  it could possibly have an answer.
 - **A new channel adapter contract verb, `POST /channel/read`**, by which an
   adapter reports "this thread has been seen up to T" for up to 50 threads at a
   time. **The manager writes the status**, exactly as it already does for
@@ -70,17 +92,25 @@ lives, and the read mark belongs beside the thread it is about.
 ## Impact
 
 - **CRD** — `api/v1alpha1/conversation_types.go` (`ThreadBinding` gains two
-  fields; it stops being a plain-copy deepcopy type), regenerated deepcopy and
-  `chart/files/crds/`. Additive and optional; **the CRDs must be re-applied on
-  upgrade** for the field to be persisted.
-- **Manager** — `internal/httpapi/server.go` (one route and handler),
+  fields, then `readers[]`; it stops being a plain-copy deepcopy type),
+  regenerated deepcopy and `chart/files/crds/`. Additive and optional; **the
+  CRDs must be re-applied on upgrade** for the fields to be persisted — and on a
+  cluster where any CRD was ever hand-applied with `kubectl apply -f`, that
+  re-apply needs `--force-conflicts`, or helm rolls the workloads and silently
+  leaves the schema behind.
+- **Manager** — `internal/httpapi/server.go` (one route and handler, then the
+  optional `reader` field with `readers[]` merge and LRU eviction),
   `internal/chat/ops.go` (stamp `readTracked` on bindings it creates). No RBAC
-  change: the manager already patches `Conversation` status.
-- **Console** — `console/adapter.go` (report reads upstream),
-  `console/conversations.go` + `convapi.go` + `api.go` (unread derivation,
-  filter, count, batch endpoint), and the conversations list and detail pages in
+  change: the manager already patches `Conversation` status, and it still reads
+  no Secrets — the hash arrives already computed.
+- **Console** — `console/adapter.go` (report reads upstream; hash the resolved
+  identity with the projected salt), `console/conversations.go` + `convapi.go` +
+  `api.go` (unread derived per viewer, filter, count, batch endpoint), stamping
+  on originate and send, and the conversations list and detail pages in
   `console/ui/`. Console RBAC is unchanged and stays read-only.
-- **Chart** — manager and console image tags, chart version.
+- **Chart** — manager and console image tags, chart version, and the console
+  Channel's `credentialsSecretRef` gains the reader-hash salt (generated on
+  install only — `lookup` is empty on every renderer without a cluster).
 - **Docs** — `docs/concepts.md` (the CRD field), `docs/contracts.md` (the verb),
   `docs/console.md` (the surface and its per-channel semantics),
   `CHANGELOG.md` (re-apply the CRDs).

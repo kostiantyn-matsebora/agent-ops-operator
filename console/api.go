@@ -183,6 +183,13 @@ func (a *API) Handler(ui http.Handler) http.Handler {
 	// of them would announce itself on surfaces nobody is watching — it is a
 	// decision about one conversation.
 	mux.HandleFunc("POST /api/conversations/delete", a.write("bulk-delete", a.handleBulkDelete))
+	// Marking read is authenticated and attributed, but NOT gated by
+	// console.write.enabled: that gate makes the console a strict viewer by
+	// removing its ability to instruct an agent or start work, and a read
+	// watermark does neither. A read-only console is exactly the install where
+	// an unread badge earns its keep, and one that could show a backlog but
+	// never clear it would be broken in the way the badge exists to fix.
+	mux.HandleFunc("POST /api/conversations/read", a.auth(a.handleMarkRead))
 	mux.HandleFunc("POST /api/conversations/{name}/messages", a.write("send-message", a.handleSend))
 	mux.HandleFunc("POST /api/conversations/{name}/reopen", a.write("reopen", a.handleReopen))
 

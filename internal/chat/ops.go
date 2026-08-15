@@ -643,9 +643,23 @@ func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) e
 		cond.Reason = "AdapterError"
 		cond.Message = "channel " + op.Channel + ": adapter completed ensure-topic without a thread id"
 	} else if existing := conv.ThreadFor(op.Channel); existing == nil {
-		conv.Status.Threads = append(conv.Status.Threads, agentopsv1alpha1.ThreadBinding{
-			Channel: op.Channel, ThreadID: res.ThreadID,
-		})
+		binding := agentopsv1alpha1.ThreadBinding{
+			// ReadTracked for EVERY channel, whether or not its adapter reports
+			// reads: the backfill rule has to stay one rule, or "no readAt" would
+			// mean "pre-upgrade" on some channels and "never seen" on others.
+			Channel: op.Channel, ThreadID: res.ThreadID, ReadTracked: true,
+		}
+		// The person who STARTED this conversation has seen it — they typed it.
+		// Stamping their own watermark here, at the one moment their thread
+		// comes into existence, is what stops a conversation being presented
+		// back to its author as unread before any answer could exist. Their key
+		// only; everyone else's view is untouched, which is what makes this
+		// safe to do at all.
+		if o := conv.Spec.OriginReader; o != nil && o.Key != "" && o.Channel == op.Channel {
+			now := metav1.Now()
+			binding.Readers = []agentopsv1alpha1.ReaderMark{{Key: o.Key, ReadAt: &now}}
+		}
+		conv.Status.Threads = append(conv.Status.Threads, binding)
 	} else {
 		// A REOPEN re-establishing an archived thread. Whatever came back is
 		// the thread now: an adapter that honoured the hint returns the same id

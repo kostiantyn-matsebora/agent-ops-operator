@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../App'
 import {
   useCloseConversations, useConversations, useDeleteConversations,
-  useReopenConversation, useSession,
+  useMarkRead, useReopenConversation, useSession,
 } from '../api/hooks'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'
@@ -43,6 +43,9 @@ export function ConversationsPage() {
   const [pipeline, setPipeline] = useState('')
   const [profile, setProfile] = useState('')
   const [errored, setErrored] = useState(false)
+  // Unread is a FILTER like every other one — evaluated server-side, so a
+  // narrowed list still pages correctly.
+  const [unread, setUnread] = useState(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(50)
@@ -59,16 +62,18 @@ export function ConversationsPage() {
     if (pipeline) p.set('pipeline', pipeline)
     if (profile) p.set('profile', profile)
     if (errored) p.set('errored', 'true')
+    if (unread) p.set('unread', 'true')
     if (search) p.set('q', search)
     p.set('limit', String(perPage))
     p.set('offset', String((page - 1) * perPage))
     return p
-  }, [phase, pipeline, profile, errored, search, page, perPage])
+  }, [phase, pipeline, profile, errored, unread, search, page, perPage])
 
   const { data, isLoading, error } = useConversations(params)
   const session = useSession()
   const close = useCloseConversations()
   const del = useDeleteConversations()
+  const markRead = useMarkRead()
   const reopen = useReopenConversation()
 
   // What is selected must never outlive what was on screen when it was picked.
@@ -119,6 +124,13 @@ export function ConversationsPage() {
   function dismissClose() {
     setCloseOpen(false)
     close.reset()
+  }
+
+  // Marking read is NOT behind canWrite: it instructs no agent and starts no
+  // work, and a read-only console that could show a backlog without ever
+  // clearing it would be broken in the way the unread mark exists to fix.
+  function runMarkRead() {
+    markRead.mutate({ names }, { onSuccess: () => setSelected(new Set()) })
   }
 
   function runDelete() {
@@ -211,6 +223,27 @@ export function ConversationsPage() {
                   }}
                 />
               </ToolbarItem>
+              <ToolbarItem>
+                <Switch
+                  id="unread"
+                  label="Unread only"
+                  isChecked={unread}
+                  onChange={(_e, v) => {
+                    setUnread(v)
+                    setPage(1)
+                  }}
+                />
+              </ToolbarItem>
+              <ToolbarItem>
+                <Button
+                  variant="secondary"
+                  isDisabled={names.length === 0 || markRead.isPending}
+                  onClick={runMarkRead}
+                  data-testid="mark-read"
+                >
+                  Mark read{names.length > 0 ? ` (${names.length})` : ''}
+                </Button>
+              </ToolbarItem>
               {canClose && (
                 <ToolbarItem>
                   <Button
@@ -267,16 +300,17 @@ export function ConversationsPage() {
             <Table variant="compact" aria-label="conversations">
               <Thead>
                 <Tr>
-                  {canClose && (
-                    <Th
-                      aria-label="select all on this page"
-                      select={{
-                        onSelect: (_e, isSelected) => toggleAll(isSelected),
-                        isSelected: allSelected,
-                        isHeaderSelectDisabled: selectable.length === 0,
-                      }}
-                    />
-                  )}
+                  {/* The selection column is NOT gated on canWrite: marking
+                      read needs a selection and is not a write to a
+                      conversation, so a read-only console still gets one. */}
+                  <Th
+                    aria-label="select all on this page"
+                    select={{
+                      onSelect: (_e, isSelected) => toggleAll(isSelected),
+                      isSelected: allSelected,
+                      isHeaderSelectDisabled: selectable.length === 0,
+                    }}
+                  />
                   <Th>Title</Th>
                   <Th>Phase</Th>
                   <Th>Pipeline</Th>
@@ -290,22 +324,32 @@ export function ConversationsPage() {
               <Tbody>
                 {data.items.map((c, rowIndex) => (
                   <Tr key={c.name}>
-                    {canClose && (
-                      <Td
-                        select={{
-                          rowIndex,
-                          onSelect: (_e, isSelected) => setRow(c.name, isSelected),
-                          isSelected: selected.has(c.name),
-                          // A conversation already on its way out cannot be
-                          // closed again — there would be nowhere to post.
-                          isDisabled: c.closing,
-                        }}
-                      />
-                    )}
+                    <Td
+                      select={{
+                        rowIndex,
+                        onSelect: (_e, isSelected) => setRow(c.name, isSelected),
+                        isSelected: selected.has(c.name),
+                        // A conversation already on its way out cannot be
+                        // closed again — there would be nowhere to post.
+                        isDisabled: c.closing,
+                      }}
+                    />
                     <Td dataLabel="Title">
-                      <Link to={`/conversations/${c.name}`}>
+                      {/* Unread is marked twice over — weight for the scan, a
+                          label for anyone who cannot see weight. Theme tokens
+                          only: a literal colour here would be the one place the
+                          console's palette lives outside theme.css. */}
+                      <Link
+                        to={`/conversations/${c.name}`}
+                        style={c.unread ? { fontWeight: 700, color: 'var(--ao-brand-strong)' } : undefined}
+                      >
                         <PlainText>{c.title || c.name}</PlainText>
                       </Link>
+                      {c.unread && (
+                        <Label isCompact color="blue" data-testid={`unread-${c.name}`} style={{ marginLeft: 6 }}>
+                          unread
+                        </Label>
+                      )}
                       <div>
                         <small>
                           <PlainText>{c.name}</PlainText>

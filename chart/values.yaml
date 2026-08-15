@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.33.0
+  tag: 0.34.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -111,28 +111,25 @@ runtime:
     token: ""
 
 # Demo advisor: a project-agnostic, read-only "k8s-engineer" agent you can try
-# minutes after install — no chat, no repo, no MCP setup. Ask it by posting a
-# `kind: task` signal to the source its Pipeline claims (there is no endpoint
-# that names a Pipeline, and no profile-addressed form):
-#   TOKEN=$(kubectl -n <ns> get secret agentops-adapter-token \
-#     -o jsonpath='{.data.token}' | base64 -d)
-#   kubectl -n <ns> run q --rm -i --image=curlimages/curl --restart=Never -- \
-#     curl -s -X POST http://agentops-manager.<ns>.svc:8080/signal/inbound \
-#     -H "Authorization: Bearer $TOKEN" \
-#     -d '{"source":"cluster-events","signals":[{"fingerprint":"ask-1",
-#          "kind":"task","payload":"why is pod X crashlooping?"}]}'
-# Answer: kubectl get conversation <name> -o jsonpath='{.status.runs[0].result}'
-# (or follow the runtime pod logs live). Requires ONE secret with a Claude
-# credential (claude setup-token output or an Anthropic API key).
+# minutes after install — no chat, no repo, no MCP setup. Requires ONE secret
+# with a Claude credential (claude setup-token output or an Anthropic API key).
+#
+# The CONSOLE is wired for you: the route claims its signal source and binds it
+# as a channel, so the quickest ask is to port-forward the console and start a
+# conversation there. The walkthrough:
+#   https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/
 #
 # Demo mode is exactly "the k8s-bundle subchart with its defaults" — the
 # k8s-engineer profile, its MCP tooling AND the cluster Events lane — plus the
-# read-only RBAC it resolves for this chart's own runtime. It lives under
-# `global.` because a subchart can read no other parent scope.
+# read-only RBAC it resolves for this chart's own runtime, and the console
+# claim. It lives under `global.` because a subchart can read no other parent
+# scope.
 #
-# NOTE: unlike the pre-2.0 demo, this ingests Warning events and answers them
-# on its own, which costs LLM credits on a noisy cluster. For the old ask-only
-# behavior set `k8s-bundle.eventsAdapter.enabled: false` alongside it.
+# NOTE: it also ingests Warning events and answers them on its own, which costs
+# LLM credits on a noisy cluster (cooldown, grouping and the conversation cap
+# bound it). `k8s-bundle.eventsAdapter.enabled: false` removes that lane and
+# leaves the console one — the `cluster-events` SOURCE goes with the adapter, so
+# a signal posted to it afterwards has nothing to land on.
 global:
   demo:
     enabled: false
@@ -318,7 +315,7 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.13.0
+    tag: 0.14.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -341,6 +338,10 @@ console:
     existingSecret: ""
     # Pin the token; wins over an existing Secret, and is how you rotate one.
     uiToken: ""
+    # Salts the per-viewer read-state key. Generated on install, and added on
+    # the first upgrade that finds the Secret without one. Set it only to pin
+    # the value — rotating it resets everyone to the channel-wide watermark.
+    readerSalt: ""
     # Does the CONSOLE authenticate browsers? Leave this true unless something
     # in front of it already does.
     #

@@ -79,6 +79,12 @@ markers. Together they make the reply derivable rather than queue-resident — s
 [Restart resilience](#restart-resilience). Both are materialized state; nothing
 sets them by hand.
 
+`status.threads[]` records one binding per bound channel, and each binding
+carries **how far that channel has read it**: `readAt` is the point in the
+conversation's activity the thread has been seen up to, and `readTracked` marks
+a binding created after read reporting existed. See
+[Read state](#read-state-per-thread) below.
+
 `spec.pipelineRef` names the Pipeline that **originated** the conversation. It is
 **provenance, never wiring**: written once at creation and read for exactly two
 things — scoping conversation reuse, and attribution in displays. What a
@@ -621,6 +627,100 @@ completes the other two without repeating the first.
 Runs recorded by a manager older than this mechanism carry no
 `deliveryTracked`. They are backfilled as delivered without sending anything —
 otherwise upgrading would re-post every recent answer to every bound thread.
+
+### Read state, per thread
+
+A conversation records how far each bound channel has **read** it, on the
+binding rather than on the conversation:
+
+```yaml
+status:
+  lastActivity: "2026-08-13T11:04:00Z"
+  threads:
+    - channel: telegram
+      threadId: "4242"
+      readTracked: true
+      readAt: "2026-08-13T11:04:00Z"   # read there
+    - channel: console
+      threadId: console-uid-abc
+      readTracked: true                # bound, never read -> unread here
+```
+
+Where the transport can tell one reader from another, each binding also carries
+`readers[]` — a bounded list of `{key, readAt}`:
+
+```yaml
+    - channel: console
+      threadId: console-uid-abc
+      readTracked: true
+      readAt: "2026-08-15T09:00:00Z"    # channel-wide: has anyone seen it
+      readers:                          # per identity, bounded at 50
+        - key: "sha256:9f2a…"           # opaque; the adapter hashes, salted
+          readAt: "2026-08-15T11:04:00Z"
+```
+
+`readAt` stays the CHANNEL-WIDE mark, and the list is an OVERLAY on it, because
+a Telegram topic is read or it is not and there is nobody to attribute that to.
+An adapter that reports no reader keeps reporting only the channel-wide mark and
+stays fully conformant.
+
+**The key is opaque to the manager.** The reporting adapter computes it — the
+console as a salted hash of whoever is signed in — and the manager stores it
+exactly as it stores `threadId` and `runtimeContextId`: verbatim, uninterpreted,
+never derived here. So a conversation records THAT someone read it and when,
+and never WHO: no address reaches etcd, a backup, or the console's YAML tab.
+`/channel/read` refuses a key containing `@`, since it cannot otherwise tell a
+hash from a plaintext address.
+
+**A reader with no entry inherits the channel-wide mark** — a teammate who
+joined today, and equally one the LRU evicted at 50. That is the `readTracked`
+backfill argument one level down: the alternative hands somebody who just
+arrived a namespace-sized backlog they can act on none of.
+
+**Who started it has seen it.** `spec.originReader{channel,key}` records the
+opaque key of whoever originated a chat conversation, and the manager stamps
+that reader's watermark the moment it creates their thread — the same moment it
+sets `readTracked`. Read exactly once, and per channel, since keys live in the
+originating surface's own key space. Without it a conversation you had just
+typed came back to you as unread before any answer could exist.
+
+**The grain is the thread, therefore the channel.** A conversation bound to
+Telegram and the console has two audiences reading it in two places, and one
+shared mark would let a Telegram reader clear the console's. Reading it on one
+channel says nothing about any other.
+
+A thread is **unread**, for a given reader, when `status.lastActivity` is after
+that reader's watermark, or when the binding carries `readTracked` and there is
+no watermark at all. "That reader's watermark" is their `readers[]` entry, and
+the channel-wide `readAt` when they have none. A channel with no binding on a
+conversation is never unread there: with no thread there is no watermark and no
+claim to make.
+
+The watermark is written **only by the manager**, on an adapter's report to
+[`POST /channel/read`](contracts.md#post-channelread) — no adapter and no console
+writes it to the Kubernetes API. Two rules make it safe to report from a
+browser:
+
+- **Monotonic.** A report at or before the stored value is skipped: not written,
+  not an error. Without it two browsers racing — one showing a stale page —
+  would un-read a thread the other just cleared.
+- **Clamped to the manager's clock.** A report ahead of `now` is written as
+  `now`. Without it one client with a skewed clock marks all future activity
+  read forever, and nothing arriving later is ever new again. It is the same
+  clock that stamps `lastActivity`, which is what the watermark is compared
+  against.
+
+Reporting is **optional per adapter**. One that never reports leaves its threads
+unread, which is inert for every surface that does not render unreadness — today
+that is everything but [the console](console.md#unread).
+
+A binding without `readTracked` **predates the mechanism and is treated as
+read**. It cannot be told apart from one nobody has read, and no timestamp can
+separate them — the same shape as `status.runs[].deliveryTracked`, taking the
+same fix for the same reason. Without it the first upgrade presents every
+conversation in the namespace as new. The manager sets `readTracked` on every
+binding it creates from that point on, for every channel, so the rule stays one
+rule.
 
 ### Telemetry says where it lost the thread
 

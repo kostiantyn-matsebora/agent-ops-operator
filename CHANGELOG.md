@@ -8,6 +8,51 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Read state becomes per person — chart 5.19.0
+
+**Additive, and the CRDs must be re-applied again** — `status.threads[]` gains
+`readers[]` and `spec` gains `originReader`. Same pruning trap as 5.18.0, and the
+same fix:
+
+```sh
+kubectl apply -f chart/files/crds/          # or helm upgrade with crds.enabled
+```
+
+If any CRD on your cluster was ever applied by hand with `kubectl apply -f`, that
+left a `kubectl-client-side-apply` field manager owning `.spec.versions`, and
+helm's server-side apply refuses it — rolling the WORKLOADS while silently
+leaving the schema behind. Add `--force-conflicts` (helmfile:
+`--args "--force-conflicts"`), which only moves ownership. Diagnose with
+`kubectl get crd conversations.agentops.dev --show-managed-fields -o json`.
+
+Where the console can tell readers apart, unread is now **per person**: your
+badge is yours, and a colleague clearing theirs does not clear yours.
+
+- **No identity is stored.** The console hashes the signed-in identity with a
+  salt projected as a channel credential and sends only that opaque key. The
+  manager stores it verbatim and cannot reverse it — a conversation records that
+  N people read it and when, never who. `/channel/read` refuses a key containing
+  `@`, since it cannot otherwise tell a hash from an address.
+- **The salt is generated for you.** On install, and on the first upgrade that
+  finds the console Secret without one — the only time that Secret renders
+  outside an install. It adopts the existing `uiToken` rather than reissuing it,
+  so nobody is signed out. Pin it with `console.auth.readerSalt` if you prefer.
+  **Rotating it orphans every stored key** and resets everyone to the
+  channel-wide mark.
+- **A shared UI token is one reader**, because there is one credential and no
+  person behind it. With no salt projected, likewise. Both are exactly the
+  5.18.0 behaviour, reached without a special case.
+- **`readAt` stays** as the channel-wide mark for transports with no reader
+  identity. `POST /channel/read` gains an OPTIONAL `reader` field, so
+  `channel-telegram` and every other adapter are untouched and fully conformant.
+- **Starting a conversation now marks it read for you** — and only you. The key
+  travels with the chat signal into `spec.originReader`, and the manager stamps
+  that reader when it creates their thread. Before this, a conversation you had
+  just typed came back unread before any answer could exist.
+- **`readers[]` is bounded at 50 per binding**, oldest watermark evicted first.
+  Eviction is not a loss: an evicted reader falls back to the channel-wide mark,
+  the same as a teammate who joined today. Neither is handed a backlog.
+
 ### The demo wires the console — chart 5.18.0
 
 **No action for an ordinary install.** Where the k8s bundle renders a route, that
@@ -34,6 +79,46 @@ nothing rendered.
 
 Outside demo mode nothing changed, and `console.enabled=false` still removes
 every console object with one value.
+
+### Unread conversations in the console — chart 5.18.0
+
+**Additive, but the CRDs MUST be re-applied.** `Conversation.status.threads[]`
+gains two fields, and the API server prunes what its schema does not know: with
+stale CRDs every read report answers 200 and changes nothing, so every
+conversation reads as unread forever and no amount of clicking clears it.
+
+```sh
+kubectl apply -f chart/files/crds/          # or helm upgrade with crds.enabled
+```
+
+The conversation list now marks conversations whose **console thread** has
+activity newer than its watermark, offers an *Unread only* filter and a **Mark
+read** action over a selection, and carries the unread count on the navigation.
+Opening a conversation clears its mark.
+
+- **Read is per CHANNEL.** The watermark lives on `status.threads[].readAt`, one
+  per bound channel, so reading a conversation in Telegram does not clear it in
+  the console and vice versa. Two operators sharing one console share one mark —
+  whoever opens a conversation clears it for both. A per-person mark would need
+  a per-user identity store the console does not have.
+- **The manager writes it**, on an adapter's report to the new, OPTIONAL
+  `POST /channel/read`. The console still performs no Kubernetes write. An
+  adapter that never reports stays fully conformant; `channel-telegram` and the
+  rest are unchanged.
+- **The watermark is monotonic and clamped to the manager's clock**, so a stale
+  browser cannot un-read a thread and a skewed one cannot mark future activity
+  read.
+- **Marking read is not behind `console.write.enabled`.** It instructs no agent
+  and starts no work, and a read-only console is exactly the install where an
+  unread badge earns its keep. The selection column is therefore present on a
+  read-only console too, while *Close* and *Delete* stay hidden.
+
+**Threads bound before this upgrade are treated as READ, once.** A binding
+without the new `readTracked` marker predates the mechanism and cannot be told
+apart from one nobody has read — the same problem, and the same fix, as
+`status.runs[].deliveryTracked`. The alternative announces a namespace-sized
+backlog nobody can act on. So the list is quiet immediately after the upgrade
+and fills as new activity arrives; that is the one-time behaviour, not a bug.
 
 ### `/exit` releases a conversation's runtime — chart 5.17.0
 

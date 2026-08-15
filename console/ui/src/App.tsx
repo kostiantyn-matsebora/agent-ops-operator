@@ -1,11 +1,11 @@
 import { Component, type ReactNode, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import {
-  Alert, Button, Nav, NavItem, NavList, Masthead, MastheadBrand, MastheadContent,
+  Alert, Badge, Button, Nav, NavItem, NavList, Masthead, MastheadBrand, MastheadContent,
   MastheadMain, Page, PageSidebar, PageSidebarBody, Label, Popover, Toolbar, ToolbarContent,
   ToolbarGroup, ToolbarItem, EmptyState, EmptyStateBody, Bullseye, Spinner, PageSection,
 } from '@patternfly/react-core'
-import { useLiveStream, useSession } from './api/hooks'
+import { useLiveStream, useSession, useUnreadCount } from './api/hooks'
 import { api } from './api/client'
 import { Logo } from './components/Logo'
 import { ThemeSwitcher } from './components/ThemeSwitcher'
@@ -84,6 +84,10 @@ const NAV = [
 export function App() {
   const session = useSession()
   const connected = useLiveStream()
+  // The badge is the count-only form of the list query: it is computed
+  // server-side BEFORE any filter, so it says the same thing wherever you are
+  // and whatever the list page happens to be showing.
+  const unread = useUnreadCount()
   const location = useLocation()
   const [navOpen, setNavOpen] = useState(true)
 
@@ -191,7 +195,14 @@ export function App() {
           <NavList>
             {NAV.map((item) => (
               <NavItem key={item.to} isActive={location.pathname.startsWith(item.to)}>
-                <NavLink to={item.to}>{item.label}</NavLink>
+                <NavLink to={item.to}>
+                  {item.label}
+                  {item.to === '/conversations' && (unread.data?.unreadTotal ?? 0) > 0 && (
+                    <Badge isRead={false} data-testid="unread-badge" style={{ marginLeft: 8 }}>
+                      {unread.data?.unreadTotal}
+                    </Badge>
+                  )}
+                </NavLink>
               </NavItem>
             ))}
           </NavList>

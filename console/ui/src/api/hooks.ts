@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useEffect } from 'react'
 import { api } from './client'
 import { connectStream, useStream } from './stream'
-import type { CloseRequest, Health } from './types'
+import type { CloseRequest, Health, MarkReadRequest } from './types'
 
 // Query hooks. Each names the resource kinds it depends on, so a CR delta for
 // that kind invalidates exactly the queries showing it — the alternative,
@@ -106,6 +106,36 @@ export function useCloseConversations() {
   return useMutation({
     mutationFn: (req: CloseRequest) => api.closeConversations(req),
     onSettled: () => client.invalidateQueries({ queryKey: ['conversations'] }),
+  })
+}
+
+/**
+ * Marking a selection read.
+ *
+ * Invalidated on SETTLE like every other batch: a partly applied batch still
+ * moved watermarks, so the list has to be re-read either way.
+ */
+export function useMarkRead() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (req: MarkReadRequest) => api.markRead(req),
+    onSettled: () => client.invalidateQueries({ queryKey: ['conversations'] }),
+  })
+}
+
+/**
+ * The unread count for the navigation, without the rows.
+ *
+ * count=1 asks for the totals only — the badge wants a number, and a page of
+ * conversations it would throw away is the wrong thing to fetch on every route.
+ * The count is computed server-side BEFORE any filter, so it is the same number
+ * whatever the list page is currently showing.
+ */
+export function useUnreadCount() {
+  const rev = useRevision(['conversations'])
+  return useQuery({
+    queryKey: ['conversationCount', rev],
+    queryFn: () => api.conversations(new URLSearchParams({ count: '1' })),
   })
 }
 

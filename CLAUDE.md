@@ -137,6 +137,18 @@ viewer), `telegram-router/` (the single getUpdates consumer), and
   metadata (`adapter`, `credentialsSecretRef` — NO wiring, NO delivery mode)
   + opaque `config` that only the serving adapter interprets.
   `status.threadId` is an opaque STRING.
+  **READ IS PER THREAD, THEREFORE PER CHANNEL** — `status.threads[].readAt` +
+  `.readTracked`, written ONLY by the manager on an adapter's report to the
+  OPTIONAL `POST /channel/read`. One shared mark would let a Telegram reader
+  clear the console's, which is the whole reason it sits on the binding. The
+  watermark is MONOTONIC and CLAMPED to the manager's clock (a stale browser
+  must not un-read a thread; a skewed one must not mark the future read), a
+  report that would not advance is `skipped` with NO write, and the batch is
+  bounded at 50. `readTracked` is stamped on EVERY binding the manager creates,
+  for every channel, so the backfill rule stays ONE rule: a binding without it
+  predates the mechanism and is READ — same shape, same fix, same reason as
+  `status.runs[].deliveryTracked`, and without it the first upgrade shows the
+  whole namespace as new. An adapter that never reports stays fully conformant.
 - **`ChannelAdapter` CR** = pure implementation (`image` + workload knobs,
   NEVER configuration or credentials — no `type`, no `env`). Interface
   METADATA is allowed and encouraged: optional `configSchema` (JSON Schema for
