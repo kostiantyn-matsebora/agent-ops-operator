@@ -39,6 +39,13 @@ screenshots have been regenerated.
 - **THEN** the routing rule names the destination file for that kind of content
 - **AND** the README line budget is stated numerically so overrun is checkable
 
+#### Scenario: A chart value is added or changed
+
+- **WHEN** a value is added to the parent chart, or an existing one changes
+  meaning
+- **THEN** the routing rule sends it to `docs/installation.md`, and a value
+  belonging to a subchart to that subchart's page instead
+
 #### Scenario: A subchart is renamed
 
 - **WHEN** a bundle subchart is renamed
@@ -56,6 +63,18 @@ screenshots have been regenerated.
 - **WHEN** a change alters what a console view looks like
 - **THEN** the routing rule names the command that regenerates the site's
   screenshots, and the change is not complete until it has been run
+
+#### Scenario: Contributor changes the site
+
+- **WHEN** a contributor wants to restyle the site or add a page to it
+- **THEN** `CLAUDE.md` names the theme files for presentation and a markdown page
+  for prose, and states that `docs/` is a published Jekyll source
+
+#### Scenario: A palette token is changed in the console
+
+- **WHEN** a contributor edits a `--ao-*` value in the console's theme
+- **THEN** `CLAUDE.md` tells them the site's copied token block is the second
+  half of that change
 
 ## ADDED Requirements
 

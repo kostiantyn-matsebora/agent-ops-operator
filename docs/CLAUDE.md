@@ -14,7 +14,13 @@ path. Plugins are limited to the set Pages enables by default.
 | `index.md` | the landing pitch, the diagram, paths onward |
 | `introduction.md` | the model — two sections, concepts and guides, no reference detail |
 | `getting-started.md` | the read-only DEMO walkthrough, console-first |
+| `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `installation.md` | the REAL install, and the PARENT chart's values |
+
+`console-guide.md` is published at `/console/`. `console.md` is the untouched
+reference and keeps its own URL. **What the console is FOR goes to the guide,
+what it IS goes to the reference.** The guide's screenshots are build output —
+`npm run screenshots` in `console/ui`, never a hand capture.
 
 The other `docs/*.md` are **reference pages, not site pages**. They carry no
 front matter, so Jekyll copies them verbatim. Do not add front matter, headings
@@ -74,6 +80,7 @@ script in a page.
 |---|---|
 | `{: .ao-cards}` | a two-column card grid. An odd count leaves the last card normal width |
 | `{: .ao-callout}` | a blockquote that EMPHASISES (the plain one is a muted aside) |
+| `{: .ao-tabs}` | a list becomes tabbed panels, each item's leading bold phrase the label. With no script it stays the labelled list, so every word and image lives in the page |
 | `{: .ao-icon-*}` | a kind glyph on a card title, copied from the console |
 | `next:` in front matter | the what-next card at the foot of the rail |
 

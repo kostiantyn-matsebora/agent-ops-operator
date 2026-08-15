@@ -4,6 +4,14 @@ permalink: /introduction/
 description: >-
   The parts agent-ops is built from — what wakes an agent, what decides what it
   may touch, what executes it — and the guides that take you from there.
+
+next:
+  eyebrow: Next
+  title: Try it in fifteen minutes
+  body: >-
+    Install the read-only demo, ask an agent about your cluster from the
+    console, and watch a first run happen.
+  url: /agent-ops-operator/getting-started/
 ---
 
 agent-ops runs LLM agents in your cluster as ordinary Kubernetes objects.
