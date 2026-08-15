@@ -20,11 +20,20 @@
       site, and the chart question is noted for a follow-up change — this change
       does not touch the chart.
       **FINDING: the line is FALSE and is dropped.** That flag removes the
-      `cluster-events` SignalSource — the exact source the demo's ask posts
-      to — leaving only `console`. Worse, `Pipeline/k8s-observe` still renders
-      claiming `cluster-events`, so the flag also leaves a DANGLING ref. It does
-      not restore ask-only; it breaks the ask. Recorded for a follow-up change;
-      no chart edit here.
+      `cluster-events` SignalSource — the exact source the demo's ask posts to —
+      leaving only `console`, which at the time no route claimed. So it did not
+      restore ask-only, it broke the ask. Recorded for a follow-up change, no
+      chart edit here.
+
+      **CORRECTION (2026-08-15).** This note also claimed the flag leaves a
+      DANGLING ref, with `k8s-observe` still claiming `cluster-events`. That was
+      WRONG, and wrong when written: `pipelines.yaml` already guarded the claim
+      with `if and $ea.enabled $ea.source.create`, so the source is simply not
+      referenced when the adapter is off. Verified by render.
+      The rest of the finding stood, and `console-wired-by-default` since fixed
+      the underlying problem — the route now claims the console source, so the
+      flag leaves a working ask lane. `chart/values.yaml` was corrected to say
+      exactly that.
 - [x] 1.4 Confirm the persistence default and the flag that opts out
       (`persistence.enabled`), and what a cluster with no RWX provisioner
       actually shows when it is left on. That observable is what the
