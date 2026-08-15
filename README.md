@@ -109,7 +109,8 @@ For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).
 | | |
 |---|---|
 | [Documentation site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) | The adopter hub: what this is, where to start, and every path onward |
-| [Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/) | Install, ask an agent a question, and write your first route |
+| [Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/) | The read-only demo: install it and ask an agent about your cluster |
+| [Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/) | The real install: what to decide, what to configure, how to wire a route |
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, and how a route's tools are resolved |
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
 | [docs/console.md](docs/console.md) | The console: topology, live runs, and the channel it also is |

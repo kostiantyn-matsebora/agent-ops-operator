@@ -71,8 +71,10 @@ Documented HTTP contracts, no fork.
 
 - **[Introduction]({{ '/introduction/' | relative_url }})** — how the pieces fit
   together: what wakes an agent, what decides what it may touch, what runs it.
-- **[Getting started]({{ '/getting-started/' | relative_url }})** — install it,
-  ask an agent a question, and write the one route that grants it reach.
+- **[Getting started]({{ '/getting-started/' | relative_url }})** — a read-only
+  demo in fifteen minutes: install it and ask an agent about your cluster.
+- **[Installation]({{ '/installation/' | relative_url }})** — the real install:
+  what to decide first, what to configure, and how to wire your first route.
 - **[The kinds you will declare](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)** —
   every CRD in full, and how a route's tool access is resolved.
 

@@ -7,12 +7,11 @@ description: >-
 
 next:
   eyebrow: Next
-  title: Wire a route of your own
+  title: Install it for real
   body: >-
-    The agent could read your cluster because its Pipeline granted a toolset,
-    not because of anything in the profile. Change the wiring and the same
-    agent has a different reach.
-  url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md
+    The decisions to make before a real install, the values that matter, how to
+    enable a bundle, and the one route without which nothing answers.
+  url: /agent-ops-operator/installation/
 ---
 
 Install the operator and get your first question answered, in the console. About
@@ -20,7 +19,8 @@ fifteen minutes, most of it the install.
 
 {: .ao-callout}
 > **A demo, not a deployment.** It exists to show you the product quickly. Do
-> not build on it — a page for real installs comes later.
+> not build on it — [Installation]({{ '/installation/' | relative_url }}) is the
+> real one.
 >
 > The agent is **read-only** and cannot change your cluster. Three walls, not
 > one: the MCP server runs `--read-only`, its identity holds only `view`, and
@@ -53,6 +53,13 @@ follow-up later.
      --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
    ```
 
+   ```powershell
+   kubectl create namespace agent-ops
+
+   kubectl -n agent-ops create secret generic agentops-claude `
+     --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+   ```
+
 2. **Install the chart.** The flag brings up
    [the k8s bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md),
    wired to the console. The token is just to sign in — pick a real one outside
@@ -64,9 +71,19 @@ follow-up later.
      --set console.auth.uiToken=demo
    ```
 
+   ```powershell
+   helm install agent-ops ./chart -n agent-ops --create-namespace `
+     --set global.demo.enabled=true `
+     --set console.auth.uiToken=demo
+   ```
+
 3. **Wait for the manager.**
 
    ```sh
+   kubectl -n agent-ops rollout status deploy/agentops-manager
+   ```
+
+   ```powershell
    kubectl -n agent-ops rollout status deploy/agentops-manager
    ```
 
@@ -84,6 +101,10 @@ Four objects matter here:
 1. **Forward the console's port.**
 
    ```sh
+   kubectl -n agent-ops port-forward svc/agentops-adapter-console 8080:8080
+   ```
+
+   ```powershell
    kubectl -n agent-ops port-forward svc/agentops-adapter-console 8080:8080
    ```
 
@@ -115,6 +136,13 @@ From the outside:
 kubectl -n agent-ops get conversations -w              # names are generated
 kubectl -n agent-ops logs -f agentops-conv-<name>      # live transcript
 kubectl -n agent-ops get conversation <name> \
+  -o jsonpath='{.status.runs[0].result}'               # the answer, durably
+```
+
+```powershell
+kubectl -n agent-ops get conversations -w              # names are generated
+kubectl -n agent-ops logs -f agentops-conv-<name>      # live transcript
+kubectl -n agent-ops get conversation <name> `
   -o jsonpath='{.status.runs[0].result}'               # the answer, durably
 ```
 
