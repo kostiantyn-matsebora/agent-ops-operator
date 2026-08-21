@@ -709,109 +709,132 @@ a:hover {
   height: auto;
 }
 
-/* The exported diagram, one variant per theme.
-   drawio bakes a light-dark() pair into every fill and then PINS the resolution
-   with `color-scheme` on the SVG root — so the two exports really are two
-   palettes of one drawing, not one drawing shown twice. An <img> is its own
-   document and does not inherit the page's colour scheme, which is why this is
-   a swap rather than a single self-adjusting asset.
-   Both carry loading="lazy": the hidden one is never rendered, so it is never
-   fetched, and only the theme in use costs its megabyte. */
-/* No plate, no frame: both exports have a transparent ground, so each one sits
-   directly on the page canvas and reads as part of the page rather than as an
-   image pasted into it.
-   It is deliberately NOT full-bleed. The drawing is a dense poster at 1778px
-   wide; shown at the content column's full width it swallows the page, and
-   shrunk far enough to be small its 15px labels stop being readable. So it is
-   capped at a size that still reads, and the whole thing links to the SVG for
-   anyone who wants to inspect it. */
-.ao-diagram-details {
-  margin: 0 0 2.5rem;
-}
+/* The exported diagram, shown as the first panel of the landing page's strip.
 
-/* The default disclosure triangle is replaced by a chevron that turns, so the
-   control reads the same in both themes and at both states. */
-.ao-diagram-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.3rem 0.6rem 0.3rem 0.25rem;
-  margin-bottom: 0.75rem;
-  border-radius: var(--ao-radius);
-  color: var(--ao-text-subtle);
-  font-family: var(--ao-font-display);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  cursor: pointer;
-  list-style: none;
-}
+   ONE FILE IS NAMED BY THE PAGE. drawio bakes a light-dark() pair into every
+   fill and then PINS the resolution with `color-scheme` on the SVG root, so the
+   two exports really are two palettes of one drawing rather than one drawing
+   shown twice — and an <img> is its own document, which does not inherit the
+   page's scheme. The swap is therefore done in assets/js/tabs.js, the same
+   place and by the same rule as the screenshots beside it in the strip.
 
-.ao-diagram-summary::-webkit-details-marker {
-  display: none;
-}
+   It shares the strip's frame (see the panel image rule below): both exports
+   carry an OPAQUE ground, because the variant the page names is what a reader
+   without scripting is served, and a transparent one would put its ink on
+   whichever canvas that reader has.
 
-.ao-diagram-summary::before {
-  content: '';
-  width: 0.42rem;
-  height: 0.42rem;
-  margin-left: 0.35rem;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 0.15s ease;
-}
-
-.ao-diagram-details[open] > .ao-diagram-summary::before {
-  transform: rotate(45deg);
-}
-
-.ao-diagram-summary:hover {
-  color: var(--ao-brand);
-}
-
-.ao-diagram-link {
-  display: block;
-  width: 100%;
-  text-decoration: none;
-  color: inherit;
-}
-
-/* The diagram and the hero fill their column and no more.
-   There WAS a breakout here, widening both past the prose measure to
-   `100vw - sidebar - gutters`. That subtraction knew about the sidebar and
-   nothing else, so once every page gained an on-this-page column it overshot by
-   exactly that column's width and drew the diagram underneath it. A breakout is
-   only ever as wide as the column it breaks out of, and with the content column
-   capped at the measure there is no room left to break into. The drawing's
-   detail lives behind its own full-size link. */
+   It is deliberately NOT full-bleed. A breakout was tried here and removed: it
+   subtracted the sidebar and nothing else, so once every page gained an
+   on-this-page column it overshot by exactly that column and drew the diagram
+   underneath it. A breakout is only ever as wide as the column it breaks out
+   of, and the column is capped at the measure. Legibility is therefore bought
+   in the DRAWING — authored at a size whose labels survive this width — and the
+   detail lives behind the full-size link in the panel. */
 
 .ao-diagram {
   display: block;
-  width: 100%;
-  background: transparent;
+  /* Below the measure the drawing would shrink its labels out of readability,
+     so past that point it scrolls inside its own frame instead. The page body
+     never scrolls sideways; this does. */
+  min-width: 42rem;
 }
 
-.ao-diagram-hint {
-  display: block;
-  margin-top: 0.4rem;
-  font-size: 0.85rem;
+.ao-content p:has(> .ao-diagram) {
+  margin: 0;
+  overflow-x: auto;
+}
+
+/* --- chip sets ------------------------------------------------------------
+   A page names this with `{: .ao-chipsets}` on a list of GROUPS: each item's
+   leading bold phrase is the group's label and its nested list becomes the
+   chips. One component, two levels, no markup in the page — and with no CSS at
+   all it is still a labelled list of names, which is the whole content.
+
+   The chips borrow the hero pill's shape but not its weight: the eyebrows above
+   them are the page's claim about itself, and a row of integration names must
+   not shout louder than the headline it sits under. So: ink rather than brand,
+   a hairline border, normal case.
+
+   The GROUPS carry the meaning, so no group is coloured differently from
+   another — the label is what tells them apart, and colouring one row would say
+   something about it that the label does not. */
+.ao-content ul.ao-chipsets {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+/* A GRID, not a flex row. With flex the label rides along with the chips, so
+   the moment one group has enough chips to wrap, its label jumps above them and
+   that group alone stops lining up with the others. Two tracks keep every label
+   in one column and every chip row starting at the same x, however many chips
+   a group has. */
+.ao-content ul.ao-chipsets > li {
+  display: grid;
+  grid-template-columns: 8.25rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.3rem;
+  margin: 0 0 0.45rem;
+}
+
+.ao-content ul.ao-chipsets > li > strong {
+  padding-top: 0.3rem;
   color: var(--ao-text-subtle);
+  font-family: var(--ao-font-display);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-.ao-diagram-link:hover .ao-diagram-hint {
-  color: var(--ao-brand);
-  text-decoration: underline;
+/* The nested list is the chip row itself, so it carries the wrapping. */
+.ao-content ul.ao-chipsets ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.ao-diagram--dark,
-.pf-v6-theme-dark .ao-diagram--light {
-  display: none;
+/* Below the measure the label column costs more than it earns, so it stacks. */
+@media (max-width: 34rem) {
+  .ao-content ul.ao-chipsets > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ao-content ul.ao-chipsets > li > strong {
+    padding-top: 0;
+  }
 }
 
-.pf-v6-theme-dark .ao-diagram--dark {
-  display: block;
+.ao-content ul.ao-chipsets ul > li {
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+  margin: 0;
+  padding: 0.12rem 0.55rem;
+  border: 1px solid var(--ao-border);
+  border-radius: 999px;
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* A mark inside a chip. The page names the file — a vendor list in this
+   stylesheet would be product knowledge in the theme. This says one thing:
+   how big. Marks are committed unaltered and are not recoloured, so nothing
+   here touches their fill. See assets/img/logos/README.md. */
+.ao-content ul.ao-chipsets ul > li img {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  margin: 0;
 }
 
 /* --- card grid ------------------------------------------------------------ */

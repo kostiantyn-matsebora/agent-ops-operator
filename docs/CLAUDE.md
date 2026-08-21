@@ -11,7 +11,7 @@ path. Plugins are limited to the set Pages enables by default.
 
 | Page | Owns |
 |---|---|
-| `index.md` | the landing pitch, the diagram, paths onward |
+| `index.md` | the landing pitch, the tab strip (diagram, manifest, the console), paths onward |
 | `introduction.md` | the model — two sections, concepts and guides, no reference detail |
 | `getting-started.md` | the read-only DEMO walkthrough, console-first |
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
@@ -19,8 +19,12 @@ path. Plugins are limited to the set Pages enables by default.
 
 `console-guide.md` is published at `/console/`. `console.md` is the untouched
 reference and keeps its own URL. **What the console is FOR goes to the guide,
-what it IS goes to the reference.** The guide's screenshots are build output —
-`npm run screenshots` in `console/ui`, never a hand capture.
+what it IS goes to the reference.** The screenshots on both the guide and the
+landing page are build output — `npm run screenshots` in `console/ui`, never a
+hand capture.
+
+The landing strip and the guide's tour show the SAME six images at different
+altitudes: one line each there, the full tour here. Keep the labels identical.
 
 The other `docs/*.md` are **reference pages, not site pages**. They carry no
 front matter, so Jekyll copies them verbatim. Do not add front matter, headings
@@ -82,9 +86,32 @@ script in a page.
 | `{: .ao-callout}` | a blockquote that EMPHASISES (the plain one is a muted aside) |
 | `{: .ao-tabs}` | a list becomes tabbed panels, each item's leading bold phrase the label. With no script it stays the labelled list, so every word and image lives in the page |
 | `{: .ao-icon-*}` | a kind glyph on a card title, copied from the console |
+| `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels |
+| `{: .ao-chipsets}` | a list of GROUPS becomes labelled chip rows — each item's leading bold phrase is the label, its nested list the chips. A chip may carry an ordinary markdown image, and the PAGE names that file. With no CSS it stays a labelled list of names |
 | `next:` in front matter | the what-next card at the foot of the rail |
 
 Content never moves into `_includes/` or `_data/` to get a look.
+
+**Integration marks live in `assets/img/logos/`**, committed unaltered from each
+project's own source with their terms in that directory's README. The PAGE names
+each file — a vendor list in `agentops.css` would be product knowledge in the
+theme. Never repaint one to fit the palette: a mark that does not read on a
+ground is dropped instead.
+
+**An `<img>`-loaded SVG is parsed STRICTLY.** XML forbids a double hyphen inside
+a comment, so a comment mentioning a `--custom-property` makes the whole mark
+fail to render — silently, as blank space with `naturalWidth` 0. That is worth
+checking before blaming the CSS.
+
+**A themed image is named ONCE.** A page writes the `-light` file and nothing
+else — `assets/js/tabs.js` rewrites it to `-dark` from the resolved theme, for
+screenshots and diagrams alike, and for a link in a panel as well as an image.
+A page that named both would be carrying theme knowledge.
+
+That rewrite is a DEFERRED script, so the light file is on the page before it
+runs. **A published image therefore carries its own ground**, never a transparent
+one that borrows the page's canvas — on a dark page a transparent light export is
+not a mismatched colour, it is invisible ink.
 
 ## Tables
 

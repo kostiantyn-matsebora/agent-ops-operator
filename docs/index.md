@@ -11,15 +11,6 @@ description: >-
   one, your wiring decides what it may touch, and it answers in a thread you can
   reply to.
 
-diagram: agent-ops
-diagram_label: How it works
-diagram_alt: >-
-  Something happens — an alert fires, a pod crashloops, a schedule comes due, a
-  room gets too warm, someone asks. You declare it as custom resources: a
-  Pipeline for what wakes it, an AgentProfile for what it should do, an
-  MCPToolset for what it may touch. The operator runs it: one conversation per
-  incident in its own thread, its own isolated pod, picking up where it stopped.
-
 stats:
   - value: 11
     icon: kinds
@@ -36,9 +27,80 @@ stats:
   - value: 3
     icon: bundles
     label: ready-made bundles
-    note: Kubernetes, Telegram, VictoriaMetrics — switch one on.
-stats_kicker: One helm install, in your own cluster.
+    note: Kubernetes, Telegram, Prometheus — switch one on.
 ---
+
+{: .ao-chipsets}
+- **Work arrives from**
+  - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes events
+  - ![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) Alertmanager
+  - Cron schedules
+  - ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) Home Assistant
+  - ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) A message in chat
+  - ![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console
+  - your own
+
+- **Can reach**
+  - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes API
+  - ![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) Prometheus
+  - ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) Home Assistant
+  - ![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) any MCP server
+
+- **Answers you in**
+  - ![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console
+  - ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) Telegram
+  - your own
+
+{: .ao-tabs #tour}
+- **How it works** — Something happens, you declare what to do about it in your own cluster, the operator runs it.
+
+  ![Something happens — an alert fires, a pod crashloops, a schedule comes due, a room gets too warm, someone asks — and each feeds into one Helm install in your own cluster. There you declare it as custom resources: a Pipeline for what wakes it, an AgentProfile for what it should do, an MCPToolset for what it may touch, shown as a real Pipeline manifest naming its signal source, profile, toolset and channel. The operator then runs it: one conversation per incident in its own thread, its own isolated pod, picking up where it stopped.]({{ '/assets/img/agent-ops-landing-light.svg' | relative_url }}){: .ao-diagram}
+
+- **What you write** — One `Pipeline`. It is the whole route, and it is the only place wiring lives.
+
+  ```yaml
+  apiVersion: agentops.dev/v1alpha1
+  kind: Pipeline
+  metadata:
+    name: k8s-ops
+  spec:
+    signalSourceRefs:
+      - name: cluster-events      # what wakes it
+    profileRef:
+      name: k8s-engineer          # what it should do
+    toolsets:
+      refs:
+        - name: agentops-observe  # what it may touch
+    channelRefs:
+      - name: telegram            # where you talk to it
+  ```
+
+- **Overview** — Everything the install is doing, and every condition that is not `True`.
+
+  ![Manager version and leader, two of five runtime slots in use, the runtime images, live-activity telemetry, tables of workloads and adapters, and one problem: a signal source no pipeline claims.]({{ '/assets/img/console/overview-light.png' | relative_url }})
+
+- **Topology** — The wiring as a live graph: where signals enter, what claims them, who answers.
+
+  ![Signal adapters and sources on the left, then three pipelines, the profiles and runtimes that execute them, and the channels the answers reach, with traffic rates on the edges between them.]({{ '/assets/img/console/topology-light.png' | relative_url }})
+
+- **Conversations** — The whole fleet, filtered by phase, pipeline or profile. Unread is per identity.
+
+  ![Six conversations with mixed phases — Working, Pending, Idle and Closed — two marked unread, each showing its pipeline, run count, queue depth and last activity.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
+
+- **Conversation** — One agent's transcript, every run with its result, and the box you reply in.
+
+  ![One conversation: the signal that started it, the agent's answer explaining an OOM-killed container, a reply relayed in from another channel, and a box to reply from.]({{ '/assets/img/console/conversation-light.png' | relative_url }})
+
+- **Queues** — What is waiting, and what is stuck. Every stalled row names its cause.
+
+  ![The work queue with three conversations, one flagged at runtime ceiling, the delivery queue per adapter with the oldest operation in each, and a suppressed-signal cooldown.]({{ '/assets/img/console/queues-light.png' | relative_url }})
+
+- **Configuration** — Every kind, and the columns that matter. A Pipeline row is the whole route on one line.
+
+  ![Three pipelines, each showing its profile, the sources it claims, the channels it posts to, its toolsets, tools mode, MCP configs and Ready status.]({{ '/assets/img/console/configuration-light.png' | relative_url }})
+
+The last six are the console, which ships enabled. The
+[Console page]({{ '/console/' | relative_url }}) takes each view in turn.
 
 ## What "takes care of it" means
 
@@ -73,8 +135,8 @@ Documented HTTP contracts, no fork.
   together: what wakes an agent, what decides what it may touch, what runs it.
 - **[Getting started]({{ '/getting-started/' | relative_url }})** — a read-only
   demo in fifteen minutes: install it and ask an agent about your cluster.
-- **[The console]({{ '/console/' | relative_url }})** — see the product before
-  you install it: six views, and how to decide who may reach them.
+- **[The console]({{ '/console/' | relative_url }})** — the six views above at
+  full length, and how to decide who may reach them.
 - **[Installation]({{ '/installation/' | relative_url }})** — the real install:
   what to decide first, what to configure, and how to wire your first route.
 - **[The kinds you will declare](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)** —
@@ -99,6 +161,8 @@ Documented HTTP contracts, no fork.
   — the ingest stack and the chat surface.
 - [Prometheus](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus-bundle.md)
   — the Alertmanager alert lane, its metrics tooling and the agent that answers.
+- [Home Assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/ha-bundle.md)
+  — the house's log lane, and two agents split by what they may do to it.
 
 ## Keep it current
 
