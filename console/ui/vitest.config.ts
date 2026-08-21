@@ -12,8 +12,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
-    // e2e/ is Playwright's — it needs a real browser and is run deliberately,
-    // not as part of `npm test`.
-    exclude: ['node_modules/**', 'dist/**', 'e2e/**'],
+    // e2e/ and screenshots/ are Playwright's — they need a real browser and are
+    // run deliberately, not as part of `npm test`. screenshots/ was missing,
+    // which made a clean tree report a failing suite: vitest collected a
+    // Playwright spec and choked on test.describe.configure().
+    exclude: ['node_modules/**', 'dist/**', 'e2e/**', 'screenshots/**'],
   },
 })

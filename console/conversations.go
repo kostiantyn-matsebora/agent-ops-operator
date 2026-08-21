@@ -139,6 +139,12 @@ type convView struct {
 		Inflight         *Inflight       `json:"inflight,omitempty"`
 		Runs             []Run           `json:"runs,omitempty"`
 		LastActivity     string          `json:"lastActivity,omitempty"`
+		Conditions       []struct {
+			Type    string `json:"type"`
+			Status  string `json:"status"`
+			Reason  string `json:"reason,omitempty"`
+			Message string `json:"message,omitempty"`
+		} `json:"conditions,omitempty"`
 	} `json:"status"`
 }
 
@@ -188,6 +194,14 @@ type ConversationSummary struct {
 	// Errored: the most recent run did not succeed. A filter facet, so "show me
 	// what went wrong" is one click rather than a scan.
 	Errored bool `json:"errored"`
+	// Blocked explains a conversation that is not running and is not merely
+	// queued — its runtime pod could not start.
+	//
+	// This is the console half of the 2026-08-20 outage. Five conversations sat
+	// with unstartable pods for fifteen hours and the list showed nothing but a
+	// phase, so the operator could see that work had stopped and not why. The
+	// REASON comes from the kubelet, through the RuntimeStarted condition.
+	Blocked *BlockedReason `json:"blocked,omitempty"`
 	// AgeSeconds is time since last activity (creation when it never ran) —
 	// server-computed so sorting and the age filter agree with each other.
 	AgeSeconds float64 `json:"ageSeconds"`
@@ -208,6 +222,19 @@ type ConversationSummary struct {
 // name of the Channel this console serves; a conversation is JOINED only when
 // that channel has a thread binding — a binding is what gives the send box a
 // destination.
+// BlockedReason is why a conversation's runtime could not start.
+type BlockedReason struct {
+	// Reason is the bounded classifier — VolumeUnavailable, Unschedulable,
+	// ImageUnavailable, StorageUnavailable, NotStarted.
+	Reason string `json:"reason"`
+	// Detail is the kubelet's own words, shown on hover and in the detail view.
+	// Free text: it is what turns "not running" into something actionable.
+	Detail string `json:"detail,omitempty"`
+	// Storage marks the subset an operator should read as "your volume is
+	// broken" rather than "this pod had a bad day".
+	Storage bool `json:"storage"`
+}
+
 func summarize(obj *Object, pipelines []*Object, consoleChannel, reader string) ConversationSummary {
 	v := conversationView(obj)
 	s := ConversationSummary{
@@ -227,6 +254,14 @@ func summarize(obj *Object, pipelines []*Object, consoleChannel, reader string) 
 	s.RunCount = len(v.Status.Runs)
 	if n := len(v.Status.Runs); n > 0 && v.Status.Runs[n-1].Status != "succeeded" {
 		s.Errored = true
+	}
+	for _, c := range v.Status.Conditions {
+		if c.Type == "RuntimeStarted" && c.Status == "False" {
+			s.Blocked = &BlockedReason{
+				Reason: c.Reason, Detail: c.Message,
+				Storage: c.Reason == "VolumeUnavailable" || c.Reason == "StorageUnavailable",
+			}
+		}
 	}
 	s.AgeSeconds = ageSeconds(time.Now(), s.sortKey())
 	if consoleChannel != "" {

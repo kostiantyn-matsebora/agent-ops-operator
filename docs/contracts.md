@@ -56,8 +56,9 @@ credentials never leave the adapter:
    persist cursors (e.g. poll offsets) via `GET/PUT /channel/state/{channel}/{key}`,
    report config problems via `POST /channel/channels/{name}/status`.
 5. Optionally act on a conversation your channel is bound to:
-   `POST /channel/conversations/{name}/reopen` and
-   `POST /channel/conversations/{name}/delete`, both `{"channel":"…"}`.
+   `POST /channel/conversations/{name}/reopen`,
+   `POST /channel/conversations/{name}/delete` and
+   `POST /channel/conversations/{name}/reset-context`, all `{"channel":"…"}`.
 6. Optionally report how far your threads have been **read**:
    `POST /channel/read` ([below](#post-channelread)).
 
@@ -446,9 +447,30 @@ list verbatim, even when it is empty, and runs with `--permission-mode dontAsk`
 so an unlisted tool is denied outright: in a pod there is nobody to answer a
 permission prompt, so prompting would hang the run until its idle TTL.
 
+**`$CONTROL_URL` is not always the manager.** When a runtime declares
+`contextSync`, the manager points it at a sidecar in the same pod, which
+forwards every request to the real manager.
+
+Nothing in the contract changes, and a runtime needs no awareness of this.
+
+That is the point. Observing the contract a runtime already implements is what
+lets context be checkpointed at work boundaries without every image
+reimplementing it. Two moments are acted on, both invisible to the runtime.
+
+| moment | what happens |
+|---|---|
+| before the first `GET /work` answers | durable context is restored into the pod-local home |
+| before `POST /work/done` reaches the manager | the context is checkpointed |
+
+That ordering is a guarantee, not an implementation detail. The manager records
+the context handle from the completion report, so checkpointing afterwards could
+leave a recorded handle whose context was never persisted. The next run would
+then fail a continuation that should have worked.
+
 Reference implementation: [`runtime-claude/`](../runtime-claude/) (Node.js + claude-code, ~200 lines).
 The same bring-your-own pattern applies to chat transports — see the channel
 adapter contract above and [`channel-telegram/`](../channel-telegram/).
+The sidecar is [`context-sync/`](../context-sync/).
 
 
 ## The activity contract
@@ -509,6 +531,10 @@ the consumer. Node kinds: `signal-adapter`, `signal-source`, `pipeline`,
 | `channel.op.enqueued` | conversation → channel | `ensure-topic` / `send` / `close-topic` queued |
 | `channel.op.completed` | channel-adapter → manager | op acked, or failed with a reason |
 | `channel.inbound` | channel-adapter → conversation | a user reply entered the router |
+| `context.restored` | runtime → conversation | durable context copied into a starting pod |
+| `context.checkpoint` | conversation → runtime | live context copied to the volume |
+| `context.skipped` | conversation → runtime | a checkpoint ran and found nothing changed |
+| `context.failed` | conversation → runtime | a restore or checkpoint failed |
 
 Three properties are load-bearing:
 
@@ -617,6 +643,7 @@ stuck item and stay in `/status`.
 | Endpoint | Purpose |
 |---|---|
 | `GET /work`, `POST /work/done` | runtime-facing dispatch (see contract) |
+| `POST /work/context` | context-sync sidecar reports one restore or checkpoint |
 | `GET/POST /channel/*` | adapter-facing channel contract (bearer token; see adapter contract) |
 | `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token; see signal adapter contract) |
 | `GET/POST /activity*` | per-hop telemetry (bearer token; see activity contract) |

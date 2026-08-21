@@ -133,6 +133,35 @@ helm show values ./chart
 | `persistence.size` | `5Gi` | session files for every conversation |
 | `persistence.storageClassName` | `""` | empty uses the cluster default |
 
+**Surviving a damaged volume.** A shared volume's filesystem can be corrupted by
+a node reboot, and the storage layer will still call it healthy — it replicates
+blocks and cannot see a filesystem.
+
+Three settings limit what that costs. All are off by default and independent.
+
+| Key | Default | What it does |
+|---|---|---|
+| `runtime.contextSync.paths` | `[]` | moves the live context to pod-local storage, leaving a snapshot on the volume |
+| `rbac.drainAware` | `false` | releases idle agent pods from a cordoned node, so the filesystem unmounts before the reboot |
+| `contextProbe.enabled` | `false` | hourly mount probe, so a damaged idle volume is found in an hour rather than at next use |
+
+`contextSync` is the one that matters most. With it set, the agent container
+gets ephemeral storage and **no mount of the durable volume at all** — so a run
+already going survives the volume failing underneath it.
+
+It needs `paths`, because only the runtime knows where its backend keeps
+context. For the reference runtime:
+
+```yaml
+runtime:
+  contextSync:
+    paths: [".claude/projects/-data-workspace/**"]
+```
+
+`rbac.drainAware` costs the manager its only cluster-scoped permission — reading
+nodes. It shrinks the window in which a reboot can corrupt the volume. It does
+not close it.
+
 ### The agent's power
 
 | Key | What it does |

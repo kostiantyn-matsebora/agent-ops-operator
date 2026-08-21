@@ -8,6 +8,99 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Context survives a corrupt volume — chart 5.21.0
+
+**No action on upgrade.** No values change is required and nothing new is on by
+default. `helm upgrade` with the new image tags, and rolling back is reverting
+them. Three new features are opt-in and independently switchable.
+
+On 2026-08-20 a node reboot corrupted the ext4 filesystem on the shared
+`agentops-home` volume. Longhorn reported the volume **healthy** the whole time,
+correctly: it replicates blocks, and all three replicas agreed on the corrupt
+ones.
+
+Every runtime pod mounts that volume. Five pods sat in `ContainerCreating` for
+fifteen hours, held every capacity slot, and starved six more conversations.
+The install was completely down and **said nothing** — no condition, no event,
+no log line. The only condition present read `DeliveryPending=False /
+AllDelivered`, which looks like health.
+
+#### What changed by default
+
+- **A runtime pod that never starts is now reaped** after
+  `RUNTIME_START_DEADLINE` (10m), with per-conversation exponential backoff.
+  It still counts against the cap until it is gone — un-counting it would
+  provision past the cap against resources the cluster has not released.
+- **`Conversation.status` carries `RuntimeStarted`**, whose message is the
+  kubelet's own words. A bare "deadline exceeded" would have reproduced the
+  original failure with a timer attached.
+- **The storage breaker gained a second edge.** It already treated many failed
+  continuations as an outage. It now also counts pods that cannot be provisioned
+  for a storage reason. That is why it never fired for the incident it was
+  written for — no pod started, so no run existed to report. While open it holds
+  work in `Pending` with a reason that says STORAGE rather than queue, and
+  re-tests with one canary.
+- **New metrics**: `agentops_storage_outage`, `agentops_storage_outage_seconds`,
+  `agentops_context_operations_total`, `agentops_context_checkpoint_bytes`.
+
+#### What is opt-in
+
+| value | default | what it does |
+|---|---|---|
+| `runtime.contextSync.paths` | `[]` | moves the live context to pod-local storage, keeping a snapshot on the volume |
+| `rbac.drainAware` | `false` | releases idle runtime pods from a cordoned node so the filesystem unmounts cleanly |
+| `contextProbe.enabled` | `false` | hourly mount probe, so a damaged idle volume is found in an hour rather than at next use |
+
+**`contextSync` needs `paths`** — only the runtime knows where its backend keeps
+context, and the chart must not guess. For the reference runtime:
+
+```yaml
+runtime:
+  contextSync:
+    paths: [".claude/projects/-data-workspace/**"]
+```
+
+With it set, the agent container gets ephemeral storage and **no mount of the
+durable volume at all**. Only the sidecar holds it. A run already going then
+survives the volume going bad underneath it, and an agent can neither read
+another conversation's context nor corrupt the filesystem.
+
+Absent, the pod is built exactly as before, and an install that never sets
+`paths` needs no migration at all.
+
+**Opting in strands existing context, and the strand is visible.** Without the
+sidecar, context sits at the claim ROOT. With it, each conversation reads a
+per-conversation subdirectory, which starts empty. Every conversation that
+already has a context handle will therefore FAIL its next run rather than answer
+without memory — which is the continuity rule working, not a defect.
+
+Recover each one with the new reset verb, which clears the handle and lets it
+start fresh:
+
+```sh
+curl -sX POST "$MANAGER/channel/conversations/<name>/reset-context" \
+  -H "Authorization: Bearer $ADAPTER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"channel":"<a channel it is bound to>"}'
+```
+
+Enable `contextSync` on a quiet install, or accept that live conversations lose
+their memory once and say so.
+
+**`rbac.drainAware` costs the manager its first cluster-scoped grant** (nodes:
+get/list/watch, read-only). Every other permission it holds is namespaced. It
+shrinks the corruption window and does not close it, because the storage
+provider picks where a shared volume is served independently of where runtime
+pods run.
+
+#### New verb
+
+`POST /channel/conversations/{name}/reset-context` clears a conversation's
+context handle, keeps the conversation, its threads and its history, and states
+the loss on every bound thread. It is explicit and operator-initiated — a failed
+continuation never triggers it, because an automatic version would be
+indistinguishable from the silent degradation the continuity rules forbid.
+
+
 ### Rate-limited replies are no longer lost — chart 5.20.0
 
 **No action on upgrade.** No CRD change, no values change: `helm upgrade` with

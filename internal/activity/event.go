@@ -50,6 +50,45 @@ const (
 	KindChannelOpEnqueued   = "channel.op.enqueued"  // conversation    -> channel
 	KindChannelOpCompleted  = "channel.op.completed" // channel-adapter -> manager
 	KindChannelInbound      = "channel.inbound"      // channel-adapter -> conversation
+	// KindRuntimeStarting marks the manager CREATING a runtime pod.
+	//
+	// It exists because the largest slice of a conversation's latency was
+	// invisible. Between the last channel op and the first work hop sat a gap —
+	// 33 seconds in the run that prompted this — covering pod scheduling,
+	// container start and the agent booting to its first poll. The sequence
+	// showed a hole and no way to tell a slow image pull from a slow agent.
+	//
+	// It is STATUS, like every other hop here: the manager already knows it
+	// created the pod, and this records that it did.
+	KindRuntimeStarting = "runtime.starting" // conversation -> runtime
+
+	// Context hops, reported by the context-sync sidecar. The runtime keeps its
+	// live context on pod-local storage; these are the moments it meets the
+	// durable volume.
+	KindContextRestored   = "context.restored"   // runtime -> conversation
+	KindContextCheckpoint = "context.checkpoint" // conversation -> runtime
+	// KindContextSkipped is emitted when a checkpoint ran and found NOTHING
+	// changed. Deliberately not silent: "nothing changed" and "nothing ran" are
+	// different facts, and an operator looking at a context that has stopped
+	// advancing needs to tell them apart. It is also the evidence that the
+	// skip-when-unchanged rule is working — a volume that is never written to
+	// is the goal, not a symptom.
+	KindContextSkipped = "context.skipped" // conversation -> runtime
+	KindContextFailed  = "context.failed"  // conversation -> runtime
+)
+
+// Context checkpoint codes — BOUNDED, so they are safe as metric labels.
+// What triggered the operation, never how big it was.
+const (
+	// CodeContextWorkBoundary: taken as a work unit completed. Quiesced.
+	CodeContextWorkBoundary = "work-done"
+	// CodeContextInterval: taken by the periodic timer, possibly mid-run.
+	CodeContextInterval = "interval"
+	// CodeContextShutdown: the final checkpoint on SIGTERM, which is what
+	// covers every ordinary end of a pod.
+	CodeContextShutdown = "shutdown"
+	// CodeContextStart: the restore before the first work unit.
+	CodeContextStart = "start"
 )
 
 // Drop codes for KindSignalDropped — bounded, so they may be metric labels.

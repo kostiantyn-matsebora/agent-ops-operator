@@ -52,6 +52,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/storagebreaker"
 )
 
 // StateAnnotationPrefix namespaces adapter cursor state kept as Channel
@@ -98,8 +99,15 @@ type Server struct {
 
 	cooldowns map[string]*ingest.Cooldown
 
+	// StorageBreaker judges whether unreachable context is one conversation's
+	// loss or an install-wide outage. SHARED with the reconciler, which feeds
+	// it the provisioning edge — a pod that cannot attach its volume is the
+	// same incident as a run that cannot reach its context, and two breakers
+	// disagreeing about that would surface as a bug report far from either.
+	// Nil is usable: one is built lazily so a zero-valued Server works.
+	StorageBreaker *storagebreaker.Breaker
+
 	breakerOnce sync.Once
-	continuity  *continuityBreaker
 }
 
 // defaultMaxQueuedConversations is the pending-backlog bound when unset.
@@ -123,11 +131,13 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /work", s.handleWork)
 	mux.HandleFunc("POST /work/done", s.handleWorkDone)
+	mux.HandleFunc("POST /work/context", s.handleContextReport)
 	mux.HandleFunc("GET /channel/ops", s.adapterAuth(s.handleChannelOps))
 	mux.HandleFunc("POST /channel/ops/{id}/done", s.adapterAuth(s.handleChannelOpDone))
 	mux.HandleFunc("POST /channel/inbound", s.adapterAuth(s.handleChannelInbound))
 	mux.HandleFunc("POST /channel/conversations/{name}/reopen", s.adapterAuth(s.handleConversationReopen))
 	mux.HandleFunc("POST /channel/conversations/{name}/delete", s.adapterAuth(s.handleConversationDelete))
+	mux.HandleFunc("POST /channel/conversations/{name}/reset-context", s.adapterAuth(s.handleContextReset))
 	mux.HandleFunc("GET /channel/channels", s.adapterAuth(s.handleChannelList))
 	mux.HandleFunc("GET /channel/state/{channel}/{key}", s.adapterAuth(s.handleStateGet))
 	mux.HandleFunc("PUT /channel/state/{channel}/{key}", s.adapterAuth(s.handleStatePut))

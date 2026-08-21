@@ -440,6 +440,42 @@ type ConversationStatus struct {
 	// each reopen's op distinct while keeping every one of them derivable.
 	// +optional
 	Reopens int32 `json:"reopens,omitempty"`
+	// RuntimeStartFailures counts CONSECUTIVE failures to bring a runtime pod
+	// up, and is reset to zero the moment one reaches Running.
+	//
+	// It exists to back off. A pod that cannot start for an environmental
+	// reason — a volume that will not attach is the case this was built for —
+	// fails again immediately if it is recreated immediately, and the resulting
+	// hot loop buys nothing while filling the event stream. The count is what
+	// makes the interval grow.
+	//
+	// Kept on status rather than in memory because the decision must survive a
+	// manager restart: a process that forgets is a process that hot-loops from
+	// zero every rollout, exactly when a storage incident is most likely.
+	// ContextCheckpoint records the most recent SUCCESSFUL durable copy of this
+	// conversation's context.
+	//
+	// Durable state rather than telemetry, and the distinction is load-bearing.
+	// The activity log is bounded and lossy by design, but whether a
+	// conversation has a usable context after a crash decides whether it can
+	// continue at all — so it cannot depend on a record that may have been
+	// evicted from a ring buffer.
+	//
+	// Written ONLY when a checkpoint actually transferred data. A skipped
+	// checkpoint writes nothing: recording every skip would patch every
+	// conversation on every interval forever, which is precisely the write
+	// amplification that suppressed signals already avoid by writing cooldown
+	// only on admission.
+	// +optional
+	ContextCheckpoint *ContextCheckpoint `json:"contextCheckpoint,omitempty"`
+	// +optional
+	RuntimeStartFailures int32 `json:"runtimeStartFailures,omitempty"`
+	// LastRuntimeStartFailure stamps the most recent reap of a pod that never
+	// started. Together with RuntimeStartFailures it is the whole of the
+	// backoff state — the delay is derived from the two, never stored, so
+	// nothing can disagree about when the next attempt is due.
+	// +optional
+	LastRuntimeStartFailure *metav1.Time `json:"lastRuntimeStartFailure,omitempty"`
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
@@ -554,4 +590,27 @@ type ConversationList struct {
 
 func init() {
 	SchemeBuilder.Register(&Conversation{}, &ConversationList{})
+}
+
+// ContextCheckpoint is one durable copy of a conversation's context.
+type ContextCheckpoint struct {
+	// At is when the copy completed.
+	At metav1.Time `json:"at"`
+	// Generation names the copy on the volume, so an operator recovering by
+	// hand knows which directory to look in and a restore can fall back to an
+	// earlier one.
+	// +optional
+	Generation string `json:"generation,omitempty"`
+	// Quiesced reports whether this copy was taken at a WORK BOUNDARY, with
+	// nothing inflight, or during a run.
+	//
+	// A mid-run copy is still worth taking — a long run is exactly what a crash
+	// would otherwise lose in full — but it may contain a partially written
+	// file. Labelling it is what lets a restore, and a person, tell a
+	// known-consistent copy from a best-effort one instead of guessing.
+	Quiesced bool `json:"quiesced"`
+	// Bytes transferred by this checkpoint. Zero is meaningful: it means the
+	// copy ran and found nothing changed.
+	// +optional
+	Bytes int64 `json:"bytes,omitempty"`
 }

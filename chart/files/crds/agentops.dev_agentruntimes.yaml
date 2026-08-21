@@ -87,6 +87,62 @@ spec:
                 - external
                 - none
                 type: string
+              contextSync:
+                description: |-
+                  ContextSync moves the LIVE context off the durable volume and keeps a
+                  snapshot on it instead. ABSENT means today's behaviour, unchanged: the
+                  home volume is mounted directly and there is no sidecar.
+                properties:
+                  exclude:
+                    description: |-
+                      Exclude drops churn from INSIDE the included paths — lock files, temp
+                      files, anything rewritten constantly without being context. Without it
+                      the change detector reports a change on nearly every cycle and the
+                      skip-when-unchanged rule buys nothing.
+                    items:
+                      type: string
+                    type: array
+                  interval:
+                    default: 2m
+                    description: |-
+                      Interval is how often the context is checkpointed while a pod is alive,
+                      as a Go duration ("2m").
+
+                      "0" disables the timer and leaves only work-boundary checkpoints, which
+                      is the right setting for a low-churn backend. The interval bounds what a
+                      SIGKILL can lose: a crash, an OOM or a node reboot takes everything
+                      written since the last checkpoint, and no design removes that — only
+                      shortens it.
+                    type: string
+                  paths:
+                    description: |-
+                      Paths are INCLUDE globs, relative to the runtime's HOME, naming what is
+                      worth persisting. For the reference runtime that is
+                      ".claude/projects/-data-workspace/**".
+
+                      An include list rather than an exclude list, deliberately: caches, tool
+                      state and telemetry are then excluded BY CONSTRUCTION, instead of by a
+                      list that has to chase every file a vendor decides to add. It is also the
+                      difference between copying a few megabytes of transcripts and copying a
+                      package cache over NFS every two minutes.
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                  retain:
+                    default: 3
+                    description: |-
+                      Retain is how many previous copies to keep.
+
+                      More than one because a checkpoint taken mid-run may hold a partially
+                      written file. Keeping the previous generations means such a copy costs a
+                      fallback rather than the context itself.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                required:
+                - paths
+                type: object
               env:
                 description: 'Env: extra environment for every worker of this runtime.'
                 items:

@@ -25,6 +25,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/metrics"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/storagebreaker"
 )
 
 var scheme = runtime.NewScheme()
@@ -67,6 +68,17 @@ func envDuration(key string) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// envDurationOr is envDuration for settings whose "off" is not zero. A start
+// deadline of zero would reap every pod the instant it was created, so an
+// unset or unparseable value must fall back to the default rather than to nil
+// behaviour.
+func envDurationOr(key string, def time.Duration) time.Duration {
+	if d := envDuration(key); d > 0 {
+		return d
+	}
+	return def
 }
 
 // maxActiveConversations resolves the cap on simultaneously ACTIVE
@@ -188,11 +200,33 @@ func main() {
 		setupLog.Info("MAX_RUNTIMES is deprecated and is removed after one release — "+
 			"set MAX_ACTIVE_CONVERSATIONS (chart: maxActiveConversations) instead", "cap", maxActive)
 	}
+	// ONE breaker, both edges. The HTTP API feeds it runs that could not reach
+	// their context; the reconciler feeds it pods that could not attach their
+	// volume. Two instances would be two judgements about whether storage is
+	// down, disagreeing at the worst possible moment.
+	breaker := storagebreaker.New()
 	reconciler := &controller.ConversationReconciler{
 		Client:                 mgr.GetClient(),
 		Scheme:                 mgr.GetScheme(),
 		MaxActiveConversations: maxActive,
-		Ops:                    ops,
+		// A runtime pod that never STARTS holds its slot until it is reaped.
+		// Generous by default: it must clear a cold pull of a large runtime
+		// image, because reaping a pod that was merely still pulling turns a
+		// slow start into a restart loop that never completes one.
+		RuntimeStartDeadline: envDurationOr("RUNTIME_START_DEADLINE", controller.DefaultRuntimeStartDeadline),
+		// Events REPORT; nothing reads them back. The reconciler holds the
+		// recorder so a pod that cannot start says so where an operator running
+		// `kubectl describe conversation` is already looking.
+		Recorder:       mgr.GetEventRecorderFor("agentops-conversation"),
+		StorageBreaker: breaker,
+		// The same log every other emission site feeds, so the runtime-start hop
+		// lands in the console's sequence beside the ones around it.
+		Activity: acts,
+		// Paired with the chart's rbac.drainAware: the behaviour and the
+		// ClusterRole that makes it possible ship together, or enabling it
+		// alone would only produce forbidden loops in the log.
+		DrainAware: envBool("DRAIN_AWARE"),
+		Ops:      ops,
 		// The timer closes through the SAME path /close does, which is why the
 		// reconciler holds the router at all.
 		Router: router,
@@ -212,6 +246,13 @@ func main() {
 			WorkspacePVC:   os.Getenv("WORKSPACE_PVC"),
 			NodeSelector:   map[string]string{"node-role/app": "true"},
 			Command:        commandFromEnv(),
+			// The sidecar that keeps context durable when a runtime declares
+			// contextSync. Release-wide, like the manager's own image: it
+			// implements a contract rather than being a backend choice. Empty
+			// disables sidecar mode outright, so a chart that has not been
+			// upgraded cannot half-apply it.
+			ContextSyncImage:     env("CONTEXT_SYNC_IMAGE", ""),
+			ContextLiveSizeLimit: env("CONTEXT_LIVE_SIZE_LIMIT", "4Gi"),
 		},
 	}
 	// Assigned rather than passed at construction: the router is built before the
@@ -239,6 +280,7 @@ func main() {
 		// The backlog bound: the one capacity check that must live in ingest,
 		// because the point is not to create the object at all.
 		MaxQueuedConversations: envInt("MAX_QUEUED_CONVERSATIONS", 50),
+		StorageBreaker:         breaker,
 		MaxActiveConversations: maxActive,
 		AdapterToken:           os.Getenv("ADAPTER_TOKEN"),
 	}

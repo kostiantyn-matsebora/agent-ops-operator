@@ -10,9 +10,25 @@ import (
 //
 // Deliberately ephemeral and bounded (design decision 5). The durable record
 // of a conversation is `status.runs[]`, which the console already has from its
-// watch; this buffer only carries the part of the exchange that has not
-// finished becoming CR state yet. A restart loses unscrolled live messages and
-// nothing else.
+// watch.
+//
+// This used to claim a restart "loses unscrolled live messages and nothing
+// else". It does not, and the gap was visible: after a restart a conversation's
+// Runs tab was full while its Transcript tab said no messages — the same
+// conversation, the same view, the same moment. The premise was right and the
+// second half was never built. `mergeTranscript` is the missing half: every
+// read merges this buffer with `status.runs[]`, so a thread shows its full
+// history whether or not the buffer still holds it.
+//
+// It MERGES rather than falling back, and that distinction is the substance of
+// the fix. A first attempt served the durable record only when the buffer was
+// EMPTY, which broke worse than the bug it replaced: typing a reply made the
+// buffer non-empty, so the history vanished mid-conversation.
+//
+// What a restart genuinely loses is what was never CR state — the signal card
+// (its input is pruned once processed) and relayed sibling-channel messages.
+// Those are not reconstructed, because inventing text nobody said would be
+// worse than starting the thread at the first answer.
 
 const (
 	// maxThreadMessages bounds one thread's live buffer.

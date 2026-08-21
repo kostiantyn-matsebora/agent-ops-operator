@@ -9,6 +9,21 @@ viewer), `telegram-router/` (the single getUpdates consumer), and
 `signal-cron/`, `signal-vmalertmanager/`, `signal-k8s-events/`,
 `signal-telegram/` (signal adapters) — the adapters dependency-free.
 
+## Answering (how to report findings)
+
+**LEAD WITH THE SHORT VERSION, THEN OFFER THE LONG ONE.** Any diagnosis, design
+or proposal is reported as three short parts — **problem**, **cause**,
+**solution(s)** — in plain language, and then ASK whether details are wanted.
+Do not open with the reasoning, the evidence trail, or the full design.
+
+The reader decides how deep to go, every time. Volunteering the deep version
+takes that choice away and buries the answer they asked for. Log excerpts,
+timelines, file-anchored change lists and trade-off analysis are what "details"
+MEANS — they are held back until asked for, not omitted from the work.
+
+Applies to chat answers only. Written deliverables under `docs/` follow the
+adopter-documentation rules at the foot of this file instead.
+
 ## Terminology (binding)
 
 - **Agent runtime**, never "worker": CRD `AgentRuntime`, SA `agentops-runtime`,
@@ -59,6 +74,28 @@ viewer), `telegram-router/` (the single getUpdates consumer), and
   runtime, then a manager-side breaker that HOLDS work, because failing fast on
   every report would destroy every active conversation's context in one storage
   incident.
+- **`context-sync`** = the sidecar that keeps a runtime's LIVE context on
+  pod-local storage and a SNAPSHOT on the durable volume. NEVER "manager" — in
+  this codebase that word means the operator, and a second thing wearing it
+  would make every sentence about either ambiguous.
+  It is opt-in per runtime via `AgentRuntime.spec.contextSync`, and ABSENT means
+  today's pod exactly: home mounted directly, no sidecar, no migration.
+  It learns work boundaries by PROXYING the work contract — the manager points
+  the agent's `CONTROL_URL` at it and it forwards to the real manager — which is
+  what lets it checkpoint without any runtime image changing. Two orderings are
+  guarantees, not details: RESTORE completes before the first `/work` is
+  answered, and CHECKPOINT completes before `/work/done` reaches the manager,
+  because the manager records the context handle from that report and a handle
+  whose bytes were never written names something gone.
+  The agent container holds NO mount of the durable volume in this mode. That
+  is deliberate twice over: a corrupt volume cannot stop a run already going,
+  and an agent cannot read another conversation's context or write to the
+  volume at all.
+  Checkpoints are CONDITIONAL and INCREMENTAL, and the second half is
+  load-bearing rather than an optimisation — a conditional-but-FULL copy every
+  two minutes would push the whole context over NFS on every change, increasing
+  writes to the very filesystem the mechanism protects. Unchanged files become
+  hardlinks into the previous generation.
 - **`Pipeline`** = THE wiring, exclusively: sources[] × channels[] + profile
   + TOOL ACCESS. No other CR carries wiring (SignalSource has no
   profile/channel refs, Channel has no default profile) — sources no Ready
@@ -205,18 +242,96 @@ go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/.
 KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19 use 1.31.x --bin-dir ~/.envtest -p path) go test ./...
 ```
 
+### No local Go: use a PERSISTENT container, not `docker run --rm`
+
+This workstation has no Go toolchain, so every command above runs in a
+container. Start ONE long-lived container and `docker exec` into it — a
+throwaway `docker run --rm` per command pays container setup on every
+invocation and throws the build cache away with it. Warm rebuilds are ~2s
+through `exec`; they are not through `run --rm`.
+
+```sh
+docker volume create agentops-gomodcache; docker volume create agentops-gocache
+# volumes are created ROOT-owned; chown once or every write fails as your uid
+docker run --rm -u 0 -v agentops-gomodcache:/gomodcache -v agentops-gocache:/gocache \
+  golang:1.23 chown -R "$(id -u):$(id -g)" /gomodcache /gocache
+docker run -d --name agentops-go -u "$(id -u):$(id -g)" \
+  -v "$PWD":"$PWD" -w "$PWD" \
+  -v agentops-gocache:/gocache -v agentops-gomodcache:/gomodcache \
+  -e GOCACHE=/gocache -e GOMODCACHE=/gomodcache \
+  -e HOME=/tmp -e GOFLAGS=-buildvcs=false \
+  golang:1.23 sleep infinity
+# then, for every go command (-w keeps submodules working):
+docker exec -i -w "$PWD" agentops-go go build ./...
+```
+
+Four details, each of which cost a debugging round:
+
+- **The caches MUST be named volumes, never host bind mounts.** The module
+  cache does heavy rename and hardlink work, and bind mounts through the
+  Rancher Desktop VM corrupt it — every package fails with
+  `zip: not a valid zip file` on a cache that was written seconds earlier. The
+  repo itself is still a bind mount, because it must be edited from the host.
+- **Run as the invoking uid.** `controller-gen` writes deepcopy and CRDs INTO
+  the repo, and a root-owned generated file is a mess to undo.
+- **Mount the repo at its REAL path**, not `/src`: compiler diagnostics then
+  carry paths that resolve on the host.
+- **`go clean -modcache` fails** (`unlinkat //gomodcache: permission denied`) —
+  it tries to remove the mount point. Remove the VOLUME instead.
+
+Two traps that are not the container's fault but look like it: `go build ./...`
+piped into `tail` reports `tail`'s exit code, so check `${PIPESTATUS[0]}` or
+redirect to a file; and `openspec` needs Node, which is likewise not installed
+system-wide (`~/.local/opt/node`, symlinked into `~/.local/bin`).
+
+### EVERY IMAGE IS MULTI-ARCH WHEREVER IT CAN BE
+
+**`buildx --platform linux/amd64,linux/arm64 --push`, never `docker build
+--platform linux/amd64`.** A single-arch image on a mixed-arch cluster does not
+fail at build, at push, or at render. It fails when the SCHEDULER happens to
+place the pod on the other architecture, which may be weeks later and looks like
+an unrelated incident:
+
+```
+failed to pull and unpack image "...": no match for platform in manifest: not found
+```
+
+That is what an amd64-only `agentops-console` did on 2026-08-21 — it had run for
+weeks purely because every reschedule had landed on an amd64 node, and the first
+one that did not left the console in `ImagePullBackOff`. Nothing in the chart or
+the CR was wrong; the image simply had no arm64 half. Every adapter here is
+dependency-free Go and cross-compiles for free, so there is no reason to ship
+one arch.
+
+The exception is a runtime whose UPSTREAM is single-arch. `runtime-claude` is the
+case: pin those with a `nodeSelector` so they only ever schedule where they can
+run, and say so in the values — a pod that crash-loops on the wrong
+architecture is the same failure one layer down.
+
 Images (bump the tag on every change — never overwrite a pushed tag):
 
 ```sh
-docker build --platform linux/amd64 -t <registry>/agentops-manager:<tag> .
+# MULTI-ARCH, and --push in the same command: buildx cannot export a
+# multi-platform result to the local daemon, so a separate `docker push` would
+# silently ship whichever single arch got loaded.
+BX="docker buildx build --platform linux/amd64,linux/arm64 --push"
+$BX -t <registry>/agentops-manager:<tag> .
+$BX -t <registry>/agentops-channel-telegram:<tag> ./channel-telegram/
+$BX -t <registry>/agentops-telegram-router:<tag> ./telegram-router/
+$BX -t <registry>/agentops-signal-telegram:<tag> ./signal-telegram/
+$BX -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
+$BX -t <registry>/agentops-signal-vmalertmanager:<tag> ./signal-vmalertmanager/
+$BX -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
+$BX -t <registry>/agentops-console:<tag> ./console/
+$BX -t <registry>/agentops-context-sync:<tag> ./context-sync/
+$BX -t <registry>/agentops-housekeeping:<tag> ./housekeeping/
+# runtime-claude is the exception — upstream is amd64-only, so it ships amd64
+# and its AgentRuntime carries a nodeSelector.
 docker build --platform linux/amd64 -t <registry>/agentops-runtime-claude:<tag> ./runtime-claude/
-docker build --platform linux/amd64 -t <registry>/agentops-channel-telegram:<tag> ./channel-telegram/
-docker build --platform linux/amd64 -t <registry>/agentops-telegram-router:<tag> ./telegram-router/
-docker build --platform linux/amd64 -t <registry>/agentops-signal-telegram:<tag> ./signal-telegram/
-docker build --platform linux/amd64 -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
-docker build --platform linux/amd64 -t <registry>/agentops-signal-vmalertmanager:<tag> ./signal-vmalertmanager/
-docker build --platform linux/amd64 -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
-docker build --platform linux/amd64 -t <registry>/agentops-console:<tag> ./console/
+
+# VERIFY before believing it — the failure mode is invisible until it schedules:
+docker manifest inspect <registry>/agentops-console:<tag> \
+  | jq -r '.manifests[].platform | "\(.os)/\(.architecture)"'
 # then update the image refs (chart values for the manager, AgentRuntime CRs for
 # runtimes), helm upgrade, and verify with a live task — a task is an ordinary
 # signal to a source a Ready Pipeline claims (there is no /task endpoint):
@@ -342,6 +457,18 @@ housekeeping/            the disk half of conversation retention (own module,
                          invariant). Named agentops-housekeeping so
                          signal-k8s-events' prefix self-exclusion catches it — a
                          CronJob fails on a SCHEDULE
+context-sync/            the context sidecar (own module, no deps) — keeps the
+                         LIVE context on pod-local storage and a SNAPSHOT on the
+                         durable volume. PROXIES the work contract (the agent's
+                         CONTROL_URL points at it) so it learns work boundaries
+                         with NO runtime image change — restore before the first
+                         /work, checkpoint before /work/done reaches the manager.
+                         Conditional (skip when unchanged) and INCREMENTAL
+                         (hardlink the unchanged), because a full copy every two
+                         minutes would increase writes to the filesystem this
+                         protects. Atomic generations + a `current` symlink;
+                         copies labelled quiesced or best-effort. Opt-in per
+                         runtime; absent = today's pod exactly
 console/                 the agent-ops console (own module, no deps) — a
                          ChannelAdapter that is ALSO the viewer. Config from
                          read-only list/watch of the eight agentops kinds
@@ -688,6 +815,50 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   A Pipeline named after a manager command (`exit`, `close`, `agents`, `help`,
   `start`) is unreachable by that command: interception precedes the Pipeline
   lookup, which is what makes the commands reliable.
+- **A RUNTIME POD THAT NEVER STARTS IS REAPED, NEVER EXEMPTED FROM THE CAP.**
+  Reaping used to handle `Succeeded` and `Failed` only. `Pending` is COUNTED as
+  active — correctly, since a stuck pod must not invent capacity — but nothing
+  bounded how long it could sit there, so five pods behind a corrupt filesystem
+  held an entire install for fifteen hours on 2026-08-20. The fix is a start
+  DEADLINE after which the pod stops existing, which frees the slot through the
+  DELETE watch that already promotes the FIFO-first waiter. Un-counting it
+  instead is the invent-capacity mistake and would provision past the cap
+  against resources the cluster has not released.
+  The condition carries the KUBELET'S OWN REASON, verbatim. A message reading
+  only "deadline exceeded" reproduces the real failure — fifteen hours in which
+  nothing said what was wrong — with a timer attached. Classification comes from
+  POD STATUS alone (`PodReadyToStartContainers` is the discriminator: false
+  exactly while a volume will not attach, true before image pulling begins), so
+  the manager needs no event-read RBAC for it.
+  A conversation inside its start-failure BACKOFF is skipped by the admission
+  waiting set. Leaving it at the FIFO head reproduces the outage one layer up:
+  the oldest conversation cannot start, and everything behind it waits on a slot
+  nobody will take.
+- **ONE STORAGE BREAKER, TWO EDGES.** `internal/storagebreaker` treats
+  unavailability as an OUTAGE before a LOSS, and it is fed BOTH by runs that
+  report an unreachable context AND by pods that cannot be provisioned for a
+  storage reason. It lived in `httpapi` watching only the first, which is why it
+  never fired for the incident it was written for: no pod started, so no run
+  existed to file a report. A SECOND breaker would be worse than none — two
+  judgements about whether storage is down, disagreeing at the worst moment.
+  Only STORAGE-attributable provisioning failures count. An unschedulable pod or
+  an unpullable image opening a storage breaker would hold every conversation in
+  the install for a reason that has nothing to do with storage.
+  While open: admit nothing, hold in `Pending` with a reason that says STORAGE
+  rather than queue, and re-test with ONE canary. The provisioning edge cannot
+  close its own breaker — no pod means no run means no success to report — which
+  is the whole reason `ProbeDue` exists.
+- **CONDITION TAINTS ARE NOT DRAINS.** `node.kubernetes.io/not-ready`,
+  `unreachable` and the pressure taints are applied by Kubernetes from node
+  CONDITIONS. Reading them as a drain releases runtime pods during a transient
+  NotReady, and during a partition across many nodes at once — precisely when
+  acting on a stale view is least affordable. Only `spec.unschedulable` and
+  taints outside that set mean a node is being taken down deliberately.
+  Drain awareness is OFF by default and gated on `rbac.drainAware`, because
+  seeing a cordon means reading NODES and every other permission this manager
+  holds is namespaced. It shrinks the corruption window; it does not close it,
+  since the storage provider picks where a shared volume is served independently
+  of where runtime pods run.
 - **THE RECLAIMING JOB'S LISTING IS PHASE-BLIND, ON PURPOSE.** `housekeeping/`
   removes workspace directories and session transcripts with no `Conversation`
   behind them. A CLOSED conversation still HAS a CR, so its state is protected

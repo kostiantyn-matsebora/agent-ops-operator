@@ -172,6 +172,9 @@ export interface ManagerStatus {
   runtimeSlots: { inUse: number; max: number; waiting: number }
   queues: QueueStat[] | null
   cooldowns: CooldownStat[] | null
+  /** Present while context storage is treated as unavailable install-wide.
+   * Work is HELD, not failed, and no runtime pods are provisioned. */
+  storageOutage?: { since?: string; forSeconds: number }
 }
 
 export interface AdapterInfo {
@@ -320,6 +323,14 @@ export interface Run {
   finishedAt?: string
 }
 
+export interface BlockedReason {
+  reason: string
+  detail?: string
+  /** True for the subset that means "your volume is broken" rather than
+   * "this pod had a bad day". */
+  storage: boolean
+}
+
 export interface ConversationSummary {
   name: string
   uid?: string
@@ -338,6 +349,10 @@ export interface ConversationSummary {
   joined: boolean
   consoleThread?: string
   errored: boolean
+  /** Why the runtime could not start. Present means the conversation is not
+   * merely queued — its pod could not come up, and this is the kubelet's own
+   * reason for it. The 2026-08-20 outage showed a phase and nothing else. */
+  blocked?: BlockedReason
   /** The CONSOLE's own thread has activity newer than its watermark. Observed
    * conversations — no console thread — are never unread. */
   unread: boolean

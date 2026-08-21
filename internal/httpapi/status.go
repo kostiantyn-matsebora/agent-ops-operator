@@ -61,6 +61,20 @@ type statusResponse struct {
 	// item — the "which one" that a metric label must never carry.
 	Queues    []chat.QueueStat `json:"queues"`
 	Cooldowns []cooldownStat   `json:"cooldowns"`
+	// StorageOutage reports that context storage is being treated as
+	// unavailable install-wide: work is HELD, not failed, and no runtime pods
+	// are provisioned until it clears.
+	//
+	// The install-LEVEL answer to "why is nothing running". A queue that has
+	// stopped moving is either full or storage-blocked, and RuntimeSlots alone
+	// cannot tell those apart — which is exactly the ambiguity that made the
+	// 2026-08-20 outage unreadable from outside.
+	StorageOutage *storageOutage `json:"storageOutage,omitempty"`
+}
+
+type storageOutage struct {
+	Since      string  `json:"since,omitempty"`
+	ForSeconds float64 `json:"forSeconds"`
 }
 
 type runtimeSlots struct {
@@ -99,6 +113,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.Ops != nil {
 		out.Queues = s.Ops.Stats()
+	}
+	if open, since := s.breaker().Open(); open {
+		o := &storageOutage{}
+		if !since.IsZero() {
+			o.Since = since.UTC().Format(time.RFC3339)
+			o.ForSeconds = time.Since(since).Seconds()
+		}
+		out.StorageOutage = o
 	}
 	for name, cd := range s.cooldowns {
 		n, window := cd.Stats()
@@ -183,6 +205,16 @@ func (s *Server) MetricsSample() metrics.Sample {
 	for name, cd := range s.cooldowns {
 		n, _ := cd.Stats()
 		out.CooldownsActive[name] = n
+	}
+	// The install-level storage fact, straight from the breaker both edges
+	// feed. This is where the "why is nothing running" answer lives: a queue
+	// that has stopped moving is either full or storage-blocked, and these two
+	// series are what tell an operator which without opening an object.
+	if open, since := s.breaker().Open(); open {
+		out.StorageOutage = true
+		if !since.IsZero() {
+			out.StorageOutageAge = time.Since(since).Seconds()
+		}
 	}
 	// Pipelines are listed ONCE and matched per conversation: attributing each
 	// conversation independently would list the pipeline set per row, on every

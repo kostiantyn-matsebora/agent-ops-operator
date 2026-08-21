@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -108,9 +110,73 @@ type AgentRuntimeSpec struct {
 	// +kubebuilder:default=volume
 	// +optional
 	ContextStorage ContextStorage `json:"contextStorage,omitempty"`
+	// ContextSync moves the LIVE context off the durable volume and keeps a
+	// snapshot on it instead. ABSENT means today's behaviour, unchanged: the
+	// home volume is mounted directly and there is no sidecar.
+	// +optional
+	ContextSync *ContextSync `json:"contextSync,omitempty"`
 	// Resources default for runtime pods (AgentProfile.resources overrides).
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// ContextSync declares how a runtime's context is kept durable when the live
+// copy lives on pod-local storage.
+//
+// The RUNTIME declares it, for exactly the reason ContextStorage gives: the
+// chart cannot know where a given agent backend keeps its context, and a wrong
+// guess produces a configuration that looks like it works right up until a
+// resume fails. Neither the chart nor the manager may infer these paths.
+//
+// The manager copies the declared tree without reading it. That is not the same
+// as interpreting context — the handle stays opaque, exactly as it is today.
+type ContextSync struct {
+	// Paths are INCLUDE globs, relative to the runtime's HOME, naming what is
+	// worth persisting. For the reference runtime that is
+	// ".claude/projects/-data-workspace/**".
+	//
+	// An include list rather than an exclude list, deliberately: caches, tool
+	// state and telemetry are then excluded BY CONSTRUCTION, instead of by a
+	// list that has to chase every file a vendor decides to add. It is also the
+	// difference between copying a few megabytes of transcripts and copying a
+	// package cache over NFS every two minutes.
+	// +kubebuilder:validation:MinItems=1
+	Paths []string `json:"paths"`
+	// Exclude drops churn from INSIDE the included paths — lock files, temp
+	// files, anything rewritten constantly without being context. Without it
+	// the change detector reports a change on nearly every cycle and the
+	// skip-when-unchanged rule buys nothing.
+	// +optional
+	Exclude []string `json:"exclude,omitempty"`
+	// Interval is how often the context is checkpointed while a pod is alive,
+	// as a Go duration ("2m").
+	//
+	// "0" disables the timer and leaves only work-boundary checkpoints, which
+	// is the right setting for a low-churn backend. The interval bounds what a
+	// SIGKILL can lose: a crash, an OOM or a node reboot takes everything
+	// written since the last checkpoint, and no design removes that — only
+	// shortens it.
+	// +kubebuilder:default="2m"
+	// +optional
+	Interval *metav1.Duration `json:"interval,omitempty"`
+	// Retain is how many previous copies to keep.
+	//
+	// More than one because a checkpoint taken mid-run may hold a partially
+	// written file. Keeping the previous generations means such a copy costs a
+	// fallback rather than the context itself.
+	// +kubebuilder:default=3
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	Retain int32 `json:"retain,omitempty"`
+}
+
+// SyncInterval returns the configured checkpoint period, and whether periodic
+// checkpointing is on at all. A nil ContextSync is off.
+func (c *ContextSync) SyncInterval() (time.Duration, bool) {
+	if c == nil || c.Interval == nil {
+		return 0, false
+	}
+	return c.Interval.Duration, c.Interval.Duration > 0
 }
 
 // AgentRuntimeStatus reports validation state.
