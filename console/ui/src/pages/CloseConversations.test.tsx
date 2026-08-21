@@ -10,7 +10,7 @@ import type { CloseResponse, ConversationSummary } from '../api/types'
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
     name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
-    ageSeconds: 1, closing: false, ...over,
+    ageSeconds: 1, deleting: false, ...over,
   }
 }
 
@@ -22,8 +22,8 @@ describe('selection', () => {
     expect(selectableNames(page)).toEqual(['a', 'b', 'c'])
   })
 
-  it('cannot select a conversation that is already closing', () => {
-    const page = [conv('a'), conv('going', { closing: true }), conv('b')]
+  it('cannot select a conversation that is already being deleted', () => {
+    const page = [conv('a'), conv('going', { deleting: true }), conv('b')]
     expect(selectableNames(page)).toEqual(['a', 'b'])
   })
 

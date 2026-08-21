@@ -331,7 +331,7 @@ export function ConversationsPage() {
                         isSelected: selected.has(c.name),
                         // A conversation already on its way out cannot be
                         // closed again — there would be nowhere to post.
-                        isDisabled: c.closing,
+                        isDisabled: c.deleting,
                       }}
                     />
                     <Td dataLabel="Title">
@@ -358,10 +358,13 @@ export function ConversationsPage() {
                     </Td>
                     <Td dataLabel="Phase">
                       {/* A conversation held by its close-topics finalizer is
-                          gone, not idle. Without saying so the list looks
-                          untouched after a close and gets closed again. */}
-                      {c.closing ? (
-                        <Label color="grey">closing</Label>
+                          on its way out, not idle. It says DELETING, because
+                          that is the verb that put it there — /close sets a
+                          phase and leaves the object alone. Without this the
+                          list looks untouched after a delete and gets deleted
+                          again. */}
+                      {c.deleting ? (
+                        <Label color="grey">deleting</Label>
                       ) : (
                         <Label color={PHASE_COLOR[c.phase ?? ''] ?? 'grey'}>
                           <PlainText>{c.phase}</PlainText>
@@ -399,7 +402,7 @@ export function ConversationsPage() {
                           with its answers and its workspace, and this is how it
                           comes back. No bulk equivalent — a batch would
                           re-materialise threads on surfaces nobody is watching. */}
-                      {canClose && c.phase === 'Closed' && !c.closing && (
+                      {canClose && c.phase === 'Closed' && !c.deleting && (
                         <Button
                           variant="link"
                           isInline

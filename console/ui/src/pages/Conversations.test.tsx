@@ -60,14 +60,14 @@ vi.mock('../api/hooks', () => ({
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
     name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
-    ageSeconds: 1, closing: false, phase: 'Idle', ...over,
+    ageSeconds: 1, deleting: false, phase: 'Idle', ...over,
   }
 }
 
 // One PAGE of a larger result: 3 shown, 120 matching.
 function page() {
   return {
-    items: [conv('a', { unread: true }), conv('going', { closing: true }), conv('b')],
+    items: [conv('a', { unread: true }), conv('going', { deleting: true }), conv('b')],
     total: 120,
     unreadTotal: 7,
     offset: 0,
@@ -99,12 +99,12 @@ describe('closing a selection', () => {
     expect(screen.getByTestId('close-selected')).toHaveTextContent('Close selected (2)')
   })
 
-  it('will not let a closing conversation be selected', () => {
+  it('will not let a conversation being deleted be selected', () => {
     renderList()
     expect(screen.getByLabelText(ROW(1))).toBeDisabled()
     expect(screen.getByLabelText(ROW(0))).toBeEnabled()
     // and the row says so rather than showing its last phase
-    expect(screen.getByText('closing')).toBeInTheDocument()
+    expect(screen.getByText('deleting')).toBeInTheDocument()
   })
 
   it('offers nothing to close until something is selected', () => {

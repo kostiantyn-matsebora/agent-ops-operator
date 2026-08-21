@@ -11,7 +11,7 @@ import type { DeleteResponse, ConversationSummary } from '../api/types'
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
     name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
-    ageSeconds: 1, closing: false, ...over,
+    ageSeconds: 1, deleting: false, ...over,
   }
 }
 
@@ -30,7 +30,7 @@ describe('selection', () => {
   })
 
   it('excludes one already on its way out', () => {
-    const page = [conv('going', { phase: 'Closed', closing: true }), conv('done', { phase: 'Closed' })]
+    const page = [conv('going', { phase: 'Closed', deleting: true }), conv('done', { phase: 'Closed' })]
     expect(deletableNames(page)).toEqual(['done'])
   })
 })
