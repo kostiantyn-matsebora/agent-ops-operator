@@ -1,0 +1,653 @@
+# Home Assistant agent bundle: the house's log stream → conversations, TWO
+# agents with different privilege, the tooling each may reach the house
+# through, and the routes that connect them.
+# Override under the `ha-bundle:` key of the parent chart's values.
+#
+# The WHOLE bundle is off by default and is turned on only directly
+# (`enabled: true`). Demo mode never enables it: every component needs a Home
+# Assistant endpoint and a credential no demo cluster has.
+#
+# The bundle ships NO SUBSTRATE: no AgentRuntime, no runtime ServiceAccount, no
+# LLM credential, no runtime RBAC. Those are release-wide facts and live in the
+# parent chart's `runtime:` block and `global.agentops.runtime.*`. Bundles
+# contribute domain — sources, profiles, tooling — and reference what the parent
+# provides.
+#
+# The SHAPE of this bundle is a PRIVILEGE SPLIT. Asking the house a question and
+# administering it are two jobs, and they want two agents:
+#
+#   ha-user      reads state and reports. Reached by chat.
+#   ha-operator  acts. Reached by NAME — `/ha-ops <task>` — so escalation is a
+#                deliberate act rather than something a casual message triggers.
+enabled: false
+
+# WHERE the house is, and WHO this release talks to it as. Three components read
+# these, so they are stated once here rather than three times below.
+#
+# TWO credentials, because they are two Home Assistant USERS doing two jobs:
+#
+#   control   USES the house — invokes services, turns on lights, runs
+#             automations and scenes.
+#   operator  FIXES the house — reloads and reconfigures integrations, repairs
+#             what broke, changes configuration.
+#
+# NEITHER IS READ-ONLY. Home Assistant has no such role, so "control" is not a
+# safe token that merely looks at things: it can act on every device exposed to
+# it. What separates the two lanes is the JOB, and on the MCP path the TOOLSET
+# is the wall. Say this out loud when deciding who may reach the surfaces below.
+#
+# Each credential comes EITHER as an existing Secret's name OR as the token
+# itself. Both forms of one credential at once FAILS the render: two sources for
+# one token is ambiguous.
+#
+#   controlSecret / operatorSecret   an EXISTING Secret you created, carrying the
+#                                    token under key `token` AND the complete
+#                                    header value under key `authorization`
+#                                    ("Bearer <token>")
+#   controlToken / operatorToken     the token itself. The bundle then creates
+#                                    the Secret (agentops-ha-control /
+#                                    agentops-ha-operator) and derives BOTH keys
+#                                    from the one value, so there is nothing to
+#                                    keep in sync.
+#
+# The token form is what a secret manager wants: hand it a reference your
+# tooling resolves (Vault, SOPS, an external-secrets ref) and no Secret has to
+# be created by hand.
+homeAssistant:
+  # Base URL, e.g. https://ha.example.org — or an in-cluster Service,
+  # http://ha.ha.svc.cluster.local:8123. Required by every component.
+  endpoint: ""
+  credentials:
+    # The everyday agent's credential, the MCP path's credential, and the
+    # ingest lane's default.
+    controlSecret: ""
+    controlToken: ""
+    # The fixing agent's credential — and the PREREQUISITE for its profile and
+    # its route. With both forms empty the bundle installs a house that can be
+    # used and questioned but never repaired.
+    operatorSecret: ""
+    operatorToken: ""
+    # What the INGEST lane authenticates as. Empty = the OPERATOR credential.
+    #
+    # It has to be an ADMIN user, and that is Home Assistant's rule rather than
+    # this chart's: `subscribe_events` is admin-only, and so are the
+    # `system_log/list` backfill and the `config_entries/get` the dwell re-check
+    # verifies with. A control token connects, passes auth, and is then refused
+    # the subscription — which surfaces as an Unreachable source and reads like
+    # a network problem.
+    ingestSecret: ""
+
+# The Home Assistant log ingest lane: adapter implementation and the source.
+# NOT the wiring — that is the `pipelines:` component at the bottom of this file.
+#
+# Turn it off for an ASK-ONLY install: the agents still answer questions, the
+# house just never wakes one.
+logsAdapter:
+  enabled: true
+  # SignalAdapter CR name — also the ROUTING KEY: SignalSources select this
+  # implementation with spec.adapter: <name>.
+  name: home-assistant
+  image:
+    repository: kmatsebora/agentops-signal-ha
+    tag: 0.1.0
+  resources: {}
+  # The log source. It is INERT until a Pipeline claims it — wiring is
+  # pipeline-only, so either turn the `pipelines:` component below on or declare
+  # the claim under the parent chart's `pipelines:`. Unclaimed, the source drops
+  # every record with Wired=False.
+  source:
+    create: true
+    # SignalSource CR name — name it in a pipeline's signalSources.
+    name: ha-logs
+    # Secret holding the adapter's token. Empty = homeAssistant.credentials
+    # .ingestSecret, then .operatorSecret. It must belong to an ADMIN user:
+    # Home Assistant's event subscription is admin-only.
+    credentialsSecret: ""
+    # Log levels to act on. WARNING is Home Assistant's background hum —
+    # deprecation notices, slow updates, sleepy devices — and watching it would
+    # bury real problems and burn LLM credits.
+    levels:
+      - ERROR
+      - CRITICAL
+    # Optional integration filters. Superseded by `rules` below, and translated
+    # into leading drop rules so there is one evaluation path.
+    includeIntegrations: []
+    excludeIntegrations: []
+    # Read the existing log listing on connect and report what is newer than the
+    # cursor. Off makes the lane lossy across restarts, on purpose only if you
+    # want a restart to forget.
+    backfill: true
+
+    # The suppression policy. Ordered, FIRST MATCH WINS.
+    #
+    # Two halves, spelled after the systems they come from — the same vocabulary
+    # the cluster Events lane uses, because it was worked out for this exact
+    # problem. `rules` is the PROMETHEUS half: what counts as a problem and how
+    # long it must hold (`for`). `route` is the ALERTMANAGER half: inhibition.
+    # Dwell is deliberately not called `group_wait` — Alertmanager's group_wait
+    # batches a group before its first notification and is NOT `for:`, which
+    # does not exist in Alertmanager at all.
+    #
+    # `for` holds a matched record, then RE-CHECKS before emitting: the
+    # integration's config entries loaded again (it recovered) or the record
+    # never recurred (it stopped) means drop; still failing means emit once,
+    # with the whole burst's evidence attached.
+    #
+    # Two properties make this set safe to trust, and both are pinned by test:
+    #   * the LAST rule is a catch-all with a dwell, never a drop — so an error
+    #     nobody anticipated is verified and reported rather than discarded;
+    #   * every message pattern in the drop list has its underlying problem
+    #     reported by some OTHER rule that is not dropped.
+    #
+    # Matchers select over the signal's labels — integration, logger, level,
+    # location — plus `message`, which is the record's TEXT and is match-only:
+    # it never becomes a label, because a label carrying free text would key
+    # conversation grouping on the exact wording.
+    rules:
+      # 1 ── never actionable on their own ─────────────────────────────────
+      # A slow update or a slow setup is Home Assistant telling you a device is
+      # sleepy. If it is actually broken it also logs an error the tiers below
+      # catch.
+      - matchers:
+          - message=~"(?s).*(took longer than the scheduled update interval|is taking over \\d+ seconds|Detected blocking call).*"
+        action: drop
+
+      # 2 ── PAST TENSE: these already happened ────────────────────────────
+      # A dwell would re-check, find nothing wrong, and erase a real incident:
+      # a script raises, the automation ends, and two minutes later the house is
+      # serene. Never give these a dwell.
+      - matchers:
+          - message=~"(?s).*(Unexpected exception|Error executing script|Error doing job|Timer got out of sync|Error while processing).*"
+        for: "0"
+      # CRITICAL is Home Assistant's own judgement that something ended badly.
+      - matchers:
+          - level="CRITICAL"
+        for: "0"
+
+      # 3 ── integration setup: real, and it retries on its own ────────────
+      # "not ready yet, will retry" is the single most common Home Assistant
+      # error and it resolves itself constantly — a hub that boots slower than
+      # the host, a cloud service rate-limiting a reconnect. Still failing five
+      # minutes later is an incident.
+      - matchers:
+          - message=~"(?s).*(not ready yet|Error setting up entry|Setup failed for|Config entry .* could not).*"
+        for: 5m
+
+      # 4 ── connectivity: flappy by nature, escalate on breadth ───────────
+      # escalateAfterObjects SHORTENS the dwell (to a quarter of it, floored at
+      # 1m) when THREE code paths of one integration are pending — it does not
+      # skip the wait. Firing on breadth alone reports every Home Assistant
+      # restart, because a restart also makes everything fail at once.
+      - matchers:
+          - message=~"(?s).*(Timeout|timed out|Connection (lost|refused|reset|aborted)|Unable to connect|No route to host).*"
+        for: 10m
+        escalateAfterObjects: 3
+
+      # 5 ── catch-all: everything unknown is KEPT, verified, reported ─────
+      # MUST stay last and MUST stay a dwell.
+      - matchers: []
+        for: 3m
+
+    # The Alertmanager half: INHIBITION — suppress the consequences of a cause
+    # that is already reported. Empty by default, shown as a worked example.
+    #
+    # The canonical use here is a hub: a Z-Wave stick or a Zigbee coordinator
+    # going away makes every device behind it log errors, and those are the same
+    # incident from the wrong end.
+    #
+    #   route:
+    #     inhibitRules:
+    #       - sourceMatchers: ['integration="zwave_js"']
+    #         targetMatchers: ['message=~"(?s).*unavailable.*"']
+    #
+    # NOTE: this adapter carries inhibition only. The TIME axis
+    # (timeIntervals / muteTimeIntervals) exists on the cluster Events adapter
+    # and is not implemented here — an unknown key is a config error, not a
+    # window that silently never fires.
+    route: {}
+
+    # SignalSource grouping policy (manager-side; defaults apply when empty).
+    #
+    # Group by INTEGRATION. The alternative — grouping per record — would open a
+    # conversation for every failing code path of one broken hub, and the
+    # manager's window reuse could never fire.
+    grouping:
+      signatureLabels:
+        - integration
+
+# Structured Home Assistant access as MCP tools — an MCPConfig (the server) and
+# MCPToolsets (the permission to call it).
+#
+# There is NO server workload to deploy, and that is the difference from the
+# Kubernetes and Prometheus bundles: Home Assistant SERVES ITS OWN MCP endpoint
+# (the built-in MCP Server integration, SSE at /mcp_server/sse). Enable that
+# integration in Home Assistant and the endpoint below already exists.
+#
+# WITHOUT MCP the agents are not helpless — they fall back to the REST API with
+# the token in their profile env, which is what `pipelines.restAccess` grants a
+# shell toolset for. With MCP configured, that fallback is off by default and
+# the toolsets below are the whole boundary.
+mcp:
+  enabled: true
+  # MCPConfig CR name (what Pipelines put in mcpConfigs.refs).
+  name: ha-api
+  # The MCP endpoint. Empty = derived from homeAssistant.endpoint, which is
+  # where the built-in integration serves.
+  url: ""
+  # Transport: sse is Home Assistant's own (path /mcp_server/sse). Set http only
+  # when pointing at a different server that speaks streamable HTTP.
+  transport: sse
+  # Optional header passthrough. Empty = an Authorization header sourced from
+  # the `authorization` key of the credential below, which is what makes a
+  # default install work. Set it to point somewhere else entirely.
+  headers: []
+  # Which credential the MCP path authenticates with. Empty = the CONTROL
+  # token, falling back to the operator one when no control token is set.
+  #
+  # Control on purpose, and it costs nothing: Home Assistant's MCP server
+  # exposes ASSIST INTENTS — service calls — and every one of them is within a
+  # control user's rights. The operator token's extra power is configuration,
+  # which no MCP tool here reaches, so pointing this at the operator would widen
+  # the shared path for no capability.
+  #
+  # This is the honest statement of where the wall is: ONE endpoint, ONE token,
+  # and the toolsets below are what separate looking from doing.
+  credentialsSecret: ""
+  # TWO toolsets, split by risk. Reads and actions are separate CRs so granting
+  # actions is a per-route decision.
+  #
+  # The server key in the rendered MCPConfig is FIXED at `homeassistant` and has
+  # no values path: that key IS the mcp__homeassistant__* namespace named in
+  # every allowlist, so a values rename would silently strip an agent's tools.
+  #
+  # Tools are ENUMERATED, not `mcp__homeassistant__*`. A wildcard spans both
+  # halves and would defeat the split — it is precisely the thing this replaces.
+  #
+  # WHICH tools exist is decided by YOUR house: Home Assistant's MCP server
+  # registers the Assist intents your instance exposes, so the lists below are a
+  # starting point to check against your own /mcp_server, not a contract. A name
+  # that resolves to nothing is inert, and a tool you use that is missing here
+  # is a values edit.
+  toolsets:
+    observe:
+      name: ha-observability
+      tools:
+        - "mcp__homeassistant__GetLiveContext"
+        - "mcp__homeassistant__HassGetState"
+        - "mcp__homeassistant__HassGetWeather"
+        - "mcp__homeassistant__HassGetCurrentDate"
+        - "mcp__homeassistant__HassGetCurrentTime"
+        - "mcp__homeassistant__todo_get_items"
+    actions:
+      # Rendered whenever the MCP component is, and NOT gated on a credential:
+      # Home Assistant registers the same Assist intents for any user, so there
+      # is no read-only server mode to detect. Set false to ship a strictly
+      # looking install whose agents cannot touch a device through MCP.
+      #
+      # Named for what it does, not for a privilege level. These are service
+      # calls — the everyday `ha-control` route binds them, because invoking
+      # them IS that agent's job.
+      enabled: true
+      name: ha-actions
+      tools:
+        - "mcp__homeassistant__HassTurnOn"
+        - "mcp__homeassistant__HassTurnOff"
+        - "mcp__homeassistant__HassLightSet"
+        - "mcp__homeassistant__HassSetPosition"
+        - "mcp__homeassistant__HassClimateSetTemperature"
+        - "mcp__homeassistant__HassMediaPause"
+        - "mcp__homeassistant__HassMediaUnpause"
+        - "mcp__homeassistant__HassMediaNext"
+        - "mcp__homeassistant__HassVacuumStart"
+        - "mcp__homeassistant__HassVacuumReturnToBase"
+        - "mcp__homeassistant__HassBroadcast"
+        - "mcp__homeassistant__HassCancelAllTimers"
+        - "mcp__homeassistant__HassListAddItem"
+
+# THE ADMIN MCP PATH — how `ha-ops` reaches everything Assist intents cannot.
+#
+# WHY THIS EXISTS. Home Assistant's built-in MCP server (the `mcp:` component
+# above) exposes Assist INTENTS: turn things on and off. It cannot read a log,
+# reload an integration, or disable an entity — those live in the entity and
+# config-entry registries, which Home Assistant serves over its WEBSOCKET API.
+# An ops agent without this component reports "no such capability exists in my
+# toolset" and hands the job back, which is exactly what it did.
+#
+# OFF by default. It is a separate server holding a token that can change your
+# whole house, and turning it on is a decision, not a default.
+#
+# TWO WAYS TO HAVE ONE, and the chart supports both:
+#
+#   1. Let the chart deploy it — set `adminMcpServer.enabled: true` and the
+#      bundle runs ha-mcp in-cluster under its own ServiceAccount. Nothing is
+#      installed inside Home Assistant. This is the path for HA Core.
+#   2. Point at one you already run — set `url` to an existing server, such as
+#      a HACS custom integration serving MCP inside Home Assistant itself. The
+#      bundle then renders only the CRs.
+#
+# Enabling this with NEITHER a url NOR the server component FAILS the render: an
+# MCPConfig pointing nowhere costs the agent its tools and looks installed.
+adminMcp:
+  enabled: false
+  # MCPConfig CR name (what the ops Pipeline puts in mcpConfigs.refs).
+  name: ha-admin-api
+  # The endpoint. Empty = the deployed server below. Set it to use your own —
+  # for a HACS component that is your Home Assistant's own URL and its MCP path.
+  url: ""
+  # http (streamable) or sse. ha-mcp serves streamable HTTP.
+  transport: http
+  # Optional header passthrough for a server you run yourself — valueFrom secret
+  # refs supported, resolved in the runtime pod. The DEPLOYED server needs none:
+  # it authenticates by URL-path secrecy (see adminMcpServer.path).
+  headers: []
+  # ONE toolset, ENUMERATED from the server's real tool list rather than
+  # wildcarded. `mcp__homeassistant_admin__*` would grant restarting Home
+  # Assistant, deleting registry objects and installing HACS packages in one
+  # line, which is the whole thing the enumeration prevents.
+  #
+  # Verified against ha-mcp 8.3.0: 78 tools, of which these 52 ship.
+  toolset:
+    name: ha-admin
+    tools:
+      - "mcp__homeassistant_admin__ha_bulk_control"
+      - "mcp__homeassistant_admin__ha_call_event"
+      - "mcp__homeassistant_admin__ha_call_service"
+      - "mcp__homeassistant_admin__ha_config_get_automation"
+      - "mcp__homeassistant_admin__ha_config_get_calendar_events"
+      - "mcp__homeassistant_admin__ha_config_get_category"
+      - "mcp__homeassistant_admin__ha_config_get_dashboard"
+      - "mcp__homeassistant_admin__ha_config_get_label"
+      - "mcp__homeassistant_admin__ha_config_get_scene"
+      - "mcp__homeassistant_admin__ha_config_get_script"
+      - "mcp__homeassistant_admin__ha_config_list_dashboard_resources"
+      - "mcp__homeassistant_admin__ha_config_list_groups"
+      - "mcp__homeassistant_admin__ha_config_list_helpers"
+      - "mcp__homeassistant_admin__ha_config_set_automation"
+      - "mcp__homeassistant_admin__ha_config_set_calendar_event"
+      - "mcp__homeassistant_admin__ha_config_set_category"
+      - "mcp__homeassistant_admin__ha_config_set_dashboard"
+      - "mcp__homeassistant_admin__ha_config_set_dashboard_resource"
+      - "mcp__homeassistant_admin__ha_config_set_group"
+      - "mcp__homeassistant_admin__ha_config_set_helper"
+      - "mcp__homeassistant_admin__ha_config_set_label"
+      - "mcp__homeassistant_admin__ha_config_set_scene"
+      - "mcp__homeassistant_admin__ha_config_set_script"
+      - "mcp__homeassistant_admin__ha_eval_template"
+      - "mcp__homeassistant_admin__ha_get_app"
+      - "mcp__homeassistant_admin__ha_get_automation_traces"
+      - "mcp__homeassistant_admin__ha_get_blueprint"
+      - "mcp__homeassistant_admin__ha_get_camera_image"
+      - "mcp__homeassistant_admin__ha_get_device"
+      - "mcp__homeassistant_admin__ha_get_entity"
+      - "mcp__homeassistant_admin__ha_get_entity_exposure"
+      - "mcp__homeassistant_admin__ha_get_hacs_info"
+      - "mcp__homeassistant_admin__ha_get_history"
+      - "mcp__homeassistant_admin__ha_get_integration"
+      - "mcp__homeassistant_admin__ha_get_logs"
+      - "mcp__homeassistant_admin__ha_get_operation_status"
+      - "mcp__homeassistant_admin__ha_get_overview"
+      - "mcp__homeassistant_admin__ha_get_skill_guide"
+      - "mcp__homeassistant_admin__ha_get_state"
+      - "mcp__homeassistant_admin__ha_get_system_health"
+      - "mcp__homeassistant_admin__ha_get_todo"
+      - "mcp__homeassistant_admin__ha_get_zone"
+      - "mcp__homeassistant_admin__ha_list_floors_areas"
+      - "mcp__homeassistant_admin__ha_list_services"
+      - "mcp__homeassistant_admin__ha_reload_core"
+      - "mcp__homeassistant_admin__ha_search"
+      - "mcp__homeassistant_admin__ha_set_area_or_floor"
+      - "mcp__homeassistant_admin__ha_set_device"
+      - "mcp__homeassistant_admin__ha_set_entity"
+      - "mcp__homeassistant_admin__ha_set_integration"
+      - "mcp__homeassistant_admin__ha_set_todo_item"
+      - "mcp__homeassistant_admin__ha_set_zone"
+  # NOT SHIPPED, and each for a reason: they restart Home Assistant, delete
+  # registry objects, manage backups, or install software. Add the ones you want
+  # by appending to `toolset.tools` above — Helm replaces lists rather than
+  # merging them, so restate the whole list.
+  #
+  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard"
+  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard_resource"
+  #   - "mcp__homeassistant_admin__ha_config_remove_automation"
+  #   - "mcp__homeassistant_admin__ha_config_remove_calendar_event"
+  #   - "mcp__homeassistant_admin__ha_config_remove_category"
+  #   - "mcp__homeassistant_admin__ha_config_remove_group"
+  #   - "mcp__homeassistant_admin__ha_config_remove_label"
+  #   - "mcp__homeassistant_admin__ha_config_remove_scene"
+  #   - "mcp__homeassistant_admin__ha_config_remove_script"
+  #   - "mcp__homeassistant_admin__ha_import_blueprint"
+  #   - "mcp__homeassistant_admin__ha_manage_app"
+  #   - "mcp__homeassistant_admin__ha_manage_backup"
+  #   - "mcp__homeassistant_admin__ha_manage_energy_prefs"
+  #   - "mcp__homeassistant_admin__ha_manage_hacs"
+  #   - "mcp__homeassistant_admin__ha_manage_pipeline"
+  #   - "mcp__homeassistant_admin__ha_manage_radio"
+  #   - "mcp__homeassistant_admin__ha_manage_theme"
+  #   - "mcp__homeassistant_admin__ha_manage_updates"
+  #   - "mcp__homeassistant_admin__ha_remove_area_or_floor"
+  #   - "mcp__homeassistant_admin__ha_remove_device"
+  #   - "mcp__homeassistant_admin__ha_remove_entity"
+  #   - "mcp__homeassistant_admin__ha_remove_helpers_integrations"
+  #   - "mcp__homeassistant_admin__ha_remove_todo_item"
+  #   - "mcp__homeassistant_admin__ha_remove_zone"
+  #   - "mcp__homeassistant_admin__ha_report_issue"
+  #   - "mcp__homeassistant_admin__ha_restart"
+
+# The admin MCP server WORKLOAD — a sibling of `adminMcp`, which renders only
+# the CRs. Runs ha-mcp in-cluster when you do not already have a server.
+#
+# It holds the OPERATOR credential and reaches your entire house. It runs under
+# its OWN ServiceAccount, never the runtime's, for the same reason k8s-bundle's
+# MCP server does: the agent's reach through MCP is then (what this server may
+# do) ∩ (what the toolset grants), two walls rather than one.
+adminMcpServer:
+  enabled: false
+  image:
+    repository: ghcr.io/homeassistant-ai/ha-mcp
+    # PINNED, and the pin is load-bearing: the toolset above enumerates tool
+    # NAMES, so a server that renames or adds tools changes what the allowlist
+    # means without anything failing.
+    tag: 8.3.0
+  port: 8086
+  # MCP_SECRET_PATH. ha-mcp's standard mode authenticates BY URL-PATH SECRECY —
+  # there is no token on the MCP endpoint itself. The Service is ClusterIP, so
+  # reach is already limited to the cluster, but on a shared cluster set a
+  # high-entropy path here (e.g. /private_<random>) and the URL follows it.
+  path: /mcp
+  # Which credential the server authenticates to Home Assistant with. Empty =
+  # the operator token, which is what makes registry writes possible at all.
+  credentialsSecret: ""
+  # Distinct from the runtime's ServiceAccount ON PURPOSE. Setting them equal
+  # FAILS the render.
+  serviceAccountName: agentops-mcp-ha
+  # Extra env passthrough. The chart already sets HOMEASSISTANT_URL,
+  # HOMEASSISTANT_TOKEN, MCP_HOST, MCP_PORT, MCP_SECRET_PATH,
+  # HA_MCP_DISABLE_SETTINGS_UI and MCP_DISABLE_UPDATE_CHECK — the last because
+  # the server otherwise calls pypi.org at startup, which an in-cluster
+  # workload has no business doing.
+  env: []
+  resources: {}
+
+# The two agents. IDENTITY ONLY — an AgentProfile carries no capabilities: no
+# allowedTools, no MCP servers. What each may DO comes from the Pipeline routing
+# it, which is why the same two prompts under two routes are the whole split.
+#
+# The split is USE versus FIX, not read versus act. Both agents act.
+#
+# Both carry CONNECTIVITY env (HA_URL and HA_TOKEN, the latter via valueFrom so
+# the manager never reads a Secret). That env is the REST path, and it is wider
+# than the toolset split: a route that also binds a shell toolset reaches the
+# whole Home Assistant API for that user, whatever the toolsets allow. That is
+# exactly how `ha-operator` fixes things, and exactly why `ha-user` is not given
+# one. See docs/ha-bundle.md.
+profiles:
+  user:
+    # Rendered when EITHER the MCP component renders OR a control credential is
+    # configured — a profile with no way to reach the house is furniture.
+    enabled: true
+    name: ha-user
+    # Appended to the runtime's own system prompt, never replacing it. Identity,
+    # not capability: nothing here widens the allowlist.
+    systemPrompt: |
+      You are the household's assistant for a Home Assistant installation. Real
+      lights, heating, media and people are on the other end of what you do.
+
+      You USE the house and you ANSWER QUESTIONS ABOUT IT. Turning things on and
+      off, setting lights and temperature, running scenes and automations, and
+      reporting what is going on are all yours to do.
+
+      You do NOT fix the house. Reloading or reconfiguring an integration,
+      editing configuration, repairing something that is broken, or anything
+      Home Assistant itself is reporting as an error belongs to another agent.
+      Say so plainly and tell them to ask with `/ha-ops <what they want>`.
+
+      Act on what was asked and nothing beside it. Confirm the current state
+      before changing it, make the narrowest change that does the job, and say
+      what you changed.
+
+      DESCRIBE AND STOP — do not act — when the request is house-wide rather
+      than one device, when it touches a lock, an alarm, a garage door or
+      heating in a way someone could be harmed by, or when you are not sure
+      which entity was meant.
+
+      Reach the house through your tools. If a tool for something is not in your
+      allowlist, you cannot do it — say so instead of improvising.
+
+      Answer briefly and in plain language. Lead with the answer or the action,
+      then the detail. Name entities the way the household does, not by
+      entity_id, unless the entity_id is what was asked for.
+    maxTurns: 30
+    # Names an AgentRuntime other than the parent's `default`. Empty emits no
+    # runtimeRef and falls back to `default`.
+    runtimeRef: ""
+  ops:
+    # Rendered ONLY when an operator credential is configured. That credential
+    # is the prerequisite, not a nicety: an agent asked to repair an integration
+    # with a token that cannot reconfigure one fails every task it is given.
+    enabled: true
+    name: ha-operator
+    systemPrompt: |
+      You are the administrator of a live Home Assistant installation. You are
+      woken when something in the house is BROKEN, and you are the agent that
+      fixes it.
+
+      HOW YOU REACH THE HOUSE — read this before concluding you cannot do
+      something. You have TWO paths, and the second is the one that matters for
+      your job:
+
+      1. Assist intents, through your mcp__homeassistant__* tools. These control
+         devices — lights, climate, media, switches. They CANNOT read logs,
+         reload an integration, or change configuration.
+      2. The Home Assistant REST API, through your shell. `$HA_URL` and
+         `$HA_TOKEN` are in your environment, and `curl` and `jq` are installed.
+         This is how you diagnose and repair. Never say a task is impossible
+         because no MCP tool exists for it — check whether the API does it.
+
+      Every call looks like this:
+
+        curl -sS -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/..."
+
+      What you will need most:
+
+        # the error log, newest last
+        curl -sS -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/error_log" | tail -100
+
+        # one entity, or everything
+        curl -sS -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/states/<entity_id>" | jq .
+        curl -sS -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/states" | jq -r '.[].entity_id'
+
+        # integrations and their state - find the entry_id you need
+        curl -sS -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/config/config_entries/entry" \
+          | jq -r '.[] | "\(.entry_id)  \(.domain)  \(.state)  \(.title)"'
+
+        # reload one integration
+        curl -sS -X POST -H "Authorization: Bearer $HA_TOKEN" \
+          "$HA_URL/api/config/config_entries/entry/<entry_id>/reload"
+
+        # call any service
+        curl -sS -X POST -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" \
+          -d '{"entity_id":"<entity_id>"}' "$HA_URL/api/services/<domain>/<service>"
+
+        # validate configuration before acting on it
+        curl -sS -X POST -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/config/core/check_config" | jq .
+
+      Adding an integration means the config-flow API
+      (`/api/config/config_entries/flow`), which is several steps and often
+      needs credentials. Describe what you would do and stop.
+
+      YOUR JOB is the half the everyday assistant does not do: integrations that
+      failed to set up, devices that went unavailable, configuration that is
+      wrong, errors Home Assistant is logging about itself.
+
+      INVESTIGATE BEFORE YOU ACT. Read the error log and the integration's state,
+      and say what you think the cause is. Many Home Assistant errors resolve
+      themselves - when that is what you find, say so rather than acting to look
+      useful.
+
+      Then make the narrowest change that fixes it, and say plainly what you
+      changed.
+
+      DESCRIBE AND STOP - do not act - when any of these is true:
+        * the change is hard to undo (a lock, an alarm, a garage door, anything
+          that could leave someone locked out or a house unheated in winter);
+        * it restarts Home Assistant or reloads its core configuration;
+        * it would remove or re-pair a device, or delete history;
+        * it edits automations or scripts someone else wrote;
+        * you are not confident which entity or integration was meant.
+      In those cases, write exactly what you would do and wait to be told.
+
+      Never touch an entity you were not asked about and did not diagnose.
+
+      Answer briefly. Lead with the finding or the action, then the evidence.
+    maxTurns: 40
+    runtimeRef: ""
+
+# The bundle's OWN wiring — the one component that spends money and touches the
+# house by itself. Two routes, one per agent.
+#
+# OFF by default, and that default is the load-bearing part: enabling this
+# bundle for its adapter, its tooling and its profiles must never silently
+# acquire routes beside the ones your install declared. The parent chart's
+# `pipelines:` stays the normal place to declare routes.
+#
+# The bundle may ship these at all only because it owns its whole lane — it
+# renders the source, both profiles and both toolsets, so the only objects it
+# does not render are chat surfaces and channels, and those are values-supplied
+# names omitted when unset.
+pipelines:
+  enabled: false
+  control:
+    # The user-facing route. Claims the chat sources below, so an unaddressed
+    # message on those surfaces reaches ha-user.
+    name: ha-control
+  ops:
+    # The ops route. Claims ha-logs and NOTHING ELSE — see chatSources.
+    name: ha-ops
+  # Chat sources BOTH routes claim, BY NAME. A claim is what puts an agent in
+  # the list a person is offered on that surface.
+  #
+  # Wiring is many-to-many: a source is claimed by as many Pipelines as you
+  # want, and two agents on one surface is an ordinary configuration. An
+  # unaddressed message there is answered with the list of agents that serve it,
+  # so the person names one — `/ha-control <task>`, `/ha-ops <task>`. Addressing
+  # works from any wired surface regardless of claims.
+  #
+  # Leave empty if this house is reached only by name.
+  # Channels BOTH routes deliver to, BY NAME — objects this bundle does not
+  # render, so the key is omitted entirely when the list is empty. Empty is a
+  # working configuration: with no thread to wait for, the conversation
+  # dispatches immediately and its answer is read from status.runs[].result.
+  channels: []
+  # Bind the built-in SHELL toolset, so an agent can reach the Home Assistant
+  # REST API with the token in its profile env.
+  #
+  # null = ON for the OPS route, OFF for the control route. That asymmetry is
+  # the design, not a default to tidy up: repairing an integration means
+  # touching configuration, and no MCP tool here reaches configuration — Home
+  # Assistant's MCP server exposes Assist intents only. So the REST path IS how
+  # `ha-operator` does its job, and giving the everyday agent the same path
+  # would hand it the operator's whole surface for no capability it needs.
+  #
+  # true = both routes get it. false = neither, which leaves `ha-operator` able
+  # to call services and unable to reconfigure anything.
+  restAccess: null

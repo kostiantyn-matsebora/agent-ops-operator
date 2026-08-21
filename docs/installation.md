@@ -100,8 +100,9 @@ substrate they run on comes from this chart.
 | Kubernetes events | `k8s-bundle.enabled` | [k8s-bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md) |
 | Prometheus alerts | `prometheus-bundle.enabled` | [prometheus-bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus-bundle.md) |
 | Telegram | `telegram-bundle.enabled` | [telegram-bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram-bundle.md) |
+| Home Assistant | `ha-bundle.enabled` | [ha-bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/ha-bundle.md) |
 
-All three are off by default. Each bundle's own page owns its values — this page
+All four are off by default. Each bundle's own page owns its values — this page
 does not repeat them.
 
 ## Configure

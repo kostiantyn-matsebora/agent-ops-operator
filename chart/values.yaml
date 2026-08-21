@@ -374,7 +374,14 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.15.6
+    # 0.15.9 renders the message a PERSON typed. The manager posts an input to a
+    # thread only when the person has not already seen it, which is right for a
+    # transport and wrong for a VIEWER: a conversation started from the composer
+    # showed a transcript beginning at the agent's answer, with the question
+    # that caused it missing. It reads as TYPED (an addressed task reaches the
+    # conversation with its address consumed), carries the starter's identity,
+    # and ADOPTS the bubble a reply already has rather than showing it twice.
+    tag: 0.15.9
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -626,6 +633,32 @@ resources:
 #     channels: [<your-channel>]        # optional; omitted when unset
 # MIGRATION from `vm-bundle:` — every value must be restated under the new key,
 # and the render FAILS while the old key is present. See CHANGELOG.md.
+
+# Home Assistant bundle (embedded subchart, OFF by default; never enabled by
+# demo mode — it needs your own Home Assistant endpoint and tokens). It ships a
+# PRIVILEGE SPLIT: ha-user reads the house and answers questions, ha-operator
+# acts and is reached by name (`/ha-ops <task>`) so escalating is deliberate.
+# See chart/charts/ha-bundle/values.yaml for the full surface. Typical
+# enablement:
+# ha-bundle:
+#   enabled: true
+#   homeAssistant:
+#     endpoint: https://ha.example.org
+#     credentials:
+#       readSecret: ha-read            # keys: token, authorization
+#       adminSecret: ha-admin          # the ops agent's PREREQUISITE; omit for
+#                                      # an ask-only house
+#   # The bundle's own routes — OFF by default, the one component that spends
+#   # money and acts on its own:
+#   pipelines:
+#     enabled: true
+#     chatSources: [<your-chat-source>] # claimed by ha-control only
+#     channels: [<your-channel>]        # optional; omitted when unset
+# The Secrets are referenced by name and never created here:
+#   kubectl -n <ns> create secret generic ha-admin \
+#     --from-literal=token="$TOKEN" --from-literal=authorization="Bearer $TOKEN"
+ha-bundle:
+  enabled: false
 
 # CRD management (cert-manager pattern): templated, so upgrades work.
 # Conversation retention — TWO STAGES, two clocks, both OFF by default.

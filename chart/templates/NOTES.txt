@@ -398,3 +398,56 @@ or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
+{{- $hb := index .Values "ha-bundle" }}
+{{- if and $hb $hb.enabled }}
+{{- $hbCtx := dict "Values" (merge (dict "global" .Values.global) $hb) "Release" .Release "Chart" .Chart }}
+{{- $hsrc := $hb.logsAdapter.source.name }}
+{{- $hwired := and $hb.logsAdapter.enabled $hb.logsAdapter.source.create }}
+{{- $hasOperator := or $hb.homeAssistant.credentials.operatorSecret $hb.homeAssistant.credentials.operatorToken }}
+
+Home Assistant bundle — TWO agents, and the split is USE versus FIX. Neither
+token is read-only: Home Assistant has no such role, so {{ $hb.profiles.user.name }} genuinely
+turns lights on, and what {{ $hb.profiles.ops.name }} adds is the configuration it can repair.
+{{- if not $hasOperator }}
+
+No operator credential, so profile {{ $hb.profiles.ops.name }} and the {{ $hb.pipelines.ops.name }} route do not
+exist: this house can be used and questioned, never repaired. The INGEST lane
+needs that credential too — Home Assistant's event subscription is admin-only.
+Add one with ha-bundle.homeAssistant.credentials.operatorToken (or .operatorSecret).
+{{- end }}
+{{- if and (include "ha-bundle.wiringActive" $hbCtx) (include "ha-bundle.userProfileEnabled" $hbCtx) }}
+
+This release WIRED the bundle, so it answers on its own:
+  Pipeline {{ $hb.pipelines.control.name }} — profile {{ $hb.profiles.user.name }}, uses the house through Assist intents
+{{- if $hasOperator }}
+  Pipeline {{ $hb.pipelines.ops.name }} — profile {{ $hb.profiles.ops.name }}, FIXES the house (REST, not just intents)
+{{- if $hwired }} and claims SignalSource {{ $hsrc }}{{ end }}
+
+Both routes claim every chat source you named, so both are offered there. Name
+the one you want:
+  /{{ $hb.pipelines.control.name }} <what you want done>     — use the house
+  /{{ $hb.pipelines.ops.name }} <what is broken>          — fix it
+{{- end }}
+Decline the routes without giving up the rest of the bundle:
+  --set ha-bundle.pipelines.enabled=false
+{{- if not $hb.pipelines.chatSources }}
+No chat source is claimed, so neither agent is offered on a surface — they are
+still reachable by name. Claim one with
+ha-bundle.pipelines.chatSources={<source>}; sources are many-to-many, so naming
+one another route already claims is fine and simply offers both agents there.
+{{- end }}
+{{- if not $hb.pipelines.channels }}
+No channel is bound, so answers are not posted anywhere — read them with:
+  kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
+Bind one with ha-bundle.pipelines.channels={<channel>}.
+{{- end }}
+{{- else if $hwired }}
+
+ONE STEP LEFT — nothing answers the house yet. SignalSource {{ $hsrc }} drops every
+record (Wired=False) until a Pipeline claims it. Either let the bundle wire
+itself:
+  --set ha-bundle.pipelines.enabled=true
+or declare the route yourself under the parent chart's `pipelines:` — which is
+what you want when one agent should answer this source AND a chat surface.
+{{- end }}
+{{- end }}

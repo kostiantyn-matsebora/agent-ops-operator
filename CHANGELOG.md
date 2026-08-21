@@ -8,6 +8,109 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### The Home Assistant bundle, and a rule about bundle wiring — chart 5.22.0
+
+**No action on upgrade.** Nothing new is on by default. `ha-bundle.enabled`
+defaults `false` and demo mode never turns it on, so an existing install renders
+exactly what it rendered before.
+
+#### The rule that changed, and what it does NOT permit
+
+A subchart may render a `Pipeline` when — and only when — **all** of these hold:
+
+1. rendering is behind an explicit wiring flag,
+2. every reference to an object the bundle does not itself render is a
+   values-supplied NAME, omitted when unset,
+3. each `Pipeline` renders only with its own profile, and
+4. the flag **defaults off**, forced on by nothing but a values path whose
+   declared purpose is a turnkey install.
+
+This does **not** make bundle-shipped wiring the norm. The rule's harm is a
+subchart wiring only its own lane because it cannot see the others, and a bundle
+whose sources and channels come from elsewhere still cannot meet condition 2.
+`telegram-bundle` continues to ship none, and is the counter-example: a chat
+surface is answered by an agent from somewhere else.
+
+`ha-bundle` is the third bundle to qualify, after `k8s-bundle` and
+`prometheus-bundle`. It owns its whole lane — the source, both profiles and both
+toolsets — so chat sources and channels are the only foreign names.
+
+#### The bundle
+
+`chart/charts/ha-bundle/` ships a **privilege split** rather than one agent:
+
+| Agent | Profile | Reached by | Job |
+|---|---|---|---|
+| The house's user | `ha-user` | an ordinary chat message | **use** the house — services, lights, automations |
+| The administrator | `ha-operator` | `/ha-ops <task>`, by name | **fix** it — integrations, configuration, repairs |
+
+The split is **use versus fix**, not read versus act: Home Assistant has no
+read-only role, so neither credential merely looks. What separates the lanes is
+the REST path — Assist intents reach no configuration, so repairing needs a
+shell, and only the ops route binds one.
+
+The acting route claims the log source and **no chat source**, so escalating is
+a deliberate act. That is not etiquette: claiming and addressing are independent
+mechanisms, so listing a chat source there would grant it nothing while making
+every unaddressed message on that surface ambiguous.
+
+The **operator credential gates the fixing half**, and the ingest lane needs it
+too: Home Assistant's `subscribe_events` is admin-only, so a control token
+connects, passes auth, and is then refused the subscription.
+
+There is **no MCP server workload**: Home Assistant serves its own endpoint
+through the built-in MCP Server integration.
+
+**The ops lane gets a second MCP server**, off by default (`adminMcp.enabled`).
+Home Assistant's built-in server exposes Assist intents only — it turns things on
+and off and cannot read a log, reload an integration or disable an entity, which
+live in registries served over the WebSocket API. Bound to `ha-ops` alone, so
+`ha-control` reaches a server that has no such tools: two walls, not one
+allowlist.
+
+Two ways to have one, both off by default and failing the render if you enable
+the config with neither: let the chart deploy
+[ha-mcp](https://github.com/homeassistant-ai/ha-mcp) in-cluster
+(`adminMcpServer.enabled`), or point `adminMcp.url` at a server you run —
+including a HACS integration inside Home Assistant. **Add-ons are not an option
+on Home Assistant Core**, which is the usual shape in Kubernetes.
+
+Of the 78 tools that server registers, **52 ship**. The 26 withheld restart Home
+Assistant, manage backups, delete registry objects or install software. The
+toolset is enumerated and the image tag pinned, because the allowlist names
+tools: a server that renames one changes what it means with nothing failing.
+
+**The ops role names the REST path explicitly**, because Home Assistant's MCP
+server exposes Assist intents only. Without that, the agent reads its own tool
+list, finds device controls and no way to reach a log or a config entry, and
+reports the task impossible. Its prompt carries `$HA_URL`, `$HA_TOKEN` and the
+calls it needs — error log, states, config entries, reload, service call, config
+check — all verified against a live instance.
+
+#### New module: `signal-ha/`
+
+A dependency-free signal adapter reading the instance's WebSocket API over a
+hand-written RFC 6455 client. It watches `system_log_event` and carries the same
+`rules` / `route` vocabulary as the cluster Events adapter, minus the time axis.
+
+`kubernetesAccess: false` — its data source is the house, not the cluster.
+
+Image: `kmatsebora/agentops-signal-ha:0.1.0`.
+
+#### Enabling it
+
+The Secrets are referenced by name and never created by the chart. Each carries
+one token under **two** keys, because the adapter sends the raw token and the
+MCP path sends a complete header value:
+
+```sh
+kubectl -n <ns> create secret generic ha-admin \
+  --from-literal=token="$TOKEN" --from-literal=authorization="Bearer $TOKEN"
+```
+
+Then set the endpoint, the credentials and — deliberately — the routes. See
+[docs/ha-bundle.md](docs/ha-bundle.md).
+
 ### Context survives a corrupt volume — chart 5.21.0
 
 **No action on upgrade.** No values change is required and nothing new is on by

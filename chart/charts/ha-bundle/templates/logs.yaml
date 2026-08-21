@@ -1,0 +1,169 @@
+{{- /*
+Ingest lane: the adapter implementation and (under source.create) the
+SignalSource itself.
+
+NOT the claim on that source. Wiring is pipeline-only — an unclaimed
+SignalSource reports Wired=False and DROPS every record — but the Pipeline is
+its own component (pipelines.yaml), so this lane can be rendered for a route
+declared anywhere, including in the parent chart's own `pipelines:`.
+*/ -}}
+{{- if and (include "ha-bundle.active" .) .Values.logsAdapter.enabled }}
+{{- $la := .Values.logsAdapter }}
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: {{ $la.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-ha-bundle
+spec:
+  image: {{ printf "%s:%s" $la.image.repository (toString $la.image.tag) | quote }}
+  # This adapter's DATA SOURCE is Home Assistant, not the cluster. It holds no
+  # Kubernetes client and mounts no ServiceAccount token.
+  kubernetesAccess: false
+  # Two sessions would post every record twice.
+  singleton: true
+  {{- with $la.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  # Interface metadata: makes `kubectl get signaladapter` answer "what goes in
+  # spec.config?" without reading adapter source.
+  configSchema:
+    type: object
+    required: ["endpoint"]
+    properties:
+      endpoint:
+        type: string
+        description: >-
+          Home Assistant base URL, e.g. https://ha.example.org. Required — this
+          adapter has no way to discover it.
+      levels:
+        type: array
+        description: 'Log levels to act on (default ["ERROR", "CRITICAL"]).'
+        items:
+          type: string
+          enum: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+      includeIntegrations:
+        type: array
+        description: When non-empty, only these integrations produce signals.
+        items:
+          type: string
+      excludeIntegrations:
+        type: array
+        description: >-
+          Integrations to drop, applied after includeIntegrations. Superseded
+          by rules; translated into leading drop rules.
+        items:
+          type: string
+      backfill:
+        type: boolean
+        description: >-
+          Read the existing log listing on connect and report what is newer
+          than the cursor (default true). Off makes a restart forget.
+      rules:
+        type: array
+        description: >-
+          Ordered, first-match-wins suppression policy. Each rule selects with
+          Alertmanager matchers and either drops or holds for `for`, after
+          which the condition is re-checked before emitting.
+        items:
+          type: object
+          properties:
+            matchers:
+              type: array
+              description: >-
+                Alertmanager matcher syntax (=, !=, =~, !~) over the signal's
+                labels — integration, logger, level, location — plus `message`,
+                the record's text, which is match-only and never emitted as a
+                label. Empty = catch-all.
+              items:
+                type: string
+            for:
+              type: string
+              description: >-
+                Dwell before re-checking, e.g. "5m". "0" emits immediately —
+                required for anything describing something that ALREADY
+                happened, where a re-check would find the recovered state and
+                erase the incident.
+            action:
+              type: string
+              description: '"drop" suppresses outright; absent means dwell and verify.'
+              enum: ["drop"]
+            escalateAfterObjects:
+              type: integer
+              description: >-
+                Emit early once this many distinct source locations of one
+                integration are pending, so a long dwell cannot hide a
+                whole-integration outage.
+      route:
+        type: object
+        description: >-
+          The Alertmanager half of the policy. Inhibition only — this adapter
+          does not implement the time axis.
+        properties:
+          inhibitRules:
+            type: array
+            items:
+              type: object
+              properties:
+                sourceMatchers:
+                  type: array
+                  items:
+                    type: string
+                targetMatchers:
+                  type: array
+                  items:
+                    type: string
+                equal:
+                  type: array
+                  description: Labels that must be equal on cause and target.
+                  items:
+                    type: string
+  # Documentation only — the manager reads no Secrets and can never verify this.
+  credentialKeys:
+    - key: token
+      required: true
+      description: >-
+        Home Assistant long-lived access token. An OPERATOR token lets the dwell
+        re-check read config entry states, which only an admin user may call. A
+        control token still works and falls back to recurrence.
+{{- if $la.source.create }}
+{{- $src := $la.source }}
+{{- $secret := include "ha-bundle.ingestSecret" . }}
+{{- if not $secret }}
+{{- fail "ha-bundle: the log source needs a credential — set homeAssistant.credentials.operatorToken (or .operatorSecret, .ingestSecret, or logsAdapter.source.credentialsSecret) so the adapter has an ADMIN Home Assistant token — subscribe_events is admin-only, so a control token authenticates and is then refused the subscription. A source that cannot authenticate reports Ready=False and ingests nothing" }}
+{{- end }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: {{ $src.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-ha-bundle
+spec:
+  # a REFERENCE to the SignalAdapter above — its implementation defines the
+  # schema of the config below
+  adapter: {{ $la.name }}
+  # Referenced BY NAME and never created here. Projected into the adapter pod by
+  # the reconciler and resolved by the kubelet; the manager reads no Secrets.
+  credentialsSecretRef:
+    name: {{ $secret }}
+  {{- with $src.grouping }}
+  grouping:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  {{- /* Built as a map so the key is omitted when everything is empty: a bare
+  `config:` would set spec.config to null rather than leave it unset. */}}
+  {{- $cfg := dict "endpoint" (include "ha-bundle.endpoint" .) }}
+  {{- with $src.levels }}{{ $_ := set $cfg "levels" . }}{{ end }}
+  {{- with $src.includeIntegrations }}{{ $_ := set $cfg "includeIntegrations" . }}{{ end }}
+  {{- with $src.excludeIntegrations }}{{ $_ := set $cfg "excludeIntegrations" . }}{{ end }}
+  {{- with $src.rules }}{{ $_ := set $cfg "rules" . }}{{ end }}
+  {{- with $src.route }}{{ $_ := set $cfg "route" . }}{{ end }}
+  {{- if not $src.backfill }}{{ $_ := set $cfg "backfill" false }}{{ end }}
+  config:
+{{ toYaml $cfg | indent 4 }}
+{{- end }}
+{{- end }}

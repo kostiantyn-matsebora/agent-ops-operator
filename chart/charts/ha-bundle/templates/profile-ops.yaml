@@ -1,0 +1,44 @@
+{{- /*
+The house's ADMINISTRATOR — the agent that FIXES it: identity only, same shape
+as the user profile.
+
+Its PREREQUISITE is the operator credential. Without one this profile does not
+render at all — an agent asked to repair an integration with a token that cannot
+reconfigure one fails every task it is given, looking installed while it does.
+
+Same rule as the user profile: no allowedTools, no mcp. Capabilities are wiring.
+*/ -}}
+{{- if and (include "ha-bundle.active" .) (include "ha-bundle.opsProfileEnabled" .) }}
+{{- $p := .Values.profiles.ops }}
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-ha-bundle
+spec:
+  maxTurns: {{ $p.maxTurns }}
+  {{- with $p.systemPrompt }}
+  # Inline role: no repository, so no agent definition file exists to read.
+  systemPrompt: |
+{{ . | trim | indent 4 }}
+  {{- end }}
+  # CONNECTIVITY, not capability — and the wider of the two paths this bundle
+  # offers. An OPERATOR token here plus the shell toolset the ops route binds
+  # reaches the whole Home Assistant API for that user. That is not a leak, it
+  # is the mechanism: configuration is what this agent fixes, and no MCP tool
+  # here reaches configuration. Documented rather than hidden — docs/ha-bundle.md.
+  env:
+    - name: HA_URL
+      value: {{ include "ha-bundle.endpoint" . | quote }}
+    - name: HA_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "ha-bundle.operatorSecret" . }}
+          key: token
+  {{- with $p.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+{{- end }}

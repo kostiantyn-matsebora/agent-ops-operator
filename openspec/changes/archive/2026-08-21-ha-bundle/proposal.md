@@ -16,17 +16,17 @@ The rewrite also changes the shape. A Home Assistant install has two genuinely d
 - **`MCPConfig ha-api`** — the Home Assistant MCP server, rendered only when its endpoint is configured. Server key fixed, the way `k8s-bundle` fixes `kubernetes`.
 - **Two `MCPToolset`s split by risk** — `ha-observability` (read state, history, logbook) and `ha-admin` (call services, change configuration) — enumerated, not wildcarded, for the same reason `k8s-bundle` enumerates: one prefix spans both halves and defeats the split.
 - **`AgentProfile ha-user`** — the house's user. Identity plus API connectivity env only; rendered when EITHER the MCP endpoint or the read-scoped API credential is configured.
-- **`AgentProfile ha-ops`** — the administrator. Rendered only when the admin API credential is configured, which is its prerequisite.
-- **Two `Pipeline`s**, behind `pipelines.enabled` (**default true**):
+- **`AgentProfile ha-operator`** — the administrator. Rendered only when the admin API credential is configured, which is its prerequisite.
+- **Two `Pipeline`s**, behind `pipelines.enabled` (**default false** — the invariant this change relaxes has since been written down with a fourth condition, and it is that the flag defaults off):
   - `ha-control` — profile `ha-user`, claims the console and telegram chat sources named in values, delivers to those channels, binds `ha-observability`.
-  - `ha-ops` — profile `ha-ops`, claims `ha-logs`, delivers to the same channels, binds `ha-observability` + `ha-admin`.
+  - `ha-ops` — profile `ha-operator`, claims `ha-logs`, delivers to the same channels, binds `ha-observability` + `ha-admin`.
 
 **BREAKING to a standing rule**: `openspec/specs/pipeline-model/spec.md` currently states that no subchart may render a `Pipeline`. This change relaxes it — a subchart MAY render wiring when it is gated by an explicit flag and every cross-component reference is a values-supplied name that the template omits when empty. `k8s-bundle` and `telegram-bundle` keep shipping none; the rule stops being absolute and becomes conditional, with the conditions written down.
 
 **Two corrections to the shape as sketched**, both forced by the current model rather than by preference:
 
 - **Profiles carry no tooling.** "ha-user has mcpconfig as tools" is expressed as the Pipeline binding `toolsets`/`mcpConfigs` — an `AgentProfile` has no `allowedTools` and no `mcp`. Profiles carry identity, role prompt, and connectivity env.
-- **Both lanes serve one surface, but only one lists it as a source.** Claiming and addressing are independent mechanisms: a claim decides who answers an UNADDRESSED message, while `/<pipeline> <task>` resolves by name with no claim check and no Ready check, and its reply lands in the originating thread regardless. Both pipelines are therefore reachable from one shared console or telegram surface — no second surface is needed. What listing the same chat source on BOTH would do is put the younger Pipeline at `Ready=False, reason=SourceConflict`: it would still answer when addressed, but it would drop out of the `/agents` listing (Ready-only) and read as broken wherever pipelines are displayed. So `ha-control` lists the chat sources and `ha-ops` lists `ha-logs` only — listing them on `ha-ops` grants nothing and costs discoverability. Escalating to the admin agent is then an explicit act, which is what a privilege split should feel like.
+- **Both lanes serve one surface, and both claim it.** Wiring is many-to-many — a source is claimed by as many Pipelines as an install declares, and nothing in the model is exclusive. Claiming decides who is OFFERED for an unaddressed message; addressing (`/<pipeline> <task>`) resolves by name with no claim check and no Ready check, and its reply lands in the originating thread. So both pipelines claim every chat source named, both are offered there, and an unaddressed message is answered with the list so the person names one. `ha-ops` additionally claims `ha-logs`, which is the only asymmetry.
 
 ## Capabilities
 

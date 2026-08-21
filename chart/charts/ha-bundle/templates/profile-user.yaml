@@ -1,0 +1,49 @@
+{{- /*
+The house's USER — the agent that USES it: identity only, one object.
+
+Rendered when there is SOME way to reach the house: the MCP path, or a control
+credential. A profile that can reach nothing is furniture.
+
+NOTE what is NOT here, and must never be added: no allowedTools, no mcp. An
+AgentProfile carries no capabilities — what this agent may DO comes exclusively
+from the Pipeline routing it. Those two fields existed once and were deleted;
+re-adding them here is the mistake to avoid, not a convenience.
+*/ -}}
+{{- if and (include "ha-bundle.active" .) (include "ha-bundle.userProfileEnabled" .) }}
+{{- $p := .Values.profiles.user }}
+{{- $secret := include "ha-bundle.controlSecret" . }}
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-ha-bundle
+spec:
+  maxTurns: {{ $p.maxTurns }}
+  {{- with $p.systemPrompt }}
+  # Inline role: this profile has no repository, so there is no
+  # .claude/agents/<name>.md to read and nothing else would give the agent a
+  # personality.
+  systemPrompt: |
+{{ . | trim | indent 4 }}
+  {{- end }}
+  # CONNECTIVITY, not capability. Where the house is, and the token to reach it
+  # with — resolved in the runtime pod, never read by the manager. It is only
+  # reachable when a route also binds a tool that can make an HTTP call, and the
+  # control route deliberately binds none: this agent works through the intents.
+  env:
+    - name: HA_URL
+      value: {{ include "ha-bundle.endpoint" . | quote }}
+    {{- with $secret }}
+    - name: HA_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: {{ . }}
+          key: token
+    {{- end }}
+  {{- with $p.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+{{- end }}
