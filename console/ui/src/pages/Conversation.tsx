@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Alert, Button, Card, CardBody, CardTitle, ClipboardCopy,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
@@ -90,7 +90,11 @@ export function ConversationPage() {
         <StackItem>
           <Tabs activeKey={tab} onSelect={(_e, k) => setTab(k)}>
             <Tab eventKey={0} title={<TabTitleText>Transcript</TabTitleText>}>
-              <Transcript detail={data} onSent={() => refetch()} />
+              {/* `active` is passed so the transcript can re-pin itself to the
+                  newest message when this tab is shown again. Its message list
+                  is unchanged by a tab switch, so nothing else would tell it
+                  to. */}
+              <Transcript detail={data} onSent={() => refetch()} active={tab === 0} />
             </Tab>
             <Tab eventKey={1} title={<TabTitleText>Runs</TabTitleText>}>
               <RunTimeline detail={data} />
@@ -122,15 +126,46 @@ export function ConversationPage() {
 function Transcript({
   detail,
   onSent,
+  active,
 }: {
   detail: NonNullable<ReturnType<typeof useConversation>['data']>
   onSent: () => void
+  active: boolean
 }) {
   const session = useSession()
   const [text, setText] = useState('')
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const messages = detail.transcript ?? []
+  // Stick to the NEWEST message — on open, and on every arrival after it.
+  //
+  // Both cases matter and they are the same effect: a thread that opens at its
+  // oldest line is the wrong end of the only view whose purpose is answering
+  // what was just said, and one that does not follow an incoming answer makes
+  // the reader hunt for the thing they were waiting for.
+  //
+  // useLayoutEffect, not useEffect: it runs before paint, so the thread appears
+  // already scrolled instead of visibly jumping. Keyed on the last message's id
+  // as well as the count, because a replaced final message (a pending local
+  // reply becoming confirmed) is new content to look at even when the count is
+  // unchanged.
+  const listRef = useRef<HTMLDivElement>(null)
+  const lastID = messages.length ? messages[messages.length - 1].id : ''
+  useLayoutEffect(() => {
+    if (!active) return
+    const el = listRef.current
+    if (!el) return
+    const pin = () => {
+      el.scrollTop = el.scrollHeight
+    }
+    pin()
+    // A second pass after paint. Coming back to this tab, the container can
+    // still be laying out when the effect runs — a hidden element has no
+    // height, so scrollHeight is whatever it was a moment ago and pinning
+    // reads as "did nothing". One frame later the measurement is real.
+    const raf = requestAnimationFrame(pin)
+    return () => cancelAnimationFrame(raf)
+  }, [messages.length, lastID, active])
   // canWrite from the session, not writeEnabled: a console whose fronting proxy
   // forwards no identity has writes ON and nothing to attribute them to, and
   // the composer must say so rather than accept text the server will refuse.
@@ -179,9 +214,22 @@ function Transcript({
           </Alert>
         </StackItem>
       )}
-      <StackItem>
-        <Card>
+      {/* The message list SCROLLS and the composer does not.
+          A long thread used to push the reply box off the bottom of the page,
+          so answering meant scrolling to the end first — on the one view whose
+          entire purpose is answering. The list gets the overflow; the composer
+          below it stays put. */}
+      <StackItem isFilled style={{ minHeight: 0 }}>
+        <Card style={{ height: '100%' }}>
           <CardBody>
+            {/* A PLAIN div holds the ref. PatternFly's CardBody does not
+                forward one to its DOM node, so scrolling it never worked —
+                listRef.current was null and the thread opened at its oldest
+                line every time. */}
+            <div
+              ref={listRef}
+              style={{ maxHeight: '58vh', overflowY: 'auto', overscrollBehavior: 'contain' }}
+            >
             {messages.length === 0 ? (
               <Empty title="No messages on the console thread yet" />
             ) : (
@@ -201,6 +249,7 @@ function Transcript({
                 </div>
               ))
             )}
+            </div>
           </CardBody>
         </Card>
       </StackItem>
@@ -397,8 +446,15 @@ function Sequence({ events }: { events: ActivityEvent[] }) {
       </Empty>
     )
   }
-  const start = new Date(events[0].ts).getTime()
-  const end = new Date(events[events.length - 1].ts).getTime()
+  // MIN/MAX, not first/last. Events arrive in CURSOR order — emission order —
+  // which is usually chronological and is not guaranteed to be. Taking the ends
+  // of the list as the bounds produced negative offsets (`+-944.0s` in the
+  // column) and a span far smaller than the real one, which then made a long
+  // hop's bar hundreds of percent wide and let it escape its cell across the
+  // whole table.
+  const times = events.map((e) => new Date(e.ts).getTime()).filter((t) => !Number.isNaN(t))
+  const start = times.length ? Math.min(...times) : 0
+  const end = times.length ? Math.max(...times) : 0
   const span = Math.max(end - start, 1)
 
   return (
@@ -417,8 +473,13 @@ function Sequence({ events }: { events: ActivityEvent[] }) {
           <Tbody>
             {events.map((e) => {
               const at = new Date(e.ts).getTime()
-              const offset = ((at - start) / span) * 100
-              const width = e.latencyMs ? Math.max((e.latencyMs / span) * 100, 1) : 1
+              // CLAMPED. A bar is a proportion of the span and can never be
+              // more than the track, however odd the underlying timestamps
+              // are. Without this an out-of-order event or an unusually long
+              // hop overflows an absolutely-positioned div across the page.
+              const offset = Math.min(Math.max(((at - start) / span) * 100, 0), 100)
+              const rawWidth = e.latencyMs ? (e.latencyMs / span) * 100 : 1
+              const width = Math.min(Math.max(rawWidth, 1), 100 - offset)
               return (
                 <Tr key={e.cursor}>
                   <Td dataLabel="Hop">
@@ -433,13 +494,34 @@ function Sequence({ events }: { events: ActivityEvent[] }) {
                         }`}
                       </PlainText>
                     </small>
+                    {/* Detail belongs to ITS hop. It used to be concatenated
+                        into one blob under the table, where a reader could see
+                        the text and not which row produced it — useless for the
+                        one question detail answers. Free text from the cluster,
+                        so rendered plain and never as markup. */}
+                    {e.detail && (
+                      <div>
+                        <small style={{ color: 'var(--ao-text-subtle)', wordBreak: 'break-word' }}>
+                          <PlainText>{e.detail}</PlainText>
+                        </small>
+                      </div>
+                    )}
                   </Td>
                   <Td dataLabel="At">{`+${((at - start) / 1000).toFixed(1)}s`}</Td>
                   <Td dataLabel="Latency">
                     {e.latencyMs ? `${(e.latencyMs / 1000).toFixed(2)}s` : '—'}
                   </Td>
                   <Td dataLabel="Timeline">
-                    <div style={{ position: 'relative', height: 10, background: 'var(--ao-surface-alt)' }}>
+                    <div
+                      style={{
+                        position: 'relative',
+                        height: 10,
+                        background: 'var(--ao-surface-alt)',
+                        // The clamp above is the fix; this is the guard that
+                        // keeps any future arithmetic mistake inside the cell.
+                        overflow: 'hidden',
+                      }}
+                    >
                       <div
                         style={{
                           position: 'absolute',
@@ -456,12 +538,6 @@ function Sequence({ events }: { events: ActivityEvent[] }) {
             })}
           </Tbody>
         </Table>
-        {events.some((e) => e.detail) && (
-          <small>
-            {/* Detail is free text from the cluster — rendered plain, never markup. */}
-            <PlainText multiline>{events.map((e) => e.detail).filter(Boolean).join('\n')}</PlainText>
-          </small>
-        )}
       </CardBody>
     </Card>
   )

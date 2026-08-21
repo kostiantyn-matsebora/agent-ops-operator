@@ -84,6 +84,21 @@ spec:
     pvcRef:
       name: {{ . }}
   {{- end }}
+  {{- with $rt.contextSync.paths }}
+  # CONTEXT SYNC: declared by the RUNTIME, because only it knows where its
+  # backend keeps context. Absent means the home volume is mounted directly and
+  # no sidecar is built — today's behaviour, so an existing install upgrades
+  # with no migration.
+  contextSync:
+    paths:
+{{ toYaml . | indent 6 }}
+    {{- with $rt.contextSync.exclude }}
+    exclude:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+    interval: {{ $rt.contextSync.interval | quote }}
+    retain: {{ $rt.contextSync.retain }}
+  {{- end }}
   {{- with $rt.resources }}
   resources:
 {{ toYaml . | indent 4 }}

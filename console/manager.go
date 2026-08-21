@@ -326,6 +326,17 @@ type ManagerStatus struct {
 	} `json:"runtimeSlots"`
 	Queues    []QueueStat    `json:"queues"`
 	Cooldowns []CooldownStat `json:"cooldowns"`
+	// StorageOutage is present while context storage is being treated as
+	// unavailable install-wide. It is the answer to "why is nothing running"
+	// that RuntimeSlots alone cannot give: a queue that has stopped moving is
+	// either full or storage-blocked, and those demand opposite responses.
+	StorageOutage *StorageOutage `json:"storageOutage,omitempty"`
+}
+
+// StorageOutage reports an install-wide context-storage outage.
+type StorageOutage struct {
+	Since      string  `json:"since,omitempty"`
+	ForSeconds float64 `json:"forSeconds"`
 }
 
 // Status reads the manager's own runtime state.

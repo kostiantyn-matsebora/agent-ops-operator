@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.35.0
+  tag: 0.36.2
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -48,6 +48,27 @@ serviceAccounts:
 # Targeted grants for the runtime SA, ADDITIVE to the mode selected by
 # global.agentops.runtime.rbacMode. Object names: <runtime-sa>-<name>.
 rbac:
+  # DRAIN AWARENESS costs the manager its first cluster-scoped grant, so it is
+  # opt-in and off.
+  #
+  # When a node is cordoned the manager releases the IDLE runtime pods on it, so
+  # the shared context volume detaches and its filesystem unmounts before the
+  # machine goes down. That is the window a corrupt filesystem comes from: a
+  # reboot manager that force-reboots on a drain timeout takes the block device
+  # away while ext4 is still mounted and dirty.
+  #
+  # Nodes are cluster-scoped, so seeing a cordon at all needs a ClusterRole
+  # (nodes: get,list,watch — read-only, nothing else). Every other permission
+  # this manager holds is namespaced, and that posture is worth keeping by
+  # default: an install that reboots gracefully, or that does not share a
+  # context volume, gains nothing here.
+  #
+  # NOT a substitute for a working drain. Kubernetes already refuses to schedule
+  # new pods onto a cordoned node, and an ordinary eviction unmounts cleanly on
+  # its own. What this buys is PROMPTNESS — idle pods go at cordon time rather
+  # than whenever the drain reaches them, which matters when the reboot happens
+  # on a timeout rather than on the drain finishing.
+  drainAware: false
   runtime:
     # ClusterRoles created + bound to the runtime SA: [{name, rules: [...]}]
     clusterRoles: []
@@ -86,6 +107,44 @@ runtime:
   # an unsupported architecture just crash-loops.
   nodeSelector: {}
   resources: {}
+  # CONTEXT SYNC — keep the LIVE context off the durable volume.
+  #
+  # A node reboot corrupted the shared home filesystem on 2026-08-20. Because
+  # the live context WAS that volume, one damaged filesystem took every
+  # conversation's context with it AND stopped every runtime pod from starting.
+  #
+  # Enabled, a sidecar keeps the live context on pod-local storage and the
+  # durable volume holds a SNAPSHOT: a run already going survives the volume
+  # going bad underneath it, and the agent container loses its mount of the
+  # volume entirely — so it can neither read another conversation's context nor
+  # corrupt the filesystem.
+  #
+  # OFF unless `paths` is set, because only the RUNTIME knows where its backend
+  # keeps context. The chart cannot infer it, and a wrong guess persists nothing
+  # while looking configured.
+  contextSync:
+    # Include globs relative to the runtime's HOME. For the reference
+    # runtime-claude this is where claude-code files its transcripts.
+    # Empty disables the whole mechanism.
+    paths: []
+    # - ".claude/projects/-data-workspace/**"
+    #
+    # Churn INSIDE those paths. Without it the change detector reports a change
+    # on nearly every cycle and the skip-when-unchanged rule buys nothing.
+    exclude: []
+    # How often to checkpoint while a pod is alive. "0s" leaves only
+    # work-boundary checkpoints. This bounds what a SIGKILL can lose.
+    interval: 2m
+    # Previous copies kept. More than one because a checkpoint taken mid-run may
+    # hold a partially written file, and the older copies are the fallback.
+    retain: 3
+    # The sidecar image. Release-wide, like the manager's own: it implements a
+    # contract rather than being a backend choice.
+    image: kmatsebora/agentops-context-sync:0.1.1
+    # Bounds the pod-local live context. In this mode the WHOLE home is
+    # ephemeral — caches and tool state included — so it must be generous.
+    # Empty leaves it unbounded, which is Kubernetes' own default.
+    liveSizeLimit: 4Gi
   # Agent session persistence is wired from the `persistence` block below
   # automatically (its claim, or existingClaim). Set this only to point at a
   # claim this chart did not create.
@@ -315,7 +374,7 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    tag: 0.14.0
+    tag: 0.15.5
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -593,6 +652,29 @@ retention:
 # The disk half of retention: a CronJob reclaiming what deleted conversations
 # left behind. Separate workload because the manager mounts no volume, and
 # mounting the claim ROOT is the reach subPath isolation denies agents.
+# THE CONTEXT MOUNT PROBE — find a damaged context volume while it is IDLE.
+#
+# The corruption that matters here is only detectable at MOUNT time. Anything
+# that can read the filesystem is something whose mount already succeeded, so a
+# read-only scan can never find it. Attempting to mount is the only real probe.
+#
+# Runtime pods mount it, but only when there is work — and with a short idle TTL
+# the volume is detached most of the time, so damage can sit unseen until the
+# next conversation needs it. This closes that gap to one interval.
+#
+# Failure surfaces as a FAILED JOB, never as a signal: the `agentops-` name
+# prefix is what the events adapter's self-exclusion keys on, so a broken volume
+# cannot wake an agent that needs that same volume to run.
+contextProbe:
+  enabled: false
+  schedule: "23 * * * *"
+  # Claim to probe. Empty follows `persistence` above, which is the usual case.
+  claimName: ""
+  # A volume that will not attach leaves the pod in ContainerCreating forever.
+  # This is what turns that into a failed Job somebody can see.
+  deadlineSeconds: 300
+  image: busybox:1.36
+
 housekeeping:
   enabled: false
   schedule: "17 3 * * *"

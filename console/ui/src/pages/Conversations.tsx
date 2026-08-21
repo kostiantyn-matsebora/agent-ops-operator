@@ -368,6 +368,19 @@ export function ConversationsPage() {
                         </Label>
                       )}
                       {c.errored && <Label status="danger">last run failed</Label>}
+                      {/* A queue that has stopped moving is either full or its
+                          storage is gone, and those demand opposite responses.
+                          The reason is the kubelet's own, so the row says which. */}
+                      {c.blocked && (
+                        <Label
+                          status={c.blocked.storage ? 'danger' : 'warning'}
+                          title={c.blocked.detail}
+                        >
+                          <PlainText>
+                            {`${c.blocked.storage ? 'storage' : 'blocked'}: ${c.blocked.reason}`}
+                          </PlainText>
+                        </Label>
+                      )}
                     </Td>
                     <Td dataLabel="Pipeline">
                       {/* Attribution is INFERRED from materialized bindings.

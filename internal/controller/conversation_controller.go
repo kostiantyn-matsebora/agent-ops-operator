@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,11 +29,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/mcpcompile"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/storagebreaker"
 )
 
 // LabelSignatureHash indexes conversations by grouping signature.
@@ -65,6 +68,21 @@ const ConditionToolingResolved = "ToolingResolved"
 // second source of truth — it is a reading of runs[].delivered[], not a record.
 const ConditionDeliveryPending = "DeliveryPending"
 
+// ConditionRuntimeStarted reports whether this conversation's runtime pod
+// reached a running state, and when it did not, WHY — in the kubelet's own
+// words rather than ours.
+//
+// It exists because the failure it names was silent. On 2026-08-20 five pods
+// sat in ContainerCreating for fifteen hours behind a corrupt filesystem,
+// holding every capacity slot, and the only condition on any of them read
+// DeliveryPending=False / AllDelivered — which looks like health. Nothing said
+// a pod could not start, so nothing said the install was down.
+//
+// Set only on conversations that have actually failed to start one: a
+// conversation whose pods have always come up carries no condition rather than
+// a standing declaration of fine.
+const ConditionRuntimeStarted = "RuntimeStarted"
+
 // MCPConfigMapName returns the ConfigMap holding a conversation's compiled
 // mcp.json. Always conversation-keyed: capabilities come from the wiring, so
 // there is no shared profile-owned document to collide over.
@@ -88,6 +106,30 @@ type ConversationReconciler struct {
 	// CloseTopicGrace overrides how long deletion waits on close-topic ops;
 	// zero means DefaultCloseTopicGrace.
 	CloseTopicGrace time.Duration
+	// RuntimeStartDeadline bounds how long a runtime pod may sit without
+	// reaching Running before it is reaped; zero means
+	// DefaultRuntimeStartDeadline. A pod that never starts still COUNTS against
+	// the cap for as long as it exists — this bounds how long that is, which is
+	// a different thing from exempting it.
+	RuntimeStartDeadline time.Duration
+	// StorageBreaker is the install-wide judgement about whether context
+	// storage is reachable. SHARED with the HTTP API, which feeds it the
+	// reporting edge; the reconciler feeds it the PROVISIONING edge — a pod
+	// that cannot attach its volume is the same incident as a run that cannot
+	// reach its context. Nil disables the provisioning edge entirely (tests).
+	StorageBreaker *storagebreaker.Breaker
+	// DrainAware releases idle runtime pods from a node that is going down, so
+	// a shared context volume detaches before the machine reboots. OFF by
+	// default and gated in the chart: nodes are cluster-scoped, and reading
+	// them is this manager's only cluster-scoped permission.
+	DrainAware bool
+	// Activity records the hops the reconciler mediates — currently the runtime
+	// pod being created, which is otherwise the largest invisible gap in a
+	// conversation's timeline. Nil is usable and ignores every emission.
+	Activity *activity.Log
+	// Recorder emits Kubernetes events on the Conversation. Nil disables them
+	// (tests), because an event is a report and never a control path.
+	Recorder record.EventRecorder
 	// Router closes conversations. The reconciler depends on it so the TIMER
 	// closes through the same path /close does — a farewell on every bound
 	// thread, and one implementation of the close. The alternative is a second
@@ -184,12 +226,80 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
+	// A pod that never STARTED is reaped too, and for the same reason the
+	// exited one is: it holds a capacity slot it is not using. The difference
+	// is that nothing used to reap it, so it held that slot forever — five of
+	// them held an entire install for fifteen hours on 2026-08-20.
+	//
+	// It stays COUNTED until it is gone (liveRuntimePods is untouched):
+	// un-counting a pod the cluster has not released is the invent-capacity
+	// mistake, and would provision past the cap while the stuck pod still
+	// exists. Deleting it is what frees the slot, through the DELETE watch that
+	// already promotes the FIFO-first waiter.
+	if podExists && runtimeStartOverdue(&pod, r.startDeadline(), time.Now()) {
+		if err := r.reapUnstartedPod(ctx, &conv, &pod); err != nil {
+			return ctrl.Result{}, err
+		}
+		podExists = false
+	}
+	// A pod that DID start clears the backoff and says so, so that a recovered
+	// conversation does not keep waiting out an interval it has already earned
+	// its way out of.
+	if podExists && podStarted(&pod) {
+		if err := r.clearRuntimeStartFailure(ctx, &conv); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	// A node on its way down: hand back the pod while the handing back is still
+	// orderly, so the context volume detaches before the machine goes.
+	if podExists {
+		released, err := r.releaseIfNodeDraining(ctx, &conv, &pod)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if released {
+			podExists = false
+		}
+	}
+
+	// Still inside the backoff after a failed start: do not recreate the pod
+	// yet. Requeue for exactly as long as is left, so recovery is prompt
+	// without polling.
+	if !podExists && dispatch.NeedsWorker(&conv) {
+		if wait := r.runtimeStartCooldown(&conv, time.Now()); wait > 0 {
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
+	}
+
 	// CAPACITY FIRST — before anything is provisioned. A conversation that
 	// cannot be admitted gets no chat topic, no MCP ConfigMap, no pod and no
 	// dispatch: suppressing the TOPIC is the point of the Pending phase, since
 	// it is what stops a thousand signals from becoming a thousand chat threads
 	// before anyone has looked at the first one. A conversation needing no
 	// worker skips the gate entirely — it costs nothing and waits for nothing.
+	// STORAGE BEFORE CAPACITY. While context storage is being treated as an
+	// outage, provisioning a pod only reproduces the failure and burns the
+	// volume's patience — 466 failed attaches in fifteen hours is what that
+	// looks like. Hold the work instead: the input stays pending, the
+	// conversation stays Pending with a reason that says STORAGE rather than
+	// queue, and nothing is failed.
+	//
+	// One canary is let through per probe interval, because the provisioning
+	// edge cannot close its own breaker: with no pod there is no run, and with
+	// no run nothing ever reports success.
+	if needsWorker && !podExists && r.StorageBreaker != nil {
+		if open, since := r.StorageBreaker.Open(); open {
+			if !r.StorageBreaker.ProbeDue(time.Now()) {
+				return ctrl.Result{RequeueAfter: 30 * time.Second},
+					r.enterPendingFor(ctx, &conv, ReasonStorageUnavailable,
+						"context storage has been unreachable across this install since "+
+							since.Format(time.RFC3339)+"; work is held, not failed")
+			}
+			logger.Info("letting one canary attempt through to re-test context storage",
+				"conversation", conv.Name)
+		}
+	}
+
 	if needsWorker && !podExists {
 		admitted, err := r.admit(ctx, &conv)
 		if err != nil {
@@ -371,6 +481,107 @@ func (r *ConversationReconciler) closeGrace() time.Duration {
 		return r.CloseTopicGrace
 	}
 	return DefaultCloseTopicGrace
+}
+
+// startDeadline is how long a runtime pod may sit without reaching Running.
+func (r *ConversationReconciler) startDeadline() time.Duration {
+	if r.RuntimeStartDeadline > 0 {
+		return r.RuntimeStartDeadline
+	}
+	return DefaultRuntimeStartDeadline
+}
+
+// runtimeStartCooldown reports how much of the post-failure backoff is left.
+// Derived from the failure count and the last failure stamp — never stored —
+// so nothing can disagree about when the next attempt is due.
+func (r *ConversationReconciler) runtimeStartCooldown(conv *agentopsv1alpha1.Conversation, now time.Time) time.Duration {
+	last := conv.Status.LastRuntimeStartFailure
+	if last == nil || conv.Status.RuntimeStartFailures <= 0 {
+		return 0
+	}
+	elapsed := now.Sub(last.Time)
+	if wait := runtimeStartBackoff(conv.Status.RuntimeStartFailures) - elapsed; wait > 0 {
+		return wait
+	}
+	return 0
+}
+
+// reapUnstartedPod deletes a runtime pod that never started, records WHY on the
+// conversation, and advances the backoff.
+//
+// The condition message carries the pod's own words. A message reading only
+// "start deadline exceeded" would reproduce the very failure this exists to
+// end: fifteen hours in which nothing said what was wrong.
+func (r *ConversationReconciler) reapUnstartedPod(ctx context.Context, conv *agentopsv1alpha1.Conversation, pod *corev1.Pod) error {
+	fail := classifyStuckPod(pod)
+	logger := log.FromContext(ctx)
+	logger.Info("reaping a runtime pod that never started",
+		"conversation", conv.Name, "pod", pod.Name,
+		"reason", fail.Reason, "storageAttributable", fail.Storage, "evidence", fail.Message)
+
+	// GracePeriodSeconds(0), as every other runtime-pod release does: the pod
+	// never started, so there is no process to drain — and a pod lingering
+	// through a grace period is a pod still holding the slot this reap exists
+	// to free.
+	if err := r.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	if r.Recorder != nil {
+		r.Recorder.Event(conv, corev1.EventTypeWarning, fail.Reason,
+			"runtime pod "+pod.Name+" never started: "+fail.Message)
+	}
+	// ONLY a storage-attributable failure is evidence about storage. An
+	// unschedulable pod or an unpullable image is a different fault, and
+	// letting either open this breaker would hold every conversation in the
+	// install for a reason that has nothing to do with storage.
+	if fail.Storage && r.StorageBreaker != nil {
+		if opened := r.StorageBreaker.Report(); opened {
+			logger.Info("treating context storage as unavailable across the install; "+
+				"holding work rather than failing it", "conversation", conv.Name)
+		}
+	}
+
+	patch := client.MergeFrom(conv.DeepCopy())
+	conv.Status.RuntimePod = ""
+	// Inflight is NOT cleared here. A pod that never started ran nothing, so
+	// there is no work to re-dispatch and nothing to reconcile away; the input
+	// is still pending and will be dispatched to the replacement pod.
+	conv.Status.RuntimeStartFailures++
+	now := metav1.Now()
+	conv.Status.LastRuntimeStartFailure = &now
+	apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
+		Type:    ConditionRuntimeStarted,
+		Status:  metav1.ConditionFalse,
+		Reason:  fail.Reason,
+		Message: fail.Message,
+	})
+	return r.Status().Patch(ctx, conv, patch)
+}
+
+// clearRuntimeStartFailure records that a runtime pod finally started, resetting
+// the backoff. Writes only on an actual change, so a healthy conversation does
+// not spend a status patch per reconcile.
+func (r *ConversationReconciler) clearRuntimeStartFailure(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	existing := apimeta.FindStatusCondition(conv.Status.Conditions, ConditionRuntimeStarted)
+	if conv.Status.RuntimeStartFailures == 0 && conv.Status.LastRuntimeStartFailure == nil &&
+		existing != nil && existing.Status == metav1.ConditionTrue {
+		return nil
+	}
+	patch := client.MergeFrom(conv.DeepCopy())
+	conv.Status.RuntimeStartFailures = 0
+	conv.Status.LastRuntimeStartFailure = nil
+	// Only conversations that have actually failed to start carry this
+	// condition. A conversation whose pods have always come up stays
+	// condition-free rather than accumulating a permanent "everything is fine".
+	if existing != nil {
+		apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
+			Type:    ConditionRuntimeStarted,
+			Status:  metav1.ConditionTrue,
+			Reason:  ReasonStarted,
+			Message: "runtime pod is running",
+		})
+	}
+	return r.Status().Patch(ctx, conv, patch)
 }
 
 // reconcileClosed is the whole of a closed conversation's lifecycle: tear down
@@ -570,6 +781,7 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alph
 	if err := r.List(ctx, &list, client.InNamespace(conv.Namespace)); err != nil {
 		return false, err
 	}
+	now := time.Now()
 	// The waiting set is defined by PODS, not by phase: a conversation that
 	// needs a worker and holds none is waiting, whether it has been marked
 	// Pending yet or has only just been created. Keying on phase would let a
@@ -586,6 +798,14 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alph
 		// closed holding any, stay on the object untouched — they are part of
 		// the record a reopen restores, not work owed.
 		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			continue
+		}
+		// A conversation still serving out a start-failure backoff will not be
+		// given a pod on this pass, so it must not hold the FIFO head either.
+		// Leaving it there reproduces the outage this whole mechanism exists to
+		// end, one layer up: the oldest conversation cannot start, and every
+		// conversation behind it waits on a slot nobody is going to take.
+		if r.runtimeStartCooldown(c, now) > 0 {
 			continue
 		}
 		waiting = append(waiting, *c)
@@ -628,6 +848,32 @@ func (r *ConversationReconciler) evictableCount(ctx context.Context, ns string, 
 // ONCE. The phase is patched before the notice so a reconcile storm cannot
 // produce a second one; a notice lost to a crash in that window is preferable
 // to a channel repeating itself every 30 seconds.
+// ReasonStorageUnavailable marks a conversation held because context storage
+// is unreachable, as opposed to one waiting for a capacity slot.
+//
+// The two look identical from outside — a queue that has stopped moving — and
+// demand opposite responses: one is "wait", the other is "your storage is
+// broken". Fifteen hours were lost to not being able to tell them apart.
+const ReasonStorageUnavailable = "StorageUnavailable"
+
+// enterPendingFor holds a conversation in Pending and records WHY on the
+// RuntimeStarted condition, so a queue that has stopped moving explains itself
+// where an operator is already looking.
+func (r *ConversationReconciler) enterPendingFor(ctx context.Context, conv *agentopsv1alpha1.Conversation, reason, message string) error {
+	patch := client.MergeFrom(conv.DeepCopy())
+	if apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
+		Type:    ConditionRuntimeStarted,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	}) {
+		if err := r.Status().Patch(ctx, conv, patch); err != nil {
+			return err
+		}
+	}
+	return r.enterPending(ctx, conv)
+}
+
 func (r *ConversationReconciler) enterPending(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
 	if conv.Status.Phase == agentopsv1alpha1.ConversationPending {
 		return nil
@@ -1034,7 +1280,27 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 		return false, err
 	}
 
-	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved.Config)
+	// A KNOWN-BAD volume costs CONTINUITY, not availability.
+	//
+	// Once the same conversation has failed to start repeatedly for a
+	// storage-attributable reason, waiting longer buys nothing: the volume is
+	// not coming back on its own, and every further attempt reproduces the same
+	// unattachable mount. Starting WITHOUT the volume lets the agent answer —
+	// and the conversation says it lost its memory, because a run that silently
+	// answered fresh is the degradation the continuity rules forbid.
+	//
+	// Deliberately NOT triggered by the install-wide breaker: that one HOLDS
+	// work, which is right while an outage may still be transient. This is the
+	// end of that road, for one conversation that has exhausted its retries.
+	degraded := r.contextLost(conv)
+	if degraded {
+		resolved.Config.HomePVC = ""
+		resolved.ContextSync = nil
+		logger.Info("starting a runtime pod WITHOUT its context volume; the conversation has lost its memory",
+			"conversation", conv.Name, "failures", conv.Status.RuntimeStartFailures)
+	}
+
+	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved)
 	pod.Namespace = conv.Namespace
 	if err := controllerutil.SetControllerReference(conv, pod, r.Scheme); err != nil {
 		return false, err
@@ -1045,9 +1311,56 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 		}
 		return false, err
 	}
+	// The pod exists; everything from here until the agent's first /work is
+	// scheduling and boot, and used to be a silent gap in the sequence.
+	r.Activity.Emit(activity.Event{
+		Kind:         activity.KindRuntimeStarting,
+		Status:       activity.StatusOK,
+		Conversation: conv.Name,
+		From:         &activity.NodeRef{Kind: activity.NodeConversation, Name: conv.Name},
+		To:           &activity.NodeRef{Kind: activity.NodeRuntime, Name: pod.Name},
+		Detail:       "runtime pod created" + degradedSuffix(degraded),
+	})
+
 	patch := client.MergeFrom(conv.DeepCopy())
 	conv.Status.RuntimePod = pod.Name
+	if degraded {
+		// The handle names a context this pod cannot reach. Clearing it is what
+		// stops the next run failing a continuation that can never succeed —
+		// and the condition is what stops the loss being silent.
+		conv.Status.RuntimeContextID = ""
+		conv.Status.SessionID = ""
+		apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
+			Type:   ConditionContextContinuity,
+			Status: metav1.ConditionFalse,
+			Reason: "ContextVolumeUnusable",
+			Message: "the context volume could not be attached after repeated attempts; " +
+				"this conversation is running without its previous memory",
+		})
+	}
 	return true, r.Status().Patch(ctx, conv, patch)
+}
+
+// degradedStartAfter is how many consecutive storage-attributable start
+// failures mean the volume is not coming back for this conversation.
+//
+// Generous, because the alternative to waiting is losing memory: a transient
+// attach problem must be given every chance the backoff already provides. By
+// the fifth failure the backoff has spread the attempts over many minutes, and
+// the same mount has failed every time.
+const degradedStartAfter = 5
+
+// contextLost reports whether this conversation should start without its
+// context volume.
+func (r *ConversationReconciler) contextLost(conv *agentopsv1alpha1.Conversation) bool {
+	if conv.Status.RuntimeStartFailures < degradedStartAfter {
+		return false
+	}
+	// Only when the recorded reason was about STORAGE. A conversation whose
+	// pods could not be scheduled must never be stripped of its context — it
+	// would lose its memory for a capacity problem.
+	cond := apimeta.FindStatusCondition(conv.Status.Conditions, ConditionRuntimeStarted)
+	return cond != nil && cond.Reason == ReasonVolumeUnavailable
 }
 
 // ensureMCPConfigMap renders the conversation's MCP from the configs its wiring
@@ -1169,4 +1482,14 @@ func (r *ConversationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				DeleteFunc:  func(e event.DeleteEvent) bool { return isRuntimePod(e.Object) },
 			})).
 		Complete(r)
+}
+
+
+// degradedSuffix names a pod started without its context volume, so the reason
+// is on the hop rather than only in a condition.
+func degradedSuffix(degraded bool) string {
+	if degraded {
+		return " WITHOUT its context volume (repeated storage failures)"
+	}
+	return ""
 }

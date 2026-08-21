@@ -1,0 +1,77 @@
+{{- if .Values.contextProbe.enabled }}
+{{- $p := .Values.persistence }}
+{{- $pvc := .Values.contextProbe.claimName }}
+{{- if and (not $pvc) $p.enabled }}
+{{- $pvc = $p.existingClaim | default $p.name }}
+{{- end }}
+{{- if not $pvc }}
+{{- fail "contextProbe.enabled needs a claim: enable persistence, or set contextProbe.claimName" }}
+{{- end }}
+---
+# THE CONTEXT MOUNT PROBE.
+#
+# It exists because the corruption that took this install down for fifteen hours
+# on 2026-08-20 is only detectable AT MOUNT TIME. A process that can READ the
+# filesystem is a process whose mount already succeeded, which means fsck already
+# passed — so no read-only scan from inside a mounted tree can ever find it. The
+# only probe that works is attempting to mount.
+#
+# Runtime pods already do that, but only when there is work. With a short idle
+# TTL the volume is detached most of the time, so latent damage can sit unseen
+# until the next conversation. This closes that gap to one schedule interval.
+#
+# It reports as STATUS, never as a signal: the name prefix `agentops-` is what
+# signal-k8s-events' self-exclusion keys on, so a failing probe cannot wake an
+# agent to investigate the storage the agent itself needs. A failed Job is
+# visible to kubectl, to the console and to metrics, which is the whole point.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: agentops-context-probe
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: {{ .Values.contextProbe.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  # Keep failures around: a failed probe is the entire output of this workload,
+  # and pruning it to zero would delete the finding.
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # A volume that will not attach leaves the pod stuck in ContainerCreating
+      # forever. The deadline is what turns that into a FAILED JOB somebody can
+      # see, rather than another silent wait.
+      activeDeadlineSeconds: {{ .Values.contextProbe.deadlineSeconds }}
+      template:
+        spec:
+          restartPolicy: Never
+          {{- with .Values.nodeSelector }}
+          nodeSelector: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+          containers:
+            - name: probe
+              image: {{ .Values.contextProbe.image | quote }}
+              command: ["/bin/sh", "-c"]
+              # READ-ONLY, and it reads deliberately little. The mount is the
+              # test; walking the tree would only add load to a filesystem this
+              # exists to protect.
+              args:
+                - 'ls /probe >/dev/null && echo "context volume mounted and readable"'
+              volumeMounts:
+                - name: context
+                  mountPath: /probe
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+          volumes:
+            - name: context
+              persistentVolumeClaim:
+                claimName: {{ $pvc }}
+                readOnly: true
+{{- end }}

@@ -5,6 +5,7 @@ package runtimepod
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -44,6 +45,18 @@ type Config struct {
 	Env []corev1.EnvVar
 	// DefaultResources when the profile doesn't override.
 	DefaultResources *corev1.ResourceRequirements
+	// ContextSyncImage is the sidecar that keeps context durable when a runtime
+	// declares contextSync. Release-wide like the manager's own image, not a
+	// per-runtime choice: it implements a contract, not a backend.
+	ContextSyncImage string
+	// ContextLiveSizeLimit bounds the pod-local live context.
+	//
+	// In sidecar mode the WHOLE home is ephemeral — caches and tool state
+	// included, which is the point — so this has to be generous enough for
+	// them. Unbounded would let one runaway agent fill a node's disk; too small
+	// evicts the pod mid-run. Empty leaves it unbounded, which is Kubernetes'
+	// own default and the honest choice when an operator has not decided.
+	ContextLiveSizeLimit string
 }
 
 // FromRuntime overlays a AgentRuntime spec on the bootstrap config.
@@ -87,6 +100,10 @@ type Resolved struct {
 	// ContextStorage declares where the runtime keeps conversation context.
 	// Empty when no AgentRuntime CR was found, i.e. the bootstrap fallback.
 	ContextStorage agentopsv1alpha1.ContextStorage
+	// ContextSync is the runtime's declaration of what to keep durable when the
+	// live context lives on pod-local storage. Nil means today's behaviour: the
+	// home volume mounted directly, no sidecar.
+	ContextSync *agentopsv1alpha1.ContextSync
 }
 
 // ResolveFor picks the execution backend for a profile — its `runtimeRef`, else
@@ -111,7 +128,20 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 		}
 		return Resolved{Config: fallback}, nil
 	}
-	return Resolved{Config: FromRuntime(&rt.Spec, fallback), ContextStorage: rt.Spec.ContextStorage}, nil
+	// A bad contextSync declaration fails HERE, where the error reaches the
+	// Conversation's RuntimeStarted condition. Nothing writes AgentRuntime
+	// status, so reporting it on that CR's readiness would mean inventing a
+	// reconciler to hold one condition; the CRD schema already rejects the
+	// structural errors at admission, and this catches what a schema cannot
+	// express — a path that escapes the runtime's home.
+	if err := rt.Spec.ContextSync.Validate(); err != nil {
+		return Resolved{}, fmt.Errorf("runtime %q: %w", name, err)
+	}
+	return Resolved{
+		Config:         FromRuntime(&rt.Spec, fallback),
+		ContextStorage: rt.Spec.ContextStorage,
+		ContextSync:    rt.Spec.ContextSync,
+	}, nil
 }
 
 // ContinuityPossible reports whether a conversation on this backend can carry
@@ -139,12 +169,28 @@ func (r Resolved) ContinuityPossible() bool {
 // profile-keyed one, or the conversation's own when its wiring binds MCPConfigs
 // (raw refs in mcp override it).
 func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile,
-	mcp mcpcompile.Result, mcpCM string, cfg Config) *corev1.Pod {
+	mcp mcpcompile.Result, mcpCM string, resolved Resolved) *corev1.Pod {
+
+	cfg := resolved.Config
+	// SIDECAR MODE moves the live context onto pod-local storage and leaves the
+	// durable volume to a separate container. It is opt-in per runtime: a
+	// runtime that declares nothing gets exactly the pod it got before, which
+	// is what lets an existing install upgrade without a migration.
+	sync := resolved.ContextSync
+	sidecar := sync != nil && cfg.ContextSyncImage != ""
+
+	// The agent talks to the SIDECAR, which forwards to the manager. That
+	// redirection is the whole mechanism: it is how work boundaries become
+	// observable without the runtime image knowing anything about it.
+	agentControlURL := cfg.ControlURL
+	if sidecar {
+		agentControlURL = "http://127.0.0.1:" + itoa(contextSyncPort)
+	}
 
 	env := []corev1.EnvVar{
 		{Name: "ROLE", Value: "worker"},
 		{Name: "CONVO_ID", Value: conv.Name},
-		{Name: "CONTROL_URL", Value: cfg.ControlURL},
+		{Name: "CONTROL_URL", Value: agentControlURL},
 		{Name: "REPO_URL", Value: profile.Spec.Repository.URL},
 		{Name: "REPO_REF", Value: profile.Spec.Repository.Ref},
 		{Name: "RUNTIME_IDLE_TTL_M", Value: itoa(cfg.IdleTTLMinutes)},
@@ -175,12 +221,29 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 	}
 	mounts := []corev1.VolumeMount{workspaceMount}
 
-	// home: durable session state (RWX PVC) or ephemeral
-	if cfg.HomePVC != "" {
+	// home: durable session state (RWX PVC), pod-local under contextSync, or
+	// ephemeral when no claim is configured at all.
+	switch {
+	case sidecar:
+		// The agent gets EPHEMERAL storage and no access to the durable volume
+		// whatsoever. Two things follow, and both are wanted: a corrupt volume
+		// can no longer stop a run that is already going, and an agent can no
+		// longer read another conversation's context or write to the volume,
+		// because it holds no mount of it.
+		volumes = append(volumes, corev1.Volume{Name: "home",
+			VolumeSource: corev1.VolumeSource{EmptyDir: emptyDirWithLimit(cfg.ContextLiveSizeLimit)}})
+		// The durable claim, per conversation. The subPath applies ONLY here:
+		// changing the layout for every install would be a migration, and this
+		// way an install that has not opted in keeps its context exactly where
+		// it already is.
+		volumes = append(volumes, corev1.Volume{Name: "context", VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.HomePVC},
+		}})
+	case cfg.HomePVC != "":
 		volumes = append(volumes, corev1.Volume{Name: "home", VolumeSource: corev1.VolumeSource{
 			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.HomePVC},
 		}})
-	} else {
+	default:
 		volumes = append(volumes, corev1.Volume{Name: "home", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 	}
 	mounts = append(mounts, corev1.VolumeMount{Name: "home", MountPath: "/data/home"})
@@ -239,6 +302,15 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 	}
 
 	uid := int64(1000)
+	var initContainers []corev1.Container
+	var gracePeriod *int64
+	if sidecar {
+		initContainers = append(initContainers,
+			contextSyncContainer(conv, cfg, sync, contextSyncMounts(conv)))
+		g := contextSyncGrace
+		gracePeriod = &g
+	}
+
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: PodName(conv.Name),
@@ -251,6 +323,11 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 			ServiceAccountName: cfg.ServiceAccount,
 			RestartPolicy:      corev1.RestartPolicyNever,
 			NodeSelector:       cfg.NodeSelector,
+			InitContainers:     initContainers,
+			// A longer grace ONLY in sidecar mode: the final checkpoint runs on
+			// SIGTERM, and a grace period that expires mid-copy turns every
+			// clean shutdown into the lossy case.
+			TerminationGracePeriodSeconds: gracePeriod,
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsUser: &uid, RunAsGroup: &uid, FSGroup: &uid,
 			},

@@ -13,6 +13,7 @@ signal-cron/signal-cron
 signal-vmalertmanager/signal-vmalertmanager
 signal-k8s-events/signal-k8s-events
 console/console
+context-sync/context-sync
 signal-telegram/signal-telegram
 telegram-router/telegram-router
 housekeeping/housekeeping

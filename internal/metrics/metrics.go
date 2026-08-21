@@ -19,6 +19,7 @@
 package metrics
 
 import (
+	"encoding/json"
 	"github.com/prometheus/client_golang/prometheus"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -43,6 +44,17 @@ type Sample struct {
 	RuntimeSlotsMax       int
 	ConversationsInflight map[string]int // by pipeline ("" = unattributed)
 	CooldownsActive       map[string]int // by source
+	// StorageOutage reports whether context storage is being treated as
+	// unavailable install-wide, and for how long.
+	//
+	// This is the INSTALL-LEVEL fact, and it is a metric rather than a
+	// condition on AgentRuntime for a plain reason: nothing writes
+	// AgentRuntimeStatus, so putting it there would mean inventing a
+	// reconciler whose only job was to hold it. A gauge is also what an
+	// operator actually wants — something to alert on when the queue stops
+	// moving, rather than an object to go and read.
+	StorageOutage    bool
+	StorageOutageAge float64 // seconds; 0 when closed
 }
 
 // SampleFunc supplies a Sample on demand.
@@ -57,6 +69,8 @@ type Collector struct {
 	runDuration      *prometheus.HistogramVec
 	channelOps       *prometheus.CounterVec
 	channelOpLatency *prometheus.HistogramVec
+	contextOps       *prometheus.CounterVec
+	contextBytes     *prometheus.HistogramVec
 
 	sample SampleFunc
 
@@ -68,6 +82,10 @@ type Collector struct {
 	slotsMax      *prometheus.Desc
 	inflight      *prometheus.Desc
 	cooldowns     *prometheus.Desc
+	// storageOutage is the one metric an operator should alert on when the
+	// queue stops moving: 1 while context storage is treated as unavailable.
+	storageOutage    *prometheus.Desc
+	storageOutageAge *prometheus.Desc
 }
 
 // New builds the metric set. sample may be nil, in which case gauges report
@@ -99,6 +117,19 @@ func New(sample SampleFunc) *Collector {
 			// buckets would put almost everything in +Inf.
 			Buckets: []float64{1, 5, 15, 30, 60, 120, 300, 600, 1800},
 		}, []string{"pipeline"}),
+		contextOps: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "agentops_context_operations_total",
+			Help: "Context sync operations, by operation, trigger and outcome.",
+		}, []string{"operation", "trigger", "status"}),
+		contextBytes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "agentops_context_checkpoint_bytes",
+			Help: "Bytes written by a context checkpoint. Zero is the healthy " +
+				"common case: an unchanged context is skipped and writes nothing.",
+			// Incremental copies are small by design — one edited transcript,
+			// not a whole home. The wide top bucket is what makes a FULL copy
+			// visible, which would mean the hardlink path had stopped working.
+			Buckets: []float64{0, 1 << 10, 1 << 14, 1 << 18, 1 << 20, 1 << 22, 1 << 24, 1 << 26},
+		}, []string{"trigger"}),
 		channelOps: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "agentops_channel_ops_total",
 			Help: "Channel operations completed, by adapter, op kind and outcome.",
@@ -125,6 +156,14 @@ func New(sample SampleFunc) *Collector {
 			"Conversations with a run in flight, by pipeline.", []string{"pipeline"}, nil),
 		cooldowns: prometheus.NewDesc("agentops_cooldowns_active",
 			"Fingerprints currently suppressed by a source's cooldown window.", []string{"source"}, nil),
+		storageOutage: prometheus.NewDesc("agentops_storage_outage",
+			"1 while context storage is being treated as unavailable install-wide. "+
+				"Work is HELD, not failed, and no runtime pods are provisioned.", nil, nil),
+		storageOutageAge: prometheus.NewDesc("agentops_storage_outage_seconds",
+			"How long context storage has been treated as unavailable. "+
+				"0 when it is not. Alert on this rather than on the gauge alone: a "+
+				"brief outage holds work correctly, a long one means nobody noticed.",
+			nil, nil),
 	}
 	return c
 }
@@ -138,7 +177,8 @@ func (c *Collector) MustRegister() { c.Register(ctrlmetrics.Registry) }
 func (c *Collector) Register(r prometheus.Registerer) {
 	r.MustRegister(
 		c.signalsReceived, c.signalsDropped, c.conversations, c.runs,
-		c.runDuration, c.channelOps, c.channelOpLatency, c,
+		c.runDuration, c.channelOps, c.channelOpLatency,
+		c.contextOps, c.contextBytes, c,
 	)
 }
 
@@ -152,6 +192,8 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.slotsMax
 	ch <- c.inflight
 	ch <- c.cooldowns
+	ch <- c.storageOutage
+	ch <- c.storageOutageAge
 }
 
 // Collect samples the manager's in-memory state at scrape time.
@@ -166,6 +208,12 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(c.oldestQueued, prometheus.GaugeValue, q.OldestQueuedAge, q.Adapter)
 		ch <- prometheus.MustNewConstMetric(c.oldestClaimed, prometheus.GaugeValue, q.OldestClaimedAge, q.Adapter)
 	}
+	outage := 0.0
+	if s.StorageOutage {
+		outage = 1
+	}
+	ch <- prometheus.MustNewConstMetric(c.storageOutage, prometheus.GaugeValue, outage)
+	ch <- prometheus.MustNewConstMetric(c.storageOutageAge, prometheus.GaugeValue, s.StorageOutageAge)
 	ch <- prometheus.MustNewConstMetric(c.slotsInUse, prometheus.GaugeValue, float64(s.RuntimeSlotsInUse))
 	ch <- prometheus.MustNewConstMetric(c.slotsMax, prometheus.GaugeValue, float64(s.RuntimeSlotsMax))
 	for pipeline, n := range s.ConversationsInflight {
@@ -192,6 +240,18 @@ func (c *Collector) Observe(e activity.Event) {
 		if e.LatencyMs > 0 {
 			c.runDuration.WithLabelValues(e.Pipeline).Observe(float64(e.LatencyMs) / 1000)
 		}
+	case activity.KindContextRestored, activity.KindContextCheckpoint,
+		activity.KindContextSkipped, activity.KindContextFailed:
+		// One counter across all four, distinguished by the operation label:
+		// the question an operator asks is "is context being persisted", and
+		// four separate counters would make that a query rather than a graph.
+		// A SKIP is counted, not dropped — an unchanged context writing nothing
+		// is the design working, and a run of skips with no checkpoints between
+		// them is how a stalled context looks.
+		c.contextOps.WithLabelValues(contextOperation(e.Kind), e.Code, e.Status).Inc()
+		if e.Kind == activity.KindContextCheckpoint {
+			c.contextBytes.WithLabelValues(e.Code).Observe(float64(contextBytes(e)))
+		}
 	case activity.KindChannelOpCompleted:
 		adapter := nodeName(e.From)
 		c.channelOps.WithLabelValues(adapter, e.Code, e.Status).Inc()
@@ -206,4 +266,34 @@ func nodeName(n *activity.NodeRef) string {
 		return ""
 	}
 	return n.Name
+}
+
+// contextOperation reduces a context event kind to a bounded label.
+func contextOperation(kind string) string {
+	switch kind {
+	case activity.KindContextRestored:
+		return "restore"
+	case activity.KindContextCheckpoint:
+		return "checkpoint"
+	case activity.KindContextSkipped:
+		return "skip"
+	case activity.KindContextFailed:
+		return "failed"
+	}
+	return ""
+}
+
+// contextBytes reads the byte count out of a checkpoint event's detail.
+//
+// It lives in `detail` rather than in a dedicated field because detail is free
+// text the metrics layer must not label on — the number is observed into a
+// histogram, where its cardinality costs nothing.
+func contextBytes(e activity.Event) int64 {
+	var d struct {
+		Bytes int64 `json:"bytes"`
+	}
+	if err := json.Unmarshal([]byte(e.Detail), &d); err != nil {
+		return 0
+	}
+	return d.Bytes
 }

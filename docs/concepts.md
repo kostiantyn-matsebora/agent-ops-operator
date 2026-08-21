@@ -609,6 +609,88 @@ The runtime pod is deliberately **not** given a host filesystem path for this: i
 executes agent code, and reaching the node's filesystem should not follow from
 wanting durable context.
 
+#### Keeping the live context off the durable volume
+
+A shared RWX volume has a failure mode worth naming.
+
+On 2026-08-20 a node reboot corrupted the filesystem on one. The live context
+**was** that volume. So a single damaged filesystem took every conversation's
+context with it, and stopped every runtime pod from starting.
+
+The whole install was down for fifteen hours.
+
+`AgentRuntime.spec.contextSync` changes what the volume holds. The live context
+moves to pod-local storage, and the volume keeps a **snapshot** instead:
+
+```yaml
+spec:
+  contextStorage: volume
+  contextSync:
+    paths: [".claude/projects/-data-workspace/**"]   # include globs, relative to HOME
+    exclude: ["**/*.lock"]                            # churn inside those paths
+    interval: 2m                                      # "0s" = work boundaries only
+    retain: 3                                         # previous copies kept
+```
+
+Three things follow, and each addresses one half of that outage:
+
+- **A run already going survives the volume going bad underneath it.** Its
+  context is local. The volume is only a copy.
+- **The agent container loses its mount of the volume entirely.** Only the sync
+  process holds it, so an agent can neither read another conversation's context
+  nor write to the volume at all.
+- **A checkpoint that finds nothing changed writes nothing.** When something did
+  change, only the changed files are copied. Unchanged ones become hardlinks into
+  the previous copy. A conditional-but-full copy every two minutes would
+  *increase* writes to the fragile filesystem — the opposite of the goal.
+
+**The runtime declares it, not the chart** — the same rule `contextStorage`
+follows, for the same reason. Only the runtime knows where its backend keeps
+context, and a wrong guess persists nothing while looking configured.
+
+`paths` is an *include* list. Caches and tool state are then excluded by
+construction, rather than by a list that has to chase every file a vendor adds.
+
+**Absent means today's behaviour**: the home volume mounted directly and no
+sidecar. An install upgrades unchanged until it opts in.
+
+**Opting in strands existing context.** Without the sidecar, context sits at the
+claim root. With it, each conversation reads its own subdirectory, which starts
+empty. Any conversation that already holds a context handle will fail its next
+run rather than answer without memory — the continuity rule working, not a
+defect. Clear each one with the reset verb below, or enable it on a quiet
+install.
+
+Copies are labelled. One taken at a work boundary is **quiesced**. One taken
+mid-run is **best-effort** and may hold a partially written file.
+
+Mid-run copies are still taken, because a long run is exactly what a crash would
+otherwise lose in full. `retain` keeps the older copies, so a torn one costs a
+fallback rather than the context.
+
+What it does **not** fix: a `SIGKILL` still loses whatever was written since the
+last checkpoint. `interval` bounds that window. Nothing removes it.
+
+#### When context is gone for good
+
+A conversation whose context store was destroyed used to have two options, both
+bad.
+
+It could fail every run forever, because a promised context that cannot be
+reached fails rather than silently starting fresh. Or it could be deleted,
+throwing away its threads and its whole history for an unrelated reason.
+
+`POST /channel/conversations/{name}/reset-context` is the third. It clears the
+handle, keeps the conversation, its threads, its inputs and its recorded runs,
+and states the loss on every bound thread.
+
+It is **explicit and operator-initiated, always**. A failed continuation never
+triggers it.
+
+An automatic version would be indistinguishable from the silent degradation the
+continuity rules exist to forbid: an agent quietly answering without its memory,
+and nobody able to tell.
+
 ### The reply is a fact, not a queue entry
 
 `POST /work/done` records the run result and enqueues the reply — the fast path,

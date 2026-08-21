@@ -77,3 +77,33 @@ subjects:
   - kind: ServiceAccount
     name: {{ .Values.serviceAccounts.manager }}
     namespace: {{ .Release.Namespace }}
+{{- if .Values.rbac.drainAware }}
+---
+# DRAIN AWARENESS — the manager's ONLY cluster-scoped grant, and opt-in.
+#
+# Read-only on nodes, nothing else. It exists so the manager can see that a node
+# has been cordoned and release the idle runtime pods on it, letting a shared
+# context volume detach before the machine reboots. Without it the manager stays
+# entirely namespaced, which is the default posture.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.serviceAccounts.manager }}-nodes
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.serviceAccounts.manager }}-nodes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.serviceAccounts.manager }}-nodes
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccounts.manager }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

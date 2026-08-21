@@ -37,6 +37,30 @@ export function OverviewPage() {
           <Title headingLevel="h1">Installation</Title>
         </StackItem>
 
+        {/* THE answer to "why is nothing running". A stalled queue is either
+            full or storage-blocked, and those demand opposite responses — the
+            2026-08-20 outage was fifteen hours of not being able to tell.
+            First, above everything, because nothing else matters while it is
+            true. */}
+        {data.manager?.storageOutage && (
+          <StackItem>
+            <Alert
+              variant="danger"
+              isInline
+              title="Context storage is unavailable — work is being held"
+            >
+              No runtime pods are being started. Queued work is <strong>held, not failed</strong>,
+              and will run once storage is reachable again.
+              {data.manager.storageOutage.forSeconds > 0 && (
+                <>
+                  {' '}
+                  Blocked for{' '}
+                  <strong>{Math.round(data.manager.storageOutage.forSeconds / 60)} minutes</strong>.
+                </>
+              )}
+            </Alert>
+          </StackItem>
+        )}
         {data.managerError && (
           <StackItem>
             <Alert variant="warning" isInline title="The manager's status surface is unreachable">

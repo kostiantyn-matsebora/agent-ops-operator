@@ -211,6 +211,12 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 	if summary.ConsoleThread != "" {
 		messages = a.transcripts.Thread(summary.ConsoleThread)
 		archived = archived || a.transcripts.Archived(summary.ConsoleThread)
+		// MERGE with the durable record, always — never only when the buffer
+		// looks empty. Conditioning on emptiness broke the moment a reader
+		// typed a reply: their own message made the buffer non-empty, the
+		// durable answers stopped being served, and the history vanished
+		// mid-conversation.
+		messages = mergeTranscript(summary.ConsoleThread, messages, summary.Runs)
 	}
 	out := map[string]any{
 		"conversation": summary,

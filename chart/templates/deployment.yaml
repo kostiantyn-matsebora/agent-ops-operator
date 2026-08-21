@@ -38,6 +38,21 @@ spec:
               value: {{ .Values.maxActiveConversations | quote }}
             - name: MAX_QUEUED_CONVERSATIONS
               value: {{ .Values.maxQueuedConversations | quote }}
+            # Paired with rbac.drainAware: without the ClusterRole the manager
+            # cannot read nodes, so enabling the behaviour alone would only
+            # produce forbidden loops in the log.
+            - name: DRAIN_AWARE
+              value: {{ .Values.rbac.drainAware | quote }}
+            {{- if .Values.runtime.contextSync.paths }}
+            # Only set when a runtime actually declares paths: an empty image
+            # disables sidecar mode outright, so the mode can never be
+            # half-applied — which would give the agent an empty ephemeral home
+            # and no sidecar to restore into it.
+            - name: CONTEXT_SYNC_IMAGE
+              value: {{ .Values.runtime.contextSync.image | quote }}
+            - name: CONTEXT_LIVE_SIZE_LIMIT
+              value: {{ .Values.runtime.contextSync.liveSizeLimit | quote }}
+            {{- end }}
             {{- if .Values.retention.autoclose.enabled }}
             - name: CONVERSATION_AUTOCLOSE_ENABLED
               value: "true"

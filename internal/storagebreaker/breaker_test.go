@@ -1,4 +1,4 @@
-package httpapi
+package storagebreaker
 
 import (
 	"testing"
@@ -11,10 +11,10 @@ import (
 // into the permanent, irreversible destruction of every active conversation's
 // context — worse than the silent degradation it replaces.
 
-func breakerAt(t *testing.T, base time.Time) (*continuityBreaker, func(time.Duration)) {
+func breakerAt(t *testing.T, base time.Time) (*Breaker, func(time.Duration)) {
 	t.Helper()
 	now := base
-	b := &continuityBreaker{now: func() time.Time { return now }}
+	b := NewWithClock(func() time.Time { return now })
 	return b, func(d time.Duration) { now = now.Add(d) }
 }
 
@@ -32,7 +32,7 @@ func TestAnIsolatedReportIsALossNotAnOutage(t *testing.T) {
 func TestEnoughReportsInTheWindowMeanOutage(t *testing.T) {
 	b, advance := breakerAt(t, time.Now())
 
-	for i := 1; i < continuityThreshold; i++ {
+	for i := 1; i < Threshold; i++ {
 		if b.Report() {
 			t.Fatalf("opened early at report %d", i)
 		}
@@ -52,11 +52,11 @@ func TestEnoughReportsInTheWindowMeanOutage(t *testing.T) {
 func TestReportsOutsideTheWindowDoNotAccumulate(t *testing.T) {
 	b, advance := breakerAt(t, time.Now())
 
-	for i := 0; i < continuityThreshold*2; i++ {
+	for i := 0; i < Threshold*2; i++ {
 		if b.Report() {
 			t.Fatalf("stale reports accumulated into a false outage at %d", i)
 		}
-		advance(continuityWindow + time.Second)
+		advance(Window + time.Second)
 	}
 }
 
@@ -64,7 +64,7 @@ func TestReportsOutsideTheWindowDoNotAccumulate(t *testing.T) {
 // that contexts are reachable again, and a successful continuation proves it.
 func TestASuccessfulContinuationClosesTheBreaker(t *testing.T) {
 	b, advance := breakerAt(t, time.Now())
-	for i := 0; i < continuityThreshold; i++ {
+	for i := 0; i < Threshold; i++ {
 		b.Report()
 		advance(time.Second)
 	}
