@@ -59,12 +59,24 @@ spec:
           ports:
             - name: http
               containerPort: {{ $s.port }}
+          # PROBED FROM INSIDE THE POD, over loopback.
+          #
+          # A kubelet probe originates on the NODE, and a node is not a pod, so
+          # no NetworkPolicy peer can name it. This server is reached on the
+          # same port it serves MCP on, so that port cannot simply be opened.
+          # A tcpSocket probe here crash-looped the server behind the policy
+          # protecting it — see the same note in k8s-bundle.
+          #
+          # An exec probe never leaves the pod's network namespace, so no policy
+          # on any CNI can block it. The server answers 404 on `/` while the MCP
+          # endpoint lives elsewhere, so this checks that it ANSWERS, not that a
+          # particular route exists.
           readinessProbe:
-            tcpSocket:
-              port: http
+            exec:
+              command: ["sh", "-c", "curl -s -o /dev/null http://127.0.0.1:{{ $s.port }}/"]
           livenessProbe:
-            tcpSocket:
-              port: http
+            exec:
+              command: ["sh", "-c", "curl -s -o /dev/null http://127.0.0.1:{{ $s.port }}/"]
           {{- with $s.resources }}
           resources:
 {{ toYaml . | indent 12 }}

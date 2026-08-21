@@ -32,6 +32,20 @@ alertmanager:
     # Cap alerts per webhook post (0 = Alertmanager default).
     maxAlerts: 0
     sendResolved: false
+  # WHO MAY POST WEBHOOKS HERE, when global.agentops.networkPolicy is on.
+  #
+  # Normally the namespace your Alertmanager runs in. Raw NetworkPolicyPeer
+  # entries, exactly like the parent chart's networkPolicy lists.
+  #
+  # EMPTY LEAVES THIS ADAPTER UNRESTRICTED, deliberately: a policy naming nobody
+  # would deny the alert lane, and a severed alert path is discovered during an
+  # incident. Under-restricting is the recoverable mistake here.
+  #
+  #   webhookFrom:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: monitoring
+  webhookFrom: []
   # The alert source. INERT until a Pipeline claims it — the `pipelines:`
   # component below, or a route under the parent chart's `pipelines:`.
   defaultSource:

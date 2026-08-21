@@ -263,3 +263,48 @@ func TestParentShipsNoGuessedAdapterPolicy(t *testing.T) {
 		t.Fatal("the parent cannot know an adapter's port; that policy belongs to the bundle that declares it")
 	}
 }
+
+// The metrics MCP server is the third one, and was the last unprotected. It
+// authenticates nobody, so without a policy any pod can query the whole metrics
+// backend through it.
+func TestPrometheusMCPServerIsRestricted(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "global.agentops.networkPolicy.enabled=true",
+		"--set", "prometheus-bundle.enabled=true",
+		"--set", "prometheus-bundle.mcp.enabled=true",
+		"--set", "prometheus-bundle.mcpServers.enabled=true",
+		"--set", "prometheus-bundle.mcpServers.backend=http://vm:8428")
+
+	p, ok := splitPolicies(out)["agentops-mcp-prometheus"]
+	if !ok {
+		t.Fatal("the metrics MCP server has no policy")
+	}
+	if !strings.Contains(p, "agentops-runtime") {
+		t.Error("runtime pods must still reach it, or agents lose their metrics tools")
+	}
+}
+
+// AN EMPTY SENDER LIST LEAVES THE WEBHOOK ADAPTER OPEN, ON PURPOSE.
+//
+// A policy selecting the adapter and naming nobody denies the alert lane —
+// silently, and discovered during an incident. Under-restricting is the
+// recoverable mistake, so the policy renders only once a sender is named.
+func TestWebhookAdapterIsOnlyRestrictedOnceTheSenderIsNamed(t *testing.T) {
+	base := []string{
+		"--set", "global.agentops.networkPolicy.enabled=true",
+		"--set", "prometheus-bundle.enabled=true",
+	}
+	if _, ok := splitPolicies(helmTemplate(t, base...))["agentops-signal-alertmanager"]; ok {
+		t.Fatal("with no sender named, the adapter must be left reachable rather than cut off")
+	}
+
+	named := helmTemplate(t, append(base, "--set-json",
+		`prometheus-bundle.alertmanager.webhookFrom=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"monitoring"}}}]`)...)
+	p, ok := splitPolicies(named)["agentops-signal-alertmanager"]
+	if !ok {
+		t.Fatal("naming the sender must restrict the adapter to it")
+	}
+	if !strings.Contains(p, "monitoring") {
+		t.Errorf("the named sender must appear in the policy:\n%s", p)
+	}
+}
