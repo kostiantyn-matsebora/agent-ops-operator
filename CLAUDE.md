@@ -6,7 +6,7 @@ Self-contained modules — no dependencies outside this directory; keep it that
 way. Nine Go modules: the operator (root), `channel-telegram/` (reference
 channel adapter), `console/` (the console — a channel adapter that is also the
 viewer), `telegram-router/` (the single getUpdates consumer), and
-`signal-cron/`, `signal-vmalertmanager/`, `signal-k8s-events/`, `signal-ha/`,
+`signal-cron/`, `signal-alertmanager/`, `signal-k8s-events/`, `signal-ha/`,
 `signal-telegram/` (signal adapters) — the adapters dependency-free.
 
 ## Answering (how to report findings)
@@ -258,7 +258,7 @@ adopter-documentation rules at the foot of this file instead.
 ```sh
 go build ./... && go vet ./...
 for m in channel-telegram telegram-router signal-telegram signal-cron \
-         signal-vmalertmanager signal-k8s-events signal-ha; do
+         signal-alertmanager signal-k8s-events signal-ha; do
   (cd $m && go build ./... && go vet ./... && go test ./...)
 done
 # regen after editing api/v1alpha1/ (deepcopy + CRDs):
@@ -356,7 +356,7 @@ $BX -t <registry>/agentops-channel-telegram:<tag> ./channel-telegram/
 $BX -t <registry>/agentops-telegram-router:<tag> ./telegram-router/
 $BX -t <registry>/agentops-signal-telegram:<tag> ./signal-telegram/
 $BX -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
-$BX -t <registry>/agentops-signal-vmalertmanager:<tag> ./signal-vmalertmanager/
+$BX -t <registry>/agentops-signal-alertmanager:<tag> ./signal-alertmanager/
 $BX -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
 $BX -t <registry>/agentops-signal-ha:<tag> ./signal-ha/
 $BX -t <registry>/agentops-console:<tag> ./console/
@@ -464,16 +464,28 @@ signal-telegram/         chat ORIGINATION adapter (own module, no deps) —
                          contacts Telegram
 signal-cron/             reference signal adapter (own module, no deps) —
                          /signal contract; five-field cron parser + scheduler
-signal-vmalertmanager/   webhook-receiving signal adapter (own module, no
+signal-alertmanager/     webhook-receiving signal adapter (own module, no
                          deps) — hosts /webhook/{source} for Alertmanager-
                          format posts; prometheus-bundle subchart ships it
                          (pod label agentops.dev/signal-adapter is a CHART
-                         CONTRACT, pinned by integration test). KEEPS its
-                         vendor name on purpose: the module, image and spec
-                         were never VM-specific except register.go, and
-                         renaming a published image is churn with a migration
-                         attached. The CHART is what an operator reads, so the
-                         CHART is what got renamed
+                         CONTRACT, pinned by integration test). RENAMED from
+                         signal-vmalertmanager in chart 5.24.0: it reads the
+                         STANDARD Alertmanager payload, which vanilla
+                         Alertmanager and VictoriaMetrics both send, so the
+                         vendor name described one sender rather than the
+                         component. The published image was renamed with it —
+                         the old one is left in place for installs pinned to
+                         an older chart, never deleted.
+                         **THE LINE FOR VM NAMING, everywhere in this repo:
+                         rename what names OUR component, KEEP what names a
+                         VictoriaMetrics API OBJECT.** register.go stays full
+                         of VMAlertmanagerConfig and operator.victoriametrics.com
+                         because it WRITES that object, and vanilla
+                         Alertmanager has no object to write — its config is a
+                         file. metrics.yaml keeps VMServiceScrape/VMRule and
+                         the `metrics.vmServiceScrape` value on the same
+                         grounds. Renaming either would name a thing that does
+                         not exist
 signal-ha/               Home Assistant log signal adapter (own module, no deps)
                          — reads that instance's WebSocket API over a
                          hand-written RFC 6455 client (`system_log_event`, with

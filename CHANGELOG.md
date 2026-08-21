@@ -8,6 +8,38 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### The Alertmanager adapter drops its vendor name — chart 5.24.0
+
+`signal-vmalertmanager/` is now **`signal-alertmanager/`**, and its image is
+**`kmatsebora/agentops-signal-alertmanager`**.
+
+The adapter reads the STANDARD Alertmanager webhook payload, which vanilla
+Alertmanager and VictoriaMetrics both send. The vendor name described one
+sender, not the component — the chart was renamed to `prometheus-bundle` in
+5.13.0 for that reason, and this finishes the job.
+
+**Nothing to migrate unless you pin the image yourself.** The chart's default
+moves to the new repository at the same tag (`0.6.0`, identical behaviour). The
+`SignalAdapter` CR is still named `alertmanager`, so `SignalSource.spec.adapter`
+values are unchanged, and the Deployment's selector label
+(`agentops.dev/signal-adapter`) is untouched — no immutable-field upgrade
+failure. The old image is left published for installs pinned to an older chart.
+
+If you set `prometheus-bundle.alertmanager.image.repository` explicitly, point
+it at `kmatsebora/agentops-signal-alertmanager`.
+
+**What deliberately keeps VictoriaMetrics names**, because it names a
+VictoriaMetrics API object rather than our component:
+
+- `register.go` writes a **`VMAlertmanagerConfig`** through
+  `operator.victoriametrics.com`. Self-registration is the one thing that is not
+  standardised — vanilla Alertmanager's config is a file with no object to
+  write, which is why NOTES.txt prints a receiver stanza for it instead.
+- `metrics.vmServiceScrape` renders a **`VMServiceScrape`**, and the rules
+  component renders **`VMRule`**. Both are VictoriaMetrics operator CRDs.
+
+Renaming either would name a thing that does not exist.
+
 ### Bound component reach — chart 5.23.0
 
 Two things were true and neither was written down. Both are now closable, and

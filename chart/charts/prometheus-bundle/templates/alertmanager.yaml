@@ -21,14 +21,14 @@ metadata:
   name: {{ $name }}
   namespace: {{ .Release.Namespace }}
   labels:
-    app.kubernetes.io/name: agentops-signal-vmalertmanager
+    app.kubernetes.io/name: agentops-signal-alertmanager
 spec:
   image: "{{ .Values.alertmanager.image.repository }}:{{ .Values.alertmanager.image.tag }}"
   port: 8080
   singleton: true
   # The config contract for SignalSources with `adapter: {{ $name }}` — this is
   # the richest config in the system, so it is the one most worth declaring.
-  # Mirrors registerSpec in signal-vmalertmanager/register.go; bump both in one
+  # Mirrors registerSpec in signal-alertmanager/register.go; bump both in one
   # diff. Advisory only: violations surface as ConfigValid, never block ingest.
   configSchema:
     type: object
@@ -87,7 +87,7 @@ metadata:
   name: agentops-signal-{{ $name }}-register
   namespace: {{ $regNS }}
   labels:
-    app.kubernetes.io/name: agentops-signal-vmalertmanager
+    app.kubernetes.io/name: agentops-signal-alertmanager
 rules:
   - apiGroups: ["operator.victoriametrics.com"]
     resources: ["vmalertmanagerconfigs"]
@@ -99,7 +99,7 @@ metadata:
   name: agentops-signal-{{ $name }}-register
   namespace: {{ $regNS }}
   labels:
-    app.kubernetes.io/name: agentops-signal-vmalertmanager
+    app.kubernetes.io/name: agentops-signal-alertmanager
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

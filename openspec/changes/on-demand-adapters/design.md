@@ -94,7 +94,7 @@ They answer different questions:
 | `Active` | ChannelAdapter / SignalAdapter | is my workload running, and if not why? |
 
 Reasons: `Active=True/HasDemand`; `Active=False/NoServedChannels`;
-`Active=False/NoWiredSources` (sources exist, none claimed — the vm-bundle
+`Active=False/NoWiredSources` (sources exist, none claimed — the prometheus-bundle
 case, worth its own reason so the message can name the missing Pipeline).
 
 Deliberately *not* folded into `Served`: a Channel whose adapter is asleep
@@ -199,7 +199,7 @@ scale straight back up on the next reconcile; nothing else is stateful.
   found so far is better expressed by creating the served CR. Deferred until
   someone hits a real one.
 - **Should `Active=False/NoWiredSources` name the fix?** The message can name
-  the unclaimed sources, which is the vm-bundle diagnostic ("adapter idle:
+  the unclaimed sources, which is the prometheus-bundle diagnostic ("adapter idle:
   source `alerts` exists but no Ready Pipeline claims it"). Cheap and probably
   worth doing; listed as a task, called out here because message quality is the
   whole value of the condition.

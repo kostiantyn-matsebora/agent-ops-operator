@@ -46,7 +46,7 @@ Hub left frozen, not deleted); QEMU emulation for `runtime-claude` arm64.
   `~/.envtest` from cache, `setup-envtest use 1.31.x`, then
   `go build ./... && go vet ./... && go test ./...` with `KUBEBUILDER_ASSETS`.
 - `adapters` — matrix over `channel-telegram`, `signal-cron`,
-  `signal-vmalertmanager`; build/vet/test each. Separate from `operator` so an
+  `signal-alertmanager`; build/vet/test each. Separate from `operator` so an
   adapter break is legible without reading the envtest log.
 - `chart` — `helm lint` + `helm template` for default, `demo.enabled=true`, and
   `vm-bundle.enabled=true` (plus the two together), each piped through
@@ -78,7 +78,7 @@ valid forms — a typo'd tag must not silently publish nothing (a `paths`- or
 `if`-filtered job that simply skips is indistinguishable from success).
 
 Components: `manager`, `channel-telegram`, `signal-cron`,
-`signal-vmalertmanager`, `runtime-claude`, `chart`.
+`signal-alertmanager`, `runtime-claude`, `chart`.
 
 Image name: `ghcr.io/kostiantyn-matsebora/agentops-<component>` — preserving
 the existing `agentops-*` names so only the registry prefix changes. Published

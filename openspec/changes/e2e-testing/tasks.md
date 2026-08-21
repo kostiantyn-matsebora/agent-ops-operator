@@ -18,7 +18,7 @@
 - [ ] 3.1 `test/fixtures/`: scrubbed Alertmanager webhook body (firing + resolved)
 - [ ] 3.2 Scrubbed Telegram `Update` fixtures — general-surface message (origination) and topic message (continuation)
 - [ ] 3.3 Scrubbing check: no real chat ids, user ids, usernames, hostnames or tokens in any committed fixture
-- [ ] 3.4 Point `signal-vmalertmanager` and `signal-telegram` unit tests at the canonical fixtures by relative path (test-only read, no `go.mod` change)
+- [ ] 3.4 Point `signal-alertmanager` and `signal-telegram` unit tests at the canonical fixtures by relative path (test-only read, no `go.mod` change)
 
 ## 4. Contract conformance suite
 
@@ -28,7 +28,7 @@
 - [ ] 4.4 Channel set: no relay loop — an outbound post never returns as inbound
 - [ ] 4.5 Signal set: normalized emission, bearer auth, source scoping, rejected post retried or surfaced rather than dropped
 - [ ] 4.6 Signal set: a chat-originating adapter always carries the channel label
-- [ ] 4.7 Run `channel-telegram`, `console`, `signal-cron`, `signal-vmalertmanager`, `signal-telegram`, `signal-k8s-events` through the suite; fix what it finds
+- [ ] 4.7 Run `channel-telegram`, `console`, `signal-cron`, `signal-alertmanager`, `signal-telegram`, `signal-k8s-events` through the suite; fix what it finds
 - [ ] 4.8 Verify no adapter module's `go.mod` changed
 
 ## 5. Stub runtime
