@@ -1,0 +1,13 @@
+flowchart LR
+  SA["source A"] --> IN
+  SB["source B"] --> IN
+  SN["source N"] --> IN
+
+  IN["manager<br/>ingest"] --> CONV
+  CONV[("conversation<br/>the durable record")] --> RUN["agent runtime"]
+  RUN -->|"output"| CONV
+  CONV --> OUT["manager<br/>deliver"]
+
+  OUT -->|"skip: it entered here"| CA["channel A"]
+  OUT -->|"deliver"| CB["channel B"]
+  OUT -->|"deliver"| CN["channel N"]
