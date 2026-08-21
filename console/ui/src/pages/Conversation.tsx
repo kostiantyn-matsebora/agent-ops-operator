@@ -17,6 +17,21 @@ import { Yaml } from '../components/Yaml'
 import { MetadataCard, age } from '../components/Metadata'
 import type { ActivityEvent } from '../api/types'
 
+// speaker names who said something, for a message carrying no sender. The
+// transcript kinds are plumbing vocabulary: `local` means "typed on this
+// console", which is a fact about where a message entered, not a person.
+const SPEAKERS: Record<string, string> = {
+  local: 'user',
+  relay: 'user',
+  agent: 'agent',
+  ack: 'agent-ops',
+  signal: 'signal',
+}
+
+function speaker(kind: string): string {
+  return SPEAKERS[kind] ?? kind
+}
+
 export function ConversationPage() {
   const { name = '' } = useParams()
   const { data, isLoading, error, refetch } = useConversation(name)
@@ -236,9 +251,12 @@ function Transcript({
               messages.map((m) => (
                 <div key={m.id} style={{ marginBottom: 12 }}>
                   <strong>
-                    {/* `sender` is set only for relayed sibling-channel
-                        messages; otherwise the kind names who spoke. */}
-                    <PlainText>{m.sender || m.kind}</PlainText>
+                    {/* `sender` when the speaker is known — a relayed
+                        sibling-channel message, or one this console posted and
+                        can attribute. Otherwise a WORD for who spoke: the kinds
+                        are an internal vocabulary, and `local` printed as a
+                        name reads as though somebody called "local" typed it. */}
+                    <PlainText>{m.sender || speaker(m.kind)}</PlainText>
                   </strong>{' '}
                   <small>{new Date(m.at).toLocaleTimeString()}</small>
                   {m.pending && <Label color="grey">sending…</Label>}

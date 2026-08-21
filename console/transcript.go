@@ -134,6 +134,79 @@ func (t *Transcripts) AppendLocal(id, thread, sender, text string) Message {
 	return msg
 }
 
+// AppendTyped records a message a PERSON typed, read from the conversation's
+// own inputs rather than from an op. Returns false when this input was already
+// recorded — one conversation produces many watch events and the message must
+// render once.
+//
+// NOT pending: unlike AppendLocal there is nothing to confirm. The manager has
+// the input already — that is where this was read from.
+func (t *Transcripts) AppendTyped(inputID, thread, sender, text, at string) bool {
+	t.mu.Lock()
+	if t.seen[inputID] {
+		t.mu.Unlock()
+		return false
+	}
+	t.seen[inputID] = true
+	t.seenRing = append(t.seenRing, inputID)
+	if len(t.seenRing) > 4096 {
+		delete(t.seen, t.seenRing[0])
+		t.seenRing = t.seenRing[1:]
+	}
+	t.mu.Unlock()
+
+	if at == "" {
+		at = nowRFC3339()
+	}
+	// THE INPUT IS NOT A SECOND MESSAGE. A reply typed into this console is
+	// already on screen — `Send` put it there the moment it was typed — and the
+	// input that same text becomes is the DURABLE identity of that bubble, not
+	// another one. Appending it produced the message twice: once attributed to
+	// the sender, once anonymous.
+	//
+	// So adopt the existing bubble when there is one, and keep ITS id: the id is
+	// what the browser renders by, and handing the same text a new one is how
+	// the duplicate would come back through the live stream instead of through
+	// the buffer.
+	if confirmed, ok := t.adoptLocal(thread, text); ok {
+		if confirmed != nil {
+			t.publish(*confirmed)
+		}
+		return true
+	}
+	t.append(Message{ID: inputID, Thread: thread, Kind: MsgLocal, Sender: sender, Text: text, At: at}, false)
+	return true
+}
+
+// adoptLocal marks an already-shown local message as durable, returning it so
+// callers can republish it (the UI drops its "sending…" label).
+//
+// Matched on TEXT within one thread and taken at most once per bubble, so two
+// identical messages adopt two inputs rather than collapsing into one.
+func (t *Transcripts) adoptLocal(thread, text string) (*Message, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	log := t.threads[thread]
+	if log == nil {
+		return nil, false
+	}
+	for i := len(log.messages) - 1; i >= 0; i-- {
+		m := &log.messages[i]
+		if m.Kind != MsgLocal || m.Text != text {
+			continue
+		}
+		if t.seen["adopted:"+m.ID] {
+			continue // this bubble already stands for an input
+		}
+		t.seen["adopted:"+m.ID] = true
+		t.seenRing = append(t.seenRing, "adopted:"+m.ID)
+		m.Pending = false
+		adopted := *m
+		return &adopted, true
+	}
+	return nil, false
+}
+
 // append stores and publishes a message; confirmPending clears the thread's
 // outstanding local messages (an ack or a relay coming back means the manager
 // took them).
