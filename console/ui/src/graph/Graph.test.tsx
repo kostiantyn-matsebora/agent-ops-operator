@@ -167,3 +167,106 @@ describe('Graph', () => {
     expect(screen.getByText('Element classes')).toBeInTheDocument()
   })
 })
+
+// Scoping. Clicking an element narrows the graph to what it is connected to,
+// and the same click that opened its details is the one that closes both.
+describe('scoped view', () => {
+  const nodes = () => screen.getAllByTestId(/^node-/).map((n) => n.getAttribute('data-testid'))
+
+  it('narrows to the clicked element and what it is connected to', async () => {
+    draw()
+    await userEvent.click(screen.getByTestId('node-pipelines/ops'))
+
+    // the strand around the pipeline stays; the unclaimed source is not on it
+    expect(nodes()).toEqual(expect.arrayContaining([
+      'node-pipelines/ops', 'node-signalsources/events',
+      'node-channels/console', 'node-mcptoolsets/admin',
+    ]))
+    expect(screen.queryByTestId('node-signalsources/orphan')).toBeNull()
+    expect(screen.getByTestId('scope-bar')).toHaveTextContent('Scoped to ops')
+  })
+
+  it('reports a failing element it put out of view, separately from hidden classes', async () => {
+    draw()
+    await userEvent.click(screen.getByTestId('node-pipelines/ops'))
+
+    const alert = screen.getByTestId('scope-failing')
+    expect(alert).toHaveTextContent('1 failing element(s) are outside this scope')
+    expect(alert).toHaveTextContent('signalsources')
+  })
+
+  it('does not change the reported health', async () => {
+    draw()
+    await userEvent.click(screen.getByLabelText('hide display panel'))
+    const before = screen.getByText('2 failing').textContent
+
+    await userEvent.click(screen.getByTestId('node-pipelines/ops'))
+    // the orphan is out of scope and still counted
+    expect(screen.getByText('2 failing').textContent).toBe(before)
+  })
+
+  it('narrows further on request and says what the depth cut off', async () => {
+    draw()
+    await userEvent.click(screen.getByTestId('node-channels/console'))
+    // the channel's route: the pipeline that posts to it and that pipeline's
+    // source. The toolset hangs off the pipeline but is not on the channel's
+    // route, so it is not here.
+    expect(nodes().sort()).toEqual([
+      'node-channels/console', 'node-pipelines/ops', 'node-signalsources/events',
+    ])
+
+    await userEvent.click(screen.getByLabelText('1 hop'))
+    expect(nodes().sort()).toEqual(['node-channels/console', 'node-pipelines/ops'])
+    expect(screen.getByTestId('scope-bar')).toHaveTextContent('1 connected beyond this depth')
+  })
+
+  it('offers only the levels the route actually has', async () => {
+    draw()
+    // The channel's route is 2 deep — the pipeline that posts to it, then that
+    // pipeline's source — so exactly one ring sits inside All.
+    await userEvent.click(screen.getByTestId('node-channels/console'))
+    expect(screen.getByLabelText('1 hop')).toBeInTheDocument()
+    expect(screen.queryByLabelText('2 hop')).toBeNull()
+    expect(screen.getByLabelText('all connected')).toBeInTheDocument()
+
+    // The pipeline is the CENTRE of its own route: here everything it binds is
+    // one hop, so there is no ring inside All and no choice to offer.
+    await userEvent.click(screen.getByLabelText('reset scope'))
+    await userEvent.click(screen.getByTestId('node-pipelines/ops'))
+    expect(screen.queryByLabelText('1 hop')).toBeNull()
+  })
+
+  it('offers no level control for an element whose route is only itself', async () => {
+    // A detached source has no route at all. Offering levels over it once threw
+    // RangeError: Invalid array length, which took the whole view down.
+    draw()
+    await userEvent.click(screen.getByTestId('node-signalsources/orphan'))
+    expect(screen.getByTestId('scope-bar')).toBeInTheDocument()
+    expect(screen.queryByLabelText('all connected')).toBeNull()
+    expect(screen.queryByLabelText('1 hop')).toBeNull()
+  })
+
+  it('returns to the whole picture on Reset, and on clicking the focused element again', async () => {
+    draw()
+    await userEvent.click(screen.getByTestId('node-pipelines/ops'))
+    await userEvent.click(screen.getByLabelText('reset scope'))
+    expect(screen.getByTestId('node-signalsources/orphan')).toBeInTheDocument()
+    expect(screen.queryByTestId('scope-bar')).toBeNull()
+
+    await userEvent.click(screen.getByTestId('node-pipelines/ops'))
+    expect(screen.queryByTestId('node-signalsources/orphan')).toBeNull()
+    await userEvent.click(screen.getByTestId('node-pipelines/ops'))
+    expect(screen.getByTestId('node-signalsources/orphan')).toBeInTheDocument()
+  })
+
+  it('opens unscoped, so a scope is never restored as though it were the graph', () => {
+    // The display panel's selections persist on purpose. A scope is a question
+    // asked once, and a page that reopened narrowed would present a filtered
+    // graph as the whole one.
+    const { unmount } = draw()
+    unmount()
+    draw()
+    expect(screen.queryByTestId('scope-bar')).toBeNull()
+    expect(screen.getByTestId('node-signalsources/orphan')).toBeInTheDocument()
+  })
+})

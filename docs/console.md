@@ -118,8 +118,50 @@ The wiring graph with live traffic.
   must not look like one that delivered.
 - An edge with no events is **visibly idle**, which is a different statement from
   absent.
+- **Every graph fits its viewing area and centres in it** when first displayed —
+  including one rendered inside a tab that was not the open one. It re-fits when
+  the area resizes, and stops once you pan or zoom, so an automatic fit never
+  overrules a view you chose.
 - Unclaimed sources render **detached** with their `Wired=False` reason; dangling
   refs render as broken edges to placeholder nodes.
+
+#### Scoped view
+
+Selecting an element narrows the graph to that element and everything connected
+to it, and names what it is scoped to. Past a handful of pipelines the whole
+picture is the wrong picture, and tracing one channel's edges by eye is what
+this replaces.
+
+- **The scope is the ROUTE THROUGH the element** — everything upstream of it and
+  everything downstream. Both directions, so a channel scopes to every pipeline
+  that posts to it, not only to its adapter.
+- **A route never turns around.** This system shares objects on purpose: one
+  AgentRuntime per install, one Channel receiving from several pipelines. Walking
+  the wiring as if it were undirected turns each of those into a shortcut — on a
+  30-node install that put the Home Assistant toolsets 3 hops from a Kubernetes
+  pipeline, and made every depth show almost the whole graph.
+- **Routes run with the FLOW**, which is not always how an edge is drawn. A
+  signal adapter feeds its source, a channel adapter is fed by its channel, and
+  `served-by` is drawn from the served CR to the adapter in both cases.
+- **Depth defaults to `all`**, and the control offers only the levels a route
+  actually has. A Pipeline is the centre of its own route — its sources, profile,
+  toolsets, MCP configs and channels are all one hop — so it gets one ring and
+  `All`, while a signal adapter at the head of a long route gets more. An
+  element with no route gets no control.
+- **Scoping a heavily shared element returns most of its route.** A source three
+  pipelines claim reaches all three, and that is the true answer for it.
+- **Reachability is computed over what is VISIBLE.** A class hidden by the
+  Display panel is not a stepping stone between two elements you cannot see, so
+  hiding a class can split a component and shrink a scope.
+- **Reset** returns the whole graph, and so does selecting the focused element
+  again.
+- **The scope is not persisted.** Display panel selections survive reload because
+  they are a standing preference. A scope is a question asked once, and a page
+  that reopened narrowed would present a filtered graph as the whole one.
+
+Out-of-scope elements are reported **separately** from Display panel hidden ones,
+and a failing one is named by class. A scope is a filter, and answers to the same
+rule: it may simplify the picture, never conceal a broken component.
 
 #### The Display panel
 

@@ -374,14 +374,28 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
-    # 0.15.9 renders the message a PERSON typed. The manager posts an input to a
-    # thread only when the person has not already seen it, which is right for a
-    # transport and wrong for a VIEWER: a conversation started from the composer
-    # showed a transcript beginning at the agent's answer, with the question
-    # that caused it missing. It reads as TYPED (an addressed task reaches the
-    # conversation with its address consumed), carries the starter's identity,
-    # and ADOPTS the bubble a reply already has rather than showing it twice.
-    tag: 0.15.9
+    # 0.15.13 scopes the graph to what you clicked, and fixes a graph that
+    # rendered tiny in a corner. Selecting an element narrows the picture to the
+    # ROUTE THROUGH IT — everything upstream and everything downstream, to a
+    # depth defaulting to all. The route may not turn around: this system shares
+    # objects on purpose (one runtime per install, one channel per several
+    # pipelines), and an undirected walk turns each into a shortcut. Measured
+    # live, that put the Home Assistant toolsets 3 hops from a Kubernetes
+    # pipeline and made every depth show the whole graph.
+    # Routes are oriented by FLOW, not by how an edge is drawn: `served-by`
+    # points from the served CR to its adapter for both kinds, but a signal
+    # adapter FEEDS its source while a channel adapter delivers outward. Taken
+    # as drawn, every signal adapter was a dead end scoping to two nodes.
+    # The depth control offers only the levels a route actually HAS. A Pipeline
+    # is the centre of its own route — sources, profile, toolsets, configs and
+    # channels are all one hop — so four buttons there gave two pictures and
+    # read as broken. A route one hop deep offers no choice and no control.
+    # A scope reports what it put out of view on the same terms class hiding
+    # does, so it can simplify without concealing a failure.
+    # The corner: a graph inside an inactive tab measured a 0x0 host, fitted to
+    # it, and clamped to minimum zoom for good. The fit now waits for a host
+    # with a size, so it works in a tab, a drawer, or wherever one lands next.
+    tag: 0.15.13
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:

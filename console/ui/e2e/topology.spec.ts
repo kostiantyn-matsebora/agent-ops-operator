@@ -129,3 +129,61 @@ test('the graph animates exactly the edges the events name, and hiding a class k
   await page.reload()
   await expect(page.getByTestId('node-mcptoolsets/admin')).toHaveCount(1)
 })
+
+// Scoping, and the fit — both about geometry, which is what this file is for.
+//
+// The unit suite pins the MECHANISM of the fit (a host with no size defers its
+// fit until it has one). This pins the OUTCOME: a real graph, laid out by a real
+// browser, ends up scaled to its viewport and centred in it. jsdom reports every
+// element as 0x0, so it can never tell those apart.
+test('scoping narrows the graph to what an element is connected to, and the graph fits its viewport', async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.goto('/topology')
+  await page.getByTestId('node-pipelines/ops').waitFor()
+
+  // Bring the capability layer back first. The failing toolset starts folded
+  // away, and an element the display panel is already hiding is not one the
+  // SCOPE put out of view — those are two different statements, and this test
+  // is about the second.
+  await page.getByLabel('Toolsets').click()
+  await expect(page.getByTestId('node-mcptoolsets/admin')).toHaveCount(1)
+
+  const nodes = () => page.locator('[data-testid^="node-"]').count()
+  const whole = await nodes()
+
+  // The toolset hangs off the pipeline, so scoping the CHANNEL at one hop must
+  // leave it out — and must still bring in the pipeline that posts to it, which
+  // is upstream. Following edges forward only would scope a channel to nothing.
+  await page.getByTestId('node-channels/console').click()
+  await page.getByTestId('scope-bar').waitFor()
+  await expect(page.getByTestId('scope-bar')).toContainText('Scoped to console')
+
+  await page.getByLabel('1 hop').click()
+  await expect(page.getByTestId('node-pipelines/ops')).toBeVisible()
+  await expect(page.getByTestId('node-mcptoolsets/admin')).toHaveCount(0)
+
+  // A failing element put out of view is named, not silently dropped.
+  await expect(page.getByTestId('scope-failing')).toContainText('mcptoolsets')
+
+  await page.getByLabel('reset scope').click()
+  expect(await nodes()).toBe(whole)
+  await expect(page.getByTestId('scope-bar')).toHaveCount(0)
+
+  // Scaled to the area and centred in it.
+  const fit = await page.evaluate(() => {
+    const host = document.querySelector('[data-testid="graph-viewport"]') as HTMLElement
+    const canvas = document.querySelector('[data-testid="graph-canvas"]') as SVGGElement
+    const h = host.getBoundingClientRect()
+    const c = canvas.getBoundingClientRect()
+    return {
+      fillsWidth: c.width > h.width * 0.4,
+      dx: Math.abs((c.left - h.left) - (h.right - c.right)),
+      dy: Math.abs((c.top - h.top) - (h.bottom - c.bottom)),
+    }
+  })
+  expect(fit.fillsWidth).toBe(true)
+  expect(fit.dx).toBeLessThanOrEqual(4)
+  expect(fit.dy).toBeLessThanOrEqual(4)
+})

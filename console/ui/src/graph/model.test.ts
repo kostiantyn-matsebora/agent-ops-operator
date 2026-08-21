@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { GraphEdge, Topology } from '../api/types'
-import { animationDuration, edgeLabel, edgeTone, liveEdgeIds, visibleGraph } from './model'
+import type { GraphEdge, GraphNode, Topology } from '../api/types'
+import { animationDuration, edgeId, edgeLabel, edgeTone, liveEdgeIds, scopedGraph, visibleGraph } from './model'
 
 const topo: Topology = {
   eventNodeKinds: {
@@ -168,5 +168,105 @@ describe('liveEdgeIds', () => {
       topo.edges,
     )
     expect(ids.size).toBe(0)
+  })
+})
+
+// A scope is another filter, so it answers to the same rule the display panel
+// does: it may simplify the picture, never conceal a broken component.
+describe('scopedGraph', () => {
+  // adapter — source — pipeline — channel, plus a toolset off the pipeline and
+  // a second pipeline sharing the channel. Two components: the strand above,
+  // and an unclaimed source that nothing joins.
+  const nodes: GraphNode[] = [
+    { id: 'signaladapters/k8s', kind: 'signaladapters', name: 'k8s', health: 'ok', active: 0, recent: 0 },
+    { id: 'signalsources/events', kind: 'signalsources', name: 'events', health: 'ok', active: 0, recent: 0 },
+    { id: 'pipelines/ops', kind: 'pipelines', name: 'ops', health: 'ok', active: 0, recent: 0 },
+    { id: 'pipelines/alerts', kind: 'pipelines', name: 'alerts', health: 'ok', active: 0, recent: 0 },
+    { id: 'channels/console', kind: 'channels', name: 'console', health: 'ok', active: 0, recent: 0 },
+    { id: 'mcptoolsets/admin', kind: 'mcptoolsets', name: 'admin', health: 'bad', active: 0, recent: 0 },
+    { id: 'signalsources/orphan', kind: 'signalsources', name: 'orphan', health: 'bad', active: 0, recent: 0 },
+  ]
+  const edges: GraphEdge[] = [
+    // AS THE BFF EMITS IT: the served CR points at its adapter. Writing this the
+    // intuitive way round is what let the adapter defect through — the fixture
+    // agreed with the code instead of with the cluster.
+    { from: 'signalsources/events', to: 'signaladapters/k8s', kind: 'served-by' },
+    { from: 'signalsources/events', to: 'pipelines/ops', kind: 'feeds' },
+    { from: 'pipelines/ops', to: 'channels/console', kind: 'posts' },
+    { from: 'pipelines/ops', to: 'mcptoolsets/admin', kind: 'uses' },
+    { from: 'pipelines/alerts', to: 'channels/console', kind: 'posts' },
+  ]
+  const ids = (r: { nodes: GraphNode[] }) => r.nodes.map((n) => n.id).sort()
+
+  it('scopes to the whole ROUTE through the element, not to whatever it can be walked to', () => {
+    const r = scopedGraph(nodes, edges, { id: 'pipelines/ops', depth: 'all' })
+    expect(ids(r)).toEqual([
+      'channels/console', 'mcptoolsets/admin',
+      'pipelines/ops', 'signaladapters/k8s', 'signalsources/events',
+    ])
+    // pipelines/alerts posts to the SAME channel, and that is the whole point:
+    // a shared object must not become a shortcut between two routes that have
+    // nothing to do with each other. Undirected traversal pulled it in.
+    expect(ids(r)).not.toContain('pipelines/alerts')
+  })
+
+  it('runs UPSTREAM as well as downstream', () => {
+    // A channel reaches nothing downstream. Scoping it must still answer which
+    // pipelines post to it, or the scope is useless on half the graph — and
+    // both of them are ancestors, so both belong.
+    const r = scopedGraph(nodes, edges, { id: 'channels/console', depth: 1 })
+    expect(ids(r)).toEqual(['channels/console', 'pipelines/alerts', 'pipelines/ops'])
+  })
+
+  it('cuts by hop distance, not by discovery order', () => {
+    const r = scopedGraph(nodes, edges, { id: 'pipelines/ops', depth: 1 })
+    expect(ids(r)).toEqual([
+      'channels/console', 'mcptoolsets/admin', 'pipelines/ops', 'signalsources/events',
+    ])
+    // the adapter is 2 hops upstream: on the route, but beyond this depth, and
+    // reported as such rather than simply absent
+    expect(r.beyondDepth).toBe(1)
+  })
+
+  it('keeps every edge whose ends both survive, and drops the rest', () => {
+    const r = scopedGraph(nodes, edges, { id: 'signalsources/events', depth: 1 })
+    expect(r.edges.map(edgeId).sort()).toEqual([
+      'signalsources/events->pipelines/ops',
+      'signalsources/events->signaladapters/k8s',
+    ])
+  })
+
+  it('names the class of a failing element it put out of view', () => {
+    const r = scopedGraph(nodes, edges, { id: 'channels/console', depth: 1 })
+    expect(r.outOfScope.failing).toBe(2)
+    expect(r.outOfScope.classes).toEqual(['mcptoolsets', 'signalsources'])
+  })
+
+  it('puts a signal adapter at the HEAD of its route, not at a dead end', () => {
+    // The adapter feeds the source, so everything the source feeds is
+    // downstream of the adapter — even though the edge is drawn the other way.
+    const r = scopedGraph(nodes, edges, { id: 'signaladapters/k8s', depth: 'all' })
+    expect(ids(r)).toEqual([
+      'channels/console', 'mcptoolsets/admin', 'pipelines/ops',
+      'signaladapters/k8s', 'signalsources/events',
+    ])
+  })
+
+  it('keeps a channel adapter at the TAIL, where the flow already points', () => {
+    const r = scopedGraph(nodes, edges, { id: 'channels/console', depth: 1 })
+    expect(ids(r)).toEqual(['channels/console', 'pipelines/alerts', 'pipelines/ops'])
+  })
+
+  it('leaves the whole graph alone when there is no scope', () => {
+    const r = scopedGraph(nodes, edges, undefined)
+    expect(r.nodes).toHaveLength(nodes.length)
+    expect(r.outOfScope.count).toBe(0)
+  })
+
+  it('falls back to the whole graph when the focused id is not on it', () => {
+    // A node can vanish under the operator — hide its class while it is
+    // focused — and an empty canvas would present that as the answer.
+    const r = scopedGraph(nodes, edges, { id: 'pipelines/gone', depth: 'all' })
+    expect(r.nodes).toHaveLength(nodes.length)
   })
 })

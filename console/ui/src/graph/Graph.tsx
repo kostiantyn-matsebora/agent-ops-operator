@@ -1,10 +1,17 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { Alert, Button, Label, LabelGroup, Split, SplitItem, Stack, StackItem } from '@patternfly/react-core'
+import {
+  Alert, Button, Label, LabelGroup, Split, SplitItem, Stack, StackItem, ToggleGroup,
+  ToggleGroupItem,
+} from '@patternfly/react-core'
 import type { ActivityEvent, GraphEdge, Topology } from '../api/types'
 import { useDisplay } from './display'
-import { animationDuration, edgeId, edgeLabel, edgeTone, liveEdgeIds, visibleGraph } from './model'
+import {
+  animationDuration, edgeId, edgeLabel, edgeTone, liveEdgeIds, scopedGraph, visibleGraph,
+  type ScopeDepth,
+} from './model'
 import { DisplayPanel } from './DisplayPanel'
 import { NodeDetails } from './NodeDetails'
+import { PlainText } from '../components/Text'
 import { Viewport } from './Viewport'
 import { anchors, layout, type PlacedNode } from './layout'
 import { Glyph, NODE_H, NODE_W, shapeDecoration, shapePath, styleFor } from './shapes'
@@ -35,19 +42,39 @@ export interface GraphProps {
 
 export function Graph({ topology, liveEvents, renderNodeExtras, emptyMessage }: GraphProps) {
   const { hidden, animate, showIdle, edgeLabels, panelOpen, setPanelOpen } = useDisplay()
+  // The selected node IS the scope. One click answers "what is this" and "what
+  // is it connected to" together, and clicking it again already meant "never
+  // mind" — so that gesture is also the way back to the whole picture.
   const [selected, setSelected] = useState<string | undefined>()
+  // Kept across re-scoping: stepping from one element to its neighbour is
+  // exploring at a chosen depth, not starting again.
+  const [depth, setDepth] = useState<ScopeDepth>('all')
 
   const view = useMemo(() => visibleGraph(topology, hidden, showIdle), [topology, hidden, showIdle])
-  const placedLayout = useMemo(() => layout(view.nodes), [view.nodes])
+  // Class hiding first, scope second: reachability is computed over what the
+  // operator can SEE, so a hidden class never joins two nodes as an invisible
+  // stepping stone.
+  const scoped = useMemo(
+    () => scopedGraph(view.nodes, view.edges, selected ? { id: selected, depth } : undefined),
+    [view.nodes, view.edges, selected, depth],
+  )
+  const placedLayout = useMemo(() => layout(scoped.nodes), [scoped.nodes])
   const byId = useMemo(
     () => new Map(placedLayout.nodes.map((n) => [n.id, n])),
     [placedLayout.nodes],
   )
   const live = useMemo(
-    () => liveEdgeIds(liveEvents, topology.eventNodeKinds ?? {}, view.edges),
-    [liveEvents, topology.eventNodeKinds, view.edges],
+    () => liveEdgeIds(liveEvents, topology.eventNodeKinds ?? {}, scoped.edges),
+    [liveEvents, topology.eventNodeKinds, scoped.edges],
   )
   const selectedNode = placedLayout.nodes.find((n) => n.id === selected)
+  const scopedName = view.nodes.find((n) => n.id === selected)?.name
+  // Rings strictly INSIDE the route, then All. Empty when the route is a single
+  // hop or less, which includes a detached element whose route is only itself.
+  const levels = useMemo<ScopeDepth[]>(() => {
+    const rings = Math.max(0, Math.min(scoped.maxDepth - 1, 3))
+    return rings === 0 ? [] : [...Array(rings)].map((_, i) => i + 1 as ScopeDepth).concat('all')
+  }, [scoped.maxDepth])
   // Re-fit when the SET of nodes changes, not on every traffic refresh — a
   // viewport that snapped back every ten seconds would be unusable.
   const fitKey = useMemo(() => placedLayout.nodes.map((n) => n.id).join('|'), [placedLayout.nodes])
@@ -85,6 +112,81 @@ export function Graph({ topology, liveEvents, renderNodeExtras, emptyMessage }: 
               )}
             </Split>
           </StackItem>
+          {selected && (
+            <StackItem>
+              {/* A narrowed graph must never be mistaken for a small install,
+                  so the bar names what it is scoped to and how far it reaches. */}
+              <Split hasGutter style={{ alignItems: 'center' }} data-testid="scope-bar">
+                <SplitItem>
+                  <Label color="blue" isCompact>
+                    Scoped to <PlainText>{scopedName ?? selected}</PlainText>
+                  </Label>
+                </SplitItem>
+                <SplitItem>
+                  {/* Only the levels that EXIST for this element. A level at or
+                      past the end of the route is the same picture as All, and a
+                      button that changes nothing reads as a broken control
+                      rather than as a short route. A route one hop deep — or a
+                      detached element, whose route is only itself — offers no
+                      choice at all, so the control goes away. */}
+                  {levels.length > 0 && (
+                    <ToggleGroup aria-label="scope depth">
+                      {levels.map((d) => (
+                        <ToggleGroupItem
+                          key={String(d)}
+                          text={d === 'all' ? 'All' : String(d)}
+                          aria-label={d === 'all' ? 'all connected' : `${d} hop`}
+                          isSelected={
+                            d === 'all'
+                              ? depth === 'all'
+                                || (typeof depth === 'number' && depth >= scoped.maxDepth)
+                              : depth === d
+                          }
+                          onChange={() => setDepth(d)}
+                        />
+                      ))}
+                    </ToggleGroup>
+                  )}
+                </SplitItem>
+                {scoped.beyondDepth > 0 && (
+                  <SplitItem>
+                    <Label isCompact color="grey">
+                      {scoped.beyondDepth} connected beyond this depth
+                    </Label>
+                  </SplitItem>
+                )}
+                <SplitItem>
+                  {/* "Reset scope", not "Reset": the Display panel carries a
+                      "Reset display" beside it, and two buttons a screen reader
+                      announces as Reset on one screen name nothing. */}
+                  <Button
+                    variant="link"
+                    isInline
+                    onClick={() => setSelected(undefined)}
+                    aria-label="reset scope"
+                  >
+                    Reset scope
+                  </Button>
+                </SplitItem>
+              </Split>
+            </StackItem>
+          )}
+          {scoped.outOfScope.failing > 0 && (
+            <StackItem>
+              {/* Reported SEPARATELY from the display panel's own hidden count.
+                  "I hid that class" and "that is outside what I am looking at"
+                  are different statements, and one number would answer neither. */}
+              <Alert
+                variant="warning"
+                isInline
+                title={`${scoped.outOfScope.failing} failing element(s) are outside this scope`}
+                data-testid="scope-failing"
+              >
+                Out-of-scope classes with failures: {scoped.outOfScope.classes.join(', ')}. They
+                still count in the health summary and the overview rollup.
+              </Alert>
+            </StackItem>
+          )}
           {view.hiddenSummary.failing > 0 && (
             <StackItem>
               {/* A filter that could conceal a broken component without saying
@@ -164,7 +266,7 @@ export function Graph({ topology, liveEvents, renderNodeExtras, emptyMessage }: 
                   </g>
                 ))}
 
-                {view.edges.map((e) => (
+                {scoped.edges.map((e) => (
                   <EdgeShape
                     key={edgeId(e)}
                     edge={e}
