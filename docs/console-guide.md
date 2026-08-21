@@ -48,7 +48,8 @@ Six views, one question each.
 - **Topology** — What is moving between components?
 
   The whole install as a graph, in four lanes: where signals enter, what claims
-  them, who answers, and where answers go.
+  them, who answers, and where answers go. Click any element to narrow the graph
+  to **what it is connected to**.
 
   ![Signal adapters and sources on the left, then three pipelines, the profiles and runtimes that execute them, and the channels the answers reach, with traffic rates on the edges between them.]({{ '/assets/img/console/topology-light.png' | relative_url }})
 

@@ -72,6 +72,159 @@ export function visibleGraph(
  * the floor a busy edge would strobe unreadably, above the ceiling a trickle
  * would look stopped, and "stopped" already means something else here.
  */
+/** How far a scope reaches: a number of hops, or the whole connected component. */
+export type ScopeDepth = number | 'all'
+
+export interface Scope {
+  /** The node the graph is scoped to. */
+  id: string
+  depth: ScopeDepth
+}
+
+export interface ScopedGraph {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  /** What the scope removed, in the same shape the display panel's filter reports. */
+  outOfScope: HiddenSummary
+  /** Connected to the focused node but beyond the current depth. */
+  beyondDepth: number
+  /**
+   * The furthest hop on the route. It is what the depth control offers: a
+   * Pipeline sits at the CENTRE of its own route — sources, profile, toolsets,
+   * MCP configs and channels are all one hop, and only the runtime and the
+   * adapters are two — so offering four levels there gives four buttons and two
+   * pictures, which reads as broken rather than as shallow.
+   */
+  maxDepth: number
+}
+
+/**
+ * scopedGraph narrows a visible graph to one node and what it is connected to.
+ *
+ * THE SCOPE IS THE ROUTE THROUGH THE NODE: everything UPSTREAM of it plus
+ * everything DOWNSTREAM of it. Both directions, because a scope answers "what is
+ * this part of" as much as "what does this reach" — following edges forward only
+ * would scope a channel to nothing, which is the opposite of the question.
+ *
+ * But a path may not TURN AROUND. Undirected traversal was tried and is wrong,
+ * and only a real install shows why: agent-ops shares objects on purpose — one
+ * AgentRuntime serves every profile, one Channel receives from every pipeline —
+ * so an undirected walk uses them as shortcuts between things that have nothing
+ * to do with each other. Measured on a 30-node install, `k8s-ops` reached 29 of
+ * 30 nodes and the Home Assistant toolsets sat 3 hops away, via the console
+ * channel. By route it reaches 15, and no `ha-*` at all. A hop count is only a
+ * proxy for "related" in a graph without hubs, and this graph is all hubs.
+ *
+ * Down and up are computed SEPARATELY and unioned, so a node's distance is its
+ * distance along whichever route reaches it. The focused node's own direction is
+ * never mixed mid-path.
+ *
+ * It runs over the ALREADY-VISIBLE graph, so a class the display panel is
+ * hiding never acts as an invisible stepping stone joining two nodes the
+ * operator cannot see. Hiding a class can therefore split a component and
+ * shrink a scope — which is the honest reading of "connected to what I am
+ * looking at".
+ *
+ * A scope is a filter, so it reports what it removed on the same terms class
+ * hiding does: an out-of-scope node that is FAILING is counted and its class
+ * named. Health totals are computed elsewhere, over the whole topology, and are
+ * not affected by scoping at all.
+ */
+export function scopedGraph(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  scope: Scope | undefined,
+): ScopedGraph {
+  const none: ScopedGraph = {
+    nodes,
+    edges,
+    outOfScope: { count: 0, failing: 0, classes: [] },
+    beyondDepth: 0,
+    maxDepth: 0,
+  }
+  // An id that is not on the graph scopes to nothing, which would present an
+  // empty canvas as the answer. The whole graph is the truthful fallback.
+  if (!scope || !nodes.some((n) => n.id === scope.id)) return none
+
+  const downstream = new Map<string, string[]>()
+  const upstream = new Map<string, string[]>()
+  const join = (m: Map<string, string[]>, a: string, b: string) => {
+    const list = m.get(a)
+    if (list) list.push(b)
+    else m.set(a, [b])
+  }
+
+  // ORIENTED BY FLOW, which is not always how the edge is DRAWN.
+  //
+  // `served-by` runs from the served CR to its adapter for both kinds, and reads
+  // correctly either way round — "this source is served by that adapter". But
+  // the two adapter kinds sit at OPPOSITE ends of the flow: a channel adapter
+  // delivers outward, so channel → adapter is already the direction work moves,
+  // while a signal adapter FEEDS its source, so source → adapter is drawn
+  // against it. Left as drawn, every signal adapter is a dead end and scopes to
+  // itself plus its source — two nodes, on an install where the same adapter is
+  // on the route of twenty-three.
+  const kindOf = new Map(nodes.map((n) => [n.id, n.kind]))
+  for (const e of edges) {
+    const flip = kindOf.get(e.to) === 'signaladapters'
+    const from = flip ? e.to : e.from
+    const to = flip ? e.from : e.to
+    join(downstream, from, to)
+    join(upstream, to, from)
+  }
+
+  // Breadth-first, recording the hop at which each node is FIRST reached, so a
+  // depth limit cuts by distance rather than by discovery order.
+  const walk = (adjacency: Map<string, string[]>): Map<string, number> => {
+    const seen = new Map<string, number>([[scope.id, 0]])
+    let frontier = [scope.id]
+    while (frontier.length > 0) {
+      const next: string[] = []
+      for (const id of frontier) {
+        for (const to of adjacency.get(id) ?? []) {
+          if (seen.has(to)) continue
+          seen.set(to, (seen.get(id) ?? 0) + 1)
+          next.push(to)
+        }
+      }
+      frontier = next
+    }
+    return seen
+  }
+
+  // The nearer of the two routes wins, so a node reachable both ways is placed
+  // at its shortest honest distance.
+  const hop = walk(downstream)
+  for (const [id, d] of walk(upstream)) {
+    const had = hop.get(id)
+    if (had === undefined || d < had) hop.set(id, d)
+  }
+
+  const within = (id: string): boolean => {
+    const d = hop.get(id)
+    return d !== undefined && (scope.depth === 'all' || d <= scope.depth)
+  }
+
+  const kept = nodes.filter((n) => within(n.id))
+  const keptIds = new Set(kept.map((n) => n.id))
+  const removed = nodes.filter((n) => !keptIds.has(n.id))
+  const failingClasses = new Set(removed.filter((n) => n.health === 'bad').map((n) => n.kind))
+
+  return {
+    nodes: kept,
+    edges: edges.filter((e) => keptIds.has(e.from) && keptIds.has(e.to)),
+    outOfScope: {
+      count: removed.length,
+      failing: removed.filter((n) => n.health === 'bad').length,
+      classes: [...failingClasses].sort(),
+    },
+    // Connected, but cut off by the depth limit rather than by not being
+    // connected at all — two different reasons to be missing.
+    beyondDepth: removed.filter((n) => hop.has(n.id)).length,
+    maxDepth: Math.max(0, ...nodes.filter((n) => hop.has(n.id)).map((n) => hop.get(n.id) ?? 0)),
+  }
+}
+
 export function animationDuration(ratePerMin: number): number {
   if (ratePerMin <= 0) return 0
   const seconds = 6 / Math.max(ratePerMin, 0.1)
