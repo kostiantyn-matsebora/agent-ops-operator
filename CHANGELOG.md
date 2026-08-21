@@ -8,6 +8,29 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### prometheus-bundle gets its network policies — chart 5.24.0
+
+Its metrics MCP server was the third one, and the last unprotected: it
+authenticates nobody, so any pod in the cluster could query the whole metrics
+backend through it. `global.agentops.networkPolicy.enabled` now restricts it to
+runtime pods, like the other two.
+
+The webhook adapter is restricted only once you name the sender:
+
+    prometheus-bundle.alertmanager.webhookFrom:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: monitoring
+
+**Empty leaves it reachable on purpose.** A policy that selects the adapter and
+names nobody denies the alert lane, silently, and that is discovered during an
+incident. Under-restricting is the recoverable mistake here.
+
+Its MCP server also moves to an exec probe over loopback, for the reason the
+Kubernetes one did: the kubelet probes from the node, no policy peer can name a
+node, and this server is reached on the port it serves on — so the probe cannot
+be opened without undoing the restriction.
+
 ### The Alertmanager adapter drops its vendor name — chart 5.24.0
 
 `signal-vmalertmanager/` is now **`signal-alertmanager/`**, and its image is
