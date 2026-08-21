@@ -499,6 +499,12 @@ func (a *API) handleStart(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Remembered BEFORE posting: the conversation can exist before this call
+	// returns, and a hint that arrives after the input has been rendered is a
+	// hint that did nothing.
+	if a.typedInputs != nil {
+		a.typedInputs.RememberOrigination(strings.TrimSpace(in.Task), Identity(r))
+	}
 	reason, err := a.originator.Start(r.Context(), a.adapter.PrimaryChannel(), Identity(r),
 		a.adapter.ReaderKey(Identity(r)), in.Task)
 	if err != nil {

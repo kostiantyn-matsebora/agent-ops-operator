@@ -50,9 +50,11 @@ func main() {
 	adapter := NewAdapter(mgr, cache, transcripts, cfg.AdapterName)
 	activity := NewActivityWindow(mgr, 5000)
 	originator := NewOriginator(cfg.ManagerURL, cfg.SignalAdapterToken, cfg.SignalSourceName)
+	typedInputs := NewTypedInputs(cache, transcripts, adapter)
 	api := NewAPI(APIDeps{
 		Cache: cache, Transcripts: transcripts, Adapter: adapter, Activity: activity,
 		Manager: mgr, Originator: originator, Metrics: NewMetricsClient(cfg.MetricsURL), Config: cfg,
+		TypedInputs: typedInputs,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -70,6 +72,11 @@ func main() {
 
 	go cache.Run(ctx)
 	go adapter.Run(ctx)
+	// Renders what people typed. The manager does not post those to threads —
+	// on a transport the sender already sees their own message — but a VIEWER
+	// has to be told, or a conversation's transcript starts at the answer with
+	// the question missing.
+	go typedInputs.Run(ctx)
 	go activity.Run(ctx)
 
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: api.Handler(UIHandler()), ReadHeaderTimeout: 10 * time.Second}

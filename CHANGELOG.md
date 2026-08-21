@@ -8,6 +8,59 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### The console renders the message you typed — console 0.15.9
+
+**No action on upgrade.** Bump the console image tag (the chart default moves
+with it). Nothing else changes.
+
+A conversation started from the composer showed a transcript that began at the
+**agent's answer**, with the question that caused it missing. Typing into an
+already-open conversation was fine — only the opening message vanished.
+
+**Cause.** The manager posts an input to a conversation's bound threads only
+when the person has not already seen it: an alert gets a signal card, and a
+message somebody typed gets nothing, because posting it back would be an echo on
+the surface it was typed on.
+
+That rule is right for a transport and wrong for a **viewer**. A Telegram user's
+own message is already in their thread, put there by Telegram. A console user's
+is not — the console renders a thread from what it was SENT, so an input nobody
+sends it is an input nobody can read. The input is then pruned once processed,
+so nothing could recover it afterwards.
+
+**Fix, console-side only.** The console now watches conversations and records
+what people typed into its own transcript buffer, keyed on the input id so the
+many watch events one conversation produces render it once. The set is read off
+the manager's own rule rather than guessed: an input the manager will not post
+BECAUSE THE PERSON TYPED IT is exactly the input the console must render itself
+(`origin.kind = channel`, and `origin.kind = signal` with `signalKind = chat`).
+
+An input with **no** origin predates provenance and is skipped, for the reason
+the manager skips it: it cannot be told from an alert, and inventing the wrong
+bubble is worse than a missing one.
+
+Three things the first cut got wrong, fixed before it was called done:
+
+- **It read as TYPED.** An addressed task (`/ha-control turn the AC on`) reaches
+  the conversation as the REST — the manager consumed the address deciding who
+  answers — so the stored payload starts mid-sentence. The console posted the
+  whole thing and is the only component that still has it.
+- **It carries the starter's identity.** The input records provenance, not
+  authorship, so without this the opening message read `local` while the reply
+  below it read your address: one thread naming one person two ways.
+- **A reply is not duplicated.** Typing into an open conversation already puts
+  the message on screen, and the input it becomes is the DURABLE IDENTITY of
+  that bubble rather than a second one. It is adopted, keeping its id — handing
+  the same text a new id is how the duplicate would come back through the live
+  stream instead of through the buffer.
+
+The UI also stopped printing `local` as a speaker's name. The transcript kinds
+are plumbing vocabulary: `local` means "typed on this console", which is a fact
+about where a message entered, not a person.
+
+Unchanged: alerts keep their manager-posted card, and a console restart still
+loses what was never CR state.
+
 ### The Home Assistant bundle, and a rule about bundle wiring — chart 5.22.0
 
 **No action on upgrade.** Nothing new is on by default. `ha-bundle.enabled`
