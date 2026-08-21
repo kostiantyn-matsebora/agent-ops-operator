@@ -1,0 +1,120 @@
+{{- $np := (.Values.global.agentops).networkPolicy | default dict }}
+{{- if $np.enabled }}
+{{/*
+  WHO MAY REACH WHAT.
+
+  One policy per component, NOT a namespace-wide default-deny. Selecting a pod
+  with any ingress policy already denies everything the policy does not list, so
+  per-component policies give the same closure without touching workloads this
+  chart did not deploy — an oauth2-proxy or anything else sharing the namespace
+  keeps working, which a blanket deny would break on the release that added it.
+
+  Egress is NOT restricted. Runtime pods need the LLM API, git and package
+  registries, and a policy that guessed at those would fail in ways an adopter
+  cannot debug from here.
+
+  THIS ENFORCES NOTHING WITHOUT A CNI THAT IMPLEMENTS POLICY. See NOTES.txt.
+*/}}
+{{- $ns := .Release.Namespace }}
+---
+# The manager's API. Its work contract requires no credential, so until this
+# exists any pod in the cluster can steal a queued work unit or forge an answer.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentops-manager
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: agentops-manager
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agentops-manager
+  policyTypes: [Ingress]
+  ingress:
+    # The callers the wiring implies: runtime pods asking for work, and the
+    # adapters serving channels and signals.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-runtime
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-adapter
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-signal-adapter
+        {{- with $np.extraIngress }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    # THE KUBELET'S PROBES, from the node — which no podSelector or
+    # namespaceSelector can express, because the node is not a pod.
+    #
+    # This rule has no `from` on purpose. Omitting it does not merely lose
+    # monitoring: liveness starts failing, the kubelet restarts the manager, and
+    # the install enters a crash loop caused entirely by the policy meant to
+    # protect it. That is what happened the first time this shipped.
+    #
+    # The port serves /healthz and /readyz and nothing else, so leaving it open
+    # to the pod network costs nothing an attacker can use.
+    - ports:
+        - protocol: TCP
+          port: 8081
+    {{- with $np.metricsFrom }}
+    # Metrics. Named separately because a collector lives in another namespace
+    # and enabling policy without naming it silences monitoring quietly.
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: 9090
+    {{- end }}
+{{- if .Values.console }}{{- if .Values.console.enabled }}
+---
+# The console. Its authenticating proxy sits at the INGRESS, so a pod reaching
+# this Service directly has always bypassed it — the reason NOTES.txt has warned
+# about this since the console shipped. This is that warning, enforced.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentops-console
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels:
+      # The pod label carries the ADAPTER's name, which is `console.name` —
+      # never `console.channelName`, which names the Channel and defaults to
+      # empty. The two agree by default, so getting it wrong selects nothing and
+      # leaves the console unrestricted while looking correct.
+      agentops.dev/adapter: {{ .Values.console.name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # Its own namespace covers an authenticating proxy deployed beside it.
+        - podSelector: {}
+        {{- with $np.consoleFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.console.port }}
+{{- end }}{{- end }}
+---
+# Runtime pods accept nothing. They are clients of everything and a server to
+# no one, so an empty ingress list is the whole policy — and it is what stops a
+# compromised pod being reachable from elsewhere in the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentops-runtime
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agentops-runtime
+  policyTypes: [Ingress]
+  ingress: []
+{{- end }}

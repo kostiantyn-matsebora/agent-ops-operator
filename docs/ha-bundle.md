@@ -304,6 +304,19 @@ That is two walls rather than one. The everyday agent cannot reach configuration
 even if its allowlist were wrong, because the server it talks to does not expose
 it.
 
+**That wall is the server's capability, so it survives a shell** — unlike a
+toolset, which the agent's own CLI applies and an agent with a shell can simply
+go around.
+
+What does not survive is the SEPARATION, if both servers are deployed. The admin
+server authenticates nobody, so a `ha-control` agent that can run commands can
+reach it directly and hold the operator token's power. Two things prevent that,
+both off by default:
+
+- `global.agentops.networkPolicy` restricts the admin server to runtime pods.
+- `runtime.egressMediation` enforces each conversation's bound toolsets, so a
+  control conversation is refused the admin server's tools.
+
 ### Two ways to have a server
 
 Both are off by default. Enabling `adminMcp` with **neither** fails the render:

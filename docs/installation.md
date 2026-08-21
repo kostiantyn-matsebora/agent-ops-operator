@@ -203,6 +203,92 @@ The console's own values — its token, ingress, TLS and forward-auth — are in
 [console.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/console.md),
 which owns the trust boundary.
 
+### Who may reach what
+
+Nothing restricts which pods may reach this release's components. Several of
+them authenticate nobody.
+
+- The **MCP servers** accept any caller. Under `rbacMode: full` the Kubernetes
+  one runs as cluster-admin.
+- The **manager's work contract** takes no credential.
+- The **console's API** answers below its authenticating proxy.
+
+Two switches, both off by default, and they close different things.
+
+| Key | Default | What it bounds |
+|---|---|---|
+| `global.agentops.networkPolicy.enabled` | `false` | **who may connect** — one policy per component, allowing only the callers your wiring implies |
+| `runtime.egressMediation.enabled` | `false` | **what a connected agent may do** — the bound toolsets, enforced outside the agent |
+
+**Network policy applies successfully on a cluster that does not enforce it, and
+protects nothing.** There is no error. This chart cannot detect the difference,
+so the install output tells you how to check rather than calling your components
+protected.
+
+Two things to name when you enable it, or they break quietly:
+
+```yaml
+global:
+  agentops:
+    networkPolicy:
+      enabled: true
+      # a collector outside this namespace, or metrics go silent
+      metricsFrom:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      # your ingress controller, or the console becomes unreachable
+      consoleFrom:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+```
+
+```powershell
+global:
+  agentops:
+    networkPolicy:
+      enabled: true
+      # a collector outside this namespace, or metrics go silent
+      metricsFrom:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      # your ingress controller, or the console becomes unreachable
+      consoleFrom:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+```
+
+### Enforcing the toolset
+
+A route's toolsets reach the agent as `--allowedTools`, applied by the CLI in
+the runtime pod. That configures a **cooperating** agent.
+
+An agent that can run commands reaches a bound MCP server directly and calls
+whatever that server registers. `agentops-shell` is bound on ordinary routes, so
+this is the common case, not an exotic one.
+
+`runtime.egressMediation.enabled` puts a proxy in the runtime pod that the
+agent's traffic cannot route around, and enforces the bound toolsets there.
+
+Know two things before enabling it.
+
+1. It adds a **privileged init container** that installs the redirect and exits
+   before the agent starts. A namespace under `restricted` Pod Security
+   admission refuses it.
+2. It adds a container per active conversation.
+
+Two things it does not cover, by design:
+
+- **stdio MCP servers**, which are child processes of the agent container.
+- **`https` MCP endpoints**, which would need TLS interception inside the pod
+  running the model's output.
+
+Neither is passed off as enforced. The conversation's `EgressMediated` condition
+names what is not covered.
+
 ### Housekeeping
 
 | Key | Default | Consequence |

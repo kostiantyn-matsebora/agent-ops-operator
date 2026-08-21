@@ -2,7 +2,9 @@
 
 ## Purpose
 Kubernetes access as MCP tools in `k8s-bundle`: the `MCPConfig` and the risk-split `MCPToolset` CRs any Pipeline can bind, and the optional in-cluster server workload whose own ServiceAccount is the second of the two walls between an agent and the API.
+
 ## Requirements
+
 ### Requirement: The bundle ships Kubernetes MCP access as a referencable config and toolsets
 When its MCP component is active, `k8s-bundle` SHALL render an `MCPConfig` CR (default name `k8s-api`) whose single server entry uses the FIXED server key `kubernetes` — the key is the `mcp__kubernetes__*` tool namespace named by toolsets and allowlists, and SHALL NOT be values-configurable — with a values-configured URL, a values-selected transport (streamable HTTP or SSE), and values-passthrough `headers` supporting `valueFrom` secret references (the manager reads no Secrets). An active component whose URL is required but empty SHALL fail rendering with a message naming the value, rather than producing a config that points nowhere.
 
@@ -38,7 +40,7 @@ The read set SHALL render whenever the component is active. The mutating set SHA
 ### Requirement: The optional server workload runs under its own reviewable identity
 The bundle SHALL deploy the Kubernetes MCP server itself, **on by default** alongside the MCP config component — the two flip together so the config's URL always has a Service to default onto. When deployed it SHALL run under a ServiceAccount distinct from the agent runtime's — the render SHALL FAIL if they are set equal — with its own values-gated RBAC, and the bundle SHALL render the Service the `MCPConfig` URL defaults onto. Because the runtime ServiceAccount is now the release-wide one at `global.agentops.runtime.serviceAccountName`, that equality guard SHALL compare against the global value.
 
-The agent's reach through MCP is therefore the intersection of that ServiceAccount's permissions and the tools its allowlist grants: two independent walls, each reviewable alone, unlike the kubectl path where the runtime ServiceAccount's RBAC is the only one.
+The agent's reach through MCP is therefore the intersection of that ServiceAccount's permissions and the tools its allowlist grants: two independent walls, each reviewable alone, unlike the kubectl path where the runtime ServiceAccount's RBAC is the only one. The SECOND wall SHALL be qualified wherever it is claimed: the allowlist is applied by the CLI running beside the agent, so it binds a COOPERATING agent only. An agent able to execute commands can reach this server directly and call anything it registers, leaving the server's ServiceAccount as the sole remaining wall. Where that matters, the wall is restored by enforcing the toolset outside the agent's control, and the bundle's risk-split toolsets SHALL NOT be documented as bounding a shell-capable agent unless such enforcement is in place.
 
 The server's read-only mode and its ServiceAccount's RBAC SHALL default to **deriving from the release's single runtime RBAC mode** (`global.agentops.runtime.rbacMode`) rather than being set independently: `full` SHALL yield a write-capable server under a `full` ServiceAccount, and every other mode — including `none` and unset — SHALL yield a read-only server under a `readonly` ServiceAccount. An explicitly set value SHALL win over the derivation.
 
@@ -73,6 +75,14 @@ Derivation SHALL NOT be presented as equivalent to independence: the documentati
 #### Scenario: The endpoint guard still bites
 - **WHEN** `mcp.enabled=true` with `mcpServers.enabled=false` and no `mcp.url`
 - **THEN** the render fails naming the missing endpoint, because an `MCPConfig` pointing nowhere silently costs agents their tools
+
+#### Scenario: The second wall is qualified where it is claimed
+- **WHEN** the bundle's two-wall property is documented
+- **THEN** it states that the toolset wall binds a cooperating agent, and names what remains when the agent has a shell
+
+#### Scenario: A shell-capable agent meets only the server identity by default
+- **WHEN** a pipeline binds only the read toolset to an agent that also holds shell access, with no enforcement outside the agent
+- **THEN** the agent can reach the deployed server directly, and what it may do there is decided solely by the server's ServiceAccount
 
 ### Requirement: MCP is the only cluster path
 The runtime image SHALL carry no Kubernetes CLI, so the `mcp__kubernetes__*` tools a Pipeline binds SHALL be the only way an agent reaches the Kubernetes API. `Bash` SHALL remain useful for the workspace and SHALL NOT imply cluster access.
@@ -113,4 +123,3 @@ The render SHALL NOT fail on that combination: pointing `mcp.url` at a separatel
 #### Scenario: A working install is not nagged
 - **WHEN** the bundle renders with the MCP component enabled
 - **THEN** no such warning appears
-

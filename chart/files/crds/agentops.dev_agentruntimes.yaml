@@ -143,6 +143,103 @@ spec:
                 required:
                 - paths
                 type: object
+              egressMediation:
+                description: |-
+                  EgressMediation interposes a proxy in the runtime pod that the agent's
+                  traffic cannot route around, so the tool access its wiring granted is
+                  enforced somewhere the agent does not control. ABSENT means today's pod
+                  exactly: no proxy, no interception, no added containers.
+
+                  The RUNTIME declares it because enabling it changes what the pod may do
+                  at startup, and a namespace under `restricted` Pod Security admission
+                  cannot run it at all. That is an execution-substrate property, which is
+                  what an AgentRuntime is for.
+                properties:
+                  excludePorts:
+                    description: |-
+                      ExcludePorts are destination ports left unredirected.
+
+                      For destinations that must not pass through a userspace proxy at all —
+                      not for tuning. Anything excluded here is reachable by the agent
+                      UNMEDIATED, so the list is a hole in the boundary by construction and is
+                      reported as one.
+                    items:
+                      format: int32
+                      type: integer
+                    type: array
+                  port:
+                    default: 15001
+                    description: |-
+                      Port the proxy listens on inside the pod, and the port the agent's
+                      traffic is redirected to.
+
+                      Overridable only because a runtime image may already use the default.
+                      Nothing outside the pod can reach it — the two containers share a network
+                      namespace and no Service names it.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: Resources for the proxy container.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                type: object
               env:
                 description: 'Env: extra environment for every worker of this runtime.'
                 items:

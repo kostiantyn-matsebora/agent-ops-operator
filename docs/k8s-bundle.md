@@ -469,7 +469,23 @@ separation stays reachable: `mcpServers.readOnly: true` under `rbacMode: full`
 makes this a strictly observing agent — broad grants on the runtime SA that
 nothing can exercise — and no mutating toolset renders. The
 toolset wall is untouched either way — mutations need a Pipeline to bind
-`k8s-admin` deliberately no matter what the server serves. `none` maps to a
+`k8s-admin` deliberately no matter what the server serves.
+
+**What the toolset wall is worth depends on the agent.** `--allowedTools` is
+applied by the CLI beside the agent, and this server has never heard of an
+`MCPToolset`. An agent that can run commands reaches the server directly and
+calls whatever it registers, so for that agent the two walls are one — the
+server's own ServiceAccount.
+
+Two things restore it, both off by default:
+
+- `runtime.egressMediation` enforces the bound toolsets from a proxy the agent
+  cannot route around.
+- `global.agentops.networkPolicy` stops anything that is not a runtime pod
+  reaching this server at all.
+
+Without either, a write-capable server under `rbacMode: full` is reachable by
+any pod in the cluster with no credential. `none` maps to a
 **readonly** server rather than to nothing, on purpose: an agent that can read
 the cluster through MCP and do nothing at all through its own identity is a
 useful shape, not an accident.

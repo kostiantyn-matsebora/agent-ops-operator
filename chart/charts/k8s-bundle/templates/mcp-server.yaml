@@ -71,14 +71,28 @@ spec:
           ports:
             - name: http
               containerPort: {{ $s.port }}
+          # PROBED FROM INSIDE THE POD, over loopback.
+          #
+          # An httpGet probe is issued by the KUBELET, from the node — and a
+          # node is not a pod, so no NetworkPolicy peer can name it. Some CNIs
+          # exempt host traffic and some do not. Cilium's default CIDR match
+          # mode does NOT match node addresses, so even an explicit ipBlock of
+          # the node network does not authorise the probe.
+          #
+          # This server probes the SAME port it serves MCP on, so the port
+          # cannot simply be left open the way a dedicated health port can. The
+          # result, the first time this shipped, was a server that crash-looped
+          # because of the policy protecting it.
+          #
+          # An exec probe never leaves the pod's network namespace, so it is
+          # subject to no policy on any CNI — and it still proves what matters,
+          # that the HTTP server answers.
           readinessProbe:
-            httpGet:
-              path: /healthz
-              port: http
+            exec:
+              command: ["curl", "-sfo", "/dev/null", "http://127.0.0.1:{{ $s.port }}/healthz"]
           livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
+            exec:
+              command: ["curl", "-sfo", "/dev/null", "http://127.0.0.1:{{ $s.port }}/healthz"]
           {{- with $s.resources }}
           resources:
 {{ toYaml . | indent 12 }}

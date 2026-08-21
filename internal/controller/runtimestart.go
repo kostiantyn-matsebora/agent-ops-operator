@@ -133,13 +133,14 @@ func classifyStuckPod(pod *corev1.Pod) startFailure {
 			Reason: ReasonVolumeUnavailable,
 			Message: condEvidence(
 				"pod is not ready to start containers, which is what an unattached or unmountable volume looks like",
-				c) + waitingSuffix(pod),
+				c) + waitingSuffix(pod) + mediationSuffix(pod),
 			Storage: true,
 		}
 	}
 	return startFailure{
 		Reason:  ReasonNotStarted,
-		Message: "runtime pod did not reach Running before its start deadline" + waitingSuffix(pod),
+		Message: "runtime pod did not reach Running before its start deadline" +
+			waitingSuffix(pod) + mediationSuffix(pod),
 		Storage: false,
 	}
 }
@@ -179,6 +180,32 @@ var imagePullReasons = map[string]bool{
 	// ConfigMap or Secret is missing, not that the image is. Filing it here
 	// would send the reader to a registry over a wiring problem, and the honest
 	// NotStarted fallback names it without guessing.
+}
+
+// mediationSuffix names the mediation containers when they are the ones stuck.
+//
+// The classifier already scans init container statuses, so a proxy that cannot
+// pull or will not start already fails the pod with the kubelet's own reason.
+// What it could not say is WHICH container, and that matters here more than
+// usual: "init container waiting" sends an operator to the runtime image, while
+// the actual answer is that the enforcing proxy is the thing that did not come
+// up — and until it does, the pod fails closed by design rather than by fault.
+func mediationSuffix(pod *corev1.Pod) string {
+	var stuck []string
+	for _, cs := range pod.Status.InitContainerStatuses {
+		if cs.Name != "egress-proxy" && cs.Name != "egress-init" {
+			continue
+		}
+		if cs.State.Waiting != nil || (cs.State.Terminated != nil && cs.State.Terminated.ExitCode != 0) {
+			stuck = append(stuck, cs.Name)
+		}
+	}
+	if len(stuck) == 0 {
+		return ""
+	}
+	sort.Strings(stuck)
+	return " (egress mediation: " + strings.Join(stuck, ", ") +
+		" has not started, so the agent reaches nothing until it does)"
 }
 
 // imageProblem reports an image-related waiting reason on any container.
