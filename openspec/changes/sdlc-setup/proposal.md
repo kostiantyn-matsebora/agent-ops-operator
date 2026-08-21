@@ -23,7 +23,7 @@ sequence of five manual commands that must not be typed wrong.
 - **Tag-driven publishing to GHCR** (`.github/workflows/release.yml` + a
   reusable `build-image.yml`): a tag of the form `<component>-v<semver>`
   (`manager-v0.13.2`, `channel-telegram-v0.4.1`, `runtime-claude-v0.1.2`,
-  `signal-cron-v…`, `signal-vmalertmanager-v…`) publishes exactly that one
+  `signal-cron-v…`, `signal-alertmanager-v…`) publishes exactly that one
   component. Preserves today's independent per-component versioning.
 - **Multi-arch images (`linux/amd64` + `linux/arm64`)** published as a single
   manifest list per tag. The four Go images already cross-compile

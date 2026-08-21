@@ -4,7 +4,7 @@
 
 Publishing SHALL be triggered by a git tag of the form `<component>-v<semver>`
 where `<component>` is one of `manager`, `channel-telegram`, `signal-cron`,
-`signal-vmalertmanager`, `runtime-claude`, or `chart`. Pushing such a tag SHALL
+`signal-alertmanager`, `runtime-claude`, or `chart`. Pushing such a tag SHALL
 publish that component alone at that version, leaving every other component
 untouched, so components keep their independent version lines. A tag naming an
 unknown component or a malformed version SHALL fail the workflow with a message

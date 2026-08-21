@@ -1,6 +1,17 @@
 package main
 
-// Sender self-registration: a served SignalSource may carry a `register`
+// Sender self-registration, and the ONE VictoriaMetrics-specific thing in this
+// module.
+//
+// The adapter itself is vendor-neutral: it receives the standard Alertmanager
+// webhook payload, which vanilla Alertmanager and VictoriaMetrics both send.
+// This file is the exception, and it is exceptional because REGISTRATION is not
+// standardised — VictoriaMetrics' operator takes a VMAlertmanagerConfig OBJECT,
+// while vanilla Alertmanager's config is a FILE with nothing to write to. So the
+// names below are VictoriaMetrics API names on purpose, and stay that way while
+// the rest of the module carries none.
+//
+// A served SignalSource may carry a `register`
 // block in its opaque config naming an in-cluster VMAlertmanager. The
 // adapter then owns a VMAlertmanagerConfig (webhook receiver + continue
 // route pointing at its own /webhook/<source>) in that namespace, so the
@@ -161,7 +172,7 @@ func desiredVMAC(source, namespace, webhookURL string, reg *registerSpec) map[st
 			"name":      name,
 			"namespace": namespace,
 			"labels": map[string]any{
-				"app.kubernetes.io/managed-by": "agentops-signal-vmalertmanager",
+				"app.kubernetes.io/managed-by": "agentops-signal-alertmanager",
 				"agentops.dev/source":          source,
 			},
 		},

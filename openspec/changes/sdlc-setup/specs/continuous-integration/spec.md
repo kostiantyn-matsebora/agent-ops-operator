@@ -4,7 +4,7 @@
 
 CI SHALL run `go build ./...`, `go vet ./...`, and `go test ./...` for the
 operator module and for each of `channel-telegram/`, `signal-cron/`, and
-`signal-vmalertmanager/` on every pull request and every push to `master`. The
+`signal-alertmanager/` on every pull request and every push to `master`. The
 operator module's tests SHALL run with `KUBEBUILDER_ASSETS` pointing at envtest
 binaries for Kubernetes 1.31.x, so the integration suite executes against a
 real API server rather than being skipped. The Go toolchain version SHALL be
@@ -27,7 +27,7 @@ derived from `go.mod` rather than pinned separately in the workflow.
 #### Scenario: An adapter module breaks
 
 - **WHEN** a pull request breaks `channel-telegram`, `signal-cron`, or
-  `signal-vmalertmanager`
+  `signal-alertmanager`
 - **THEN** that module's job fails independently of the operator job, naming
   the module
 
@@ -53,7 +53,7 @@ schemas plus the repository's own CRDs from `chart/files/crds/`.
 ### Requirement: Every pull request builds all container images without publishing
 
 CI SHALL build all five images (`manager`, `channel-telegram`, `signal-cron`,
-`signal-vmalertmanager`, `runtime-claude`) from their Dockerfiles on every pull
+`signal-alertmanager`, `runtime-claude`) from their Dockerfiles on every pull
 request with publishing disabled, using layer caching to keep feedback fast.
 
 #### Scenario: A Dockerfile breaks

@@ -8,12 +8,11 @@ metadata:
   namespace: agent-ops
 spec:
   servers:
-    victorialogs:
-      type: sse
-      url: http://mcp-victorialogs.internal.komatoo.net/sse
-    victoriametrics:
-      type: sse
-      url: http://mcp-victoriametrics.internal.komatoo.net/sse
+    # Server KEY is what tool names are qualified with: a toolset grants
+    # mcp__prometheus__* to reach this one. prometheus-bundle fixes this key.
+    prometheus:
+      type: http
+      url: http://agentops-mcp-prometheus.agent-ops.svc:8080/mcp
 ---
 # MCPToolset: a named tool allowlist, nothing else. Servers live in MCPConfig
 # CRs; this says which tools a wiring may CALL. Pipelines bind the two together
@@ -23,12 +22,11 @@ spec:
 apiVersion: agentops.dev/v1alpha1
 kind: MCPToolset
 metadata:
-  name: vm-observability
+  name: prometheus-observability
   namespace: agent-ops
 spec:
   tools:
-    - "mcp__victorialogs__*"
-    - "mcp__victoriametrics__*"
+    - "mcp__prometheus__*"
 ---
 # The cluster itself as MCP tools — the k8s-bundle chart renders this pair
 # (`k8s-bundle.mcp`), shown here for hand-rolled installs. The server key
@@ -147,7 +145,7 @@ spec:
     refs:
       - name: agentops-observe
       - name: agentops-shell
-      - name: vm-observability
+      - name: prometheus-observability
       # Both halves or neither: the toolset is permission to call the servers
       # the mcpConfigs below supply.
       - name: k8s-observability
@@ -311,40 +309,41 @@ spec:
       - schedule
       - input
 ---
-# VM Alertmanager webhook source — spec.adapter names the serving SignalAdapter
+# Alertmanager webhook source — spec.adapter names the serving SignalAdapter
 # CR (the prometheus-bundle subchart renders one named alertmanager; its reconciler
-# owns the workload AND the webhook Service). VMAlertmanager posts the
-# standard Alertmanager webhook format to
-#   http://agentops-signal-vm-alertmanager.<ns>.svc:8080/webhook/vm-alerts
+# owns the workload AND the webhook Service). The sender posts the standard
+# Alertmanager webhook format to
+#   http://agentops-signal-alertmanager.<ns>.svc:8080/webhook/alerts
+# Vanilla Alertmanager and VictoriaMetrics both send it.
 # Open variant: no credentialsSecretRef — anonymous posts accepted
 # (ClusterIP-only posture).
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource
 metadata:
-  name: vm-alerts
+  name: alerts
   namespace: agent-ops
 spec:
-  adapter: vm-alertmanager
+  adapter: alertmanager
   grouping:
     signatureLabels: ["alertgroup", "alertname", "namespace"]
 ---
 # Credentialed variant: the Secret's TOKEN key is projected into the adapter
-# (AGENTOPS_CRED_VM_ALERTS_SECURE_TOKEN) and webhooks must carry
-# Authorization: Bearer <token>. Configure the same token in VMAlertmanager's
-# webhook_configs http_config.
+# (AGENTOPS_CRED_ALERTS_SECURE_TOKEN) and webhooks must carry
+# Authorization: Bearer <token>. Configure the same token in the sender's
+# webhook_configs http_config — vanilla Alertmanager or VictoriaMetrics alike.
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource
 metadata:
-  name: vm-alerts-secure
+  name: alerts-secure
   namespace: agent-ops
 spec:
-  adapter: vm-alertmanager
+  adapter: alertmanager
   credentialsSecretRef:
-    name: vm-webhook-token   # Secret with key TOKEN
+    name: alert-webhook-token   # Secret with key TOKEN
 ---
 # Remember: wiring is pipeline-only — claim the source or its signals drop
 # (Wired=False). Capabilities are wiring too: this pipeline is the ONLY thing
-# saying what ha-engineer may do on the VM-alert route, and it replaces the
+# saying what ha-engineer may do on the alert route, and it replaces the
 # baseline for conversations it originates rather than adding to it. Both halves
 # are needed — mcpConfigs supply the servers, toolsets grant permission to call
 # them. Refs are snapshotted onto each conversation at creation; the referenced
@@ -354,12 +353,12 @@ spec:
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
 metadata:
-  name: vm-alerts
+  name: alerts
   namespace: agent-ops
 spec:
   signalSourceRefs:
-    - name: vm-alerts
-    - name: vm-alerts-secure
+    - name: alerts
+    - name: alerts-secure
   channelRefs:
     - name: home-ops
   profileRef:
@@ -368,15 +367,14 @@ spec:
     # No mode here, ever: an agent definition declares no MCP SERVERS, so
     # there is nothing on the other side to merge with or overwrite.
     refs:
-      - name: vm-logs
-      - name: vm-metrics
+      - name: home-observability
   toolsets:
     # overwrite ignores what ha-engineer.md declares and grants exactly this.
     # Same profile as the chat route above, deliberately narrower: alert triage
     # gets observability and nothing else, however the agent describes itself.
     mode: overwrite
     refs:
-      - name: vm-observability
+      - name: prometheus-observability
 ---
 # Cluster Events as a signal lane. The k8s-bundle subchart renders this trio
 # (adapter + source + pipeline) for you; shown here for a hand-rolled setup.

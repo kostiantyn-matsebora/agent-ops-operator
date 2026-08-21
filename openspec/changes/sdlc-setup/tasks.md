@@ -22,7 +22,7 @@
       `KUBEBUILDER_ASSETS` — confirm the `internal/integration` suite runs
       rather than skipping
 - [ ] 2.3 Job `adapters`: matrix over `channel-telegram`, `signal-cron`,
-      `signal-vmalertmanager` running build + vet + test in each module dir
+      `signal-alertmanager` running build + vet + test in each module dir
 - [ ] 2.4 Job `chart`: `helm lint`, then `helm template` for default,
       `demo.enabled=true`, `vm-bundle.enabled=true`, and both together
 - [ ] 2.5 Extend the `chart` job with `kubeconform` in strict mode over each

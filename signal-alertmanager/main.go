@@ -1,4 +1,4 @@
-// signal-vmalertmanager: webhook-receiving signal adapter. Serves
+// signal-alertmanager: webhook-receiving signal adapter. Serves
 // SignalSources whose spec.adapter names its SignalAdapter CR (ADAPTER_NAME,
 // injected by the reconciler = the CR name) against the operator's signal
 // contract by hosting its OWN HTTP endpoint accepting the standard
@@ -105,7 +105,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("signal-vmalertmanager adapter starting (adapter=%s, listen=%s)", sourceType, listen)
+	log.Printf("signal-alertmanager adapter starting (adapter=%s, listen=%s)", sourceType, listen)
 
 	go a.registryLoop(ctx)
 
@@ -161,7 +161,7 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (s
 	reg := parseRegister(info.Config)
 	if reg == nil {
 		// no registration asked for: name the path an operator should target
-		return "AdapterReady", fmt.Sprintf("served by signal-vmalertmanager — POST %s", a.endpoint(info.Name))
+		return "AdapterReady", fmt.Sprintf("served by signal-alertmanager — POST %s", a.endpoint(info.Name))
 	}
 	// default to our own namespace: vm-operator selects VMAlertmanagerConfigs
 	// from everywhere by default, so this needs no cross-namespace grant
@@ -182,7 +182,7 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (s
 		return "RegistrationManual", manualInstructions(info.Name, ns, url, err.Error())
 	}
 	return "AdapterReady", fmt.Sprintf(
-		"served by signal-vmalertmanager — POST %s; sender registered in VMAlertmanagerConfig %s", url, ref)
+		"served by signal-alertmanager — POST %s; sender registered in VMAlertmanagerConfig %s", url, ref)
 }
 
 // manualInstructions renders the degraded message: why registration could not
