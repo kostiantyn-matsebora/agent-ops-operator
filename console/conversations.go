@@ -186,10 +186,18 @@ type ConversationSummary struct {
 	Joined bool `json:"joined"`
 	// ConsoleThread is the thread id to post replies against when joined.
 	ConsoleThread string `json:"consoleThread,omitempty"`
-	// Closing: the Conversation is deleted and held by its close-topics
-	// finalizer while the threads are archived. Without this the list looks
-	// untouched after a close, the operator concludes it failed, and re-closes.
-	Closing bool `json:"closing"`
+	// Deleting: the Conversation has a deletionTimestamp and is held by its
+	// close-topics finalizer while its threads are archived.
+	//
+	// It was called `closing`, from when /close DELETED the conversation. Those
+	// are now two verbs — /close sets a PHASE and the object survives, delete
+	// is a second verb that only accepts an already-Closed one — so the old
+	// name told an operator watching a DELETE that something was "closing",
+	// which is the other operation entirely.
+	//
+	// Without it the list looks untouched after a delete, and the operator
+	// concludes it failed and deletes again.
+	Deleting bool `json:"deleting"`
 
 	// Errored: the most recent run did not succeed. A filter facet, so "show me
 	// what went wrong" is one click rather than a scan.
@@ -246,7 +254,7 @@ func summarize(obj *Object, pipelines []*Object, consoleChannel, reader string) 
 		Queued:     len(v.Spec.Inputs),
 		Toolsets:   v.Spec.Toolsets.refs(),
 		MCPConfigs: v.Spec.MCPConfigs.refs(),
-		Closing:    obj.Metadata.DeletionTimestamp != "",
+		Deleting:   obj.Metadata.DeletionTimestamp != "",
 	}
 	// RunCount is set HERE, not only on the list path: the detail view carries
 	// Runs too, and a summary that reported 0 runs beside a populated list was

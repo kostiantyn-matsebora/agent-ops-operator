@@ -32,7 +32,7 @@ import type { CloseResponse, ConversationSummary } from '../api/types'
  * with nowhere to land.
  */
 export function selectableNames(items: ConversationSummary[]): string[] {
-  return items.filter((c) => !c.closing).map((c) => c.name)
+  return items.filter((c) => !c.deleting).map((c) => c.name)
 }
 
 /** How many of the selection are working — stated before anything is abandoned. */

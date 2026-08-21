@@ -30,7 +30,7 @@ import type { DeleteResponse, ConversationSummary } from '../api/types'
  * not a candidate at all — the two-step is the safety property, not a nag.
  */
 export function deletableNames(items: ConversationSummary[]): string[] {
-  return items.filter((c) => !c.closing && c.phase === 'Closed').map((c) => c.name)
+  return items.filter((c) => !c.deleting && c.phase === 'Closed').map((c) => c.name)
 }
 
 /** The conversations a batch did not delete, with the server's own reason. */

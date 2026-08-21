@@ -254,7 +254,7 @@ func TestBulkCloseIsGatedLikeEveryOtherWrite(t *testing.T) {
 
 // 3.8: a conversation already held by its close-topics finalizer is skipped, so
 // re-running the action over a batch cannot double-close.
-func TestBulkCloseSkipsAConversationAlreadyClosing(t *testing.T) {
+func TestBulkCloseSkipsAConversationBeingDeleted(t *testing.T) {
 	closing := joinedConversation("going")
 	closing.Metadata.DeletionTimestamp = "2026-08-12T10:00:00Z"
 	api, f, _, _ := apiWithOptions(t, "tok", true, closing)

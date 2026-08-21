@@ -362,7 +362,10 @@ export interface ConversationSummary {
   toolsets?: string[]
   mcpConfigs?: string[]
   /** Deleted and held by its close-topics finalizer while threads are archived. */
-  closing: boolean
+  /** The conversation has a deletionTimestamp and is held by its close-topics
+   * finalizer while its threads are archived. Named `closing` once, from when
+   * /close deleted the conversation — those are two verbs now. */
+  deleting: boolean
 }
 
 // ---- closing a batch ---------------------------------------------------------
