@@ -127,10 +127,14 @@
 // the page is a labelled list with every panel visible, which is the whole
 // content rather than a fallback for it.
 //
-// It also resolves the screenshot variant. A page names one image, always the
-// `-light` one, and this rewrites the src when the document resolves dark. That
-// keeps "there are two themes" out of the page, where it would be theme
-// knowledge in content.
+// It also resolves the THEME VARIANT of anything a panel points at. A page names
+// one file, always the `-light` one, and this rewrites it when the document
+// resolves dark. That keeps "there are two themes" out of the page, where it
+// would be theme knowledge in content.
+//
+// Images and links alike, screenshots and diagrams alike: the first panel holds
+// a diagram whose full-size link is a second themed asset, and a light poster
+// opened from the dark theme is the same fault one click later.
 (function () {
   var content = document.getElementById('ao-content');
   if (!content) return;
@@ -138,7 +142,7 @@
   var lists = [].slice.call(content.querySelectorAll('ul.ao-tabs'));
   if (!lists.length) return;
 
-  var images = [];
+  var themed = [];
 
   function slug(s) {
     return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -201,7 +205,10 @@
       // fetching: a reader who never opens Queues never downloads it.
       [].forEach.call(panel.querySelectorAll('img'), function (img) {
         if (i > 0) img.setAttribute('loading', 'lazy');
-        images.push(img);
+        themed.push({ el: img, attr: 'src' });
+      });
+      [].forEach.call(panel.querySelectorAll('a[href]'), function (a) {
+        themed.push({ el: a, attr: 'href' });
       });
 
       return { btn: btn, panel: panel, id: id };
@@ -256,12 +263,18 @@
 
   // The variant follows the resolved theme, and repaints on a toggle so the
   // open panel is never the wrong one.
+  //
+  // The suffix is matched, never assumed: a reference with no `-light`/`-dark`
+  // stem is left exactly as the page wrote it, so an ordinary link in a panel
+  // is not rewritten into one that 404s.
+  var VARIANT = /-(?:light|dark)(\.(?:png|svg))$/;
+
   function paint() {
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    images.forEach(function (img) {
-      var src = img.getAttribute('src');
-      var want = src.replace(/-(?:light|dark)\.png$/, dark ? '-dark.png' : '-light.png');
-      if (want !== src) img.setAttribute('src', want);
+    themed.forEach(function (t) {
+      var was = t.el.getAttribute(t.attr);
+      var want = was.replace(VARIANT, (dark ? '-dark' : '-light') + '$1');
+      if (want !== was) t.el.setAttribute(t.attr, want);
     });
   }
   paint();

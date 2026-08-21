@@ -5,12 +5,19 @@ layout: default
 The landing layout.
 
 Every word on this page comes from the page's own front matter or its body —
-the hero line, the diagram's alt text, the stat tiles. This file decides only
-how those are arranged, which is what keeps the theme free of product prose.
+the hero line, the stat tiles, the strip below them. This file decides only how
+those are arranged, which is what keeps the theme free of product prose.
 
-The diagram ships as two exports, one per theme, because drawio pins each one's
-palette with `color-scheme` on the SVG root and an <img> does not inherit the
-page's. Both are lazy: the hidden one is never rendered, so it is never fetched.
+The product visual is NOT here. It is the first panel of the page's own tab
+strip, so its alt text, its caption and the manifest beside it are the page's
+words — the layout would otherwise own content, which is the one thing it may
+not.
+
+Which is also why the stat tiles are placed by SPLITTING the page's content at
+its first heading rather than by a marker the page writes: everything before
+the page's first section is its opening, the tiles close that opening, and the
+sections follow. The page states its words in order and says nothing about
+where the tiles go.
 {%- endcomment -%}
 {%- comment -%}
 The hero is real text, not part of the drawing: the site's diagram page has its
@@ -32,25 +39,11 @@ readable by a screen reader without going through alt text.
 </div>
 
 {%- comment -%}
-Collapsible, and OPEN by default — a reader who came to understand the product
-should not have to ask for the picture. `<details>` rather than a script: it
-folds with no JavaScript, is a tab stop and a space-bar toggle for free, and a
-reader who collapses it gets the paths onward one screen sooner.
+`content` is already rendered HTML here, so the split is on the first section
+heading. A page with no `<h2>` simply keeps all of its content above the tiles.
 {%- endcomment -%}
-{%- if page.diagram %}
-<details class="ao-diagram-details" open>
-  <summary class="ao-diagram-summary">{{ page.diagram_label | default: 'Diagram' }}</summary>
-  <a class="ao-diagram-link" href="{{ page.diagram | append: '-light.svg' | prepend: '/assets/img/' | relative_url }}">
-    <img class="ao-diagram ao-diagram--light" loading="lazy"
-         src="{{ page.diagram | append: '-light.svg' | prepend: '/assets/img/' | relative_url }}"
-         alt="{{ page.diagram_alt }}">
-    <img class="ao-diagram ao-diagram--dark" loading="lazy"
-         src="{{ page.diagram | append: '-dark.svg' | prepend: '/assets/img/' | relative_url }}"
-         alt="{{ page.diagram_alt }}">
-    <span class="ao-diagram-hint">Open the diagram full size</span>
-  </a>
-</details>
-{%- endif %}
+{%- assign sections = content | split: '<h2' -%}
+{{ sections[0] }}
 
 {%- if page.stats %}
 <ul class="ao-stats">
@@ -70,4 +63,4 @@ reader who collapses it gets the paths onward one screen sooner.
 {%- endif %}
 {%- endif %}
 
-{{ content }}
+{%- for section in sections offset: 1 %}<h2{{ section }}{% endfor %}

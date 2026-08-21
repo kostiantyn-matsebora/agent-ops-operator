@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""Export agent-ops.drawio to the two SVG variants the site serves.
+"""Export agent-ops.drawio to the SVG variants the site serves.
 
 Run from the repository root:  python docs/diagrams/export.py
 
-Which page
-----------
-The file holds two: `why` is the standalone poster, which carries its own
-eyebrow pills, headline and standfirst because nothing around it does. `site`
-is the same drawing with that masthead removed — the landing page states those
-in real, selectable, translatable text, and a page that says the headline twice
-reads as a mistake. Only `site` is exported here.
+Which pages
+-----------
+The file holds three. `why` is the standalone poster, which carries its own
+eyebrow pills, headline and standfirst because nothing around it does. It is
+NOT exported here — a render for a slide or a post is made at that moment and
+not committed.
+
+The two the site serves are:
+
+* `landing` — the simplified spine the landing page leads with, authored at
+  960px so its labels still read at the content column's 720px.
+* `site` — the same argument in full, behind the landing page's full-size link.
+
+Both have the poster's masthead removed: the page states the headline in real,
+selectable, translatable text, and a page that says it twice reads as a mistake.
 
 Why a script rather than two docker commands in a comment
 ---------------------------------------------------------
@@ -27,29 +35,54 @@ alone; it reads on both grounds. Doing this by hand after every export is the
 kind of step that gets forgotten once and ships a broken diagram, which is why
 it lives here.
 
+The scratch directory is made BESIDE THIS FILE, never in /tmp
+--------------------------------------------------------------
+A VM-backed daemon — Rancher Desktop, Docker Desktop — mounts the user's home
+and not `/tmp`, so a `/tmp` workdir bind-mounts as an EMPTY directory. The
+exporter then finds no drawing, writes nothing, and says nothing: the run looks
+like a docker fault rather than a mount one. Keeping the scratch beside the
+source keeps it on a path any such daemon can already see.
+
 Requires: docker, python 3.
 """
 
 import base64
+import contextlib
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 SOURCE = HERE / "agent-ops.drawio"
 OUT = HERE.parent / "assets" / "img"
 IMAGE = "rlespinasse/drawio-export:latest"
-PAGE = "site"
+
+# page name -> the basename its variants are written under in assets/img/.
+PAGES = {
+    "landing": "agent-ops-landing",
+    "site": "agent-ops",
+}
 
 ICON_INK_LIGHT = b"#1A1A1A"
 ICON_INK_DARK = b"#D7D7D7"
 
 
-def export(workdir: pathlib.Path, theme: str) -> pathlib.Path:
-    """Run the exporter in a container and return the generated SVG."""
+@contextlib.contextmanager
+def scratch() -> pathlib.Path:
+    """A workdir beside the source, removed however this exits."""
+    work = HERE / ".export-work"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+    try:
+        yield work
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def export(workdir: pathlib.Path, theme: str) -> None:
+    """Run the exporter in a container. It writes every page in one pass."""
     subprocess.run(
         [
             "docker", "run", "--rm",
@@ -59,12 +92,21 @@ def export(workdir: pathlib.Path, theme: str) -> pathlib.Path:
         ],
         check=True,
     )
+
+
+def produced(workdir: pathlib.Path, theme: str, page: str) -> pathlib.Path:
+    """Return the one SVG the exporter wrote for `page`, or fail saying so.
+
+    The check is per page rather than per run: a rename in the drawing that
+    silently dropped one page would otherwise leave a stale committed SVG
+    beside a correct one, which is the failure this refuses to ship.
+    """
     # The exporter writes one file per page, named "<file>-<page>.svg".
-    produced = list((workdir / f"export-{theme}").glob(f"*-{PAGE}.svg"))
-    if len(produced) != 1:
-        found = [p.name for p in (workdir / f"export-{theme}").glob("*.svg")]
-        sys.exit(f"no single '{PAGE}' page in the {theme} export; found {found}")
-    return produced[0]
+    found = list((workdir / f"export-{theme}").glob(f"*-{page}.svg"))
+    if len(found) != 1:
+        every = [p.name for p in (workdir / f"export-{theme}").glob("*.svg")]
+        sys.exit(f"no single '{page}' page in the {theme} export; found {every}")
+    return found[0]
 
 
 def repaint_icons(svg: bytes) -> tuple[bytes, int]:
@@ -92,20 +134,24 @@ def main() -> None:
         sys.exit(f"no diagram at {SOURCE}")
     OUT.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        work = pathlib.Path(tmp)
+    with scratch() as work:
         shutil.copy(SOURCE, work / SOURCE.name)
 
-        light = export(work, "light")
-        shutil.copy(light, OUT / "agent-ops-light.svg")
-        print(f"wrote {OUT / 'agent-ops-light.svg'}")
+        export(work, "light")
+        export(work, "dark")
 
-        dark = export(work, "dark")
-        patched, repainted = repaint_icons(dark.read_bytes())
-        if repainted == 0:
-            print("WARNING: no icon ink repainted — did the icon colours change?")
-        (OUT / "agent-ops-dark.svg").write_bytes(patched)
-        print(f"wrote {OUT / 'agent-ops-dark.svg'} ({repainted} icons repainted)")
+        for page, base in PAGES.items():
+            light = OUT / f"{base}-light.svg"
+            shutil.copy(produced(work, "light", page), light)
+            print(f"wrote {light}")
+
+            dark = OUT / f"{base}-dark.svg"
+            patched, repainted = repaint_icons(produced(work, "dark", page).read_bytes())
+            if repainted == 0:
+                print(f"WARNING: no icon ink repainted in '{page}' — "
+                      "did the icon colours change?")
+            dark.write_bytes(patched)
+            print(f"wrote {dark} ({repainted} icons repainted)")
 
 
 if __name__ == "__main__":

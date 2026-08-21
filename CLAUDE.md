@@ -279,6 +279,16 @@ Four details, each of which cost a debugging round:
 - **`go clean -modcache` fails** (`unlinkat //gomodcache: permission denied`) —
   it tries to remove the mount point. Remove the VOLUME instead.
 
+**A VM-BACKED DAEMON MOUNTS YOUR HOME, NOT `/tmp`.** Rancher Desktop runs the
+daemon in a VM, so `-v /tmp/whatever:/data` bind-mounts an EMPTY directory: the
+container runs, finds nothing, writes nothing and often says nothing. It reads
+as a broken image rather than a missing mount. `docs/diagrams/export.py` builds
+its scratch directory BESIDE ITSELF for exactly this reason — anything else
+running a container over generated files must do the same. (The `pass`
+credential helper also needs an unlocked gpg agent, so a `docker pull` from a
+non-interactive session fails with `gpg: decryption failed` before it ever
+reaches the registry.)
+
 Two traps that are not the container's fault but look like it: `go build ./...`
 piped into `tail` reports `tail`'s exit code, so check `${PIPESTATUS[0]}` or
 redirect to a file; and `openspec` needs Node, which is likewise not installed
@@ -599,17 +609,36 @@ docs/                    reference pages: concepts.md (CRDs + capability
                          HTTP API), and one page per bundle subchart — AND the
                          published site's Jekyll source: _config.yml, _layouts/,
                          _includes/, _data/nav.yml, assets/ (css, js, vendored
-                         Red Hat fonts, the exported diagram). diagrams/ holds
+                         Red Hat fonts, the exported diagrams). diagrams/ holds
                          the drawio SOURCE plus export.py — run that, never the
-                         exporter by hand: it writes BOTH theme variants and
-                         repaints the dark one's icon ink, which drawio cannot
-                         do because the icons are embedded images.
+                         exporter by hand: it writes BOTH theme variants of BOTH
+                         site pages (four SVGs) and repaints the dark ones' icon
+                         ink, which drawio cannot do because the icons are
+                         embedded images. THREE drawio pages, and only two are
+                         exported: `landing` is the poster's own COMPOSITION
+                         compressed to 950px, `site` the full argument behind its
+                         full-size link, `why` the standalone poster (rendered on
+                         demand, never committed). 950 BECAUSE the content column
+                         is 720 and there is no breakout: displayed size is type
+                         over canvas, so making it fit means REMOVING ELEMENTS
+                         and tightening layout, never shrinking type. Adding
+                         detail back is what makes it unreadable.
                          GitHub Pages builds this directory
                          directly from master (Deploy from a branch → /docs), so
                          there is NO workflow, NO Gemfile and no Ruby in anyone's
                          path — a feature needing a plugin Pages does not enable
                          is implemented in the theme's own assets or dropped.
-                         index.md (landing), introduction.md (the adopter's
+                         index.md (landing — the hero, what it plugs into, ONE
+                         tab strip (the diagram, the Pipeline manifest as
+                         copyable page text, and the six console views), THEN the
+                         stat tiles, then the sections. That order is not written
+                         in the page: home.html SPLITS the rendered content at
+                         its first <h2> and drops the tiles in the seam, so the
+                         page states its words in order and says nothing about
+                         placement. There is no diagram block in the layout and
+                         no `diagram:` front matter — the strip is page content,
+                         which is what lets the alt text and the manifest be the
+                         page's own words), introduction.md (the adopter's
                          orientation — the model, the seams, and NO reference
                          detail: a sentence a field rename would break belongs in
                          concepts.md) and getting-started.md (THE walkthrough —
@@ -1201,9 +1230,16 @@ one-directional (a Jekyll site must not need a Node build to publish a
 paragraph); what makes it survivable is that no colour is stated literally
 anywhere else in the site CSS, so the sync is one block, not a hunt:
 `grep -n '#[0-9a-fA-F]\{3,6\}' docs/assets/css/agentops.css` must return hits
-only inside those blocks. The mark (`_includes/logo.svg` from
-`console/ui/src/components/Logo.tsx`) and the theme-choice semantics
-(`assets/js/theme.js` from `theme/useTheme.ts`) are copied on the same terms.
+only inside those blocks. The theme-choice semantics (`assets/js/theme.js` from
+`theme/useTheme.ts`) are copied on the same terms, and the MARK is copied on
+those terms across THREE files: `console/ui/src/components/Logo.tsx` is the
+source, `docs/_includes/logo.svg` the masthead's theme-driven copy, and
+`docs/assets/img/logos/agent-ops.svg` the standalone one an `<img>` can load —
+which states its colours literally, because an `<img>` is its own document and
+inherits no custom properties. Integration marks sit beside it, committed
+unaltered from each project's own source with their terms in that directory's
+README, and the PAGE names each file: a vendor list in the stylesheet would be
+product knowledge in the theme.
 
 **README.md has a budget: 150 lines** (`wc -l README.md`). It holds the pitch and
 diagram, one line per CRD kind, the behaviors that matter, the demo, install, the
