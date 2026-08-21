@@ -3,10 +3,10 @@
 Go/controller-runtime Kubernetes operator (README.md for the product view,
 docs/concepts.md for the CRD detail).
 Self-contained modules — no dependencies outside this directory; keep it that
-way. Eight Go modules: the operator (root), `channel-telegram/` (reference
+way. Nine Go modules: the operator (root), `channel-telegram/` (reference
 channel adapter), `console/` (the console — a channel adapter that is also the
 viewer), `telegram-router/` (the single getUpdates consumer), and
-`signal-cron/`, `signal-vmalertmanager/`, `signal-k8s-events/`,
+`signal-cron/`, `signal-vmalertmanager/`, `signal-k8s-events/`, `signal-ha/`,
 `signal-telegram/` (signal adapters) — the adapters dependency-free.
 
 ## Answering (how to report findings)
@@ -115,8 +115,10 @@ adopter-documentation rules at the foot of this file instead.
   is a regression, not a fix.
   The ONE lane that does not fan out is a BARE chat message: a person asked one
   question and is owed one answer, and unlike an alert they CAN name the agent.
-  One server routes it, several REFUSE it with the choices and the
-  `/<pipeline> <task>` form, none keeps the unwired drop. Addressed messages and
+  One server routes it, several ANSWER WITH THE CHOICES and the
+  `/<pipeline> <task>` form, none keeps the unwired drop. Several claimants is
+  the EXPECTED shape on a shared surface — see the many-to-many rule above —
+  and the choice list is the feature, not a degraded mode. Addressed messages and
   thread replies are untouched. The lane is told apart by the ARRIVING SIGNAL's
   `kind` in ingest — no `SignalSource` or `SignalAdapter` field declares "chat
   source", and no reconciler decides it; adding such a handle buys one `if` at
@@ -133,6 +135,30 @@ adopter-documentation rules at the foot of this file instead.
   one behavior wearing two names.
   Refs in order: tools concatenate with dedup, server keys overlay (later wins).
   Content stays in the referenced CRs; Ready validates both ref sets.
+  **WIRING IS MANY-TO-MANY, IN EVERY DIRECTION. THIS IS THE MODEL, NOT A HAZARD.**
+  A Pipeline claims MANY sources and delivers to MANY channels. A source is
+  claimed by MANY Pipelines. A channel carries MANY Pipelines' conversations.
+  There is no exclusivity anywhere, no conflict condition, no tiebreak, and
+  nothing to warn about: two agents on one surface and two agents on one source
+  are ORDINARY CONFIGURATIONS an adopter chooses. Any advice that reads "prefer a
+  source of its own" or "claiming this too would cost you X" is WRONG and is to
+  be deleted on sight — it was written three times in this repo and reverted
+  three times. The only consequence of several claimants is mechanical and
+  benign: an UNADDRESSED chat message is answered with the list of agents that
+  serve the surface, so the person names one. That is a teaching moment, not a
+  cost, and it is the whole of it.
+  **CLAIMING AND ADDRESSING ARE INDEPENDENT MECHANISMS.** A CLAIM
+  (`signalSourceRefs`) decides who answers an UNADDRESSED message and is read
+  from Ready pipelines only. ADDRESSING (`/<pipeline> <task>`, `router.go`
+  `HandleCommand`) is a plain `Get` BY NAME — no claim check and no Ready check
+  — and `boundChannels` folds the originating channel in, so the reply lands in
+  the thread it was asked from whatever the addressed Pipeline declares. Two
+  consequences that decide how bundles wire themselves: several pipelines share
+  ONE surface without sharing its source, and listing a chat source on a
+  Pipeline that is only ever addressed grants that Pipeline NOTHING while making
+  every unaddressed message on that surface ambiguous — which the bare-chat lane
+  answers by REFUSING. `/agents` lists Ready pipelines only, so an addressable
+  Pipeline stays discoverable whether or not it claims anything.
   **REACHED, NEVER NAMED**: a Pipeline is reached two ways and no others — a
   signal posted to a source it CLAIMS, and a `/<pipeline>` chat command on a
   wired surface. There is NO HTTP form that names a Pipeline: `POST /task` was
@@ -232,7 +258,7 @@ adopter-documentation rules at the foot of this file instead.
 ```sh
 go build ./... && go vet ./...
 for m in channel-telegram telegram-router signal-telegram signal-cron \
-         signal-vmalertmanager signal-k8s-events; do
+         signal-vmalertmanager signal-k8s-events signal-ha; do
   (cd $m && go build ./... && go vet ./... && go test ./...)
 done
 # regen after editing api/v1alpha1/ (deepcopy + CRDs):
@@ -332,6 +358,7 @@ $BX -t <registry>/agentops-signal-telegram:<tag> ./signal-telegram/
 $BX -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
 $BX -t <registry>/agentops-signal-vmalertmanager:<tag> ./signal-vmalertmanager/
 $BX -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
+$BX -t <registry>/agentops-signal-ha:<tag> ./signal-ha/
 $BX -t <registry>/agentops-console:<tag> ./console/
 $BX -t <registry>/agentops-context-sync:<tag> ./context-sync/
 $BX -t <registry>/agentops-housekeeping:<tag> ./housekeeping/
@@ -447,6 +474,20 @@ signal-vmalertmanager/   webhook-receiving signal adapter (own module, no
                          renaming a published image is churn with a migration
                          attached. The CHART is what an operator reads, so the
                          CHART is what got renamed
+signal-ha/               Home Assistant log signal adapter (own module, no deps)
+                         — reads that instance's WebSocket API over a
+                         hand-written RFC 6455 client (`system_log_event`, with
+                         `system_log/list` for backfill and for the dwell
+                         re-check's evidence). NO Kubernetes client at all:
+                         `kubernetesAccess: false`, credential projected per
+                         SOURCE. Same `rules`/`route` vocabulary as
+                         signal-k8s-events, minus the time axis. Fingerprint
+                         keys on LOGGER + SOURCE LOCATION — Home Assistant's own
+                         dedup identity — never on the occurrence. Verification
+                         ladder: config-entry state, then recurrence. Its loop
+                         breaker is the agent SURFACE (`mcp_server`, `api`,
+                         `websocket_api`), because a failed agent call is logged
+                         there and reporting it would wake the agent that made it
 signal-k8s-events/       cluster Events signal adapter (own module, no deps) —
                          in-cluster API over net/http (no client-go): SA token
                          re-read, list+watch per namespace scope, 410 relist.
@@ -575,6 +616,31 @@ chart/charts/prometheus-bundle/
                          The retired `vm-bundle:` key FAILS the render: helm
                          never reports an unread values key, so the rename would
                          otherwise install nothing and look successful
+chart/charts/ha-bundle/  subchart: the Home Assistant lane and a PRIVILEGE
+                         SPLIT — the log ingest lane, ONE `MCPConfig` (server
+                         key FIXED at `homeassistant`, and NO server workload:
+                         the house serves its own MCP endpoint), TWO risk-split
+                         `MCPToolset`s, and TWO identity-only profiles —
+                         `ha-user` USES the house, `ha-operator` FIXES it. The
+                         split is use-versus-fix, NOT read-versus-act: Home
+                         Assistant has no read-only role, so both agents act and
+                         what separates them is the REST path (Assist intents
+                         reach no configuration, so repairing needs a shell and
+                         only the ops route binds one). The OPERATOR credential
+                         gates the fixing half AND the ingest lane —
+                         `subscribe_events` is admin-only, so a control token
+                         authenticates and is then refused the subscription,
+                         which reads like a network fault.
+                         Never enabled by demo mode. Two default-off routes, and
+                         BOTH claim the chat sources — wiring is many-to-many, so
+                         a shared surface offering both agents is the point.
+                         `ha-ops` additionally claims the log source, which is
+                         the only asymmetry. `pipelines.restAccess` is PER
+                         ROUTE: on for ops, off for control. Credentials come as
+                         a NAME or as the TOKEN ITSELF — the token form makes the
+                         bundle create the Secret and derive BOTH keys
+                         (`token` + `authorization`), which is what lets a
+                         secret manager's ref go straight into values
 chart/charts/telegram-bundle/
                          subchart: the three-component Telegram stack (router +
                          signal adapter + channel adapter) as adapter CRs, and
@@ -1124,9 +1190,12 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   `prometheus-bundle.pipelines` qualifies on the same grounds and ships one
   route; its `enabled` is a plain `false` rather than nullable, because demo
   mode never enables that bundle at all, so there is nothing for an explicit
-  `false` to have to beat. `telegram-bundle` still ships NONE and is the
-  counter-example: its routes genuinely span bundles, because a chat surface is
-  answered by an agent from somewhere else.
+  `false` to have to beat. `ha-bundle.pipelines` is the third, on the same plain
+  `false` for the same reason, and it ships TWO routes because its lane has two
+  privilege levels — the acting one claims the log source and NO chat source, so
+  reaching it is `/ha-ops <task>` and never an accident. `telegram-bundle` still
+  ships NONE and is the counter-example: its routes genuinely span bundles,
+  because a chat surface is answered by an agent from somewhere else.
   Name pipelines for their JOB, not for the
   channel they answer on. And a SignalSource is NOT claimed by exactly one
   pipeline — sources are shareable, so a bundle's route and an install's route

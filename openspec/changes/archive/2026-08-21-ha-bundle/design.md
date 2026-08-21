@@ -40,24 +40,19 @@ The sketch gives `ha-user` "mcpconfig as tools". An `AgentProfile` has no such f
 
 This is not a downgrade of the intent — it is the same privilege split expressed where the model puts it, and it has a property the sketch does not: the same profile routed by a different Pipeline gets different power, so the split is enforced by the wiring rather than by remembering which profile is which.
 
-### D2: Both lanes serve one surface; only `ha-control` lists it as a source
+### D2: Both lanes serve one surface, and both claim it
 
-Claiming and addressing are independent, and conflating them is what made an earlier draft of this design wrong. Two separate mechanisms:
+**WIRING IS MANY-TO-MANY.** A source is claimed by as many Pipelines as an install declares, a Pipeline claims as many sources, and a channel carries as many Pipelines. There is no exclusivity, no conflict condition and no tiebreak anywhere in the model, and a shared surface is an ordinary configuration rather than something to advise against.
 
-- **Claiming** (`PipelineForSource`, `signals.go:330`) decides who answers an UNADDRESSED message on a surface. It reads Ready pipelines only.
-- **Addressing** (`HandleCommand`, `router.go:205`) resolves `/<pipeline> <task>` with a plain `Get` — no claim check and no Ready check. `signals.go:352-354` states it directly: an addressed command opens the conversation "on the pipeline it names rather than the one claiming the source." `boundChannels` then folds the originating channel in, so the reply lands in the thread the request came from whatever the addressed Pipeline declares.
+Claiming and addressing remain independent mechanisms. **Claiming** decides who is OFFERED for an unaddressed message. **Addressing** (`HandleCommand`, `router.go`) resolves `/<pipeline> <task>` with a plain `Get` — no claim check and no Ready check — and `boundChannels` folds the originating channel in, so the reply lands in the thread the request came from.
 
-So both pipelines ARE reachable from one shared console or telegram surface, by name. That was never in question and needs no separate sources.
+**IMPLEMENTATION CORRECTION, twice.** This design first costed a second claimant as a `SourceConflict` — machinery that is DELETED. It then argued that `ha-ops` should claim no chat source because an unaddressed message would become ambiguous. That argument is also withdrawn: several claimants is the EXPECTED shape on a shared surface, and the manager answers an unaddressed message with the list of agents serving it, which is the disambiguation working. Both routes therefore claim every chat source the install names, and the log source is the only asymmetry.
 
-What listing the same chat source on both pipelines would actually do is narrower than "break it": `sourceConflicts` (`pipeline_controller.go:104-132`) flags any source an older Pipeline already lists, and lines 95-99 set `Ready=False, reason=SourceConflict` on the younger. The agent still answers when addressed, because the command path never consults Ready. The costs are that `/agents` lists Ready pipelines only (`router.go:178-181`), so `/ha-ops` vanishes from the listing people use to find it, and the Pipeline reads as broken in the console and in `kubectl get pipeline`.
+### D3: Wiring ships with the bundle, behind a flag defaulting OFF
 
-Hence: `ha-control` lists the chat sources, `ha-ops` lists `ha-logs` only. Not because `ha-ops` could not otherwise answer, but because listing them **grants nothing** — addressing already ignores claims — while costing a permanent unready condition and discoverability. Both pipelines still list the console and telegram CHANNELS, so alert-driven conversations from `ha-logs` deliver to the surfaces people watch, and both stay Ready, so `/agents` shows both.
+**IMPLEMENTATION CORRECTION.** This design specified `pipelines.enabled: true`. The invariant it relaxes has since been written down with FOUR conditions, and the fourth is that the flag DEFAULTS OFF — enabling a bundle for its adapter, tooling and profiles must never silently acquire routes beside the ones the install declared. `k8s-bundle` and `prometheus-bundle` both ship off, and so does this one: `pipelines.enabled: false`, a plain boolean rather than a nullable, because demo mode never enables this bundle at all and there is nothing for an explicit `false` to have to beat.
 
-*Alternatives considered:* separate chat sources per lane (`console-ha-control`, `console-ha-ops`, plus a second telegram surface) — the console values already document declaring several sources, so it works, but it buys default-addressability for `ha-ops` at the price of a second telegram chat or topic. Rejected: the privilege split is better served by escalation being a deliberate act than by the admin agent answering casual messages.
-
-### D3: Wiring ships with the bundle, behind a flag defaulting on
-
-`pipelines.enabled: true`. Turning it off renders neither Pipeline and leaves every other component intact.
+Turning it on renders both routes and leaves every other component intact.
 
 *Why relax the rule at all:* the rule's stated harm is a subchart wiring only its own lane because it cannot see the others. This bundle's lane is substantially its own — `ha-logs`, both profiles and both toolsets are all bundle-rendered — and the only outside references are chat surfaces, which arrive as values-supplied names. The `k8s-bundle` events template already articulates the counter-case in its own comment: "a SignalSource nobody claims reports Wired=False and DROPS every signal, so shipping the source alone would look installed and quietly do nothing."
 
@@ -103,8 +98,9 @@ The rules that vocabulary carries come with it. `for:` is Prometheus and `group_
 5. The live install already runs same-shaped hand-applied CRs. Enabling the bundle with matching names would hit server-side-apply ownership conflicts, so the options are, in order: keep it disabled there; adopt by matching the live names and upgrading once with `--force-conflicts`; or install side-by-side under fresh names and retire the old CRs. Default-disabled means an upgrade never forces the choice.
 6. Rollback: disable the bundle. Helm removes bundle-owned CRs; hand-applied ones are untouched.
 
-## Open Questions
+## Open Questions — resolved before implementation
 
-- **What exactly does the adapter watch?** Home Assistant exposes an error log, a `system_log` component, and a WebSocket event stream. The event stream is the richest and the closest analogue to watching cluster Events; the error log is the simplest and matches "listening ha logs" most literally. Leaning to the event stream with the log as a second configurable source, but this wants one look at a live instance before it is settled.
-- **Should `ha-user` get the shell toolset at all?** Without it the read path is MCP-only and the boundary in D5 is clean for that profile. With it, "ask the house something" can fall back to REST. Leaning MCP-only for `ha-user`, which makes the D5 caveat apply to `ha-ops` alone.
-- **Profile and pipeline both named `ha-ops`.** Legal — different kinds — but it makes prose ambiguous. Keeping the names as specified; worth one look before implementation.
+- **What the adapter watches: the WebSocket event stream.** `system_log_event` over Home Assistant's WebSocket API, with `system_log/list` for backfill and for the dwell re-check's evidence. The client is hand-written (RFC 6455) to keep the module dependency-free, the same way `signal-k8s-events` hand-writes its watch. `/api/error_log` was rejected: it returns the raw log FILE, so every structured field would be a regex and the cursor a byte offset that rotation invalidates.
+- **Does `ha-user` get the shell toolset? Derived, not decided.** `pipelines.restAccess` binds the built-in shell toolset exactly when the MCP component is ABSENT — "MCP if configured, otherwise the REST API". With MCP present a shell would step around the split it exists for, so the D5 caveat applies to a deliberate `restAccess: true` and to the no-MCP install.
+- **The `ha-ops` name collision: the PROFILE was renamed.** Profile `ha-operator`, Pipeline `ha-ops`, toolset `ha-admin`. The command people type keeps the short name.
+- **The MCP path has no server workload.** Home Assistant serves its own MCP endpoint (the built-in MCP Server integration, SSE at `/mcp_server/sse`), so `mcp.url` defaults onto the configured Home Assistant endpoint and there is no `mcpServers` component to mirror from the other bundles.

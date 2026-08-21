@@ -6,11 +6,11 @@ plus one scenario of this change's own. Whichever archives second folds rather
 than restates — so if `k8s-bundle-wiring` has already archived, this delta is
 additive against the synced requirement and nothing here re-argues the rule.
 
-This bundle's wiring flag defaults ON, which the general rule forbids. That
-exception is carried EXPLICITLY by this change's own `ha-bundle` spec
-("The bundle ships its wiring behind a flag that defaults on"), under the clause
-below permitting a subchart that substantially owns its lane to document one.
-The general requirement does not carry it. -->
+IMPLEMENTATION CORRECTION: this bundle's wiring flag was to default ON, under
+the clause below permitting a subchart that substantially owns its lane to
+document an exception. It does not — it ships DEFAULT OFF like the other two
+bundles that qualify, so the exception clause goes unused by this change and the
+general rule applies unmodified. -->
 
 ### Requirement: Chart-managed wiring is declared once, at the top
 Wiring names a profile, signal sources and channels that routinely originate in

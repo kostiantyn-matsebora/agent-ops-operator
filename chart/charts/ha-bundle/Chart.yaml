@@ -1,0 +1,11 @@
+apiVersion: v2
+name: ha-bundle
+description: >-
+  Home Assistant agent bundle for the agent-ops operator: the Home Assistant log
+  signal source (adapter + source), the house's MCP tooling split by risk, TWO
+  profiles — one that asks the house questions and one that administers it — and
+  the bundle's own opt-in wiring for both. The execution substrate is the parent
+  chart's. Never enabled by demo mode: every component needs an endpoint and a
+  credential no demo cluster has.
+type: application
+version: 0.1.0

@@ -3,7 +3,9 @@
 ## Purpose
 
 The Pipeline CRD: a credential-free wiring layer binding N signal sources and M channels to one profile, and the SOLE source of its conversations' capabilities (`toolsets` refs plus their composition mode, and mode-less `mcpConfigs` refs) — with pipeline-only routing resolution, and shareable sources whose signals fan out to every pipeline listing them.
+
 ## Requirements
+
 ### Requirement: Pipeline CRD declares the wiring between sources, channels, and a profile
 The `Pipeline` CRD SHALL bind N `signalSourceRefs` and M `channelRefs` to one `profileRef`: signals from every referenced source SHALL become conversations bound to ALL referenced channels with the pipeline's profile, and conversations originated from any referenced channel SHALL be bound to all referenced channels. The Pipeline SHALL also be the SOLE source of its conversations' capabilities, via two optional stanzas of ordered refs: `spec.toolsets` (→ `MCPToolset` CRs, the allowlist) and `spec.mcpConfigs` (→ `MCPConfig` CRs, the MCP servers). `spec.toolsets` SHALL carry a `mode` (`merge` | `overwrite`, default `merge`) declaring how its tools compose with those the AGENT'S OWN DEFINITION declares — `merge` extends them, `overwrite` replaces them. `spec.mcpConfigs` SHALL carry no mode: an agent definition declares no MCP servers, so there is nothing there to compose against. Neither stanza has a default — a Pipeline that declares no bindings gives its conversations no wiring-level capabilities, and nothing supplies them elsewhere. A Pipeline SHALL be reachable two ways and no others: a signal posted to a source it LISTS, and a chat command NAMING it on a surface whose chat source is itself served. There SHALL be no HTTP addressing form that names a Pipeline — a caller selecting its own wiring is the shape this CRD exists to prevent, and the chat form is bounded by a person having to be on a wired surface to type it. A Pipeline with neither sources nor channels carries no special meaning; it is simply a route no signal feeds, still nameable by command. The Pipeline SHALL carry no credentials, no server or tool definitions, and no runtime selection (runtime stays `profile.runtimeRef → "default"`). A reconciler SHALL maintain a `Ready` condition (all references resolve, including toolset and mcpConfig refs) without creating any workload.
 
@@ -199,6 +201,11 @@ has nothing to gain from it.
 - **THEN** both Pipelines render and the source fans out to both, because
   sources are shareable and no conflict guard exists to reinstate
 
+#### Scenario: A bundle never names what nobody rendered
+- **WHEN** a subchart renders wiring while an optional channel name is unset
+- **THEN** the rendered Pipeline omits that reference entirely rather than
+  naming an object that does not exist
+
 ### Requirement: Pipelines are named for their purpose, not their transport
 A `Channel` is shareable across Pipelines by design — one chat surface carries
 many jobs, so that operators need not run a bot and a group per route. A
@@ -215,4 +222,3 @@ another Pipeline may watch the same one for a different purpose.
 - **WHEN** two Pipelines with different purposes both list one SignalSource
 - **THEN** both are valid and neither is preferred, so each name must say which
   job it does rather than which source it reads
-

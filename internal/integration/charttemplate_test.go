@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -1361,5 +1362,460 @@ func TestEphemeralInstallSaysConversationsCannotContinue(t *testing.T) {
 	}
 	if strings.Contains(helmNotes(t), "CANNOT BE CONTINUED") {
 		t.Fatal("the default install CAN continue conversations")
+	}
+}
+
+// ---- ha-bundle --------------------------------------------------------------
+
+// haArgs is the smallest enablement that renders every ha-bundle component.
+func haArgs(extra ...string) []string {
+	return append([]string{
+		"--set", "ha-bundle.enabled=true",
+		"--set", "ha-bundle.homeAssistant.endpoint=https://ha.example.org",
+		"--set", "ha-bundle.homeAssistant.credentials.controlSecret=ha-control",
+		"--set", "ha-bundle.homeAssistant.credentials.operatorSecret=ha-operator",
+	}, extra...)
+}
+
+func haDoc(t *testing.T, rendered, kind, name string) string {
+	t.Helper()
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, "\nkind: "+kind+"\n") &&
+			strings.Contains(doc, "\n  name: "+name+"\n") &&
+			strings.Contains(doc, "agentops-ha-bundle") {
+			return doc
+		}
+	}
+	t.Fatalf("no %s/%s rendered by ha-bundle", kind, name)
+	return ""
+}
+
+// The bundle is off by default and demo mode must never turn it on: every
+// component needs an endpoint and a token no demo cluster has.
+func TestHaBundleIsOffByDefaultAndUnderDemo(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"default", nil},
+		{"demo", []string{"--set", "global.demo.enabled=true"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := helmTemplate(t, tc.args...)
+			if strings.Contains(out, "agentops-ha-bundle") {
+				t.Fatal("ha-bundle must render nothing here")
+			}
+		})
+	}
+}
+
+// The wiring flag DEFAULTS OFF. That default is the load-bearing half of the
+// rule that lets a subchart ship wiring at all: enabling the bundle for its
+// parts must never silently acquire routes beside the ones the install declared.
+func TestHaWiringDefaultsOff(t *testing.T) {
+	out := helmTemplate(t, haArgs()...)
+	// Checked per DOCUMENT, not by substring: the bundle's Secret names contain
+	// the route names, so a grep would find itself.
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "\nkind: Pipeline\n") && strings.Contains(doc, "agentops-ha-bundle") {
+			t.Fatalf("ha-bundle.pipelines.enabled defaults false:\n%s", doc)
+		}
+	}
+	// ...and the rest of the bundle still renders.
+	haDoc(t, out, "AgentProfile", "ha-user")
+	haDoc(t, out, "SignalSource", "ha-logs")
+}
+
+// BOTH routes claim the chat sources. Wiring is many-to-many, so a surface
+// serving both agents is the ordinary shape — and the claim is what puts each
+// agent in the list an unaddressed message is answered with.
+func TestHaBothRoutesClaimTheChatSources(t *testing.T) {
+	out := helmTemplate(t, haArgs(
+		"--set", "ha-bundle.pipelines.enabled=true",
+		"--set", "ha-bundle.pipelines.chatSources={console-ha,home-ops}",
+	)...)
+
+	control := stripComments(haDoc(t, out, "Pipeline", "ha-control"))
+	ops := stripComments(haDoc(t, out, "Pipeline", "ha-ops"))
+	for _, doc := range []string{control, ops} {
+		for _, src := range []string{"- name: console-ha", "- name: home-ops"} {
+			if !strings.Contains(doc, src) {
+				t.Fatalf("both routes claim every chat source, missing %q:\n%s", src, doc)
+			}
+		}
+	}
+	// The log source is the ONLY asymmetry between them.
+	if !strings.Contains(ops, "- name: ha-logs") {
+		t.Fatalf("the ops route must claim the log source:\n%s", ops)
+	}
+	if strings.Contains(control, "- name: ha-logs") {
+		t.Fatalf("the control route answers people, not the log:\n%s", control)
+	}
+
+	// The split is USE versus FIX, so BOTH bind the service-call toolset. What
+	// separates them is the REST path: configuration is what the ops agent
+	// repairs, and no Assist intent reaches configuration.
+	for _, doc := range []string{control, ops} {
+		if !strings.Contains(doc, "- name: ha-actions") {
+			t.Fatalf("both routes bind the service-call toolset:\n%s", doc)
+		}
+	}
+	if !strings.Contains(ops, "- name: agentops-shell") {
+		t.Fatalf("the ops route must bind the shell toolset — REST is how it reconfigures:\n%s", ops)
+	}
+	if strings.Contains(control, "- name: agentops-shell") {
+		t.Fatalf("the control route must NOT bind a shell: it works through the intents:\n%s", control)
+	}
+}
+
+// The OPERATOR credential gates the fixing half. With none, a house that can be
+// used but not repaired is a configuration rather than a half-install: no ops
+// profile and no ops route.
+func TestHaWithoutOperatorCredentialShipsNoFixingLane(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "ha-bundle.enabled=true",
+		"--set", "ha-bundle.homeAssistant.endpoint=https://ha.example.org",
+		"--set", "ha-bundle.homeAssistant.credentials.controlSecret=ha-control",
+		"--set", "ha-bundle.pipelines.enabled=true")
+	for _, doc := range splitDocs(out) {
+		if !strings.Contains(doc, "agentops-ha-bundle") {
+			continue
+		}
+		if strings.Contains(doc, "\nkind: AgentProfile\n") && strings.Contains(doc, "name: ha-operator") {
+			t.Fatal("no operator credential must render no operator profile")
+		}
+		if strings.Contains(doc, "\nkind: Pipeline\n") && strings.Contains(doc, "name: ha-ops") {
+			t.Fatal("no operator credential must render no fixing route")
+		}
+	}
+	haDoc(t, out, "Pipeline", "ha-control")
+}
+
+// A credential supplied as a TOKEN makes the bundle create the Secret, deriving
+// BOTH keys from one value — which is what lets a secret manager hand this chart
+// a reference instead of anyone creating a Secret by hand.
+func TestHaTokenFormCreatesTheSecret(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "ha-bundle.enabled=true",
+		"--set", "ha-bundle.homeAssistant.endpoint=https://ha.example.org",
+		"--set", "ha-bundle.homeAssistant.credentials.controlToken=CTOK",
+		"--set", "ha-bundle.homeAssistant.credentials.operatorToken=OTOK")
+	for _, tc := range []struct{ name, token string }{
+		{"agentops-ha-control", "CTOK"},
+		{"agentops-ha-operator", "OTOK"},
+	} {
+		doc := haDoc(t, out, "Secret", tc.name)
+		if !strings.Contains(doc, "token: "+strconv.Quote(tc.token)) {
+			t.Errorf("%s must carry the raw token:\n%s", tc.name, doc)
+		}
+		// The header value is substituted WHOLE, so the scheme lives inside the
+		// Secret rather than in front of it.
+		if !strings.Contains(doc, "authorization: "+strconv.Quote("Bearer "+tc.token)) {
+			t.Errorf("%s must derive the complete header value:\n%s", tc.name, doc)
+		}
+	}
+	// The MCP path authenticates as CONTROL: every Assist intent is within that
+	// user's rights, so defaulting to the operator would widen the shared path
+	// and buy no capability.
+	cfg := haDoc(t, out, "MCPConfig", "ha-api")
+	if !strings.Contains(cfg, "name: agentops-ha-control") {
+		t.Fatalf("the MCP path must authenticate as the control user:\n%s", cfg)
+	}
+}
+
+// Two sources for one token is ambiguous, so it fails the render rather than
+// picking one.
+func TestHaBothCredentialFormsIsRefused(t *testing.T) {
+	msg := helmTemplateErr(t,
+		"--set", "ha-bundle.enabled=true",
+		"--set", "ha-bundle.homeAssistant.endpoint=https://ha.example.org",
+		"--set", "ha-bundle.homeAssistant.credentials.controlSecret=ha-control",
+		"--set", "ha-bundle.homeAssistant.credentials.controlToken=CTOK")
+	if !strings.Contains(msg, "not both") {
+		t.Fatalf("expected the ambiguity to be refused, got:\n%s", msg)
+	}
+}
+
+// The MCP server key is FIXED. It IS the mcp__homeassistant__* namespace named
+// in every allowlist, so a values path here would let a rename silently strip an
+// agent's tools instead of failing.
+func TestHaMCPServerKeyIsFixed(t *testing.T) {
+	out := helmTemplate(t, haArgs()...)
+	cfg := stripComments(haDoc(t, out, "MCPConfig", "ha-api"))
+	if !strings.Contains(cfg, "\n    homeassistant:\n") {
+		t.Fatalf("the MCP server key must be homeassistant:\n%s", cfg)
+	}
+	if !strings.Contains(cfg, "/mcp_server/sse") {
+		t.Fatalf("an empty url must default onto Home Assistant's own MCP endpoint:\n%s", cfg)
+	}
+}
+
+// Tools are ENUMERATED, never wildcarded. A server-wide wildcard spans both
+// halves of the risk split and defeats it — which is exactly what the split
+// replaces.
+func TestHaToolsetsAreEnumerated(t *testing.T) {
+	out := helmTemplate(t, haArgs()...)
+	for _, name := range []string{"ha-observability", "ha-actions"} {
+		doc := stripComments(haDoc(t, out, "MCPToolset", name))
+		if strings.Contains(doc, "*") {
+			t.Fatalf("toolset %s must enumerate its tools, found a wildcard:\n%s", name, doc)
+		}
+		if !strings.Contains(doc, "mcp__homeassistant__") {
+			t.Fatalf("toolset %s names no Home Assistant tools:\n%s", name, doc)
+		}
+	}
+}
+
+// The default rule set's SHAPE, pinned for the same reasons as the cluster
+// events one: the tuning stays editable, the two properties that make it safe do
+// not.
+func TestHaDefaultRulesShape(t *testing.T) {
+	out := helmTemplate(t, haArgs()...)
+	src := stripComments(haDoc(t, out, "SignalSource", "ha-logs"))
+
+	blocks := haRuleBlocks(src)
+	if len(blocks) == 0 {
+		t.Fatal("no default rules rendered")
+	}
+
+	// Anything describing something that ALREADY happened must never dwell: a
+	// re-check would find the recovered house and erase the incident.
+	for _, pastTense := range []string{"Error executing script", `level="CRITICAL"`} {
+		var line string
+		for _, b := range blocks {
+			if strings.Contains(b, pastTense) {
+				line = b
+				break
+			}
+		}
+		if line == "" {
+			t.Errorf("past-tense condition %q is not covered by any rule", pastTense)
+			continue
+		}
+		if !strings.Contains(line, `for: "0"`) {
+			t.Errorf("past-tense condition %q must carry for: \"0\", got rule:\n%s", pastTense, line)
+		}
+	}
+
+	last := blocks[len(blocks)-1]
+	if !strings.Contains(last, "matchers: []") {
+		t.Fatalf("the last rule must be a catch-all:\n%s", last)
+	}
+	if strings.Contains(last, "action: drop") {
+		t.Fatalf("the catch-all must never be a drop:\n%s", last)
+	}
+	if !strings.Contains(last, "for:") {
+		t.Fatalf("the catch-all must carry a dwell:\n%s", last)
+	}
+
+	// Grouping by integration, never per record: one broken hub logs from
+	// several code paths and is one conversation.
+	if !strings.Contains(src, "- integration") {
+		t.Fatalf("the log source must group by integration:\n%s", src)
+	}
+	// This adapter implements no time axis, so a window here would be a key it
+	// rejects rather than one that silently never fires.
+	for _, absent := range []string{"timeIntervals", "muteTimeIntervals"} {
+		if strings.Contains(src, absent) {
+			t.Errorf("the log source must declare no %s:\n%s", absent, src)
+		}
+	}
+}
+
+// The REST path is per ROUTE, and an explicit value still moves both. Its
+// default asymmetry is the design: configuration is what the ops agent repairs,
+// and no Assist intent reaches configuration.
+func TestHaRestAccessIsPerRoute(t *testing.T) {
+	shell := "- name: agentops-shell"
+
+	derived := helmTemplate(t, haArgs("--set", "ha-bundle.pipelines.enabled=true")...)
+	if !strings.Contains(stripComments(haDoc(t, derived, "Pipeline", "ha-ops")), shell) {
+		t.Error("the ops route needs the REST path to reconfigure anything")
+	}
+	if strings.Contains(stripComments(haDoc(t, derived, "Pipeline", "ha-control")), shell) {
+		t.Error("the everyday route must not get its token's whole surface by default")
+	}
+
+	off := helmTemplate(t, haArgs(
+		"--set", "ha-bundle.pipelines.enabled=true",
+		"--set", "ha-bundle.pipelines.restAccess=false")...)
+	if strings.Contains(stripComments(haDoc(t, off, "Pipeline", "ha-ops")), shell) {
+		t.Error("an explicit false must take the REST path away from the ops route too")
+	}
+}
+
+// Profiles carry identity ONLY. allowedTools and mcp were deleted from this CRD
+// once already, and re-adding them here is the mistake to catch at render time.
+func TestHaProfilesCarryNoCapabilities(t *testing.T) {
+	out := helmTemplate(t, haArgs()...)
+	for _, name := range []string{"ha-user", "ha-operator"} {
+		doc := stripComments(haDoc(t, out, "AgentProfile", name))
+		for _, forbidden := range []string{"allowedTools", "mcpConfigs", "toolsets"} {
+			if strings.Contains(doc, forbidden) {
+				t.Errorf("profile %s must carry no capabilities, found %q:\n%s", name, forbidden, doc)
+			}
+		}
+		if !strings.Contains(doc, "HA_URL") {
+			t.Errorf("profile %s must carry its connectivity env:\n%s", name, doc)
+		}
+	}
+}
+
+// The adapter's data source is the house, not the cluster. Mounting a token here
+// would grant it an identity it has no use for.
+func TestHaAdapterHoldsNoKubernetesAccess(t *testing.T) {
+	out := helmTemplate(t, haArgs()...)
+	doc := stripComments(haDoc(t, out, "SignalAdapter", "home-assistant"))
+	if !strings.Contains(doc, "kubernetesAccess: false") {
+		t.Fatalf("the ha adapter must declare kubernetesAccess: false:\n%s", doc)
+	}
+	if !strings.Contains(doc, "singleton: true") {
+		t.Fatalf("two sessions would post every record twice:\n%s", doc)
+	}
+	// credentialKeys entries key on `key`. Spelling it `name` renders, passes
+	// every template assertion, and is REJECTED by the API server on apply —
+	// which is how it was found.
+	if !strings.Contains(doc, "- key: token") {
+		t.Fatalf("credentialKeys entries must use `key`, not `name`:\n%s", doc)
+	}
+}
+
+// haRuleBlocks splits the rendered `rules:` list into its entries.
+func haRuleBlocks(src string) []string {
+	_, after, ok := strings.Cut(src, "\n    rules:\n")
+	if !ok {
+		return nil
+	}
+	body, _, _ := strings.Cut(after, "\n    route:")
+	var out []string
+	for _, chunk := range strings.Split(body, "\n    - ") {
+		if strings.TrimSpace(chunk) != "" {
+			out = append(out, chunk)
+		}
+	}
+	return out
+}
+
+// The ADMIN MCP path exists because Home Assistant's built-in server exposes
+// Assist intents only: it cannot read a log, reload an integration, or disable
+// an entity. Those live in registries served over the WebSocket API, and an ops
+// agent without this component hands the job back.
+func TestHaAdminMcpIsOffByDefault(t *testing.T) {
+	out := helmTemplate(t, haArgs("--set", "ha-bundle.pipelines.enabled=true")...)
+	for _, absent := range []string{"ha-admin-api", "agentops-mcp-ha"} {
+		if strings.Contains(out, absent) {
+			t.Fatalf("the admin MCP path is opt-in, found %q", absent)
+		}
+	}
+}
+
+// Two servers, split by lane. The control route reaches ONE server that cannot
+// touch configuration, so the split is a wall rather than an allowlist.
+func TestHaAdminMcpIsBoundToTheOpsRouteOnly(t *testing.T) {
+	out := helmTemplate(t, haArgs(
+		"--set", "ha-bundle.pipelines.enabled=true",
+		"--set", "ha-bundle.adminMcp.enabled=true",
+		"--set", "ha-bundle.adminMcpServer.enabled=true")...)
+
+	control := stripComments(haDoc(t, out, "Pipeline", "ha-control"))
+	ops := stripComments(haDoc(t, out, "Pipeline", "ha-ops"))
+	for _, admin := range []string{"ha-admin-api", "- name: ha-admin"} {
+		if strings.Contains(control, admin) {
+			t.Fatalf("the control route must not reach the admin server, found %q:\n%s", admin, control)
+		}
+		if !strings.Contains(ops, admin) {
+			t.Fatalf("the ops route must bind %q:\n%s", admin, ops)
+		}
+	}
+
+	// Distinct server keys: two servers with two tool vocabularies, so one key
+	// for both would make an allowlist entry mean whichever happened to bind.
+	cfg := stripComments(haDoc(t, out, "MCPConfig", "ha-admin-api"))
+	if !strings.Contains(cfg, "\n    homeassistant_admin:\n") {
+		t.Fatalf("the admin server key must be homeassistant_admin:\n%s", cfg)
+	}
+}
+
+// The tools are enumerated from the server's real list. A wildcard would grant
+// restarting Home Assistant, deleting registry objects and installing HACS
+// packages in one line.
+func TestHaAdminToolsetIsEnumeratedAndWithholdsTheDestructive(t *testing.T) {
+	out := helmTemplate(t, haArgs(
+		"--set", "ha-bundle.adminMcp.enabled=true",
+		"--set", "ha-bundle.adminMcpServer.enabled=true")...)
+	doc := stripComments(haDoc(t, out, "MCPToolset", "ha-admin"))
+
+	if strings.Contains(doc, "*") {
+		t.Fatalf("the admin toolset must enumerate:\n%s", doc)
+	}
+	// The tools that answer the failures this component exists for.
+	for _, want := range []string{"ha_set_entity", "ha_set_integration", "ha_get_logs", "ha_reload_core"} {
+		if !strings.Contains(doc, "mcp__homeassistant_admin__"+want) {
+			t.Errorf("the admin toolset must grant %s — it is why this component exists", want)
+		}
+	}
+	// Withheld by default: these restart Home Assistant, delete registry
+	// objects, or install software. Adding one is a values decision.
+	for _, absent := range []string{"ha_restart", "ha_manage_backup", "ha_remove_entity", "ha_manage_hacs"} {
+		if strings.Contains(doc, "mcp__homeassistant_admin__"+absent) {
+			t.Errorf("%s must not ship in the default allowlist", absent)
+		}
+	}
+}
+
+// Either the bundle deploys a server or it points at one. Enabled with neither
+// renders an MCPConfig aimed at nothing, which costs the agent its tools and
+// looks installed — so it fails instead.
+func TestHaAdminMcpNeedsAServer(t *testing.T) {
+	msg := helmTemplateErr(t, haArgs("--set", "ha-bundle.adminMcp.enabled=true")...)
+	if !strings.Contains(msg, "no server to reach") {
+		t.Fatalf("expected the missing-server guard, got:\n%s", msg)
+	}
+}
+
+// Pointing at a server you already run — a HACS MCP integration inside Home
+// Assistant, say — renders the CRs and no workload.
+func TestHaAdminMcpCanUseAnExistingServer(t *testing.T) {
+	out := helmTemplate(t, haArgs(
+		"--set", "ha-bundle.adminMcp.enabled=true",
+		"--set", "ha-bundle.adminMcp.url=https://ha.example.org/api/mcp")...)
+	cfg := stripComments(haDoc(t, out, "MCPConfig", "ha-admin-api"))
+	if !strings.Contains(cfg, "https://ha.example.org/api/mcp") {
+		t.Fatalf("the configured url must win:\n%s", cfg)
+	}
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "\nkind: Deployment\n") && strings.Contains(doc, "agentops-mcp-ha") {
+			t.Fatal("pointing at an existing server must render no workload")
+		}
+	}
+}
+
+// The server holds a credential that can change the whole house, so it runs
+// under its OWN identity — the same two-wall argument k8s-bundle's server makes.
+func TestHaAdminMcpServerHasItsOwnIdentity(t *testing.T) {
+	out := helmTemplate(t, haArgs(
+		"--set", "ha-bundle.adminMcp.enabled=true",
+		"--set", "ha-bundle.adminMcpServer.enabled=true")...)
+	dep := haDoc(t, out, "Deployment", "agentops-mcp-ha")
+	if !strings.Contains(dep, "serviceAccountName: agentops-mcp-ha") {
+		t.Fatalf("the server must not run as the runtime:\n%s", dep)
+	}
+	// Env var NAMES are read off the image, not its documentation — the docs
+	// describe the Home Assistant ADD-ON, a different deployment.
+	for _, env := range []string{"HOMEASSISTANT_URL", "HOMEASSISTANT_TOKEN", "MCP_PORT", "MCP_SECRET_PATH"} {
+		if !strings.Contains(dep, "name: "+env) {
+			t.Errorf("the server needs %s", env)
+		}
+	}
+	if !strings.Contains(dep, `command: ["ha-mcp-web"]`) {
+		t.Errorf("ha-mcp-web is the env-driven HTTP entry point:\n%s", dep)
+	}
+
+	msg := helmTemplateErr(t, haArgs(
+		"--set", "ha-bundle.adminMcp.enabled=true",
+		"--set", "ha-bundle.adminMcpServer.enabled=true",
+		"--set", "global.agentops.runtime.serviceAccountName=agentops-mcp-ha")...)
+	if !strings.Contains(msg, "must NOT be the runtime") {
+		t.Fatalf("sharing the runtime identity collapses the two walls, got:\n%s", msg)
 	}
 }

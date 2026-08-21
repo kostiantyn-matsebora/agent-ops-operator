@@ -1,6 +1,9 @@
-# ha-bundle
+# ha-bundle Specification
 
-## ADDED Requirements
+## Purpose
+TBD - created by archiving change ha-bundle. Update Purpose after archive.
+
+## Requirements
 
 ### Requirement: The HA bundle ships as a self-gated subchart, off by default
 A Helm subchart at `chart/charts/ha-bundle/` SHALL package the Home Assistant
@@ -44,7 +47,7 @@ The bundle SHALL render two `AgentProfile` objects with distinct jobs:
 - **`ha-user`** — the user of the house. It SHALL render when EITHER the MCP
   endpoint OR the read-scoped API credential is configured, and SHALL NOT render
   when neither is.
-- **`ha-ops`** — the administrator. The admin API credential SHALL be its
+- **`ha-operator`** — the administrator. The admin API credential SHALL be its
   prerequisite: it SHALL render only when that credential is configured, and MCP
   configuration SHALL be optional for it.
 
@@ -66,7 +69,7 @@ to hold an agent definition.
 
 #### Scenario: The ops profile requires its credential
 - **WHEN** the bundle is enabled with no admin credential configured
-- **THEN** no `ha-ops` profile is rendered, regardless of MCP configuration
+- **THEN** no `ha-operator` profile is rendered, regardless of MCP configuration
 
 #### Scenario: Profiles declare no capabilities
 - **WHEN** either profile is rendered
@@ -93,15 +96,17 @@ servers cannot drift apart.
 - **WHEN** the MCP endpoint is left unset
 - **THEN** no `MCPConfig` renders and the render succeeds
 
-### Requirement: The bundle ships its wiring behind a flag that defaults on
+### Requirement: The bundle ships its wiring behind a flag that defaults off
 The bundle SHALL render two `Pipeline` objects under a wiring flag defaulting to
-**true**, so that enabling the bundle produces a working install rather than
-components that look installed and drop everything:
+**false**, so that enabling the bundle for its adapter, tooling and profiles
+never silently adds a route beside the ones the install declared. Nothing forces
+the flag on: no turnkey mode enables this bundle at all, so the flag is a plain
+boolean rather than a nullable one:
 
 - **`ha-control`** — profile `ha-user`, claiming the chat sources named in
   values, delivering to the channels named in values, binding the read-only
   toolset.
-- **`ha-ops`** — profile `ha-ops`, claiming the bundle's own signal source,
+- **`ha-ops`** — profile `ha-operator`, claiming the bundle's own signal source,
   delivering to the same channels, binding both toolsets.
 
 Turning the flag off SHALL render neither Pipeline and SHALL leave every other
@@ -112,8 +117,12 @@ A Pipeline SHALL render only when its profile renders. Chat source and channel
 references SHALL come from values and SHALL be omitted when unset, so the bundle
 never names an object another component did not create.
 
-#### Scenario: Enabling the bundle produces a working lane
-- **WHEN** the bundle is enabled with credentials and surface names supplied
+#### Scenario: Enabling the bundle alone adds no route
+- **WHEN** the bundle is enabled with credentials but the wiring flag is not set
+- **THEN** no `Pipeline` renders, and the install's own declarations remain the only routes
+
+#### Scenario: Asking for the wiring produces a working lane
+- **WHEN** the bundle is enabled with credentials, surface names and the wiring flag set
 - **THEN** both Pipelines render, each naming its profile, and the signal source is claimed rather than left inert
 
 #### Scenario: Wiring can be declined
@@ -125,31 +134,32 @@ never names an object another component did not create.
 - **THEN** neither Pipeline references a telegram channel or source, and both render valid
 
 #### Scenario: No profile, no pipeline
-- **WHEN** the admin credential is absent so `ha-ops` does not render
+- **WHEN** the admin credential is absent so `ha-operator` does not render
 - **THEN** the `ha-ops` Pipeline is not rendered either
 
-### Requirement: The two lanes share one surface, and only one of them claims it
+### Requirement: The two lanes share one surface, and both claim it
+Wiring is MANY-TO-MANY: a signal source is claimed by as many Pipelines as an
+install declares, a Pipeline claims as many sources, and a channel carries as
+many Pipelines. Nothing in this model is exclusive, and a surface serving
+several agents SHALL NOT be treated as a conflict, a hazard or a thing to warn
+about.
+
 Addressing a Pipeline by name in chat SHALL route to that Pipeline regardless of
-which Pipeline claims the surface's source, and regardless of the addressed
-Pipeline's own conditions. Claiming a source and being addressable are
-INDEPENDENT: a claim decides who answers an UNADDRESSED message, and nothing
-else.
+which Pipelines claim the surface's source, and regardless of the addressed
+Pipeline's own conditions. Claiming and being addressable are INDEPENDENT: a
+claim decides who is OFFERED for an unaddressed message, and nothing else.
 
-Because of that independence, `ha-ops` SHALL list the bundle's own signal source
-and SHALL NOT list any chat source. Listing one would grant nothing — the
-command path never consults the claim — while costing the Pipeline a permanent
-`SourceConflict`, since a source listed by an older Pipeline puts every later
-claimant at `Ready=False`. That state SHALL be avoided not because it would stop
-the agent answering, but because an unready Pipeline is omitted from the chat
-listing of available agents and reads as broken everywhere it is displayed.
+Both routes SHALL therefore claim every chat source the install names, so both
+agents are offered on that surface. `ha-ops` SHALL additionally claim the
+bundle's own signal source, which is the only asymmetry between them.
 
-`ha-control` SHALL therefore be the sole claimant of the chat sources and the
-default answerer, and the administrator SHALL be reached by name. Escalation
-SHALL be an explicit act rather than the default behaviour of the surface.
+When several Ready Pipelines serve one chat source, an unaddressed message SHALL
+be answered with the list of agents that serve it, so the person names one. That
+is the disambiguation mechanism working, not a degraded mode.
 
-#### Scenario: One claimant, both addressable
+#### Scenario: Both agents are offered on a shared surface
 - **WHEN** both Pipelines render against one console surface
-- **THEN** only `ha-control` lists the chat source, both Pipelines report `Ready=True`, and neither reports a source conflict
+- **THEN** both claim it, both report `Ready=True`, and an unaddressed message is answered with both as choices
 
 #### Scenario: Escalation is explicit and lands where it was asked
 - **WHEN** a person addresses the administrator pipeline by name from a surface claimed by `ha-control`

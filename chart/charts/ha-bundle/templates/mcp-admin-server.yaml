@@ -1,0 +1,114 @@
+{{- /* The admin MCP server WORKLOAD.
+
+Rendered only when the bundle deploys its own — pointing `adminMcp.url` at a
+server you already run (a HACS MCP integration inside Home Assistant, say)
+renders the CRs and nothing here.
+
+It runs under its OWN ServiceAccount, never the runtime's. The agent's reach
+through MCP is then (what this server may do in Home Assistant) ∩ (what the
+toolset grants), which is two walls rather than one — the same reason
+k8s-bundle's MCP server has an identity of its own.
+*/ -}}
+{{- if and (include "ha-bundle.active" .) (include "ha-bundle.adminMcpServerEnabled" .) }}
+{{- $s := .Values.adminMcpServer }}
+{{- $name := include "ha-bundle.adminMcpServerName" . }}
+{{- $secret := include "ha-bundle.adminMcpSecret" . }}
+{{- if not $secret }}
+{{- fail "ha-bundle: the admin MCP server needs a Home Assistant credential — set homeAssistant.credentials.operatorToken (or .operatorSecret, or adminMcpServer.credentialsSecret). Without one it starts, answers, and refuses every repair" }}
+{{- end }}
+{{- $runtimeSA := dig "agentops" "runtime" "serviceAccountName" "" (.Values.global | default dict) }}
+{{- if and $runtimeSA (eq $s.serviceAccountName $runtimeSA) }}
+{{- fail (printf "ha-bundle: adminMcpServer.serviceAccountName (%s) must NOT be the runtime's ServiceAccount — the second identity is the point of running this server, and sharing one collapses the two walls into one" $s.serviceAccountName) }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $s.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-ha-bundle
+# It needs NO Kubernetes permissions: it reads an HTTP API, not the API server.
+# The separate identity is where a cluster-side grant would go if one were ever
+# needed, and it stays empty until then.
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-ha-bundle
+spec:
+  selector:
+    app.kubernetes.io/name: agentops-ha-bundle
+    app.kubernetes.io/component: mcp-ha
+  ports:
+    - name: http
+      port: {{ $s.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-ha-bundle
+    app.kubernetes.io/component: mcp-ha
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentops-ha-bundle
+      app.kubernetes.io/component: mcp-ha
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentops-ha-bundle
+        app.kubernetes.io/component: mcp-ha
+    spec:
+      serviceAccountName: {{ $s.serviceAccountName }}
+      automountServiceAccountToken: false
+      containers:
+        - name: ha-mcp
+          image: {{ printf "%s:%s" $s.image.repository (toString $s.image.tag) | quote }}
+          # The env-driven HTTP entry point. Its names are read off the image
+          # rather than its documentation, which describes the Home Assistant
+          # ADD-ON — a different deployment with different ports.
+          command: ["ha-mcp-web"]
+          ports:
+            - name: http
+              containerPort: {{ $s.port }}
+          env:
+            - name: HOMEASSISTANT_URL
+              value: {{ include "ha-bundle.endpoint" . | quote }}
+            - name: HOMEASSISTANT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: token
+            - name: MCP_HOST
+              value: "0.0.0.0"
+            - name: MCP_PORT
+              value: {{ $s.port | quote }}
+            # Standard mode authenticates by URL-PATH SECRECY — there is no
+            # token on the MCP endpoint. ClusterIP already bounds reach to the
+            # cluster; set a high-entropy path on a shared one.
+            - name: MCP_SECRET_PATH
+              value: {{ $s.path | quote }}
+            # No settings UI: this server is reached by one agent, not by people.
+            - name: HA_MCP_DISABLE_SETTINGS_UI
+              value: "1"
+            # It calls pypi.org at startup otherwise, which an in-cluster
+            # workload has no business doing.
+            - name: MCP_DISABLE_UPDATE_CHECK
+              value: "1"
+            {{- with $s.env }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          {{- with $s.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+{{- end }}
