@@ -115,10 +115,67 @@ type AgentRuntimeSpec struct {
 	// home volume is mounted directly and there is no sidecar.
 	// +optional
 	ContextSync *ContextSync `json:"contextSync,omitempty"`
+	// EgressMediation interposes a proxy in the runtime pod that the agent's
+	// traffic cannot route around, so the tool access its wiring granted is
+	// enforced somewhere the agent does not control. ABSENT means today's pod
+	// exactly: no proxy, no interception, no added containers.
+	//
+	// The RUNTIME declares it because enabling it changes what the pod may do
+	// at startup, and a namespace under `restricted` Pod Security admission
+	// cannot run it at all. That is an execution-substrate property, which is
+	// what an AgentRuntime is for.
+	// +optional
+	EgressMediation *EgressMediation `json:"egressMediation,omitempty"`
 	// Resources default for runtime pods (AgentProfile.resources overrides).
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
+
+// EgressMediation declares that the agent container's egress is redirected
+// through a proxy that enforces the conversation's bound tool access.
+//
+// Presence is the switch. There is no `enabled` field, following ContextSync:
+// a stanza that exists to be declared is clearer than a stanza that exists to
+// be read as false.
+type EgressMediation struct {
+	// Port the proxy listens on inside the pod, and the port the agent's
+	// traffic is redirected to.
+	//
+	// Overridable only because a runtime image may already use the default.
+	// Nothing outside the pod can reach it — the two containers share a network
+	// namespace and no Service names it.
+	// +kubebuilder:default=15001
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port int32 `json:"port,omitempty"`
+	// ExcludePorts are destination ports left unredirected.
+	//
+	// For destinations that must not pass through a userspace proxy at all —
+	// not for tuning. Anything excluded here is reachable by the agent
+	// UNMEDIATED, so the list is a hole in the boundary by construction and is
+	// reported as one.
+	// +optional
+	ExcludePorts []int32 `json:"excludePorts,omitempty"`
+	// Resources for the proxy container.
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// MediationPort returns the port the proxy listens on, defaulting when the
+// stanza is present but the field was left unset (a CR applied before the
+// default existed, or one built in Go rather than through the API server).
+func (e *EgressMediation) MediationPort() int32 {
+	if e == nil || e.Port == 0 {
+		return DefaultEgressMediationPort
+	}
+	return e.Port
+}
+
+// DefaultEgressMediationPort is the proxy's default listen port. 15001 follows
+// the convention service meshes use, so an operator reading a netstat in a
+// runtime pod recognises what it is.
+const DefaultEgressMediationPort int32 = 15001
 
 // ContextSync declares how a runtime's context is kept durable when the live
 // copy lives on pod-local storage.

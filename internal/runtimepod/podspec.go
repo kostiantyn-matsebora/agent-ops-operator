@@ -18,6 +18,13 @@ import (
 )
 
 // LabelApp marks runtime pods; LabelConversation binds one to its conversation.
+// runtimeUID is the identity the agent container runs as.
+//
+// It was an inline literal, which was fine while nothing depended on it. Egress
+// mediation does: interception tells the agent from the proxy by uid, so this
+// value and egressProxyUID must stay distinct or the boundary is not one.
+const runtimeUID int64 = 1000
+
 const (
 	LabelApp          = "app.kubernetes.io/name"
 	LabelAppValue     = "agentops-runtime"
@@ -49,6 +56,15 @@ type Config struct {
 	// declares contextSync. Release-wide like the manager's own image, not a
 	// per-runtime choice: it implements a contract, not a backend.
 	ContextSyncImage string
+	// EgressProxyImage is the proxy interposed in front of the agent when a
+	// runtime declares egressMediation. Release-wide for the same reason
+	// ContextSyncImage is: it implements a contract, not a backend.
+	EgressProxyImage string
+	// EgressInitImage installs the redirect at pod start. Separate from the
+	// proxy image because it needs iptables and root and the proxy needs
+	// neither, so keeping them apart keeps the privileged surface small.
+	// Empty falls back to EgressProxyImage.
+	EgressInitImage string
 	// ContextLiveSizeLimit bounds the pod-local live context.
 	//
 	// In sidecar mode the WHOLE home is ephemeral — caches and tool state
@@ -104,6 +120,10 @@ type Resolved struct {
 	// live context lives on pod-local storage. Nil means today's behaviour: the
 	// home volume mounted directly, no sidecar.
 	ContextSync *agentopsv1alpha1.ContextSync
+	// EgressMediation is the runtime's declaration that the agent's egress is
+	// redirected through an enforcing proxy. Nil means today's pod: the agent
+	// reaches whatever the network reaches.
+	EgressMediation *agentopsv1alpha1.EgressMediation
 }
 
 // ResolveFor picks the execution backend for a profile — its `runtimeRef`, else
@@ -138,9 +158,10 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 		return Resolved{}, fmt.Errorf("runtime %q: %w", name, err)
 	}
 	return Resolved{
-		Config:         FromRuntime(&rt.Spec, fallback),
-		ContextStorage: rt.Spec.ContextStorage,
-		ContextSync:    rt.Spec.ContextSync,
+		Config:          FromRuntime(&rt.Spec, fallback),
+		ContextStorage:  rt.Spec.ContextStorage,
+		ContextSync:     rt.Spec.ContextSync,
+		EgressMediation: rt.Spec.EgressMediation,
 	}, nil
 }
 
@@ -178,6 +199,12 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 	// is what lets an existing install upgrade without a migration.
 	sync := resolved.ContextSync
 	sidecar := sync != nil && cfg.ContextSyncImage != ""
+
+	// EGRESS MEDIATION redirects the agent's traffic through a proxy that
+	// enforces the conversation's bound tool access. Opt-in per runtime on the
+	// same terms as the sidecar above: a runtime declaring nothing gets exactly
+	// the pod it got before.
+	mediated := mediating(resolved)
 
 	// The agent talks to the SIDECAR, which forwards to the manager. That
 	// redirection is the whole mechanism: it is how work boundaries become
@@ -301,17 +328,36 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 		res = *profile.Spec.Resources
 	}
 
-	uid := int64(1000)
+	uid := runtimeUID
 	var initContainers []corev1.Container
 	var gracePeriod *int64
+	// ORDER MATTERS and is the fail-closed property: the redirect is installed
+	// by an ordinary init container that RUNS TO COMPLETION, so it is in place
+	// before any long-running container exists. Until the proxy answers, the
+	// kernel refuses the redirected connections — there is no window in which
+	// the agent reaches a mediated destination unmediated.
+	if mediated {
+		initContainers = append(initContainers,
+			egressInitContainerSpec(cfg, resolved.EgressMediation))
+	}
 	if sidecar {
 		initContainers = append(initContainers,
 			contextSyncContainer(conv, cfg, sync, contextSyncMounts(conv)))
 		g := contextSyncGrace
 		gracePeriod = &g
 	}
+	if mediated {
+		// The proxy always forwards to the destination the caller intended, so
+		// this URL is not a forwarding target — it is how the proxy RECOGNISES
+		// the work contract in the stream, which is where the access decision
+		// arrives. It is the MANAGER's URL in both modes: with a sidecar the
+		// agent talks to loopback and the sidecar talks to the manager, and it
+		// is the sidecar's connection that carries the work unit.
+		initContainers = append(initContainers, egressProxyContainerSpec(
+			cfg, resolved.EgressMediation, mcpEndpoints(mcp.Endpoints), cfg.ControlURL))
+	}
 
-	return &corev1.Pod{
+	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: PodName(conv.Name),
 			Labels: map[string]string{
@@ -343,6 +389,10 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 			Volumes: volumes,
 		},
 	}
+	if mediated {
+		hardenAgentContainer(&pod.Spec.Containers[0])
+	}
+	return pod
 }
 
 func itoa(i int) string {

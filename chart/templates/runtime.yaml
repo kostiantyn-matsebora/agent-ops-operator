@@ -99,6 +99,26 @@ spec:
     interval: {{ $rt.contextSync.interval | quote }}
     retain: {{ $rt.contextSync.retain }}
   {{- end }}
+  {{- if $rt.egressMediation.enabled }}
+  # EGRESS MEDIATION: declared by the RUNTIME, because enabling it changes what
+  # the pod may do at startup — it adds a privileged init container, which a
+  # namespace under `restricted` Pod Security admission will refuse. Absent
+  # means today's pod exactly.
+  egressMediation:
+    # ALWAYS rendered, never an empty mapping: an empty stanza is null to the
+    # API server, and null means ABSENT — which would read as "mediation off"
+    # on an install that just asked for it, silently.
+    port: {{ $rt.egressMediation.port | default 15001 }}
+    {{- with $rt.egressMediation.excludePorts }}
+    # Every port here is reachable by the agent UNMEDIATED.
+    excludePorts:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+    {{- with $rt.egressMediation.resources }}
+    resources:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+  {{- end }}
   {{- with $rt.resources }}
   resources:
 {{ toYaml . | indent 4 }}

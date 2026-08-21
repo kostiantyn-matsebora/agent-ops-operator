@@ -34,6 +34,18 @@ type Result struct {
 	// RawConfigMap / RawSecret request mounting the raw object as mcp.json.
 	RawConfigMap string
 	RawSecret    string
+	// Endpoints maps server key to URL for every NETWORK server compiled.
+	//
+	// Egress mediation enforces on these, so it needs them structured rather
+	// than parsed back out of the rendered document. stdio servers are absent
+	// by construction: they are child processes of the agent container, so no
+	// network proxy can see them, and pretending otherwise would advertise a
+	// boundary that is not there.
+	//
+	// Empty for a RAW config: a hand-written mcp.json is opaque to the
+	// operator, which is exactly why a mediated conversation must report it
+	// rather than assume there is nothing to enforce.
+	Endpoints map[string]string
 }
 
 // RawExclusiveError reports a hand-written mcp.json bound alongside other
@@ -106,8 +118,12 @@ func render(merged map[string]agentopsv1alpha1.MCPServer) (Result, error) {
 	out := map[string]jsonServer{}
 	var env []corev1.EnvVar
 
+	endpoints := map[string]string{}
 	for name, srv := range merged {
 		js := jsonServer{Type: srv.Type, URL: srv.URL, Command: srv.Command, Args: srv.Args}
+		if srv.URL != "" {
+			endpoints[name] = srv.URL
+		}
 		if len(srv.Headers) > 0 {
 			js.Headers = map[string]string{}
 			for _, h := range srv.Headers {
@@ -139,5 +155,5 @@ func render(merged map[string]agentopsv1alpha1.MCPServer) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{JSON: string(b), Env: env}, nil
+	return Result{JSON: string(b), Env: env, Endpoints: endpoints}, nil
 }

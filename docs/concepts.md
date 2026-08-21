@@ -65,8 +65,11 @@ USER node
 and point an `AgentRuntime` at it. The version pin becomes yours to own against
 your cluster, which is the right place for it. Note what you are choosing: that
 CLI authenticates as the runtime ServiceAccount, so its reach is that SA's RBAC
-handed over whole — one wall, where the MCP path has the server's own identity
-*and* the toolset allowlist.
+handed over whole — where the MCP path also has the server's own identity and
+the toolset allowlist.
+
+How much the allowlist is worth depends on one thing, which the next section
+states plainly.
 
 ### Conversation
 
@@ -336,8 +339,31 @@ contributes nothing, so `merge` degrades to the route's tools alone.
 
 The composition happens in the **runtime**, not the manager — the runtime is
 the only component with the repository checked out. The manager resolves the
-route's half and states the mode; `allowedTools` on the work unit is that half,
+route's half and states the mode. `allowedTools` on the work unit is that half,
 not the final answer.
+
+#### Who the allowlist actually binds
+
+`--allowedTools` is applied by the CLI **in the runtime pod, beside the agent**.
+The MCP server has never heard of an `MCPToolset`.
+
+So the allowlist configures a **cooperating** agent. An agent that can run
+commands — `agentops-shell` is bound on ordinary routes — can open a socket to a
+bound MCP server and call anything that server registers. What bounds it then is
+the server's own ServiceAccount, and nothing else.
+
+> **The toolset is a boundary only where something enforces it outside the
+> agent.** Otherwise it is configuration the agent may decline.
+
+That is what `AgentRuntime.spec.egressMediation` is for. It redirects the
+agent's traffic through a proxy in its own pod, which enforces the bound
+toolsets on MCP calls — so the same decision applies to an agent that does not
+cooperate. It is off by default, and
+[`docs/installation.md`](installation.md) covers what enabling it requires.
+
+A conversation reports what mediation actually covers on its `EgressMediated`
+condition. An endpoint the proxy cannot read — an `https` MCP URL, or a
+hand-written `mcp.json` — is named there rather than passed off as enforced.
 
 `mcpConfigs` has no mode, deliberately. An agent definition has no field that
 declares an MCP *server* — servers reach a run only through the compiled

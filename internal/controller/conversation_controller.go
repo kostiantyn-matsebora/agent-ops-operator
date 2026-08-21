@@ -1324,6 +1324,11 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 
 	patch := client.MergeFrom(conv.DeepCopy())
 	conv.Status.RuntimePod = pod.Name
+	// What mediation actually covers, judged from the endpoints just compiled.
+	// A conversation with one unenforceable endpoint is not mostly mediated, and
+	// an operator who enabled the feature has every reason to think otherwise
+	// unless told.
+	applyMediationCondition(conv, mediationCondition(mcpRes, resolved.EgressMediation))
 	if degraded {
 		// The handle names a context this pod cannot reach. Clearing it is what
 		// stops the next run failing a continuation that can never succeed —

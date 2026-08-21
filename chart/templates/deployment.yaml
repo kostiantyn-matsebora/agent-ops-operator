@@ -53,6 +53,18 @@ spec:
             - name: CONTEXT_LIVE_SIZE_LIMIT
               value: {{ .Values.runtime.contextSync.liveSizeLimit | quote }}
             {{- end }}
+            {{- if .Values.runtime.egressMediation.enabled }}
+            # Only set when mediation is enabled: an empty image disables it
+            # outright, so the redirect can never be installed without a proxy
+            # to answer it — which would leave the agent unable to reach
+            # anything at all.
+            - name: EGRESS_PROXY_IMAGE
+              value: {{ .Values.runtime.egressMediation.image | quote }}
+            {{- with .Values.runtime.egressMediation.initImage }}
+            - name: EGRESS_INIT_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.retention.autoclose.enabled }}
             - name: CONVERSATION_AUTOCLOSE_ENABLED
               value: "true"

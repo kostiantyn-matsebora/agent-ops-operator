@@ -451,3 +451,67 @@ or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
+
+{{- $np := (.Values.global.agentops).networkPolicy | default dict }}
+{{- $mcpDeployed := or (and (index .Values "k8s-bundle") (index .Values "k8s-bundle" "enabled")) (and (index .Values "ha-bundle") (index .Values "ha-bundle" "enabled")) }}
+{{- if $np.enabled }}
+
+────────────────────────────────────────────────────────────────────────────
+NETWORK POLICY IS RENDERED. WHETHER IT IS ENFORCED IS NOT UP TO THIS CHART.
+
+A NetworkPolicy on a cluster whose CNI does not implement policy applies
+successfully, appears in `kubectl get networkpolicy`, and blocks NOTHING. There
+is no error and no warning. This chart cannot detect the difference, so it will
+not tell you your components are protected.
+
+CHECK IT, do not assume it. Your CNI must implement NetworkPolicy. Calico,
+Cilium and Antrea do. Flannel on its own does NOT. Confirm from a pod that
+should be refused:
+
+  kubectl -n default run np-probe --rm -it --restart=Never --image=curlimages/curl -- \
+    curl -sS -m 5 http://agentops-manager.{{ .Release.Namespace }}.svc:8080/healthz
+
+  refused or timed out  ->  policy is enforced
+  a JSON reply          ->  it is NOT, and everything below is still open
+
+WHAT IS STILL OPEN IF IT IS NOT ENFORCED:
+  - the manager's work contract, which requires no credential: any pod can take
+    a queued work unit or post a forged agent answer
+{{- if $mcpDeployed }}
+  - the MCP servers, which authenticate nobody
+{{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
+    and one of which runs as cluster-admin in this install
+{{- end }}
+{{- end }}
+{{- if and .Values.console .Values.console.enabled }}
+  - the console's API, below its authenticating proxy
+{{- end }}
+
+RESTRICTING REACH IS NOT AUTHENTICATION. Every component above still accepts
+unauthenticated callers — from whoever is still allowed to reach them.
+{{- if not $np.metricsFrom }}
+
+Nothing is permitted to scrape the manager's metrics port. If a collector runs
+outside this namespace, name it or monitoring goes quiet:
+  --set-json 'global.agentops.networkPolicy.metricsFrom=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"monitoring"}}}]'
+{{- end }}
+{{- else }}
+{{- if $mcpDeployed }}
+
+────────────────────────────────────────────────────────────────────────────
+NOTHING RESTRICTS WHO MAY REACH THIS RELEASE'S COMPONENTS.
+
+Any pod in the cluster can reach them, and several authenticate nobody:
+  - the MCP servers accept any caller
+{{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
+    and the Kubernetes one runs as cluster-admin (rbacMode=full), so reaching it
+    IS cluster-admin, with no credential
+{{- end }}
+  - the manager's work contract requires no credential
+
+Restrict it with:
+  --set global.agentops.networkPolicy.enabled=true
+
+Read the note it prints before trusting it — enforcement depends on your CNI.
+{{- end }}
+{{- end }}

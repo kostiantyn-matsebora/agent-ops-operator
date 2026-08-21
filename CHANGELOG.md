@@ -8,6 +8,55 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### Bound component reach — chart 5.23.0
+
+Two things were true and neither was written down. Both are now closable, and
+both are **off by default**, so upgrading changes nothing until you ask.
+
+**Nothing restricted who may reach this release's components.** The MCP servers
+accept any caller with no credential — under `rbacMode: full` the Kubernetes one
+runs as cluster-admin, so reaching it *is* cluster-admin. The manager's work
+contract takes no credential either, which means any pod could take a queued
+work unit or post a forged agent answer.
+
+    global.agentops.networkPolicy.enabled: true
+
+renders one NetworkPolicy per component, allowing only the callers your wiring
+implies. Name two things when you enable it or they break quietly:
+`networkPolicy.metricsFrom` for a collector outside the namespace, and
+`networkPolicy.consoleFrom` for your ingress controller.
+
+**Read the note it prints.** A NetworkPolicy on a cluster whose CNI does not
+enforce policy applies cleanly, shows up in `kubectl get`, and blocks nothing.
+The chart cannot detect that, so NOTES.txt tells you how to check instead of
+calling your components protected.
+
+**A route's toolsets bound only a cooperating agent.** `--allowedTools` is
+applied by the CLI beside the agent, and an MCP server has never heard of an
+`MCPToolset` — so an agent with a shell reached a bound server directly and
+called anything it registered. `agentops-shell` is bound on ordinary routes.
+
+    runtime.egressMediation.enabled: true
+
+puts a proxy in the runtime pod that the agent's traffic cannot route around,
+and enforces the bound toolsets there. Two things to know first: it adds a
+**privileged init container** (refused by a namespace under `restricted` Pod
+Security admission), and a container per active conversation.
+
+stdio servers and `https` MCP endpoints stay unenforceable, and are reported on
+the conversation's new `EgressMediated` condition rather than passed off as
+covered.
+
+**Two things to name when you enable network policy, or a workload crash-loops.**
+The kubelet probes from the NODE, and no policy peer can name a node. The
+manager's probe port serves only health, so it is opened unconditionally. The
+Kubernetes MCP server probes the same port it serves MCP on, so it now probes
+itself over loopback instead — no policy on any CNI can block that. If your CNI
+does not exempt host traffic, set `networkPolicy.probesFrom` to your node
+network for anything else that probes over the network.
+
+Decided in [docs/adr/0001-bound-component-reach.md](docs/adr/0001-bound-component-reach.md).
+
 ### The console renders the message you typed — console 0.15.9
 
 **No action on upgrade.** Bump the console image tag (the chart default moves

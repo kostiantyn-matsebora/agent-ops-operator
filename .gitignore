@@ -15,6 +15,7 @@ signal-vmalertmanager/signal-vmalertmanager
 signal-k8s-events/signal-k8s-events
 console/console
 context-sync/context-sync
+egress-proxy/egress-proxy
 signal-telegram/signal-telegram
 telegram-router/telegram-router
 housekeeping/housekeeping

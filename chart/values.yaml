@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.36.2
+  tag: 0.37.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -145,6 +145,36 @@ runtime:
     # ephemeral — caches and tool state included — so it must be generous.
     # Empty leaves it unbounded, which is Kubernetes' own default.
     liveSizeLimit: 4Gi
+  # ENFORCE THE AGENT'S TOOL ACCESS FROM OUTSIDE THE AGENT.
+  #
+  # The tool allowlist reaches the agent as `--allowedTools` on a CLI running
+  # beside it, so it configures a COOPERATING agent. An agent with a shell —
+  # `agentops-shell` is bound on ordinary pipelines — can open a socket to a
+  # bound MCP server and call anything that server registers. Mediation puts a
+  # proxy in the pod that the agent's traffic cannot route around, and enforces
+  # the bound toolsets there.
+  #
+  # OFF by default, and absent means today's pod exactly. Two things to know
+  # before enabling it:
+  #   1. It adds a PRIVILEGED init container (NET_ADMIN) that installs the
+  #      redirect and exits before the agent starts. A namespace under
+  #      `restricted` Pod Security admission will refuse it.
+  #   2. It adds a container per active conversation.
+  egressMediation:
+    enabled: false
+    # The proxy image. Release-wide like the sidecar above: a contract, not a
+    # backend choice.
+    image: kmatsebora/agentops-egress-proxy:0.1.3
+    # The image that installs the redirect. Empty uses the proxy image, which
+    # ships both. Point it elsewhere only to keep the privileged image minimal.
+    initImage: ""
+    # The port the proxy listens on inside the pod. Override only if a runtime
+    # image already uses it. Nothing outside the pod can reach it.
+    port: 15001
+    # Destination ports left UNREDIRECTED. Every port here is one the agent
+    # reaches unmediated, so this is a hole in the boundary by construction —
+    # not a tuning knob.
+    excludePorts: []
   # Agent session persistence is wired from the `persistence` block below
   # automatically (its claim, or existingClaim). Set this only to point at a
   # claim this chart did not create.
@@ -193,10 +223,58 @@ global:
   demo:
     enabled: false
 
-  # The two release-wide facts about how agents execute, declared in the ONE
-  # scope a subchart can read. k8s-bundle's MCP server derives its own identity
-  # and posture from them, which is why they are not ordinary top-level values.
+  # The release-wide facts declared in the ONE scope a subchart can read.
+  # k8s-bundle's MCP server derives its own identity and posture from the
+  # runtime keys, and both bundles render their MCP servers' network policies
+  # from the networkPolicy key — which is why none of these is an ordinary
+  # top-level value.
   agentops:
+    # WHO MAY REACH THE COMPONENTS THIS RELEASE DEPLOYS.
+    #
+    # Every component here assumes its callers are wired. Nothing enforces that
+    # on its own: the MCP servers accept any caller, and so does the manager's
+    # work contract. Enabling this restricts each component to the callers its
+    # wiring implies.
+    #
+    # READ THE WARNING IN NOTES.txt BEFORE TRUSTING IT. A NetworkPolicy on a
+    # cluster whose CNI does not enforce policy applies cleanly, appears in
+    # `kubectl get`, and protects NOTHING. This chart cannot detect the
+    # difference, which is why the output says so rather than reporting your
+    # components as protected.
+    #
+    # Off by default: on a cluster that DOES enforce, a policy that missed a
+    # flow breaks it, and that is not a surprise to hand an install by default.
+    networkPolicy:
+      enabled: false
+      # Callers permitted to reach the MANAGER's API beyond the release's own
+      # adapters and runtime pods. Raw NetworkPolicyPeer entries.
+      extraIngress: []
+      # Peers allowed to scrape the manager's metrics port. A collector in
+      # another namespace needs naming here, or enabling policy silences it.
+      metricsFrom: []
+      # Peers allowed to reach the console — normally the ingress controller's
+      # namespace. The console is what an operator loses first if this is
+      # wrong, so it is its own key rather than folded into extraIngress.
+      consoleFrom: []
+      # WHERE THE KUBELET PROBES COME FROM.
+      #
+      # A liveness probe originates on the NODE, and a node is not a pod — no
+      # podSelector or namespaceSelector can name it. Some CNIs exempt host
+      # traffic and some do not, and on one that does not, a policy that omits
+      # this does far worse than lose monitoring: liveness fails, the kubelet
+      # restarts the workload, and the install crash-loops because of the policy
+      # meant to protect it.
+      #
+      # The manager's probe port serves only /healthz and /readyz, so it is
+      # opened unconditionally. The MCP servers probe the SAME port they serve
+      # MCP on, so they cannot be — name your node addresses here instead.
+      #
+      #   probesFrom:
+      #     - ipBlock:
+      #         cidr: 192.0.2.0/24   # your node network
+      #
+      # Leave it empty ONLY if you have confirmed your CNI exempts host traffic.
+      probesFrom: []
     runtime:
       # The ServiceAccount every runtime pod runs as — exactly one per release,
       # created by this chart. Its RBAC IS the agent's power.
