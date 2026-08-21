@@ -476,6 +476,52 @@ Consequence worth knowing: a Pipeline named after a manager command (`exit`,
 interception happens before the Pipeline lookup, which is what makes the commands
 reliable.
 
+## How a message travels
+
+A **surface** is anywhere a person reads or writes — a chat, a console, a
+ticket queue, anything an adapter serves.
+
+One surface is usually two objects: a **signal source** (where a message
+enters) and a **channel** (where messages are read). Neither implies the other,
+and either can exist alone.
+
+Everything below is transport-agnostic. Nothing in the model knows what a
+surface is made of.
+
+The flow is one diagram, kept as its own source:
+[`diagrams/message-flow.mmd`](diagrams/message-flow.mmd).
+
+**Two kinds of message, one path.** What a person sends and what the agent
+answers are both messages on one conversation.
+
+They enter at different ends — a person's through a source, the agent's from
+its runtime. From the conversation onward they are delivered by the same rule.
+
+**The rule is decided per destination, never per message.** A message is
+delivered to every bound channel except the one it entered on, because that
+surface displayed it already.
+
+"Already seen" is a fact about a surface, not about a message. A person's words
+are new to every channel but the one they typed on.
+
+That single rule covers the cases that otherwise need special handling:
+
+| Message enters on | Read on | Delivered |
+|---|---|---|
+| surface A | surface A | no — A displayed it when it was typed |
+| surface A | surface B | yes, attributed to its sender |
+| the agent | any bound channel | yes |
+| a source with no matching channel | every bound channel | yes — nobody has seen it |
+
+**The order is the record.** A conversation holds its messages in sequence, so
+a surface that joins late, a viewer that reloads, and a conversation that is
+reopened all read the same history in the same order.
+
+> **Not yet implemented in full.** A person's message is currently withheld from
+> every channel rather than from its own surface only, and the input queue is
+> pruned once processed, so the questions are not part of the durable record
+> the way the answers are. Both are being changed to the model above.
+
 ## Restart resilience
 
 Every piece of live state has **one declared home**, chosen by what the state is:
