@@ -47,7 +47,7 @@ func vocab() Vocabulary {
 		Entries: []VocabularyEntry{
 			{Kind: "builtin", Name: "pipelines", Description: "List the pipelines you can address", Position: "general"},
 			{Kind: "builtin", Name: "exit", Description: "Release this conversation's runtime", Position: "thread"},
-			{Kind: "pipeline", Name: "k8s-observe", Description: "k8s-engineer", Position: "general", Profile: "k8s-engineer", Icon: "🔎"},
+			{Kind: "pipeline", Name: "k8s-observe", Description: "k8s-engineer", Position: "general", Profile: "k8s-engineer", Icon: "aops:observe"},
 			{Kind: "pipeline", Name: "team.ops", Description: "nobody", Position: "general"},
 		},
 	}
@@ -65,9 +65,10 @@ func TestCommandsForRegistersBuiltinsAndPipelines(t *testing.T) {
 			t.Fatalf("%q missing from the menu: %v", want, got)
 		}
 	}
-	// The icon LEADS the description: a Telegram command name takes no emoji.
+	// The icon LEADS the description, RESOLVED — `aops:observe` reaches a reader
+	// as a magnifier, never as the characters "aops:observe".
 	if got["k8s_observe"] != "🔎 k8s-engineer" {
-		t.Fatalf("pipeline description = %q, want the icon leading it", got["k8s_observe"])
+		t.Fatalf("pipeline description = %q, want the resolved icon leading it", got["k8s_observe"])
 	}
 	// Telegram cannot express a dot, so it is left out — not renamed, not
 	// refused, not reported.
@@ -463,5 +464,36 @@ func TestSyncCommandsRetriesAfterAFailedRun(t *testing.T) {
 	a.syncCommands(context.Background(), "rev-1")
 	if !a.menu.stale("rev-1") {
 		t.Fatal("a failed run consumed the revision — the next poll will skip it and the menu never registers")
+	}
+}
+
+// TELEGRAM DRAWS EMOJI AND NOTHING ELSE. A reference it cannot resolve must
+// contribute NOTHING — "aops:home ha-user" in a menu shows a reader plumbing
+// they cannot act on, which is worse than no icon at all.
+func TestIconReferencesResolveOrDisappear(t *testing.T) {
+	for ref, want := range map[string]string{
+		"aops:kubernetes":            "☸",
+		"aops:home":                  "🏠",
+		"aops:observe":               "🔎",
+		"aops:no-such-icon":          "",
+		"mdi:kubernetes":             "",
+		"https://example.com/x.svg":  "",
+		"🚀":                          "🚀",
+		"":                           "",
+		"   ":                        "",
+	} {
+		if got := emojiFor(ref); got != want {
+			t.Errorf("emojiFor(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}
+
+// The raw reference must never reach a description.
+func TestUnresolvableIconLeavesTheDescriptionClean(t *testing.T) {
+	v := Vocabulary{Revision: "r", Entries: []VocabularyEntry{
+		{Kind: "pipeline", Name: "remote", Description: "some-profile", Position: "general", Icon: "mdi:cloud"},
+	}}
+	if got := commandsFor(v)[0].Description; got != "some-profile" {
+		t.Fatalf("description = %q — a reference Telegram cannot draw leaked into it", got)
 	}
 }
