@@ -21,11 +21,16 @@ that is what stops the next reader undoing it. What gets cut is the RESTATEMENT
 of the rule, never its why.
 
 **ONE TOPIC PER FILE, and `CLAUDE.md` is only the index.** The root holds the
-title, one orientation line and the `@.claude/<topic>.md` imports — nothing
+title, the orientation lines and the `@.claude/<topic>.md` imports — nothing
 else.
 
 - **A new topic is a new file plus one import line**, never a section appended
   to an existing file because it was open.
+- **A topic that belongs to ONE directory lives there**, in that directory's
+  own `CLAUDE.md` or `.claude/`, and the root only MENTIONS it. Imports load at
+  launch whatever file they sit in, so moving a topic out of the root index is
+  the only move that actually spends less context — a nested `CLAUDE.md` loads
+  when its directory is read. `docs/` is the case.
 - **Each file opens with its own `## ` heading** and uses `###` / `####` below
   it.
 - **Import order is reading order.** Preserve it when adding one.

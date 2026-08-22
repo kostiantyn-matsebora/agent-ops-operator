@@ -1,4 +1,8 @@
-## The site (`docs/`)
+## The site's shell and mechanics
+
+`CLAUDE.md` beside this file governs how a PAGE reads — its structure, the
+command tabs, the components it may name, the table rules and the pre-flight
+lint. What is here is the directory around those pages.
 
 **Reference pages** — `concepts.md` (CRDs plus capability resolution),
 `contracts.md` (work and adapter contracts plus HTTP API), and one page per
@@ -8,27 +12,7 @@ bundle subchart.
 `_includes/`, `_data/nav.yml`, `assets/` (css, js, vendored Red Hat fonts, the
 exported diagrams, the console screenshots and the landing recording).
 
-**`docs/CLAUDE.md` owns how a page is written and built** — structure over
-prose, the command tabs, the components a page may name, the table rules and the
-pre-flight lint. `.claude/` routes what goes where, that one governs how it
-reads.
-
-**`docs/CHANGELOG.md`** holds every chart-version migration guide.
-
-- **The ONLY place upgrade steps live.**
-- **Newest first**, Keep a Changelog 1.1.0 format.
-- **TEN versions.** Older ones move VERBATIM to
-  `docs/changelog/CHANGELOG-<range>.md`, linked from its foot.
-
-### The site's pages
-
-| Page | Owns |
-|---|---|
-| `index.md` | the hero, what it plugs into, ONE tab strip (the recording of one incident, the diagram, the Pipeline manifest as copyable page text), then the stat tiles, then the sections |
-| `introduction.md` | the adopter's orientation — the model, the seams, and NO reference detail |
-| `getting-started.md` | THE walkthrough — install and a first answer IN THE CONSOLE |
-| `installation.md` | THE REAL install, and the only home the PARENT chart's values have |
-| `console-guide.md` | permalink `/console/` — what the console is FOR |
+### What each page owes, beyond the table
 
 - **`index.md`'s order is not written in the page.** `home.html` SPLITS the
   rendered content at its first `<h2>` and drops the tiles in the seam, so the
@@ -49,17 +33,8 @@ reads.
     commands.
 - **`installation.md` puts decisions before commands**, values grouped by the
   decision they serve, bundle values left to their own pages.
-- **`console-guide.md` covers the six views and the question each answers**,
-  plus the authentication decision an operator makes before exposing it.
-  Endpoints, the RBAC grant and the values list stay in the untouched reference
-  `docs/console.md`, which keeps its own name and its own URL.
 
-**How a page reads, how its assets are BUILT, and how Pages serves this
-directory are `docs/CLAUDE.md`'s** — the build-output rule for the screenshots
-and the recording, the recording's silence, and the reference pages' static-file
-status are stated there and not restated here.
-
-Two that stay, because they are about the SHELL rather than a page:
+### The build, not a page
 
 - **The FRAMES are the reproducible artifact, not the MP4.** Review the beat
   script and the frames. Nobody is to make the encoder deterministic.
@@ -104,16 +79,3 @@ beside a 66px gutter.
 
 **Body type is 17px on purpose.** Red Hat Text is narrow, and at 16px that 45rem
 column reads 99 characters.
-
-### The DEMO WIRES THE CONSOLE
-
-Where k8s-bundle renders a route, that route claims the console's source and
-binds it as a channel, from `global.agentops.console` — a subchart reads no
-other parent scope, and helm cannot derive a value from a value.
-
-- **Those names DUPLICATE `console.signalSourceName` / `channelName`**, so the
-  render FAILS when they disagree.
-- **Scoped to demo mode**, because `console.enabled: false` is pinned to remove
-  every console object with ONE value.
-- **The claim rides the EXISTING route.** A second claimant makes every
-  unaddressed console message ambiguous.

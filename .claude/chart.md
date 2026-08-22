@@ -151,3 +151,16 @@ Manager Deployment, RBAC and Service, plus CRDs as gated templates.
 - **`templates/runtime-rbac.yaml`** renders the mode-driven bindings.
 - **`templates/_helpers.tpl` resolves BOTH substrate facts from `.Values.global`
   alone**, so a subchart calling them cannot disagree with the parent.
+
+### The DEMO WIRES THE CONSOLE
+
+Where k8s-bundle renders a route, that route claims the console's source and
+binds it as a channel, from `global.agentops.console` — a subchart reads no
+other parent scope, and helm cannot derive a value from a value.
+
+- **Those names DUPLICATE `console.signalSourceName` / `channelName`**, so the
+  render FAILS when they disagree.
+- **Scoped to demo mode**, because `console.enabled: false` is pinned to remove
+  every console object with ONE value.
+- **The claim rides the EXISTING route.** A second claimant makes every
+  unaddressed console message ambiguous.
