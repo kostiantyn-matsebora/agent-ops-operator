@@ -47,6 +47,12 @@ be inferred.
 - **WHEN** an input type is added
 - **THEN** it is delivered by the same per-destination rule, unedited
 
+#### Scenario: A posted task explains itself
+
+- **WHEN** a `kind: task` signal opens a conversation on a claimed source
+- **THEN** the task text is delivered to the bound channels, so the topic does
+  not appear without a stated cause
+
 #### Scenario: A recurrence posts into the existing thread
 - **WHEN** the same problem recurs and appends an input to an existing
   conversation
