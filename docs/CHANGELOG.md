@@ -1,10 +1,12 @@
 # Changelog
 
-Chart-version migration guides — the upgrade steps for every breaking change,
-newest first. See [README.md](README.md) for the product overview and
-[docs/](docs/) for reference material.
+All notable changes to this project are documented here, in
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. Entries are
+keyed by CHART version. The manager and image tags move independently.
 
-Entries are keyed by CHART version; the manager image tag moves independently.
+See [../README.md](../README.md) for the product overview and [./](./) for
+reference material. `CLAUDE.md` in this directory owns the rules this file
+follows — the format, and the ten-version limit with older entries archived.
 
 ## Unreleased
 

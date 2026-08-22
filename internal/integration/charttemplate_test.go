@@ -46,7 +46,7 @@ func helmTemplateErr(t *testing.T, args ...string) string {
 
 // The console is ON by default since chart 5.0.0, so the opt-out is what needs
 // pinning: ONE value must remove every console object, or the "nothing about
-// your install changes" promise in CHANGELOG.md is not true.
+// your install changes" promise in docs/CHANGELOG.md is not true.
 func TestConsoleRendersNothingWhenDisabled(t *testing.T) {
 	out := helmTemplate(t, "--set", "console.enabled=false")
 	// console-specific names only: "kind: ChannelAdapter" appears in the CRD
@@ -936,7 +936,7 @@ func TestBundleShipsNoWiringUnlessAsked(t *testing.T) {
 	}
 }
 
-// Declining the route must cost nothing else — the opt-out in CHANGELOG.md is
+// Declining the route must cost nothing else — the opt-out in docs/CHANGELOG.md is
 // one value, and it has to leave a bundle that still watches, profiles and tools.
 func TestDecliningWiringLeavesTheRestOfTheBundle(t *testing.T) {
 	out := helmTemplate(t, "--set", "global.demo.enabled=true",

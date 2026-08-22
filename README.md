@@ -119,7 +119,7 @@ For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).
 | [docs/telegram-bundle.md](docs/telegram-bundle.md) | The Telegram ingest stack and chat surface |
 | [docs/prometheus-bundle.md](docs/prometheus-bundle.md) | The Alertmanager alert lane and its metrics tooling |
 | [docs/ha-bundle.md](docs/ha-bundle.md) | The Home Assistant lane, and its two agents split by privilege |
-| [CHANGELOG.md](CHANGELOG.md) | Every chart-version upgrade guide, newest first |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Every chart-version upgrade guide, newest first |
 | [CLAUDE.md](CLAUDE.md) | Working notes: terminology, invariants, the gotchas that cost debugging |
 
 ## Development

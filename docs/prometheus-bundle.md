@@ -40,7 +40,7 @@ profile executes on the parent's `AgentRuntime` named `default`;
 > must be restated under `prometheus-bundle:` — the render FAILS while the old
 > key is present, because Helm never reports an unread values key. The logs
 > component was removed and the metrics server key changed. See
-> [CHANGELOG.md](../CHANGELOG.md).
+> [CHANGELOG.md](CHANGELOG.md).
 
 ## The ingest lane (`alertmanager`)
 

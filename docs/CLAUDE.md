@@ -30,6 +30,42 @@ The other `docs/*.md` are **reference pages, not site pages**. They carry no
 front matter, so Jekyll copies them verbatim. Do not add front matter, headings
 or navigation entries to them — publishing them is its own change.
 
+## `CHANGELOG.md`
+
+Migration guides for every breaking change. The ONLY place upgrade steps live.
+
+### Format: Keep a Changelog 1.1.0
+
+Follows <https://keepachangelog.com/en/1.1.0/>. Binding, not a suggestion:
+
+- **Newest first.** Unreleased at the top, then versions descending.
+- **One `##` heading per version**, `## [<version>] — <YYYY-MM-DD>`. A version is
+  a CHART version — image tags move independently and are named in the entry.
+- **Group changes under the six `###` types**, in this order, omitting empty
+  ones: `Added` · `Changed` · `Deprecated` · `Removed` · `Fixed` · `Security`.
+- **A breaking change is marked in its entry**, not given a type of its own.
+- **Upgrade steps belong to the version that needs them**, as a `### Upgrade`
+  block after the change types.
+
+The old shape — one `## Unreleased` holding thirty `###` version headings — is
+what this replaces. It made every released version look unreleased and left the
+type of each change unstated.
+
+### Length: ten versions, then archive
+
+`CHANGELOG.md` holds the **ten most recent versions** and nothing older.
+
+- Older entries move to `CHANGELOG-<range>.md` in this directory, VERBATIM.
+- An `## Older versions` section at the FOOT of `CHANGELOG.md` links each
+  archive file and the version range it covers.
+- **Archives are append-only.** Moving an entry never edits it — a migration
+  guide someone is following must not change under them.
+- Trim when the eleventh version lands, as part of that release, never as a
+  separate tidy-up.
+
+Ten because a reader upgrading skips at most a few versions, and a 2000-line
+file is one nobody scrolls.
+
 Adding a page is the markdown file plus ONE line in `_data/nav.yml`, and the page
 DECLARES its own `permalink` (no permalink style is configured, and the sidebar
 marks the current entry by comparing URLs).

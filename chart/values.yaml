@@ -724,7 +724,7 @@ resources:
 #     enabled: true
 #     channels: [<your-channel>]        # optional; omitted when unset
 # MIGRATION from `vm-bundle:` — every value must be restated under the new key,
-# and the render FAILS while the old key is present. See CHANGELOG.md.
+# and the render FAILS while the old key is present. See docs/CHANGELOG.md.
 
 # Home Assistant bundle (embedded subchart, OFF by default; never enabled by
 # demo mode — it needs your own Home Assistant endpoint and tokens). It ships a
@@ -755,7 +755,7 @@ ha-bundle:
 # CRD management (cert-manager pattern): templated, so upgrades work.
 # Conversation retention — TWO STAGES, two clocks, both OFF by default.
 # Closing is reversible and keeps the record; deleting is neither. Stage 2 is
-# NOT "stage 1 but tidier" — see CHANGELOG.md and docs/concepts.md.
+# NOT "stage 1 but tidier" — see docs/CHANGELOG.md and docs/concepts.md.
 retention:
   # Close a FINISHED conversation once it has been idle this long.
   # Idle time, never lifetime: measured from the last run or input.

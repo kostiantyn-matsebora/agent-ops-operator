@@ -845,8 +845,11 @@ docs/                    reference pages: concepts.md (CRDs + capability
                          a page declaring none gets no card — every word is the
                          page's, the include only places it. Same shape as the
                          landing page's `stats:` and its stat-icon include
-CHANGELOG.md             every chart-version migration guide, newest first —
-                         the ONLY place upgrade steps live
+docs/CHANGELOG.md        every chart-version migration guide, newest first —
+                         the ONLY place upgrade steps live. Keep a Changelog
+                         1.1.0 format, TEN versions; older ones move verbatim to
+                         docs/CHANGELOG-<range>.md and are linked from its foot
+                         (docs/CLAUDE.md owns the rules)
 ```
 
 ## Invariants (do not break)
@@ -1318,7 +1321,7 @@ three documents wearing one filename — so the routing is explicit:
 | Work contract, adapter contracts, HTTP endpoints | `docs/contracts.md` |
 | A subchart's components or values | `docs/<bundle>.md` |
 | The PARENT chart's values, install, upgrade, uninstall | `docs/installation.md` |
-| Breaking change + upgrade steps | `CHANGELOG.md`, newest first |
+| Breaking change + upgrade steps | `docs/CHANGELOG.md`, newest first |
 | Terminology, invariants, hard-won gotchas | this file |
 | What the console is FOR — its views, what each answers, the authentication decision | `docs/console-guide.md` |
 | What the console IS — endpoints, RBAC grant, values reference, internals | `docs/console.md` |

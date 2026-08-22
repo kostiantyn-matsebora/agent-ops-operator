@@ -166,7 +166,7 @@ Documented HTTP contracts, no fork.
 
 ## Keep it current
 
-- [CHANGELOG](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/CHANGELOG.md)
+- [CHANGELOG](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
   — every chart-version upgrade guide, newest first.
 - [The repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
   — source, issues, and the working notes contributors read first.
