@@ -1,3 +1,9 @@
+---
+paths:
+  - "chart/**"
+  - "chart/**/*"
+---
+
 ## The chart
 
 ### `chart/charts/k8s-bundle/`
