@@ -244,23 +244,6 @@ global:
               kubernetes.io/metadata.name: ingress-nginx
 ```
 
-```powershell
-global:
-  agentops:
-    networkPolicy:
-      enabled: true
-      # a collector outside this namespace, or metrics go silent
-      metricsFrom:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      # your ingress controller, or the console becomes unreachable
-      consoleFrom:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
-```
-
 ### Enforcing the toolset
 
 A route's toolsets reach the agent as `--allowedTools`, applied by the CLI in

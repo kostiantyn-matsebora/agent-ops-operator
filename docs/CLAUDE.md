@@ -3,7 +3,7 @@
 Rules for the pages an adopter reads. The root `CLAUDE.md` routes WHICH document
 receives what. This file governs HOW a page under `docs/` is written and built.
 
-`docs/` IS the site root: GitHub Pages builds it from `master` (Deploy from a
+**`docs/` IS the site root.** GitHub Pages builds it from `master` (Deploy from a
 branch → `/docs`), so there is no workflow, no Gemfile and no Ruby in anyone's
 path. Plugins are limited to the set Pages enables by default.
 
@@ -17,18 +17,22 @@ path. Plugins are limited to the set Pages enables by default.
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `installation.md` | the REAL install, and the PARENT chart's values |
 
-`console-guide.md` is published at `/console/`. `console.md` is the untouched
-reference and keeps its own URL. **What the console is FOR goes to the guide,
-what it IS goes to the reference.** The screenshots on both the guide and the
-landing page are build output — `npm run screenshots` in `console/ui`, never a
-hand capture.
+- **`console-guide.md` is published at `/console/`.** `console.md` is the
+  untouched reference and keeps its own URL.
+  - **What the console is FOR goes to the guide.** What it IS goes to the
+    reference.
+- **The screenshots are build output** — `npm run screenshots` in `console/ui`,
+  never a hand capture. That covers the guide and the landing page both.
+- **The landing strip and the guide's tour show the SAME six images**, at
+  different altitudes: one line each there, the full tour here. Keep the labels
+  identical.
+- **Every other `docs/*.md` is a reference page, not a site page.** They carry no
+  front matter, so Jekyll copies them verbatim. Do not add front matter, headings
+  or navigation entries to them — publishing one is its own change.
 
-The landing strip and the guide's tour show the SAME six images at different
-altitudes: one line each there, the full tour here. Keep the labels identical.
-
-The other `docs/*.md` are **reference pages, not site pages**. They carry no
-front matter, so Jekyll copies them verbatim. Do not add front matter, headings
-or navigation entries to them — publishing them is its own change.
+**Adding a page is the markdown file plus ONE line in `_data/nav.yml`**, and the
+page DECLARES its own `permalink`. No permalink style is configured, and the
+sidebar marks the current entry by comparing URLs.
 
 ## `CHANGELOG.md`
 
@@ -39,10 +43,10 @@ Migration guides for every breaking change. The ONLY place upgrade steps live.
 Follows <https://keepachangelog.com/en/1.1.0/>. Binding, not a suggestion:
 
 - **Newest first.** Unreleased at the top, then versions descending.
-- **One `##` heading per version**, `## [<version>] — <YYYY-MM-DD>`. Usually a
-  CHART version, with the image tags it ships named in the entry. A release that
-  bumps ONE component and no chart gets its own heading, named for it —
-  `## [console 0.15.9]`.
+- **One `##` heading per version**, `## [<version>] — <YYYY-MM-DD>`.
+  - Usually a CHART version, with the image tags it ships named in the entry.
+  - A release that bumps ONE component and no chart gets its own heading, named
+    for it — `## [console 0.15.9]`.
 - **One heading per version, not per change.** Two things shipped in one chart
   version are one entry with two bullets, never two headings.
 - **Group changes under the six `###` types**, in this order, omitting empty
@@ -59,20 +63,18 @@ type of each change unstated.
 
 `CHANGELOG.md` holds the **ten most recent versions** and nothing older.
 
-- Older entries move to `CHANGELOG-<range>.md` in this directory, VERBATIM.
-- An `## Older versions` section at the FOOT of `CHANGELOG.md` links each
+- **Older entries move to `changelog/CHANGELOG-<range>.md`**, VERBATIM. They are
+  already in this format when they get there, so moving one is a file move and
+  nothing else.
+- **An `## Older versions` section at the FOOT** of `CHANGELOG.md` links each
   archive file and the version range it covers.
 - **Archives are append-only.** Moving an entry never edits it — a migration
   guide someone is following must not change under them.
-- Trim when the eleventh version lands, as part of that release, never as a
+- **Trim when the eleventh version lands**, as part of that release, never as a
   separate tidy-up.
 
 Ten because a reader upgrading skips at most a few versions, and a 2000-line
 file is one nobody scrolls.
-
-Adding a page is the markdown file plus ONE line in `_data/nav.yml`, and the page
-DECLARES its own `permalink` (no permalink style is configured, and the sidebar
-marks the current entry by comparing URLs).
 
 ## Writing: structure over prose
 
@@ -83,14 +85,22 @@ Everything here is written to be SCANNED. The markdown is the structure.
   enumerates is a list that has not been written yet.*
 - **Short sentences, one idea each.** Three clauses is three sentences. If it has
   to be read twice, it is wrong.
-- **NO SEMICOLONS.** A `;` is a full stop that lost its nerve.
+- **NO SEMICOLONS.** A `;` is a full stop that lost its nerve — the tell of a
+  sentence that should have been two. Forbidden whatever the grammar allows.
 - **Small paragraphs.** Past about three lines it stops being read.
 - **Emphasise the load-bearing phrase**, not the sentence around it. Everything
   bold means nothing bold.
 - **Cut what earns nothing.** Reasoning belongs in the reference page that owns
   it, in the root `CLAUDE.md`, or in the commit message.
 
+**The failure mode is recognisable and has been shipped here more than once:**
+long compound sentences, every point explained twice, nothing scannable — prose
+doing a table's job.
+
 Reference pages may be dense. A page an adopter meets first may not.
+
+The binding statement of the shape rules is at the foot of this file. It is
+quoted verbatim and is not paraphrased anywhere.
 
 ## Commands: every block is BOTH platforms
 
@@ -107,51 +117,64 @@ kubectl -n agent-ops get secret x -o jsonpath='{.data.token}' | base64 -d
 ```
 ````
 
-Write the two fences ADJACENT and the theme pairs them — `sh` first, then
-`powershell`. The page carries no markup and no tab widget: it names the shell
-with the fence language, exactly as it names a card with `{: .ao-cards}`.
+- **Write the two fences ADJACENT** and the theme pairs them — `sh` first, then
+  `powershell`.
+- **The page carries no markup and no tab widget.** It names the shell with the
+  fence language, exactly as it names a card with `{: .ao-cards}`.
+- **Give both fences even where the command is byte-identical.** A reader on
+  Windows should never have to wonder.
+- **ONLY SHELL LANGUAGES PAIR.** `tabs.js` groups `sh`/`bash`/`shell`/`zsh` and
+  `powershell`, nothing else. A `yaml` block copied into a `powershell` fence
+  never becomes a tab, so the page silently renders the same snippet twice —
+  `installation.md` shipped exactly that.
 
-What actually differs is line continuations (`\` vs a backtick), variable
-assignment, and quoting around JSON. Where a command is byte-identical, still
-give both fences — a reader on Windows should never have to wonder.
+What actually differs: line continuations (`\` vs a backtick), variable
+assignment, and quoting around JSON.
 
 ## Components a page may name
 
-The page names a class, the theme draws it. No `<div>`, no inline style, no
-script in a page.
+A page needing more than prose NAMES a component with a **kramdown attribute
+list**. The page names the class, the theme draws it. No `<div>`, no inline
+style, no script in a page.
 
 | Attribute | Renders |
 |---|---|
-| `{: .ao-cards}` | a two-column card grid. An odd count leaves the last card normal width |
-| `{: .ao-callout}` | a blockquote that EMPHASISES (the plain one is a muted aside) |
+| `{: .ao-cards}` | a two-column card grid, stated not derived. An odd count leaves the last card at normal width |
+| `{: .ao-callout}` | a blockquote that EMPHASISES. The plain one is an ASIDE in `--ao-text-subtle`, so rendering a load-bearing claim in it puts a footnote where the weight belongs |
 | `{: .ao-tabs}` | a list becomes tabbed panels, each item's leading bold phrase the label. With no script it stays the labelled list, so every word and image lives in the page |
 | `{: .ao-icon-*}` | a kind glyph on a card title, copied from the console |
 | `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels |
 | `{: .ao-chipsets}` | a list of GROUPS becomes labelled chip rows — each item's leading bold phrase is the label, its nested list the chips. A chip may carry an ordinary markdown image, and the PAGE names that file. With no CSS it stays a labelled list of names |
-| `next:` in front matter | the what-next card at the foot of the rail |
+| `next:` in front matter | the what-next card (eyebrow / title / body / url) at the foot of the on-this-page rail. A page declaring none gets no card |
+| `stats:` in front matter | the landing page's stat tiles, through the stat-icon include |
+
+**FRONT MATTER is the other half of that division.** Every word is the page's,
+and the include only places it.
 
 Content never moves into `_includes/` or `_data/` to get a look.
 
-**Integration marks live in `assets/img/logos/`**, committed unaltered from each
-project's own source with their terms in that directory's README. The PAGE names
-each file — a vendor list in `agentops.css` would be product knowledge in the
-theme. Never repaint one to fit the palette: a mark that does not read on a
-ground is dropped instead.
+### Images and marks
 
-**An `<img>`-loaded SVG is parsed STRICTLY.** XML forbids a double hyphen inside
-a comment, so a comment mentioning a `--custom-property` makes the whole mark
-fail to render — silently, as blank space with `naturalWidth` 0. That is worth
-checking before blaming the CSS.
-
-**A themed image is named ONCE.** A page writes the `-light` file and nothing
-else — `assets/js/tabs.js` rewrites it to `-dark` from the resolved theme, for
-screenshots and diagrams alike, and for a link in a panel as well as an image.
-A page that named both would be carrying theme knowledge.
-
-That rewrite is a DEFERRED script, so the light file is on the page before it
-runs. **A published image therefore carries its own ground**, never a transparent
-one that borrows the page's canvas — on a dark page a transparent light export is
-not a mismatched colour, it is invisible ink.
+- **Integration marks live in `assets/img/logos/`**, committed unaltered from
+  each project's own source with their terms in that directory's README.
+  - **The PAGE names each file.** A vendor list in `agentops.css` would be
+    product knowledge in the theme.
+  - **Never repaint one to fit the palette.** A mark that does not read on a
+    ground is dropped instead.
+- **An `<img>`-loaded SVG is parsed STRICTLY.** XML forbids a double hyphen
+  inside a comment, so a comment mentioning a `--custom-property` makes the
+  whole mark fail to render — silently, as blank space with `naturalWidth` 0.
+  Check that before blaming the CSS.
+- **A themed image is named ONCE.** A page writes the `-light` file and nothing
+  else.
+  - `assets/js/tabs.js` rewrites it to `-dark` from the resolved theme, for
+    screenshots and diagrams alike, and for a link in a panel as well as an
+    image.
+  - A page that named both would be carrying theme knowledge.
+- **A published image carries its own ground**, never a transparent one that
+  borrows the page's canvas. The rewrite is a DEFERRED script, so the light file
+  is on the page before it runs — and on a dark page a transparent light export
+  is not a mismatched colour, it is invisible ink.
 
 ## Tables
 
@@ -166,17 +189,53 @@ not a mismatched colour, it is invisible ink.
 
 ## Before calling a page done
 
-```sh
-# 1. the prose rules, mechanically
-awk '/^---$/{fm=!fm;next} fm{next} /^```/{b=!b;next} b{next}
-     /;/ && !/&[a-z]+;/ {printf "%s:%d SEMICOLON\n", FILENAME, NR}
-     /^\|/||/^[0-9]+\./||/^ /||/^>/{next}
-     /^$/{if(n>45)printf "%s:%d LONG PARAGRAPH (%d words)\n",FILENAME,s,n;n=0;next}
-     {if(n==0)s=NR;n+=NF}' docs/*.md
+**CHECK IT, do not remember it.** These rules were written and then broken on the
+very next page, twice, and caught each time by the reader rather than the writer.
 
-# 2. build it and LOOK at it — a rendering fault is invisible in markdown
-#    (see the root CLAUDE.md for the container build and playwright)
+**1. The prose rules, mechanically.** Silence is the pass.
+
+```sh
+awk 'FNR==1{fm=0;b=0;n=0}
+     /^---$/{fm=!fm;next} fm{next} /^```/{b=!b;next} b{next}
+     {t=$0; gsub(/`[^`]*`/,"",t); gsub(/&[a-z]+;/,"",t)
+      if (t ~ /;/) printf "%s:%d SEMICOLON\n", FILENAME, FNR}
+     /^\|/||/^[0-9]+\./||/^[-*] /||/^ /||/^>/{next}
+     /^$/{if(n>45)printf "%s:%d LONG PARAGRAPH (%d words)\n",FILENAME,s,n;n=0;next}
+     {if(n==0)s=FNR;n+=NF}' docs/*.md
 ```
 
-Silence is the pass on 1. Step 2 is not optional: the squeezed column, the
-wrapped key and the headerless table were all invisible until rendered.
+**This file is the only place it is written out.** The root `CLAUDE.md` used to
+carry a second copy, and the two drifted — one was fixed and the other was not.
+
+**2. Build it and LOOK.** Not optional — the squeezed column, the wrapped key
+and the headerless table were all invisible until rendered.
+
+```sh
+OUT=~/.cache/agentops-docs-site; rm -rf $OUT; mkdir -p $OUT
+docker run --rm -v "$PWD/docs":/src -v "$OUT":/out -w /src -e JEKYLL_ENV=production \
+  jekyll/jekyll:4 sh -c 'gem install jekyll-default-layout jekyll-seo-tag \
+    jekyll-sitemap --no-document -q >/dev/null 2>&1; jekyll build -d /out --quiet'
+```
+
+Three details, each of which cost a round:
+
+- **The image ships no Pages plugins.** `jekyll-default-layout` is the one the
+  build dies without, and it must be installed as ROOT — so do not pass `-u`.
+- **Serve it over HTTP, not `file://`.** `_config.yml` sets a `baseurl`, so the
+  absolute asset paths only resolve under `/agent-ops-operator/`. Symlink the
+  output to that name and `python3 -m http.server`.
+- **The output must live under `$HOME`.** A VM-backed daemon (Rancher Desktop)
+  does not mount `/tmp`, so a bind mount there is silently empty.
+
+**3. Check what a screenshot cannot show.** Anchors, table shape and horizontal
+overflow are per-page facts a glance at the top of the page misses. Assert them
+in the browser rather than reading for them.
+
+## Authoring rules (binding)
+Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
+Structure over prose:
+Steps → numbered list.
+Choices / mappings → table.
+"X means Y" → **X.** Y on its own line.
+Multi-rule bullet → parent + sub-bullets, one rule per line.
+Prose paragraph stating > 2 rules → restructure.

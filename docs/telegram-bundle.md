@@ -8,11 +8,14 @@ default. It ships in two layers, because the implementations are guessable and
 the surface is not.
 
 **Layer 1 — the implementations** (`telegram-bundle.enabled=true` alone). Three
-adapter CRs, because Telegram serves exactly one update stream per bot token: a
-second concurrent `getUpdates` gets `409`, and confirming an offset
-destructively consumes updates for every reader. So origination and
-continuation cannot each poll for themselves — one process reads the stream and
-fans it out:
+adapter CRs.
+
+**Telegram serves exactly one update stream per bot token.** A second concurrent
+`getUpdates` gets `409`, and confirming an offset destructively consumes updates
+for every reader.
+
+So origination and continuation cannot each poll for themselves. One process
+reads the stream and fans it out:
 
 ```
 getUpdates ─▶ telegram-router ─┬─ no topic ─▶ signal-telegram  ─▶ /signal/inbound
@@ -66,10 +69,12 @@ exactly when it still gets one:
 
 **Expect an alert burst to take minutes to appear in full.** Every topic in a
 forum shares one `chat_id`, so cards, replies and topic creations for the whole
-surface contend for the same 20/minute — a 44-alert burst is roughly 144 calls,
-which is over seven minutes of drain. That is Telegram's limit rather than a
-tuning choice, and the alternative is the old behaviour, which lost the messages
-outright. A single alert is unaffected.
+surface contend for the same 20/minute.
+
+A 44-alert burst is roughly 144 calls, which is over seven minutes of drain.
+
+That is Telegram's limit rather than a tuning choice, and the alternative is the
+old behaviour, which lost the messages outright. A single alert is unaffected.
 
 Pacing gates the **claim**, not the send: work the adapter cannot yet deliver
 stays queued in the manager, still derivable from conversation state, so an
@@ -92,45 +97,53 @@ telegram-bundle:
 ```
 
 The topic is then **deleted** instead, and no tombstone is posted into it — a
-thread about to disappear has nobody to tell. **It destroys the transcript**,
-which is why it is off by default and why the setting is worth a second thought
-on a group whose history anyone might want.
+thread about to disappear has nobody to tell.
+
+**It destroys the transcript**, which is why it is off by default and why the
+setting is worth a second thought on a group whose history anyone might want.
 
 One line does go to the chat's **general surface**, naming the conversation.
 Without it a topic simply vanishes: the conversation object is gone too, so
 nothing anywhere would record that agent-ops removed it, and a reader would
 reasonably assume someone deleted it by hand.
 
-Two practical notes. The bot must hold **`can_delete_messages`**; without it the
-operation is reported as failed — deliberately, rather than falling back to
-archiving, because a silent fallback would leave you with a growing list of
-archived topics and no sign that the setting was doing nothing. The conversation
-is still deleted either way, once the manager's grace expires.
+Two practical notes:
 
-And the setting is on the **Channel**, not the `ChannelAdapter`: whether a
+- **The bot must hold `can_delete_messages`.** Without it the operation is
+  reported as failed — deliberately, rather than falling back to archiving,
+  because a silent fallback would leave you with a growing list of archived
+  topics and no sign that the setting was doing nothing.
+- **The conversation is still deleted either way**, once the manager's grace
+  expires.
+
+And the setting is on the **Channel**, not the `ChannelAdapter`. Whether a
 group's threads should outlive their conversations is a property of that group,
-so two surfaces served by one adapter can differ. Only DELETION is affected —
-closing still archives the topic, because a closed conversation can be reopened
-into it.
+so two surfaces served by one adapter can differ.
+
+Only DELETION is affected. Closing still archives the topic, because a closed
+conversation can be reopened into it.
 
 The router is the odd one out of the three components: it is the only
 `getUpdates` consumer, but it produces no signals, so it is **not an adapter**.
-It has no `SignalAdapter` CR and no served CR — the bundle owns its Deployment
+
+It has no `SignalAdapter` CR and no served CR. The bundle owns its Deployment
 and injects the two forwarding URLs and the bot token as env, and it never
-contacts the manager. One Deployment per bot token makes "exactly one poller"
-structural rather than bookkeeping; the trade is that one router serves one bot,
-so a second surface means a second router.
+contacts the manager.
+
+One Deployment per bot token makes "exactly one poller" structural rather than
+bookkeeping. The trade is that one router serves one bot, so a second surface
+means a second router.
 
 The credential comes in either form, and exactly one of them:
 
-| | |
+| Value | Meaning |
 |---|---|
 | `credentials.existingSecret` | a Secret you already manage, holding key `botToken` — prefer this when the token comes from an external secret manager |
-| `credentials.botToken` | the token itself; the bundle creates the Secret (`<surface.name>-telegram`, override with `credentials.secretName`). Convenient, but the value then lives in your values file *and* in the release stored in-cluster |
+| `credentials.botToken` | the token itself — the bundle creates the Secret (`<surface.name>-telegram`, override with `credentials.secretName`). Convenient, but the value then lives in your values file *and* in the release stored in-cluster |
 
 One Secret serves the whole surface either way: the `Channel` references it to
 **send**, the router's `SignalSource` to **poll** — the same bot. Neither the
-manager nor any reconciler reads it; both are projected into their pods and
+manager nor any reconciler reads it. Both are projected into their pods and
 resolved by the kubelet.
 
 **No bundle ships a `Pipeline`, so nothing answers yet** — declare the route
