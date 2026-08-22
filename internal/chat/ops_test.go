@@ -355,14 +355,14 @@ func TestFailedInputCardIsReDerivable(t *testing.T) {
 	tid := "t1"
 	card := SignalMessage("k8s-ops", "cluster-events", "PodCrashLooping", "i1", nil, "the alert body")
 
-	q.EnqueueInputCard(ctx, ch, "conv-1", "i1", &tid, card)
+	q.EnqueueInputDelivery(ctx, ch, "conv-1", "i1", &tid, card)
 	op := q.Claim("slack")
 	if op == nil {
 		t.Fatal("no card queued")
 	}
 	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: Too Many Requests: retry after 30"})
 
-	q.EnqueueInputCard(ctx, ch, "conv-1", "i1", &tid, card)
+	q.EnqueueInputDelivery(ctx, ch, "conv-1", "i1", &tid, card)
 	again := q.Claim("slack")
 	if again == nil {
 		t.Fatal("a failed input card must be re-derivable: the thread never opened with its event")

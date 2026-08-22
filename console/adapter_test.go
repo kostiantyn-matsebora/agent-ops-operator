@@ -316,6 +316,62 @@ func TestSendMarksPendingThenConfirms(t *testing.T) {
 	}
 }
 
+// A message typed HERE and the copy the manager delivers back are ONE message.
+//
+// The console receives its own users' messages now — it renders nothing it is
+// not sent, so withholding them is what left a composer-started conversation
+// with no question above its answer. The delivered copy CONFIRMS the bubble
+// already on screen instead of becoming a second one, and it does so without
+// comparing text to anything.
+func TestOwnMessageDeliveredBackConfirmsInsteadOfDuplicating(t *testing.T) {
+	f := newFakeManager(t, ChannelInfo{Name: "console"})
+	conv := obj("conversations", "conv", "1", `{"profileRef":{"name":"ops"}}`,
+		`{"threads":[{"channel":"console","threadId":"console-uid-1"}]}`)
+	a, tr, _ := consoleUnderTest(t, f, conv)
+	a.refreshChannels(context.Background())
+	thread := "console-uid-1"
+
+	if _, err := a.Send(context.Background(), "conv", "kim", "restart it"); err != nil {
+		t.Fatal(err)
+	}
+	// the manager delivers that same message back to this surface
+	f.queue(Op{ID: "input:conv:in-9:console", Channel: "console", Kind: "send", ThreadID: &thread,
+		Message: &OpMessage{Kind: "relay", Origin: "console", Sender: "kim", Body: "restart it"}})
+	runUntil(t, a, func() bool { return !tr.Thread(thread)[0].Pending })
+
+	msgs := tr.Thread(thread)
+	if len(msgs) != 1 {
+		t.Fatalf("one message typed, one message shown: %+v", msgs)
+	}
+	if msgs[0].Kind != MsgLocal || msgs[0].Sender != "kim" || msgs[0].Text != "restart it" {
+		t.Fatalf("the reader's own words, attributed to them: %+v", msgs[0])
+	}
+	if msgs[0].recordID != "in-9" {
+		t.Fatalf("the bubble must stand for the input it is, so a merge cannot double it: %+v", msgs[0])
+	}
+	if got := f.inbounds(); len(got) != 1 {
+		t.Fatalf("the delivered copy must never be re-posted inbound: %+v", got)
+	}
+}
+
+// A message from ANOTHER surface is somebody else's words, however it arrives.
+func TestDeliveredMessageFromAnotherSurfaceStaysARelay(t *testing.T) {
+	f := newFakeManager(t, ChannelInfo{Name: "console"})
+	a, tr, _ := consoleUnderTest(t, f)
+	thread := "console-uid-1"
+	f.queue(Op{ID: "input:conv:in-3:console", Channel: "console", Kind: "send", ThreadID: &thread,
+		Message: &OpMessage{Kind: "relay", Origin: "telegram", Sender: "kim", Body: "have a look"}})
+	runUntil(t, a, func() bool { return len(tr.Thread(thread)) == 1 })
+
+	msg := tr.Thread(thread)[0]
+	if msg.Kind != MsgRelay || msg.Sender != "telegram/kim" {
+		t.Fatalf("a remote sender keeps their attribution: %+v", msg)
+	}
+	if msg.recordID != "in-3" {
+		t.Fatalf("a delivered message names the input it is: %+v", msg)
+	}
+}
+
 func TestSendRefusedForObservedConversation(t *testing.T) {
 	f := newFakeManager(t, ChannelInfo{Name: "console"})
 	// bound to telegram only: no console thread, so nothing to reply into

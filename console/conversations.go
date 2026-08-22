@@ -88,6 +88,25 @@ type Run struct {
 	Result     string `json:"result,omitempty"`
 	StartedAt  string `json:"startedAt,omitempty"`
 	FinishedAt string `json:"finishedAt,omitempty"`
+	// Inputs are the messages this run consumed — the DURABLE half of a
+	// conversation's questions, kept where the run keeps its answer. Absent on
+	// runs recorded before the manager kept them, which is why a thread from
+	// before this change still reads as answers alone.
+	Inputs []RecordedInput `json:"inputs,omitempty"`
+}
+
+// RecordedInput is one message a run consumed, as the Conversation records it.
+type RecordedInput struct {
+	ID   string `json:"id"`
+	Type string `json:"type,omitempty"`
+	Text string `json:"text,omitempty"`
+	// Truncated: Text is the beginning of a larger payload, not the whole of it.
+	Truncated bool `json:"truncated,omitempty"`
+	// Surface is the channel the message was typed on, empty when no surface
+	// displayed it — an alert, a job tick, a posted task.
+	Surface    string `json:"surface,omitempty"`
+	Sender     string `json:"sender,omitempty"`
+	ReceivedAt string `json:"receivedAt,omitempty"`
 }
 
 // Inflight is the unit currently dispatched to a runtime.

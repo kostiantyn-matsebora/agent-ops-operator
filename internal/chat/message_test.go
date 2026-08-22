@@ -77,10 +77,10 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	thread := "t-1"
 	card := SignalMessage("", "vm-alerts", "DiskFull", "", nil, "boom")
 
-	q.EnqueueInputCard(ctx, ch, "conv-1", "in-1", &thread, card)
-	q.EnqueueInputCard(ctx, ch, "conv-1", "in-1", &thread, card) // reconcile repeat
+	q.EnqueueInputDelivery(ctx, ch, "conv-1", "in-1", &thread, card)
+	q.EnqueueInputDelivery(ctx, ch, "conv-1", "in-1", &thread, card) // reconcile repeat
 	first := q.Claim("slack")
-	if first == nil || first.ID != InputCardOpID("conv-1", "in-1", "c1") {
+	if first == nil || first.ID != InputOpID("conv-1", "in-1", "c1") {
 		t.Fatalf("input card id: %+v", first)
 	}
 	if again := q.Claim("slack"); again != nil {
@@ -89,12 +89,12 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	// still deduped AFTER completion — this is the half a fresh-id send lacks,
 	// and without it every reconcile would repost the alert
 	q.Complete(ctx, first.ID, OpResult{})
-	q.EnqueueInputCard(ctx, ch, "conv-1", "in-1", &thread, card)
+	q.EnqueueInputDelivery(ctx, ch, "conv-1", "in-1", &thread, card)
 	if again := q.Claim("slack"); again != nil {
 		t.Fatalf("input card reposted after completion: %+v", again)
 	}
 	// a DIFFERENT input on the same conversation is a different card
-	q.EnqueueInputCard(ctx, ch, "conv-1", "in-2", &thread, card)
+	q.EnqueueInputDelivery(ctx, ch, "conv-1", "in-2", &thread, card)
 	if op := q.Claim("slack"); op == nil {
 		t.Fatal("a second input must get its own card")
 	}
@@ -106,26 +106,81 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	}
 }
 
-// The posting rule is a property of the input, so a new input type inherits
-// correct behavior instead of defaulting to whichever branch someone forgot.
-func TestPostToChannelsRule(t *testing.T) {
+// The delivery rule is a property of the input and the DESTINATION, so a new
+// input type inherits correct behavior instead of defaulting to whichever
+// branch someone forgot — and no lane needs a clause of its own.
+func TestDeliverToRule(t *testing.T) {
 	sig := func(kind string) *agentopsv1alpha1.InputItem {
 		return &agentopsv1alpha1.InputItem{Origin: &agentopsv1alpha1.InputOrigin{
 			Kind: agentopsv1alpha1.OriginSignal, Name: "src", SignalKind: kind}}
 	}
-	for kind, want := range map[string]bool{"alert": true, "job": true, "task": true, "chat": false} {
-		if got := sig(kind).PostToChannels(); got != want {
-			t.Fatalf("kind %q: PostToChannels() = %v, want %v", kind, got, want)
+	// An event nobody typed entered on no surface, so every bound channel is
+	// owed it — chat included, which used to be the one exception.
+	for _, kind := range []string{"alert", "job", "task", "chat"} {
+		if !sig(kind).DeliverTo("telegram", "", true) {
+			t.Fatalf("kind %q: an input no surface displayed must reach every channel", kind)
 		}
+	}
+	// A chat message typed on a surface that echoes: everywhere but there.
+	chat := sig("chat")
+	if chat.DeliverTo("telegram", "telegram", true) {
+		t.Fatal("the surface that displayed a message must not be sent it again")
+	}
+	if !chat.DeliverTo("console", "telegram", true) {
+		t.Fatal("a channel that never showed the message is owed it")
+	}
+	// A surface that renders only what it is sent receives its own users'
+	// messages, because echoing is a fact about the transport.
+	if !chat.DeliverTo("console", "console", false) {
+		t.Fatal("a viewer that does not echo must receive its own users' messages")
 	}
 	channel := &agentopsv1alpha1.InputItem{Origin: &agentopsv1alpha1.InputOrigin{
 		Kind: agentopsv1alpha1.OriginChannel, Name: "home-ops"}}
-	if channel.PostToChannels() {
-		t.Fatal("a channel-originated input is an echo and must not be posted")
+	if channel.DeliverTo("home-ops", "home-ops", true) {
+		t.Fatal("a reply typed in a thread must not be posted back into it")
 	}
-	// pre-upgrade inputs: posting them would spray history into every open
+	if !channel.DeliverTo("console", "home-ops", true) {
+		t.Fatal("a reply typed elsewhere is new to every other bound channel")
+	}
+	// pre-upgrade inputs: delivering them would spray history into every open
 	// thread on the first reconcile after upgrade
-	if (&agentopsv1alpha1.InputItem{}).PostToChannels() {
-		t.Fatal("an input with no recorded origin must not be posted")
+	if (&agentopsv1alpha1.InputItem{}).DeliverTo("console", "", true) {
+		t.Fatal("an input with no recorded origin must not be delivered")
+	}
+}
+
+// The origin SURFACE is resolved in one place for both lanes, so a chat signal
+// and a channel reply cannot drift apart.
+func TestOriginSurfaceAndSender(t *testing.T) {
+	chatSignal := &agentopsv1alpha1.InputItem{Origin: &agentopsv1alpha1.InputOrigin{
+		Kind: agentopsv1alpha1.OriginSignal, Name: "tg-chat", SignalKind: "chat"}}
+	labels := map[string]string{
+		agentopsv1alpha1.LabelChatChannel: "telegram",
+		agentopsv1alpha1.LabelChatSender:  "alice",
+	}
+	if got := chatSignal.OriginSurface(labels); got != "telegram" {
+		t.Fatalf("chat signal surface = %q, want the channel it was typed on", got)
+	}
+	if got := chatSignal.OriginSender(labels); got != "alice" {
+		t.Fatalf("chat signal sender = %q, want alice", got)
+	}
+	if !chatSignal.TypedByAPerson() {
+		t.Fatal("a chat signal is somebody's words")
+	}
+	alert := &agentopsv1alpha1.InputItem{Origin: &agentopsv1alpha1.InputOrigin{
+		Kind: agentopsv1alpha1.OriginSignal, Name: "vm-alerts", SignalKind: "alert"}}
+	if alert.OriginSurface(nil) != "" {
+		t.Fatal("an alert entered on no surface")
+	}
+	if alert.TypedByAPerson() {
+		t.Fatal("an alert is an event, not somebody's words")
+	}
+	reply := &agentopsv1alpha1.InputItem{Origin: &agentopsv1alpha1.InputOrigin{
+		Kind: agentopsv1alpha1.OriginChannel, Name: "console", Sender: "bob@example.com"}}
+	if got := reply.OriginSurface(nil); got != "console" {
+		t.Fatalf("channel surface = %q, want the channel itself", got)
+	}
+	if got := reply.OriginSender(nil); got != "bob@example.com" {
+		t.Fatalf("channel sender = %q, want the recorded sender", got)
 	}
 }

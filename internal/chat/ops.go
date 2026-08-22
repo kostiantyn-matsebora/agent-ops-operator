@@ -293,19 +293,24 @@ func (q *OpQueue) EnqueueReopenNotice(ctx context.Context, ch *agentopsv1alpha1.
 	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
 }
 
-// EnqueueInputCard queues the card for one input on one channel. Unlike an
-// ordinary send its id is STABLE per conversation×input×channel, so the
-// reconciler re-deriving it on every pass dedups against both the pending map
-// and the recent window — exactly as ensure-topic already does. Without that, a
-// conversation would repost its alert on every reconcile.
-func (q *OpQueue) EnqueueInputCard(ctx context.Context, ch *agentopsv1alpha1.Channel,
+// EnqueueInputDelivery queues ONE input's delivery to ONE channel — the event
+// card for something that woke the agent, or somebody's words relayed from the
+// surface they were typed on. One queue call for both, because they are one
+// delivery decided by one rule.
+//
+// Unlike an ordinary send its id is STABLE per conversation×input×channel, so
+// the reconciler re-deriving it on every pass dedups against both the pending
+// map and the recent window — exactly as ensure-topic already does. Without
+// that, a conversation would repost its alert, and everything anyone said, on
+// every reconcile.
+func (q *OpQueue) EnqueueInputDelivery(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conversation, inputID string, threadID *string, msg Message) {
 
-	q.enqueueMessage(ctx, InputCardOpID(conversation, inputID, ch.Name), ch, conversation, threadID, msg, true)
+	q.enqueueMessage(ctx, InputOpID(conversation, inputID, ch.Name), ch, conversation, threadID, msg, true)
 }
 
-// InputCardOpID is the stable id of one input's card on one channel.
-func InputCardOpID(conversation, inputID, channel string) string {
+// InputOpID is the stable id of one input's delivery on one channel.
+func InputOpID(conversation, inputID, channel string) string {
 	return "input:" + conversation + ":" + inputID + ":" + channel
 }
 

@@ -75,7 +75,10 @@ states plainly.
 
 One incident/task: chat topic + agent session + an append-only queue of inputs (task/alert/reply/recurrence), executed strictly serially. `kubectl get conversations` shows phase/thread/runtime live. Phases: `Pending` (waiting for a capacity slot — nothing provisioned, see [below](#capacity-how-many-run-at-once)), `Queued` (admitted, work waiting its turn), `Working`, `Idle`. Ends with `/close` in its thread, or `kubectl delete` — both archive the chat threads first. `/exit` is the other thread command and is not an ending: it [releases the runtime](#releasing-a-runtime-by-hand--exit) and keeps the conversation.
 
-`status.runs[]` records each completed run and **who has been told about it**:
+`status.runs[]` records each completed run — **what it answered**, **what it was
+asked**, and **who has been told**. `inputs[]` holds the messages the run
+consumed (text, arrival time, origin surface, sender), which is what makes a
+conversation's whole timeline readable from status after the queue is pruned.
 `delivered[]` names the bound channels whose thread already carries the reply,
 and `deliveryTracked` marks a run recorded by a manager that maintains those
 markers. Together they make the reply derivable rather than queue-resident — see
@@ -117,6 +120,13 @@ Chat surface, split in two parts: **implementation-agnostic metadata** (`adapter
 ### ChannelAdapter
 
 **A channel implementation, nothing more**: a container image implementing the adapter contract, plugged in as a CR whose **name is the type key** — Channels select it with `spec.adapter: <adapter name>`, so one adapter per implementation holds by construction. The reconciler deploys and owns the workload (zero-RBAC SA, no SA token, `replicas 1 + Recreate` when `singleton`), injects a derived per-adapter contract token, and projects every served Channel's credential Secret into the pod (kubelet-resolved — nothing reads Secrets through the API). **All configuration lives on the served Channels** (connectivity, credentials, opaque `config`) — the adapter CR carries none. Publishing a new channel type (Slack, Teams, …) = an image + one CR, zero operator or chart changes. `channel-telegram/` is the reference.
+
+`spec.echoesOwnMessages` is the one thing the implementation declares about its
+BEHAVIOUR, and it is interface metadata rather than configuration: does this
+transport show a person the message they just typed on it? Default **true**,
+which is every chat app. A viewer that renders only what it is sent declares
+**false**, and the manager then delivers that surface its own users' messages —
+see [How a message travels](#how-a-message-travels).
 
 ### SignalSource
 
@@ -180,7 +190,7 @@ that claims it**.
 
 ### Pipeline
 
-**The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is reached two ways and no others: a signal posted to a source it LISTS, and a chat command NAMING it on a wired surface — there is no HTTP form that names a Pipeline. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is relayed to the siblings as attributed text. **Wiring lives ONLY here**: sources route nothing until a Ready Pipeline lists them.
+**The wiring**: N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`, see [below](#capabilities-are-wiring)) — the only place they are declared. It is reached two ways and no others: a signal posted to a source it LISTS, and a chat command NAMING it on a wired surface — there is no HTTP form that names a Pipeline. Every referenced source's signals become conversations **mirrored on all referenced channels**, and conversations started from any referenced channel are mirrored everywhere too — each channel gets its own thread, the manager fans agent replies and acks out to all of them, and a user message on one surface is delivered to every other bound channel as attributed text. **Wiring lives ONLY here**: sources route nothing until a Ready Pipeline lists them.
 
 **Sources are shareable, exactly as channels are** — see [Sharing a source](#sharing-a-source). Name a Pipeline for its PURPOSE, never for the channel it answers on: one chat surface carries many jobs. **No chart bundle ships a Pipeline**: wiring spans bundles, so the chart declares it once at the top, under `pipelines:`.
 
@@ -539,21 +549,32 @@ That single rule covers the cases that otherwise need special handling:
 | the agent | any bound channel | yes |
 | a source with no matching channel | every bound channel | yes — nobody has seen it |
 
+Whether the surface a message entered on displayed it is a fact about the
+TRANSPORT, declared by its adapter (`ChannelAdapter.spec.echoesOwnMessages`).
+A chat app shows you your own message. A viewer that renders only what it is
+sent does not, so it receives its own users' messages like any other
+destination.
+
 **The order is the record.** A conversation holds its messages in sequence, so
 a surface that joins late, a viewer that reloads, and a conversation that is
 reopened all read the same history in the same order.
 
-> **Not yet implemented in full.** A person's message is currently withheld from
-> every channel rather than from its own surface only, and the input queue is
-> pruned once processed, so the questions are not part of the durable record
-> the way the answers are. Both are being changed to the model above.
+The record lives on the run that consumed the message
+(`status.runs[].inputs[]`): its text, when it arrived, the surface it entered
+on, and who sent it. `spec.inputs[]` stays a QUEUE and is still pruned once
+processed — what changed is that pruning is no longer the last copy of what a
+person said.
+
+Text is inlined up to a cap and marked as a fragment beyond it, so a large
+payload is not copied into the conversation object.
 
 ## Restart resilience
 
 Every piece of live state has **one declared home**, chosen by what the state is:
 
 - **The Kubernetes API** — configuration, conversation state (session id,
-  threads, inputs, runs, phase), adapter cursors, delivery markers and
+  threads, inputs, runs, phase, and the message record — what people sent as
+  well as what the agent answered), adapter cursors, delivery markers and
   suppression windows. Recovered by reading; survives any restart and any
   rescheduling.
 - **A PersistentVolume** — state that genuinely *is* a filesystem: the runtime's
@@ -574,7 +595,7 @@ a second source of truth beside the CRs.
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history; clients are told to resync rather than handed silence |
 | Runtime pod | agent session files, repo checkout | PVC when enabled, else ephemeral | with `persistence.enabled` off, conversational context; with it on, nothing |
 | Channel / signal adapters | transport cursors | annotations on `Channel` / `SignalSource` | nothing |
-| Console | config cache, activity index | rebuilt by list→watch and cursor replay | nothing authoritative; it mounts no volume by design |
+| Console | transcript buffer, config cache, activity index | rebuilt by list→watch and cursor replay; the transcript is a CACHE of `status.runs[]` | nothing authoritative; acks and notices only |
 | Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
 
 ### What reclaims what, and why the manager cannot
@@ -638,7 +659,7 @@ get this wrong:
 |---|---|---|---|
 | **Runtime context** | wherever the runtime keeps it — for the reference runtime, session files on `/data/home` | every message, tool call and model response | **the agent's memory** |
 | Thread transcript | the chat surface, via bound channels | what a human said and was told | the human-visible history |
-| Run history | `Conversation.status.runs[]` | outcome + result, truncated | what the operator knows |
+| Run history | `Conversation.status.runs[]` | the messages consumed + outcome + result, both truncated | what the operator knows |
 
 "Continue with full context" is a property of the **first** row only. The others
 are summaries, and neither can reconstruct it — which is why a lost context is

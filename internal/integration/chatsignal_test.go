@@ -34,7 +34,10 @@ func chatSignal(t *testing.T, srv *httpapi.Server, source, channel, text string)
 			"fingerprint": fmt.Sprintf("tg-%d", chatFingerprint),
 			"kind":        "chat",
 			"payload":     text,
-			"labels":      map[string]string{"agentops.dev/channel": channel},
+			"labels": map[string]string{
+				"agentops.dev/channel": channel,
+				"agentops.dev/sender":  "somebody@example.com",
+			},
 		}},
 	}, "test-adapter-token")
 }
@@ -230,6 +233,13 @@ func TestChatCommandsAnswerWithoutCreatingConversations(t *testing.T) {
 	}
 	if convs[0].Spec.Inputs[0].Payload != "check nodes" {
 		t.Fatalf("task payload: %+v", convs[0].Spec.Inputs[0])
+	}
+	// An addressed command is a MESSAGE, and it is delivered to every surface
+	// that did not display it — so it must arrive there with a speaker. Losing
+	// the sender here made a person's own question anonymous on every other
+	// surface AND in the conversation's record.
+	if o := convs[0].Spec.Inputs[0].Origin; o == nil || o.Sender != "somebody@example.com" {
+		t.Fatalf("an addressed command must keep who typed it: %+v", o)
 	}
 }
 

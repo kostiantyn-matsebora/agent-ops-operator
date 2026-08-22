@@ -32,7 +32,6 @@ type API struct {
 	mgr         *Manager
 	originator  *Originator
 	metrics     *MetricsClient
-	typedInputs *TypedInputs
 	sessions    *Sessions
 
 	namespace    string
@@ -63,9 +62,6 @@ type APIDeps struct {
 	Originator  *Originator
 	Metrics     *MetricsClient
 	Config      *Config
-	// TypedInputs renders what people typed. The start path tells it who, so a
-	// thread does not name one person two ways.
-	TypedInputs *TypedInputs
 }
 
 // NewAPI builds the browser surface.
@@ -73,7 +69,6 @@ func NewAPI(d APIDeps) *API {
 	return &API{
 		cache: d.Cache, transcripts: d.Transcripts, adapter: d.Adapter,
 		activity: d.Activity, mgr: d.Manager, originator: d.Originator, metrics: d.Metrics,
-		typedInputs:  d.TypedInputs,
 		sessions:     NewSessions(),
 		namespace:    d.Config.Namespace,
 		adapterName:  d.Config.AdapterName,

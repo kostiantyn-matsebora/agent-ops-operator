@@ -245,20 +245,6 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 		t.Fatalf("prompt must forbid agent-side posting: %.200s", unit.PromptText)
 	}
 
-	// channel B's topic lands late — binding still recorded
-	claimTopic("mc-tb", "222")
-	var bound agentopsv1alpha1.Conversation
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, &bound)
-	if bound.ThreadFor("mc-a") == nil || bound.ThreadFor("mc-b") == nil {
-		t.Fatalf("expected both bindings: %+v", bound.Status.Threads)
-	}
-
-	// run completes → manager fans the result out to BOTH channels' threads
-	rec = adapterReq(srv, "POST", "/work/done",
-		map[string]any{"convo": conv.Name, "runId": unit.RunID, "status": "succeeded", "result": "the mirrored answer"}, "")
-	if rec.Code != 200 {
-		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
-	}
 	expectSend := func(chanType, threadID, contains string) chat.Op {
 		t.Helper()
 		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
@@ -271,6 +257,33 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 			t.Fatalf("%s send op: %+v", chanType, op)
 		}
 		return op
+	}
+	// channel B's topic lands late — binding still recorded
+	claimTopic("mc-tb", "222")
+	var bound agentopsv1alpha1.Conversation
+	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, &bound)
+	if bound.ThreadFor("mc-a") == nil || bound.ThreadFor("mc-b") == nil {
+		t.Fatalf("expected both bindings: %+v", bound.Status.Threads)
+	}
+	// The message that STARTED the conversation reaches channel B, which never
+	// showed it — and not channel A, which is the surface it was typed on. One
+	// rule, per destination: the chat lane needs no clause of its own.
+	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: conv.Name}}); err != nil {
+		t.Fatal(err)
+	}
+	opening := expectSend("mc-tb", "222", "mirror me")
+	if opening.Message.Kind != chat.MsgRelay || opening.Message.Origin != "mc-a" {
+		t.Fatalf("the opening message must arrive attributed to the surface it was typed on: %+v", opening.Message)
+	}
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=mc-ta&contract=2&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
+		t.Fatalf("the originating surface displayed the message already: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// run completes → manager fans the result out to BOTH channels' threads
+	rec = adapterReq(srv, "POST", "/work/done",
+		map[string]any{"convo": conv.Name, "runId": unit.RunID, "status": "succeeded", "result": "the mirrored answer"}, "")
+	if rec.Code != 200 {
+		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
 	}
 	expectSend("mc-ta", "111", "the mirrored answer")
 	expectSend("mc-tb", "222", "the mirrored answer")
