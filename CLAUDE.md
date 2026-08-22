@@ -1,7 +1,7 @@
 # Claude context — agent-ops-operator
 
-Go/controller-runtime Kubernetes operator. `README.md` for the product view,
-`docs/concepts.md` for the CRD detail.
+**Go/controller-runtime Kubernetes operator.** `README.md` for the product
+view, `docs/concepts.md` for the CRD detail.
 
 **Self-contained modules.** No dependencies outside this directory. Keep it that
 way.
@@ -11,15 +11,12 @@ way.
 | **Twelve Go modules** | the operator (root) plus eleven submodules, every submodule dependency-free |
 | **Thirteen images** | those twelve plus `runtime-claude/`, which has no `go.mod` |
 
-The eleven submodules, by what they are:
-
-- **Channel adapters** — `channel-telegram/` (the reference one), `console/`
-  (the console: a channel adapter that is also the viewer).
-- **Signal adapters** — `signal-cron/`, `signal-alertmanager/`,
-  `signal-k8s-events/`, `signal-ha/`, `signal-telegram/`.
-- **Neither** — `telegram-router/`, the single getUpdates consumer.
-- **Run BESIDE a conversation rather than serving a CR** — `context-sync/`,
-  `egress-proxy/`, `housekeeping/`.
+| The eleven submodules | Are |
+|---|---|
+| `channel-telegram/`, `console/` | channel adapters — the reference one, and the viewer that is also an adapter |
+| `signal-cron/`, `signal-alertmanager/`, `signal-k8s-events/`, `signal-ha/`, `signal-telegram/` | signal adapters |
+| `telegram-router/` | neither — the single getUpdates consumer |
+| `context-sync/`, `egress-proxy/`, `housekeeping/` | run BESIDE a conversation, serving no CR |
 
 **Count from the repo, not from this sentence.** It was wrong twice, and
 `egress-proxy/` was missing from this file entirely.
@@ -35,16 +32,14 @@ language:
 2. **Cause**
 3. **Solution(s)**
 
-Then ASK whether details are wanted. Do not open with the reasoning, the
-evidence trail, or the full design.
-
+- **Then ASK whether details are wanted.** Never open with the reasoning, the
+  evidence trail or the full design.
 - **The reader decides how deep to go, every time.** Volunteering the deep
   version takes that choice away and buries the answer they asked for.
 - **Details are held back, not omitted from the work.** Log excerpts, timelines,
   file-anchored change lists and trade-off analysis are what "details" MEANS.
-
-Applies to chat answers only. Written deliverables under `docs/` follow
-`docs/CLAUDE.md` instead.
+- **Chat answers only.** Written deliverables under `docs/` follow
+  `docs/CLAUDE.md`.
 
 ## Session naming (say what this window is doing)
 
@@ -80,15 +75,14 @@ wiring path-independent.
 - **The title file itself stays per-session under `$XDG_RUNTIME_DIR`**, never in
   the repo. It is scratch keyed by session id, not configuration.
 
-The phase is the opsx verb driving the work — `opsx:explore`, `opsx:propose`,
-`opsx:update`, `opsx:apply`, `opsx:archive` — and the change is its directory
-name under `openspec/changes/`. Set it at the START of the work and again at
-every transition, not once at the end: the title exists to be read while the
-work is still running.
-
-Work with no change behind it says what it is instead, in the same two-word
-shape: `review chart-values`, `debug telegram-409`, `docs installation`. A title
-that reads only `claude` is the failure this rule names.
+- **The PHASE is the opsx verb driving the work** — `opsx:explore`,
+  `opsx:propose`, `opsx:update`, `opsx:apply`, `opsx:archive`.
+- **The CHANGE is its directory name** under `openspec/changes/`.
+- **Set it at the START and again at every transition**, never once at the end.
+  The title exists to be read while the work is still running.
+- **Work with no change behind it says what it is**, in the same two-word shape:
+  `review chart-values`, `debug telegram-409`, `docs installation`.
+- **A title reading only `claude` is the failure this rule names.**
 
 **The script moves the TERMINAL TITLE ONLY.** Two other names exist and neither
 is reachable from inside a session:
@@ -99,27 +93,25 @@ is reachable from inside a session:
 | session display name | prompt box, `/resume` picker, terminal title | the USER: `/rename <name>`, or `claude -n "<name>"` at launch |
 | peer name (`agent-ops-operator-05`) | `ListAgents`, Remote Control rows | nobody — derived from the directory |
 
-So when a window's name matters somewhere other than its own title bar, ASK for
-`/rename` rather than reporting a rename that did not happen. Its terminal-title
-half is governed by `terminalTitleFromRename`, which defaults on and therefore
-wins over this script until the next repaint.
+- **When a window's name matters anywhere but its own title bar, ASK for
+  `/rename`** rather than reporting a rename that did not happen.
+- **`terminalTitleFromRename` governs the terminal-title half**, defaults ON,
+  and therefore beats this script until the next repaint.
 
 ## Terminology (binding)
 
 ### A Pipeline is what a message ADDRESSES, never "an agent"
 
-The listing command is `/pipelines`. `/agents` still works and is never printed,
-offered or registered — a published word cannot simply stop answering, but
-nobody should learn it from us again.
-
-"Agent" is TAKEN: it names a DEFINITION in `.claude/agents/` inside a profile's
-repository, which is what `AgentProfile.spec.agent` selects. Using it for the
-addressable thing puts two meanings on one word, and the more visible one was
-wrong. `internal/chat` publishes the vocabulary that a transport registers as
-its command menu, so the word is carved into every install's composer — which is
-why it had to be right before that shipped, not after.
-
-`pipelines` joins the reserved set a Pipeline cannot be reached by.
+- **The listing command is `/pipelines`.** `/agents` still answers and is never
+  printed, offered or registered — a published word cannot simply stop working,
+  but nobody should learn it from us again.
+- **"Agent" is TAKEN.** It names a DEFINITION in `.claude/agents/` inside a
+  profile's repository, which is what `AgentProfile.spec.agent` selects. Two
+  meanings on one word, and the more visible one was wrong.
+- **The word is carved into every install's composer.** `internal/chat`
+  publishes the vocabulary a transport registers as its command menu, which is
+  why this had to be right BEFORE that shipped.
+- **`pipelines` joins the reserved set** a Pipeline cannot be reached by.
 
 ### Agent runtime, never "worker"
 
@@ -174,9 +166,10 @@ accumulated context.**
 thread, another has none. A vendor's word in this API teaches the next reader
 that the manager knows what is inside the handle, which it does not.
 
-The manager stores it, hands it back on the next work unit, and interprets
-nothing. `--resume` is one runtime's implementation and appears nowhere in the
-contract.
+- **The manager stores it, hands it back on the next work unit, and interprets
+  NOTHING.**
+- **`--resume` is one runtime's implementation** and appears nowhere in the
+  contract.
 
 **LATEST-WINS.** It was write-once, which was unsound:
 
@@ -186,8 +179,8 @@ contract.
   failed continuation.
 - One recoverable loss became permanent.
 
-`Conversation.ContextID()` is the only place the retired `sessionId` is read —
-dual-read for one release, because a rename that merely moved the field would
+**`Conversation.ContextID()` is the only place the retired `sessionId` is
+read.** Dual-read for one release: a rename that merely moved the field would
 have stranded every in-flight handle on upgrade.
 
 **Continuity is PROMISED ONLY WHERE POSSIBLE** —
@@ -246,10 +239,9 @@ Channel has no default profile.
 
 #### SOURCES ARE SHAREABLE, exactly as channels are
 
-Any number of Ready Pipelines may list one, of any kind, with NO conflict
-condition and no effect on `Ready`. Whether two agents watch one thing is the
-ADOPTER's call.
-
+- **Any number of Ready Pipelines may list one**, of any kind, with NO conflict
+  condition and no effect on `Ready`. Whether two agents watch one thing is the
+  ADOPTER's call.
 - **A signal admitted on a source N Pipelines serve opens N CONVERSATIONS**, one
   each, with their own profiles and capabilities.
 - **Per-source policy is evaluated ONCE ABOVE the fan-out** — cooldown,
@@ -307,18 +299,15 @@ sets.
 - A source is claimed by MANY Pipelines.
 - A channel carries MANY Pipelines' conversations.
 
-**There is no exclusivity anywhere**, no conflict condition, no tiebreak, and
-nothing to warn about. Two agents on one surface and two agents on one source
-are ORDINARY CONFIGURATIONS an adopter chooses.
-
-**Any advice that reads "prefer a source of its own" or "claiming this too would
-cost you X" is WRONG and is to be deleted on sight.** It was written three times
-in this repo and reverted three times.
-
-The only consequence of several claimants is mechanical and benign: an
-UNADDRESSED chat message is answered with the list of agents that serve the
-surface, so the person names one. That is a teaching moment, not a cost, and it
-is the whole of it.
+- **There is no exclusivity anywhere** — no conflict condition, no tiebreak,
+  nothing to warn about. Two agents on one surface, or on one source, are
+  ORDINARY CONFIGURATIONS an adopter chooses.
+- **Any advice reading "prefer a source of its own" or "claiming this too would
+  cost you X" is WRONG, and is deleted on sight.** Written three times in this
+  repo, reverted three times.
+- **The ONLY consequence of several claimants:** an UNADDRESSED chat message is
+  answered with the list of agents serving the surface, so the person names one.
+  A teaching moment, not a cost, and the whole of it.
 
 #### CLAIMING AND ADDRESSING ARE INDEPENDENT MECHANISMS
 
@@ -327,8 +316,8 @@ is the whole of it.
 | **CLAIM** (`signalSourceRefs`) | who answers an UNADDRESSED message | read from Ready pipelines only |
 | **ADDRESSING** (`/<pipeline> <task>`, `router.go` `HandleCommand`) | reaching one by name | a plain `Get` BY NAME — no claim check, no Ready check |
 
-`boundChannels` folds the originating channel in, so the reply lands in the
-thread it was asked from whatever the addressed Pipeline declares.
+**`boundChannels` folds the originating channel in.** The reply lands in the
+thread it was asked from, whatever the addressed Pipeline declares.
 
 Two consequences that decide how bundles wire themselves:
 
@@ -361,12 +350,13 @@ A Pipeline is reached two ways and no others:
 
 ### `MCPToolset`
 
-**A pure LIST of tool patterns** (`spec.tools`). No servers, no status —
-patterns are opaque, passed through like `allowedTools`. Servers live ONLY in
-`MCPConfig`. Manager RBAC on it is read-only.
+**A pure LIST of tool patterns** (`spec.tools`).
 
-**Bound from `Pipeline.spec.toolsets` ONLY** — capabilities are wiring, never
-profile fields.
+- **No servers, no status.** Patterns are opaque, passed through like
+  `allowedTools`. Servers live ONLY in `MCPConfig`.
+- **Manager RBAC on it is read-only.**
+- **Bound from `Pipeline.spec.toolsets` ONLY** — capabilities are wiring, never
+  profile fields.
 
 **What the pipeline binds is HALF the allowlist.** The RUNTIME composes it with
 the agent definition's own `tools:` per the unit's `toolsMode`, since it alone
@@ -396,10 +386,12 @@ channels AND tooling both. Reaching a pipeline gets its wiring, not half of it.
   displayed it (attributed text, per DESTINATION — not "siblings").
 - Dispatches once ≥1 thread binding exists.
 
-**The OPERATOR delivers.** Agent output is posted to every bound thread by the
-manager via the adapters, for single- and multi-channel alike. Agents never post
-to a transport (no delivery mode on Channel), so prompts carry no transport
-steps and runtimes hold no channel credentials.
+**The OPERATOR delivers.** Agent output reaches every bound thread through the
+manager's adapters, single- and multi-channel alike.
+
+- **Agents never post to a transport**, and Channel carries no delivery mode.
+- **So prompts carry no transport steps**, and runtimes hold no channel
+  credentials.
 
 ### Channel adapter
 
@@ -455,10 +447,11 @@ name by mistake.
 injects `POD_NAMESPACE`, IDENTITY ONLY. Permissions stay an external grant
 against SA `agentops-adapter-<name>`, and no reconciler ever creates RBAC.
 
-**Credentials are per-surface** on `Channel.credentialsSecretRef`, projected
-into the adapter pod as `envFrom` with prefix `AGENTOPS_CRED_<CHANNEL>_`. The
-kubelet resolves them, and the contract's channel listing advertises
-`credentialEnvPrefix`.
+**Credentials are per-surface** on `Channel.credentialsSecretRef`.
+
+- **Projected into the adapter pod** as `envFrom`, prefix
+  `AGENTOPS_CRED_<CHANNEL>_`, resolved by the KUBELET.
+- **The contract's channel listing advertises `credentialEnvPrefix`.**
 
 ### `SignalAdapter` CR / signal adapter
 
@@ -484,22 +477,20 @@ Adapters push normalized signals (`fingerprint`, `labels`, `title?`, `payload`,
 
 ### On both adapter kinds, the CR NAME is the ROUTING KEY
 
-`Channel` / `SignalSource.spec.adapter` names the serving adapter. **A
-REFERENCE, not an attribute:** that adapter's implementation defines the schema
-of the sibling `config`.
+`Channel` / `SignalSource.spec.adapter` names the serving adapter.
 
-It drives the contract listing `?adapter=`, the injected `ADAPTER_NAME`,
-credential projection, token scope and `Served`.
-
-**One adapter per implementation by construction** — duplicate adapters for one
-implementation are impossible.
-
-**Adapter CRs carry no configuration.** Connectivity, credentials and config
-live ONLY on Channel and SignalSource.
+- **A REFERENCE, not an attribute.** That adapter's implementation defines the
+  schema of the sibling `config`.
+- **It drives** the contract listing `?adapter=`, the injected `ADAPTER_NAME`,
+  credential projection, token scope and `Served`.
+- **One adapter per implementation by construction** — duplicates for one
+  implementation are impossible.
+- **Adapter CRs carry NO configuration.** Connectivity, credentials and config
+  live only on Channel and SignalSource.
 
 ### API group
 
-`agentops.dev/v1alpha1`. Provisional — a rename is possible pre-1.0.
+**`agentops.dev/v1alpha1`.** Provisional — a rename is possible pre-1.0.
 
 ## Build / test
 
@@ -518,13 +509,13 @@ KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@r
 
 ### No local Go: use a PERSISTENT container, not `docker run --rm`
 
-This workstation has no Go toolchain, so every command above runs in a
+**This workstation has no Go toolchain**, so every command above runs in a
 container.
 
 **Start ONE long-lived container and `docker exec` into it.** A throwaway
-`docker run --rm` per command pays container setup on every invocation and
-throws the build cache away with it. Warm rebuilds are ~2s through `exec`. They
-are not through `run --rm`.
+`docker run --rm` pays container setup per invocation and throws the build cache
+away with it — warm rebuilds are ~2s through `exec` and are not through
+`run --rm`.
 
 ```sh
 docker volume create agentops-gomodcache; docker volume create agentops-gocache
@@ -579,21 +570,19 @@ Two traps that are not the container's fault but look like it:
 **Use `buildx --platform linux/amd64,linux/arm64 --push`.**
 Never `docker build --platform linux/amd64`.
 
-A single-arch image on a mixed-arch cluster does not fail at build, at push, or
-at render. It fails when the SCHEDULER happens to place the pod on the other
-architecture, which may be weeks later and looks like an unrelated incident:
+**A single-arch image fails at SCHEDULE TIME, not at build, push or render** —
+possibly weeks later, looking like an unrelated incident:
 
 ```
 failed to pull and unpack image "...": no match for platform in manifest: not found
 ```
 
-That is what an amd64-only `agentops-console` did on 2026-08-21. It had run for
-weeks purely because every reschedule had landed on an amd64 node, and the first
-one that did not left the console in `ImagePullBackOff`.
-
-Nothing in the chart or the CR was wrong. The image simply had no arm64 half.
-Every adapter here is dependency-free Go and cross-compiles for free, so there
-is no reason to ship one arch.
+- **An amd64-only `agentops-console` did exactly that on 2026-08-21.** It had
+  run for weeks only because every reschedule landed on an amd64 node; the first
+  that did not left the console in `ImagePullBackOff`.
+- **Nothing in the chart or the CR was wrong.** The image had no arm64 half.
+- **Every adapter here is dependency-free Go** and cross-compiles for free, so
+  there is no reason to ship one arch.
 
 **THERE IS NO EXCEPTION.** This file used to name one — "a runtime whose
 UPSTREAM is single-arch, `runtime-claude` is the case" — and it was wrong.
@@ -607,16 +596,16 @@ arch: aarch64 / v22.23.2 / 2.1.239 (Claude Code)
 
 `node:22-bookworm-slim` plus apt plus one npm global is multi-arch throughout.
 
-The constraint was the `--platform linux/amd64` in the build command below, and
-the runtime `nodeSelector` the chart ships was compensating for a build flag
-rather than for the vendor. It can be relaxed once a multi-arch runtime image is
+**The constraint was the `--platform linux/amd64` in the build command below.**
+The runtime `nodeSelector` the chart ships compensates for a build flag rather
+than for the vendor, and can be relaxed once a multi-arch runtime image is
 published.
 
 **A component may still be single-arch one day.** Establish that by BUILDING it
 on the other architecture and running the binary, never by inheriting a claim
 from prose — including this prose.
 
-Images. Bump the tag on every change, and never overwrite a pushed tag:
+**Bump the tag on every change. Never overwrite a pushed tag.**
 
 ```sh
 # MULTI-ARCH, and --push in the same command: buildx cannot export a
@@ -695,20 +684,23 @@ env).
 
 - **The pending-backlog bound lives here**, in `signals.go`.
 - **NO origination endpoint.** `POST /task` is deleted.
-- **The signature fallback in `signals.go` splits on LANE.** `alert`/`job` keep
-  `ingest.DefaultSignatureLabels`, which prometheus-bundle and signal-cron
-  depend on. `task`/`chat` key on the fingerprint. Do not collapse it into one
-  rule.
+- **The signature fallback in `signals.go` splits on LANE.** Do not collapse it
+  into one rule.
+  - **`alert` / `job`** keep `ingest.DefaultSignatureLabels`, which
+    prometheus-bundle and signal-cron depend on.
+  - **`task` / `chat`** key on the fingerprint.
 
 **`internal/chat/`** — the channel-type-agnostic core:
 
-- **Provider + Registry** — in-process built-ins.
-- **OpQueue** — outbound ops, at-least-once: `ensure-topic` | `send` |
-  `close-topic` | `delete-conversation`. The last REPLACES `close-topic` on the
-  deletion path, reports a FACT rather than a thread instruction, and is named
-  for the conversation because that is what ended.
-- **Router** — transport-neutral inbound, with `/close` intercepted on the reply
-  path.
+| Piece | Is |
+|---|---|
+| Provider + Registry | in-process built-ins |
+| OpQueue | outbound ops, at-least-once: `ensure-topic` \| `send` \| `close-topic` \| `delete-conversation` |
+| Router | transport-neutral inbound, `/close` intercepted on the reply path |
+
+**`delete-conversation` REPLACES `close-topic` on the deletion path.** It
+reports a FACT rather than a thread instruction, and is named for the
+conversation because that is what ended.
 
 **`internal/dispatch/`** — input → work-unit resolution, plus the built-in lane
 templates:
@@ -720,45 +712,48 @@ templates:
   no mode.
 
 **`internal/mcpcompile/`** — bound MCPConfigs → `mcp.json` plus `valueFrom` env.
-ONE entry (`Compile` over an ordered list). A raw hand-written `mcp.json` is
-EXCLUSIVE: bound with others is an error.
+
+- **ONE entry** — `Compile` over an ordered list.
+- **A raw hand-written `mcp.json` is EXCLUSIVE.** Bound with others is an
+  error.
 
 ### `runtime-claude/`
 
 The reference `AgentRuntime` — Node plus claude-code, implementing the `/work`
 contract.
 
-**GENERIC BY CONSTRUCTION:** git and openssh for the checkout it owns, plus
-generic shell utilities, and NO domain tooling. kubectl was dropped in image
-0.5.0.
-
-A CLI here would be the same category error as bundling an MCP server: what an
-agent may reach is wiring. Need one? Derive an image and point
-`AgentRuntime.spec.image` at it (README) — that is why the field exists.
+- **GENERIC BY CONSTRUCTION** — git and openssh for the checkout it owns, plus
+  generic shell utilities, and NO domain tooling. kubectl was dropped in image
+  0.5.0.
+- **A CLI here is the same category error as bundling an MCP server.** What an
+  agent may reach is WIRING.
+- **Need one? Derive an image** and point `AgentRuntime.spec.image` at it
+  (README). That is why the field exists.
 
 ### The Telegram trio
 
-**`channel-telegram/`** — the reference channel adapter (own module, no deps),
-implementing the `/channel` contract. Bot API sending lives HERE.
+**`channel-telegram/`** — the reference channel adapter, implementing the
+`/channel` contract. Bot API sending lives HERE.
 
 **It does NOT poll.** It receives topic updates pushed by the router
 (`POST /updates`, `ChannelAdapter spec.port`) and persists the router's offset
 (`GET/PUT /offset` → state API).
 
-**`telegram-router/`** — the ONLY getUpdates consumer (own module, no deps).
+**`telegram-router/`** — the ONLY getUpdates consumer.
 
 - **It classifies each update on `is_topic_message` and forwards it VERBATIM.**
   No topic → `signal-telegram` (origination). Topic → `channel-telegram`
   (continuation).
 - **It holds no channel config, persists nothing, needs no RBAC.**
 - **NOT AN ADAPTER.** It emits no signals, so it has no `SignalAdapter` CR and
-  no served CR. The telegram-bundle chart owns its Deployment and injects
-  `SIGNAL_TARGET` / `CHANNEL_TARGET` / the bot token as env. It never contacts
-  the manager.
+  no served CR.
+  - **The telegram-bundle chart owns its Deployment**, injecting
+    `SIGNAL_TARGET` / `CHANNEL_TARGET` / the bot token as env.
+  - **It never contacts the manager.**
 - **One Deployment per bot token makes the single-consumer rule structural.** A
   missing env var exits at startup.
 
-**`signal-telegram/`** — the chat ORIGINATION adapter (own module, no deps).
+**`signal-telegram/`** — the chat ORIGINATION adapter.
 
 It normalizes general-surface updates and posts `/signal/inbound`:
 
@@ -771,11 +766,10 @@ It normalizes general-surface updates and posts `/signal/inbound`:
 
 ### The other signal adapters
 
-**`signal-cron/`** — the reference signal adapter (own module, no deps),
-implementing the `/signal` contract. Five-field cron parser plus scheduler.
+**`signal-cron/`** — the reference signal adapter, implementing the `/signal`
+contract. Five-field cron parser plus scheduler.
 
-**`signal-alertmanager/`** — webhook-receiving signal adapter (own module, no
-deps). Hosts `/webhook/{source}` for Alertmanager-format posts, and the
+**`signal-alertmanager/`** — webhook-receiving signal adapter. Hosts `/webhook/{source}` for Alertmanager-format posts, and the
 prometheus-bundle subchart ships it.
 
 - **The pod label `agentops.dev/signal-adapter` is a CHART CONTRACT**, pinned by
@@ -796,7 +790,7 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
   `metrics.vmServiceScrape` value on the same grounds.
 - **Renaming either would name a thing that does not exist.**
 
-**`signal-ha/`** — Home Assistant log signal adapter (own module, no deps).
+**`signal-ha/`** — Home Assistant log signal adapter.
 
 - **Reads that instance's WebSocket API** over a hand-written RFC 6455 client:
   `system_log_event`, with `system_log/list` for backfill and for the dwell
@@ -812,7 +806,7 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
   `websocket_api`), because a failed agent call is logged there and reporting it
   would wake the agent that made it.
 
-**`signal-k8s-events/`** — cluster Events signal adapter (own module, no deps).
+**`signal-k8s-events/`** — cluster Events signal adapter.
 
 - **In-cluster API over `net/http`**, no client-go: SA token re-read, list+watch
   per namespace scope, 410 relist.
@@ -823,8 +817,7 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
 
 ### Beside a conversation
 
-**`housekeeping/`** — the disk half of conversation retention (own module, no
-deps).
+**`housekeeping/`** — the disk half of conversation retention.
 
 - **A CronJob, not a daemon.** It scans the claim ROOTS for workspace
   directories and session transcripts no Conversation backs, and removes them.
@@ -836,8 +829,7 @@ deps).
 - **Named `agentops-housekeeping`** so `signal-k8s-events`' prefix
   self-exclusion catches it. A CronJob fails on a SCHEDULE.
 
-**`egress-proxy/`** — the tool-access wall INSIDE the runtime pod (own module,
-no deps).
+**`egress-proxy/`** — the tool-access wall INSIDE the runtime pod.
 
 - **ONE binary, two subcommands:** `install-redirect` (privileged init
   container, writes the redirect rules) and `proxy` (serves the redirected
@@ -851,16 +843,15 @@ no deps).
 - **Opt-in via `runtime.egressMediation.enabled`** — see
   `docs/adr/0001-bound-component-reach.md`.
 
-**`context-sync/`** — the context sidecar (own module, no deps). Semantics in
-the terminology entry; what lives HERE is the implementation:
+**`context-sync/`** — the context sidecar. Semantics in the terminology entry;
+what lives HERE is the implementation:
 
 - **Atomic generations plus a `current` symlink.** Copies are labelled quiesced
   or best-effort.
 
 ### `console/`
 
-The agent-ops console (own module, no deps) — a ChannelAdapter that is ALSO the
-viewer.
+**The agent-ops console** — a ChannelAdapter that is ALSO the viewer.
 
 - **Config from read-only list/watch of the eight agentops kinds**, in-cluster
   API over `net/http`, the same technique as `signal-k8s-events`.
@@ -932,7 +923,7 @@ The `mcp` component:
 
 ### `chart/charts/prometheus-bundle/`
 
-WAS `vm-bundle` through chart 5.12.0. It ships:
+**WAS `vm-bundle` through chart 5.12.0.** It ships:
 
 - **The Alertmanager ingest lane.**
 - **ONE metrics MCP component.** `MCPConfig` server key FIXED at `prometheus`,
@@ -995,9 +986,9 @@ refused the subscription, which reads like a network fault.
 
 ### `chart/charts/telegram-bundle/`
 
-The three-component Telegram stack — router, signal adapter, channel adapter —
-as adapter CRs. Under `surface.enabled` it also renders the Channel, the chat
-SignalSource, and the router's credential source.
+**The three-component Telegram stack** — router, signal adapter, channel
+adapter — as adapter CRs. Under `surface.enabled` it also renders the Channel,
+the chat SignalSource and the router's credential source.
 
 - **`surface.enabled` makes the unguessable fields REQUIRED.** A missing
   `chatId`, a missing credential, or BOTH credential forms at once FAIL the
@@ -1096,10 +1087,11 @@ Two that stay, because they are about the SHELL rather than a page:
 
 #### `diagrams/`
 
-Holds the drawio SOURCE plus `export.py`. **Run that, never the exporter by
-hand:** it writes BOTH theme variants of BOTH site pages (four SVGs) and
-repaints the dark ones' icon ink, which drawio cannot do because the icons are
-embedded images.
+**Holds the drawio SOURCE plus `export.py`.**
+
+**Run that, never the exporter by hand.** It writes BOTH theme variants of BOTH
+site pages (four SVGs) and repaints the dark ones' icon ink, which drawio cannot
+do because the icons are embedded images.
 
 THREE drawio pages, and only two are exported:
 
@@ -1186,9 +1178,10 @@ Dedicated SA, and no RBAC objects created or bound by any reconciler.
 
 ### Strictly serial per conversation
 
-One inflight unit. Parallelism is across conversations, capped by
-`MAX_ACTIVE_CONVERSATIONS` (default 5) with idle-runtime eviction.
-`MAX_RUNTIMES` is the deprecated alias, honored one release.
+- **ONE inflight unit.** Parallelism is across conversations.
+- **Capped by `MAX_ACTIVE_CONVERSATIONS`** (default 5), with idle-runtime
+  eviction.
+- **`MAX_RUNTIMES` is the deprecated alias**, honored one release.
 
 ### THE CAP IS DECIDED BEFORE ANYTHING IS PROVISIONED
 
@@ -1250,8 +1243,8 @@ materialized refs left EXACTLY as they are.
 **`close-topic` IS NOW DERIVABLE.** It was the exception only because it was
 enqueued while the object was disappearing, leaving nothing to record against.
 
-Now `status.threadsArchived[]` marks the done threads and an unarchived one is
-an archive still owed. **Do not re-add the "one non-derivable op" clause.**
+**`status.threadsArchived[]` marks the done threads**, so an unarchived one is
+an archive still owed. Do not re-add the "one non-derivable op" clause.
 
 **The `agentops.dev/close-topics` finalizer survives for the ONE path where the
 object really does go away** — a direct `kubectl delete` of a conversation
@@ -1265,14 +1258,13 @@ and answers with usage on a general surface.
 (`spec.channelRefs`, read off the conversation, never off the request), and
 delete REFUSES anything not already `Closed`.
 
-That is what the retired "no remote close verb exists" rule was actually
-protecting — *you may only end a conversation you are PART of* — and holding a
-live thread was the proof. A closed conversation has none, so the binding is the
-next-strongest.
+**That is what the retired "no remote close verb exists" rule protected** —
+*you may only end a conversation you are PART of*, with a live thread as the
+proof. A closed conversation has none, so the binding is the next-strongest.
 
 ### `/exit` RELEASES THE RUNTIME — `/close` ENDS THE CONVERSATION
 
-One word apart and not interchangeable. `/exit` deletes the runtime POD and
+**One word apart and not interchangeable.** `/exit` deletes the runtime POD and
 nothing else: object, threads, inputs, runs and `runtimeContextId` all survive,
 and the next input admits it again with a fresh pod.
 
@@ -1299,7 +1291,7 @@ still needs a worker, so the replacement pod:
 4. Clears `Inflight`, makes the input pending again and **RE-RUNS work that may
    already have acted**.
 
-`/close` owns abandonment and owns it safely. Queued input is refused too,
+**`/close` owns abandonment, and owns it safely.** Queued input is refused too,
 merely because the pod would come straight back.
 
 **What the release COSTS is computed, never guessed.**
@@ -1474,8 +1466,9 @@ Consequences that were each a real loss:
 `telegram-router`: ONE poll loop per Deployment and ONE Deployment per token
 (replicas 1 + Recreate, chart-owned).
 
-Neither adapter polls and the manager has no poller. **Adding a poll loop back
-to `channel-telegram` is the mistake that produces 409s and stolen updates.**
+**Neither adapter polls, and the manager has no poller.** Adding a poll loop
+back to `channel-telegram` is the mistake that produces 409s and stolen
+updates.
 
 ### Channel ops are at-least-once
 
@@ -1531,10 +1524,10 @@ Exactly as a run's reply is.
 origin-KIND rule (`InputItem.PostToChannels`: `signal` posts, `channel` does
 not, `kind: chat` does not) and its stated chat exception are DELETED.
 
-They asked the question once, per message, and so withheld a person's words from
-channels that had never shown them — a console transcript that began at the
-agent's answer was that bug. **Re-adding either, in any layer, is the
-regression.**
+**They asked the question once, per MESSAGE**, and so withheld a person's words
+from channels that had never shown them — a console transcript beginning at the
+agent's answer was that bug. Re-adding either, in any layer, is the
+regression.
 
 - **Whether the origin surface displayed it is TRANSPORT knowledge**, declared
   by the implementation: `ChannelAdapter.spec.echoesOwnMessages`, default TRUE,
@@ -1724,36 +1717,33 @@ and the 7-day window reuse could never fire.
 **A rendered pod is not a running one, and a chart render test cannot tell the
 difference.**
 
-`mcpServers` shipped `PROMETHEUS_MCP_TRANSPORT` for a whole implementation pass.
-The real variable is `PROMETHEUS_MCP_SERVER_TRANSPORT`, the server silently fell
-back to stdio, and a stdio process in a pod prints a banner and exits — a
-`Completed` pod behind a Service that answers nothing.
-
-Every guard, every assertion and `--dry-run=server` all passed. Only starting
-the thing found it. **Pin env-var NAMES third-party images read, and smoke any
-new workload before believing its values.**
+- **`mcpServers` shipped `PROMETHEUS_MCP_TRANSPORT` for a whole implementation
+  pass.** The real name is `PROMETHEUS_MCP_SERVER_TRANSPORT`, so the server fell
+  back to stdio — and a stdio process in a pod prints a banner and exits, giving
+  a `Completed` pod behind a Service that answers nothing.
+- **Every guard, every assertion and `--dry-run=server` passed.** Only starting
+  the thing found it.
+- **Pin env-var NAMES third-party images read**, and smoke any new workload
+  before believing its values.
 
 **`helm.sh/resource-policy: keep` protects nothing retroactively.**
 
-Helm reads it off the LIVE object when a resource leaves the manifest, not off
-the manifest dropping it, so adding the annotation in the same release that
-stops rendering the resource DELETES it. Verified against helm v4, all three
-cases.
-
-Anything that stops being rendered — the generated credential Secrets — needs
-the annotation on the object FIRST, which is why `agentops.generatedSecretGuard`
-fails the render rather than trusting a migration note.
+- **Helm reads it off the LIVE object** when a resource leaves the manifest,
+  never off the manifest dropping it. Adding the annotation in the same release
+  that stops rendering the resource DELETES it. Verified against helm v4, all
+  three cases.
+- **Anything that stops being rendered needs the annotation on the object
+  FIRST** — the generated credential Secrets are the case, which is why
+  `agentops.generatedSecretGuard` fails the render rather than trusting a
+  migration note.
 
 **`lookup` returns empty on any renderer without a cluster** — `helm template`,
 CI, a GitOps controller, `--dry-run=client`.
 
-So a template that can generate a value on the UPGRADE path does not merely show
-a new credential in a diff, it applies one. **Generate under
-`.Release.IsInstall` only.**
-
-The corollary: a `lookup`-driven guard is silent under `helm template`, so it
-cannot be pinned by a chart render test. Verify it with
-`helm upgrade --dry-run=server`.
+- **A template generating a value on the UPGRADE path APPLIES a new credential**,
+  not merely shows one in a diff. Generate under `.Release.IsInstall` only.
+- **A `lookup`-driven guard is silent under `helm template`**, so no chart render
+  test can pin it. Verify with `helm upgrade --dry-run=server`.
 
 **A HAND-PATCHED FIELD SURVIVES EVERY LATER `helm upgrade`.**
 
@@ -1788,8 +1778,8 @@ dial tcp 192.0.2.187:8080: connect: operation not permitted
 
 **`reply_to_message` IS ONE LEVEL DEEP AND NEVER NESTS.**
 
-A reply carries the message it answers, and that message carries no
-`reply_to_message` of its own. A chain walked two links up to recover an
+**A reply carries the message it answers, and no further.** That message holds
+no `reply_to_message` of its own, so a chain walked two links up to recover an
 original command finds nil, every time.
 
 - **The menu prompt NAMES the addressed form in its own text** —
@@ -1818,17 +1808,18 @@ runs.
 **The router's bot Secret is the SAME one the Channel uses**, since it polls the
 bot the channel sends as, injected by the chart as `TELEGRAM_BOT_TOKEN`.
 
-It used to be an adapter with a signal-free `SignalSource` purely to carry that
-credential — which then sat at `Wired=False` until some Pipeline faked a claim.
-**Modelling plumbing as an adapter is what produced that whole chain.**
+**It used to be an adapter with a signal-free `SignalSource`** purely to carry
+that credential, which then sat at `Wired=False` until some Pipeline faked a
+claim. Modelling plumbing as an adapter produced that whole chain.
 
 ### THE PARENT CHART IS WHERE WIRING IS DECLARED
 
 **A bundle ships it only under the four conditions.**
 
-Wiring names a profile, sources and channels that routinely come from DIFFERENT
-bundles, and a subchart sees only itself, so one that shipped wiring could only
-ever wire ITSELF. Declare routes in the top-level `pipelines:` values.
+**A subchart sees only itself**, while wiring names a profile, sources and
+channels that routinely come from DIFFERENT bundles — so one that shipped wiring
+could only ever wire ITSELF. Declare routes in the top-level `pipelines:`
+values.
 
 A bundle MAY ship its own only when ALL of:
 
@@ -1907,7 +1898,7 @@ filename — so the routing is explicit:
 belong to `docs/installation.md`, a SUBCHART's to that bundle's own page, and
 neither restates the other.
 
-`installation.md` carries the values an operator must DECIDE, grouped by the
+**`installation.md` carries the values an operator must DECIDE**, grouped by the
 decision they serve. `helm show values` is the exhaustive list, and a
 hand-copied inventory rots.
 
@@ -1959,9 +1950,9 @@ file. A vendor list in the stylesheet would be product knowledge in the theme.
 
 `wc -l README.md`.
 
-It holds the pitch and diagram, one line per CRD kind, the behaviors that
-matter, the demo, install, the Documentation index (the site first),
-development and status. **Nothing else.**
+**It holds** the pitch and diagram, one line per CRD kind, the behaviors that
+matter, the demo, install, the Documentation index (the site first), development
+and status. **Nothing else.**
 
 - **A distinguishing behavior is named in a LINE**, and the document that owns
   it is linked.
