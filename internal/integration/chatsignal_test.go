@@ -24,6 +24,11 @@ import (
 
 var chatFingerprint int
 
+// chatMessageHandle is the transport's own handle for the arriving message, as
+// an adapter supplies it. OPAQUE to the manager, which stores and returns it
+// unaltered — the tests assert exactly that and never its shape.
+const chatMessageHandle = "tg-msg-4242"
+
 // chatSignal posts one general-surface message as the chat adapter would.
 func chatSignal(t *testing.T, srv *httpapi.Server, source, channel, text string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -37,6 +42,7 @@ func chatSignal(t *testing.T, srv *httpapi.Server, source, channel, text string)
 			"labels": map[string]string{
 				"agentops.dev/channel": channel,
 				"agentops.dev/sender":  "somebody@example.com",
+				"agentops.dev/message": chatMessageHandle,
 			},
 		}},
 	}, "test-adapter-token")

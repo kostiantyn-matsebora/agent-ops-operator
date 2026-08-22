@@ -52,11 +52,31 @@ func TestTaskUsesBuiltinTemplate(t *testing.T) {
 	}
 }
 
-func TestAgentOverride(t *testing.T) {
+// TestQueuedAgentOverrideStillDispatches pins the DEPRECATED dual-read.
+// Nothing writes InputItem.Agent any more, but an input queued before the
+// upgrade must still reach the agent it was parsed with — changing agent
+// mid-conversation because the manager restarted would be worse than the
+// retired field. Delete this test when the field goes.
+func TestQueuedAgentOverrideStillDispatches(t *testing.T) {
 	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x", Agent: "node-doctor"})
 	u, _, _, _ := dispatchNext(c, profile())
 	if !strings.Contains(u.PromptText, "node-doctor") {
-		t.Fatalf("agent override ignored:\n%s", u.PromptText)
+		t.Fatalf("queued agent override ignored:\n%s", u.PromptText)
+	}
+}
+
+// TestNewInputUsesProfileAgent is the post-change shape: an input carrying no
+// agent — which is every input created from now on — runs the agent the
+// PROFILE declares. That is the whole point of removing the override: the
+// agent comes from the wiring, never from whoever typed the message.
+func TestNewInputUsesProfileAgent(t *testing.T) {
+	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if want := profile().Spec.Agent; u.Agent != want {
+		t.Fatalf("agent: want profile's %q, got %q", want, u.Agent)
 	}
 }
 
@@ -198,7 +218,8 @@ func TestWorkUnitCarriesToolsModeAndAgent(t *testing.T) {
 
 // A per-input agent override must reach the runtime too, or it would read the
 // wrong definition's tools while being told to act as a different agent.
-func TestWorkUnitAgentFollowsInputOverride(t *testing.T) {
+// Also pins the deprecated dual-read — see TestQueuedAgentOverrideStillDispatches.
+func TestWorkUnitAgentFollowsQueuedOverride(t *testing.T) {
 	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x", Agent: "k8s-engineer"})
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {

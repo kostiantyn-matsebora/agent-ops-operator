@@ -263,10 +263,29 @@ func TestAmbiguousBareChatMessageIsRefusedWithTheChoices(t *testing.T) {
 	var op chat.Op
 	_ = json.Unmarshal(rec.Body.Bytes(), &op)
 	body := opBody(op)
-	for _, want := range []string{"/amb-a", "/amb-b", "prof-amb-a", "prof-amb-b", "/agents"} {
+	for _, want := range []string{"/amb-a", "/amb-b", "prof-amb-a", "prof-amb-b", "/" + chat.ListCommand} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("the refusal must carry %q — it is the teaching moment: %q", want, body)
 		}
+	}
+	if strings.Contains(body, "agents serve this chat") {
+		t.Fatalf("the refusal calls pipelines agents: %q", body)
+	}
+
+	// THE MOMENT CONTROLS EARN MOST. The person has already typed their task,
+	// so a surface with controls can send THAT text to the pipeline they pick.
+	// The manager states the offer; how it looks is the adapter's business.
+	got := map[string]string{}
+	for _, c := range op.Message.Choices {
+		got[c.Label] = c.Command
+	}
+	if len(got) != 2 || got["amb-a"] != "/amb-a" || got["amb-b"] != "/amb-b" {
+		t.Fatalf("refusal must offer each server as a choice, got %v", got)
+	}
+	// ...and it is LINKED to the message that provoked it, which is what lets a
+	// selection carry the original forward with nothing held in between.
+	if op.Message.InReplyTo != chatMessageHandle {
+		t.Fatalf("refusal not linked to the original message: %q", op.Message.InReplyTo)
 	}
 }
 

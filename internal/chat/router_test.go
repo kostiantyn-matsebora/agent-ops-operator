@@ -262,3 +262,121 @@ func TestReopenNoticeReachesEveryBoundThread(t *testing.T) {
 		t.Fatalf("a second reopen is owed its own notice, got %d", len(second))
 	}
 }
+
+// ---- the Pipeline listing -----------------------------------------------
+//
+// The listing lists PIPELINES and is now named for them. `/agents` was wrong
+// twice: "agent" already names a definition inside a profile's repository, and
+// the listing has never held one. It keeps WORKING — it is published in installs
+// already — but nothing offers, registers or prints it.
+
+func listingBody(t *testing.T, r *Router, q *OpQueue, text string) string {
+	t.Helper()
+	cmd, ok := addressing.Parse(text)
+	if !ok {
+		t.Fatalf("parse %q", text)
+	}
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, ""); err != nil {
+		t.Fatal(err)
+	}
+	ops := drain(q, "slack")
+	if len(ops) != 1 {
+		t.Fatalf("%q: want one reply, got %d", text, len(ops))
+	}
+	return opBody(ops[0])
+}
+
+func TestListingAnswersBothNamesIdentically(t *testing.T) {
+	r, q, _ := closeFixture(t, pipeline("k8s-observe", "k8s-engineer", true))
+	nu := listingBody(t, r, q, "/"+ListCommand)
+	old := listingBody(t, r, q, "/"+RetiredListCommand)
+	if nu != old {
+		t.Fatalf("retired name answers differently:\n%s\n---\n%s", nu, old)
+	}
+	if !strings.Contains(nu, "k8s-observe") || !strings.Contains(nu, "k8s-engineer") {
+		t.Fatalf("listing lacks the pipeline or its profile:\n%s", nu)
+	}
+}
+
+// The reply is the most-read prose the manager emits. It must not call a
+// Pipeline an agent, and must not advertise the retired second segment.
+func TestListingSaysPipelineAndDropsTheRetiredForm(t *testing.T) {
+	r, q, _ := closeFixture(t, pipeline("k8s-observe", "k8s-engineer", true))
+	body := listingBody(t, r, q, "/"+ListCommand)
+	for _, banned := range []string{"Agents", "<agent>", ":<role>", "/agents"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("listing still says %q:\n%s", banned, body)
+		}
+	}
+	if !strings.Contains(body, "`/<pipeline> <task>`") {
+		t.Fatalf("listing does not show the addressed form:\n%s", body)
+	}
+	// Both thread commands, together, with the difference stated — they are one
+	// word apart and only one of them ends the conversation.
+	for _, want := range []string{"/exit", "/close"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("listing omits %s:\n%s", want, body)
+		}
+	}
+}
+
+// Choices ride ALONGSIDE the prose: a transport with controls gets controls, one
+// without still reads the list.
+func TestListingOffersEachPipelineAsAChoice(t *testing.T) {
+	r, q, _ := closeFixture(t,
+		pipeline("k8s-observe", "k8s-engineer", true),
+		pipeline("alert-investigator", "responder", true),
+		pipeline("half-wired", "nobody", false),
+	)
+	cmd, _ := addressing.Parse("/" + ListCommand)
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, ""); err != nil {
+		t.Fatal(err)
+	}
+	ops := drain(q, "slack")
+	got := map[string]string{}
+	for _, c := range ops[0].Message.Choices {
+		got[c.Label] = c.Command
+	}
+	if len(got) != 2 {
+		t.Fatalf("want a choice per Ready pipeline, got %v", got)
+	}
+	if got["k8s-observe"] != "/k8s-observe" {
+		t.Fatalf("choice command wrong: %v", got)
+	}
+	if _, ok := got["half-wired"]; ok {
+		t.Fatal("unready pipeline offered as a choice")
+	}
+}
+
+func TestUnknownPipelineRefusalNamesTheListingCommand(t *testing.T) {
+	r, q, _ := closeFixture(t)
+	body := listingBody(t, r, q, "/nope do a thing")
+	if strings.Contains(body, "agent") {
+		t.Fatalf("refusal calls a pipeline an agent: %q", body)
+	}
+	if !strings.Contains(body, "/"+ListCommand) {
+		t.Fatalf("refusal does not point at the listing: %q", body)
+	}
+}
+
+// Interception precedes the Pipeline lookup, which is what makes the commands
+// reliable — so a Pipeline named after one is unreachable BY THAT COMMAND.
+func TestPipelineNamedAfterACommandIsUnreachable(t *testing.T) {
+	r, q, c := closeFixture(t, pipeline(ListCommand, "shadow", true))
+	body := listingBody(t, r, q, "/"+ListCommand+" do a thing")
+	if !strings.Contains(body, "Pipelines") {
+		t.Fatalf("command was shadowed by a pipeline of the same name: %q", body)
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 0 {
+		t.Fatalf("shadowing pipeline started %d conversation(s)", len(list.Items))
+	}
+	for _, name := range ReservedCommands() {
+		if name == "" {
+			t.Fatal("reserved set holds an empty name")
+		}
+	}
+}

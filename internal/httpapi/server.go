@@ -15,6 +15,7 @@
 //	POST /channel/ops/{id}/done         async op completion
 //	POST /channel/inbound               {"channel","threadId"?,"text"} -> router
 //	GET  /channel/channels?type=        channels served by an adapter (+config)
+//	GET  /channel/vocabulary            what may be typed, + its revision
 //	GET  /channel/state/{channel}/{key} adapter cursor state (annotation-backed)
 //	PUT  /channel/state/{channel}/{key}
 //	POST /channel/channels/{name}/status  {"ready","reason"?,"message"?}
@@ -139,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /channel/conversations/{name}/delete", s.adapterAuth(s.handleConversationDelete))
 	mux.HandleFunc("POST /channel/conversations/{name}/reset-context", s.adapterAuth(s.handleContextReset))
 	mux.HandleFunc("GET /channel/channels", s.adapterAuth(s.handleChannelList))
+	mux.HandleFunc("GET /channel/vocabulary", s.adapterAuth(s.handleVocabulary))
 	mux.HandleFunc("GET /channel/state/{channel}/{key}", s.adapterAuth(s.handleStateGet))
 	mux.HandleFunc("PUT /channel/state/{channel}/{key}", s.adapterAuth(s.handleStatePut))
 	mux.HandleFunc("POST /channel/channels/{name}/status", s.adapterAuth(s.handleChannelStatus))
@@ -820,6 +822,19 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	if wait > 30 {
 		wait = 30
 	}
+	// THE CHANGE RIDES A CONNECTION THE ADAPTER ALREADY HOLDS.
+	//
+	// The manager cannot dial an adapter — a ChannelAdapter's port is optional
+	// and the contract is pull-only — so a vocabulary change reaches an
+	// otherwise idle adapter here, on the poll it is already blocked in. A
+	// header rather than a body field, because the empty case is a bodyless 204
+	// and giving it a body would change what every existing adapter parses.
+	//
+	// Computed ONCE per request, before the wait: it is a read of the informer
+	// cache, and recomputing it every second of a 30-second poll would buy
+	// nothing an adapter can act on any sooner.
+	s.setVocabularyRevision(r.Context(), w)
+
 	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	for {
 		if op := s.Ops.Claim(channelType); op != nil {

@@ -86,8 +86,19 @@ spec:
                     PayloadRef (a ConversationInput object) for large payloads.
                   properties:
                     agent:
-                      description: Agent override for task inputs (`/<profile>:<agent>`
-                        addressing).
+                      description: |-
+                        Agent is DEPRECATED and no longer written. It carried the per-message
+                        agent override of the retired `/<pipeline>:<agent>` addressing form,
+                        which let whoever typed it select an agent definition the WIRING never
+                        declared. A Pipeline names one profile and a profile names one agent, so
+                        the agent is already fully determined by the wiring.
+
+                        Dispatch still READS it for one release, so inputs already queued when
+                        the manager restarts dispatch to the agent they were parsed with. Same
+                        posture as the retired `sessionId` dual-read; removing the field is a
+                        later change.
+
+                        Deprecated: nothing sets this. Do not add a writer.
                       type: string
                     id:
                       minLength: 1

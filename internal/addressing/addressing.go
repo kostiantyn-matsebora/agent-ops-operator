@@ -1,18 +1,28 @@
-// Package addressing parses chat commands into agent addresses.
+// Package addressing parses chat commands into the Pipeline they address.
 //
-//	/<profile> <task>            -> profile's default agent
-//	/<profile>:<agent> <task>    -> specific agent within the profile's repo
+//	/<pipeline> <task>
+//
+// ONE SEGMENT, deliberately. There used to be a `/<pipeline>:<agent>` form that
+// picked an agent definition inside the profile's repository, and it let
+// whoever typed it choose an agent the WIRING never declared. A Pipeline names
+// one profile and a profile names one agent, so the agent that runs is already
+// fully determined — exactly as the toolsets and MCP servers are. Selecting
+// your own is the same shape as a caller naming its own Pipeline over HTTP,
+// which `pipeline-model` forbids in so many words.
+//
+// Consequence worth stating: text after the Pipeline name is simply the task.
+// `/k8s-observe check:the pods` is a task containing a colon, which it always
+// should have been.
 package addressing
 
 import "regexp"
 
-var cmdRe = regexp.MustCompile(`^/([\w-]+)(?::([\w-]+))?(?:@\S+)?\s*([\s\S]*)$`)
+var cmdRe = regexp.MustCompile(`^/([\w-]+)(?:@\S+)?\s*([\s\S]*)$`)
 
 // Command is a parsed chat command.
 type Command struct {
-	Profile string
-	Agent   string // optional override
-	Rest    string
+	Pipeline string
+	Rest     string
 }
 
 // Parse returns the parsed command, or ok=false for non-command text.
@@ -21,7 +31,7 @@ func Parse(text string) (Command, bool) {
 	if m == nil {
 		return Command{}, false
 	}
-	return Command{Profile: m[1], Agent: m[2], Rest: trimSpace(m[3])}, true
+	return Command{Pipeline: m[1], Rest: trimSpace(m[2])}, true
 }
 
 func trimSpace(s string) string {
