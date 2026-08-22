@@ -76,30 +76,15 @@ type of each change unstated.
 Ten because a reader upgrading skips at most a few versions, and a 2000-line
 file is one nobody scrolls.
 
-## Writing (binding)
+## Writing: structure over prose
 
 Everything here is written to be SCANNED. The markdown is the structure.
 
-**Concise and LLM-optimized.** Cut filler, marketing tone and preambles. Every
-sentence earns its tokens.
-
-**Structure first.** *A paragraph that enumerates is a list that has not been
-written yet.*
-
-| What you are writing | The shape it takes |
-|---|---|
-| A procedure | NUMBERED STEPS |
-| A mapping, or a set of choices | A TABLE |
-| A set | BULLETS |
-| The claim the page rests on | A CALLOUT |
-| "X means Y" | **X.** Y on its own line |
-| A bullet stating more than one rule | parent + sub-bullets, one rule per line |
-| A prose paragraph stating more than two rules | restructure it as one of the above |
-
-Then the sentences:
-
-- **Short sentences, one idea each.** Three clauses is three sentences. If it
-  has to be read twice, it is wrong.
+- **Structure first.** A procedure is NUMBERED STEPS. A mapping is a TABLE. A set
+  is BULLETS. The claim a page rests on is a callout. *A paragraph that
+  enumerates is a list that has not been written yet.*
+- **Short sentences, one idea each.** Three clauses is three sentences. If it has
+  to be read twice, it is wrong.
 - **NO SEMICOLONS.** A `;` is a full stop that lost its nerve — the tell of a
   sentence that should have been two. Forbidden whatever the grammar allows.
 - **Small paragraphs.** Past about three lines it stops being read.
@@ -113,6 +98,9 @@ long compound sentences, every point explained twice, nothing scannable — pros
 doing a table's job.
 
 Reference pages may be dense. A page an adopter meets first may not.
+
+The binding statement of the shape rules is at the foot of this file. It is
+quoted verbatim and is not paraphrased anywhere.
 
 ## Commands: every block is BOTH platforms
 
@@ -242,3 +230,12 @@ Three details, each of which cost a round:
 **3. Check what a screenshot cannot show.** Anchors, table shape and horizontal
 overflow are per-page facts a glance at the top of the page misses. Assert them
 in the browser rather than reading for them.
+
+## Authoring rules (binding)
+Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
+Structure over prose:
+Steps → numbered list.
+Choices / mappings → table.
+"X means Y" → **X.** Y on its own line.
+Multi-rule bullet → parent + sub-bullets, one rule per line.
+Prose paragraph stating > 2 rules → restructure.
