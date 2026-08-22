@@ -104,6 +104,7 @@ type servedSource struct {
 type tgFrom struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
+	IsBot    bool   `json:"is_bot"`
 }
 
 type tgChat struct {
@@ -390,31 +391,34 @@ func (a *adapter) normalizeSelection(upd tgUpdate) (string, Signal, bool) {
 // promptedCommand returns the addressed command this message is answering, or
 // "" when it is not answering one.
 //
-// A message qualifies when it replies to a message that itself replied to a
-// BARE command — the shape the manager's "what should it do?" produces and
-// nothing else does. Anything with a task already on it is somebody addressing
-// a Pipeline directly, and is left alone.
+// THE CHAIN IS ONE LINK LONG, and that is Telegram's rule rather than a choice:
+// a reply carries the message it answers, but that message never carries its
+// own reply. So "two links up to the original command" is not available, and an
+// earlier version of this that assumed otherwise recovered nothing — every
+// prompted answer fell through to the manager's ambiguity refusal.
+//
+// What survives is the QUESTION'S OWN TEXT, and the manager names the addressed
+// form in it for exactly this reason. The first slash-token is that form.
+//
+// Guarded on the question coming FROM A BOT: a person quoting `/ha-ops` at
+// somebody is not answering a prompt, and their reply must stay their words.
 func promptedCommand(m *tgMessage) string {
-	question := m.ReplyToMessage
-	if question == nil || question.ReplyToMessage == nil {
+	q := m.ReplyToMessage
+	if q == nil || q.From == nil || !q.From.IsBot {
 		return ""
 	}
-	original := reverseSpelling(strings.TrimSpace(question.ReplyToMessage.Text))
-	if !strings.HasPrefix(original, "/") {
-		return ""
+	for _, field := range strings.Fields(q.Text) {
+		token := strings.Trim(field, "`*_.,:;!?()[]")
+		if !strings.HasPrefix(token, "/") || len(token) < 2 {
+			continue
+		}
+		name := reverseSpelling(token)
+		if at := strings.IndexByte(name, '@'); at > 0 {
+			name = name[:at]
+		}
+		return name
 	}
-	// Bare only: a command that already carried a task was never prompted.
-	if strings.ContainsAny(original, " \t\n") {
-		return ""
-	}
-	// Telegram appends @BotName to commands in groups. The manager tolerates it,
-	// but this text becomes the conversation's recorded input and its title —
-	// so the transport's own convention is dropped here rather than kept in the
-	// record forever.
-	if at := strings.IndexByte(original, '@'); at > 0 {
-		original = original[:at]
-	}
-	return original
+	return ""
 }
 
 // sourceFor resolves the served source whose chat this is.

@@ -524,7 +524,14 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		//
 		// Linked to the command that provoked it, so the answer can be traced
 		// back to the Pipeline without anything being remembered in between.
-		ask := Warn(fmt.Sprintf("💬 What should **%s** do? Reply with the task.", cmd.Pipeline))
+		// NAMES THE ADDRESSED FORM, and must keep doing so.
+		//
+		// A transport whose only linkage is "this replies to that" recovers the
+		// Pipeline from THIS TEXT — Telegram hands a reply the message it
+		// answers, but never that message's own reply, so the chain stops here.
+		// The addressed form is the one part of this sentence an adapter is
+		// entitled to read.
+		ask := Warn(fmt.Sprintf("💬 Reply with the task for `/%s`.", cmd.Pipeline))
 		ask.ExpectsReply = true
 		ask.InReplyTo = messageID
 		r.Ops.EnqueueMessage(ctx, ch, nil, ask)
