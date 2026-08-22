@@ -69,6 +69,21 @@ type OpMessage struct {
 
 	Status string `json:"status,omitempty"`
 	Level  string `json:"level,omitempty"`
+
+	// Choices are the actions this message OFFERS — structured like Labels, not
+	// prose. The console is a browser surface, so it renders them as controls
+	// and keeps them structured all the way to the transcript.
+	Choices []OpChoice `json:"choices,omitempty"`
+	// InReplyTo is the transport handle for the message this one answers. The
+	// console has no use for it — its transcript is already ordered and every
+	// entry is visible — so it is carried and ignored rather than dropped.
+	InReplyTo string `json:"inReplyTo,omitempty"`
+}
+
+// OpChoice is one offered action.
+type OpChoice struct {
+	Label   string `json:"label"`
+	Command string `json:"command"`
 }
 
 // TopicDescriptor describes a thread to create. The console has no naming limit
@@ -191,6 +206,38 @@ func (m *Manager) NextOp(ctx context.Context, adapter string, waitSeconds int) (
 }
 
 // CompleteOp reports an op result (threadID for ensure-topic; opErr on failure).
+// Vocabulary fetches what may be typed on a chat surface.
+//
+// The console CAN see Pipelines — it watches them for topology and
+// configuration — and fetches this anyway. The typeahead and a Telegram command
+// menu answer the same question, and this module cannot import the manager's
+// derivation of it: they are separate Go modules by design. Two independent
+// derivations of one fact is exactly the drift this endpoint removes.
+func (m *Manager) Vocabulary(ctx context.Context) (Vocabulary, error) {
+	var v Vocabulary
+	_, err := m.do(ctx, "GET", "/channel/vocabulary", nil, &v)
+	return v, err
+}
+
+// Vocabulary is the manager's list of what a person may type.
+type Vocabulary struct {
+	Revision string            `json:"revision"`
+	Entries  []VocabularyEntry `json:"entries"`
+}
+
+// VocabularyEntry is one thing a person may type.
+//
+// Position is what the console can honour that a chat transport cannot: it has
+// TWO composers — one that starts a conversation and one attached to an
+// existing one — and they take disjoint sets.
+type VocabularyEntry struct {
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Position    string `json:"position"`
+	Profile     string `json:"profile,omitempty"`
+}
+
 func (m *Manager) CompleteOp(ctx context.Context, opID, threadID, opErr string) error {
 	body := map[string]string{}
 	if threadID != "" {

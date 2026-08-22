@@ -460,6 +460,21 @@ export interface Message {
   at: string
   /** A locally-typed message the manager has not confirmed yet. */
   pending?: boolean
+  /**
+   * Actions this message OFFERS. Structured, not prose — the manager states
+   * what is on offer and says nothing about how it looks.
+   *
+   * Additive: the message body already names every choice and its addressed
+   * form, for surfaces that cannot render controls. These save the typing.
+   */
+  choices?: Choice[]
+}
+
+/** One offered action. */
+export interface Choice {
+  label: string
+  /** The addressed text this choice stands for. */
+  command: string
 }
 
 export interface ConversationDetail {
@@ -498,15 +513,34 @@ export interface SourcesResponse {
   writeEnabled: boolean
 }
 
-/** One addressable Pipeline, as offered by the composer's typeahead. */
-export interface Agent {
+/**
+ * One thing a person may type, as the composer offers it.
+ *
+ * NAMED FOR WHAT IT IS. It used to be `Agent`, which was wrong twice: an agent
+ * in this project is a DEFINITION inside a profile's repository, and this list
+ * has never held one. What a message addresses is a PIPELINE.
+ */
+export interface VocabularyEntry {
+  /** `builtin` for a manager command, `pipeline` for an addressable Pipeline. */
+  kind: 'builtin' | 'pipeline'
   name: string
-  /** What tells two agents apart when their names do not. */
+  /** Menu text. For a pipeline, the profile answering for it. */
+  description?: string
+  /**
+   * Where the entry is valid: `general` is the composer that STARTS a
+   * conversation, `thread` the one attached to an existing one. The two take
+   * disjoint sets — addressing a Pipeline inside a thread is input for the
+   * agent, and the commands that end or release a conversation have nothing to
+   * act on outside one.
+   */
+  position: 'general' | 'thread'
+  /** What tells two pipelines apart when their names do not. */
   profile?: string
 }
 
-export interface AgentsResponse {
-  agents: Agent[]
+export interface VocabularyResponse {
+  entries: VocabularyEntry[]
+  revision?: string
 }
 
 export interface Session {

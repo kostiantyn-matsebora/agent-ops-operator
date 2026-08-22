@@ -169,7 +169,7 @@ func (a *API) Handler(ui http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/charts", a.auth(a.handleCharts))
 	mux.HandleFunc("GET /api/charts/{chart}", a.auth(a.handleHistory))
 	mux.HandleFunc("GET /api/sources", a.auth(a.handleOriginationSources))
-	mux.HandleFunc("GET /api/agents", a.auth(a.handleAgents))
+	mux.HandleFunc("GET /api/vocabulary", a.auth(a.handleVocabulary))
 
 	mux.HandleFunc("GET /api/conversations", a.auth(a.handleConversations))
 	mux.HandleFunc("GET /api/conversations/{name}", a.auth(a.handleConversation))

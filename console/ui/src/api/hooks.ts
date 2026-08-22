@@ -181,9 +181,9 @@ export function useSources() {
 }
 
 /** The Pipelines a message can address — Ready only, exactly like `/agents`. */
-export function useAgents() {
+export function useVocabulary() {
   const rev = useRevision(['pipelines'])
-  return useQuery({ queryKey: ['agents', rev], queryFn: api.agents })
+  return useQuery({ queryKey: ['vocabulary', rev], queryFn: api.vocabulary })
 }
 
 /** Which historical charts the backend can answer, and whether one exists. */

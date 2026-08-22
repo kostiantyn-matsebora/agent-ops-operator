@@ -1,5 +1,5 @@
 import type {
-  AgentsResponse, ChartResponse, CloseRequest, CloseResponse,
+  VocabularyResponse, ChartResponse, CloseRequest, CloseResponse,
   DeleteResponse, ConversationDetail, ConversationGraph,
   ConversationPage, Detail, Finding, KindInfo, InventoryRow, MarkReadRequest,
   MarkReadResponse, Overview, Queues, Session, SourcesResponse, TopologyResponse,
@@ -58,7 +58,7 @@ export const api = {
     request<ConversationGraph>(`/api/conversations/${name}/graph`),
 
   sources: () => request<SourcesResponse>('/api/sources'),
-  agents: () => request<AgentsResponse>('/api/agents'),
+  vocabulary: () => request<VocabularyResponse>('/api/vocabulary'),
   start: (task: string, source?: string) =>
     request<{ source: string; note: string }>('/api/conversations', {
       method: 'POST',
