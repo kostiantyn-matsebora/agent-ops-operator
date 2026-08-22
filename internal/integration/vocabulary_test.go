@@ -156,3 +156,76 @@ func hasName(hay []string, needle string) bool {
 	}
 	return false
 }
+
+// TestPreVocabularyAdapterIsUnaffected is the backward-compatibility claim,
+// exercised end to end rather than asserted.
+//
+// It drives the contract EXACTLY as an adapter built before any of this
+// existed: contract=2, no vocabulary fetch, no header read, no choices
+// rendered. Every step must behave as it did, because that is what "additive"
+// has to mean for anyone who does not upgrade in step with the manager.
+func TestPreVocabularyAdapterIsUnaffected(t *testing.T) {
+	mkChannel(t, "legacy-chan", "telegram")
+	mkChatSource(t, "legacy-src", "legacy-chan")
+	mkProfile(t, "legacy-profile")
+	mkPipeline(t, "legacy-pipe", []string{"legacy-src"}, []string{"legacy-chan"}, "legacy-profile")
+	reconcilePipeline(t, "legacy-pipe")
+	srv := apiServer()
+
+	// 1. The handshake is unchanged: contract 2 is served, contract 1 refused.
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
+		t.Fatalf("empty poll: %d, want 204", rec.Code)
+	}
+	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=1&wait=0", nil, "test-adapter-token"); rec.Code != 400 {
+		t.Fatalf("contract 1 must still be refused, got %d", rec.Code)
+	}
+
+	// 2. A conversation still originates from a chat signal, addressed form and
+	//    all, with no knowledge of anything added here.
+	if rec := chatSignal(t, srv, "legacy-src", "legacy-chan", "/legacy-pipe check the disk"); rec.Code != 200 {
+		t.Fatalf("addressed command: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := len(convsBoundTo(t, "legacy-chan")); n != 1 {
+		t.Fatalf("want one conversation, got %d", n)
+	}
+
+	// 3. A command whose whole result is a reply still produces a send op — the
+	//    path an older adapter meets most often. Note it asks with the RETIRED
+	//    listing name, which such an adapter is the likeliest thing to send.
+	if rec := chatSignal(t, srv, "legacy-src", "legacy-chan", "/"+chat.RetiredListCommand); rec.Code != 200 {
+		t.Fatalf("retired listing name: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 4. Ops still arrive in the shape such an adapter parses: a typed message
+	//    with a body, and the fields it already knew.
+	var sawSend bool
+	for i := 0; i < 8; i++ {
+		rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, "test-adapter-token")
+		if rec.Code == 204 {
+			break
+		}
+		var op chat.Op
+		if err := json.Unmarshal(rec.Body.Bytes(), &op); err != nil {
+			t.Fatalf("an older adapter must be able to parse every op: %v", err)
+		}
+		if op.Kind == chat.OpSend {
+			sawSend = true
+			if op.Message == nil || op.Message.Kind == "" {
+				t.Fatalf("send op lost its typed message: %+v", op)
+			}
+		}
+		// Completing an op is unchanged.
+		if rec := adapterReq(srv, "POST", "/channel/ops/"+op.ID+"/done",
+			map[string]string{"threadId": "t-1"}, "test-adapter-token"); rec.Code >= 400 {
+			t.Fatalf("completing an op: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	if !sawSend {
+		t.Fatal("no send op reached the adapter at all")
+	}
+
+	// 5. The contract version did not move. An adapter pinning it keeps working.
+	if chat.ContractVersion != "2" {
+		t.Fatalf("contract version is now %q — nothing in this change required it", chat.ContractVersion)
+	}
+}

@@ -11,6 +11,36 @@ import (
 // Runtime selection stays profile.runtimeRef — the Pipeline binds no runtime,
 // credentials, or config.
 type PipelineSpec struct {
+	// Icon is how this Pipeline is RECOGNISED in a list of them. Optional, and
+	// purely how the name is presented.
+	//
+	// A REFERENCE, not an image. Four forms, and the manager tells them apart
+	// not at all — it publishes the string and interprets it no further:
+	//
+	//	aops:kubernetes            the built-in set, shipped inside each surface
+	//	mdi:kubernetes             a named icon from a public set
+	//	https://example/logo.svg   your own, by URL
+	//	🔎                         an emoji, drawable by anything
+	//
+	// WHAT A SURFACE CAN DRAW IS THE SURFACE'S BUSINESS. `aops:` and an emoji
+	// work everywhere, because every adapter ships the first and every
+	// transport can print the second. Telegram can draw neither a URL nor a
+	// named set — a command menu takes no image — so it renders what it can and
+	// omits the rest. Nothing fails over an icon.
+	//
+	// Prefer `aops:` for anything shipped: it needs no network, survives an
+	// air-gapped install, and is the only form guaranteed on every surface.
+	//
+	// It is INTERFACE METADATA, not wiring, and it does not weaken the rule
+	// that this CR carries the wiring exclusively: nothing routes on it, no
+	// condition reads it, and removing it changes where not one signal goes.
+	// Same category as `ChannelAdapter.spec.configSchema`.
+	//
+	// It lives HERE rather than on the profile because a Pipeline is what a
+	// message addresses, so a Pipeline is what appears in a menu.
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	Icon string `json:"icon,omitempty"`
 	// SignalSourceRefs: the sources feeding this pipeline. A source is
 	// SHAREABLE exactly as a channel is — any number of pipelines may list
 	// one, and a signal admitted there opens a conversation on EVERY Ready

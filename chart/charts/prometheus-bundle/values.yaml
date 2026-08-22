@@ -139,6 +139,8 @@ pipelines:
   enabled: false
   # Named for the job, not the channel it answers on.
   name: alert-triage
+  # Display only — see k8s-bundle's `pipelines.observe.icon`.
+  icon: aops:alert
   # Channels to deliver to, BY NAME — the one object the bundle does not render,
   # so the key is omitted entirely when empty. Empty works: the conversation
   # dispatches immediately and the answer lands in status.runs[].result.

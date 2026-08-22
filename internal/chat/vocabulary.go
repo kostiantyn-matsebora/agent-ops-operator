@@ -62,6 +62,10 @@ type Entry struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	Position    Position  `json:"position"`
+	// Icon is how this entry is RECOGNISED in a list — an emoji, or nothing.
+	// Published as declared and interpreted no further: whether a surface can
+	// draw one, and where it puts it, is that adapter's business.
+	Icon string `json:"icon,omitempty"`
 	// Profile is the profile answering for a Pipeline entry, empty on a builtin.
 	// It is DERIVED from what the Pipeline already declares — no CRD field was
 	// added to carry prose here, because a second place to write a name is a
@@ -128,7 +132,7 @@ func (r *Router) readyPipelines(ctx context.Context) []Entry {
 		profile := p.Spec.ProfileRef.Name
 		out = append(out, Entry{
 			Kind: KindPipeline, Name: p.Name, Position: PositionGeneral,
-			Description: profile, Profile: profile,
+			Description: profile, Profile: profile, Icon: p.Spec.Icon,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -159,7 +163,7 @@ func (r *Router) Vocabulary(ctx context.Context) Vocabulary {
 func revisionOf(entries []Entry) string {
 	h := sha256.New()
 	for _, e := range entries {
-		for _, f := range []string{string(e.Kind), e.Name, e.Description, string(e.Position)} {
+		for _, f := range []string{string(e.Kind), e.Name, e.Description, string(e.Position), e.Icon} {
 			h.Write([]byte(f))
 			h.Write([]byte{0})
 		}

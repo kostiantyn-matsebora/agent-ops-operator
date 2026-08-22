@@ -6,6 +6,8 @@ import {
 import { useSession, useSources, useVocabulary } from '../api/hooks'
 import { api, ApiError } from '../api/client'
 import { PlainText } from '../components/Text'
+import { ComposerHint } from '../components/ComposerHint'
+import { Icon } from '../components/Icon'
 import type { VocabularyEntry } from '../api/types'
 
 // "New conversation".
@@ -85,9 +87,17 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
   const [cursor, setCursor] = useState(0)
   const taskRef = useRef<HTMLTextAreaElement>(null)
 
-  const matches = dismissed
-    ? null
-    : matchEntries(task, vocabulary.data?.entries ?? [], 'general')
+  // ONLY WHAT THIS SURFACE CAN ACTUALLY DO. The general-position set includes
+  // the listing commands, whose whole result is a reply posted to a channel's
+  // GENERAL surface — and this console has no general-surface view to put one
+  // in. Offering them here sends a message whose answer nobody ever sees.
+  //
+  // They are redundant here anyway: this typeahead IS the listing.
+  //
+  // Same division as every other adapter decision — the manager states what may
+  // be typed, the surface decides what it can express.
+  const startable = (vocabulary.data?.entries ?? []).filter((e) => e.kind === 'pipeline')
+  const matches = dismissed ? null : matchEntries(task, startable, 'general')
   const active = matches ? Math.min(cursor, matches.length - 1) : 0
 
   // Selecting inserts the addressed form and leaves the cursor after the space,
@@ -105,6 +115,14 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
   }
 
   function onTaskKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // SHIFT+ENTER SENDS, and it wins over the menu. It is the one keystroke
+    // that means "I am done" — deciding it might instead pick a highlighted
+    // entry would make the same keys do different things depending on state.
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault()
+      if (!busy && task.trim()) void start()
+      return
+    }
     if (!matches) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -250,8 +268,13 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
       )}
       <Modal isOpen={open} onClose={() => setOpen(false)} variant="medium">
         <ModalHeader title="Start a conversation" />
-        <ModalBody>
-          <Form>
+        {/* NOTHING SCROLLS SIDEWAYS. A dialog is as wide as the window gives
+            it, so anything inside must wrap rather than widen — a long name, a
+            long profile, a long line of prose. minWidth 0 lets flex children
+            shrink below their content, which is what makes wrapping possible
+            at all. */}
+        <ModalBody style={{ minWidth: 0, overflowX: 'hidden', overflowWrap: 'anywhere' }}>
+          <Form style={{ minWidth: 0 }}>
             <FormGroup label="Answered by" fieldId="destination">
               {wired.map((s) => (
                 <div key={s.name}>
@@ -291,10 +314,35 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
                 onKeyDown={onTaskKeyDown}
                 rows={6}
                 aria-label="task"
-                placeholder={`What should the agent do? Start with ${ADDRESS_PREFIX} to address a pipeline.`}
+                placeholder="What should the agent do?"
               />
+              {/* IN FLOW, AND IT SCROLLS ITSELF.
+                  ModalBody is a scroll container. An absolutely positioned
+                  menu inside one is CLIPPED by it and adds to its scrollable
+                  area, so opening the list scrolled the whole dialog and showed
+                  one row. In a modal the footer is its own region and does not
+                  move, so the menu can simply take space — bounded, with its
+                  own scrollbar, so a long list scrolls THE LIST.
+
+                  minWidth 0 lets a long description wrap instead of widening
+                  the column, which is what put a sideways scrollbar on the
+                  dialog. */}
               {matches && (
-                <Menu aria-label="pipelines" data-testid="pipeline-typeahead" isScrollable>
+                <Menu
+                  aria-label="pipelines"
+                  data-testid="pipeline-typeahead"
+                  isScrollable
+                  style={{
+                    marginTop: '0.25rem',
+                    minWidth: 0,
+                    // Relative to the WINDOW, not a fixed height: on a short
+                    // window the list stays inside the dialog, on a tall one it
+                    // shows more.
+                    maxHeight: '40vh',
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                  }}
+                >
                   <MenuContent>
                     <MenuList>
                       {matches.map((e, i) => (
@@ -304,6 +352,7 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
                           onClick={() => choose(e)}
                           description={e.description || e.profile}
                         >
+                          <Icon icon={e.icon} />{' '}
                           {ADDRESS_PREFIX}
                           {e.name}
                         </MenuItem>
@@ -312,8 +361,20 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
                   </MenuContent>
                 </Menu>
               )}
+              <div style={{ marginTop: '0.75rem' }}>
+                <ComposerHint
+                  shortcuts={[
+                    { keys: [ADDRESS_PREFIX], does: 'address a pipeline' },
+                    { keys: ['Shift', 'Enter'], does: 'send' },
+                  ]}
+                />
+              </div>
             </FormGroup>
-            {error && <Alert variant="danger" isInline title={error} />}
+            {error && (
+              <div style={{ marginTop: '0.75rem' }}>
+                <Alert variant="danger" isInline title={error} />
+              </div>
+            )}
           </Form>
         </ModalBody>
         <ModalFooter>

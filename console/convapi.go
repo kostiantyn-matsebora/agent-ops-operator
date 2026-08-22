@@ -783,6 +783,9 @@ type Entry struct {
 	Name string `json:"name"`
 	// Description is menu text — for a pipeline, the profile answering for it.
 	Description string `json:"description,omitempty"`
+	// Icon is how the entry is recognised in a list — an emoji, or nothing.
+	// Drawn by the surface; the manager interprets it no further.
+	Icon string `json:"icon,omitempty"`
 	// Position is `general` (the composer that starts a conversation) or
 	// `thread` (the one attached to an existing conversation). The two take
 	// disjoint sets, and the console is a surface that can honour the
@@ -817,7 +820,10 @@ func (a *API) handleVocabulary(w http.ResponseWriter, r *http.Request) {
 		if v, err := a.mgr.Vocabulary(r.Context()); err == nil {
 			out := make([]Entry, 0, len(v.Entries))
 			for _, e := range v.Entries {
-				out = append(out, Entry(e))
+				out = append(out, Entry{
+					Kind: e.Kind, Name: e.Name, Description: e.Description,
+					Icon: e.Icon, Position: e.Position, Profile: e.Profile,
+				})
 			}
 			sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 			writeJSON(w, http.StatusOK, map[string]any{"entries": out, "revision": v.Revision})
@@ -837,6 +843,7 @@ func (a *API) handleVocabulary(w http.ResponseWriter, r *http.Request) {
 		out = append(out, Entry{
 			Kind: "pipeline", Name: p.Metadata.Name, Position: "general",
 			Description: profile, Profile: profile,
+			Icon: decodeSpec[pipelineSpec](p.Spec).Icon,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

@@ -14,7 +14,7 @@
 // byte-identical images.
 
 import type {
-  AgentsResponse, ConversationDetail, ConversationGraph, ConversationPage, Detail,
+  VocabularyResponse, ConversationDetail, ConversationGraph, ConversationPage, Detail,
   Finding, InventoryRow, KindInfo, Overview, Queues, Session, SourcesResponse,
   TopologyResponse,
 } from '../src/api/types'
@@ -353,7 +353,7 @@ const conversationDetail: ConversationDetail = {
     // so the fixture writes prose. Markdown here would publish a screenshot of
     // asterisks and read as a rendering fault.
     {
-      id: 'm1', thread: 'console/cluster-events-7c1d4e', kind: 'notice',
+      id: 'm1', thread: 'console/cluster-events-7c1d4e', kind: 'signal',
       text: 'Signal from cluster-events — checkout-api in namespace storefront has restarted 5 times in 10 minutes (BackOff).',
       at: ago(96),
     },
@@ -377,7 +377,7 @@ const conversationDetail: ConversationDetail = {
       at: ago(58),
     },
     {
-      id: 'm3', thread: 'console/cluster-events-7c1d4e', kind: 'user',
+      id: 'm3', thread: 'console/cluster-events-7c1d4e', kind: 'relay',
       sender: 'ops-chat/dana',
       text: 'Does the same setting affect the other two services in that namespace?',
       at: ago(44),
@@ -484,46 +484,102 @@ const sources: SourcesResponse = {
   sources: [{ name: 'console', wired: true, pipeline: 'k8s-observe', profile: 'k8s-engineer' }],
 }
 
-const agents: AgentsResponse = {
-  agents: [
-    { name: 'k8s-observe', profile: 'k8s-engineer' },
-    { name: 'alert-triage', profile: 'alert-investigator' },
-    { name: 'nightly-report', profile: 'release-scribe' },
+const vocabulary: VocabularyResponse = {
+  revision: 'fixture-1',
+  entries: [
+    { kind: 'builtin', name: 'pipelines', position: 'general',
+      description: 'List the pipelines you can address' },
+    { kind: 'builtin', name: 'help', position: 'general',
+      description: 'Show the pipelines and how to address them' },
+    { kind: 'builtin', name: 'exit', position: 'thread',
+      description: "Release this conversation's runtime, keep the conversation" },
+    { kind: 'builtin', name: 'close', position: 'thread',
+      description: 'End this conversation and archive its thread' },
+    { kind: 'pipeline', name: 'k8s-observe', position: 'general',
+      description: 'k8s-engineer', profile: 'k8s-engineer', icon: 'aops:observe' },
+    { kind: 'pipeline', name: 'alert-triage', position: 'general',
+      description: 'alert-investigator', profile: 'alert-investigator', icon: 'aops:alert' },
+    { kind: 'pipeline', name: 'nightly-report', position: 'general',
+      description: 'release-scribe', profile: 'release-scribe', icon: 'aops:workload' },
   ],
+}
+
+// ---- the install -------------------------------------------------------------
+
+/**
+ * Everything the fixture serves, as ONE value.
+ *
+ * It is exported so a second producer can LAYER over it rather than invent a
+ * second install: `demo/story.ts` clones this and patches it beat by beat, so
+ * the recording on the landing page and the screenshots on the console page
+ * show the same made-up namespace and cannot drift apart.
+ */
+export interface Install {
+  session: Session
+  overview: Overview
+  queues: Queues
+  kinds: KindInfo[]
+  findings: Finding[]
+  inventory: Record<string, InventoryRow[]>
+  pipelineDetail: Detail
+  conversations: ConversationPage
+  conversationDetail: ConversationDetail
+  conversationGraph: ConversationGraph
+  topology: TopologyResponse
+  sources: SourcesResponse
+  vocabulary: VocabularyResponse
+}
+
+export const install: Install = {
+  session, overview, queues, kinds, findings, inventory, pipelineDetail,
+  conversations, conversationDetail, conversationGraph, topology, sources,
+  vocabulary,
 }
 
 // ---- routing -----------------------------------------------------------------
 
 /**
- * Answers one `/api/*` path, or null when the fixture has nothing for it — the
- * server then falls back to `{}`, which is what an unexercised endpoint should
- * return rather than a crash mid-capture.
+ * Answers one `/api/*` path from a given install, or null when it has nothing
+ * for it — the server then falls back to `{}`, which is what an unexercised
+ * endpoint should return rather than a crash mid-capture.
+ *
+ * ONE routing table, over whichever install is passed. A producer that walked a
+ * story would otherwise write a second one, and the day an endpoint moved only
+ * one of them would follow.
  */
-export function answer(path: string, query: URLSearchParams): unknown {
-  switch (path) {
-    case '/api/session': return session
-    case '/api/overview': return overview
-    case '/api/queues': return queues
-    case '/api/config': return kinds
-    case '/api/findings': return findings
-    case '/api/topology': return topology
-    case '/api/sources': return sources
-    case '/api/agents': return agents
-    case '/api/charts': return { available: false, charts: [] }
+export function responder(state: Install) {
+  return function answer(path: string, query: URLSearchParams): unknown {
+    switch (path) {
+      case '/api/session': return state.session
+      case '/api/overview': return state.overview
+      case '/api/queues': return state.queues
+      case '/api/config': return state.kinds
+      case '/api/findings': return state.findings
+      case '/api/topology': return state.topology
+      case '/api/sources': return state.sources
+      case '/api/vocabulary': return state.vocabulary
+      case '/api/charts': return { available: false, charts: [] }
+    }
+
+    if (path === '/api/conversations') {
+      // The navigation badge asks for the totals only.
+      return query.get('count') === '1'
+        ? { ...state.conversations, items: [] }
+        : state.conversations
+    }
+
+    const detail = /^\/api\/conversations\/([^/]+)(\/graph)?$/.exec(path)
+    if (detail && detail[1] === state.conversationDetail.conversation.name) {
+      return detail[2] ? state.conversationGraph : state.conversationDetail
+    }
+
+    const inv = /^\/api\/config\/([a-z]+)$/.exec(path)
+    if (inv) return state.inventory[inv[1]] ?? []
+    if (path === '/api/config/pipelines/k8s-observe') return state.pipelineDetail
+
+    return null
   }
-
-  if (path === '/api/conversations') {
-    // The navigation badge asks for the totals only.
-    return query.get('count') === '1'
-      ? { ...conversations, items: [] }
-      : conversations
-  }
-  if (path === '/api/conversations/cluster-events-7c1d4e') return conversationDetail
-  if (path === '/api/conversations/cluster-events-7c1d4e/graph') return conversationGraph
-
-  const inv = /^\/api\/config\/([a-z]+)$/.exec(path)
-  if (inv) return inventory[inv[1]] ?? []
-  if (path === '/api/config/pipelines/k8s-observe') return pipelineDetail
-
-  return null
 }
+
+/** The frozen install the console's screenshots are taken of. */
+export const answer = responder(install)

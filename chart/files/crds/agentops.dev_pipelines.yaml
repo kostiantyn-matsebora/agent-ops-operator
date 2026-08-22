@@ -72,6 +72,29 @@ spec:
                   - name
                   type: object
                 type: array
+              icon:
+                description: "Icon is how this Pipeline is RECOGNISED in a list of
+                  them. Optional, and\npurely how the name is presented.\n\nA REFERENCE,
+                  not an image. Four forms, and the manager tells them apart\nnot
+                  at all — it publishes the string and interprets it no further:\n\n\taops:kubernetes
+                  \           the built-in set, shipped inside each surface\n\tmdi:kubernetes
+                  \            a named icon from a public set\n\thttps://example/logo.svg
+                  \  your own, by URL\n\t\U0001F50E                         an emoji,
+                  drawable by anything\n\nWHAT A SURFACE CAN DRAW IS THE SURFACE'S
+                  BUSINESS. `aops:` and an emoji\nwork everywhere, because every adapter
+                  ships the first and every\ntransport can print the second. Telegram
+                  can draw neither a URL nor a\nnamed set — a command menu takes no
+                  image — so it renders what it can and\nomits the rest. Nothing fails
+                  over an icon.\n\nPrefer `aops:` for anything shipped: it needs no
+                  network, survives an\nair-gapped install, and is the only form guaranteed
+                  on every surface.\n\nIt is INTERFACE METADATA, not wiring, and it
+                  does not weaken the rule\nthat this CR carries the wiring exclusively:
+                  nothing routes on it, no\ncondition reads it, and removing it changes
+                  where not one signal goes.\nSame category as `ChannelAdapter.spec.configSchema`.\n\nIt
+                  lives HERE rather than on the profile because a Pipeline is what
+                  a\nmessage addresses, so a Pipeline is what appears in a menu."
+                maxLength: 256
+                type: string
               mcpConfigs:
                 description: |-
                   MCPConfigs binds MCPConfig CRs supplying this wiring's MCP servers,

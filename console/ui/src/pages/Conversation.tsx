@@ -11,9 +11,12 @@ import { useParams } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../App'
 import { useConversation, useConversationGraph, useMarkRead, useSession, useVocabulary } from '../api/hooks'
 import { PlainText } from '../components/Text'
+import { Markdown } from '../components/Markdown'
 import { Graph } from '../graph/Graph'
 import { api, ApiError } from '../api/client'
 import { Crumbs } from '../components/Crumbs'
+import { ComposerHint } from '../components/ComposerHint'
+import { Icon, stripLeadingIcon } from '../components/Icon'
 import { matchEntries } from './NewConversation'
 import type { VocabularyEntry } from '../api/types'
 import { Yaml } from '../components/Yaml'
@@ -35,6 +38,58 @@ function speaker(kind: string): string {
   return SPEAKERS[kind] ?? kind
 }
 
+/**
+ * WHO SPOKE, AS A BADGE.
+ *
+ * Bold alone stopped working the moment the body could be bold too — an actor
+ * merged into the markdown under it. So the attribution gets a shape of its
+ * own: a glyph in a tinted disc, and the name in that speaker's colour.
+ *
+ * Colour carries meaning here, so it is never the ONLY signal — the glyph
+ * differs per kind and the name is still written out.
+ */
+// Keyed on the kinds the BFF actually sends — `local`, `relay`, `agent`,
+// `ack`, `signal`. A kind that is not here still renders, with the neutral
+// glyph: an unknown speaker is a message to show, not a message to drop.
+const SPEAKER_STYLE: Record<string, { icon: string; tint: string }> = {
+  // A PERSON. Given the brand colour, because "did I say this or did it?" is
+  // the question a transcript is scanned for.
+  local: { icon: 'aops:user', tint: 'var(--ao-brand-strong)' },
+  relay: { icon: 'aops:user', tint: 'var(--ao-brand-strong)' },
+  agent: { icon: 'aops:agent', tint: 'var(--ao-text)' },
+  ack: { icon: 'aops:system', tint: 'var(--ao-text-subtle)' },
+  signal: { icon: 'aops:alert', tint: 'var(--ao-warning)' },
+}
+
+function speakerStyle(kind: string) {
+  return SPEAKER_STYLE[kind] ?? { icon: 'aops:system', tint: 'var(--ao-text)' }
+}
+
+/** The avatar that sits in the gutter. */
+function Avatar({ kind, icon }: { kind: string; icon?: string }) {
+  const style = speakerStyle(kind)
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '2em',
+        height: '2em',
+        borderRadius: '50%',
+        color: style.tint,
+        background: 'var(--ao-surface-alt)',
+        border: `1px solid ${style.tint}`,
+      }}
+    >
+      {/* The AGENT wears its route's icon when the route declares one — the
+          same glyph the composer completes — and falls back to the generic. */}
+      <Icon icon={kind === 'agent' ? icon || style.icon : style.icon} size="1.1em" />
+    </span>
+  )
+}
+
 export function ConversationPage() {
   const { name = '' } = useParams()
   const { data, isLoading, error, refetch } = useConversation(name)
@@ -53,6 +108,9 @@ export function ConversationPage() {
   const reported = useRef('')
   const activity = summary?.lastActivity ?? summary?.created ?? ''
   const joinedUnread = Boolean(summary?.joined && summary?.unread)
+  const pageVocabulary = useVocabulary()
+
+
   useEffect(() => {
     if (!summary || !joinedUnread) return
     const stamp = `${summary.name}:${activity}`
@@ -67,26 +125,42 @@ export function ConversationPage() {
   if (error || !data) return <ErrorState title="Conversation not found">{String(error)}</ErrorState>
 
   const c = data.conversation
+  // The route's declared icon, by name.
+  const pipelineIcon = (pageVocabulary.data?.entries ?? []).find(
+    (e) => e.kind === 'pipeline' && e.name === c.pipeline,
+  )?.icon
   return (
     <>
       <Crumbs
         items={[
           { label: 'Conversations', to: '/conversations' },
-          { label: c.title || c.name },
+          { label: stripLeadingIcon(c.title || c.name) },
         ]}
       />
-      <PageSection>
+      {/* PATTERNFLY'S OWN ANSWER, not a hand-rolled one.
+          `isFilled` gives this section the space the page has left; the flex
+          chain below then only has to keep `min-height: 0` at every level, which
+          is the documented requirement for a scroll container inside flex.
+          Two earlier attempts guessed a height and then fought PatternFly's own
+          block wrappers — both were me not reading what the component offers. */}
+      <PageSection isFilled hasOverflowScroll aria-label="conversation">
       <Stack hasGutter>
         <StackItem>
+          {/* The ROUTE's icon, drawn from what the Pipeline declares. The lane
+              emoji the manager wrote into the title is stripped so the two do
+              not stack. */}
           <Title headingLevel="h1">
-            <PlainText>{c.title || c.name}</PlainText>
+            <Icon icon={pipelineIcon} />{' '}
+            <PlainText>{stripLeadingIcon(c.title || c.name)}</PlainText>
           </Title>
           {/* The whole identity of the run, as chips: phase, attribution,
               profile, the runtime pod, and the capabilities it MATERIALIZED. */}
           <LabelGroup numLabels={10}>
             <Label isCompact color="blue">{c.phase}</Label>
             {c.pipeline ? (
-              <Label isCompact color="blue">pipeline {c.pipeline}</Label>
+              <Label isCompact color="blue" icon={<Icon icon={pipelineIcon} />}>
+                pipeline {c.pipeline}
+              </Label>
             ) : (
               <Tooltip content="a Conversation records no pipelineRef; attribution is inferred from its bindings and left blank when ambiguous">
                 <Label isCompact color="grey">unattributed</Label>
@@ -182,6 +256,12 @@ function Transcript({
   }
 
   function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // SHIFT+ENTER SENDS — see NewConversation for why it wins over the menu.
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault()
+      if (!busy && text.trim()) void send()
+      return
+    }
     if (!commands) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -233,6 +313,12 @@ function Transcript({
   // forwards no identity has writes ON and nothing to attribute them to, and
   // the composer must say so rather than accept text the server will refuse.
   const canWrite = (session.data?.canWrite ?? false) && detail.conversation.joined && !detail.archived
+  // The agent's avatar wears its ROUTE's icon, so the face in the thread and
+  // the glyph in the composer are the same thing.
+  const vocab = useVocabulary()
+  const pipelineIcon = (vocab.data?.entries ?? []).find(
+    (e) => e.kind === 'pipeline' && e.name === detail.conversation.pipeline,
+  )?.icon
   const noIdentity =
     (session.data?.writeEnabled ?? false) && !(session.data?.canWrite ?? false)
 
@@ -282,8 +368,8 @@ function Transcript({
           so answering meant scrolling to the end first — on the one view whose
           entire purpose is answering. The list gets the overflow; the composer
           below it stays put. */}
-      <StackItem isFilled style={{ minHeight: 0 }}>
-        <Card style={{ height: '100%' }}>
+      <StackItem>
+        <Card>
           <CardBody>
             {/* A PLAIN div holds the ref. PatternFly's CardBody does not
                 forward one to its DOM node, so scrolling it never worked —
@@ -291,31 +377,91 @@ function Transcript({
                 line every time. */}
             <div
               ref={listRef}
-              style={{ maxHeight: '58vh', overflowY: 'auto', overscrollBehavior: 'contain' }}
+              style={{
+                minWidth: 0,
+                // ONE SCROLLER, and it is the SECTION above. A second one here
+                // is what put two scrollbars on the page, and made "which one
+                // am I in" a question a reader had to answer.
+                //
+                // Sideways is still forbidden: anything too wide — a table, a
+                // code block — scrolls inside its own box, never the page.
+                overflowX: 'hidden',
+              }}
             >
             {messages.length === 0 ? (
               <Empty title="No messages on the console thread yet" />
             ) : (
-              messages.map((m) => (
-                <div key={m.id} style={{ marginBottom: 12 }}>
-                  <strong>
-                    {/* `sender` when the speaker is known — a relayed
-                        sibling-channel message, or one this console posted and
-                        can attribute. Otherwise a WORD for who spoke: the kinds
-                        are an internal vocabulary, and `local` printed as a
-                        name reads as though somebody called "local" typed it. */}
-                    <PlainText>{m.sender || speaker(m.kind)}</PlainText>
-                  </strong>{' '}
-                  <small>{new Date(m.at).toLocaleTimeString()}</small>
-                  {m.pending && <Label color="grey">sending…</Label>}
-                  <div>
-                    {/* Cluster- and wire-sourced text, rendered as plain text. */}
-                    <PlainText multiline>{m.text}</PlainText>
+              messages.map((m, i) => {
+                /* GROUPED, THE WAY EVERY MESSENGER DOES IT.
+                   A run of messages from one speaker is ONE block: the avatar
+                   and the name appear when the speaker changes and not again,
+                   so a thread reads as a conversation instead of a log with the
+                   same name stamped on every line.
+                   Sixty seconds is the usual window — long enough to group a
+                   burst, short enough that a later reply still says who. */
+                const prev = messages[i - 1]
+                const sameSpeaker =
+                  prev && prev.kind === m.kind && (prev.sender ?? '') === (m.sender ?? '')
+                const within = prev && Date.parse(m.at) - Date.parse(prev.at) < 60_000
+                const startsGroup = !sameSpeaker || !within
+
+                return (
+                <article
+                  key={m.id}
+                  style={{
+                    display: 'grid',
+                    // The gutter holds the avatar; everything else lines up in
+                    // one column beneath the name, grouped or not.
+                    gridTemplateColumns: '2em 1fr',
+                    columnGap: '0.75em',
+                    padding: startsGroup ? '0.85em 0 0.15em' : '0.15em 0',
+                    // The rule separates GROUPS, not every line — inside a run
+                    // it would cut a single speaker's turn into slices.
+                    borderTop: startsGroup && i > 0 ? '1px solid var(--ao-border)' : undefined,
+                  }}
+                >
+                  <div style={{ gridColumn: 1 }}>
+                    {startsGroup && <Avatar kind={m.kind} icon={pipelineIcon} />}
                   </div>
-                  {/* Offered actions, as controls. ADDITIVE — the body above
-                      already names every choice and its addressed form, which
-                      is what a surface with no controls shows. These only save
-                      the typing. */}
+                  <div style={{ gridColumn: 2, minWidth: 0 }}>
+                    {startsGroup && (
+                      <header
+                        style={{
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          justifyContent: 'space-between',
+                          gap: '0.75em',
+                          marginBottom: '0.2em',
+                        }}
+                      >
+                        <strong style={{ color: speakerStyle(m.kind).tint, overflowWrap: 'anywhere' }}>
+                          {/* `sender` when the speaker is known — a relayed
+                              sibling-channel message, or one this console
+                              posted and can attribute. Otherwise a WORD for who
+                              spoke: the kinds are plumbing vocabulary, and
+                              `local` printed as a name reads as though somebody
+                              called "local" typed it. */}
+                          <PlainText>{m.sender || speaker(m.kind)}</PlainText>
+                        </strong>
+                        <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.5em', flex: 'none' }}>
+                          {m.pending && <Label isCompact color="grey">sending…</Label>}
+                          {/* Reference, not the point: subdued, and pinned to
+                              the far edge so the stamps line up in a column. */}
+                          <time dateTime={m.at} style={{ color: 'var(--ao-text-subtle)', whiteSpace: 'nowrap' }}>
+                            {new Date(m.at).toLocaleTimeString()}
+                          </time>
+                        </span>
+                      </header>
+                    )}
+                    {/* AGENT PROSE IS MARKDOWN — the contract says so, and a
+                        browser is the surface that can render all of it. A
+                        namespace table arriving as thirty lines of pipes is what
+                        plain text costs here.
+
+                        Still never HTML: the renderer has raw HTML disabled and
+                        the text is tag-stripped first, so nothing an agent
+                        writes reaches the DOM as markup. */}
+                    <Markdown>{m.text}</Markdown>
                   {m.choices && m.choices.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                       {m.choices.map((c) => (
@@ -330,8 +476,10 @@ function Transcript({
                       ))}
                     </div>
                   )}
-                </div>
-              ))
+                  </div>
+                </article>
+                )
+              })
             )}
             </div>
           </CardBody>
@@ -351,6 +499,47 @@ function Transcript({
       )}
       {canWrite && (
         <StackItem>
+          <div style={{ position: 'relative' }}>
+          {/* ABOVE THE BOX, OUT OF FLOW.
+            The composer is pinned to the bottom and does not scroll — the
+            message list takes the overflow — so a menu in normal flow is
+            clipped by the region and pushes Send out of reach.
+            It opens UPWARD because the composer sits against the bottom edge,
+            and it clears the field entirely so what you typed stays visible
+            while you choose. */}
+          {commands && (
+            <Menu
+              aria-label="commands"
+              data-testid="command-typeahead"
+              isScrollable
+              style={{
+                position: 'absolute',
+                bottom: '100%',
+                left: 0,
+                right: 0,
+                zIndex: 200,
+                marginBottom: 4,
+                maxHeight: '40vh',
+                overflowY: 'auto',
+              }}
+            >
+            <MenuContent>
+              <MenuList>
+                {commands.map((c, i) => (
+                  <MenuItem
+                    key={c.name}
+                    isFocused={i === activeCommand}
+                    onClick={() => chooseCommand(c)}
+                    description={c.description}
+                  >
+                    <Icon icon={c.icon} />{' '}
+                    /{c.name}
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </MenuContent>
+            </Menu>
+          )}
           <TextArea
             aria-label="message"
             ref={textRef}
@@ -364,30 +553,37 @@ function Transcript({
             }}
             onKeyDown={onComposerKeyDown}
             rows={3}
-            placeholder="Reply to the agent, or / for commands"
+            placeholder="Reply to the agent…"
           />
-          {commands && (
-            <Menu aria-label="commands" data-testid="command-typeahead" isScrollable>
-              <MenuContent>
-                <MenuList>
-                  {commands.map((c, i) => (
-                    <MenuItem
-                      key={c.name}
-                      isFocused={i === activeCommand}
-                      onClick={() => chooseCommand(c)}
-                      description={c.description}
-                    >
-                      /{c.name}
-                    </MenuItem>
-                  ))}
-                </MenuList>
-              </MenuContent>
-            </Menu>
+          </div>
+          {error && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <Alert variant="danger" isInline title={error} />
+            </div>
           )}
-          {error && <Alert variant="danger" isInline title={error} />}
-          <Button onClick={send} isDisabled={busy || !text.trim()}>
-            Send
-          </Button>
+          {/* ONE ROW under the field: what the keys do on the left, the button
+              on the right. Stacking them left-aligned put a button hard against
+              the hint with nothing between them. */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '0.75rem',
+              marginTop: '0.75rem',
+            }}
+          >
+            <ComposerHint
+              shortcuts={[
+                { keys: ['/'], does: 'commands' },
+                { keys: ['Shift', 'Enter'], does: 'send' },
+              ]}
+            />
+            <Button onClick={send} isDisabled={busy || !text.trim()}>
+              Send
+            </Button>
+          </div>
         </StackItem>
       )}
     </Stack>

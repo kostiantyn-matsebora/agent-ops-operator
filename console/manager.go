@@ -235,7 +235,9 @@ type VocabularyEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Position    string `json:"position"`
-	Profile     string `json:"profile,omitempty"`
+	// Icon is how the entry is recognised in a list — an emoji, or nothing.
+	Icon    string `json:"icon,omitempty"`
+	Profile string `json:"profile,omitempty"`
 }
 
 func (m *Manager) CompleteOp(ctx context.Context, opID, threadID, opErr string) error {
