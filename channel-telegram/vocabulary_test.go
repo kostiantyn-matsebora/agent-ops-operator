@@ -126,15 +126,22 @@ func itoa(i int) string {
 
 // ---- re-registration ------------------------------------------------------
 
-// Registration is rate-limited by Telegram, so an unchanged view must produce
-// no call. The revision is the only thing that triggers a refetch.
-func TestStaleOnlyOnAChangedRevision(t *testing.T) {
+// ASKING IS NOT RECORDING. `stale` is a pure question and `synced` is the
+// answer, and the split is not stylistic: recording inside the question is what
+// made a live cluster register nothing. A poll that arrived while the adapter
+// had no channels yet consumed the revision and never came back to it.
+func TestStaleAsksAndSyncedRecords(t *testing.T) {
 	m := newMenu()
 	if !m.stale("rev-1") {
 		t.Fatal("first revision should be stale")
 	}
+	// Still stale: nothing has been done about it yet.
+	if !m.stale("rev-1") {
+		t.Fatal("asking consumed the revision — a run that did nothing would never retry")
+	}
+	m.synced("rev-1")
 	if m.stale("rev-1") {
-		t.Fatal("unchanged revision re-fetched")
+		t.Fatal("a synced revision is still reported stale")
 	}
 	if !m.stale("rev-2") {
 		t.Fatal("changed revision not noticed")
@@ -377,5 +384,84 @@ func TestMissingIconLeavesTheDescriptionAlone(t *testing.T) {
 	}}
 	if got := commandsFor(v)[0].Description; got != "some-profile" {
 		t.Fatalf("description = %q", got)
+	}
+}
+
+// ---- syncCommands, end to end -------------------------------------------
+//
+// The pieces were each tested and the whole was not, and the whole is what
+// failed: registration silently did nothing on a live cluster while every unit
+// test passed. This drives the real path — a manager serving a vocabulary, a
+// served channel, and a Bot API recording what it was told.
+
+func TestSyncCommandsRegistersForEveryServedChat(t *testing.T) {
+	var setCalls []map[string]any
+	bot := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		if strings.HasSuffix(r.URL.Path, "/setMyCommands") {
+			setCalls = append(setCalls, body)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer bot.Close()
+
+	mgr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/channel/vocabulary" {
+			_ = json.NewEncoder(w).Encode(vocab())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer mgr.Close()
+
+	a := &adapter{
+		mgr:      NewManager(mgr.URL, "tok"),
+		menu:     newMenu(),
+		channels: map[string]servedChannel{},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
+	}
+	a.channels["home-ops"] = servedChannel{cfg: channelConfig{ChatID: "-100123"}, token: "bot-token"}
+	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: bot.Client(), BaseURL: bot.URL}
+
+	a.syncCommands(context.Background(), "rev-1")
+
+	if len(setCalls) != 1 {
+		t.Fatalf("setMyCommands called %d time(s), want 1", len(setCalls))
+	}
+	cmds, _ := setCalls[0]["commands"].([]any)
+	if len(cmds) == 0 {
+		t.Fatalf("registered an EMPTY command list — that CLEARS the menu: %v", setCalls[0])
+	}
+	scope, _ := setCalls[0]["scope"].(map[string]any)
+	if scope["chat_id"] != "-100123" {
+		t.Fatalf("scope = %v", scope)
+	}
+
+	// Same revision again: no second call, because registration is rate-limited.
+	a.syncCommands(context.Background(), "rev-1")
+	if len(setCalls) != 1 {
+		t.Fatalf("re-registered an unchanged list: %d calls", len(setCalls))
+	}
+}
+
+// A revision consumed by a run that did NOTHING must not stop the next attempt.
+// stale() records the revision before the work happens, so a fetch that fails —
+// or a moment with no channels yet — would otherwise never be retried.
+func TestSyncCommandsRetriesAfterAFailedRun(t *testing.T) {
+	fail := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer fail.Close()
+
+	a := &adapter{
+		mgr: NewManager(fail.URL, "tok"), menu: newMenu(),
+		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+	}
+	a.syncCommands(context.Background(), "rev-1")
+	if !a.menu.stale("rev-1") {
+		t.Fatal("a failed run consumed the revision — the next poll will skip it and the menu never registers")
 	}
 }

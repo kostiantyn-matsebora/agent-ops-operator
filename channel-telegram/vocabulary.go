@@ -129,18 +129,33 @@ func newMenu() *menu {
 }
 
 // stale reports whether the manager's revision differs from the one last
-// fetched, and records the new one.
+// SYNCED. It records nothing.
+//
+// Recording here is what broke this on a live cluster: the revision was
+// consumed before the work, so a run that fetched nothing — a manager still
+// rolling out, or a moment before this adapter had read its channels — marked
+// that revision done and never tried again. The menu stayed empty and no error
+// was logged, because nothing had failed. It just had not happened.
+//
+// A revision is recorded by `synced`, after the work.
 func (m *menu) stale(revision string) bool {
 	if m == nil || revision == "" {
 		return false // a manager that predates the vocabulary
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.revision == revision {
-		return false
+	return m.revision != revision
+}
+
+// synced records a revision as done. Called ONLY when the work completed: the
+// vocabulary was read and every served chat was registered.
+func (m *menu) synced(revision string) {
+	if m == nil {
+		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.revision = revision
-	return true
 }
 
 // publishedName maps a Telegram command name back to what the manager
@@ -182,7 +197,7 @@ func (a *adapter) syncCommands(ctx context.Context, revision string) {
 	v, err := a.mgr.Vocabulary(ctx)
 	if err != nil {
 		log.Printf("fetch vocabulary: %v", err)
-		return
+		return // NOT recorded: the next poll must try again
 	}
 	cmds := commandsFor(v)
 
@@ -196,7 +211,15 @@ func (a *adapter) syncCommands(ctx context.Context, revision string) {
 	a.menu.mu.Unlock()
 
 	fingerprint := commandFingerprint(cmds)
-	for _, sc := range a.servedChannelList() {
+	served := a.servedChannelList()
+	if len(served) == 0 {
+		// Nothing to register FOR yet — this adapter has not read its channels,
+		// or serves none. Leaving the revision unrecorded is the whole point:
+		// the menu appears once there is a chat to put it in.
+		return
+	}
+	done := true
+	for _, sc := range served {
 		chatID := sc.cfg.ChatID
 		if chatID == "" {
 			continue
@@ -209,11 +232,15 @@ func (a *adapter) syncCommands(ctx context.Context, revision string) {
 		}
 		if err := a.client(sc.token).SetCommands(ctx, chatID, cmds); err != nil {
 			log.Printf("register commands for chat %s: %v", chatID, err)
+			done = false // retry this revision on the next poll
 			continue
 		}
 		a.menu.mu.Lock()
 		a.menu.registered[chatID] = fingerprint
 		a.menu.mu.Unlock()
+	}
+	if done {
+		a.menu.synced(revision)
 	}
 }
 
