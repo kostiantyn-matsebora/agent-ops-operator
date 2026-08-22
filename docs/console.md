@@ -523,18 +523,27 @@ Pipelines with their answering profile, narrows as you keep typing, and inserts
 Arrow keys move, Enter or Tab picks, Escape dismisses without sending. A surface
 with nothing addressable shows no menu rather than an empty one.
 
-The listing is served by `GET /api/agents` from the Pipelines the console
-already list/watches — **no new RBAC, no manager endpoint, no CRD field.**
+The listing is served by `GET /api/vocabulary`, projected from the manager's own
+`GET /channel/vocabulary` — **no new RBAC and no CRD field.**
 
-It is Ready-filtered for the same reason `/agents` is: an unready Pipeline names
-wiring that does not resolve, so offering it would invite a request nothing can
-serve.
+The console *can* read Pipelines and fetches the manager's list anyway. This
+typeahead and a chat transport's command menu answer the same question, and two
+derivations of one fact drift.
 
-The two must never disagree, and tests on both sides pin that they do not.
+If the manager is unreachable the console falls back to its own Pipeline view. A
+composer with no listing is worse than one built from a second source.
 
-The listing is advisory — the console's cache can lag a moment, and an addressed
-message to a Pipeline that has since gone is already answered with "unknown
-agent". `/agents` remains the fallback wherever a client cannot present a menu.
+It is Ready-filtered for the same reason `/pipelines` is: an unready Pipeline
+names wiring that does not resolve, so offering it would invite a request
+nothing can serve.
+
+Entries carry a **position**. The composer that starts a conversation offers
+`general` entries. The reply box inside a conversation offers `thread` ones —
+`/exit` and `/close` — and never a Pipeline.
+
+The listing is advisory — an addressed message to a Pipeline that has since gone
+is already answered with "unknown pipeline". `/pipelines` remains the fallback
+wherever a client cannot present a menu.
 
 ## Trust boundary
 

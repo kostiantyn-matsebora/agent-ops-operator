@@ -31,6 +31,10 @@ adapter.
    transport backpressure in-process (below), because finishing after it expires
    means a second claimant posts the same message again.
 
+   **Every response carries `X-Agentops-Vocabulary-Revision`** — the delivered
+   op and the empty `204` alike. See [What may be
+   typed](#what-may-be-typed) below.
+
 2. **Complete each op** with `POST /channel/ops/{id}/done`.
 
    | op | Body |
@@ -71,25 +75,33 @@ adapter.
 
    ```json
    {"kind":"chat","fingerprint":"…","payload":"…",
-    "labels":{"agentops.dev/channel":"…","agentops.dev/sender":"…"}}
+    "labels":{"agentops.dev/channel":"…","agentops.dev/sender":"…",
+              "agentops.dev/message":"…"}}
    ```
 
    The Pipeline claiming that source decides who answers, and command parsing
-   (`/agents`, `/<pipeline> <task>`) happens there.
+   (`/pipelines`, `/<pipeline> <task>`) happens there.
 
-4. **Read your channels** and their opaque `spec.config` from
+   `agentops.dev/message` is optional. It is your transport's own handle for the
+   message that arrived. The manager stores it and hands it back on any reply,
+   so a reply can say which message it answers.
+
+4. **Read what may be typed** from `GET /channel/vocabulary`, if you offer a
+   command menu or a typeahead.
+
+5. **Read your channels** and their opaque `spec.config` from
    `GET /channel/channels?adapter=`.
    - Persist cursors — poll offsets and the like — via
      `GET/PUT /channel/state/{channel}/{key}`.
    - Report config problems via `POST /channel/channels/{name}/status`.
 
-5. **Optionally act on a conversation your channel is bound to**, all with
+6. **Optionally act on a conversation your channel is bound to**, all with
    `{"channel":"…"}`:
    - `POST /channel/conversations/{name}/reopen`
    - `POST /channel/conversations/{name}/delete`
    - `POST /channel/conversations/{name}/reset-context`
 
-6. **Optionally report how far your threads have been read** —
+7. **Optionally report how far your threads have been read** —
    `POST /channel/read` ([below](#post-channelread)).
 
 ### POST /channel/read
@@ -204,6 +216,57 @@ pace your own sending so bursts are spread rather than rejected.
 should stay queued in the manager, where it is still derivable from CR state and
 survives your restart.
 
+### What may be typed
+
+`GET /channel/vocabulary` returns everything a person may type on a chat
+surface, and the revision identifying it.
+
+```json
+{"revision":"3f2a91c…",
+ "entries":[
+   {"kind":"builtin","name":"pipelines","description":"…","position":"general"},
+   {"kind":"builtin","name":"exit","description":"…","position":"thread"},
+   {"kind":"pipeline","name":"k8s-observe","description":"k8s-engineer",
+    "position":"general","profile":"k8s-engineer"}]}
+```
+
+It exists because **an adapter holds no Kubernetes access**. You cannot read a
+Pipeline, so the manager is the only thing that can tell you what is
+addressable.
+
+| field | what it is |
+|---|---|
+| `kind` | `builtin` for a manager command, `pipeline` for an addressable Pipeline |
+| `position` | `general` starts a conversation, `thread` acts on one |
+| `description` | menu text — for a Pipeline, the profile answering for it |
+
+**The two positions take disjoint sets.** Addressing a Pipeline works only on a
+general surface. `/exit` and `/close` work only inside a thread.
+
+Offer only what applies where the person is typing, **if your transport can
+express the difference**. If it cannot, offer the union — the manager answers a
+command used in the wrong position with usage, and that is the correction.
+
+**The list is UNFILTERED, and deciding what you can express is your job.**
+
+Telegram command names admit no hyphen, so `channel-telegram` registers
+`k8s_observe` and translates it back before anything leaves the adapter.
+
+That rule lives in that adapter. Nothing here knows it, and no Pipeline was
+renamed for it.
+
+**Learn about changes from the long-poll, not a timer.** Every
+`GET /channel/ops` response carries `X-Agentops-Vocabulary-Revision`, on the
+`200` and the `204` both. A revision different from your last fetch means
+refetch.
+
+The manager cannot dial you — your port is optional and this contract is
+pull-only — so the news rides the connection you are already blocked in.
+
+**All of it is additive.** Ignore the endpoint and the header and you behave
+exactly as an adapter built before either existed. The contract version stays
+`2`.
+
 ### Commands the manager answers itself
 
 These are handled before any Pipeline lookup. An adapter forwards them as
@@ -211,10 +274,15 @@ ordinary text and does not implement them.
 
 | Command | Where | What it does |
 |---|---|---|
-| `/agents`, `/help`, `/start` | general surface | lists Ready pipelines and their profiles |
+| `/pipelines`, `/help`, `/start` | general surface | lists Ready pipelines and their profiles |
 | `/<pipeline> <task>` | general surface | originates a conversation ([above](#the-channel-adapter-contract)) |
 | `/close` | a conversation's thread | ends the conversation, archives the thread |
 | `/exit` | a conversation's thread | releases the runtime pod, keeps the conversation |
+
+- **`/agents` still works** and is never printed, offered or registered. It was
+  the old name for `/pipelines`.
+- **The addressed form is one segment.** Text after the Pipeline name is the
+  task, colons included.
 
 - **Both thread commands are intercepted on the REPLY path**, before the text
   could become an input.
@@ -238,6 +306,24 @@ ordinary text and does not implement them.
 | `answer` | `body`, `status` | agent output, reported through `/work/done` |
 | `relay` | `origin`, `sender?`, `body` | a user message, from any surface but this one — including THIS surface's own users when the adapter declares `echoesOwnMessages: false` |
 | `notice` | `level` (`info`/`warn`), `body` | the manager on its own behalf: acks, listings, refusals |
+
+**Any kind MAY also carry `choices` and `inReplyTo`.** Both are optional and
+both are structured, not prose.
+
+| field | what it is | what you do |
+|---|---|---|
+| `choices[]` | offered actions: `label`, `command` | render controls if your transport has them. Otherwise the body already names each one, so nothing is lost |
+| `inReplyTo` | your OWN handle for the message this answers, as you supplied it in `agentops.dev/message` | reply to that message, or ignore it |
+
+`inReplyTo` is **opaque** to the manager. It stores and returns the string
+unaltered and never parses it, exactly as it treats a thread id.
+
+Together they are what lets a control offered on somebody's own words carry
+those words forward. Post the offer as a reply to their message and your
+transport still holds the text, so a selection needs no state on either side.
+
+**Never drop `choices`.** They are the reader's only account of what is on
+offer. A transport without controls renders them as a list.
 
 **`ensure-topic` carries `op.topic`, a descriptor** — `conversation`,
 `pipeline?`, `source?`, `title`, `labels{}`, `kind` — and YOU name the thread

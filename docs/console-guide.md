@@ -68,6 +68,11 @@ Six views, one question each.
   The transcript reads from the **message that started it**, and rebuilds after
   a reload or a restart. Only acks are lost.
 
+  The reply box completes commands. Type `/` and it offers what acts on **this**
+  conversation — `/exit` to release its runtime, `/close` to end it — with the
+  difference stated. It never offers a Pipeline: inside a conversation that text
+  is input for the agent.
+
   ![One conversation: the signal that started it, the agent's answer explaining an OOM-killed container, a reply relayed in from another channel, and a box to reply from.]({{ '/assets/img/console/conversation-light.png' | relative_url }})
 
 - **Queues** — What is waiting, and what is stuck?
