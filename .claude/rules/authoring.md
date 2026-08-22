@@ -40,6 +40,9 @@ only when one of them is READ. A file without it loads at launch.
   on a chat answer, or while writing a file that does not exist yet, and none of
   those is a read.
 - **`chart.md` is the only one that passes** — a chart mistake is a chart edit.
+- **A scoped rule is LOST at compaction** until a matching file is read again.
+  An unscoped one is re-injected from disk, exactly as the root `CLAUDE.md` is,
+  which is the second reason to scope sparingly.
 - **A topic belonging to ONE directory lives there instead**, in that
   directory's own `CLAUDE.md` or `.claude/`, with the root only MENTIONING it.
   `docs/` is the case.
