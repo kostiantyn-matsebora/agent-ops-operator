@@ -35,8 +35,8 @@ meaning, adapters compose presentation.** No transport dialect under `internal/`
 
 ### D1 — The manager parses, not the adapters
 
-**Chosen:** `/work/done` bodies are parsed manager-side; `Message` carries
-`blocks[]`.
+**Chosen:** agent-reported bodies are parsed manager-side and `Message` carries
+`blocks[]`. WHERE that parse is called is D9.
 
 **Alternative:** each adapter parses tags out of `body`.
 
@@ -161,6 +161,33 @@ body says otherwise. Per-signal also lets one adapter emit both kinds.
 asking why `<details>` will not render in their docs must see their own
 characters.
 
+### D9 — The parse follows agent-reported TEXT, not the message KIND
+
+**Chosen:** a run's reply carries blocks whether it leaves as an `answer` or as a
+`notice`.
+
+`chat.RunReplyMessage` sends a run that FAILED but explained itself as
+`Warn(body)` — a `notice` — deliberately, so the reader gets the reason instead
+of "run failed". That explanation is agent output, and it is the longest thing a
+failed investigation produces. Leaving `notice` blockless would exempt the one
+case the fold serves best.
+
+`notice` therefore gains `blocks[]`, populated only where its body is
+agent-reported. A manager-composed notice — a `/pipelines` listing, a refusal, a
+usage error — is the manager's own text and carries none.
+
+**Where the parse is CALLED follows from the same helper.** `RunReplyMessage`
+composes from the RECORDED RUN ALONE, so that `/work/done` and the reconciler
+backstop produce the same message from the same facts. The parse is a pure
+function called there, never a step on the `/work/done` path — parsing at the
+report point would leave the backstop's re-derived reply blockless, which is the
+"a re-derived reply would differ from the one it replaces" failure that helper
+exists to prevent.
+
+**Blocks are therefore DERIVABLE from `status.runs[].result` and are not
+persisted.** Storing them would add a fourth kind of manager state to a matrix
+that admits three.
+
 ## Risks / Trade-offs
 
 - **Agents ignore the grammar** → parsing is total; no tags yields one block,
@@ -203,8 +230,13 @@ migration, no CR rewrite.
 - **The above-the-fold cap value.** Needs a real number, and the right way to
   choose one is to look at recent answers rather than guess. Does not change the
   specs, the approach or the tasks.
-- **`<choice>` blocks.** Turning `Reply: **approve**` into a real button is the
-  highest-value block in the grammar, but Telegram callbacks arrive through
-  `gateway-telegram`, which classifies on `is_topic_message` — a `callback_query`
-  carries that field one level down, so the router needs a new rule. Scoped OUT
-  as its own change. Nothing here forecloses it: it is one more reserved tag.
+- **A `<choice>` block tag.** Stated as "the contract gains offered actions",
+  which was WRONG: `Message.Choices` and `Message.InReplyTo` already exist and
+  the main spec already requires both to stay structured and opaque. What is
+  actually missing is a way for the AGENT to populate `choices` — a reserved tag
+  the parser lifts into the existing field.
+
+  The inbound half is the real cost and is unchanged: Telegram callbacks arrive
+  through `gateway-telegram`, which classifies on `is_topic_message`, and a
+  `callback_query` carries that field one level down, so the router needs a new
+  rule. Scoped OUT as its own change. Nothing here forecloses it.

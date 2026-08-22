@@ -9,7 +9,21 @@ any of them:
 - `signal` — `{pipeline, source, title, labels{}, body, blocks[], inputRef}`
 - `answer` — `{body, blocks[], status}`
 - `relay` — `{origin, sender, body}`
-- `notice` — `{level, body}`
+- `notice` — `{level, body, blocks[]}`
+
+A message of any kind MAY additionally carry `choices` — a list of offered
+actions, each naming what it does and the addressed text it stands for. Choices
+are a STRUCTURED field like `labels`, not prose: the manager states which actions
+are on offer and SHALL NOT state how they are presented, whether the transport
+has controls for them, or how many it can show at once.
+
+A message of any kind MAY additionally carry `inReplyTo` — the transport's own
+handle for the message this one answers. It SHALL be OPAQUE: the manager
+receives it from the surface that originated the message, stores and returns it
+unaltered, and SHALL NOT parse, validate, compare or construct one. It is the
+same category as a thread id, which the contract already treats this way. That a
+message answers another is MEANING, and it is what lets an adapter offer an
+action on somebody's own words without holding state to remember them.
 
 A `signal` message SHALL name the Pipeline that originated the conversation and
 the SignalSource the input came from, so a reader can tell which route produced
@@ -27,6 +41,12 @@ sections plus a folded region. The manager SHALL populate it and SHALL keep
 `body` populated alongside as the flattened equivalent, so a message is never
 carried by `blocks[]` alone.
 
+`blocks[]` SHALL follow AGENT-REPORTED text rather than the message kind carrying
+it. A run that failed and explained itself is reported as a `notice`, and that
+explanation SHALL carry blocks exactly as an `answer` does. A message whose body
+the manager composed itself — a listing, a refusal, a usage error — SHALL carry
+none.
+
 #### Scenario: The manager emits no transport markup
 
 - **WHEN** any outbound message is produced — an ack, a listing, a relayed user
@@ -38,6 +58,18 @@ carried by `blocks[]` alone.
 
 - **WHEN** a `signal` message carries labels
 - **THEN** they reach the adapter as a map, not as a formatted string
+
+#### Scenario: A reply handle is carried without being understood
+
+- **WHEN** a message carries `inReplyTo`
+- **THEN** the manager returns the value exactly as the originating surface
+  supplied it, and no component under `internal/` parses or interprets it
+
+#### Scenario: Choices stay structured
+
+- **WHEN** a message offers a set of actions
+- **THEN** they reach the adapter as typed entries, not as a formatted list, and
+  carry no instruction on how to present them
 
 #### Scenario: A card names its route and its source
 
@@ -57,6 +89,13 @@ carried by `blocks[]` alone.
 - **WHEN** an adapter concatenates the fields and posts them as plain text
 - **THEN** that is a conforming implementation — the contract requires ownership
   of presentation, not fidelity
+
+#### Scenario: A failed run's explanation is still structured
+
+- **WHEN** a run fails, reports its own explanation, and that explanation goes
+  out as a `notice`
+- **THEN** the notice carries blocks, because the body is the agent's text —
+  while a listing the manager composed carries none
 
 #### Scenario: Structure and prose travel together
 

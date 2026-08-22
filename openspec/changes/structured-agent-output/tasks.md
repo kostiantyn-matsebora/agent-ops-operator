@@ -26,11 +26,20 @@
 - [ ] 2.2 `ContractVersion` 2 → 3.
 - [ ] 2.3 `/channel/ops` serves `contract=2` the message with `body` populated
       and `blocks[]` omitted; `contract=1` stays refused with 400.
-- [ ] 2.4 Parse at the `/work/done` answer path so both producers of a run reply
-      — `httpapi` and the reconciler backstop — carry identical blocks.
-- [ ] 2.5 Signal bodies parsed only when the inbound signal declares it; default
+- [ ] 2.4 Parse where the reply is COMPOSED, never where the run is reported.
+      `chat.RunReplyMessage` builds a run's reply FROM THE RECORDED RUN ALONE so
+      that `/work/done` and the reconciler backstop compose the same message, and
+      a pure parse called there keeps that true. Parsing on the `/work/done` path
+      instead leaves the backstop's re-derived reply blockless.
+- [ ] 2.5 Blocks are DERIVABLE from `status.runs[].result` and are NOT persisted.
+      Nothing new goes in status.
+- [ ] 2.6 `notice` gains `blocks[]`, populated only when its body is
+      agent-reported — the FAILED-run case, where `RunReplyMessage` sends the
+      agent's own explanation as `Warn(body)`. Manager-composed notices
+      (listings, refusals, usage errors) carry none.
+- [ ] 2.7 Signal bodies parsed only when the inbound signal declares it; default
       raw.
-- [ ] 2.6 `/signal/inbound` accepts and records the declaration.
+- [ ] 2.8 `/signal/inbound` accepts and records the declaration.
 
 ## 3. AgentProfile flag
 
@@ -71,8 +80,9 @@
       `dangerouslySetInnerHTML` is introduced anywhere.
 - [ ] 6.4 Messages with no blocks render as text, unchanged.
 - [ ] 6.5 Bump `ContractVersion` to 3.
-- [ ] 6.6 Re-run `npm run screenshots` in `console/ui` — the site's screenshots
-      are build output and the change is not done until they match.
+- [ ] 6.6 Re-run BOTH `npm run screenshots` and `npm run demo` in
+      `platform/console/ui`. The screenshots and the landing recording are both
+      build output, and the change is not done until both match.
 
 ## 7. Chart and profiles
 
@@ -91,7 +101,13 @@
 - [ ] 8.4 `CHANGELOG.md` — the template removal and the flag, newest first.
 - [ ] 8.5 Check the adopter pages: does `introduction.md`, `getting-started.md`
       or the landing page now say something untrue about agent output?
-- [ ] 8.6 Run the adopter-prose lint from `CLAUDE.md` over `docs/*.md`.
+- [ ] 8.6 Read every changed adopter page against `docs/CLAUDE.md`'s writing
+      rules BY HAND — structure over prose, no semicolons, both shell fences.
+      There is no lint script in this repo.
+- [ ] 8.7 `.claude/rules/invariants.md` — "THE MANAGER COMPOSES MEANING" names
+      the four message kinds' fields and says `format.md` binds the agent to the
+      markdown subset. Contract 3, `blocks[]` and the block grammar make both
+      lines incomplete.
 
 ## 9. Verification
 
