@@ -61,7 +61,9 @@ type of each change unstated.
 
 `CHANGELOG.md` holds the **ten most recent versions** and nothing older.
 
-- Older entries move to `CHANGELOG-<range>.md` in this directory, VERBATIM.
+- Older entries move to `changelog/CHANGELOG-<range>.md`, VERBATIM. They are
+  already in this format when they get there, so moving one is a file move and
+  nothing else.
 - An `## Older versions` section at the FOOT of `CHANGELOG.md` links each
   archive file and the version range it covers.
 - **Archives are append-only.** Moving an entry never edits it — a migration

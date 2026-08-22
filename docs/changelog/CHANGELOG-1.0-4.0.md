@@ -3,7 +3,7 @@
 Migration guides for chart versions **1.0.0 through 4.0.0**, newest first, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-Moved here from [CHANGELOG.md](CHANGELOG.md), which holds the ten most recent
+Moved here from [CHANGELOG.md](../CHANGELOG.md), which holds the ten most recent
 versions.
 
 ## [4.0.0] — 2026-08-09
@@ -503,6 +503,12 @@ read no parent scope except `global.`, which is why the toggle moved there.
 | `demo.readOnlyRbac: false` | `k8s-bundle.rbac.enabled: false` |
 | *inherited `persistence`* | `k8s-bundle.profile.runtime.homePvcRef` — **set this explicitly**, subcharts cannot see the parent's `persistence` block |
 | *inherited `runtimeIdleTtlMinutes`* | `k8s-bundle.profile.runtime.idleTtlMinutes` |
+
+### Upgrade
+
+1. Restate every `demo.*` value under its Chart 2.x path, from the table above.
+2. **Set `homePvcRef` explicitly.** It was inherited from the parent's
+   `persistence` block, and a subchart cannot see one.
 
 The runtime ServiceAccount is renamed `agentops-runtime-demo` →
 `agentops-runtime-k8s`. `helm upgrade` removes the old objects with the deleted

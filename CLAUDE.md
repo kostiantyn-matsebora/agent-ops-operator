@@ -848,7 +848,7 @@ docs/                    reference pages: concepts.md (CRDs + capability
 docs/CHANGELOG.md        every chart-version migration guide, newest first —
                          the ONLY place upgrade steps live. Keep a Changelog
                          1.1.0 format, TEN versions; older ones move verbatim to
-                         docs/CHANGELOG-<range>.md and are linked from its foot
+                         docs/changelog/CHANGELOG-<range>.md, linked from its foot
                          (docs/CLAUDE.md owns the rules)
 ```
 
