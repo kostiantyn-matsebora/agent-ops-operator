@@ -29,6 +29,11 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops
 spec:
+  {{- with .icon }}
+  # Display only: how this route is recognised in a chat command menu or the
+  # console's typeahead. Nothing routes on it.
+  icon: {{ . | quote }}
+  {{- end }}
   profileRef:
     name: {{ $p.profile }}
   {{- with $p.signalSources }}

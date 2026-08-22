@@ -527,6 +527,14 @@ export interface VocabularyEntry {
   /** Menu text. For a pipeline, the profile answering for it. */
   description?: string
   /**
+   * How this entry is RECOGNISED in a list — an emoji, or nothing.
+   *
+   * Declared on the Pipeline and published as-is. Drawing it is this surface's
+   * decision: Telegram cannot put one in a command name and leads the
+   * description with it instead.
+   */
+  icon?: string
+  /**
    * Where the entry is valid: `general` is the composer that STARTS a
    * conversation, `thread` the one attached to an existing one. The two take
    * disjoint sets — addressing a Pipeline inside a thread is input for the

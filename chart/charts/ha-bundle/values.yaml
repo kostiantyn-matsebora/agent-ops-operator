@@ -620,9 +620,12 @@ pipelines:
     # The user-facing route. Claims the chat sources below, so an unaddressed
     # message on those surfaces reaches ha-user.
     name: ha-control
+    # Display only — see k8s-bundle's `pipelines.observe.icon`.
+    icon: aops:home
   ops:
     # The ops route. Claims ha-logs and NOTHING ELSE — see chatSources.
     name: ha-ops
+    icon: aops:operate
   # Chat sources BOTH routes claim, BY NAME. A claim is what puts an agent in
   # the list a person is offered on that surface.
   #

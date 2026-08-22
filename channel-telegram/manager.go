@@ -237,7 +237,11 @@ type VocabularyEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Position    string `json:"position"`
-	Profile     string `json:"profile,omitempty"`
+	// Icon is how the entry is recognised in a list. Telegram command NAMES
+	// take only [a-z0-9_], so it cannot go there — it leads the description,
+	// which is the one part of a menu row that accepts an emoji.
+	Icon    string `json:"icon,omitempty"`
+	Profile string `json:"profile,omitempty"`
 }
 
 // CompleteOp reports an op result (threadID for ensure-topic; opErr on failure).

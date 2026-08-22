@@ -71,6 +71,7 @@ everyday agent needs nothing beyond the intents. */ -}}
 {{- if include "ha-bundle.userProfileEnabled" . }}
 {{- $routes = append $routes (dict
       "name" $p.control.name
+      "icon" ($p.control.icon | default "")
       "profile" .Values.profiles.user.name
       "sources" ($p.chatSources | default list)
       "tools" $controlTools
@@ -79,6 +80,7 @@ everyday agent needs nothing beyond the intents. */ -}}
 {{- if include "ha-bundle.opsProfileEnabled" . }}
 {{- $routes = append $routes (dict
       "name" $p.ops.name
+      "icon" ($p.ops.icon | default "")
       "profile" .Values.profiles.ops.name
       "sources" (concat ($p.chatSources | default list) $logSource)
       "tools" $opsTools
@@ -94,6 +96,11 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-ha-bundle
 spec:
+  {{- with .icon }}
+  # Display only: how this route is recognised in a chat command menu or the
+  # console's typeahead. Nothing routes on it.
+  icon: {{ . | quote }}
+  {{- end }}
   profileRef:
     name: {{ .profile }}
   {{- with .sources }}

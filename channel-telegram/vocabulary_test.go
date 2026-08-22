@@ -47,7 +47,7 @@ func vocab() Vocabulary {
 		Entries: []VocabularyEntry{
 			{Kind: "builtin", Name: "pipelines", Description: "List the pipelines you can address", Position: "general"},
 			{Kind: "builtin", Name: "exit", Description: "Release this conversation's runtime", Position: "thread"},
-			{Kind: "pipeline", Name: "k8s-observe", Description: "k8s-engineer", Position: "general", Profile: "k8s-engineer"},
+			{Kind: "pipeline", Name: "k8s-observe", Description: "k8s-engineer", Position: "general", Profile: "k8s-engineer", Icon: "🔎"},
 			{Kind: "pipeline", Name: "team.ops", Description: "nobody", Position: "general"},
 		},
 	}
@@ -65,8 +65,9 @@ func TestCommandsForRegistersBuiltinsAndPipelines(t *testing.T) {
 			t.Fatalf("%q missing from the menu: %v", want, got)
 		}
 	}
-	if got["k8s_observe"] != "k8s-engineer" {
-		t.Fatalf("pipeline description = %q", got["k8s_observe"])
+	// The icon LEADS the description: a Telegram command name takes no emoji.
+	if got["k8s_observe"] != "🔎 k8s-engineer" {
+		t.Fatalf("pipeline description = %q, want the icon leading it", got["k8s_observe"])
 	}
 	// Telegram cannot express a dot, so it is left out — not renamed, not
 	// refused, not reported.
@@ -341,5 +342,40 @@ func mustJSON(t *testing.T, raw string, out any) {
 	t.Helper()
 	if err := json.Unmarshal([]byte(raw), out); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// PIPELINES FIRST. Telegram lists commands in the order given, and typing `/`
+// is overwhelmingly somebody reaching for an agent — the manager's own commands
+// are the rarer errand.
+func TestPipelinesAreListedBeforeBuiltins(t *testing.T) {
+	cmds := commandsFor(vocab())
+	var firstBuiltin, lastPipeline = -1, -1
+	for i, c := range cmds {
+		switch c.Command {
+		case "pipelines", "exit", "help", "close":
+			if firstBuiltin < 0 {
+				firstBuiltin = i
+			}
+		default:
+			lastPipeline = i
+		}
+	}
+	if firstBuiltin < 0 || lastPipeline < 0 {
+		t.Fatalf("expected both kinds in the menu: %+v", cmds)
+	}
+	if lastPipeline > firstBuiltin {
+		t.Fatalf("a builtin was listed before a pipeline: %+v", cmds)
+	}
+}
+
+// An entry with no icon is rendered without one — nothing is invented, and the
+// description is not left with a leading space.
+func TestMissingIconLeavesTheDescriptionAlone(t *testing.T) {
+	v := Vocabulary{Revision: "r", Entries: []VocabularyEntry{
+		{Kind: "pipeline", Name: "plain", Description: "some-profile", Position: "general"},
+	}}
+	if got := commandsFor(v)[0].Description; got != "some-profile" {
+		t.Fatalf("description = %q", got)
 	}
 }

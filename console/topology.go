@@ -22,9 +22,11 @@ type Ref struct {
 
 // pipelineSpec is the console's read of Pipeline.spec.
 type pipelineSpec struct {
-	SignalSourceRefs []Ref `json:"signalSourceRefs,omitempty"`
-	ChannelRefs      []Ref `json:"channelRefs,omitempty"`
-	ProfileRef       Ref   `json:"profileRef"`
+	// Icon is display metadata: how this Pipeline is recognised in a list.
+	Icon             string `json:"icon,omitempty"`
+	SignalSourceRefs []Ref  `json:"signalSourceRefs,omitempty"`
+	ChannelRefs      []Ref  `json:"channelRefs,omitempty"`
+	ProfileRef       Ref    `json:"profileRef"`
 	Toolsets         *struct {
 		Mode string `json:"mode,omitempty"`
 		Refs []Ref  `json:"refs,omitempty"`

@@ -68,6 +68,15 @@ func markdownToHTML(md string) string {
 		return stash("<pre>" + escape(strings.TrimRight(fencedRe.FindStringSubmatch(m)[1], "\n")) + "</pre>")
 	})
 
+	// TABLES BECOME A MONOSPACED BLOCK. Telegram has no table markup at all, so
+	// the choice is a preformatted block with the columns padded, or thirty
+	// lines of raw pipes — which is what a reader got before, and it is
+	// unreadable on a phone.
+	//
+	// Stashed like a fence, for the same reason: nothing after this should see
+	// the cell text as prose to re-mark-up.
+	withoutFences = renderTables(withoutFences, stash)
+
 	out := escape(withoutFences)
 	out = codeRe.ReplaceAllStringFunc(out, func(m string) string {
 		return stash("<code>" + codeRe.FindStringSubmatch(m)[1] + "</code>")
@@ -80,6 +89,91 @@ func markdownToHTML(md string) string {
 		out = strings.ReplaceAll(out, fmt.Sprintf("\x00%d\x00", i), b)
 	}
 	return out
+}
+
+// tableRowRe matches one pipe-delimited row of a GFM table.
+var tableRowRe = regexp.MustCompile(`^\s*\|.*\|\s*$`)
+
+// tableDividerRe matches the |---|---| line that makes the rows above a HEADER.
+var tableDividerRe = regexp.MustCompile(`^\s*\|[\s:|-]+\|\s*$`)
+
+// renderTables replaces every GFM table with a preformatted block whose columns
+// line up.
+//
+// Telegram supports no table markup, so this is the closest a chat surface
+// gets: <pre> is the one place a proportional font is not used, which is what
+// makes columns readable at all.
+//
+// Anything that is not a table is returned untouched, line for line.
+func renderTables(md string, stash func(string) string) string {
+	lines := strings.Split(md, "\n")
+	var out []string
+	for i := 0; i < len(lines); {
+		// A table is two or more pipe rows whose SECOND line is a divider.
+		if i+1 < len(lines) && tableRowRe.MatchString(lines[i]) && tableDividerRe.MatchString(lines[i+1]) {
+			end := i + 2
+			for end < len(lines) && tableRowRe.MatchString(lines[end]) {
+				end++
+			}
+			rows := make([][]string, 0, end-i-1)
+			for j := i; j < end; j++ {
+				if j == i+1 {
+					continue // the divider carries no data
+				}
+				rows = append(rows, splitRow(lines[j]))
+			}
+			out = append(out, stash("<pre>"+escape(alignColumns(rows))+"</pre>"))
+			i = end
+			continue
+		}
+		out = append(out, lines[i])
+		i++
+	}
+	return strings.Join(out, "\n")
+}
+
+// splitRow turns `| a | b |` into the cells between the pipes.
+func splitRow(line string) []string {
+	trimmed := strings.TrimSpace(line)
+	trimmed = strings.TrimPrefix(trimmed, "|")
+	trimmed = strings.TrimSuffix(trimmed, "|")
+	cells := strings.Split(trimmed, "|")
+	for i := range cells {
+		cells[i] = strings.TrimSpace(cells[i])
+	}
+	return cells
+}
+
+// alignColumns pads every cell to its column's widest, so the block reads as a
+// table rather than as ragged text.
+//
+// Width is counted in RUNES, not bytes: a namespace with a non-ASCII character
+// in it would otherwise pad short and skew every column after it.
+func alignColumns(rows [][]string) string {
+	widest := map[int]int{}
+	for _, r := range rows {
+		for i, c := range r {
+			if n := len([]rune(c)); n > widest[i] {
+				widest[i] = n
+			}
+		}
+	}
+	var b strings.Builder
+	for ri, r := range rows {
+		if ri > 0 {
+			b.WriteByte('\n')
+		}
+		for i, c := range r {
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			b.WriteString(c)
+			if i < len(r)-1 {
+				b.WriteString(strings.Repeat(" ", widest[i]-len([]rune(c))))
+			}
+		}
+	}
+	return b.String()
 }
 
 // renderMessage turns one semantic message into Telegram HTML.

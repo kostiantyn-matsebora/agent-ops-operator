@@ -17,6 +17,13 @@ COPY ui/package.json ui/package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY ui/ ./
 RUN npm run build
+# PRE-COMPRESS, once, here. The assets never change after this line, so gzipping
+# them per request would spend CPU on a fixed answer — and a build can afford
+# -9 where a request handler cannot. `-k` keeps the original for clients that
+# do not offer gzip. Roughly 2.6MB of CSS and JS becomes about 400KB.
+RUN find dist -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' -o -name '*.map' \) \
+      -exec gzip -9 -k -f {} \; \
+ && echo "compressed:" && du -sh dist
 
 FROM --platform=$BUILDPLATFORM golang:1.23 AS build
 ARG TARGETOS TARGETARCH

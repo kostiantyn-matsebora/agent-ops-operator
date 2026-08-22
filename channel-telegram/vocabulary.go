@@ -57,7 +57,7 @@ func spellForTelegram(name string) (string, bool) {
 
 // commandsFor renders the vocabulary as Telegram's command list.
 //
-// Built-ins first, then Pipelines by name, bounded by Telegram's cap: an
+// Pipelines first, by name, then the built-ins, bounded by Telegram's cap: an
 // over-long list is truncated rather than rejected, and what falls off the end
 // is still typable.
 //
@@ -73,10 +73,16 @@ func commandsFor(v Vocabulary) []BotCommand {
 		if !ok {
 			continue
 		}
-		cmd := BotCommand{Command: spelled, Description: truncate(e.Description, telegramMaxDescription)}
-		if cmd.Description == "" {
-			cmd.Description = e.Name
+		desc := e.Description
+		if desc == "" {
+			desc = e.Name
 		}
+		// The icon LEADS the description, because a Telegram command name takes
+		// no emoji and the description is the rest of the row.
+		if e.Icon != "" {
+			desc = e.Icon + " " + desc
+		}
+		cmd := BotCommand{Command: spelled, Description: truncate(desc, telegramMaxDescription)}
 		if e.Kind == "builtin" {
 			builtins = append(builtins, cmd)
 		} else {
@@ -84,7 +90,14 @@ func commandsFor(v Vocabulary) []BotCommand {
 		}
 	}
 	sort.Slice(pipelines, func(i, j int) bool { return pipelines[i].Command < pipelines[j].Command })
-	out := append(builtins, pipelines...)
+	// PIPELINES FIRST. Telegram lists commands in the order given, and typing
+	// `/` is overwhelmingly somebody reaching for an agent — the manager's own
+	// commands are the rarer errand and belong after them.
+	//
+	// Overflow therefore drops BUILT-INS first, which is the right half to
+	// lose: they are four fixed words a person can learn, while a Pipeline they
+	// cannot complete is one they may not know exists.
+	out := append(pipelines, builtins...)
 	if len(out) > telegramMaxCommands {
 		out = out[:telegramMaxCommands]
 	}

@@ -8,10 +8,12 @@ import { Link } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../App'
 import {
   useCloseConversations, useConversations, useDeleteConversations,
-  useMarkRead, useReopenConversation, useSession,
+  useMarkRead, useReopenConversation, useSession, useVocabulary,
 } from '../api/hooks'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'
+import { HelpChip, PipelinesChip } from './Vocabulary'
+import { Icon, stripLeadingIcon } from '../components/Icon'
 import { CloseSelectedModal, selectableNames, workingCount } from './CloseConversations'
 import { DeleteSelectedModal, deletableNames } from './DeleteConversations'
 import { ApiError } from '../api/client'
@@ -41,6 +43,13 @@ function age(seconds: number): string {
 export function ConversationsPage() {
   const [phase, setPhase] = useState('')
   const [pipeline, setPipeline] = useState('')
+  // The route's declared icon, by name. The vocabulary is already fetched for
+  // the header chips, so this costs nothing extra.
+  const vocabulary = useVocabulary()
+  const iconFor = (name?: string) =>
+    name
+      ? vocabulary.data?.entries.find((e) => e.kind === 'pipeline' && e.name === name)?.icon
+      : undefined
   const [profile, setProfile] = useState('')
   const [errored, setErrored] = useState(false)
   // Unread is a FILTER like every other one — evaluated server-side, so a
@@ -149,8 +158,17 @@ export function ConversationsPage() {
         <Stack hasGutter>
         <StackItem>
           {/* "New conversation" lives in the masthead — a global action, one
-              click from every page rather than repeated per view. */}
-          <Title headingLevel="h1">Conversations</Title>
+              click from every page rather than repeated per view.
+              These two are REFERENCE, not action: what can be addressed, and
+              what may be typed. The manager answers the same questions as chat
+              commands, but its answer is posted to a channel's general surface
+              and this console has no view for one — so it shows the vocabulary
+              it already holds instead of asking and losing the reply. */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <Title headingLevel="h1">Conversations</Title>
+            <PipelinesChip />
+            <HelpChip />
+          </div>
         </StackItem>
         <StackItem>
           <Toolbar>
@@ -339,11 +357,17 @@ export function ConversationsPage() {
                           label for anyone who cannot see weight. Theme tokens
                           only: a literal colour here would be the one place the
                           console's palette lives outside theme.css. */}
+                      {/* THE ROUTE'S OWN ICON, not a generic one. A title
+                          carries a lane emoji the manager wrote into it; the
+                          Pipeline says what IT looks like, which is more use
+                          in a list where every row is a conversation. The
+                          baked-in one is stripped so the two do not stack. */}
                       <Link
                         to={`/conversations/${c.name}`}
                         style={c.unread ? { fontWeight: 700, color: 'var(--ao-brand-strong)' } : undefined}
                       >
-                        <PlainText>{c.title || c.name}</PlainText>
+                        <Icon icon={iconFor(c.pipeline)} />{' '}
+                        <PlainText>{stripLeadingIcon(c.title || c.name)}</PlainText>
                       </Link>
                       {c.unread && (
                         <Label isCompact color="blue" data-testid={`unread-${c.name}`} style={{ marginLeft: 6 }}>
@@ -388,7 +412,14 @@ export function ConversationsPage() {
                     <Td dataLabel="Pipeline">
                       {/* Attribution is INFERRED from materialized bindings.
                           Blank means ambiguous, never "none". */}
-                      {c.pipeline ? <PlainText>{c.pipeline}</PlainText> : <small>unattributed</small>}
+                      {c.pipeline ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <Icon icon={iconFor(c.pipeline)} />
+                          <PlainText>{c.pipeline}</PlainText>
+                        </span>
+                      ) : (
+                        <small>unattributed</small>
+                      )}
                     </Td>
                     <Td dataLabel="Runs">{c.runCount}</Td>
                     <Td dataLabel="Queued">{c.queued}</Td>

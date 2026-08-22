@@ -27,6 +27,20 @@ vi.mock('../api/hooks', () => ({
     return { data: page(), isLoading: false, error: null }
   },
   useSession: () => ({ data: { canWrite } }),
+  // The page header carries the Pipelines and Help chips, which read the
+  // vocabulary rather than asking the manager a question whose answer this
+  // console has no view for.
+  useVocabulary: () => ({
+    data: {
+      entries: [
+        { kind: 'pipeline', name: 'k8s-ops', position: 'general', description: 'k8s-engineer', icon: 'aops:kubernetes' },
+        { kind: 'builtin', name: 'exit', position: 'thread', description: 'Release the runtime' },
+        { kind: 'builtin', name: 'close', position: 'thread', description: 'End the conversation' },
+      ],
+    },
+    isLoading: false,
+    error: null,
+  }),
   useCloseConversations: () => ({
     mutate,
     data: undefined,

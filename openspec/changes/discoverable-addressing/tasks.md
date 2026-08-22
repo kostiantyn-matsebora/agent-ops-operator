@@ -64,7 +64,7 @@
 
 ## 8. Whole-change verification
 
-- [ ] 8.1 Build and vet the root module and all nine submodules per the `CLAUDE.md` container recipe, and verify every module passes
-- [ ] 8.2 Run the full suite with `KUBEBUILDER_ASSETS` and verify unit and envtest cases pass
-- [ ] 8.3 Verify backward compatibility end to end: run an adapter that ignores the header and the endpoint against the upgraded manager, assert its behaviour is unchanged and the contract version is still `2`
-- [ ] 8.4 Smoke the real thing on a cluster — a rendered pod is not a running one: confirm the `/` control appears in a Telegram chat and completes both a built-in and a hyphenated Pipeline, that the completed Pipeline opens a conversation recorded under its real name, and that selecting a control on an ambiguity refusal delivers the original message
+- [x] 8.1 Build and vet the root module and all nine submodules per the `CLAUDE.md` container recipe, and verify every module passes
+- [x] 8.2 Run the full suite with `KUBEBUILDER_ASSETS` and verify unit and envtest cases pass
+- [x] 8.3 Verify backward compatibility end to end: run an adapter that ignores the header and the endpoint against the upgraded manager, assert its behaviour is unchanged and the contract version is still `2`
+- [x] 8.4 Smoke the real thing on a cluster — a rendered pod is not a running one: confirm the `/` control appears in a Telegram chat and completes both a built-in and a hyphenated Pipeline, that the completed Pipeline opens a conversation recorded under its real name, and that selecting a control on an ambiguity refusal delivers the original message

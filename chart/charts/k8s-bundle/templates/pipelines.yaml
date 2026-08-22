@@ -57,10 +57,10 @@ question was asked in. Values-named channels still win a place beside it. */ -}}
 {{- end }}
 {{- $routes := list }}
 {{- if include "k8s-bundle.observePipelineEnabled" . }}
-{{- $routes = append $routes (dict "name" $p.observe.name "tools" $readTools) }}
+{{- $routes = append $routes (dict "name" $p.observe.name "icon" ($p.observe.icon | default "") "tools" $readTools) }}
 {{- end }}
 {{- if include "k8s-bundle.adminPipelineEnabled" . }}
-{{- $routes = append $routes (dict "name" $p.admin.name "tools" (concat $readTools $writeTools)) }}
+{{- $routes = append $routes (dict "name" $p.admin.name "icon" ($p.admin.icon | default "") "tools" (concat $readTools $writeTools)) }}
 {{- end }}
 {{- range $routes }}
 ---
@@ -72,6 +72,11 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-k8s-bundle
 spec:
+  {{- with .icon }}
+  # Display only: how this route is recognised in a chat command menu or the
+  # console's typeahead. Nothing routes on it.
+  icon: {{ . | quote }}
+  {{- end }}
   profileRef:
     name: {{ $.Values.profile.name }}
   {{- with $sources }}

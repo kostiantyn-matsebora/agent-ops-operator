@@ -455,12 +455,18 @@ pipelines:
     enabled: null
     # Reads the cluster, changes nothing.
     name: k8s-observe
+    # Display only — how the route is recognised in a command menu or the
+    # console. `aops:` is the built-in set every surface ships, so it needs no
+    # network and works air-gapped. `mdi:<name>` or a URL also work, where the
+    # surface can fetch one.
+    icon: aops:observe
   admin:
     enabled: null
     # Named k8s-operate, not k8s-admin: k8s-admin is already the MCPToolset this
     # route binds, and "bind k8s-admin on k8s-admin" is a sentence nobody should
     # have to parse.
     name: k8s-operate
+    icon: aops:operate
   # Channels to deliver to, BY NAME — the one class of object this bundle does
   # not render, so it is values-supplied and the key is omitted entirely when
   # this list is empty. Empty is a working configuration, not a degraded one:

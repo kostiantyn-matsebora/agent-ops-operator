@@ -27,6 +27,11 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-prometheus-bundle
 spec:
+  {{- with $p.icon }}
+  # Display only: how this route is recognised in a chat command menu or the
+  # console's typeahead. Nothing routes on it.
+  icon: {{ . | quote }}
+  {{- end }}
   profileRef:
     name: {{ .Values.profile.name }}
   {{- with $sources }}

@@ -201,3 +201,57 @@ func TestUnknownKindStillRendersItsBody(t *testing.T) {
 		t.Fatalf("unknown kind rendered %q", got)
 	}
 }
+
+// ---- tables --------------------------------------------------------------
+//
+// Telegram has no table markup. A GFM table arriving as raw pipes is thirty
+// unreadable lines on a phone, so it becomes a preformatted block with the
+// columns padded — the one place a chat client uses a monospaced font.
+
+func TestTableBecomesAnAlignedPreBlock(t *testing.T) {
+	md := "Here they are:\n\n| Name | Status | Age |\n|---|---|---|\n| agent-ops | Active | 40h |\n| b2-backup | Active | 188d |\n\ndone"
+	out := renderMessage(newMenu(), Message{Kind: MsgAnswer, Body: md})
+
+	if strings.Contains(out, "|---|") {
+		t.Fatalf("the divider row reached the reader:\n%s", out)
+	}
+	if !strings.Contains(out, "<pre>") {
+		t.Fatalf("table did not become a preformatted block:\n%s", out)
+	}
+	// Columns line up: the short name is padded to the width of the long one.
+	if !strings.Contains(out, "agent-ops  Active") || !strings.Contains(out, "Name       Status") {
+		t.Fatalf("columns are not aligned:\n%s", out)
+	}
+	// The prose around it is untouched.
+	if !strings.Contains(out, "Here they are:") || !strings.Contains(out, "done") {
+		t.Fatalf("surrounding prose lost:\n%s", out)
+	}
+}
+
+// A lone pipe line is somebody's text, not a table.
+func TestPipesWithoutADividerAreLeftAlone(t *testing.T) {
+	out := renderMessage(newMenu(), Message{Kind: MsgAnswer, Body: "run a | b | c to see"})
+	if strings.Contains(out, "<pre>") {
+		t.Fatalf("ordinary pipes were treated as a table:\n%s", out)
+	}
+}
+
+// Cell text is ESCAPED like everything else — a table is not a way to get
+// markup past the renderer.
+func TestTableCellsAreEscaped(t *testing.T) {
+	md := "| Name | Note |\n|---|---|\n| a | <b>x</b> |"
+	out := renderMessage(newMenu(), Message{Kind: MsgAnswer, Body: md})
+	if strings.Contains(out, "<b>x</b>") {
+		t.Fatalf("cell markup reached the transport:\n%s", out)
+	}
+}
+
+// Width is counted in runes: a non-ASCII cell must not skew the columns after
+// it.
+func TestAlignmentCountsRunesNotBytes(t *testing.T) {
+	md := "| Name | S |\n|---|---|\n| über | x |\n| ab | y |"
+	out := renderMessage(newMenu(), Message{Kind: MsgAnswer, Body: md})
+	if !strings.Contains(out, "über  x") {
+		t.Fatalf("multi-byte cell padded wrong:\n%s", out)
+	}
+}
