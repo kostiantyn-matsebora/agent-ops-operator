@@ -1,9 +1,8 @@
 ---
 paths:
-  - "signal-k8s-events/**"
-  - "signal-ha/**"
-  - "internal/ingest/**"
-  - "internal/integration/charttemplate_test.go"
+  - "signals/**"
+  - "platform/manager/internal/ingest/**"
+  - "platform/manager/internal/integration/charttemplate_test.go"
   - "chart/charts/k8s-bundle/**"
   - "chart/charts/ha-bundle/**"
 ---

@@ -21,7 +21,7 @@ func helmTemplate(t *testing.T, args ...string) string {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed")
 	}
-	cmd := exec.Command("helm", append([]string{"template", "test", "../../chart"}, args...)...)
+	cmd := exec.Command("helm", append([]string{"template", "test", chartDir()}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template failed: %v\n%s", err, out)
@@ -36,7 +36,7 @@ func helmTemplateErr(t *testing.T, args ...string) string {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed")
 	}
-	cmd := exec.Command("helm", append([]string{"template", "test", "../../chart"}, args...)...)
+	cmd := exec.Command("helm", append([]string{"template", "test", chartDir()}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("helm template unexpectedly succeeded:\n%s", out)
@@ -1249,7 +1249,7 @@ func helmNotes(t *testing.T, args ...string) string {
 	// crds.enabled=false because this chart ships CRDs as gated TEMPLATES, so a
 	// dry-run install otherwise trips the ownership check against CRDs a real
 	// release already owns. The notes do not depend on them.
-	cmd := exec.Command("helm", append([]string{"install", "notes-test", "../../chart", "--dry-run", "--set", "crds.enabled=false"}, args...)...)
+	cmd := exec.Command("helm", append([]string{"install", "notes-test", chartDir(), "--dry-run", "--set", "crds.enabled=false"}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "cluster unreachable") {

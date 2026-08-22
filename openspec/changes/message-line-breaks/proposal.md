@@ -10,7 +10,7 @@ agent to put a section label on its own line and the content on the next:
 {1–3 lines}
 ```
 
-Telegram renders that as written — `channel-telegram/render.go` returns every
+Telegram renders that as written — `channels/telegram/render.go` returns every
 non-table line untouched, line for line. The console renders it as one run-on
 paragraph, because `react-markdown` follows CommonMark, where a single newline
 inside a paragraph is a space.
@@ -54,14 +54,14 @@ It surfaced on the published site: the console screenshots showed
 
 ## Impact
 
-**The console.** `console/ui/src/components/Markdown.tsx` plus one dependency
+**The console.** `platform/console/ui/src/components/Markdown.tsx` plus one dependency
 (`remark-breaks`) and its tests. A rendering change means a **console image
 release**, its tag in the chart values, and a `docs/CHANGELOG.md` entry.
 
 **The contract.** `internal/dispatch/templates/format.md` (what an agent is told
 to write) and `docs/contracts.md` (what the subset is).
 
-**The site.** `console/ui/screenshots/fixture.ts` unwraps its answer, and the
+**The site.** `platform/console/ui/screenshots/fixture.ts` unwraps its answer, and the
 twelve screenshots plus the landing recording are regenerated — both are build
 output, so this is a command, not an edit.
 

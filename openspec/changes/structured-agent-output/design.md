@@ -5,8 +5,8 @@ below:
 
 - `chat.Message.Body` is one opaque markdown string. `internal/chat/message.go`
   carries typed fields around it but nothing inside it.
-- `channel-telegram/render.go` converts the markdown subset to HTML and splits at
-  4096 characters, preferring a paragraph break. `console/ui/src/components/Text.tsx`
+- `channels/telegram/render.go` converts the markdown subset to HTML and splits at
+  4096 characters, preferring a paragraph break. `platform/console/ui/src/components/Text.tsx`
   does the opposite: it prints the string verbatim and **strips every tag**, on a
   deliberate no-`dangerouslySetInnerHTML` rule.
 - `/channel/ops` already negotiates `?contract=`, so a version bump has a home
@@ -205,6 +205,6 @@ migration, no CR rewrite.
   specs, the approach or the tasks.
 - **`<choice>` blocks.** Turning `Reply: **approve**` into a real button is the
   highest-value block in the grammar, but Telegram callbacks arrive through
-  `telegram-router`, which classifies on `is_topic_message` — a `callback_query`
+  `gateway-telegram`, which classifies on `is_topic_message` — a `callback_query`
   carries that field one level down, so the router needs a new rule. Scoped OUT
   as its own change. Nothing here forecloses it: it is one more reserved tag.

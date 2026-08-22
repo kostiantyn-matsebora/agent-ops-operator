@@ -18,11 +18,11 @@ So origination and continuation cannot each poll for themselves. One process
 reads the stream and fans it out:
 
 ```
-getUpdates ─▶ telegram-router ─┬─ no topic ─▶ signal-telegram  ─▶ /signal/inbound
+getUpdates ─▶ gateway-telegram ─┬─ no topic ─▶ signal-telegram  ─▶ /signal/inbound
               (the only poller) └─ topic    ─▶ channel-telegram ─▶ /channel/inbound
 ```
 
-- **`telegram-router`** classifies on `is_topic_message` — a field that rides
+- **`gateway-telegram`** classifies on `is_topic_message` — a field that rides
   on the update, so the decision is local with no manager round-trip — and
   forwards updates **verbatim**. It holds no channel configuration (chat-id
   matching and approver filtering stay in the receiving adapters), persists
@@ -165,10 +165,17 @@ conversation can be reopened into it.
 
 The router is the odd one out of the three components: it is the only
 `getUpdates` consumer, but it produces no signals, so it is **not an adapter**.
+That is why it is called `gateway-telegram` — it terminates a foreign transport
+and forwards into the two contracts that are ours.
 
 It has no `SignalAdapter` CR and no served CR. The bundle owns its Deployment
-and injects the two forwarding URLs and the bot token as env, and it never
-contacts the manager.
+(`agentops-gateway-telegram`) and injects the two forwarding URLs and the bot
+token as env, and it never contacts the manager.
+
+**It was `telegram-router` until chart 5.38.0**, image and Deployment both. The
+values key stayed `router:` — see [the changelog](CHANGELOG.md) for the one
+upgrade step, which exists because Helm creates the new Deployment before
+deleting the old one and two consumers must never poll one bot token.
 
 One Deployment per bot token makes "exactly one poller" structural rather than
 bookkeeping. The trade is that one router serves one bot, so a second surface

@@ -13,8 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/mcpcompile"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
 )
 
 // LabelApp marks runtime pods; LabelConversation binds one to its conversation.

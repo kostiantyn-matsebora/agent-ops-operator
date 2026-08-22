@@ -1,24 +1,55 @@
 ## Repository map
 
-**Self-contained modules.** No dependencies outside this directory. Keep it that
-way.
+**A DIRECTORY IS A COMPONENT, AND ITS PATH IS AN IMAGE NAME.** The tree is the C&C
+view projected onto files: one container, one directory, grouped by what that
+container IS at runtime.
 
-| Count | What |
-|---|---|
-| **Twelve Go modules** | the operator (root) plus eleven submodules, every submodule dependency-free |
-| **Thirteen images** | those twelve plus `runtime-claude/`, which has no `go.mod` |
+| Group | Holds | The type |
+|---|---|---|
+| `platform/` | `manager` `console` `housekeeping` `context-sync` `egress-proxy` | the product's own components |
+| `runtimes/` | `claude` | client side of the work contract |
+| `signals/` | `cron` `alertmanager` `k8s-events` `ha` `telegram` | push to `/signal/inbound` |
+| `channels/` | `telegram` | serve `/channel/*` |
+| `gateways/` | `telegram` | speaks no agent-ops contract at all |
 
-| The eleven submodules | Are |
-|---|---|
-| `channel-telegram/`, `console/` | channel adapters — the reference one, and the viewer that is also an adapter |
-| `signal-cron/`, `signal-alertmanager/`, `signal-k8s-events/`, `signal-ha/`, `signal-telegram/` | signal adapters |
-| `telegram-router/` | neither — the single getUpdates consumer |
-| `context-sync/`, `egress-proxy/`, `housekeeping/` | run BESIDE a conversation, serving no CR |
+- **THE PATH IS THE PUBLISHED IDENTITY.** A PLURAL group names a kind and lends
+  its singular as a prefix; a SINGULAR group is a namespace and lends nothing:
 
-**Count from the repo, not from this sentence.** It was wrong twice, and
-`egress-proxy/` was missing from the context entirely.
+  ```
+  signals/cron       -> signal-cron       -> agentops-signal-cron
+  channels/telegram  -> channel-telegram  -> agentops-channel-telegram
+  runtimes/claude    -> runtime-claude    -> agentops-runtime-claude
+  gateways/telegram  -> gateway-telegram  -> agentops-gateway-telegram
+  platform/console   -> console           -> agentops-console
+  ```
 
-### The operator
+  So the kind is written once in the tree and once in the image, never twice in
+  either. `.github/components.sh` derives it, asserts it is unique, and a
+  release tag is matched against exactly that list — **moving a directory
+  renames a published image.**
+- **A MODULE PATH FOLLOWS ITS DIRECTORY.** Go resolves a module by looking for
+  `go.mod` where the module says it lives, so a module claiming the repository
+  root from two directories down is unfetchable.
+- **A DIRECTORY HOLDS EVERYTHING ITS CONTAINER BUILDS FROM.** The build context
+  IS the Dockerfile's directory, so `COPY ../shared` cannot work. Shared code
+  lives inside its consumer until sharing is a decision someone makes.
+- **Self-contained modules.** Every submodule has ZERO requires — standard
+  library only — and nothing outside `platform/manager/` imports its `api/` or
+  `internal/`.
+- **Grouping is by component type, never by what installs it.** The chart is the
+  allocation view and carries that; a component moving between the parent chart
+  and a bundle must not move its source.
+
+**Count from the repo, not from this file.** The counts were wrong twice, and
+`platform/egress-proxy/` was missing from the context entirely — `.github/components.sh
+images` and `modules` answer both questions from the tree.
+
+### `platform/manager/` — the operator
+
+Its own Go module, and the only one with dependencies. It moved out of the
+repository root so that every component sits in a directory named for the image
+it publishes — which is also what deleted the one hardcoded name in
+`components.sh`.
 
 | Path | Holds |
 |---|---|
@@ -27,7 +58,7 @@ way.
 | `internal/ingest/` | signature grouping, fingerprint cooldown |
 | `internal/runtimepod/` | runtime pod builder (AgentRuntime CR over bootstrap Config) |
 | `internal/addressing/` | `/<pipeline> <task>` parsing — ONE segment. The `:<agent>` override is deleted: a Pipeline names one profile and a profile names one agent, so the agent comes from the wiring, and a sender picking their own reached past it |
-| `internal/integration/` | envtest suite — real API server, fake chat, no kubelet |
+| `internal/integration/` | envtest suite — real API server, fake chat, no kubelet. `chartDir()` names the way out to `chart/`, once |
 | `config/samples/` | example CRs, the only `config/` content. Deployment-specific config belongs with the deployment, never in this module |
 
 **`internal/controller/`** — the Conversation reconciler, plus the adapter and
@@ -85,7 +116,7 @@ templates:
 - **A raw hand-written `mcp.json` is EXCLUSIVE.** Bound with others is an
   error.
 
-### `runtime-claude/`
+### `runtimes/claude/`
 
 The reference `AgentRuntime` — Node plus claude-code, implementing the `/work`
 contract.
@@ -100,14 +131,14 @@ contract.
 
 ### The Telegram trio
 
-**`channel-telegram/`** — the reference channel adapter, implementing the
+**`channels/telegram/`** — the reference channel adapter, implementing the
 `/channel` contract. Bot API sending lives HERE.
 
 **It does NOT poll.** It receives topic updates pushed by the router
 (`POST /updates`, `ChannelAdapter spec.port`) and persists the router's offset
 (`GET/PUT /offset` → state API).
 
-**`telegram-router/`** — the ONLY getUpdates consumer.
+**`gateways/telegram/`** — the ONLY getUpdates consumer.
 
 - **It classifies each update on `is_topic_message` and forwards it VERBATIM.**
   No topic → `signal-telegram` (origination). Topic → `channel-telegram`
@@ -121,7 +152,7 @@ contract.
 - **One Deployment per bot token makes the single-consumer rule structural.** A
   missing env var exits at startup.
 
-**`signal-telegram/`** — the chat ORIGINATION adapter.
+**`signals/telegram/`** — the chat ORIGINATION adapter.
 
 It normalizes general-surface updates and posts `/signal/inbound`:
 
@@ -134,10 +165,10 @@ It normalizes general-surface updates and posts `/signal/inbound`:
 
 ### The other signal adapters
 
-**`signal-cron/`** — the reference signal adapter, implementing the `/signal`
+**`signals/cron/`** — the reference signal adapter, implementing the `/signal`
 contract. Five-field cron parser plus scheduler.
 
-**`signal-alertmanager/`** — webhook-receiving signal adapter. Hosts `/webhook/{source}` for Alertmanager-format posts, and the
+**`signals/alertmanager/`** — webhook-receiving signal adapter. Hosts `/webhook/{source}` for Alertmanager-format posts, and the
 prometheus-bundle subchart ships it.
 
 - **The pod label `agentops.dev/signal-adapter` is a CHART CONTRACT**, pinned by
@@ -158,7 +189,7 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
   `metrics.vmServiceScrape` value on the same grounds.
 - **Renaming either would name a thing that does not exist.**
 
-**`signal-ha/`** — Home Assistant log signal adapter.
+**`signals/ha/`** — Home Assistant log signal adapter.
 
 - **Reads that instance's WebSocket API** over a hand-written RFC 6455 client:
   `system_log_event`, with `system_log/list` for backfill and for the dwell
@@ -174,7 +205,7 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
   `websocket_api`), because a failed agent call is logged there and reporting it
   would wake the agent that made it.
 
-**`signal-k8s-events/`** — cluster Events signal adapter.
+**`signals/k8s-events/`** — cluster Events signal adapter.
 
 - **In-cluster API over `net/http`**, no client-go: SA token re-read, list+watch
   per namespace scope, 410 relist.
@@ -185,7 +216,7 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
 
 ### Beside a conversation
 
-**`housekeeping/`** — the disk half of conversation retention.
+**`platform/housekeeping/`** — the disk half of conversation retention.
 
 - **A CronJob, not a daemon.** It scans the claim ROOTS for workspace
   directories and session transcripts no Conversation backs, and removes them.
@@ -197,7 +228,7 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
 - **Named `agentops-housekeeping`** so `signal-k8s-events`' prefix
   self-exclusion catches it. A CronJob fails on a SCHEDULE.
 
-**`egress-proxy/`** — the tool-access wall INSIDE the runtime pod.
+**`platform/egress-proxy/`** — the tool-access wall INSIDE the runtime pod.
 
 - **ONE binary, two subcommands:** `install-redirect` (privileged init
   container, writes the redirect rules) and `proxy` (serves the redirected
@@ -211,13 +242,13 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
 - **Opt-in via `runtime.egressMediation.enabled`** — see
   `docs/adr/0001-bound-component-reach.md`.
 
-**`context-sync/`** — the context sidecar. Semantics in the terminology entry;
+**`platform/context-sync/`** — the context sidecar. Semantics in the terminology entry;
 what lives HERE is the implementation:
 
 - **Atomic generations plus a `current` symlink.** Copies are labelled quiesced
   or best-effort.
 
-### `console/`
+### `platform/console/`
 
 **The agent-ops console** — a ChannelAdapter that is ALSO the viewer.
 

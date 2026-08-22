@@ -3,7 +3,7 @@
 // A chat transport is inherently a surface AND an originator. Before this mode
 // existed, declaring both identities meant two Deployments, one of which was an
 // idle pod whose only job was to make a source Served — the exact shape this
-// repo already paid for with telegram-router. These tests pin that the second
+// repo already paid for with gateway-telegram. These tests pin that the second
 // pod does not come back.
 package integration
 
@@ -20,9 +20,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 )
 
 // mkServedSignalAdapter creates a SignalAdapter with no image, served by a

@@ -40,7 +40,7 @@ filename — so the routing is explicit:
 | Hard-won gotchas | `.claude/rules/gotchas.md` |
 | What the console is FOR — its views, what each answers, the authentication decision | `docs/console-guide.md` |
 | What the console IS — endpoints, RBAC grant, values reference, internals | `docs/console.md` |
-| A change to the console's UI | re-run BOTH `npm run screenshots` and `npm run demo` in `console/ui` — the site's screenshots and its landing recording are build output, and the change is not done until both match |
+| A change to the console's UI | re-run BOTH `npm run screenshots` and `npm run demo` in `platform/console/ui` — the site's screenshots and its landing recording are build output, and the change is not done until both match |
 | The pitch, the kind list, the demo, the install command | `README.md` |
 | The site's SHELL — Jekyll source, diagrams, what each page owes beyond its row | `docs/.claude/site.md` |
 | A colour token, the theme choice, or the mark | `.claude/rules/palette-and-mark.md` — always a TWO-FILE change |

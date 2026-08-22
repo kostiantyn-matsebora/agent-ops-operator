@@ -14,9 +14,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 )
 
 type readResp struct {

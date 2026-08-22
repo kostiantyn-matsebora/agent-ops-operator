@@ -3,7 +3,7 @@
 // claim check, cooldown, grouping and observability as an alert or a cron job,
 // instead of creating a Conversation down a private path.
 //
-//	updates: POST /updates            (from telegram-router; LISTEN_ADDR, default :8080)
+//	updates: POST /updates            (from gateway-telegram; LISTEN_ADDR, default :8080)
 //	sources: GET /signal/sources?adapter=<ADAPTER_NAME>   (15s poll)
 //	push:    POST /signal/inbound     (normalized; chat lane)
 //

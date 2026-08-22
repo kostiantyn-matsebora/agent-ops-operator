@@ -2,7 +2,7 @@
 
 `AgentRuntime` has always promised a pluggable backend — `spec.image` plus the
 four-step work contract — and exactly one image has ever implemented it
-(`runtime-claude/`, Node + claude-code). Everything vendor-shaped in the contract
+(`runtimes/claude/`, Node + claude-code). Everything vendor-shaped in the contract
 was therefore written by looking at one vendor: `runtimeContextId` is an opaque
 handle *because we said so*, not because a second backend ever tested it;
 `allowedTools` carries claude-code's vocabulary; the agent definition lives at
@@ -145,7 +145,7 @@ turning a routing decision into a vendor decision.
 ### D5 — The definition path is the runtime's fact; the "declares nothing" rule is not
 
 The copilot runtime reads `.github/agents/<agent>.agent.md` (Copilot's location),
-parses the same frontmatter shapes `runtime-claude/tools.js` handles, and
+parses the same frontmatter shapes `runtimes/claude/tools.js` handles, and
 composes with `toolsMode` identically. Absent file, absent frontmatter, absent
 `tools:`, unparseable frontmatter → contributes NOTHING, logged, never fatal.
 

@@ -19,10 +19,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 )
 
 func mkChannel(t *testing.T, name, typ string) {

@@ -15,12 +15,12 @@ import (
 // controller-gen spells it — against the manager Role, so a new kind cannot
 // ship without its rule either.
 func TestManagerRBACCoversEveryCRDPlural(t *testing.T) {
-	crdDir := filepath.Join("..", "..", "chart", "files", "crds")
+	crdDir := chartDir("files", "crds")
 	entries, err := os.ReadDir(crdDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rbac, err := os.ReadFile(filepath.Join("..", "..", "chart", "templates", "rbac.yaml"))
+	rbac, err := os.ReadFile(chartDir("templates", "rbac.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

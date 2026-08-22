@@ -153,7 +153,7 @@ A fake Bot API server SHALL implement `getUpdates`, `sendMessage`,
 SHALL be pointed at it through the adapters' configured base URL. No test SHALL
 contact `api.telegram.org`, and no bot token SHALL be required to run any tier.
 
-The double is faithful because `telegram-router` forwards updates verbatim: a
+The double is faithful because `gateway-telegram` forwards updates verbatim: a
 replayed `Update` is byte-identical to what the real API would have produced.
 
 #### Scenario: The full Telegram path runs with no bot

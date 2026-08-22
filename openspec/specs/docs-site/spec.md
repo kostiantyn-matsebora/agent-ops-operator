@@ -108,11 +108,11 @@ used the console recognises the documentation as the same product. Specifically
 it SHALL reproduce:
 
 - **The palette**, as the `--ao-*` custom-property block copied verbatim from
-  `console/ui/src/theme/theme.css` — both the light block and the dark block,
+  `platform/console/ui/src/theme/theme.css` — both the light block and the dark block,
   token names unchanged. The site's own CSS SHALL be written against those
   tokens and SHALL NOT hard-code a hex colour outside the token block.
 - **The mark**, as the same inline SVG the console's masthead renders
-  (`console/ui/src/components/Logo.tsx`), drawn with `var(--ao-brand)` and
+  (`platform/console/ui/src/components/Logo.tsx`), drawn with `var(--ao-brand)` and
   `var(--ao-surface)` so it follows the theme.
 - **The shell**: a fixed masthead carrying the mark and the product word, over a
   left navigation sidebar and a content column — the console's arrangement, not
@@ -133,7 +133,7 @@ component library.
 
 #### Scenario: The console palette changes
 
-- **WHEN** a token value in `console/ui/src/theme/theme.css` is changed
+- **WHEN** a token value in `platform/console/ui/src/theme/theme.css` is changed
 - **THEN** the corresponding value in the site's token block is the only site
   edit required, because no other rule states a colour literally
 
@@ -554,7 +554,7 @@ depend on a component's behaviour to make its content complete or comprehensible
 A component no page uses SHALL be removed rather than kept for a future one.
 
 Where a component draws a kind's glyph it SHALL use the one the console draws
-for that kind (`console/ui/src/graph/shapes.tsx`), copied on the same terms as
+for that kind (`platform/console/ui/src/graph/shapes.tsx`), copied on the same terms as
 the palette and the mark — one-directional, so that changing a glyph is a
 two-file change — and rendered so it follows the theme's colour rather than
 carrying a baked-in one.

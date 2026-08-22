@@ -136,7 +136,7 @@ The gate is applied ONCE, before the request: only allowed tools are advertised.
 A model that names an unadvertised tool anyway gets a tool error it can read and
 recover from, never an execution.
 
-Composition is a port of `runtime-claude/tools.js` — including its deliberate
+Composition is a port of `runtimes/claude/tools.js` — including its deliberate
 non-YAML-parser posture: read one field of one shape, treat anything not
 understood as "declares nothing", never let an unreadable role file stop an
 agent answering. Its test cases port with it.

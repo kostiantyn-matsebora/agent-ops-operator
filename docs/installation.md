@@ -177,7 +177,7 @@ not close it.
 ```yaml
 runtime:
   # the agent backend — swap it to change vendor
-  image: kmatsebora/agentops-runtime-claude:0.6.0
+  image: kmatsebora/agentops-runtime-claude:0.8.0
   credentialsSecret:
     # read by the kubelet, never by the operator
     name: agentops-claude

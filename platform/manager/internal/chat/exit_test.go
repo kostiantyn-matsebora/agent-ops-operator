@@ -8,9 +8,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/addressing"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/addressing"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
 // /exit is the second command the REPLY path handles, and it is one word from

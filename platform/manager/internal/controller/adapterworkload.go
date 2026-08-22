@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/configschema"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/configschema"
 )
 
 // Adapter workload machinery shared by the ChannelAdapter and SignalAdapter

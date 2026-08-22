@@ -29,7 +29,7 @@ type SignalAdapterSpec struct {
 	// ORIGINATOR — it carries conversations on threads and starts them from the
 	// general surface. Without this, declaring both identities produces two
 	// Deployments, one of which is an idle pod existing only to make a source
-	// Served. This repo has paid for that shape once already (telegram-router
+	// Served. This repo has paid for that shape once already (gateway-telegram
 	// was an adapter with a signal-free SignalSource purely to carry a
 	// credential, which then sat at Wired=False). The difference here is the one
 	// that matters: an externally-served source originates real conversations

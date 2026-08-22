@@ -8,8 +8,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 )
 
 // Programmatic origination is an ordinary signal: `kind: task` posted to a

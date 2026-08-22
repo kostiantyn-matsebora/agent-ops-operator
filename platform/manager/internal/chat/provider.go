@@ -3,7 +3,7 @@
 // that resolves a Channel's type to one, the outbound operation queue external
 // adapters consume over HTTP, and the transport-neutral Router that turns
 // inbound messages into Conversations. Concrete transports (Telegram, Slack, …)
-// live outside the manager as adapters; see channel-telegram/ for the
+// live outside the manager as adapters; see channels/telegram/ for the
 // reference implementation.
 package chat
 

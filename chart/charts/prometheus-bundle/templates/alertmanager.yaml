@@ -28,7 +28,7 @@ spec:
   singleton: true
   # The config contract for SignalSources with `adapter: {{ $name }}` — this is
   # the richest config in the system, so it is the one most worth declaring.
-  # Mirrors registerSpec in signal-alertmanager/register.go; bump both in one
+  # Mirrors registerSpec in signals/alertmanager/register.go; bump both in one
   # diff. Advisory only: violations surface as ConfigValid, never block ingest.
   configSchema:
     type: object

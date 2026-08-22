@@ -290,7 +290,7 @@ type BotCommand struct {
 
 // tgUpdate is the slice of the Telegram update shape this adapter reads from
 // updates the ROUTER forwards. There is no GetUpdates here on purpose:
-// Telegram serves one update stream per bot token, so telegram-router is the
+// Telegram serves one update stream per bot token, so gateway-telegram is the
 // only process that may call it. Adding a poll loop back to this file is the
 // mistake that produces 409s and stolen updates.
 type tgUpdate struct {

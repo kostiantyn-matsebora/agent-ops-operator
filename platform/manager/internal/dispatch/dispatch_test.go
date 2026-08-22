@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
 func inlineResolver(item agentopsv1alpha1.InputItem) (string, error) { return item.Payload, nil }

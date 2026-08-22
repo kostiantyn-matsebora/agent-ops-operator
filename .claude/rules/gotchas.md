@@ -78,7 +78,7 @@ dial tcp 192.0.2.187:8080: connect: operation not permitted
 
 - **It is a rollout race, not a denial**, and clears the moment an endpoint goes
   ready. kube-proxy would have said `connection refused` at the same instant.
-- **`telegram-router` logs it once at startup**, reading the offset while
+- **`gateway-telegram` logs it once at startup**, reading the offset while
   `channel-telegram` is mid-rollout, then retries every 5s and recovers.
 - **Confirm against the ENDPOINT LIST and the ReplicaSet timestamps before
   suspecting policy.** Three sessions read that line as a NetworkPolicy problem.
@@ -107,7 +107,7 @@ Migrating from another system, or from the old single-container adapter:
 
 1. Stop its poller.
 2. CONFIRM none remains.
-3. Start `telegram-router`.
+3. Start `gateway-telegram`.
 
 **`Channel.spec.config.pollingEnabled` is gone.** Ingest is on when the router
 runs.

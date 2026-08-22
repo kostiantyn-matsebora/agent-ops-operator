@@ -8,7 +8,8 @@
 #
 # The gomod list is the one place in .github/ that names modules. It cannot be
 # derived — Dependabot reads this file directly — so a new module adds four
-# lines here, and CI keeps covering it either way.
+# lines here, and CI keeps covering it either way. The paths are component
+# directories, which is also where the image name comes from.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -17,66 +18,66 @@ updates:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/"
+    directory: "/platform/manager"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/channel-telegram"
+    directory: "/channels/telegram"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/console"
+    directory: "/platform/console"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/context-sync"
+    directory: "/platform/context-sync"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/egress-proxy"
+    directory: "/platform/egress-proxy"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/housekeeping"
+    directory: "/platform/housekeeping"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/signal-alertmanager"
+    directory: "/signals/alertmanager"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/signal-cron"
+    directory: "/signals/cron"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/signal-ha"
+    directory: "/signals/ha"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/signal-k8s-events"
+    directory: "/signals/k8s-events"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/signal-telegram"
+    directory: "/signals/telegram"
     schedule:
       interval: weekly
 
   - package-ecosystem: gomod
-    directory: "/telegram-router"
+    directory: "/gateways/telegram"
     schedule:
       interval: weekly
 
   - package-ecosystem: npm
-    directory: "/console/ui"
+    directory: "/platform/console/ui"
     schedule:
       interval: weekly

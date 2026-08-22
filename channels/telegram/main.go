@@ -4,11 +4,11 @@
 // for other transports (Slack, Teams, …).
 //
 //	outbound: long-poll GET /channel/ops?adapter=telegram  ->  Bot API calls
-//	inbound:  POST /updates (from telegram-router)         ->  POST /channel/inbound
+//	inbound:  POST /updates (from gateway-telegram)         ->  POST /channel/inbound
 //	offset:   GET/PUT /offset (for the router)             ->  adapter state API
 //
 // This adapter DOES NOT POLL. Telegram serves exactly one update stream per
-// bot token, so telegram-router owns the single getUpdates loop and forwards
+// bot token, so gateway-telegram owns the single getUpdates loop and forwards
 // each update to whichever component it belongs to: a forum-topic message
 // CONTINUES a conversation and comes here; a general-surface message
 // ORIGINATES one and goes to signal-telegram instead. Conversations are born
@@ -51,7 +51,7 @@ import (
 //
 // There is no pollingEnabled any more: this adapter never polls, so a channel
 // cannot opt into a loop that no longer exists here. Ingest is enabled by
-// running telegram-router against the bot token.
+// running gateway-telegram against the bot token.
 type channelConfig struct {
 	ChatID       string  `json:"chatId"`
 	FeedThreadID *int64  `json:"feedThreadId,omitempty"`

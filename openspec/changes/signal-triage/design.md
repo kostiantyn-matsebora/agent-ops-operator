@@ -141,4 +141,4 @@ The triage Conversation has a pod; the pod can fail; a failing pod emits events.
 - Should the cap window be fixed (per hour) or configurable? Fixed is one fewer knob and one fewer way to misconfigure a safety floor.
 - What does the agent see about candidates — titles and signatures only, or recent input payloads too? Payloads make the judgment better and the cost higher, and they widen the injection surface.
 - Should a `drop` verdict still bump `receivedTotal`/`lastReceived` on the source? Arguably yes: the signal *was* received, and hiding it would make the source look idle during a storm the agent is suppressing.
-- Does the console (`console/`) need a triage-verdict view? A verdict record nobody reads is not really an audit.
+- Does the console (`platform/console/`) need a triage-verdict view? A verdict record nobody reads is not really an audit.

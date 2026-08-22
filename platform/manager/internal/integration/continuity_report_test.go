@@ -8,11 +8,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 )
 
 // Losing context is the one failure that leaves a conversation looking entirely

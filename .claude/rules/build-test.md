@@ -1,14 +1,16 @@
 ## Build / test
 
 ```sh
-go build ./... && go vet ./...
-for m in channel-telegram telegram-router signal-telegram signal-cron \
-         signal-alertmanager signal-k8s-events signal-ha; do
+# EVERY module, discovered rather than listed — the same answer CI's matrix gets.
+for m in $(.github/components.sh modules | jq -r '.[]'); do
   (cd $m && go build ./... && go vet ./... && go test ./...)
 done
-# regen after editing api/v1alpha1/ (deepcopy + CRDs):
+# the operator lives in platform/manager/, and everything below runs from there:
+cd platform/manager
+# regen after editing api/v1alpha1/ (deepcopy + CRDs). The chart is four levels
+# up now, which is also why the integration suite names that path once:
 go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 object paths=./api/...
-go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/... output:crd:artifacts:config=chart/files/crds
+go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/... output:crd:artifacts:config=../../chart/files/crds
 # full tests (unit + envtest against a real API server):
 KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19 use 1.31.x --bin-dir ~/.envtest -p path) go test ./...
 ```
@@ -95,7 +97,7 @@ UPSTREAM is single-arch, `runtime-claude` is the case" — and it was wrong.
 Building the image settles it:
 
 ```
-docker buildx build --platform linux/arm64 ./runtime-claude/     # succeeds
+docker buildx build --platform linux/arm64 ./runtimes/claude/     # succeeds
 docker run --platform linux/arm64 … claude --version
 arch: aarch64 / v22.23.2 / 2.1.239 (Claude Code)
 ```
@@ -118,19 +120,27 @@ from prose — including this prose.
 # multi-platform result to the local daemon, so a separate `docker push` would
 # silently ship whichever single arch got loaded.
 BX="docker buildx build --platform linux/amd64,linux/arm64 --push"
-$BX -t <registry>/agentops-manager:<tag> .
-$BX -t <registry>/agentops-channel-telegram:<tag> ./channel-telegram/
-$BX -t <registry>/agentops-telegram-router:<tag> ./telegram-router/
-$BX -t <registry>/agentops-signal-telegram:<tag> ./signal-telegram/
-$BX -t <registry>/agentops-signal-cron:<tag> ./signal-cron/
-$BX -t <registry>/agentops-signal-alertmanager:<tag> ./signal-alertmanager/
-$BX -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
-$BX -t <registry>/agentops-signal-ha:<tag> ./signal-ha/
-$BX -t <registry>/agentops-console:<tag> ./console/
-$BX -t <registry>/agentops-context-sync:<tag> ./context-sync/
-$BX -t <registry>/agentops-egress-proxy:<tag> ./egress-proxy/
-$BX -t <registry>/agentops-housekeeping:<tag> ./housekeeping/
-$BX -t <registry>/agentops-runtime-claude:<tag> ./runtime-claude/
+# The image name is the DIRECTORY's name, which is why this list can be derived
+# rather than remembered — and why renaming a directory renames an image:
+.github/components.sh images | jq -r '.[] | "\(.component) \(.context)"' |
+  while read -r component context; do
+    $BX -t "<registry>/agentops-$component:<tag>" "$context"
+  done
+
+# or one at a time:
+$BX -t <registry>/agentops-manager:<tag> ./platform/manager/
+$BX -t <registry>/agentops-console:<tag> ./platform/console/
+$BX -t <registry>/agentops-context-sync:<tag> ./platform/context-sync/
+$BX -t <registry>/agentops-egress-proxy:<tag> ./platform/egress-proxy/
+$BX -t <registry>/agentops-housekeeping:<tag> ./platform/housekeeping/
+$BX -t <registry>/agentops-runtime-claude:<tag> ./runtimes/claude/
+$BX -t <registry>/agentops-signal-cron:<tag> ./signals/cron/
+$BX -t <registry>/agentops-signal-alertmanager:<tag> ./signals/alertmanager/
+$BX -t <registry>/agentops-signal-k8s-events:<tag> ./signals/k8s-events/
+$BX -t <registry>/agentops-signal-ha:<tag> ./signals/ha/
+$BX -t <registry>/agentops-signal-telegram:<tag> ./signals/telegram/
+$BX -t <registry>/agentops-channel-telegram:<tag> ./channels/telegram/
+$BX -t <registry>/agentops-gateway-telegram:<tag> ./gateways/telegram/
 
 # VERIFY before believing it — the failure mode is invisible until it schedules:
 docker manifest inspect <registry>/agentops-console:<tag> \

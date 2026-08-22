@@ -5,7 +5,7 @@ configured. The reconcilers own every Deployment and Service.
 */ -}}
 {{- if include "telegram-bundle.active" . }}
 {{- $ca := .Values.channelAdapter }}
-# CONTINUATION and delivery. Does NOT poll: telegram-router owns the single
+# CONTINUATION and delivery. Does NOT poll: gateway-telegram owns the single
 # getUpdates loop and pushes topic updates here.
 apiVersion: agentops.dev/v1alpha1
 kind: ChannelAdapter

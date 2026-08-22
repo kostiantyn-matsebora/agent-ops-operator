@@ -1,5 +1,6 @@
 # agentops claude agent runtime — the default AgentRuntime image.
-# docker build --platform linux/amd64 -t kmatsebora/agentops-runtime-claude:<tag> .
+# docker buildx build --platform linux/amd64,linux/arm64 --push \
+#   -t kmatsebora/agentops-runtime-claude:<tag> ./runtimes/claude/
 FROM node:22-bookworm-slim
 
 RUN apt-get update -qq && \

@@ -14,9 +14,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/storagebreaker"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
 )
 
 // TestUnattachableVolumesOpenTheBreaker: three conversations whose pods cannot

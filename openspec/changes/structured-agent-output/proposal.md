@@ -79,7 +79,7 @@ which now injects the default section set instead.
 - `internal/dispatch/templates/format.md` — rewritten; prompt assembly gated on
   the profile flag.
 - `api/v1alpha1` — `AgentProfile` flag field; deepcopy + CRD regeneration.
-- `channel-telegram/render.go` — block rendering, expandable blockquote,
+- `channels/telegram/render.go` — block rendering, expandable blockquote,
   block-boundary splitting.
 - `console/ui` — block components; `Text.tsx` retains its plain-text rule for
   everything else.
@@ -90,4 +90,4 @@ which now injects the default section set instead.
 
 - **`<choice>` blocks.** Turning `Reply: **approve**` into a real button is the
   highest-value block, but it drags Telegram callback routing through
-  `telegram-router`, which classifies on `is_topic_message`. Scoped OUT here.
+  `gateway-telegram`, which classifies on `is_topic_message`. Scoped OUT here.

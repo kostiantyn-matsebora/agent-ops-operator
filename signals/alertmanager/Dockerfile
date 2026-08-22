@@ -1,5 +1,5 @@
 # signal-alertmanager adapter — multi-stage build
-# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-signal-alertmanager:<tag> ./signal-alertmanager/
+# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-signal-alertmanager:<tag> ./signals/alertmanager/
 FROM --platform=$BUILDPLATFORM golang:1.23 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src

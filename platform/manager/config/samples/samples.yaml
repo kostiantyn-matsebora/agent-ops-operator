@@ -166,7 +166,7 @@ metadata:
   namespace: agent-ops
 spec:
   image: kmatsebora/agentops-channel-telegram:0.5.0
-  # This adapter does NOT poll. telegram-router owns the single getUpdates loop
+  # This adapter does NOT poll. gateway-telegram owns the single getUpdates loop
   # and pushes topic updates here, so the reconciler owns Service
   # agentops-adapter-telegram and injects LISTEN_ADDR.
   port: 8080
@@ -206,7 +206,7 @@ spec:
 ---
 # The Telegram ingest split. One poller, two receivers:
 #
-#   getUpdates -> telegram-router --+-- no topic -> signal-telegram  (ORIGINATION)
+#   getUpdates -> gateway-telegram --+-- no topic -> signal-telegram  (ORIGINATION)
 #                                   +-- topic    -> channel-telegram (CONTINUATION)
 #
 # EXACTLY ONE process may read a bot token's stream, ever. Scale any older
@@ -238,7 +238,7 @@ spec:
     # repeating a request means it twice. Set signatureLabels to opt in.
     cooldownHours: 0
 ---
-# NOTE: telegram-router has NO CR. It produces no signals, so it is not an
+# NOTE: gateway-telegram has NO CR. It produces no signals, so it is not an
 # adapter: the telegram-bundle chart owns its Deployment and injects
 # SIGNAL_TARGET, CHANNEL_TARGET and the bot token as env. Modelling it as a
 # SignalAdapter used to require a signal-free SignalSource purely to carry the

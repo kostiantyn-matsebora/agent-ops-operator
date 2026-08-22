@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.43.0
+  tag: 0.44.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -103,7 +103,7 @@ runtime:
   # 0.2.0+ composes the allowlist with the agent definition's own `tools:` and
   # passes it verbatim — no substituted `Read` when nothing is declared.
   # Pinning an older tag keeps that substitution and ignores toolsets.mode.
-  image: kmatsebora/agentops-runtime-claude:0.7.1
+  image: kmatsebora/agentops-runtime-claude:0.8.0
   # Empty = follow runtimeIdleTtlMinutes above, so the release has ONE number.
   # Set it only to give THIS runtime a different one. (It is always written to
   # the CR: the CRD defaults this field to 10, so an omitted field is not unset
@@ -149,7 +149,7 @@ runtime:
     retain: 3
     # The sidecar image. Release-wide, like the manager's own: it implements a
     # contract rather than being a backend choice.
-    image: kmatsebora/agentops-context-sync:0.1.1
+    image: kmatsebora/agentops-context-sync:0.2.0
     # Bounds the pod-local live context. In this mode the WHOLE home is
     # ephemeral — caches and tool state included — so it must be generous.
     # Empty leaves it unbounded, which is Kubernetes' own default.
@@ -173,7 +173,7 @@ runtime:
     enabled: false
     # The proxy image. Release-wide like the sidecar above: a contract, not a
     # backend choice.
-    image: kmatsebora/agentops-egress-proxy:0.1.3
+    image: kmatsebora/agentops-egress-proxy:0.2.0
     # The image that installs the redirect. Empty uses the proxy image, which
     # ships both. Point it elsewhere only to keep the privileged image minimal.
     initImage: ""
@@ -368,7 +368,7 @@ global:
 #   pipelines:
 #     - name: k8s-ops                 # Pipeline CR name
 #       profile: k8s-engineer         # REQUIRED
-#       signalSources: [cluster-events, k8s-ops-chat, telegram-router]
+#       signalSources: [cluster-events, k8s-ops-chat, home-ops]
 #       channels: [k8s-ops]
 #       toolsets: [agentops-observe, agentops-shell, k8s-observability]
 #       toolsetsMode: merge           # optional: merge (default) | overwrite
@@ -493,7 +493,7 @@ console:
     # The corner: a graph inside an inactive tab measured a 0x0 host, fitted to
     # it, and clamped to minimum zoom for good. The fit now waits for a host
     # with a size, so it works in a tab, a drawer, or wherever one lands next.
-    tag: 0.25.1
+    tag: 0.26.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -825,7 +825,7 @@ housekeeping:
   schedule: "17 3 * * *"
   image:
     repository: kmatsebora/agentops-housekeeping
-    tag: 0.1.1
+    tag: 0.2.0
   # Reports what it would remove and removes nothing. Take it off only after a
   # run has named no directory belonging to a conversation you are keeping.
   dryRun: true

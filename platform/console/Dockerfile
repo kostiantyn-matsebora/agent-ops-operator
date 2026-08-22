@@ -6,7 +6,7 @@
 # port with nothing fetched at runtime.
 #
 #   docker buildx build --platform linux/amd64,linux/arm64 \
-#     -t kmatsebora/agentops-console:<tag> --push ./console/
+#     -t kmatsebora/agentops-console:<tag> ./platform/console/
 # Never overwrite a pushed tag — bump it on every change.
 
 FROM --platform=$BUILDPLATFORM node:22-alpine AS ui

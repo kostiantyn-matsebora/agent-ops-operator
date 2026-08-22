@@ -6,7 +6,7 @@
 # stream per bot token (a second concurrent getUpdates gets 409, and confirming
 # an offset destructively consumes updates for every reader):
 #
-#   getUpdates ─▶ telegram-router ─┬─ no topic ─▶ signal-telegram  (ORIGINATION)
+#   getUpdates ─▶ gateway-telegram ─┬─ no topic ─▶ signal-telegram  (ORIGINATION)
 #                 (the only poller) └─ topic    ─▶ channel-telegram (CONTINUATION)
 #
 # The two RECEIVING ends are adapter CRs, and the operator's reconcilers own
@@ -27,7 +27,7 @@ channelAdapter:
   name: telegram
   image:
     repository: kmatsebora/agentops-channel-telegram
-    tag: 0.19.0
+    tag: 0.20.0
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
@@ -40,7 +40,7 @@ signalAdapter:
   name: telegram
   image:
     repository: kmatsebora/agentops-signal-telegram
-    tag: 0.5.0
+    tag: 0.6.0
   # Port the router pushes general-surface updates to.
   port: 8080
   resources: {}
@@ -52,8 +52,8 @@ signalAdapter:
 # env. It reaches the Kubernetes API not at all.
 router:
   image:
-    repository: kmatsebora/agentops-telegram-router
-    tag: 0.4.0
+    repository: kmatsebora/agentops-gateway-telegram
+    tag: 0.5.0
   # Extra env passthrough (appended after SIGNAL_TARGET, CHANNEL_TARGET and the
   # projected bot token).
   env: []

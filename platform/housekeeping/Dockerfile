@@ -1,5 +1,5 @@
 # housekeeping job — multi-stage build
-# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-housekeeping:<tag> ./housekeeping/
+# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-housekeeping:<tag> ./platform/housekeeping/
 FROM --platform=$BUILDPLATFORM golang:1.23 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src

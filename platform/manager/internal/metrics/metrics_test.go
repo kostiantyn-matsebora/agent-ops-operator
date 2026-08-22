@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 )
 
 // wired builds a log whose ONLY observer is the metric set — the shape the

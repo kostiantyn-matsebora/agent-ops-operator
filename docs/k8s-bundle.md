@@ -580,7 +580,7 @@ Two tools (`nodes_log`, `nodes_stats_summary`) read through `nodes/proxy`, which
 a `readonly` server SA deliberately does not grant. They fail with a
 Forbidden the agent can read, and widening is a deliberate grant.
 
-The events adapter (`signal-k8s-events/`) watches core `v1` Events through the
+The events adapter (`signals/k8s-events/`) watches core `v1` Events through the
 in-cluster API with its own ServiceAccount token — the operator grants adapters
 nothing, so those permissions come from this chart, bound to the deterministic
 name `agentops-signal-<adapter>`. Its `severities` default to `["Warning"]`,

@@ -1042,7 +1042,7 @@ manager `0.25.1`, channel-telegram `0.7.0`, console `0.6.0`.
 outbound message contract, and version 2 is not compatible with version 1 in
 either direction.
 
-The signal adapters and `telegram-router` are unaffected. They never consume
+The signal adapters and `gateway-telegram` are unaffected. They never consume
 `/channel/ops`.
 
 ### Changed

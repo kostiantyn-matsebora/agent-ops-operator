@@ -1,5 +1,5 @@
 # egress-proxy — the enforcing proxy AND the redirect installer, one image.
-# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-egress-proxy:<tag> ./egress-proxy/
+# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-egress-proxy:<tag> ./platform/egress-proxy/
 #
 # NOT distroless, unlike every other component here, and the reason is the one
 # thing this image does that Go cannot: writing the redirect rules.

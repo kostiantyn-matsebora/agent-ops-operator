@@ -18,14 +18,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/metrics"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/storagebreaker"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/metrics"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
 )
 
 var scheme = runtime.NewScheme()

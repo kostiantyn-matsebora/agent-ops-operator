@@ -2,7 +2,7 @@
 # Adapter pods carry no node constraints, so they must run on every node
 # architecture in the cluster (mixed amd64/arm64 clusters are common):
 #   docker buildx build --platform linux/amd64,linux/arm64 \
-#     -t kmatsebora/agentops-signal-telegram:<tag> --push ./signal-telegram/
+#     -t kmatsebora/agentops-signal-telegram:<tag> ./signals/telegram/
 FROM --platform=$BUILDPLATFORM golang:1.23 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src

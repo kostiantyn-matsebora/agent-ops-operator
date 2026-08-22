@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 )
 
 // streamKeepAlive bounds how long an idle SSE connection goes without bytes.
