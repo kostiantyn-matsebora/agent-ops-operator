@@ -11,7 +11,7 @@ path. Plugins are limited to the set Pages enables by default.
 
 | Page | Owns |
 |---|---|
-| `index.md` | the landing pitch, the tab strip (diagram, manifest, the console), paths onward |
+| `index.md` | the landing pitch, the tab strip (the recording, the diagram, the manifest), paths onward |
 | `introduction.md` | the model — two sections, concepts and guides, no reference detail |
 | `getting-started.md` | the read-only DEMO walkthrough, console-first |
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
@@ -21,11 +21,16 @@ path. Plugins are limited to the set Pages enables by default.
   untouched reference and keeps its own URL.
   - **What the console is FOR goes to the guide.** What it IS goes to the
     reference.
-- **The screenshots are build output** — `npm run screenshots` in `console/ui`,
-  never a hand capture. That covers the guide and the landing page both.
-- **The landing strip and the guide's tour show the SAME six images**, at
-  different altitudes: one line each there, the full tour here. Keep the labels
-  identical.
+- **Every product asset is build output**, never a hand capture.
+  - **The screenshots** — `npm run screenshots` in `console/ui`, published to
+    `assets/img/console/`, shown on the CONSOLE page.
+  - **The landing recording and its poster** — `npm run demo` in the same
+    place, published to `assets/video/`, shown on the LANDING page.
+- **The six views are toured in ONE place**, the Console page. The landing page
+  shows the recording instead — a still cannot show work arriving and being
+  answered.
+- **The recording carries no text of its own.** No caption, no title card. What
+  each beat shows is the page's words, beside it.
 - **Every other `docs/*.md` is a reference page, not a site page.** They carry no
   front matter, so Jekyll copies them verbatim. Do not add front matter, headings
   or navigation entries to them — publishing one is its own change.
@@ -144,6 +149,7 @@ style, no script in a page.
 | `{: .ao-tabs}` | a list becomes tabbed panels, each item's leading bold phrase the label. With no script it stays the labelled list, so every word and image lives in the page |
 | `{: .ao-icon-*}` | a kind glyph on a card title, copied from the console |
 | `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels |
+| `{: .ao-demo}` | on a LINK whose target is a recording and whose content is the poster image, it becomes a player. With no script it stays the poster, linking to the file |
 | `{: .ao-chipsets}` | a list of GROUPS becomes labelled chip rows — each item's leading bold phrase is the label, its nested list the chips. A chip may carry an ordinary markdown image, and the PAGE names that file. With no CSS it stays a labelled list of names |
 | `next:` in front matter | the what-next card (eyebrow / title / body / url) at the foot of the on-this-page rail. A page declaring none gets no card |
 | `stats:` in front matter | the landing page's stat tiles, through the stat-icon include |
@@ -165,11 +171,14 @@ Content never moves into `_includes/` or `_data/` to get a look.
   inside a comment, so a comment mentioning a `--custom-property` makes the
   whole mark fail to render — silently, as blank space with `naturalWidth` 0.
   Check that before blaming the CSS.
-- **A themed image is named ONCE.** A page writes the `-light` file and nothing
+- **A themed asset is named ONCE.** A page writes the `-light` file and nothing
   else.
-  - `assets/js/tabs.js` rewrites it to `-dark` from the resolved theme, for
-    screenshots and diagrams alike, and for a link in a panel as well as an
-    image.
+  - `assets/js/themed.js` rewrites it to `-dark` from the resolved theme —
+    screenshot, diagram, recording and poster alike, and a link in a panel as
+    well as an image.
+  - **It is ONE resolver on purpose.** The strip and the player both register
+    with it, because two painters watching one `data-theme` would leave one
+    asset on the wrong variant after a toggle.
   - A page that named both would be carrying theme knowledge.
 - **A published image carries its own ground**, never a transparent one that
   borrows the page's canvas. The rewrite is a DEFERRED script, so the light file

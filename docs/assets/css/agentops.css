@@ -1073,6 +1073,31 @@ a:hover {
   background: var(--ao-surface-alt);
 }
 
+/* --- the player -----------------------------------------------------------
+   A page names `{: .ao-demo}` on a link whose target is a recording and whose
+   content is the poster image. With no scripting that is exactly what it
+   stays — a poster the reader can click — so the rule dresses BOTH: the link's
+   image before the upgrade, and the video element after it.
+
+   Same frame as a panel image, because it is the same thing to the reader: the
+   product, at the width of the column. */
+.ao-content .ao-demo,
+.ao-content a.ao-demo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 0.75rem;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface-alt);
+}
+
+/* The link is a frame around one image, not a run of text. */
+.ao-content a.ao-demo {
+  display: block;
+  text-decoration: none;
+}
+
 /* --- tables --------------------------------------------------------------- */
 /* A table is a TABLE, so its cells divide the column. It used to be
    `display: block` for the scroll frame — which makes a table shrink to its

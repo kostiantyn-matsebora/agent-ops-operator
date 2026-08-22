@@ -3,8 +3,18 @@
 ### Requirement: The landing page demonstrates the product with a generated recording
 
 The landing page SHALL carry a **recording of the product working**, showing one
-piece of work from the event that starts it to the answer a person replies to.
-It SHALL be the strip's first panel.
+piece of work from the event that starts it to the answer a person replies to,
+and then the machinery that carried it. It SHALL be the strip's first panel.
+
+**The machinery is part of the claim, not an appendix**: what is waiting and what
+is stuck, the wiring that routed the signal, and that every part of it is an
+ordinary Kubernetes resource. The last SHALL be shown as an actual MANIFEST — a
+grid of object counts asserts that resources exist, while the object shows that
+the incident itself is one and that `kubectl` already knows it.
+
+**Every manifest a published asset shows SHALL be appliable**: each field name
+SHALL exist on the CRD it claims to be. A screenshot of a manifest nobody can
+apply teaches a field that does not exist, and is worse than no manifest.
 
 **It SHALL be produced by a committed, repeatable command**, on the same terms as
 the site's screenshots: driving the application's own built bundle against a
@@ -25,6 +35,21 @@ card, subtitle or narration overlay: text in a recording cannot be selected,
 translated, searched or read aloud. What the recording is showing SHALL be stated
 by the PAGE, beside it, in the page's own words. Words the console itself renders
 are the console's and are not affected.
+
+**It MAY carry a caption track**, as a separate timed-text file the page names
+and the viewer can turn off. That is text, not pixels — selectable, translatable
+and available to a screen reader — so it is the form signposting takes here.
+Its words SHALL come from the same source as the beats the page prints, so the
+two cannot drift, and it SHALL ship ONE file for every theme, because the words
+do not change with the palette.
+
+**There SHALL be no audio track.** A silent recording needs no narration and no
+music: narration would lock the demo to one language and re-record with every
+voice change, and music carries nothing the page does not already say.
+
+**Beats MAY cross-fade**, and the fade SHALL be taken out of the beats it joins
+rather than added between them, so the recording's stated length is its real
+length and the caption cues stay in step with it.
 
 The recording SHALL be silent, SHALL ship **one variant per theme**, and SHALL
 be delivered:
@@ -48,6 +73,20 @@ of the ordinary test suite.
 - **WHEN** a first-time visitor opens the site root
 - **THEN** the first panel shows one piece of work carried from its signal to its
   answer, and they can watch it without installing anything
+- **AND** it goes on to show the queue, the wiring, and the conversation as a
+  Kubernetes object
+
+#### Scenario: A published manifest is read
+
+- **WHEN** a reader reads a manifest in a published screenshot or recording
+- **THEN** every field on it exists on that CRD, so copying it produces an object
+  the cluster accepts
+
+#### Scenario: A beat's words are reworded
+
+- **WHEN** a beat's caption is rewritten
+- **THEN** nothing else silently changes behaviour — what the poster frame is,
+  and which beat it comes from, are declared rather than matched on the text
 
 #### Scenario: The console's UI changes
 
