@@ -21,7 +21,8 @@ path. Plugins are limited to the set Pages enables by default.
   untouched reference and keeps its own URL.
   - **What the console is FOR goes to the guide.** What it IS goes to the
     reference.
-- **Every product asset is build output**, never a hand capture.
+- **Every product asset is build output**, never a hand capture, and every one
+  is rendered from ONE curated fixture that names no real cluster.
   - **The screenshots** — `npm run screenshots` in `console/ui`, published to
     `assets/img/console/`, shown on the CONSOLE page.
   - **The landing recording and its poster** — `npm run demo` in the same
