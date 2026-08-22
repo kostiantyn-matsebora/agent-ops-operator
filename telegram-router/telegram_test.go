@@ -133,3 +133,116 @@ func TestOffsetDelegation(t *testing.T) {
 		t.Fatalf("PutOffset sent %q, want 501", put)
 	}
 }
+
+// ---- selections ----------------------------------------------------------
+//
+// A tap on a control the manager offered is classified by the SAME rule as the
+// message it hangs on. There is no second rule, because there is no second
+// question: the general surface originates, a topic continues.
+
+func TestClassifySelectionUsesTheSameRule(t *testing.T) {
+	cases := []struct {
+		name      string
+		raw       string
+		wantTopic bool
+		wantCB    string
+	}{
+		{
+			name: "selection on the general surface is an origination",
+			raw: `{"update_id":21,"callback_query":{"id":"cb-1","data":"p:k8s-observe",
+				"message":{"message_id":9,"chat":{"id":-100}}}}`,
+			wantTopic: false, wantCB: "cb-1",
+		},
+		{
+			name: "selection inside a topic is a continuation",
+			raw: `{"update_id":22,"callback_query":{"id":"cb-2","data":"p:k8s-observe",
+				"message":{"message_id":9,"chat":{"id":-100},"is_topic_message":true}}}`,
+			wantTopic: true, wantCB: "cb-2",
+		},
+		{
+			name:      "selection with no attached message is the general surface",
+			raw:       `{"update_id":23,"callback_query":{"id":"cb-3","data":"p:x"}}`,
+			wantTopic: false, wantCB: "cb-3",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			u, err := classifyUpdate(json.RawMessage(c.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if u.IsTopicMessage != c.wantTopic {
+				t.Fatalf("IsTopicMessage = %v, want %v", u.IsTopicMessage, c.wantTopic)
+			}
+			if u.CallbackID != c.wantCB {
+				t.Fatalf("CallbackID = %q, want %q", u.CallbackID, c.wantCB)
+			}
+		})
+	}
+}
+
+// A plain message carries no callback id, so nothing is acknowledged for it.
+func TestPlainMessageIsNotASelection(t *testing.T) {
+	u, err := classifyUpdate(json.RawMessage(`{"update_id":24,"message":{"text":"hi"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.CallbackID != "" {
+		t.Fatalf("plain message reported a callback id %q", u.CallbackID)
+	}
+}
+
+// Selections are an update KIND, and Telegram sends only the kinds we ask for.
+func TestGetUpdatesAsksForSelections(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{Token: "t", HTTP: srv.Client(), BaseURL: srv.URL}
+	if _, err := tg.GetUpdates(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	allowed, _ := body["allowed_updates"].([]any)
+	got := map[string]bool{}
+	for _, a := range allowed {
+		got[a.(string)] = true
+	}
+	if !got["message"] || !got["callback_query"] {
+		t.Fatalf("allowed_updates = %v, want both message and callback_query", allowed)
+	}
+}
+
+// The acknowledgement is CONTENT-FREE: it stops the tapper's spinner and says
+// nothing. Anything it said would be a message the router composed, which is
+// the one thing this process must never do.
+func TestAcknowledgeSaysNothing(t *testing.T) {
+	var method string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{Token: "t", HTTP: srv.Client(), BaseURL: srv.URL}
+	if err := tg.Acknowledge(context.Background(), "cb-1"); err != nil {
+		t.Fatal(err)
+	}
+	if method != "/bott/answerCallbackQuery" {
+		t.Fatalf("method path = %q", method)
+	}
+	if body["callback_query_id"] != "cb-1" {
+		t.Fatalf("callback id not sent: %v", body)
+	}
+	for _, k := range []string{"text", "show_alert", "url"} {
+		if _, ok := body[k]; ok {
+			t.Fatalf("acknowledgement carried %q — it must say nothing: %v", k, body)
+		}
+	}
+}

@@ -17,6 +17,21 @@ import (
 type Telegram struct {
 	Token string
 	HTTP  *http.Client
+	// BaseURL is the Bot API root. Empty means the real one; tests point it at
+	// a local server, because a Bot API call with no seam to exercise it is one
+	// that ships unverified.
+	BaseURL string
+}
+
+// telegramAPIBase is the real Bot API root.
+const telegramAPIBase = "https://api.telegram.org"
+
+// apiBase returns the root this client posts to.
+func (t *Telegram) apiBase() string {
+	if t.BaseURL != "" {
+		return t.BaseURL
+	}
+	return telegramAPIBase
 }
 
 // NewTelegram builds a client; the HTTP timeout leaves room for 20s long-polls.
@@ -87,7 +102,7 @@ func (t *Telegram) API(ctx context.Context, method string, body any) (json.RawMe
 	budget := retryBudget(ctx)
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			"https://api.telegram.org/bot"+t.Token+"/"+method, bytes.NewReader(b))
+			t.apiBase()+"/bot"+t.Token+"/"+method, bytes.NewReader(b))
 		if err != nil {
 			return nil, err
 		}
@@ -193,9 +208,45 @@ func alreadyClosed(err error) bool {
 
 // Send posts an HTML message; falls back to General when the topic is gone.
 func (t *Telegram) Send(ctx context.Context, chatID string, threadID *int64, html string) error {
+	return t.SendWith(ctx, chatID, threadID, html, SendExtras{})
+}
+
+// SendExtras are the optional parts of a send that come from the OP rather than
+// from the prose: which message this answers, and which controls hang off it.
+//
+// Both are presentation decisions made HERE from meaning stated by the manager —
+// the op carries an opaque reply handle and a list of offered actions, and what
+// a "control" is remains Telegram's business.
+type SendExtras struct {
+	// ReplyTo is Telegram's own message id, as the manager handed it back
+	// unaltered. Empty when the message answers nothing in particular.
+	ReplyTo string
+	// Keyboard is the inline keyboard markup, already built. Nil for none.
+	Keyboard any
+}
+
+// SendWith posts a message with its optional reply linkage and controls.
+//
+// The controls are INLINE — attached to this message — never a reply keyboard.
+// A reply keyboard is shown to every member of a group and replaces their own
+// composer, which is not acceptable on an operations chat several people read.
+func (t *Telegram) SendWith(ctx context.Context, chatID string, threadID *int64, html string, extras SendExtras) error {
 	body := map[string]any{"chat_id": chatID, "text": html, "parse_mode": "HTML"}
 	if threadID != nil {
 		body["message_thread_id"] = *threadID
+	}
+	if extras.Keyboard != nil {
+		body["reply_markup"] = extras.Keyboard
+	}
+	if extras.ReplyTo != "" {
+		if id, err := strconv.ParseInt(extras.ReplyTo, 10, 64); err == nil {
+			// allow_sending_without_reply: the original may have been deleted,
+			// and losing the linkage is better than losing the message.
+			body["reply_parameters"] = map[string]any{
+				"message_id":                  id,
+				"allow_sending_without_reply": true,
+			}
+		}
 	}
 	if _, err := t.API(ctx, "sendMessage", body); err != nil {
 		if threadID == nil {
@@ -206,6 +257,25 @@ func (t *Telegram) Send(ctx context.Context, chatID string, threadID *int64, htm
 		return err
 	}
 	return nil
+}
+
+// SetCommands registers this bot's command vocabulary for one chat, so Telegram
+// renders its own control in the composer and completes what a person types.
+//
+// Scoped to the CHAT rather than the bot's default, so the bot does not claim a
+// command vocabulary in chats it does not serve.
+func (t *Telegram) SetCommands(ctx context.Context, chatID string, commands []BotCommand) error {
+	_, err := t.API(ctx, "setMyCommands", map[string]any{
+		"commands": commands,
+		"scope":    map[string]any{"type": "chat", "chat_id": chatID},
+	})
+	return err
+}
+
+// BotCommand is one entry in Telegram's own command menu.
+type BotCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
 }
 
 // tgUpdate is the slice of the Telegram update shape this adapter reads from
@@ -256,7 +326,7 @@ func (t *Telegram) SendDocument(ctx context.Context, chatID string, threadID *in
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.telegram.org/bot"+t.Token+"/sendDocument", &buf)
+		t.apiBase()+"/bot"+t.Token+"/sendDocument", &buf)
 	if err != nil {
 		return err
 	}

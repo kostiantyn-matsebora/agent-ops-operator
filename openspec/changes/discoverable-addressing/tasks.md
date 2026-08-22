@@ -19,27 +19,27 @@
 
 - [x] 3.1 Add `Choices []Choice{Label, Command}` to `chat.Message` as an optional structured field — and verify tests assert it is omitted when empty and that nothing under `internal/` renders it to text
 - [x] 3.2 Add `InReplyTo` to `chat.Message` as an opaque handle — and verify a test asserts nothing under `internal/` parses, compares or constructs one, matching the `threadId` treatment
-- [ ] 3.3 Accept an opaque origin-message label on a chat signal in `internal/httpapi/signals.go` and thread it onto messages sent back to the originating surface — and verify a test asserts a refusal carries it and a signal without the label still sends
-- [ ] 3.4 Populate `Choices` on the ambiguity refusal and the Pipeline listing, keeping the prose — and verify existing refusal tests pass and new assertions cover one choice per serving Pipeline
-- [ ] 3.5 Verify `dispatch` and `ingest` fixtures are unchanged except where task 1.2 intends it — those tests are pinned deliberately, so any other diff is a decision, not a side effect
+- [x] 3.3 Accept an opaque origin-message label on a chat signal in `internal/httpapi/signals.go` and thread it onto messages sent back to the originating surface — and verify a test asserts a refusal carries it and a signal without the label still sends
+- [x] 3.4 Populate `Choices` on the ambiguity refusal and the Pipeline listing, keeping the prose — and verify existing refusal tests pass and new assertions cover one choice per serving Pipeline
+- [x] 3.5 Verify `dispatch` and `ingest` fixtures are unchanged except where task 1.2 intends it — those tests are pinned deliberately, so any other diff is a decision, not a side effect
 
 ## 4. Telegram ingest: selections reach the right adapter
 
-- [ ] 4.1 Add the origin-message label in `signal-telegram` beside `agentops.dev/channel` and `agentops.dev/sender` — and verify `main_test.go` asserts it is set from the update and that the adapter still contacts Telegram nowhere
-- [ ] 4.2 Widen `allowed_updates` to include the selection update kind in `telegram-router` — and verify `telegram_test.go` asserts the request body carries both kinds
-- [ ] 4.3 Classify a selection by reading `is_topic_message` from the message it was attached to, reusing the existing binary rule — and verify `classifyUpdate` tests cover a general-surface selection routing to the signal target and an in-topic one routing to the channel target
-- [ ] 4.4 Acknowledge every selection from the router, content-free, before forwarding — and verify a test asserts exactly one acknowledgement per selection and that forwarding is still verbatim
-- [ ] 4.5 Normalize a general-surface selection into an addressed chat signal in `signal-telegram`, recovering the original text from the tapped message's reply linkage — and verify tests cover a successful reconstruction and an unrecoverable original
+- [x] 4.1 Add the origin-message label in `signal-telegram` beside `agentops.dev/channel` and `agentops.dev/sender` — and verify `main_test.go` asserts it is set from the update and that the adapter still contacts Telegram nowhere
+- [x] 4.2 Widen `allowed_updates` to include the selection update kind in `telegram-router` — and verify `telegram_test.go` asserts the request body carries both kinds
+- [x] 4.3 Classify a selection by reading `is_topic_message` from the message it was attached to, reusing the existing binary rule — and verify `classifyUpdate` tests cover a general-surface selection routing to the signal target and an in-topic one routing to the channel target
+- [x] 4.4 Acknowledge every selection from the router, content-free, before forwarding — and verify a test asserts exactly one acknowledgement per selection and that forwarding is still verbatim
+- [x] 4.5 Normalize a general-surface selection into an addressed chat signal in `signal-telegram`, recovering the original text from the tapped message's reply linkage — and verify tests cover a successful reconstruction and an unrecoverable original
 
 ## 5. Telegram channel adapter: menu, spelling map, controls
 
-- [ ] 5.1 Fetch `/channel/vocabulary` on the existing refresh path and on an observed revision change — and verify tests cover the fetch and that an unchanged revision triggers none
-- [ ] 5.2 Implement the transport-local spelling map — register a Telegram-legal form, translate back before anything leaves the adapter, refuse to register either of two Pipelines that collide, and report a collision on the Channel Ready condition — and verify unit tests cover a hyphenated name round-tripping, a collision registering neither, and an over-length name being skipped
-- [ ] 5.3 Register built-ins and Pipelines with `setMyCommands` per `BotCommandScopeChat`, only when the adapted list differs from the last registered one — and verify a test asserts an inconsequential revision change produces zero Bot API registration calls
-- [ ] 5.4 Use the registered spelling wherever the adapter names a Pipeline to a person — and verify a test asserts the listing and the menu print the same string for one Pipeline
-- [ ] 5.5 Render `Message.Choices` as an inline keyboard on the message, falling back to text for any choice whose callback payload exceeds 64 bytes — and verify `render_test.go` covers both branches
-- [ ] 5.6 Send with `reply_to_message_id` when `Message.InReplyTo` is set — and verify a test asserts it is passed through opaquely and omitted when absent
-- [ ] 5.7 Handle a forwarded selection: resolve the Pipeline through the spelling map, recover the original message, post the addressed form — and verify tests cover the happy path and the expired-offer refusal that delivers nothing
+- [x] 5.1 Fetch `/channel/vocabulary` on the existing refresh path and on an observed revision change — and verify tests cover the fetch and that an unchanged revision triggers none
+- [x] 5.2 Implement the transport-local spelling in `channel-telegram` (`-` → `_`, injective because a Kubernetes name cannot contain `_`) and its reverse in `signal-telegram`, each independently and with no shared state — and verify unit tests cover a hyphenated name round-tripping both ways, and that a name Telegram cannot express is skipped rather than refused, reported or conditioned on
+- [x] 5.3 Register built-ins and Pipelines with `setMyCommands` per `BotCommandScopeChat`, only when the adapted list differs from the last registered one — and verify a test asserts an inconsequential revision change produces zero Bot API registration calls
+- [x] 5.4 Use the registered spelling wherever the adapter names a Pipeline to a person — and verify a test asserts the listing and the menu print the same string for one Pipeline
+- [x] 5.5 Render `Message.Choices` as an inline keyboard on the message, falling back to text for any choice whose callback payload exceeds 64 bytes — and verify `render_test.go` covers both branches
+- [x] 5.6 Send with `reply_to_message_id` when `Message.InReplyTo` is set — and verify a test asserts it is passed through opaquely and omitted when absent
+- [x] 5.7 Handle a forwarded selection: resolve the Pipeline through the spelling map, recover the original message, post the addressed form — and verify tests cover the happy path and the expired-offer refusal that delivers nothing
 
 ## 6. Console: one source, two composers
 

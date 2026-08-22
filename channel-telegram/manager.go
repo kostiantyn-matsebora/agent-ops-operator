@@ -66,6 +66,23 @@ type Message struct {
 
 	// notice
 	Level string `json:"level,omitempty"`
+
+	// any kind
+	//
+	// Choices are the actions this message OFFERS — structured like Labels, not
+	// prose. The manager states which actions are on offer and nothing about how
+	// they look; rendering them as controls is this adapter's decision.
+	Choices []Choice `json:"choices,omitempty"`
+	// InReplyTo is Telegram's own message id for the message this one answers,
+	// handed back exactly as this adapter supplied it. It is what lets a control
+	// offered on somebody's own words carry those words forward.
+	InReplyTo string `json:"inReplyTo,omitempty"`
+}
+
+// Choice is one offered action.
+type Choice struct {
+	Label   string `json:"label"`
+	Command string `json:"command"`
 }
 
 // TopicDescriptor describes the thread to create. THIS adapter names it, within
@@ -126,17 +143,24 @@ type ChannelInfo struct {
 }
 
 func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int, error) {
+	code, _, err := m.doH(ctx, method, path, in, out)
+	return code, err
+}
+
+// doH is do, plus the response headers — the vocabulary revision rides one, so
+// a caller that tracks it needs to see them.
+func (m *Manager) doH(ctx context.Context, method, path string, in, out any) (int, http.Header, error) {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		body = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, m.BaseURL+path, body)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+m.Token)
 	if in != nil {
@@ -144,32 +168,76 @@ func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int
 	}
 	resp, err := m.HTTP.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return resp.StatusCode, fmt.Errorf("%s %s: %d %s", method, path, resp.StatusCode, bytes.TrimSpace(b))
+		return resp.StatusCode, resp.Header, fmt.Errorf("%s %s: %d %s", method, path, resp.StatusCode, bytes.TrimSpace(b))
 	}
 	if out != nil && resp.StatusCode != 204 {
-		return resp.StatusCode, json.NewDecoder(resp.Body).Decode(out)
+		return resp.StatusCode, resp.Header, json.NewDecoder(resp.Body).Decode(out)
 	}
-	return resp.StatusCode, nil
+	return resp.StatusCode, resp.Header, nil
 }
 
+// VocabularyRevisionHeader carries the manager's current vocabulary revision on
+// every outbound long-poll response — the 200 that delivers an op and the 204
+// that delivers none.
+//
+// It is how a change reaches this adapter while it is otherwise idle. The
+// manager cannot dial us: a ChannelAdapter port is optional and the contract is
+// pull-only, so the news rides the connection we are already blocked in.
+const VocabularyRevisionHeader = "X-Agentops-Vocabulary-Revision"
+
 // NextOp long-polls for the next outbound op; nil when none arrived in time.
-func (m *Manager) NextOp(ctx context.Context, channelType string, waitSeconds int) (*Op, error) {
+// The second return is the vocabulary revision the manager reported, empty from
+// a manager that predates it.
+func (m *Manager) NextOp(ctx context.Context, channelType string, waitSeconds int) (*Op, string, error) {
 	var op Op
-	code, err := m.do(ctx, "GET",
+	code, hdr, err := m.doH(ctx, "GET",
 		fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
 			url.QueryEscape(channelType), ContractVersion, waitSeconds), nil, &op)
+	rev := hdr.Get(VocabularyRevisionHeader)
 	if err != nil {
-		return nil, err
+		return nil, rev, err
 	}
 	if code == 204 {
-		return nil, nil
+		return nil, rev, nil
 	}
-	return &op, nil
+	return &op, rev, nil
+}
+
+// Vocabulary fetches what may be typed on a chat surface.
+//
+// This adapter holds NO Kubernetes access — it cannot read a Pipeline and never
+// will — so the manager is the only thing that can tell it what is addressable.
+// What comes back is UNFILTERED: deciding which of it Telegram can express is
+// this adapter's job, not the manager's.
+func (m *Manager) Vocabulary(ctx context.Context) (Vocabulary, error) {
+	var v Vocabulary
+	_, err := m.do(ctx, "GET", "/channel/vocabulary", nil, &v)
+	return v, err
+}
+
+// Vocabulary is the manager's list of what a person may type, plus the revision
+// identifying it.
+type Vocabulary struct {
+	Revision string            `json:"revision"`
+	Entries  []VocabularyEntry `json:"entries"`
+}
+
+// VocabularyEntry is one thing a person may type. Position is `general` (the
+// surface a conversation starts from) or `thread` (inside one); Telegram's
+// finest command scope is a CHAT, which spans both, so this adapter registers
+// the union and the manager's own usage replies correct a command used in the
+// wrong place.
+type VocabularyEntry struct {
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Position    string `json:"position"`
+	Profile     string `json:"profile,omitempty"`
 }
 
 // CompleteOp reports an op result (threadID for ensure-topic; opErr on failure).

@@ -83,10 +83,31 @@ type adapter struct {
 	// REJECTS rather than queues, so without this a burst is lost, not delayed.
 	pace *pacer
 
+	// menu tracks the command vocabulary this adapter last registered with
+	// Telegram, so a change reaches the composer without re-registering an
+	// unchanged list on every poll.
+	menu *menu
+
 	mu       sync.Mutex
 	channels map[string]servedChannel // validated, by channel name
 	reported map[string]string        // last status message per channel (avoid spam)
 	clients  map[string]*Telegram     // bot client per token
+}
+
+// servedChannelList snapshots the validated channels, deduplicated by chat: one
+// chat is one command scope however many Channels name it.
+func (a *adapter) servedChannelList() []servedChannel {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	seen := map[string]bool{}
+	out := make([]servedChannel, 0, len(a.channels))
+	for _, sc := range a.channels {
+		if id := sc.cfg.ChatID; id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, sc)
+		}
+	}
+	return out
 }
 
 // chatIDs lists the chats this adapter currently serves.
@@ -127,6 +148,7 @@ func main() {
 		fallbackToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
 		listen:        listen,
 		pace:          newPacer(),
+		menu:          newMenu(),
 		channels:      map[string]servedChannel{},
 		reported:      map[string]string{},
 		clients:       map[string]*Telegram{},
@@ -248,7 +270,12 @@ func (a *adapter) opsLoop(ctx context.Context) {
 		if !a.pace.wait(ctx, a.chatIDs()) {
 			continue
 		}
-		op, err := a.mgr.NextOp(ctx, a.channelType, 25)
+		op, revision, err := a.mgr.NextOp(ctx, a.channelType, 25)
+		// The revision rides EVERY poll response, delivered op or not, so a
+		// vocabulary change reaches this adapter while it is otherwise idle —
+		// the manager cannot dial us. Acted on before the error check: a poll
+		// that failed may still have carried it.
+		a.syncCommands(ctx, revision)
 		if err != nil {
 			if ctx.Err() == nil {
 				log.Printf("ops poll: %v", err)
@@ -347,8 +374,19 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		// Render here, split here: the Bot API caps a message at 4096 and used
 		// to FAIL the whole op past it, which lost exactly the long payloads
 		// worth reading. Every chunk must land for the op to succeed.
-		for _, chunk := range splitHTML(renderMessage(*op.Message)) {
-			if err := tg.Send(ctx, sc.cfg.ChatID, tid, chunk); err != nil {
+		//
+		// The controls hang off the LAST chunk, where the reader ends up, and
+		// the reply linkage off the first, which is the one that answers.
+		chunks := splitHTML(renderMessage(a.menu, *op.Message))
+		for i, chunk := range chunks {
+			extras := SendExtras{}
+			if i == 0 {
+				extras.ReplyTo = op.Message.InReplyTo
+			}
+			if i == len(chunks)-1 {
+				extras.Keyboard = inlineKeyboard(op.Message.Choices)
+			}
+			if err := tg.SendWith(ctx, sc.cfg.ChatID, tid, chunk, extras); err != nil {
 				return "", err.Error()
 			}
 		}
@@ -409,7 +447,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			return "", err.Error()
 		}
 		if op.Message != nil {
-			for _, chunk := range splitHTML(renderMessage(*op.Message)) {
+			for _, chunk := range splitHTML(renderMessage(a.menu, *op.Message)) {
 				if err := tg.Send(ctx, sc.cfg.ChatID, &tid, chunk); err != nil {
 					// Close it again even so: a topic left open after a failed
 					// tombstone is worse than a missing tombstone.

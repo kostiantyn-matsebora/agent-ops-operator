@@ -139,3 +139,155 @@ func TestTitleTruncates(t *testing.T) {
 		t.Fatalf("title = %q, want first line only", got)
 	}
 }
+
+// ---- the transport-local spelling ---------------------------------------
+//
+// Telegram command names admit only [a-z0-9_], so a hyphenated Pipeline is
+// registered under an underscored spelling and the menu inserts THAT. It has to
+// be reversed before anything leaves this adapter.
+
+func TestReverseSpellingIsExactAndBoundedToTheCommandWord(t *testing.T) {
+	for in, want := range map[string]string{
+		"/k8s_observe check the disk": "/k8s-observe check the disk",
+		"/k8s_observe":                "/k8s-observe",
+		"/pipelines":                  "/pipelines",
+		// The TASK is the person's own text and is never rewritten — only the
+		// command word is ours.
+		"/k8s_observe grep foo_bar": "/k8s-observe grep foo_bar",
+		"not a command at all":      "not a command at all",
+		"tell me about foo_bar":     "tell me about foo_bar",
+	} {
+		if got := reverseSpelling(in); got != want {
+			t.Errorf("reverseSpelling(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The mapping is injective BY CONSTRUCTION: a Kubernetes object name is a
+// DNS-1123 subdomain and cannot contain an underscore, so every `_` in a
+// command word is one we introduced. That is what lets this adapter and
+// channel-telegram each hold one line and no shared state.
+func TestMenuSpellingReachesTheManagerAsTheRealName(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	upd := mustUpdate(t, `{"update_id":91,"message":{"message_id":5,"text":"/k8s_observe check the disk",
+		"chat":{"id":-1001},"from":{"id":42,"username":"operator"}}}`)
+	_, sig, ok := a.normalize(upd)
+	if !ok {
+		t.Fatal("menu-inserted command should originate")
+	}
+	if sig.Payload != "/k8s-observe check the disk" {
+		t.Fatalf("payload = %q — the alternate spelling escaped the adapter", sig.Payload)
+	}
+}
+
+// The message handle is what lets a reply say which message it answers.
+func TestChatSignalCarriesTheMessageHandle(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	upd := mustUpdate(t, `{"update_id":78,"message":{"message_id":314,"text":"who is on call?",
+		"chat":{"id":-1001},"from":{"id":42,"username":"operator"}}}`)
+	_, sig, _ := a.normalize(upd)
+	if sig.Labels[labelMessage] != "314" {
+		t.Fatalf("%s = %q, want 314", labelMessage, sig.Labels[labelMessage])
+	}
+
+	// Optional: an update with no handle simply loses the linkage.
+	upd = mustUpdate(t, `{"update_id":79,"message":{"text":"hi","chat":{"id":-1001}}}`)
+	_, sig, _ = a.normalize(upd)
+	if _, ok := sig.Labels[labelMessage]; ok {
+		t.Fatalf("handle invented from nothing: %v", sig.Labels)
+	}
+}
+
+// ---- selections ----------------------------------------------------------
+
+const selectionUpdate = `{"update_id":80,"callback_query":{"id":"cb-1","data":"p:k8s-observe",
+	"from":{"id":42,"username":"operator"},
+	"message":{"message_id":9,"chat":{"id":-1001},
+		"reply_to_message":{"message_id":8,"text":"who is on call?"}}}}`
+
+// ONE TAP SENDS WHAT THEY ALREADY TYPED. The offer was posted as a reply to the
+// person's own message, so Telegram still holds that text — nothing is retained
+// on either side between the offer and the selection.
+func TestSelectionCarriesTheOriginalMessage(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	source, sig, ok := a.normalize(mustUpdate(t, selectionUpdate))
+	if !ok {
+		t.Fatal("a selection should originate")
+	}
+	if source != "tg-chat" || sig.Kind != "chat" {
+		t.Fatalf("source=%q kind=%q", source, sig.Kind)
+	}
+	if sig.Payload != "/k8s-observe who is on call?" {
+		t.Fatalf("payload = %q — the original was not carried forward", sig.Payload)
+	}
+	if sig.Fingerprint != "tg-cb-cb-1" {
+		t.Fatalf("fingerprint = %q", sig.Fingerprint)
+	}
+	if sig.Labels[labelMessage] != "8" {
+		t.Fatalf("selection must link to the ORIGINAL message, got %q", sig.Labels[labelMessage])
+	}
+	if sig.Labels[labelSender] != "operator" {
+		t.Fatalf("sender = %q", sig.Labels[labelSender])
+	}
+}
+
+// An unrecoverable original is not an error to report — this adapter holds no
+// Telegram credential. The addressed command goes out with no task and the
+// manager answers with its own usage reply, on the surface they are looking at.
+func TestSelectionWithNoRecoverableOriginalAsksForTheTask(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	upd := mustUpdate(t, `{"update_id":81,"callback_query":{"id":"cb-2","data":"p:k8s-observe",
+		"from":{"id":42},"message":{"message_id":9,"chat":{"id":-1001}}}}`)
+	_, sig, ok := a.normalize(upd)
+	if !ok {
+		t.Fatal("a selection with no original should still reach the manager")
+	}
+	if sig.Payload != "/k8s-observe" {
+		t.Fatalf("payload = %q, want the bare addressed command", sig.Payload)
+	}
+}
+
+// Controls this adapter did not offer are none of its business.
+func TestForeignCallbackDataIsIgnored(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	for _, data := range []string{"", "something-else", "x:k8s-observe"} {
+		upd := mustUpdate(t, `{"update_id":82,"callback_query":{"id":"cb-3","data":"`+data+`",
+			"message":{"message_id":9,"chat":{"id":-1001}}}}`)
+		if _, _, ok := a.normalize(upd); ok {
+			t.Fatalf("data %q should not originate", data)
+		}
+	}
+}
+
+// A selection inside a topic is a CONTINUATION and belongs to the channel
+// adapter — this one must never turn it into a second conversation.
+func TestSelectionInsideATopicIsNotOrigination(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	upd := mustUpdate(t, `{"update_id":83,"callback_query":{"id":"cb-4","data":"p:k8s-observe",
+		"message":{"message_id":9,"chat":{"id":-1001},"is_topic_message":true}}}`)
+	if _, _, ok := a.normalize(upd); ok {
+		t.Fatal("in-topic selection must not originate")
+	}
+}
+
+// Approver filtering applies to whoever TAPPED, not to whoever was offered.
+func TestSelectionRespectsApprovers(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops", Approvers: []int64{7}},
+	})
+	if _, _, ok := a.normalize(mustUpdate(t, selectionUpdate)); ok {
+		t.Fatal("unapproved tapper originated a conversation")
+	}
+}

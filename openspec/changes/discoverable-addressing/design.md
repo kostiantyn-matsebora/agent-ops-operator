@@ -84,16 +84,29 @@ spelling; the Pipeline CR is untouched; no other component knows it exists.
 Registering only the built-ins would teach a person that Pipelines are not
 something you type.
 
-Three local rules, all in the adapter:
+**The mapping is injective BY CONSTRUCTION, so there is nothing to detect and
+nothing to refuse.** Kubernetes object names are DNS-1123 subdomains — lowercase
+alphanumerics, `-` and `.`, and NO underscore (verified against
+`validation.IsDNS1123Subdomain`, which rejects `k8s_observe`). `-` → `_`
+therefore reverses exactly as `_` → `-`, for every name that can exist.
 
-- **Reversibility.** If two Pipelines collapse to one spelling, neither is
-  registered — an ambiguous completion is worse than one that must be typed.
+That matters twice over. It removes a conflict rule this repository has now
+rejected four times — many-to-many is the model, and inventing a refusal for a
+state that cannot occur is the same mistake in a new place. And it means the two
+halves of the round trip need NO shared state: `channel-telegram` registers the
+spelling, `signal-telegram` reverses it, each with one line and no coordination.
+That is load-bearing, because they are separate modules and the reverse lands in
+the signal adapter, which cannot read a channel endpoint at all.
+
+Two remaining local rules, both in the adapter:
+
 - **One spelling per surface.** Whatever the menu completes is what the adapter
   prints when it names that Pipeline, so the listing and the menu never show two
   strings for one thing.
-- **Overflow.** Telegram caps the list at 100 and names at 32 characters.
-  Built-ins first, then Pipelines by name; anything over the cap or too long is
-  unregistered and still typable.
+- **Overflow.** Telegram caps the list at 100 and names at 32 characters, and
+  rejects `.`. Built-ins first, then Pipelines by name; anything that does not
+  fit is unregistered and still typable. Not registering something is not
+  refusing it.
 
 *Alternatives rejected:* a derived name in the MANAGER — two names for one
 object, and `/pipelines` would print a different string from the menu; a
@@ -240,7 +253,6 @@ is a task containing a colon, which it always should have been.
 | **Telegram's menu shows `/exit` and `/close` in the main chat, where they do nothing.** No per-topic scope exists. | The existing usage replies (`router.go`) already answer both by name and say where they belong. Registered descriptions say "inside a conversation's thread". |
 | **`/agents` muscle memory** in installs that already use it. | It keeps working, unchanged and forever-ish. It is simply never offered, registered or printed, so nobody learns it from us again. |
 | **Two spellings for one Pipeline on Telegram** — the menu completes `k8s_observe`, the CR says `k8s-observe`. | The adapter prints one spelling everywhere it names a Pipeline on that transport, and the real name keeps working. The alternate never reaches a signal, a conversation or a record. |
-| **A collision leaves two Pipelines uncompleted** with no obvious cause. | The adapter reports it on the Channel Ready condition, where adapters already report their own problems. |
 | **`inReplyTo` is a transport handle in a semantic message** — the shape the message contract exists to prevent. | It is opaque and never interpreted, exactly as `threadId` and `previousThreadId` already are. Pinned by a test asserting no `internal/` code parses it. |
 | **`setMyCommands` rate limits** if re-registration is chatty. | Compare the FILTERED list (D4): Pipeline churn, the common case, causes zero calls. |
 | **Revision churn** if the hash includes anything volatile. | Hash only `(kind, name, description, position)` sorted — no timestamps, no resource versions, no conditions beyond Ready. Pinned by a test that mutates an unrelated Pipeline field and asserts the revision is unchanged. |
