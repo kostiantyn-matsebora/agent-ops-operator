@@ -4,8 +4,8 @@ All notable changes to this project are documented here, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. Versions are
 CHART versions. Image tags move independently and are named in each entry.
 
-This file holds the **ten most recent versions**. Older entries are in the
-archives at the [foot of this page](#older-versions).
+This file holds the **ten most recent versions**. Older entries are in
+`changelog/`, linked at the [foot of this page](#older-versions).
 
 See [../README.md](../README.md) for the product overview and [./](./) for
 reference material. `CLAUDE.md` in this directory owns the rules this file
@@ -642,5 +642,5 @@ Nothing. No CRD change, no contract change.
 
 | Archive | Covers |
 |---|---|
-| [CHANGELOG-5.0-5.16.md](CHANGELOG-5.0-5.16.md) | chart 5.0.0 through 5.16.0 |
-| [CHANGELOG-1.0-4.0.md](CHANGELOG-1.0-4.0.md) | chart 1.0 through 4.0.0 |
+| [CHANGELOG-5.0-5.16.md](changelog/CHANGELOG-5.0-5.16.md) | chart 5.0.0 through 5.16.0 |
+| [CHANGELOG-1.0-4.0.md](changelog/CHANGELOG-1.0-4.0.md) | chart 1.0 through 4.0.0 |

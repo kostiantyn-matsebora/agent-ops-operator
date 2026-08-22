@@ -3,7 +3,7 @@
 Migration guides for chart versions **5.0.0 through 5.16.0**, newest first, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-Moved here from [CHANGELOG.md](CHANGELOG.md), which holds the ten most recent
+Moved here from [CHANGELOG.md](../CHANGELOG.md), which holds the ten most recent
 versions.
 
 ## [5.16.0] — 2026-08-14
