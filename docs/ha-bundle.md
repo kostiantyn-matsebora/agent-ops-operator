@@ -24,7 +24,7 @@ agents act. What separates them is the job and the reach it needs.
 
 | Component | Flag | What it renders |
 |---|---|---|
-| Ingest lane | `logsAdapter.enabled` (**on**) | The `SignalAdapter` (`home-assistant`, adapter `signal-ha/`) and — under `source.create` — a `SignalSource` (`ha-logs`). **Not the claim on it** |
+| Ingest lane | `logsAdapter.enabled` (**on**) | The `SignalAdapter` (`home-assistant`, adapter `signals/ha/`) and — under `source.create` — a `SignalSource` (`ha-logs`). **Not the claim on it** |
 | MCP tooling | `mcp.enabled` (**on**) | An `MCPConfig` (`ha-api`, server key `homeassistant`) and two `MCPToolset`s |
 | Admin MCP | `adminMcp.enabled` (**off**) | A second `MCPConfig` (`ha-admin-api`, server key `homeassistant_admin`) and the `ha-admin` toolset — see [Repairing the house](#repairing-the-house-adminmcp) |
 | Admin MCP server | `adminMcpServer.enabled` (**off**) | That server's workload: `Deployment` + `Service` (`agentops-mcp-ha`) and **its own `ServiceAccount`** |

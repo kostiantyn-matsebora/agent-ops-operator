@@ -1,7 +1,7 @@
 ---
 paths:
-  - "console/ui/src/theme/**"
-  - "console/ui/src/components/Logo.tsx"
+  - "platform/console/ui/src/theme/**"
+  - "platform/console/ui/src/components/Logo.tsx"
   - "docs/assets/css/**"
   - "docs/assets/js/**"
   - "docs/_includes/logo.svg"
@@ -10,7 +10,7 @@ paths:
 
 ## The palette and the mark are COPIED, and the copy is one block
 
-**The site's `--ao-*` palette is copied from `console/ui/src/theme/theme.css`**
+**The site's `--ao-*` palette is copied from `platform/console/ui/src/theme/theme.css`**
 into the token blocks at the head of `docs/assets/css/agentops.css`. Changing a
 token is a TWO-FILE change.
 
@@ -33,7 +33,7 @@ That must return hits only inside those blocks.
 
 | File | Is |
 |---|---|
-| `console/ui/src/components/Logo.tsx` | the source |
+| `platform/console/ui/src/components/Logo.tsx` | the source |
 | `docs/_includes/logo.svg` | the masthead's theme-driven copy |
 | `docs/assets/img/logos/agent-ops.svg` | the standalone one an `<img>` can load |
 

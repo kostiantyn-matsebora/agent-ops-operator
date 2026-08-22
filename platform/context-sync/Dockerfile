@@ -1,5 +1,5 @@
 # context-sync sidecar — multi-stage build
-# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-context-sync:<tag> ./context-sync/
+# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-context-sync:<tag> ./platform/context-sync/
 #
 # distroless/static, like every other component here: the incremental copy is
 # implemented in Go rather than by shelling out to rsync, so the image needs no

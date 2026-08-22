@@ -23,12 +23,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/controller"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/httpapi"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/runtimepod"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
 var (
@@ -38,12 +38,23 @@ var (
 	ns        = "default"
 )
 
+// chartDir locates the chart from a test's working directory, which is this
+// package's own directory.
+//
+// Named ONCE because six call sites counted the `..` segments by hand, and the
+// day the manager moved from the repository root into platform/manager/ every
+// one of them was wrong — with a failure that reads as a broken envtest rather
+// than as a moved directory.
+func chartDir(parts ...string) string {
+	return filepath.Join(append([]string{"..", "..", "..", "..", "chart"}, parts...)...)
+}
+
 func TestMain(m *testing.M) {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(agentopsv1alpha1.AddToScheme(scheme))
 
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "chart", "files", "crds")},
+		CRDDirectoryPaths:     []string{chartDir("files", "crds")},
 		ErrorIfCRDPathMissing: true,
 	}
 	cfg, err := testEnv.Start()

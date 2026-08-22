@@ -8,14 +8,20 @@ docs/_site/
 docs/.jekyll-cache/
 docs/diagrams/.export-work/
 
-# adapter build artifacts (never commit binaries)
-channel-telegram/channel-telegram
-signal-cron/signal-cron
-signal-alertmanager/signal-alertmanager
-signal-k8s-events/signal-k8s-events
-console/console
-context-sync/context-sync
-egress-proxy/egress-proxy
-signal-telegram/signal-telegram
-telegram-router/telegram-router
-housekeeping/housekeeping
+# Build artifacts (never commit binaries).
+#
+# `go build` names its output after the package directory, so a component's
+# binary lands beside its source as <group>/<leaf>/<leaf>. Listed by PATTERN
+# rather than one line per module: the per-module list silently stopped matching
+# the day the tree was regrouped, and eleven stale binaries turned up staged.
+platform/*/[!.]*[!.]
+signals/*/[!.]*[!.]
+channels/*/[!.]*[!.]
+gateways/*/[!.]*[!.]
+runtimes/*/[!.]*[!.]
+!*/*/*.*
+!*/*/Dockerfile
+!*/*/Makefile
+!*/*/README
+!*/*/LICENSE
+!*/*/[a-z]*/

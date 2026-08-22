@@ -28,7 +28,7 @@ VictoriaMetrics-specific feature is
 
 | Component | Flag | What it renders |
 |---|---|---|
-| Ingest lane | `alertmanager.enabled` (**on**) | The `SignalAdapter` (`alertmanager`, reference adapter `signal-alertmanager/`, `port: 8080`) and — under `defaultSource.enabled` — a `SignalSource`. **Not the claim on it**: that is the wiring component, or your own `pipelines:` |
+| Ingest lane | `alertmanager.enabled` (**on**) | The `SignalAdapter` (`alertmanager`, reference adapter `signals/alertmanager/`, `port: 8080`) and — under `defaultSource.enabled` — a `SignalSource`. **Not the claim on it**: that is the wiring component, or your own `pipelines:` |
 | Profile | `profile.enabled` (**on**) | Exactly one object: the `alert-investigator` `AgentProfile` (identity only, with an inline `systemPrompt` role) |
 | MCP tooling | `mcp.enabled` | An `MCPConfig` (`prometheus-api`, server key `prometheus`) and an `MCPToolset` (`prometheus-observability`) |
 | MCP server | `mcpServers.enabled` | The query server workload: `Deployment` + `Service` (`agentops-mcp-prometheus`) and **its own `ServiceAccount`** |

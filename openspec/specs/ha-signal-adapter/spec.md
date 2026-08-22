@@ -6,7 +6,7 @@ TBD - created by archiving change ha-bundle. Update Purpose after archive.
 ## Requirements
 
 ### Requirement: The HA signal adapter is a standalone, dependency-free module
-`signal-ha/` SHALL be its own Go module with no dependencies outside this
+`signals/ha/` SHALL be its own Go module with no dependencies outside this
 repository, reaching Home Assistant over plain HTTP and the manager over the
 `/signal/*` contract. It SHALL hold no Kubernetes client and SHALL declare
 `kubernetesAccess: false`, because its data source is Home Assistant, not the

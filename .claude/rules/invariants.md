@@ -227,7 +227,7 @@ applied by Kubernetes from node CONDITIONS.
 
 ### THE RECLAIMING JOB'S LISTING IS PHASE-BLIND, ON PURPOSE
 
-`housekeeping/` removes workspace directories and session transcripts with no
+`platform/housekeeping/` removes workspace directories and session transcripts with no
 `Conversation` behind them.
 
 **A CLOSED conversation still HAS a CR**, so its state is protected by the same
@@ -325,7 +325,7 @@ Consequences that were each a real loss:
 `NeedLeaderElection()=false` — webhooks must serve during rollouts.
 
 **Exactly one getUpdates consumer per bot token, ever.** That consumer is
-`telegram-router`: ONE poll loop per Deployment and ONE Deployment per token
+`gateway-telegram`: ONE poll loop per Deployment and ONE Deployment per token
 (replicas 1 + Recreate, chart-owned).
 
 **Neither adapter polls, and the manager has no poller.** Adding a poll loop
@@ -460,7 +460,7 @@ another runtime pod under a NEW name, forever.
 - `MAX_ACTIVE_CONVERSATIONS` caps pods and `MAX_QUEUED_CONVERSATIONS` caps the
   backlog, but neither stops the LOOP. It just fills etcd more slowly.
 
-`signal-k8s-events/selfexclude.go` implements THREE independent mechanisms:
+`signals/k8s-events/selfexclude.go` implements THREE independent mechanisms:
 
 1. **Name prefix** — needs no API read, so it holds with a cold cache.
 2. **Owner/label.**

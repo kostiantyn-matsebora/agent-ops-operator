@@ -77,8 +77,8 @@ only thing shared is the permission-callback shape.
 
 ## Impact
 
-- **Changed**: `runtime-claude/` (`runtime.js` rewritten around `query()`;
-  `tools.js` composition logic unchanged), `runtime-claude/Dockerfile`
+- **Changed**: `runtimes/claude/` (`runtime.js` rewritten around `query()`;
+  `tools.js` composition logic unchanged), `runtimes/claude/Dockerfile`
   (`@anthropic-ai/claude-agent-sdk` replaces the global `@anthropic-ai/claude-code`
   install), a new `agentops-runtime-claude` image tag, `docs/contracts.md`,
   `CLAUDE.md`.

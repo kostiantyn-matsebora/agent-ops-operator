@@ -124,10 +124,18 @@ For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).
 
 ## Development
 
+**One directory per container, grouped by what it is at runtime** —
+`platform/` `runtimes/` `signals/` `channels/` `gateways/`, with the operator at
+`platform/manager/`. A component's published name comes from its path:
+`signals/cron` is `agentops-signal-cron`, `platform/console` is
+`agentops-console`.
+
 See [.claude/rules/build-test.md](.claude/rules/build-test.md) for the
-build/test workflow. `go test ./...` covers unit
+build/test workflow. In `platform/manager`, `go test ./...` covers unit
 semantics (grouping, cooldown, dispatch, addressing, MCP compilation) and
-envtest integration (real API server: lifecycle, alert routing, runtime selection).
+envtest integration (real API server: lifecycle, alert routing, runtime
+selection). Every other module is a `go build ./... && go vet ./... && go test
+./...` of its own, discovered by `.github/components.sh modules`.
 
 ## Status
 

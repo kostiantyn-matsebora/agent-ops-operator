@@ -142,7 +142,7 @@ Their gates differ and must not be collapsed:
 
 | Component | Kind | Sleeps when |
 |---|---|---|
-| `telegram-router` | SignalAdapter | its source is unclaimed — but it is the only poller, so this is the one to think hard about |
+| `gateway-telegram` | SignalAdapter | its source is unclaimed — but it is the only poller, so this is the one to think hard about |
 | `signal-telegram` | SignalAdapter | the chat source is unclaimed |
 | `channel-telegram` | ChannelAdapter | no Channel names it |
 

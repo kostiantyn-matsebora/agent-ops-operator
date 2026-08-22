@@ -110,7 +110,7 @@ second `AgentRuntime`).
   second reference implementation; `README.md` install/kind text unchanged;
   `CLAUDE.md` gains the module in its map and the terminology it establishes.
 - **Unchanged**: `api/v1alpha1/`, every CRD, `internal/` in its entirety,
-  `runtime-claude/`. If this change needs a manager edit, the contract was not
+  `runtimes/claude/`. If this change needs a manager edit, the contract was not
   vendor-neutral and that finding is the more important outcome.
 - **Operational reach**: none by default — nothing renders unless an operator
   declares a runtime in the new list.

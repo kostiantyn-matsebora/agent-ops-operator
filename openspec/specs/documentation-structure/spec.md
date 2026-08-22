@@ -147,7 +147,7 @@ GitHub Pages, and route the two kinds of site change separately: site
 presentation (layouts, includes, navigation data, CSS, fonts) to the theme files
 under `docs/`, and adopter-facing prose to a markdown page — never the reverse.
 It SHALL record that the site's `--ao-*` palette is copied from
-`console/ui/src/theme/theme.css`, so a token change is a two-file change.
+`platform/console/ui/src/theme/theme.css`, so a token change is a two-file change.
 
 **Where two documents cover one subject for two audiences, the routing rule SHALL
 say which receives what, in one line each.** For the console that split is: what

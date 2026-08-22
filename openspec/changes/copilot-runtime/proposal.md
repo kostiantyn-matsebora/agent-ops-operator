@@ -79,4 +79,4 @@ profile's `runtimeRef` is the entire switch.
   A GitHub credential with Copilot access, per runtime, as
   `COPILOT_GITHUB_TOKEN` — projected from a Secret, never read by the manager.
 - **Unchanged**: `api/v1alpha1/` (no CRD change), `internal/` (no manager
-  change), `runtime-claude/`, every adapter module.
+  change), `runtimes/claude/`, every adapter module.

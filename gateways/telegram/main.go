@@ -1,7 +1,7 @@
-// telegram-router: the single getUpdates consumer for a bot token, and the
+// gateway-telegram: the single getUpdates consumer for a bot token, and the
 // only component that knows what a Telegram topic MEANS.
 //
-//	Telegram getUpdates ─▶ telegram-router ─┬─ no topic ─▶ signal-telegram  ─▶ /signal/inbound
+//	Telegram getUpdates ─▶ gateway-telegram ─┬─ no topic ─▶ signal-telegram  ─▶ /signal/inbound
 //	                                        └─ topic    ─▶ channel-telegram ─▶ /channel/inbound
 //
 // Why this process exists: Telegram serves exactly one update stream per bot
@@ -101,7 +101,7 @@ func loadConfig() config {
 		missing = append(missing, "CHANNEL_TARGET (base URL of the telegram channel adapter)")
 	}
 	if len(missing) > 0 {
-		log.Fatalf("telegram-router is misconfigured, missing: %s", strings.Join(missing, ", "))
+		log.Fatalf("gateway-telegram is misconfigured, missing: %s", strings.Join(missing, ", "))
 	}
 	return c
 }
@@ -112,7 +112,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("telegram-router starting (signal=%s channel=%s)", cfg.SignalTarget, cfg.ChannelTarget)
+	log.Printf("gateway-telegram starting (signal=%s channel=%s)", cfg.SignalTarget, cfg.ChannelTarget)
 
 	r.poll(ctx)
 }

@@ -3,7 +3,7 @@ package runtimepod
 import (
 	"testing"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
 // Continuity is promised only where it is possible. The distinction this guards

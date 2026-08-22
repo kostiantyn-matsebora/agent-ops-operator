@@ -71,7 +71,7 @@ adapter.
      adapter declares `echoesOwnMessages: false`.
 
    **To ORIGINATE**, your transport's general surface belongs to a chat
-   `SignalSource`. Post to `/signal/inbound` (see `signal-telegram/`):
+   `SignalSource`. Post to `/signal/inbound` (see `signals/telegram/`):
 
    ```json
    {"kind":"chat","fingerprint":"…","payload":"…",
@@ -412,7 +412,7 @@ alternative to naming it is every adapter inventing its own.
 **Rendering, escaping, splitting and truncation are yours, entirely.** The
 manager guarantees nothing about how a message looks or how long it may be.
 
-`channel-telegram/render.go` is the reference: HTML composition, entity
+`channels/telegram/render.go` is the reference: HTML composition, entity
 escaping, 4096-character splitting, 128-character topic names. An adapter that
 cannot be bothered may concatenate the fields and send them plain — the contract
 asks only that presentation be the adapter's call.
@@ -441,7 +441,7 @@ one adapter process.
 | The bare master token, chart-provisioned into the manager as env | full, so hand-deployed adapters work unchanged |
 
 **No Kubernetes API access is needed.** The reference adapter
-[`channel-telegram/`](../channel-telegram/) is dependency-free Go.
+[`channels/telegram/`](../channels/telegram/) is dependency-free Go.
 
 ### Discovering what `config` needs
 
@@ -666,7 +666,7 @@ signal adapters sharing a name never share a token.
 
 A `SignalSource` whose adapter nothing serves carries `Served=False`.
 
-**Reference implementation:** [`signal-cron/`](../signal-cron/), which replaced
+**Reference implementation:** [`signals/cron/`](../signals/cron/), which replaced
 the old roadmap `cron` sub-struct.
 
 `config: {schedule, input, title?}` fires job-lane signals with
@@ -771,10 +771,10 @@ the limit to `0` to disable the breaker without disabling the counting.
 
 **Reference implementations:**
 
-- [`runtime-claude/`](../runtime-claude/) — Node.js + claude-code, ~200 lines.
-- [`channel-telegram/`](../channel-telegram/) — the same bring-your-own pattern
+- [`runtimes/claude/`](../runtimes/claude/) — Node.js + claude-code, ~200 lines.
+- [`channels/telegram/`](../channels/telegram/) — the same bring-your-own pattern
   for chat transports, against the channel adapter contract above.
-- [`context-sync/`](../context-sync/) — the sidecar.
+- [`platform/context-sync/`](../platform/context-sync/) — the sidecar.
 
 ## The activity contract
 
@@ -858,7 +858,7 @@ Node kinds: `signal-adapter`, `signal-source`, `pipeline`, `conversation`,
 - **Telemetry is not signal.** These events go to this log, never to
   `/signal/inbound`, and nothing converts one into the other. agent-ops' own
   health is STATUS, not SIGNAL — routing an error event about a broken runtime
-  pod back through ingest is the loop `signal-k8s-events/selfexclude.go` exists
+  pod back through ingest is the loop `signals/k8s-events/selfexclude.go` exists
   to break, and keeping the surfaces apart makes it structural here.
 
 **Attribution.** `pipeline` is present when it is knowable and EMPTY when it is

@@ -1,5 +1,5 @@
 # signal-cron adapter — multi-stage build
-# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-signal-cron:<tag> ./signal-cron/
+# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-signal-cron:<tag> ./signals/cron/
 FROM --platform=$BUILDPLATFORM golang:1.23 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src

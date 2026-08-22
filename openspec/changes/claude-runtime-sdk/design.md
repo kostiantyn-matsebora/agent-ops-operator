@@ -1,6 +1,6 @@
 ## Context
 
-`runtime-claude/runtime.js` polls `/work`, and for each unit spawns
+`runtimes/claude/runtime.js` polls `/work`, and for each unit spawns
 `claude -p … --resume <contextId>` with a set of flags, parsing `stream-json` off
 stdout. One process per work unit.
 

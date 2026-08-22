@@ -53,7 +53,7 @@ func TestEveryWiredFlowIsAllowed(t *testing.T) {
 			t.Errorf("%s policy missing; the router's push lane is unprotected", name)
 			continue
 		}
-		if !strings.Contains(p, "agentops-telegram-router") {
+		if !strings.Contains(p, "agentops-gateway-telegram") {
 			t.Errorf("%s must admit the router, or chat stops when policy is enforced", name)
 		}
 	}

@@ -1,4 +1,4 @@
-module github.com/kostiantyn-matsebora/agent-ops-operator
+module github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager
 
 go 1.23.0
 

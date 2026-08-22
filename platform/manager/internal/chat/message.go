@@ -3,7 +3,7 @@ package chat
 import (
 	"strings"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
 // THE MANAGER COMPOSES MEANING; ADAPTERS COMPOSE PRESENTATION.

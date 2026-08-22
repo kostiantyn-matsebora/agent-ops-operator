@@ -6,7 +6,7 @@ Current state, established by inspection:
 |---|---|
 | No `.github/` directory | Greenfield — no CI to preserve or migrate |
 | 12 Go modules (root + 11), all `go 1.23` | Root needs envtest assets; the eleven are dependency-free and test in seconds |
-| `CLAUDE.md` says "Nine Go modules" and never mentions `egress-proxy/` — not in the Map, not in the image build block | The only document listing what this repo ships is already behind it. Derive the CI and release matrices from the repo, and correct the prose so the two cannot drift apart again |
+| `CLAUDE.md` says "Nine Go modules" and never mentions `platform/egress-proxy/` — not in the Map, not in the image build block | The only document listing what this repo ships is already behind it. Derive the CI and release matrices from the repo, and correct the prose so the two cannot drift apart again |
 | `console/` also holds a React UI (npm, vitest) | One non-Go job: nothing runs `Text.test.tsx` / `Yaml.test.tsx` today |
 | 13 Dockerfiles | 12 cross-compile via `--platform=$BUILDPLATFORM` + `TARGETOS/TARGETARCH`; `runtime-claude` is `node:22` + apt + one npm global, every layer of which is multi-arch |
 | `runtime-claude` builds and RUNS on arm64 — verified: `claude --version` reports 2.1.239 on `aarch64` | There is no single-arch component. The published image is amd64-only because the hand-run command says `--platform linux/amd64`, and `CLAUDE.md`'s "upstream is single-arch" claim is wrong |
@@ -53,7 +53,7 @@ CI job; GHCR packages are PUBLIC, so nothing needs a pull secret.
   `~/.envtest` from cache, `setup-envtest use 1.31.x`, then
   `go build ./... && go vet ./... && go test ./...` with `KUBEBUILDER_ASSETS`.
 - `modules` — matrix over the eleven submodules (`channel-telegram`,
-  `telegram-router`, `signal-telegram`, `signal-cron`, `signal-alertmanager`,
+  `gateway-telegram`, `signal-telegram`, `signal-cron`, `signal-alertmanager`,
   `signal-k8s-events`, `signal-ha`, `console`, `context-sync`, `housekeeping`,
   `egress-proxy`); build/vet/test each. Separate from `operator` so a module
   break is legible without reading the envtest log.
@@ -98,7 +98,7 @@ component or malformed version fails immediately with a message naming the
 valid forms — a typo'd tag must not silently publish nothing (a `paths`- or
 `if`-filtered job that simply skips is indistinguishable from success).
 
-Components: `manager`, `channel-telegram`, `telegram-router`,
+Components: `manager`, `channel-telegram`, `gateway-telegram`,
 `signal-telegram`, `signal-cron`, `signal-alertmanager`, `signal-k8s-events`,
 `signal-ha`, `console`, `context-sync`, `housekeeping`, `egress-proxy`,
 `runtime-claude`, `chart`. The set is derived from the Dockerfiles, and a new
@@ -220,7 +220,7 @@ as an open question.
 ### D8. Add `.dockerignore`; do not restructure build contexts
 
 The root build context is the whole repository — `chart/`, `openspec/`,
-`runtime-claude/`, `.git/` all get uploaded to the daemon for a build that
+`runtimes/claude/`, `.git/` all get uploaded to the daemon for a build that
 copies only `go.mod`, `go.sum`, `api/`, `cmd/`, `internal/`. A `.dockerignore`
 fixes that in one file. Restructuring contexts or introducing a Makefile is a
 larger change with no CI-correctness payoff.

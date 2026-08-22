@@ -2,7 +2,7 @@
 
 See `proposal.md` — Why. What shapes the approach:
 
-- **`channel-telegram/render.go` already breaks on newlines.** Everything that is
+- **`channels/telegram/render.go` already breaks on newlines.** Everything that is
   not a table is returned "untouched, line for line", so the shipped transport
   has been reading the subset this way all along.
 - **The console is built on `react-markdown` + `remark-gfm`.** CommonMark makes a

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kostiantyn-matsebora/agent-ops-operator/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 )
 
 func postContext(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {

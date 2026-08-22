@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
 func testChannel(name, typ string) *agentopsv1alpha1.Channel {

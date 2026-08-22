@@ -9,9 +9,24 @@
 # remember to edit is a matrix that silently stops covering things.
 #
 # Discovery rules:
-#   images  — every Dockerfile. Root is `manager`; anything else is its directory.
-#   modules — every go.mod EXCEPT the root's, which the `operator` job owns
-#             because only it needs envtest.
+#   images  — every Dockerfile. The component is derived from its PATH:
+#             <group>/<leaf>, where a PLURAL group names a kind of component and
+#             contributes its singular as a prefix, and a singular group is a
+#             namespace and contributes nothing.
+#
+#               signals/cron       -> signal-cron        -> agentops-signal-cron
+#               channels/telegram  -> channel-telegram   -> agentops-channel-telegram
+#               runtimes/claude    -> runtime-claude     -> agentops-runtime-claude
+#               gateways/telegram  -> gateway-telegram   -> agentops-gateway-telegram
+#               platform/console   -> console            -> agentops-console
+#
+#             The name is therefore never repeated: the directory says the kind
+#             once, and the image name says it once, and neither is written
+#             down twice. Renaming a directory renames a published image, so
+#             the derivation is asserted unique below.
+#   modules — every go.mod. The envtest suite belongs to platform/manager, and
+#             the `operator` job in ci.yml names that module so it is tested
+#             once, with assets.
 #
 # The one thing that cannot be derived is PLATFORMS, so it is declared, once,
 # below — and the release asserts what it actually pushed against that
@@ -42,22 +57,42 @@ platforms_for() {
   echo "${SINGLE_ARCH[$component]:-$DEFAULT_PLATFORMS}"
 }
 
+# component_for derives a component name from a directory PATH.
+#
+# A group whose name is PLURAL names a kind of component and lends its singular
+# to every member; a group whose name is singular is a namespace and lends
+# nothing. That is the whole rule, and it reproduces every name this repository
+# has ever published except the one this change renames on purpose.
+component_for() {
+  local dir="${1#./}"
+  local group="${dir%%/*}" leaf="${dir#*/}"
+  case "$group" in
+    *s) echo "${group%s}-${leaf}" ;;
+    *)  echo "$leaf" ;;
+  esac
+}
+
 images() {
   local out=()
   while IFS= read -r dockerfile; do
     local dir component context
     dir="$(dirname "$dockerfile")"
-    if [ "$dir" = "." ]; then
-      component="manager"
-      context="."
-    else
-      component="$(basename "$dir")"
-      context="$dir"
-    fi
+    component="$(component_for "$dir")"
+    context="$dir"
     out+=("$(jq -nc --arg c "$component" --arg ctx "$context" --arg df "$dockerfile" \
       --arg p "$(platforms_for "$component")" \
       '{component:$c, context:$ctx, dockerfile:$df, platforms:$p}')")
   done < <(find . -name Dockerfile -not -path '*/node_modules/*' | sed 's|^\./|./|' | sort)
+  # UNIQUE, asserted rather than assumed. A flat directory name was unique by
+  # construction; a derived one is not — two groups could produce one component
+  # name, and the release workflow matches a tag against exactly this list.
+  local names dupes
+  names="$(printf '%s\n' "${out[@]}" | jq -r .component | sort)"
+  dupes="$(printf '%s\n' "$names" | uniq -d)"
+  if [ -n "$dupes" ]; then
+    echo "components.sh: two components derive one name: $dupes" >&2
+    exit 1
+  fi
   printf '%s\n' "${out[@]}" | jq -sc .
 }
 

@@ -1,5 +1,5 @@
 # signal-k8s-events adapter — multi-stage build
-# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
+# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-signal-k8s-events:<tag> ./signals/k8s-events/
 FROM --platform=$BUILDPLATFORM golang:1.23 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src

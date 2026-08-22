@@ -13,12 +13,25 @@ follows.
 
 ## [Unreleased]
 
-Images: manager, console, `channel-telegram`, `telegram-router`,
-`signal-telegram` all move. No chart value changes and no CRD field is removed.
+**Every image moves.** The repository was regrouped by component type and every
+component rebuilt and republished, so the version line is uniform rather than
+partial:
 
-**Nothing to do on upgrade.** Every wire addition is optional, the adapter
-contract version stays `2`, and an adapter that ignores all of it behaves
-exactly as before.
+| Component | Tag | | Component | Tag |
+|---|---|---|---|---|
+| `manager` | 0.44.0 | | `signal-cron` | 0.3.0 |
+| `console` | 0.26.0 | | `signal-alertmanager` | 0.7.0 |
+| `runtime-claude` | 0.8.0 | | `signal-k8s-events` | 0.4.0 |
+| `context-sync` | 0.2.0 | | `signal-ha` | 0.2.0 |
+| `egress-proxy` | 0.2.0 | | `signal-telegram` | 0.6.0 |
+| `housekeeping` | 0.2.0 | | `channel-telegram` | 0.20.0 |
+| | | | `gateway-telegram` | 0.5.0 |
+
+No CRD field is removed and the adapter contract version stays `2`.
+
+**One thing to do on upgrade**, and only for Telegram: `gateway-telegram` is
+`telegram-router` renamed, workload included — see the entry below. Everything
+else is a tag bump.
 
 ### Added
 
@@ -97,6 +110,35 @@ exactly as before.
   never executed. The prompt line is a workaround for a schema the chart does
   not own.
 
+### Changed
+
+- **The repository is grouped by component type** — `platform/` `runtimes/`
+  `signals/` `channels/` `gateways/`, one container per directory, with the
+  operator now at `platform/manager/`. A component's published name is derived
+  from its PATH: a plural group lends its singular as a prefix
+  (`signals/cron` → `agentops-signal-cron`), a singular one lends nothing
+  (`platform/console` → `agentops-console`). Twelve of thirteen image names are
+  unchanged.
+
+  Every Go module path now follows its directory, so `api/v1alpha1` is imported
+  as `…/agent-ops-operator/platform/manager/api/v1alpha1`. No CRD, contract or
+  runtime behaviour changed.
+
+- **BREAKING — `telegram-router` is now `gateway-telegram`.** The image is
+  `agentops-gateway-telegram` and the Deployment is `agentops-gateway-telegram`.
+  The old image stays published, as `signal-vmalertmanager` did.
+
+  ### Upgrade
+
+  Helm creates the new Deployment before deleting the old one, so for a few
+  seconds **two consumers poll one bot token** — 409s and a couple of stolen
+  updates, with the same image on both sides. To avoid the overlap entirely,
+  scale `agentops-telegram-router` to zero before upgrading, or uninstall the
+  telegram bundle and reinstall it.
+
+  Nothing else moves: the `router:` values key in `telegram-bundle` keeps its
+  name, and both adapters, the Channel and the SignalSource are untouched.
+
 ### Removed
 
 - **The `/<pipeline>:<agent>` addressed form.** A Pipeline names one profile and
@@ -156,7 +198,7 @@ Rolling back is reverting the images. Old records stay readable.
 ### Changed
 
 **BREAKING for pinned images.** `signal-vmalertmanager/` is now
-**`signal-alertmanager/`**, and its image is
+**`signals/alertmanager/`**, and its image is
 **`kmatsebora/agentops-signal-alertmanager`** at the same tag (`0.6.0`,
 identical behaviour).
 
@@ -378,7 +420,7 @@ changes what the allowlist means with nothing failing.
 own tool list, finds device controls and no way to reach a log, and reports the
 task impossible.
 
-**New module `signal-ha/`** — a dependency-free signal adapter reading the
+**New module `signals/ha/`** — a dependency-free signal adapter reading the
 instance's WebSocket API over a hand-written RFC 6455 client.
 
 - Watches `system_log_event`.

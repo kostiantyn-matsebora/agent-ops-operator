@@ -22,6 +22,12 @@ concurrency:
 
 env:
   ENVTEST_K8S_VERSION: "1.31.x"
+  # The one module whose suite needs a real API server. Named ONCE, and used
+  # twice below — by the job that provisions envtest for it, and by the filter
+  # that keeps it out of the plain module matrix, where it would fail for want
+  # of assets. Two places naming it separately is how they would come to
+  # disagree.
+  ENVTEST_MODULE: platform/manager
 
 jobs:
   # WHAT EXISTS, asked once and answered for every matrix below.
@@ -34,7 +40,8 @@ jobs:
       - uses: actions/checkout@v4
       - id: list
         run: |
-          echo "modules=$(./.github/components.sh modules)" >> "$GITHUB_OUTPUT"
+          echo "modules=$(./.github/components.sh modules \
+            | jq -c --arg m "$ENVTEST_MODULE" 'map(select(. != $m))')" >> "$GITHUB_OUTPUT"
           echo "images=$(./.github/components.sh images)" >> "$GITHUB_OUTPUT"
 
   # The operator, against a REAL API server. Its own suite file records that
@@ -42,11 +49,14 @@ jobs:
   # about the kubelet — which is what the e2e-testing change is for.
   operator:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.ENVTEST_MODULE }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: ${{ env.ENVTEST_MODULE }}/go.mod
           cache: true
       - name: Cache envtest assets
         uses: actions/cache@v4
@@ -70,8 +80,8 @@ jobs:
       - name: Assert envtest was provisioned
         run: test -n "$KUBEBUILDER_ASSETS" || { echo "envtest assets were never provisioned"; exit 1; }
 
-  # Every submodule. Dependency-free by design, so these are seconds each, and
-  # separate from `operator` so a module break is legible without reading an
+  # Every OTHER module. Dependency-free by design, so these are seconds each,
+  # and separate from `operator` so a module break is legible without reading an
   # envtest log.
   modules:
     needs: discover
@@ -104,14 +114,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: console/ui
+        working-directory: platform/console/ui
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: console/ui/package-lock.json
+          cache-dependency-path: platform/console/ui/package-lock.json
       - run: npm ci
       - run: npm test
       - run: npm run build

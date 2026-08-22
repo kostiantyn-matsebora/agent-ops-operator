@@ -9,7 +9,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/api/v1alpha1"
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
 // THE MANAGER SAYS WHAT MAY BE TYPED; THE ADAPTER DECIDES WHAT IT CAN EXPRESS.

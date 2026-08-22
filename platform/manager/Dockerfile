@@ -1,5 +1,5 @@
 # agentops manager — multi-stage build
-# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-manager:<tag> .
+# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-manager:<tag> ./platform/manager/
 FROM --platform=$BUILDPLATFORM golang:1.23 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src

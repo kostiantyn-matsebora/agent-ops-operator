@@ -280,7 +280,7 @@ what you want when one agent should answer this source AND a chat surface.
 {{- $tb := index .Values "telegram-bundle" }}
 {{- if and $tb $tb.enabled }}
 
-Telegram bundle — telegram-router is now the ONLY getUpdates consumer for this
+Telegram bundle — gateway-telegram is now the ONLY getUpdates consumer for this
 bot token. If anything else still polls it (an older single-container adapter,
 another system), stop it now: two consumers means 409s and stolen updates.
 {{- if $tb.surface.enabled }}

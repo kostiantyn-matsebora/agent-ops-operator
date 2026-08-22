@@ -55,7 +55,7 @@
 
 ## 9. Image and docs
 
-- [ ] 9.1 Update `runtime-claude/Dockerfile`: install the SDK (optional deps intact), drop the global `@anthropic-ai/claude-code` install, keep the no-domain-tooling comment
+- [ ] 9.1 Update `runtimes/claude/Dockerfile`: install the SDK (optional deps intact), drop the global `@anthropic-ai/claude-code` install, keep the no-domain-tooling comment
 - [ ] 9.2 Build and push a new `agentops-runtime-claude` tag (never overwrite a pushed tag)
 - [ ] 9.3 `docs/contracts.md`: the allowlist may be enforced per invocation, and what that obliges (nothing shadows the decision point)
 - [ ] 9.4 `CLAUDE.md`: note that the reference runtime drives the SDK and holds a session per pod, and that the allowlist is a callback rule set

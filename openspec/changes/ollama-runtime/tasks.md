@@ -54,7 +54,7 @@
 
 ## 4. Allowlist composition and the gate
 
-- [ ] 4.1 `tools.go`: port `runtime-claude/tools.js` — frontmatter `tools:`
+- [ ] 4.1 `tools.go`: port `runtimes/claude/tools.js` — frontmatter `tools:`
   reader (flow list, inline, block forms), keeping its "not a YAML parser,
   unreadable declares nothing" posture
 - [ ] 4.2 Port `tools.test.js` cases to `tools_test.go`, plus merge/overwrite

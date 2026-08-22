@@ -397,7 +397,7 @@ removed. Ingest is on when the router runs.
      grouping: {cooldownHours: 0}
    ```
 
-   Then add `home-ops-chat` and `telegram-router` to your Pipeline's
+   Then add `home-ops-chat` and `gateway-telegram` to your Pipeline's
    `signalSourceRefs`. **A chat source no Pipeline claims answers nobody.** The
    user is told so on the surface, but nothing runs.
 3. **Scale the old adapter to zero and CONFIRM no `getUpdates` consumer remains**

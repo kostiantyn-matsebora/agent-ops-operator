@@ -36,5 +36,5 @@ colours literally, and the glyph sits on the brand circle rather than on the
 page — one file, readable on either ground, no theme variant.
 
 **That makes the mark a THREE-file change**, not two:
-`console/ui/src/components/Logo.tsx` is the source, `_includes/logo.svg` the
+`platform/console/ui/src/components/Logo.tsx` is the source, `_includes/logo.svg` the
 masthead's copy, and this the one an `<img>` can load. Same paths in all three.

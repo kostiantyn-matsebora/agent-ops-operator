@@ -85,7 +85,7 @@ just stops being a second door to the API.
 exists so the runtime is swappable. Derive one:
 
 ```dockerfile
-FROM kmatsebora/agentops-runtime-claude:0.5.0
+FROM kmatsebora/agentops-runtime-claude:0.8.0
 USER root
 RUN curl -fsSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/<ver>/bin/linux/amd64/kubectl \
  && chmod 0755 /usr/local/bin/kubectl
@@ -206,7 +206,7 @@ The reconciler:
 opaque `config`. The adapter CR carries none.
 
 Publishing a new channel type (Slack, Teams, …) is an image plus one CR, with
-zero operator or chart changes. `channel-telegram/` is the reference.
+zero operator or chart changes. `channels/telegram/` is the reference.
 
 `spec.echoesOwnMessages` is the one thing the implementation declares about its
 BEHAVIOUR, and it is interface metadata rather than configuration: does this
@@ -279,7 +279,7 @@ also owns a Service `agentops-signal-<name>` and injects `LISTEN_ADDR`, so
 enabling the adapter is a complete appliance.
 
 A new signal kind (PagerDuty, email, k8s events, …) is an image plus one CR.
-`signal-cron/` is the reference.
+`signals/cron/` is the reference.
 
 #### `servedBy` — two identities, one pod
 
@@ -329,7 +329,7 @@ precisely because one adapter could not be both.
 **The alternative is worse.** Two adapter CRs with images means an idle pod
 whose only job is to make a source `Served`.
 
-This repo already paid for that shape once, when `telegram-router` was an
+This repo already paid for that shape once, when `gateway-telegram` was an
 adapter with a signal-free `SignalSource` purely to carry a credential, which
 then sat at `Wired=False`.
 
@@ -481,7 +481,7 @@ everything.
 runtime:
   enabled: true                 # false = you manage AgentRuntime CRs yourself
   name: default                 # the name a profile with no runtimeRef resolves
-  image: kmatsebora/agentops-runtime-claude:0.5.0
+  image: kmatsebora/agentops-runtime-claude:0.8.0
   idleTtlMinutes: ""            # empty = follow runtimeIdleTtlMinutes
   nodeSelector: {}
   resources: {}

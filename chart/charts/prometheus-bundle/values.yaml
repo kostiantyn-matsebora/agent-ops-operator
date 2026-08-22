@@ -14,7 +14,7 @@ alertmanager:
   name: alertmanager
   image:
     repository: kmatsebora/agentops-signal-alertmanager
-    tag: 0.6.0
+    tag: 0.7.0
   resources: {}
   # Sender self-registration. VICTORIAMETRICS ONLY — it writes a
   # VMAlertmanagerConfig, and vanilla Alertmanager has no such object.

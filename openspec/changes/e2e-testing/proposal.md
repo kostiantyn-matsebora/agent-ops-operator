@@ -17,7 +17,7 @@ guarding it and no test that can run them, because reproducing it requires a
 real pod that really fails.
 
 The obstacle was assumed to be the third parties. It is not. Auditing egress
-across every module: only `telegram-router`, `channel-telegram`, the planned
+across every module: only `gateway-telegram`, `channel-telegram`, the planned
 `signal-ha`, and `runtime-claude` call *out*. Every adapter the question was
 asked about — vmalertmanager, telegram ingest, k8s-events, cron — is
 **inbound**: it hosts a port and waits. Driving it needs a POST, not a fake. And
@@ -64,11 +64,11 @@ simulated.
   agent exhibit them on cue. The stub is an instrument, not a cost workaround.
 - **A fake Bot API server** (`test/fakebotapi/`) implementing `getUpdates`,
   `sendMessage`, `sendDocument`, `createForumTopic`, `closeForumTopic`. Because
-  `telegram-router` forwards updates **verbatim**, a replayed `Update` is
+  `gateway-telegram` forwards updates **verbatim**, a replayed `Update` is
   byte-identical to what Telegram would have produced, which is what makes the
   double faithful rather than approximate.
 - **The outbound Bot API base URL becomes configuration.** `channel-telegram`
-  and `telegram-router` hardcode `https://api.telegram.org` while parameterizing
+  and `gateway-telegram` hardcode `https://api.telegram.org` while parameterizing
   the *manager* URL in the same files. Both gain `TELEGRAM_API_BASE`, defaulting
   to the real host, surfaced as an optional `telegram-bundle` value that renders
   nothing when unset. The standing rule this establishes — **an adapter's
@@ -122,7 +122,7 @@ have made it untestable).
   adapter binaries black-box), and `.github/workflows/e2e.yml`. **No adapter
   module gains a dependency** — the eight-module boundary is preserved.
 - **Go changes are two lines of substance**: the Bot API base URL in
-  `channel-telegram/telegram.go` and `telegram-router/telegram.go`. **No CRD,
+  `channels/telegram/telegram.go` and `gateways/telegram/telegram.go`. **No CRD,
   API, or manager change** — the pack asserts existing behavior.
 - **Chart**: `telegram-bundle` gains an optional `apiBase`; the stub runtime is
   selected through the existing `runtime.image` value, so no new template logic.

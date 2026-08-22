@@ -24,7 +24,7 @@
       `KUBEBUILDER_ASSETS` — confirm the `internal/integration` suite runs
       rather than skipping
 - [x] 2.3 Job `modules`: matrix over every submodule with a `go.mod`
-      (`channel-telegram`, `telegram-router`, `signal-telegram`, `signal-cron`,
+      (`channel-telegram`, `gateway-telegram`, `signal-telegram`, `signal-cron`,
       `signal-alertmanager`, `signal-k8s-events`, `signal-ha`, `console`,
       `context-sync`, `housekeeping`, `egress-proxy`) running build + vet + test
       in each module dir. Derive the matrix from the `go.mod` files present, so

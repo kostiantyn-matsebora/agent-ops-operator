@@ -32,7 +32,7 @@ eventsAdapter:
     # 0.3.0 adds the time axis (route.timeIntervals / route.muteTimeIntervals);
     # an earlier image ignores those keys, which looks like a window that never
     # fires.
-    tag: 0.3.0
+    tag: 0.4.0
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding
