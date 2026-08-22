@@ -315,6 +315,19 @@ func (a *adapter) normalize(upd tgUpdate) (string, Signal, bool) {
 	// real one. Reversed HERE, so nothing outside this adapter ever sees it.
 	text := reverseSpelling(m.Text)
 
+	// ANSWERING A PROMPT. A command menu sends on tap, so `/k8s-ops` arrives
+	// with no task and the manager asks for one. This is that answer, and the
+	// Pipeline it belongs to is two links back up the reply chain:
+	//
+	//	this reply  ->  the manager's question  ->  the bare command
+	//
+	// Read from Telegram's own linkage rather than from anything remembered, so
+	// a restart between the question and the answer changes nothing — the same
+	// technique a tapped control already uses.
+	if cmd := promptedCommand(m); cmd != "" {
+		text = cmd + " " + text
+	}
+
 	return match, Signal{
 		// update_id is unique per bot, so identical text twice never
 		// collapses on cooldown — repeating yourself is not dedup.
@@ -372,6 +385,36 @@ func (a *adapter) normalizeSelection(upd tgUpdate) (string, Signal, bool) {
 		Payload:     payload,
 		Title:       title(payload),
 	}, true
+}
+
+// promptedCommand returns the addressed command this message is answering, or
+// "" when it is not answering one.
+//
+// A message qualifies when it replies to a message that itself replied to a
+// BARE command — the shape the manager's "what should it do?" produces and
+// nothing else does. Anything with a task already on it is somebody addressing
+// a Pipeline directly, and is left alone.
+func promptedCommand(m *tgMessage) string {
+	question := m.ReplyToMessage
+	if question == nil || question.ReplyToMessage == nil {
+		return ""
+	}
+	original := reverseSpelling(strings.TrimSpace(question.ReplyToMessage.Text))
+	if !strings.HasPrefix(original, "/") {
+		return ""
+	}
+	// Bare only: a command that already carried a task was never prompted.
+	if strings.ContainsAny(original, " \t\n") {
+		return ""
+	}
+	// Telegram appends @BotName to commands in groups. The manager tolerates it,
+	// but this text becomes the conversation's recorded input and its title —
+	// so the transport's own convention is dropped here rather than kept in the
+	// record forever.
+	if at := strings.IndexByte(original, '@'); at > 0 {
+		original = original[:at]
+	}
+	return original
 }
 
 // sourceFor resolves the served source whose chat this is.

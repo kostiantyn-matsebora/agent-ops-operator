@@ -181,7 +181,7 @@ func TestCloseOnGeneralSurfaceAnswersWithUsage(t *testing.T) {
 	if !ok {
 		t.Fatal("parse")
 	}
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -276,7 +276,7 @@ func listingBody(t *testing.T, r *Router, q *OpQueue, text string) string {
 	if !ok {
 		t.Fatalf("parse %q", text)
 	}
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -329,7 +329,7 @@ func TestListingOffersEachPipelineAsAChoice(t *testing.T) {
 		pipeline("half-wired", "nobody", false),
 	)
 	cmd, _ := addressing.Parse("/" + ListCommand)
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")

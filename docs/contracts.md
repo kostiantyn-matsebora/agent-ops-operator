@@ -314,9 +314,24 @@ both are structured, not prose.
 |---|---|---|
 | `choices[]` | offered actions: `label`, `command` | render controls if your transport has them. Otherwise the body already names each one, so nothing is lost |
 | `inReplyTo` | your OWN handle for the message this answers, as you supplied it in `agentops.dev/message` | reply to that message, or ignore it |
+| `expectsReply` | this message ASKS the reader for something | open a reply box if you can, or do nothing — the prose says what to send |
 
 `inReplyTo` is **opaque** to the manager. It stores and returns the string
 unaltered and never parses it, exactly as it treats a thread id.
+
+**`expectsReply` exists because a command menu SENDS on tap.** Somebody picking
+`/k8s-ops` from a transport's own list posts it bare, with nowhere to type the
+task — so the manager asks for one instead of answering with usage.
+
+The answer finds its way back through the reply chain, and nothing is stored:
+
+```
+  the reply          →  the manager's question  →  the bare command
+                            (inReplyTo)              (the Pipeline)
+```
+
+An adapter that cannot open a reply box is still conformant. The prose names the
+Pipeline and says what to send.
 
 Together they are what lets a control offered on somebody's own words carry
 those words forward. Post the offer as a reply to their message and your
