@@ -400,8 +400,8 @@ read.** It is how many conversations one signal will open, and — on a chat
 source — whether a bare message is unambiguous.
 
 **Chat is the one lane that does not fan out.** A person asked one question on
-one surface and is owed one answer, and unlike an alert they can say which agent
-they meant.
+one surface and is owed one answer, and unlike an alert they can say which
+Pipeline they meant.
 
 | Message on a chat source | Ready Pipelines serving it | What happens |
 |---|---|---|
@@ -414,6 +414,25 @@ they meant.
 **That distinction comes from the arriving signal's `kind`**, which ingest
 already holds. Nothing on a `SignalSource` or a `SignalAdapter` declares "this
 is a chat source", and no reconciler decides it.
+
+#### The addressed form is one segment
+
+`/<pipeline> <task>`. Everything after the name is the task, colons included.
+
+There was a `/<pipeline>:<agent>` form that picked an agent definition inside
+the profile's repository. **It is removed.**
+
+A Pipeline names one profile and a profile names one agent. The agent is
+therefore already decided by the wiring, the same way the toolsets and MCP
+servers are.
+
+Letting whoever typed the message pick a different one is the shape this CRD
+exists to prevent, and the same reason [no HTTP form names a
+Pipeline](#pipeline).
+
+`Conversation.spec.inputs[].agent` carried that override. It is **deprecated**:
+nothing writes it, and dispatch reads it for one release so an input queued
+before the upgrade still reaches the agent it was parsed with.
 
 ### MCPConfig
 
@@ -788,12 +807,12 @@ rather than discovered later.
 | `/exit` | the runtime pod | the conversation and its thread |
 | `/close` | the conversation | nothing running. The thread is archived |
 
-`/agents` lists both with that difference.
+`/pipelines` lists both with that difference.
 
-**Consequence worth knowing:** a Pipeline named after a manager command (`exit`,
-`close`, `agents`, `help`, `start`) cannot be reached by that command. The
-interception happens before the Pipeline lookup, which is what makes the
-commands reliable.
+**Consequence worth knowing:** a Pipeline named after a manager command
+(`pipelines`, `agents`, `help`, `start`, `exit`, `close`) cannot be reached by
+that command. The interception happens before the Pipeline lookup, which is
+what makes the commands reliable.
 
 ## How a message travels
 

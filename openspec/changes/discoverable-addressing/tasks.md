@@ -54,13 +54,13 @@
 
 ## 7. Documentation
 
-- [ ] 7.1 Update `docs/concepts.md` for the single-segment addressed form and the deprecated `InputItem.agent` — and verify no page still documents a per-message agent override
-- [ ] 7.2 Document the vocabulary endpoint, the revision header, `choices` and `inReplyTo` in `docs/contracts.md` — and verify the endpoint list, the message-kind table and the adapter obligations all reflect the additions
-- [ ] 7.3 Document the Telegram command menu and the transport-local spelling in `docs/telegram-bundle.md` — and verify the page states why the menu may complete a different string than the CR carries
-- [ ] 7.4 Update `docs/console-guide.md` for the reply-composer assistance — and verify it says what the composer offers and where, without restating reference detail owned by `docs/console.md`
-- [ ] 7.5 Add a `CHANGELOG.md` entry, newest first, covering the listing rename, the removed override and the deprecated field — and verify it names what an operator must do, which is nothing
-- [ ] 7.6 Update `CLAUDE.md`: the reserved command set gains `pipelines`, the `addressing/` map line loses `[:<agent>]`, and the terminology section states that a Pipeline is what a message addresses — and verify no line in the file still shows the two-segment form
-- [ ] 7.7 Run the adopter-prose lint from `CLAUDE.md` over `docs/*.md` and verify it is silent
+- [x] 7.1 Update `docs/concepts.md` for the single-segment addressed form and the deprecated `InputItem.agent` — and verify no page still documents a per-message agent override
+- [x] 7.2 Document the vocabulary endpoint, the revision header, `choices` and `inReplyTo` in `docs/contracts.md` — and verify the endpoint list, the message-kind table and the adapter obligations all reflect the additions
+- [x] 7.3 Document the Telegram command menu and the transport-local spelling in `docs/telegram-bundle.md` — and verify the page states why the menu may complete a different string than the CR carries
+- [x] 7.4 Update `docs/console-guide.md` for the reply-composer assistance — and verify it says what the composer offers and where, without restating reference detail owned by `docs/console.md`
+- [x] 7.5 Add a `CHANGELOG.md` entry, newest first, covering the listing rename, the removed override and the deprecated field — and verify it names what an operator must do, which is nothing
+- [x] 7.6 Update `CLAUDE.md`: the reserved command set gains `pipelines`, the `addressing/` map line loses `[:<agent>]`, and the terminology section states that a Pipeline is what a message addresses — and verify no line in the file still shows the two-segment form
+- [x] 7.7 Run the adopter-prose lint from `CLAUDE.md` over `docs/*.md` and verify it is silent
 
 ## 8. Whole-change verification
 

@@ -132,6 +132,21 @@ wins over this script until the next repaint.
 
 ## Terminology (binding)
 
+### A Pipeline is what a message ADDRESSES, never "an agent"
+
+The listing command is `/pipelines`. `/agents` still works and is never printed,
+offered or registered — a published word cannot simply stop answering, but
+nobody should learn it from us again.
+
+"Agent" is TAKEN: it names a DEFINITION in `.claude/agents/` inside a profile's
+repository, which is what `AgentProfile.spec.agent` selects. Using it for the
+addressable thing puts two meanings on one word, and the more visible one was
+wrong. `internal/chat` publishes the vocabulary that a transport registers as
+its command menu, so the word is carved into every install's composer — which is
+why it had to be right before that shipped, not after.
+
+`pipelines` joins the reserved set a Pipeline cannot be reached by.
+
 ### Agent runtime, never "worker"
 
 CRD `AgentRuntime`, SA `agentops-runtime`, env `RUNTIME_*`, pkg `runtimepod`,
@@ -348,7 +363,7 @@ Two consequences that decide how bundles wire themselves:
    Pipeline NOTHING**, while making every unaddressed message on that surface
    ambiguous — which the bare-chat lane answers by REFUSING.
 
-`/agents` lists Ready pipelines only, so an addressable Pipeline stays
+`/pipelines` lists Ready pipelines only, so an addressable Pipeline stays
 discoverable whether or not it claims anything.
 
 #### REACHED, NEVER NAMED
@@ -680,7 +695,7 @@ Point the claiming Pipeline at a stub runtime and it costs no LLM.
 | `cmd/manager/main.go` | wiring: reconciler, httpapi, chat registry/ops/router, env config |
 | `internal/ingest/` | signature grouping, fingerprint cooldown |
 | `internal/runtimepod/` | runtime pod builder (AgentRuntime CR over bootstrap Config) |
-| `internal/addressing/` | `/<profile>[:<agent>]` parsing |
+| `internal/addressing/` | `/<pipeline> <task>` parsing — ONE segment. The `:<agent>` override is deleted: a Pipeline names one profile and a profile names one agent, so the agent comes from the wiring, and a sender picking their own reached past it |
 | `internal/integration/` | envtest suite — real API server, fake chat, no kubelet |
 | `config/samples/` | example CRs, the only `config/` content. Deployment-specific config belongs with the deployment, never in this module |
 
@@ -1332,7 +1347,7 @@ merely because the pod would come straight back.
 `ResolveFor(...).ContinuityPossible()` — the same call dispatch uses — decides
 whether the reply promises the context or warns it starts fresh.
 
-**A Pipeline named after a manager command** (`exit`, `close`, `agents`, `help`,
+**A Pipeline named after a manager command** (`pipelines`, `agents`, `exit`, `close`, `help`,
 `start`) **is unreachable by that command.** Interception precedes the Pipeline
 lookup, which is what makes the commands reliable.
 
@@ -1488,7 +1503,7 @@ Consequences that were each a real loss:
 - NO signature grouping unless `signatureLabels` is set. Chat keys on the
   fingerprint, and the default alert labels would hash every message alike into
   one conversation.
-- **Commands whose whole result is a reply** (`/agents`, unknown agent, usage
+- **Commands whose whole result is a reply** (`/pipelines`, unknown pipeline, usage
   error) emit a send op and create nothing.
 - **A chat signal MUST carry `agentops.dev/channel`.** `/signal/inbound` refuses
   one it could not answer.

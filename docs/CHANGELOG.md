@@ -13,7 +13,59 @@ follows.
 
 ## [Unreleased]
 
-Nothing yet.
+Images: manager, console, `channel-telegram`, `telegram-router`,
+`signal-telegram` all move. No chart value changes and no CRD field is removed.
+
+**Nothing to do on upgrade.** Every wire addition is optional, the adapter
+contract version stays `2`, and an adapter that ignores all of it behaves
+exactly as before.
+
+### Added
+
+- **`GET /channel/vocabulary`** — what may be typed on a chat surface: the
+  manager commands and every Ready Pipeline, each with a `position` (`general`
+  or `thread`). A channel adapter holds no Kubernetes access, so this is the
+  only way it can know what is addressable.
+- **`X-Agentops-Vocabulary-Revision`** on every `GET /channel/ops` response, the
+  `200` and the `204` alike. A changed revision means refetch. The manager
+  cannot dial an adapter, so the news rides a connection the adapter already
+  holds.
+- **`choices[]` and `inReplyTo` on an outbound message.** Offered actions, and
+  the transport's own handle for the message being answered. Both optional, both
+  structured. A transport without controls renders the same list as text.
+- **Telegram registers a command menu** per served chat, covering the manager
+  commands and your Ready Pipelines. Telegram then shows its own control in the
+  composer and completes what you type.
+- **Tapping a Pipeline on the ambiguity refusal sends the message you already
+  typed**, rather than making you write it again.
+- **The console's reply box completes commands** — `/exit` and `/close`, with
+  the difference stated. It never offers a Pipeline there.
+- `agentops.dev/message`, an optional label on a chat signal carrying the
+  transport's handle for the arriving message.
+
+### Changed
+
+- **`/agents` is now `/pipelines`.** The old name still works and always will,
+  but it is never printed, offered or registered. It listed Pipelines, and
+  "agent" already names a definition inside a profile's repository.
+- A Pipeline named `pipelines` joins the set unreachable by command.
+- A hyphenated Pipeline is completed on Telegram under an underscored spelling
+  (`/k8s_observe`). **The CR is not renamed** and the manager never sees the
+  other form — the adapter translates it back. Both forms work when typed.
+
+### Removed
+
+- **The `/<pipeline>:<agent>` addressed form.** A Pipeline names one profile and
+  a profile names one agent, so the agent is decided by the wiring. Letting the
+  sender pick a different one reached past it.
+
+  Text after the Pipeline name is now simply the task, colons included.
+
+### Deprecated
+
+- `Conversation.spec.inputs[].agent`. Nothing writes it. Dispatch reads it for
+  one release so an input queued before the upgrade still reaches the agent it
+  was parsed with. The field is removed in a later release.
 
 ## [5.25.0] — 2026-08-22
 

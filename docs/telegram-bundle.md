@@ -53,6 +53,46 @@ telegram-bundle:
 That renders the `Channel`, the chat `SignalSource` (same name as the Channel —
 one name for the whole surface), the bot `Secret`, and the **router Deployment**.
 
+### The composer offers what you can type
+
+Once the surface is running, Telegram shows its own command control in the
+composer and completes what you type. `channel-telegram` registers the manager's
+vocabulary for each chat it serves, so nothing has to be posted to teach it and
+nothing scrolls away.
+
+**Both kinds are registered**: the manager commands and your Ready Pipelines.
+
+**A hyphenated Pipeline is completed under an underscored name.** Telegram
+command names admit only lowercase letters, digits and underscores, so
+`k8s-observe` is registered as `/k8s_observe`.
+
+- The **CR is untouched** and the manager never sees the other spelling.
+- The adapter translates it back before anything leaves, so every conversation
+  and every record names the Pipeline as you declared it.
+- Both forms work when typed. Only one is completed.
+- The listing prints the completed form, so the menu and the message agree.
+
+That mapping is safe because a Kubernetes name cannot contain an underscore, so
+no two Pipelines can collapse to one command.
+
+**A name Telegram cannot express at all is simply not registered** — one
+containing a dot, or longer than 32 characters. It stays typable. Nothing is
+refused.
+
+Registration happens when the vocabulary actually changes, and only when the
+list Telegram would see changes with it.
+
+### Tapping an offered Pipeline sends what you typed
+
+Send a message on the general surface with several Pipelines serving it and you
+get the refusal that names them. Each one is now a **button**.
+
+Tapping it sends **the message you already wrote** to that Pipeline. You do not
+retype the task.
+
+The buttons are attached to that message, never to the chat: a chat-wide
+keyboard is shown to every member of the group and replaces their own composer.
+
 ### Bursts are paced, not dropped
 
 Telegram **rejects** rather than queues. A 44-alert burst on 2026-08-13 produced
