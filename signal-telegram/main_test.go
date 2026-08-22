@@ -2,6 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -299,65 +303,118 @@ func TestSelectionRespectsApprovers(t *testing.T) {
 // Pipeline — and it does so through Telegram's own reply chain, with nothing
 // remembered on either side.
 
+// ---- the real path -------------------------------------------------------
+//
+// These drive the ENTRY POINT — an update POSTed to /updates, exactly as the
+// router forwards one — and assert what this adapter POSTs to the manager.
+// Nothing calls normalize() directly.
+//
+// The earlier version of these tests did, with a payload shaped the way I
+// assumed Telegram sends it. It does not: `reply_to_message` is ONE level deep
+// and never carries its own. The tests passed and the feature did not work, so
+// they were asserting my assumption rather than the behaviour.
+//
+// The wire SHAPE is still an assumption these cannot check — only the live
+// transport can settle that. What they do check is everything downstream of it.
+
+// postedSignal runs one update through the adapter's HTTP handler and returns
+// what reached the manager.
+func postedSignal(t *testing.T, cfg map[string]sourceConfig, update string) (string, []Signal, bool) {
+	t.Helper()
+	var gotSource string
+	var gotSignals []Signal
+	var reached bool
+
+	mgr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Source  string   `json:"source"`
+			Signals []Signal `json:"signals"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &in); err != nil {
+			t.Errorf("manager received unparseable body: %v", err)
+		}
+		gotSource, gotSignals, reached = in.Source, in.Signals, true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer mgr.Close()
+
+	a := testAdapter(cfg)
+	a.mgr = NewManager(mgr.URL, "tok")
+
+	rec := httptest.NewRecorder()
+	a.handleUpdate(rec, httptest.NewRequest("POST", "/updates", strings.NewReader(update)))
+	if rec.Code >= 400 {
+		t.Fatalf("handler refused the update: %d %s", rec.Code, rec.Body.String())
+	}
+	return gotSource, gotSignals, reached
+}
+
+var opsChat = map[string]sourceConfig{"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"}}
+
+// The shape Telegram actually sends: ONE level of reply, and the question's own
+// text is the only place the Pipeline survives.
 const promptChain = `{"update_id":90,"message":{"message_id":12,"text":"check the disk",
 	"chat":{"id":-1001},"from":{"id":42,"username":"kostya"},
-	"reply_to_message":{"message_id":11,"text":"What should k8s-ops do? Reply with the task.",
-		"reply_to_message":{"message_id":10,"text":"/k8s_ops@HomeOpsBot"}}}}`
+	"reply_to_message":{"message_id":11,"from":{"id":9,"is_bot":true,"username":"HomeOpsBot"},
+		"text":"⚠️ 💬 Reply with the task for /k8s_ops."}}}`
 
-func TestReplyToAPromptRebuildsTheAddressedCommand(t *testing.T) {
-	a := testAdapter(map[string]sourceConfig{
-		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
-	})
-	_, sig, ok := a.normalize(mustUpdate(t, promptChain))
-	if !ok {
-		t.Fatal("a prompted answer should originate")
+func TestPromptedAnswerReachesTheManagerAddressed(t *testing.T) {
+	source, sigs, reached := postedSignal(t, opsChat, promptChain)
+	if !reached {
+		t.Fatal("nothing reached the manager")
 	}
-	// The pipeline comes from the person's OWN command two links up, not from
-	// parsing the manager's prose — and the menu spelling is reversed on the way.
-	if sig.Payload != "/k8s-ops check the disk" {
-		t.Fatalf("payload = %q", sig.Payload)
+	if source != "tg-chat" || len(sigs) != 1 {
+		t.Fatalf("source=%q signals=%d", source, len(sigs))
 	}
-}
-
-// An ordinary reply inside the general surface is not an answer to a prompt.
-func TestOrdinaryReplyIsNotTreatedAsAPrompt(t *testing.T) {
-	a := testAdapter(map[string]sourceConfig{
-		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
-	})
-	upd := mustUpdate(t, `{"update_id":91,"message":{"message_id":12,"text":"thanks",
-		"chat":{"id":-1001},"reply_to_message":{"message_id":11,"text":"some answer",
-			"reply_to_message":{"message_id":10,"text":"what do you think?"}}}}`)
-	_, sig, _ := a.normalize(upd)
-	if sig.Payload != "thanks" {
-		t.Fatalf("payload = %q — an ordinary reply was rewritten", sig.Payload)
+	if sigs[0].Payload != "/k8s-ops check the disk" {
+		t.Fatalf("payload = %q — the manager cannot tell which pipeline this is for", sigs[0].Payload)
+	}
+	if sigs[0].Kind != "chat" {
+		t.Fatalf("kind = %q", sigs[0].Kind)
+	}
+	if sigs[0].Labels[labelChannel] != "telegram-ops" {
+		t.Fatalf("reply has nowhere to go: %v", sigs[0].Labels)
 	}
 }
 
-// A command that ALREADY carried a task was never prompted, so a later reply to
-// it must not be prefixed a second time.
-func TestAddressedCommandWithATaskIsNotAPrompt(t *testing.T) {
-	a := testAdapter(map[string]sourceConfig{
-		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
-	})
-	upd := mustUpdate(t, `{"update_id":92,"message":{"message_id":12,"text":"and the memory?",
-		"chat":{"id":-1001},"reply_to_message":{"message_id":11,"text":"here you go",
-			"reply_to_message":{"message_id":10,"text":"/k8s_ops check the disk"}}}}`)
-	_, sig, _ := a.normalize(upd)
-	if sig.Payload != "and the memory?" {
-		t.Fatalf("payload = %q", sig.Payload)
+// A reply to a PERSON is that person's words, whatever they quoted.
+func TestReplyToAPersonReachesTheManagerUnchanged(t *testing.T) {
+	_, sigs, reached := postedSignal(t, opsChat, `{"update_id":91,"message":{"message_id":12,
+		"text":"check the disk","chat":{"id":-1001},"from":{"id":42},
+		"reply_to_message":{"message_id":11,"from":{"id":7,"is_bot":false,"username":"dana"},
+			"text":"try /k8s_ops for that"}}}`)
+	if !reached {
+		t.Fatal("nothing reached the manager")
+	}
+	if sigs[0].Payload != "check the disk" {
+		t.Fatalf("payload = %q — a person's quote was treated as a prompt", sigs[0].Payload)
 	}
 }
 
-// One link is not enough: replying straight to a bare command is somebody
-// quoting it, not answering a question about it.
-func TestReplyDirectlyToACommandIsNotAPrompt(t *testing.T) {
-	a := testAdapter(map[string]sourceConfig{
-		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
-	})
-	upd := mustUpdate(t, `{"update_id":93,"message":{"message_id":12,"text":"check the disk",
-		"chat":{"id":-1001},"reply_to_message":{"message_id":10,"text":"/k8s_ops"}}}`)
-	_, sig, _ := a.normalize(upd)
-	if sig.Payload != "check the disk" {
-		t.Fatalf("payload = %q", sig.Payload)
+// A bot message with no command in it is not a prompt.
+func TestReplyToABotMessageWithNoCommandIsUnchanged(t *testing.T) {
+	_, sigs, _ := postedSignal(t, opsChat, `{"update_id":92,"message":{"message_id":12,
+		"text":"thanks","chat":{"id":-1001},"from":{"id":42},
+		"reply_to_message":{"message_id":11,"from":{"id":9,"is_bot":true},
+			"text":"the pod restarted twice"}}}`)
+	if sigs[0].Payload != "thanks" {
+		t.Fatalf("payload = %q", sigs[0].Payload)
+	}
+}
+
+// A menu tap: the command arrives bare, and must reach the manager as one so it
+// can ask for the task.
+func TestBareMenuCommandReachesTheManagerBare(t *testing.T) {
+	_, sigs, _ := postedSignal(t, opsChat, `{"update_id":93,"message":{"message_id":10,
+		"text":"/k8s_ops@HomeOpsBot","chat":{"id":-1001},"from":{"id":42}}}`)
+	if sigs[0].Payload != "/k8s-ops@HomeOpsBot" {
+		t.Fatalf("payload = %q", sigs[0].Payload)
+	}
+	// The handle is what lets the manager's question be a REPLY to this, which
+	// is the whole mechanism the answer travels back through.
+	if sigs[0].Labels[labelMessage] != "10" {
+		t.Fatalf("no message handle: %v", sigs[0].Labels)
 	}
 }
