@@ -210,6 +210,12 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 		SystemPrompt: profile.Spec.SystemPrompt,
 	}
 	agentName := profile.Spec.Agent
+	// DEPRECATED DUAL-READ, one release only. Nothing writes InputItem.Agent
+	// any more — the `/<pipeline>:<agent>` form is gone, because a caller
+	// selecting its own agent reaches past the wiring that originated it. This
+	// branch exists so an input QUEUED BEFORE the upgrade still dispatches to
+	// the agent it was parsed with, rather than silently changing agent
+	// mid-conversation on a manager restart. Delete it with the field.
 	if first.Agent != "" {
 		agentName = first.Agent
 	}

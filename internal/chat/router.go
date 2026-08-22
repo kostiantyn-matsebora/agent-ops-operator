@@ -37,7 +37,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -161,6 +160,21 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	return nil
 }
 
+// ListCommand is the name the Pipeline listing parses to.
+//
+// It lists PIPELINES, so it is named for them. The old name, `/agents`, was
+// wrong twice over: an "agent" in this project is a DEFINITION inside a
+// profile's repository, and the listing has never contained one. Publishing
+// that word into a transport's own command menu — which is what the vocabulary
+// now does — would carve the wrong noun into every install's composer.
+const ListCommand = "pipelines"
+
+// RetiredListCommand is the former name. It keeps WORKING, because it is
+// published in installs already and a dead command is a poor way to learn about
+// a rename — but nothing offers it, registers it or prints it, so nobody learns
+// it from us again.
+const RetiredListCommand = "agents"
+
 // CloseCommand is the name /close parses to — a "pipeline" that ends a
 // conversation rather than starting one.
 const CloseCommand = "close"
@@ -170,7 +184,7 @@ const CloseCommand = "close"
 // filed it" is an instruction for the agent, not a command for the manager.
 func isCloseCommand(text string) bool {
 	cmd, ok := addressing.Parse(text)
-	return ok && cmd.Profile == CloseCommand && cmd.Agent == "" && cmd.Rest == ""
+	return ok && cmd.Pipeline == CloseCommand && cmd.Rest == ""
 }
 
 // ExitCommand is the name /exit parses to — a "pipeline" that releases a
@@ -178,7 +192,7 @@ func isCloseCommand(text string) bool {
 //
 // One word from /close and a world away from it: /exit frees the pod and leaves
 // the conversation open, /close ends the conversation and archives its thread.
-// That is why both are named in the /agents listing and in every reply either
+// That is why both are named in the Pipeline listing and in every reply either
 // one produces.
 const ExitCommand = "exit"
 
@@ -187,7 +201,7 @@ const ExitCommand = "exit"
 // is an instruction for the agent.
 func isExitCommand(text string) bool {
 	cmd, ok := addressing.Parse(text)
-	return ok && cmd.Profile == ExitCommand && cmd.Agent == "" && cmd.Rest == ""
+	return ok && cmd.Pipeline == ExitCommand && cmd.Rest == ""
 }
 
 // ReleaseRuntime deletes a conversation's runtime pod and NOTHING else — the
@@ -442,52 +456,51 @@ func (r *Router) boundChannels(origin *agentopsv1alpha1.Pipeline, ch *agentopsv1
 // delivered to every surface that did not display it, and one with no sender
 // arrives there anonymous.
 func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender string) error {
-	if cmd.Profile == "agents" || cmd.Profile == "help" || cmd.Profile == "start" {
+	if isListCommand(cmd.Pipeline) {
 		// List PIPELINES: they are what a message addresses, and what carries
 		// the capabilities the resulting conversation will have. Listing
 		// profiles would name things a user cannot actually address.
-		var pipelines agentopsv1alpha1.PipelineList
-		if err := r.Reader.List(ctx, &pipelines, client.InNamespace(r.Namespace)); err != nil {
-			return err
+		entries := r.readyPipelines(ctx)
+		if entries == nil {
+			return fmt.Errorf("list pipelines for %s listing", ListCommand)
 		}
 		// Each entry carries its answering PROFILE, matching what a surface with
-		// input assistance offers in its typeahead. Two agents on one surface is
-		// now an ordinary configuration — a source is shareable — and a bare
+		// input assistance offers in its typeahead. Two Pipelines on one surface
+		// is now an ordinary configuration — a source is shareable — and a bare
 		// list of names is not enough to choose between them.
-		lines := make([]string, 0, len(pipelines.Items))
-		for i := range pipelines.Items {
-			p := &pipelines.Items[i]
-			if !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
-				continue
-			}
-			line := "• `/" + p.Name + "`"
-			if profile := p.Spec.ProfileRef.Name; profile != "" {
-				line += " — " + profile
+		lines := make([]string, 0, len(entries))
+		choices := make([]Choice, 0, len(entries))
+		for _, e := range entries {
+			line := "• `/" + e.Name + "`"
+			if e.Profile != "" {
+				line += " — " + e.Profile
 			}
 			lines = append(lines, line)
+			choices = append(choices, Choice{Label: e.Name, Command: "/" + e.Name})
 		}
 		sort.Strings(lines)
 		// Both thread commands are named TOGETHER, with the difference spelled
 		// out. Two commands one word apart, one of which archives a thread, are
 		// exactly the pair nobody should have to guess between.
-		r.Ops.EnqueueMessage(ctx, ch, nil, Notice("🤖 **Agents**\n"+strings.Join(lines, "\n")+
-			"\n\nUsage: `/<agent> <task>` — each call gets its own topic. "+
-			"`/<agent>:<role>` picks a role inside the agent's repo.\n"+
-			"Inside a conversation's own thread: `/exit` releases its runtime and keeps "+
-			"the conversation, `/close` ends the conversation and archives the thread."))
+		msg := Notice("🤖 **Pipelines**\n" + strings.Join(lines, "\n") +
+			"\n\nUsage: `/<pipeline> <task>` — each call gets its own topic.\n" +
+			"Inside a conversation's own thread: `/exit` releases its runtime and keeps " +
+			"the conversation, `/close` ends the conversation and archives the thread.")
+		msg.Choices = choices
+		r.Ops.EnqueueMessage(ctx, ch, nil, msg)
 		return nil
 	}
-	if cmd.Profile == CloseCommand {
+	if cmd.Pipeline == CloseCommand {
 		// /close reaches HandleCommand only from a general surface, where there
 		// is no conversation to end. Answer with usage rather than "unknown
-		// agent": typing it here is an obvious mistake, not a typo'd pipeline.
+		// pipeline": typing it here is an obvious mistake, not a typo.
 		r.Ops.EnqueueMessage(ctx, ch, nil, Warn("⚠️ `/close` ends a conversation — send it inside that "+
 			"conversation's own thread. Nothing was closed."))
 		return nil
 	}
-	if cmd.Profile == ExitCommand {
+	if cmd.Pipeline == ExitCommand {
 		// Same shape as /close's: there is no conversation on a general surface,
-		// so there is no runtime to release. Usage, not "unknown agent".
+		// so there is no runtime to release. Usage, not "unknown pipeline".
 		r.Ops.EnqueueMessage(ctx, ch, nil, Warn("⚠️ `/exit` releases a conversation's runtime — send it "+
 			"inside that conversation's own thread. Nothing was released."))
 		return nil
@@ -496,18 +509,19 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 	// supplies the profile AND the capabilities. Addressing a profile would
 	// name something with no wiring, and therefore nothing to grant.
 	var pipe agentopsv1alpha1.Pipeline
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Profile}, &pipe); err != nil {
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Pipeline}, &pipe); err != nil {
 		if apierrors.IsNotFound(err) {
-			r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf("⚠️ Unknown agent **%s** — see `/agents`.", cmd.Profile)))
+			r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf(
+				"⚠️ Unknown pipeline **%s** — see `/%s`.", cmd.Pipeline, ListCommand)))
 			return nil
 		}
 		return err
 	}
 	if cmd.Rest == "" {
-		r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf("⚠️ Usage: `/%s <task>`", cmd.Profile)))
+		r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf("⚠️ Usage: `/%s <task>`", cmd.Pipeline)))
 		return nil
 	}
-	_, err := r.CreateTaskConversation(ctx, ch, pipe.Spec.ProfileRef.Name, cmd.Agent, cmd.Rest, sender, &pipe)
+	_, err := r.CreateTaskConversation(ctx, ch, pipe.Spec.ProfileRef.Name, cmd.Rest, sender, &pipe)
 	return err
 }
 
@@ -515,10 +529,10 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 // bound to the origin Pipeline's channel set. The origin also snapshots its
 // tooling bindings onto the conversation — capabilities come from the wiring
 // that originated it, never from the profile.
-func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, agentOverride, task, sender string,
+func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, task, sender string,
 	origin *agentopsv1alpha1.Pipeline) (*agentopsv1alpha1.Conversation, error) {
 	title := "🛠 " + strings.Join(strings.Fields(task), " ")
-	if agentOverride != "" || profile != "" {
+	if profile != "" {
 		title = "🤖 " + profile + ": " + strings.Join(strings.Fields(task), " ")
 	}
 	if len(title) > 60 {
@@ -533,7 +547,7 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		Title:       title,
 		Inputs: []agentopsv1alpha1.InputItem{{
 			ID: newInputID(), Type: agentopsv1alpha1.InputTask,
-			Payload: task, Agent: agentOverride, ReceivedAt: metav1.Now(),
+			Payload: task, ReceivedAt: metav1.Now(),
 			// A command is typed on a surface, so its origin is that CHANNEL —
 			// which is the one destination it is not delivered to, and the
 			// sender is who it is attributed to everywhere else.

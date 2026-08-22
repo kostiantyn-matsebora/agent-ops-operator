@@ -66,6 +66,22 @@ const (
 	NoticeWarn NoticeLevel = "warn"
 )
 
+// Choice is one action a message OFFERS. It is a structured field like Labels,
+// not prose: the manager states WHICH actions are on offer, and says nothing
+// about how they are presented, whether the transport has controls for them, or
+// how many it can show at once.
+//
+// An adapter with selectable controls renders them as controls; one without
+// renders the same list as text and is fully conformant. What it must not do is
+// DROP them — they are the reader's only account of what is on offer.
+type Choice struct {
+	// Label names the action in the reader's terms.
+	Label string `json:"label"`
+	// Command is the addressed text the choice stands for, so a transport with
+	// no controls can print something the reader can type.
+	Command string `json:"command"`
+}
+
 // RunStatus values carried on an answer, so an adapter can style a failure
 // differently from a result without parsing the body.
 const (
@@ -108,12 +124,32 @@ type Message struct {
 	// Labels are the signal's grouping labels, structured so each surface
 	// decides how much of them to show.
 	Labels map[string]string `json:"labels,omitempty"`
+
 	// InputRef names the ConversationInput holding the full payload, so an
 	// adapter can cite where the event lives for anyone with cluster access.
 	// Named for the INPUT, not the source: `source` on this same message means
 	// the SignalSource, and two fields a letter apart meaning different objects
 	// is the kind of naming that produces one bug per adapter.
 	InputRef string `json:"inputRef,omitempty"`
+
+	// ---- any kind ----
+
+	// Choices are the actions this message offers. Optional on every kind.
+	Choices []Choice `json:"choices,omitempty"`
+
+	// InReplyTo is the transport's OWN handle for the message this one answers,
+	// supplied by the surface the original arrived on.
+	//
+	// OPAQUE. The manager stores and returns it unaltered and never parses,
+	// validates, compares or constructs one — the same treatment threadId and
+	// previousThreadId already get. That a message answers another is MEANING;
+	// what the handle looks like is the transport's business.
+	//
+	// It is what lets an adapter offer an action on somebody's OWN WORDS
+	// without holding state to remember them: the transport already links the
+	// two messages, so a selection can carry the original forward with nothing
+	// retained between the offer and the choice.
+	InReplyTo string `json:"inReplyTo,omitempty"`
 
 	// ---- relay ----
 

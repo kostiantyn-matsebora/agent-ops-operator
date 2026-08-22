@@ -98,6 +98,17 @@ func oneShot(kind string) bool { return kind == KindChat || kind == KindTask }
 const (
 	LabelChatChannel = "agentops.dev/channel"
 	LabelChatSender  = "agentops.dev/sender"
+	// LabelChatMessage is the transport's OWN handle for the message that
+	// arrived, set by the adapter that normalized it. OPAQUE here and
+	// everywhere else in the manager: it is stored and handed back unaltered,
+	// never parsed, compared or constructed — the same treatment a thread id
+	// gets.
+	//
+	// It is what lets a reply say WHICH message it answers, and therefore what
+	// lets an adapter offer an action on somebody's own words without holding
+	// state to remember them. Optional: an adapter that does not set it loses
+	// the linkage and nothing else.
+	LabelChatMessage = "agentops.dev/message"
 )
 
 // titleFromText renders a conversation title from the request itself:
@@ -365,9 +376,9 @@ func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.
 	if len(servers) == 0 {
 		reason := "source not served by any Ready pipeline (Wired=False) — signals dropped"
 		s.emitDropped(source, signals, activity.CodeUnclaimed, reason)
-		s.tellOriginatingSurfaces(ctx, signals, fmt.Sprintf(
+		s.tellOriginatingSurfaces(ctx, signals, chat.Warn(fmt.Sprintf(
 			"⚠️ Nothing here is wired to answer. No Ready Pipeline serves the chat source **%s**, "+
-				"so this message was dropped. Add it to a Pipeline's sources to give it an agent.", source.Name))
+				"so this message was dropped. Add it to a Pipeline's sources to give it one.", source.Name)))
 		return 0, 0, reason, nil
 	}
 
@@ -421,8 +432,8 @@ func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.
 	if reason == ReasonAtCapacity {
 		// A person is waiting on the surface they typed on; an alert can be
 		// found later in a condition, a question cannot.
-		s.tellOriginatingSurfaces(ctx, rest, "⚠️ At capacity — too many conversations are already waiting for "+
-			"an agent slot, so this message was dropped. Try again once the backlog clears.")
+		s.tellOriginatingSurfaces(ctx, rest, chat.Warn("⚠️ At capacity — too many conversations are already "+
+			"waiting for a runtime slot, so this message was dropped. Try again once the backlog clears."))
 	}
 	return queued + answered, touched, reason, err
 }
@@ -431,19 +442,32 @@ func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.
 // several pipelines serve.
 //
 // It is the TEACHING MOMENT, not an error string: somebody who has never heard
-// of /agents finds out the addressed form exists at the one moment they need
-// it, so it names every server with the profile answering for it and shows the
-// form ready to copy. Prose in the manager's markdown subset — the adapter
-// renders it; nothing here knows a transport dialect.
-func ambiguousChatMessage(servers []agentopsv1alpha1.Pipeline) string {
+// of the listing command finds out the addressed form exists at the one moment
+// they need it, so it names every server with the profile answering for it and
+// shows the form ready to copy. Prose in the manager's markdown subset — the
+// adapter renders it; nothing here knows a transport dialect.
+//
+// It also OFFERS each Pipeline as a choice. This is the moment that earns
+// controls most: the person has already typed their task, so a surface with
+// controls can send THAT text to the Pipeline they pick rather than making them
+// type it again. A surface without controls renders the same list, and the
+// prose above is why it loses nothing.
+func ambiguousChatMessage(servers []agentopsv1alpha1.Pipeline) chat.Message {
 	var b strings.Builder
-	fmt.Fprintf(&b, "🤔 **%d agents serve this chat, so I don't know who you meant.**\n\n", len(servers))
+	fmt.Fprintf(&b, "🤔 **%d pipelines serve this chat, so I don't know who you meant.**\n\n", len(servers))
 	b.WriteString("Address one of them:\n")
+	choices := make([]chat.Choice, 0, len(servers))
 	for i := range servers {
 		fmt.Fprintf(&b, "• `/%s <task>` — %s\n", servers[i].Name, servers[i].Spec.ProfileRef.Name)
+		choices = append(choices, chat.Choice{
+			Label:   servers[i].Name,
+			Command: "/" + servers[i].Name,
+		})
 	}
-	b.WriteString("\nYour message was not sent to anyone. `/agents` shows this list any time.")
-	return b.String()
+	fmt.Fprintf(&b, "\nYour message was not sent to anyone. `/%s` shows this list any time.", chat.ListCommand)
+	msg := chat.Warn(b.String())
+	msg.Choices = choices
+	return msg
 }
 
 // chatChannel resolves the Channel a chat signal came from.
@@ -461,9 +485,14 @@ func (s *Server) chatChannel(ctx context.Context, sig NormalizedSignal) *agentop
 
 // tellOriginatingSurfaces posts one message to each distinct chat surface a
 // batch came from, so a drop is visible where the user is looking.
-func (s *Server) tellOriginatingSurfaces(ctx context.Context, signals []NormalizedSignal, text string) {
+func (s *Server) tellOriginatingSurfaces(ctx context.Context, signals []NormalizedSignal, msg chat.Message) {
 	// A drop is something the reader has to act on, so it goes out as a WARNING
 	// notice rather than plain text — the adapter decides how loud that looks.
+	//
+	// The reply is linked to the message that provoked it when the adapter
+	// supplied a handle for one. That linkage is what carries the original
+	// forward: a person selecting an offered action is answering their OWN
+	// message, and the transport already knows which one it was.
 	told := map[string]bool{}
 	for _, sig := range signals {
 		name := sig.Labels[LabelChatChannel]
@@ -472,7 +501,9 @@ func (s *Server) tellOriginatingSurfaces(ctx context.Context, signals []Normaliz
 		}
 		told[name] = true
 		if ch := s.chatChannel(ctx, sig); ch != nil {
-			s.Ops.EnqueueMessage(ctx, ch, nil, chat.Warn(text))
+			out := msg
+			out.InReplyTo = sig.Labels[LabelChatMessage]
+			s.Ops.EnqueueMessage(ctx, ch, nil, out)
 		}
 	}
 }
