@@ -513,6 +513,13 @@ profiles:
       Reach the house through your tools. If a tool for something is not in your
       allowlist, you cannot do it — say so instead of improvising.
 
+      QUOTE EVERY STRING you pass to a tool, `domain` included:
+      `{"domain": "sensor"}`, never `{"domain": sensor}`. Home Assistant
+      advertises that filter with no type at all, and an unquoted word is not
+      valid JSON — the call is discarded before it runs, so repeating it reads
+      as a tool that answers nothing. `domain` takes one string or a list of
+      them.
+
       Answer briefly and in plain language. Lead with the answer or the action,
       then the detail. Name entities the way the household does, not by
       entity_id, unless the entity_id is what was asked for.
@@ -542,6 +549,13 @@ profiles:
          `$HA_TOKEN` are in your environment, and `curl` and `jq` are installed.
          This is how you diagnose and repair. Never say a task is impossible
          because no MCP tool exists for it — check whether the API does it.
+
+      On path 1, QUOTE EVERY STRING you pass, `domain` included:
+      `{"domain": "sensor"}`, never `{"domain": sensor}`. Home Assistant
+      advertises that filter with no type at all, and an unquoted word is not
+      valid JSON — the call is discarded before it runs, so repeating it reads
+      as a tool that answers nothing. `domain` takes one string or a list of
+      them.
 
       Every call looks like this:
 

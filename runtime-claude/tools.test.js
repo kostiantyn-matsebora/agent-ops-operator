@@ -1,4 +1,4 @@
-// node --test runtime-claude/
+// cd runtime-claude && node --test
 'use strict';
 
 const test = require('node:test');

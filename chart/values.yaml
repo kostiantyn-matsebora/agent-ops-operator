@@ -92,19 +92,28 @@ runtime:
   # AgentRuntime CR name. `default` is the fallback every profile without a
   # runtimeRef resolves; renaming it means every profile needs one.
   name: default
+  # 0.7.1 ends a run that keeps making a tool call it cannot FORM. Arguments
+  # that are not valid JSON are discarded before anything runs, so a run made of
+  # them looks busy and then answers from whatever the session already held —
+  # five identical unparsable calls in a row now fail the run and say which tool
+  # and what was written. RUNTIME_UNPARSED_REPEAT_LIMIT tunes it, 0 disables.
+  # A run that recovers instead — by abandoning the tool, which is what
+  # recovery usually means — carries one line on its answer saying how many
+  # calls never ran, because the answer itself does not mention it.
   # 0.2.0+ composes the allowlist with the agent definition's own `tools:` and
   # passes it verbatim — no substituted `Read` when nothing is declared.
   # Pinning an older tag keeps that substitution and ignores toolsets.mode.
-  image: kmatsebora/agentops-runtime-claude:0.6.0
+  image: kmatsebora/agentops-runtime-claude:0.7.1
   # Empty = follow runtimeIdleTtlMinutes above, so the release has ONE number.
   # Set it only to give THIS runtime a different one. (It is always written to
   # the CR: the CRD defaults this field to 10, so an omitted field is not unset
   # and would override the release's setting.)
   idleTtlMinutes: ""
   # Where conversation runtime pods may be scheduled. Set it when the runtime
-  # image is not multi-arch (the reference runtime-claude images are amd64 only)
-  # or when agent work belongs on particular nodes — a runtime pod that lands on
-  # an unsupported architecture just crash-loops.
+  # image is not multi-arch, or when agent work belongs on particular nodes — a
+  # runtime pod that lands on an unsupported architecture just crash-loops.
+  # The reference runtime-claude images are multi-arch from 0.7.0; older tags
+  # are amd64 only, which is what this used to say unconditionally.
   nodeSelector: {}
   resources: {}
   # CONTEXT SYNC — keep the LIVE context off the durable volume.

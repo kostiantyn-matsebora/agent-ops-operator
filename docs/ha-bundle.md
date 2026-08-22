@@ -404,6 +404,19 @@ a reload, a service call, and a config check.
 Both are told to describe and stop for a lock, an alarm, a garage door, or
 heating in a way someone could be harmed by.
 
+**Both are also told to quote `domain`.** Home Assistant advertises
+`GetLiveContext`'s domain filter with an `anyOf` whose first branch is an empty
+schema, so that parameter carries no declared type — and a model writes
+`{"domain": sensor}` where its neighbours, typed `string`, come out quoted.
+
+That text is not valid JSON, so the call is discarded before it runs. Measured
+on one install, **59 of 110 calls to that tool never executed**, and the runs
+answered from readings they already held.
+
+The prompt line is a workaround for a schema this chart does not own. The
+runtime's own breaker is the backstop —
+[contracts](contracts.md#a-tool-call-the-model-cannot-form).
+
 Both carry connectivity `env`: `HA_URL`, and `HA_TOKEN` via `valueFrom`, resolved
 in the runtime pod. The manager reads no Secrets.
 

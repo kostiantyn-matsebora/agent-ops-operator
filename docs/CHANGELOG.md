@@ -75,6 +75,28 @@ exactly as before.
   fresh. Nothing is persisted — no `localStorage`, no IndexedDB — so closing the
   tab still leaves nothing behind.
 
+### Fixed
+
+- **A tool call the model could not FORM no longer spins.** Arguments that are
+  not valid JSON are discarded by claude-code before anything runs — no MCP
+  server sees them, no allowlist refuses them — so a run made of them looks busy
+  and then answers from whatever the session already held. `runtime-claude` now
+  counts them, and ends the run as **failed** when the same tool is called with
+  the same unparsable arguments five times in a row, naming the tool and
+  quoting what was written. `RUNTIME_UNPARSED_REPEAT_LIMIT` tunes it, `0`
+  disables the breaker and keeps the counting.
+- **A run that recovers from one says so on the answer.** Recovering usually
+  means abandoning the tool rather than fixing the call, and the model then
+  answers from what the session already held without mentioning it. The runtime
+  appends one line naming how many calls never ran and which tool — the agent's
+  answer is still the answer.
+- **Both Home Assistant profiles are told to quote `domain`.** Home Assistant
+  advertises `GetLiveContext`'s domain filter with an `anyOf` whose first branch
+  is an empty schema, so the parameter has no declared type and a model writes
+  `{"domain": sensor}`. Measured on one install, 59 of 110 calls to that tool
+  never executed. The prompt line is a workaround for a schema the chart does
+  not own.
+
 ### Removed
 
 - **The `/<pipeline>:<agent>` addressed form.** A Pipeline names one profile and

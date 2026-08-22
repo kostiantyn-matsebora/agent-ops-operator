@@ -15,7 +15,7 @@ RUN apt-get update -qq && \
 # the same category error as bundling an MCP server. Need one? Derive an image
 # (three lines, and the version pin becomes yours to own against your cluster)
 # and point AgentRuntime.spec.image at it; see README.
-COPY runtime.js tools.js /srv/
+COPY runtime.js tools.js spin.js /srv/
 
 ENV HOME=/data/home
 USER node
