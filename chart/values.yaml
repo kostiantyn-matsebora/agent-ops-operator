@@ -173,7 +173,7 @@ runtime:
     enabled: false
     # The proxy image. Release-wide like the sidecar above: a contract, not a
     # backend choice.
-    image: kmatsebora/agentops-egress-proxy:0.2.0
+    image: kmatsebora/agentops-egress-proxy:0.2.1
     # The image that installs the redirect. Empty uses the proxy image, which
     # ships both. Point it elsewhere only to keep the privileged image minimal.
     initImage: ""
@@ -493,7 +493,7 @@ console:
     # The corner: a graph inside an inactive tab measured a 0x0 host, fitted to
     # it, and clamped to minimum zoom for good. The fit now waits for a host
     # with a size, so it works in a tab, a drawer, or wherever one lands next.
-    tag: 0.26.0
+    tag: 0.26.1
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:

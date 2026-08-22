@@ -20,10 +20,10 @@ partial:
 | Component | Tag | | Component | Tag |
 |---|---|---|---|---|
 | `manager` | 0.44.0 | | `signal-cron` | 0.3.0 |
-| `console` | 0.26.0 | | `signal-alertmanager` | 0.7.0 |
+| `console` | 0.26.1 | | `signal-alertmanager` | 0.7.0 |
 | `runtime-claude` | 0.8.0 | | `signal-k8s-events` | 0.4.0 |
 | `context-sync` | 0.2.0 | | `signal-ha` | 0.2.0 |
-| `egress-proxy` | 0.2.0 | | `signal-telegram` | 0.6.0 |
+| `egress-proxy` | 0.2.1 | | `signal-telegram` | 0.6.0 |
 | `housekeeping` | 0.2.0 | | `channel-telegram` | 0.20.0 |
 | | | | `gateway-telegram` | 0.5.0 |
 
@@ -69,10 +69,13 @@ else is a tag bump.
   now carries the changed object, projected into the shapes its own snapshot
   endpoints serve, so a listing, a kind detail and an open conversation update
   in place. A message appears from the message event itself.
-- **Sending a message from the console asks for nothing.** The echo, the
-  acknowledgement and the answer all arrive on the stream. The composer used to
-  re-read the whole conversation on every send — the heaviest read on the page,
-  for what was already on its way.
+- **Sending a message from the console asks for nothing WHILE THE STREAM IS
+  UP.** The echo, the acknowledgement and the answer all arrive as events. The
+  composer used to re-read the whole conversation on every send — the heaviest
+  read on the page, for what was already on its way. With the stream DOWN it
+  still reads once, because the confirmation that clears `sending…` is itself a
+  stream event, and without it a sent message sits unconfirmed until the page is
+  reloaded.
 - **A console view that has painted never goes back to a spinner.** A change
   counter used to sit in every query key, so each event asked for a cache entry
   that had never been filled — which is what made the page blank for a second
@@ -90,6 +93,15 @@ else is a tag bump.
 
 ### Fixed
 
+- **A tool advertised with a parameter that has NO TYPE is repaired before the
+  agent sees it.** Home Assistant publishes `GetLiveContext`'s `domain` filter as
+  `anyOf: [{}, {type: array…}]` — the first branch is an empty schema, so the
+  parameter constrains nothing and a model writes `{"domain": sensor}`, which is
+  not valid JSON and never runs. The egress-proxy already rewrites tool listings
+  on the way back, and now drops union branches that say nothing, leaving the
+  typed branch the server itself published. **It invents no types**: a union of
+  typed branches passes through untouched, and a property whose only branch is
+  empty is left exactly as published. Requires `runtime.egressMediation`.
 - **A tool call the model could not FORM no longer spins.** Arguments that are
   not valid JSON are discarded by claude-code before anything runs — no MCP
   server sees them, no allowlist refuses them — so a run made of them looks busy

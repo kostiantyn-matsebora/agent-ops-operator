@@ -351,6 +351,7 @@ describe('the composer', () => {
     )
     await screen.findByText('what happened?')
     await waitFor(() => expect(loading()).toBeNull())
+    useStream.setState({ connected: true })
     const before = calls['conversation:conv-1']
 
     await userEvent.type(screen.getByLabelText('message'), 'restart it')
@@ -363,6 +364,30 @@ describe('the composer', () => {
     emit('message', { id: 'm2', thread: 'th-1', kind: 'local', text: 'restart it', at: 't' })
     await screen.findByText('restart it')
     expect(calls['conversation:conv-1']).toBe(before)
+    expect(loading()).toBeNull()
+    stop()
+  })
+
+  // The confirmation that clears `sending…` IS a stream event. With the stream
+  // down nothing delivers it, and the bubble would sit unconfirmed until the
+  // page was reloaded — so the read is conditioned, not removed.
+  it('reads once after a send when the stream is down', async () => {
+    const { ConversationPage } = await import('./Conversation')
+    const { stop } = mount(
+      <Routes>
+        <Route path="/conversations/:name" element={<ConversationPage />} />
+      </Routes>,
+      '/conversations/conv-1',
+    )
+    await screen.findByText('what happened?')
+    await waitFor(() => expect(loading()).toBeNull())
+    const before = calls['conversation:conv-1']
+
+    useStream.setState({ connected: false })
+    await userEvent.type(screen.getByLabelText('message'), 'is anyone there')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(calls['conversation:conv-1']).toBe(before + 1))
     expect(loading()).toBeNull()
     stop()
   })

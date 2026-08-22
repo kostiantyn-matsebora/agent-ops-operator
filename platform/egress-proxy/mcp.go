@@ -18,7 +18,8 @@ import (
 //	tools/call  refused before it reaches the server, if the wiring did not
 //	            grant that tool
 //	tools/list  filtered on the way back, so what is advertised is what is
-//	            callable
+//	            callable — and REPAIRED, so what is advertised is something a
+//	            model can actually form a call to (schema.go)
 //
 // A refusal is an MCP-level error, never a dropped connection. An agent that
 // receives a transport failure retries blindly, and a retry loop against a wall
@@ -234,7 +235,12 @@ func filterListing(body []byte, endpointKey string, state *policy) ([]byte, bool
 			kept = append(kept, t)
 		}
 	}
-	if len(kept) == len(tools) {
+	// A schema the model cannot satisfy is a tool it cannot call, so the
+	// advertisement is repaired on the same pass that filters it — see
+	// schema.go. This happens even when nothing was filtered out, which is why
+	// the early return below asks about BOTH.
+	repaired := repairSchemas(kept)
+	if len(kept) == len(tools) && !repaired {
 		return body, false
 	}
 	newTools, err := json.Marshal(kept)

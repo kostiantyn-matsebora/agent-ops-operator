@@ -10,6 +10,7 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useParams } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../App'
 import { useConversation, useConversationGraph, useMarkRead, useSession, useVocabulary } from '../api/hooks'
+import { useStream } from '../api/stream'
 import { PlainText } from '../components/Text'
 import { Markdown } from '../components/Markdown'
 import { Graph } from '../graph/Graph'
@@ -92,7 +93,7 @@ function Avatar({ kind, icon }: { kind: string; icon?: string }) {
 
 export function ConversationPage() {
   const { name = '' } = useParams()
-  const { data, isLoading, error } = useConversation(name)
+  const { data, isLoading, error, refetch } = useConversation(name)
   const [tab, setTab] = useState<string | number>(0)
 
   // Opening a conversation reports its CONSOLE thread read, and reports again
@@ -186,12 +187,11 @@ export function ConversationPage() {
                   newest message when this tab is shown again. Its message list
                   is unchanged by a tab switch, so nothing else would tell it
                   to. */}
-              {/* Nothing to re-read after a send: the manager delivers the
-                  message back to this channel, so the bubble arrives on the
-                  stream like any other. Asking for the whole conversation here
-                  was the heaviest read on the page, and it asked for what was
-                  already on its way. */}
-              <Transcript detail={data} active={tab === 0} />
+              {/* Nothing to re-read after a send WHILE THE STREAM IS UP: the
+                  manager delivers the message back to this channel, so the
+                  bubble arrives like any other event. The fallback is for when
+                  it cannot — see the composer. */}
+              <Transcript detail={data} onSentOffline={() => refetch()} active={tab === 0} />
             </Tab>
             <Tab eventKey={1} title={<TabTitleText>Runs</TabTitleText>}>
               <RunTimeline detail={data} />
@@ -222,12 +222,15 @@ export function ConversationPage() {
 
 function Transcript({
   detail,
+  onSentOffline,
   active,
 }: {
   detail: NonNullable<ReturnType<typeof useConversation>['data']>
+  onSentOffline: () => void
   active: boolean
 }) {
   const session = useSession()
+  const connected = useStream((s) => s.connected)
   const [text, setText] = useState('')
   // The composer attached to a conversation offers what ACTS on one: releasing
   // its runtime and ending it. It never offers a Pipeline — inside a thread that
@@ -331,6 +334,15 @@ function Transcript({
     try {
       await api.send(detail.conversation.name, text)
       setText('')
+      // A sent message shows as `sending…` until the manager's confirmation
+      // comes back — and that confirmation is a STREAM event. With the stream
+      // down there is nothing to deliver it, so the bubble would sit unconfirmed
+      // until somebody reloaded the page: the same "only true after F5" failure
+      // the reconnect logic exists to prevent, wearing different clothes.
+      //
+      // So the read is not removed, it is CONDITIONED: it happens exactly when
+      // the thing that replaced it cannot run.
+      if (!connected) onSentOffline()
     } catch (e) {
       setError((e as ApiError).message)
     } finally {
