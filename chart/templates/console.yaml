@@ -192,6 +192,13 @@ spec:
   # identity only — the Role below is what grants anything, and no reconciler
   # creates or binds RBAC
   kubernetesAccess: true
+  # A VIEWER, NOT A TRANSPORT. The console renders only what it is sent, so a
+  # person typing here does not see their own message unless the manager
+  # delivers it — which is why a conversation started from the composer used to
+  # read as an answer with no question above it. Declaring this false is what
+  # makes the manager deliver this surface its own users' messages; every chat
+  # transport leaves it at the default, because it echoes them itself.
+  echoesOwnMessages: false
   {{- with $c.resources }}
   resources:
 {{ toYaml . | indent 4 }}

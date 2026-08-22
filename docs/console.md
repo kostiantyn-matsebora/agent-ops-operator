@@ -246,8 +246,20 @@ Detail is tabbed:
   console channel holds a thread; when it does not, the tab explains why and shows
   the exact patch. The console never edits a Pipeline — showing the edit is the
   answer.
-- **Runs** — `status.runs[]` with status, exit code, result, plus the bindings the
-  conversation materialized and its runtime pod.
+
+  The transcript is a **cache of the conversation's durable record**, never its
+  only copy. Every read merges the live buffer with `status.runs[]` — the
+  messages each run consumed AND its result, in time order — so a reload or a
+  console restart rebuilds the whole thread, starting at the message that opened
+  it. Only acks and notices are lost, because nothing records them.
+
+  A message typed here is shown at once and **confirmed** by the copy the manager
+  delivers back. The console declares `echoesOwnMessages: false`, so it receives
+  its own users' messages like any other destination, matched to the pending
+  bubble by the input it names — never by comparing text.
+- **Runs** — `status.runs[]` with status, exit code, result and the messages each
+  run consumed, plus the bindings the conversation materialized and its runtime
+  pod.
 - **Graph** — every element this conversation involved, **built from what the
   Conversation recorded, not from the Pipeline's current spec**. A Conversation
   snapshots the bindings it materialized, so after a re-wire this graph still

@@ -19,8 +19,10 @@
 //
 // Conversations are bound to a SET of channels (the originating Pipeline's
 // channels): every bound channel mirrors the whole conversation — acks fan out
-// to all of them and a user message on one channel is relayed to the siblings
-// as attributed text. Transport-specific concerns (update parsing, offsets,
+// to all of them, and a user message is delivered to every bound channel except
+// the surface that displayed it as it was typed. That delivery is the
+// reconciler's, composed from the conversation's own inputs, so it survives a
+// restart of this process. Transport-specific concerns (update parsing, offsets,
 // approver filtering) stay in the adapter. Outbound flows back as send ops on
 // the OpQueue.
 package chat
@@ -53,8 +55,8 @@ type InboundMessage struct {
 	// general surface.
 	ThreadID *string
 	Text     string
-	// Sender is an optional transport-side identity, used only for attribution
-	// when relaying to sibling channels.
+	// Sender is an optional transport-side identity, recorded on the input for
+	// attribution when the message is delivered to the other bound surfaces.
 	Sender string
 }
 
@@ -119,10 +121,14 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	inputID := newInputID()
 	if err := r.appendInput(ctx, conv, agentopsv1alpha1.InputItem{
 		ID: inputID, Type: agentopsv1alpha1.InputReply, Payload: text, ReceivedAt: metav1.Now(),
-		// Channel origin: the person is looking at the surface they typed on, so
-		// this input is never posted back as a card. Siblings see it through
-		// relayToSiblings instead.
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: ch.Name},
+		// Channel origin, with the sender kept: this input is delivered to every
+		// OTHER bound surface as an attributed relay, and reconciliation composes
+		// that from the conversation alone. Sending it from here instead would be
+		// a second delivery path — in memory, lost on a restart, and unable to
+		// reach a surface that renders nothing it is not sent.
+		Origin: &agentopsv1alpha1.InputOrigin{
+			Kind: agentopsv1alpha1.OriginChannel, Name: ch.Name, Sender: msg.Sender,
+		},
 	}); err != nil {
 		return err
 	}
@@ -140,11 +146,17 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 		Conversation: conv.Name, Pipeline: pipeline, InputID: inputID,
 		Detail: "reply on " + ch.Name,
 	})
+	// FAST PATH for delivery, before the ack: the reconciler re-derives this on
+	// its next pass and the op ids are stable, so calling it here costs nothing
+	// and buys the ORDER a thread reads in — somebody's message, then the ack
+	// that answers it. Composed by the one implementation both callers share.
+	if fresh, err := r.conversation(ctx, conv.Name); err == nil {
+		DeliverInputs(ctx, r.Reader, r.Ops, fresh)
+	}
 	ack := "🔧 On it…"
 	if busy {
 		ack = "⏳ Noted — I'll pick this up as soon as the current step finishes."
 	}
-	r.relayToSiblings(ctx, conv, ch.Name, msg.Sender, text)
 	r.FanOutSend(ctx, conv, Notice(ack))
 	return nil
 }
@@ -424,7 +436,12 @@ func (r *Router) boundChannels(origin *agentopsv1alpha1.Pipeline, ch *agentopsv1
 // HandleCommand answers chat input that addresses a pipeline. Called from the
 // CHAT SIGNAL path, which is where origination lives — commands that only
 // produce a response emit a send op and create no Conversation.
-func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command) error {
+//
+// sender is the transport identity that typed it, when the adapter named one.
+// It is carried because an addressed command is a MESSAGE like any other: it is
+// delivered to every surface that did not display it, and one with no sender
+// arrives there anonymous.
+func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender string) error {
 	if cmd.Profile == "agents" || cmd.Profile == "help" || cmd.Profile == "start" {
 		// List PIPELINES: they are what a message addresses, and what carries
 		// the capabilities the resulting conversation will have. Listing
@@ -490,7 +507,7 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf("⚠️ Usage: `/%s <task>`", cmd.Profile)))
 		return nil
 	}
-	_, err := r.CreateTaskConversation(ctx, ch, pipe.Spec.ProfileRef.Name, cmd.Agent, cmd.Rest, &pipe)
+	_, err := r.CreateTaskConversation(ctx, ch, pipe.Spec.ProfileRef.Name, cmd.Agent, cmd.Rest, sender, &pipe)
 	return err
 }
 
@@ -498,7 +515,7 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 // bound to the origin Pipeline's channel set. The origin also snapshots its
 // tooling bindings onto the conversation — capabilities come from the wiring
 // that originated it, never from the profile.
-func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, agentOverride, task string,
+func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, agentOverride, task, sender string,
 	origin *agentopsv1alpha1.Pipeline) (*agentopsv1alpha1.Conversation, error) {
 	title := "🛠 " + strings.Join(strings.Fields(task), " ")
 	if agentOverride != "" || profile != "" {
@@ -517,9 +534,12 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		Inputs: []agentopsv1alpha1.InputItem{{
 			ID: newInputID(), Type: agentopsv1alpha1.InputTask,
 			Payload: task, Agent: agentOverride, ReceivedAt: metav1.Now(),
-			// A command is typed on a surface, so it is a channel origin and
-			// posts no card — the user already sees what they sent.
-			Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: ch.Name},
+			// A command is typed on a surface, so its origin is that CHANNEL —
+			// which is the one destination it is not delivered to, and the
+			// sender is who it is attributed to everywhere else.
+			Origin: &agentopsv1alpha1.InputOrigin{
+				Kind: agentopsv1alpha1.OriginChannel, Name: ch.Name, Sender: sender,
+			},
 		}},
 	}
 	if origin != nil {
@@ -608,18 +628,6 @@ func (r *Router) FanOutRunReply(ctx context.Context, conv *agentopsv1alpha1.Conv
 	})
 }
 
-// relayToSiblings mirrors a user message onto the conversation's other
-// channels ("channels fully repeat the conversation"). The attribution stays
-// STRUCTURED — origin and sender as fields, not composed into the body — so
-// each surface decides how to mark somebody else's words.
-// Channel implementations must never re-ingest their own outbound posts.
-func (r *Router) relayToSiblings(ctx context.Context, conv *agentopsv1alpha1.Conversation, origin, sender, text string) {
-	msg := RelayMessage(origin, sender, text)
-	r.eachBoundThread(ctx, conv, origin, func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueMessage(ctx, ch, tid, msg)
-	})
-}
-
 // eachBoundThread runs fn for every bound channel that already has a thread,
 // optionally skipping one by name. Channels with no binding are skipped rather
 // than queued: a send to a thread that does not exist has nowhere to land.
@@ -640,6 +648,16 @@ func (r *Router) eachBoundThread(ctx context.Context, conv *agentopsv1alpha1.Con
 		}
 		fn(&bound, tid)
 	}
+}
+
+// conversation re-reads a conversation, for the paths that need the object as
+// it stands AFTER their own write.
+func (r *Router) conversation(ctx context.Context, name string) (*agentopsv1alpha1.Conversation, error) {
+	var conv agentopsv1alpha1.Conversation
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &conv); err != nil {
+		return nil, err
+	}
+	return &conv, nil
 }
 
 func (r *Router) appendInput(ctx context.Context, conv *agentopsv1alpha1.Conversation, item agentopsv1alpha1.InputItem) error {

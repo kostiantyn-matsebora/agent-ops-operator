@@ -23,27 +23,40 @@ import (
 //
 //   - Every agent answer in `status.runs[]` is durable and belongs in the
 //     thread, whether or not the buffer still holds it.
-//   - Everything the buffer holds that is NOT durable — the signal card, relays
-//     from sibling channels, manager notices, a just-typed local message —
-//     belongs too, and only the buffer has it.
-//   - An answer present in both must appear ONCE.
+//   - Every MESSAGE those runs consumed is durable too, and belongs in the
+//     thread in the order it was received. This is the half that did not exist:
+//     a conversation recorded its answers and not its questions, so the console
+//     watched the input queue and captured what people typed before pruning
+//     deleted it. That workaround is gone, and so is the reason for it.
+//   - Everything the buffer holds that is NOT durable — manager notices and
+//     acks — belongs too, and only the buffer has it.
+//   - A message present in both must appear ONCE, matched by the INPUT it
+//     stands for rather than by comparing text.
 //
-// WHAT STILL CANNOT COME BACK after a restart: the signal card and relayed
-// sibling messages. Neither was ever CR state — the signal's input is pruned
-// once processed and its payload object garbage collected. Reconstructing them
-// would mean inventing text nobody said, so a restarted thread starts at the
-// first answer rather than lying about how it began.
+// WHAT STILL CANNOT COME BACK after a restart: acks and notices. Nothing
+// records them, because a conversation's state does not depend on them.
 
 // mergeTranscript returns the thread as it should be read: the live buffer plus
-// any durable answer the buffer no longer holds, in time order.
-func mergeTranscript(thread string, live []Message, runs []Run) []Message {
+// every durable message the buffer no longer holds, in time order.
+//
+// ownChannel is this console's Channel, which is how a recorded message is
+// attributed: typed HERE, typed on another surface, or an event no surface
+// displayed at all.
+func mergeTranscript(thread, ownChannel string, live []Message, runs []Run) []Message {
 	// A MULTISET of what the buffer already shows as agent output. A count,
 	// not a set: an agent that answered the same thing twice produced two runs
 	// and two messages, and collapsing them would silently drop one.
 	liveAgentText := map[string]int{}
+	// The inputs the buffer already stands for, by id. An id, not the text:
+	// a bubble typed here, its delivered copy and the record entry are ONE
+	// message wearing three ids, and text matching is what made that guesswork.
+	liveInputs := map[string]bool{}
 	for _, m := range live {
 		if m.Kind == MsgAgent {
 			liveAgentText[m.Text]++
+		}
+		if m.recordID != "" {
+			liveInputs[m.recordID] = true
 		}
 	}
 
@@ -51,6 +64,12 @@ func mergeTranscript(thread string, live []Message, runs []Run) []Message {
 	out = append(out, live...)
 
 	for _, r := range runs {
+		for _, in := range r.Inputs {
+			if in.Text == "" || liveInputs[in.ID] {
+				continue
+			}
+			out = append(out, recordedMessage(thread, ownChannel, in))
+		}
 		if r.Result == "" {
 			continue // a run with no result said nothing; an empty line would be a lie
 		}
@@ -75,6 +94,39 @@ func mergeTranscript(thread string, live []Message, runs []Run) []Message {
 
 	sortByTime(out)
 	return out
+}
+
+// recordedMessage renders one recorded input as a transcript line.
+//
+// The speaker is named for a READER: whoever sent it when a sender is known,
+// and otherwise the surface it came from. An internal kind identifier is never
+// shown as somebody's name.
+//
+// Which bubble it is follows from WHERE it entered, the same fact the delivery
+// rule reads: this console's own surface means somebody typed it here, another
+// surface means somebody else's words, and no surface at all means an event —
+// an alert, a job tick, a posted task — that no person typed anywhere.
+func recordedMessage(thread, ownChannel string, in RecordedInput) Message {
+	msg := Message{
+		ID: "input:" + in.ID, Thread: thread, Text: in.Text, At: in.ReceivedAt,
+		recordID: in.ID,
+	}
+	if in.Truncated {
+		msg.Text += "\n\n_…truncated — the full payload is not kept in the conversation record._"
+	}
+	switch {
+	case in.Surface == "":
+		msg.Kind = MsgSignal
+	case ownChannel != "" && in.Surface == ownChannel:
+		msg.Kind, msg.Sender = MsgLocal, in.Sender
+	default:
+		msg.Kind = MsgRelay
+		msg.Sender = in.Surface
+		if in.Sender != "" {
+			msg.Sender = in.Surface + "/" + in.Sender
+		}
+	}
+	return msg
 }
 
 // sortByTime orders a thread oldest-first.

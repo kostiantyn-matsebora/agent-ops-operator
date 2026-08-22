@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -8,9 +9,9 @@ import (
 // The live wire: what the manager posts to the console's threads, kept in
 // memory and streamed to browsers.
 //
-// Deliberately ephemeral and bounded (design decision 5). The durable record
-// of a conversation is `status.runs[]`, which the console already has from its
-// watch.
+// Deliberately ephemeral and bounded (design decision 5). The durable record of
+// a conversation is `status.runs[]` — the answers AND the messages they
+// answered — which the console already has from its watch.
 //
 // This used to claim a restart "loses unscrolled live messages and nothing
 // else". It does not, and the gap was visible: after a restart a conversation's
@@ -25,10 +26,10 @@ import (
 // EMPTY, which broke worse than the bug it replaced: typing a reply made the
 // buffer non-empty, so the history vanished mid-conversation.
 //
-// What a restart genuinely loses is what was never CR state — the signal card
-// (its input is pruned once processed) and relayed sibling-channel messages.
-// Those are not reconstructed, because inventing text nobody said would be
-// worse than starting the thread at the first answer.
+// What a restart genuinely loses is what was never CR state at all: acks and
+// other manager notices, which nothing records because nothing has to. Every
+// MESSAGE — the event that opened the thread, what people typed here and
+// elsewhere, what the agent answered — is read back from the record.
 
 const (
 	// maxThreadMessages bounds one thread's live buffer.
@@ -69,6 +70,13 @@ type Message struct {
 	At     string `json:"at"`
 	// Pending marks a locally-typed message the manager has not confirmed yet.
 	Pending bool `json:"pending,omitempty"`
+
+	// recordID is the conversation input this bubble stands for, when it stands
+	// for one. Internal correlation only — never rendered, never sent to the
+	// browser — and it is what lets a read MERGE the buffer with the durable
+	// record without comparing text: a message already on screen is the same
+	// message as the record entry naming the same input.
+	recordID string
 }
 
 // Transcripts holds every live thread buffer.
@@ -104,7 +112,14 @@ func NewTranscripts() *Transcripts {
 // AppendOp records one incoming `send` op. Returns false when the op id was
 // already recorded — channel ops are at-least-once, so a redelivered op must
 // render exactly once.
-func (t *Transcripts) AppendOp(opID, thread string, m *OpMessage) bool {
+//
+// ownChannel is this console's Channel, and it is what tells one of THIS
+// surface's own users' messages from somebody else's: the manager delivers a
+// message to every bound channel except the surface that displayed it, and a
+// viewer displays nothing it was not sent — so a message typed here comes back
+// here, as a relay whose origin is this channel. It CONFIRMS the bubble already
+// on screen rather than becoming a second one.
+func (t *Transcripts) AppendOp(opID, thread string, m *OpMessage, ownChannel string) bool {
 	t.mu.Lock()
 	if t.seen[opID] {
 		t.mu.Unlock()
@@ -118,10 +133,68 @@ func (t *Transcripts) AppendOp(opID, thread string, m *OpMessage) bool {
 	}
 	t.mu.Unlock()
 
-	kind, sender := transcriptKind(m)
-	msg := Message{ID: opID, Thread: thread, Kind: kind, Sender: sender, Text: m.Render(), At: nowRFC3339()}
+	kind, sender := transcriptKind(m, ownChannel)
+	text := m.Render()
+	record := inputIDOf(opID)
+	if kind == MsgLocal {
+		// Rendered plain: the relay prefix names a speaker for somebody else's
+		// words, and these are the words of the person reading this thread.
+		text = m.Body
+		if confirmed, ok := t.confirmLocal(thread, sender, record); ok {
+			if confirmed != nil {
+				t.publish(*confirmed)
+			}
+			return true
+		}
+	}
+	msg := Message{ID: opID, Thread: thread, Kind: kind, Sender: sender, Text: text, At: nowRFC3339(), recordID: record}
 	t.append(msg, kind == MsgAck || kind == MsgRelay)
 	return true
+}
+
+// confirmLocal marks the bubble a delivered copy stands for as durable,
+// returning it so callers can republish it (the UI drops its "sending…" label).
+//
+// Matched on ORDER and, when both are known, on the SENDER — never on the text.
+// Recovering a message by comparing text to something posted earlier is the
+// workaround this whole change removes, and it produced a truncated message, a
+// duplicated one and a missing one in a single evening. FIFO is sound because
+// the manager delivers a thread's messages in the order it took them.
+func (t *Transcripts) confirmLocal(thread, sender, record string) (*Message, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	log := t.threads[thread]
+	if log == nil {
+		return nil, false
+	}
+	for i := range log.messages {
+		m := &log.messages[i]
+		if m.Kind != MsgLocal || m.recordID != "" {
+			continue // not a local bubble, or already standing for a message
+		}
+		if sender != "" && m.Sender != "" && m.Sender != sender {
+			continue // somebody else's message on a shared surface
+		}
+		m.Pending = false
+		m.recordID = record
+		confirmed := *m
+		return &confirmed, true
+	}
+	return nil, false
+}
+
+// inputIDOf reads the input id out of a delivery op id
+// ("input:<conversation>:<input>:<channel>"), or "" for any other op.
+//
+// The correlation between the buffer and the record is an ID, not a string
+// comparison — which is the difference between a merge that is right and one
+// that is usually right.
+func inputIDOf(opID string) string {
+	parts := strings.Split(opID, ":")
+	if len(parts) != 4 || parts[0] != "input" {
+		return ""
+	}
+	return parts[2]
 }
 
 // AppendLocal records a message typed in this console as pending. It is NEVER
@@ -132,79 +205,6 @@ func (t *Transcripts) AppendLocal(id, thread, sender, text string) Message {
 	msg := Message{ID: id, Thread: thread, Kind: MsgLocal, Sender: sender, Text: text, At: nowRFC3339(), Pending: true}
 	t.append(msg, false)
 	return msg
-}
-
-// AppendTyped records a message a PERSON typed, read from the conversation's
-// own inputs rather than from an op. Returns false when this input was already
-// recorded — one conversation produces many watch events and the message must
-// render once.
-//
-// NOT pending: unlike AppendLocal there is nothing to confirm. The manager has
-// the input already — that is where this was read from.
-func (t *Transcripts) AppendTyped(inputID, thread, sender, text, at string) bool {
-	t.mu.Lock()
-	if t.seen[inputID] {
-		t.mu.Unlock()
-		return false
-	}
-	t.seen[inputID] = true
-	t.seenRing = append(t.seenRing, inputID)
-	if len(t.seenRing) > 4096 {
-		delete(t.seen, t.seenRing[0])
-		t.seenRing = t.seenRing[1:]
-	}
-	t.mu.Unlock()
-
-	if at == "" {
-		at = nowRFC3339()
-	}
-	// THE INPUT IS NOT A SECOND MESSAGE. A reply typed into this console is
-	// already on screen — `Send` put it there the moment it was typed — and the
-	// input that same text becomes is the DURABLE identity of that bubble, not
-	// another one. Appending it produced the message twice: once attributed to
-	// the sender, once anonymous.
-	//
-	// So adopt the existing bubble when there is one, and keep ITS id: the id is
-	// what the browser renders by, and handing the same text a new one is how
-	// the duplicate would come back through the live stream instead of through
-	// the buffer.
-	if confirmed, ok := t.adoptLocal(thread, text); ok {
-		if confirmed != nil {
-			t.publish(*confirmed)
-		}
-		return true
-	}
-	t.append(Message{ID: inputID, Thread: thread, Kind: MsgLocal, Sender: sender, Text: text, At: at}, false)
-	return true
-}
-
-// adoptLocal marks an already-shown local message as durable, returning it so
-// callers can republish it (the UI drops its "sending…" label).
-//
-// Matched on TEXT within one thread and taken at most once per bubble, so two
-// identical messages adopt two inputs rather than collapsing into one.
-func (t *Transcripts) adoptLocal(thread, text string) (*Message, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	log := t.threads[thread]
-	if log == nil {
-		return nil, false
-	}
-	for i := len(log.messages) - 1; i >= 0; i-- {
-		m := &log.messages[i]
-		if m.Kind != MsgLocal || m.Text != text {
-			continue
-		}
-		if t.seen["adopted:"+m.ID] {
-			continue // this bubble already stands for an input
-		}
-		t.seen["adopted:"+m.ID] = true
-		t.seenRing = append(t.seenRing, "adopted:"+m.ID)
-		m.Pending = false
-		adopted := *m
-		return &adopted, true
-	}
-	return nil, false
 }
 
 // append stores and publishes a message; confirmPending clears the thread's
@@ -350,12 +350,20 @@ func (t *Transcripts) publish(msg Message) {
 // the console reverse-engineering Telegram HTML the manager had rendered for a
 // different surface. A message kind is now stated, so nothing here can be
 // wrong about it.
-func transcriptKind(m *OpMessage) (kind, sender string) {
+//
+// A relay whose ORIGIN is this console's own channel is one of this surface's
+// users' messages coming back, so it renders as a local message rather than as
+// somebody else's words. The speaker is named for a reader: the sender when one
+// is known, and never an internal kind identifier.
+func transcriptKind(m *OpMessage, ownChannel string) (kind, sender string) {
 	if m == nil {
 		return MsgAgent, ""
 	}
 	switch m.Kind {
 	case "relay":
+		if ownChannel != "" && m.Origin == ownChannel {
+			return MsgLocal, m.Sender
+		}
 		who := m.Origin
 		if m.Sender != "" {
 			who = m.Origin + "/" + m.Sender

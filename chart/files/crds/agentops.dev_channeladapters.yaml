@@ -99,6 +99,25 @@ spec:
                   - key
                   type: object
                 type: array
+              echoesOwnMessages:
+                default: true
+                description: |-
+                  EchoesOwnMessages says whether this transport shows a person the message
+                  they just typed on it. INTERFACE METADATA, like configSchema: it holds no
+                  configuration and grants nothing — it states one fact about the
+                  implementation that only the implementation knows.
+
+                  It is what makes the delivery rule per DESTINATION. A message is
+                  delivered to every bound channel except the surface that DISPLAYED it,
+                  and displaying is a property of the transport: a chat app puts your own
+                  message in your thread, a viewer that renders only what it is sent does
+                  not — so withholding it there is how a console user's own question went
+                  missing from the transcript it started.
+
+                  Defaults to TRUE, which is the conservative reading: an adapter that has
+                  not been asked keeps today's behaviour, and nobody sees their own message
+                  twice. A viewer sets it false.
+                type: boolean
               image:
                 description: Image implementing the adapter contract.
                 minLength: 1

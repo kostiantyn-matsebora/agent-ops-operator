@@ -510,9 +510,15 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	if d.Continuity == ContinuityUnavailable {
 		hold = s.breaker().Report()
 	}
+	// The messages this run consumed, recorded WITH the run. Same status write
+	// that marks them processed, so the record exists before the reconciler is
+	// allowed to prune the queue entry — a crash between the two would otherwise
+	// lose what a person said, permanently and silently.
+	var recorded []agentopsv1alpha1.RecordedInput
 	if conv.Status.Inflight != nil && conv.Status.Inflight.RunID == d.RunID {
 		latencyMs = now.Sub(conv.Status.Inflight.DispatchedAt.Time).Milliseconds()
 		if !hold {
+			recorded = s.recordInputs(ctx, &conv, conv.Status.Inflight.InputIDs)
 			conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
 		}
 		conv.Status.Inflight = nil
@@ -580,6 +586,10 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		// This manager owes the reply to every bound thread. Recorded on the run
 		// itself so the obligation survives the process that took it on.
 		DeliveryTracked: true,
+		// The questions, beside the answer. Without them a conversation records
+		// half a thread: durable results linked by inputIds to text the queue
+		// already deleted.
+		Inputs: recorded,
 	})
 	if len(conv.Status.Runs) > 10 {
 		conv.Status.Runs = conv.Status.Runs[len(conv.Status.Runs)-10:]
@@ -627,6 +637,47 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// recordInputs renders the queued inputs a run consumed as the record kept on
+// that run.
+//
+// Reads the out-of-line payload where there is one, so the record holds the
+// MESSAGE rather than a reference to an object that is about to be pruned with
+// the queue entry. The inline cap lives on the API type, applied once, in
+// InputItem.Record.
+//
+// An id with no queue entry left is skipped rather than recorded empty: a
+// conversation reconciled between the dispatch and this report has already
+// pruned nothing, so this only happens when the input was never there — and an
+// entry with no text is a message nobody sent.
+func (s *Server) recordInputs(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+	ids []string) []agentopsv1alpha1.RecordedInput {
+
+	if len(ids) == 0 {
+		return nil
+	}
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	var out []agentopsv1alpha1.RecordedInput
+	for i := range conv.Spec.Inputs {
+		item := &conv.Spec.Inputs[i]
+		if !want[item.ID] {
+			continue
+		}
+		text, labels := item.Payload, map[string]string(nil)
+		if item.PayloadRef != nil {
+			var ci agentopsv1alpha1.ConversationInput
+			if err := s.Reader.Get(ctx, types.NamespacedName{
+				Namespace: conv.Namespace, Name: item.PayloadRef.Name}, &ci); err == nil {
+				text, labels = ci.Spec.Payload, ci.Spec.Labels
+			}
+		}
+		out = append(out, item.Record(text, labels))
+	}
+	return out
 }
 
 // runByID finds a recorded run on a conversation, or nil.

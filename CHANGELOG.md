@@ -8,6 +8,53 @@ Entries are keyed by CHART version; the manager image tag moves independently.
 
 ## Unreleased
 
+### A conversation keeps its questions, and delivery is per destination — chart 5.25.0
+
+**Messages that used to be withheld now arrive.** A person's message is
+delivered to every bound channel EXCEPT the surface it was typed on. Before
+this, it was withheld from ALL of them, so a second surface on the same
+conversation never saw what somebody asked.
+
+What an operator will SEE differently:
+
+- A conversation bound to two surfaces now shows both sides of it on both.
+- The console shows the message that STARTED a conversation, and keeps it after
+  a reload or a restart. It used to begin at the agent's answer.
+- A thread that was already noisy is not noisier: nothing is posted back to the
+  surface that displayed it, and nothing is delivered retroactively on upgrade.
+
+**The record.** `Conversation.status.runs[]` gains `inputs[]` — the messages
+each run consumed, with their text, arrival time, origin surface and sender.
+`spec.inputs[]` is still a queue and is still pruned once processed. What
+changed is that pruning is no longer the only copy of what a person said.
+
+Text is inlined up to 2000 characters and marked `truncated` beyond it, so a
+large alert payload is not copied into the conversation object.
+
+**Adapters declare one new thing.** `ChannelAdapter.spec.echoesOwnMessages`
+(default `true`) says whether the transport shows a person the message they just
+typed. Every chat app leaves it alone. A VIEWER — one that renders only what it
+is sent — sets it `false` and then receives its own users' messages like any
+other destination. The console does this, in the chart.
+
+**Upgrade steps.**
+
+1. Apply the CRDs before the manager image. `status.runs[].inputs[]` and
+   `spec.echoesOwnMessages` are additive and optional, but a manager writing a
+   field the CRD does not know loses it silently.
+2. `helm upgrade` with the new image tags (manager `0.38.1`, console `0.16.0`).
+3. Nothing is backfilled. Runs recorded before this carry no inputs and render
+   as they always did — answers alone. Conversations whose opening message the
+   console only ever held in memory do not get it back.
+
+**If you wrote your own channel adapter**, check one thing: it must never
+re-ingest its own outbound posts as inbound. That rule now matters in one more
+place, because one adapter may serve several surfaces of one conversation and a
+message can be delivered toward the transport it entered through.
+
+Rolling back is reverting the images. The record stops being written, old
+records stay readable, and delivery returns to the previous rule.
+
 ### prometheus-bundle gets its network policies — chart 5.24.0
 
 Its metrics MCP server was the third one, and the last unprotected: it

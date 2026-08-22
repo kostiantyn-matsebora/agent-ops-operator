@@ -48,12 +48,40 @@ type InputOrigin struct {
 	// +optional
 	Name string `json:"name,omitempty"`
 	// SignalKind is the originating signal's lane (alert | job | task | chat)
-	// for `signal` origins, empty otherwise. Carried because CHAT is the one
-	// signal a bound channel must NOT be shown: the person typed it, so posting
-	// it back is an echo — and origin kind alone cannot tell it from an alert.
+	// for `signal` origins, empty otherwise. It says whether a PERSON typed
+	// this input — which decides how it is rendered on the surfaces that did
+	// not show it (somebody's words, or the event that woke the agent). It does
+	// NOT decide whether it is delivered: that is per destination, read off the
+	// origin SURFACE.
 	// +optional
 	SignalKind string `json:"signalKind,omitempty"`
+	// Sender is the transport-side identity that typed this input, when the
+	// serving adapter supplied one. Attribution, never authority: nothing is
+	// resolved through it and no permission reads it.
+	//
+	// It is recorded because a person's message is now delivered to every OTHER
+	// bound surface, and reconciliation composes that delivery from the
+	// conversation alone. An in-memory sender would leave the same message
+	// attributed on the fast path and anonymous when re-derived after a
+	// restart — the same class of bug the delivery markers on runs fixed.
+	// A chat signal carries the same fact in its labels
+	// (LabelChatSender); this is where the CHANNEL lane keeps it.
+	// +optional
+	Sender string `json:"sender,omitempty"`
 }
+
+// SignalKindChat is the chat lane's name on InputOrigin.SignalKind — a person
+// typing on a surface, as opposed to an alert, a job tick or a posted task.
+const SignalKindChat = "chat"
+
+// Reserved labels a chat signal carries into a conversation. Declared here
+// because the DELIVERY rule reads the channel one: it names the SURFACE a
+// message was typed on, and that surface is the one destination the message is
+// not delivered to. /signal/inbound refuses a chat signal without it.
+const (
+	LabelChatChannel = "agentops.dev/channel"
+	LabelChatSender  = "agentops.dev/sender"
+)
 
 // InputItem is one queued work unit. Payload is inline OR referenced via
 // PayloadRef (a ConversationInput object) for large payloads.
@@ -77,21 +105,67 @@ type InputItem struct {
 	ReceivedAt metav1.Time `json:"receivedAt,omitempty"`
 }
 
-// PostToChannels reports whether this input should be posted to the
-// conversation's bound channels as a card.
+// OriginSurface names the CHANNEL this input was typed on, or "" when no
+// surface displayed it (an alert, a job tick, a task a machine posted).
 //
-// The rule is "post what a human has not already seen", read off the recorded
-// origin rather than by enumerating input types — so a new input type inherits
-// correct behavior instead of defaulting to whichever branch someone forgot:
-//
-//	signal  -> yes, except kind: chat (the person typed it; siblings get a relay)
-//	channel -> no  (the originating surface already showed it)
-//	absent  -> no  (predates provenance; the event is long delivered)
-func (i *InputItem) PostToChannels() bool {
-	if i.Origin == nil || i.Origin.Kind != OriginSignal {
+// ONE resolution for both lanes, because two would drift: a channel origin
+// names its channel, and a chat signal carries the surface in its labels. The
+// labels come from the input's ConversationInput, so the caller passes them in
+// — nothing here reads the API.
+func (i *InputItem) OriginSurface(labels map[string]string) string {
+	if i.Origin == nil {
+		return ""
+	}
+	switch i.Origin.Kind {
+	case OriginChannel:
+		return i.Origin.Name
+	case OriginSignal:
+		return labels[LabelChatChannel]
+	}
+	return ""
+}
+
+// OriginSender is the identity that typed this input, from whichever lane
+// carried it, or "" when nobody is named.
+func (i *InputItem) OriginSender(labels map[string]string) string {
+	if i.Origin != nil && i.Origin.Sender != "" {
+		return i.Origin.Sender
+	}
+	return labels[LabelChatSender]
+}
+
+// TypedByAPerson reports whether somebody wrote this input, as opposed to an
+// event that woke the agent. It decides how a delivery is RENDERED — somebody's
+// words carry their attribution, an event is a card — and nothing else.
+func (i *InputItem) TypedByAPerson() bool {
+	if i.Origin == nil {
 		return false
 	}
-	return i.Origin.SignalKind != "chat"
+	return i.Origin.Kind == OriginChannel || i.Origin.SignalKind == SignalKindChat
+}
+
+// DeliverTo answers the ONE delivery question, per DESTINATION: does this bound
+// channel still owe its readers this message?
+//
+// "Already seen" is a fact about a SURFACE, never about a message. A message
+// typed on surface A was displayed by A as it was typed, and is new to every
+// other bound channel. The rule this replaced decided once, from the origin
+// KIND, and so withheld a person's words from channels that had never shown
+// them — the console's own composer message among them.
+//
+// Whether the origin surface displayed it is a fact about its TRANSPORT, not
+// about the message: a chat app echoes what you typed, a viewer that renders
+// only what it is sent does not. The caller supplies that as originEchoes,
+// read off the serving ChannelAdapter.
+//
+// An input with NO origin is delivered nowhere. It predates provenance, cannot
+// be told from an alert, and its event was delivered long ago — so an upgrade
+// cannot fill every open thread with history.
+func (i *InputItem) DeliverTo(channel, originSurface string, originEchoes bool) bool {
+	if i.Origin == nil {
+		return false
+	}
+	return !(channel == originSurface && originEchoes)
 }
 
 // ConversationSpec pins a conversation to its chat surfaces and an agent
@@ -231,6 +305,89 @@ type RunStatus struct {
 	// re-post to the delivered thread or abandon the other two.
 	// +optional
 	Delivered []string `json:"delivered,omitempty"`
+	// Inputs are the messages this run consumed, kept where the run keeps its
+	// answer — so a conversation records the questions as well as the answers
+	// and its whole timeline reads off status in order.
+	//
+	// The queue is a QUEUE: spec.inputs[] is pruned once dispatch has consumed
+	// an entry, which is what stops answered work running twice, and it took
+	// the only copy of what a person said with it. This is the copy that stays.
+	//
+	// Written in the SAME status write that marks the inputs processed, and
+	// therefore strictly before the reconciler prunes them: a record written
+	// afterwards would be lost by a crash in between, permanently.
+	//
+	// Absent on runs written before this existed. A viewer renders what it has
+	// and invents nothing.
+	// +optional
+	Inputs []RecordedInput `json:"inputs,omitempty"`
+}
+
+// MaxRecordedInputText bounds how much of one message is inlined into a
+// conversation's record. THE cap, stated once: nothing configures it, because
+// an installation that could opt out of it would be an installation that could
+// grow a Conversation past what etcd will store.
+//
+// Large payloads already live out of line in a ConversationInput for exactly
+// that reason, and copying them into status would undo it.
+const MaxRecordedInputText = 2000
+
+// RecordedInput is one message a run consumed: what was said, when, and where
+// it entered the system — everything a reader needs to render it without
+// inference.
+type RecordedInput struct {
+	// ID is the input's id, the same one runs[].inputIds names.
+	ID string `json:"id"`
+	// +optional
+	Type InputType `json:"type,omitempty"`
+	// Text is the message, inlined up to MaxRecordedInputText.
+	// +optional
+	Text string `json:"text,omitempty"`
+	// Truncated says Text is NOT the whole message — it was longer than the cap
+	// and what is kept here is its beginning. A reader must present it as a
+	// fragment rather than as what somebody said.
+	// +optional
+	Truncated bool `json:"truncated,omitempty"`
+	// PayloadRef names the ConversationInput the full text was read from, when
+	// there was one. A CITATION of where the message lived, not a live pointer:
+	// that object is deleted with the queue entry, which is why the beginning of
+	// the text is kept here rather than only referenced.
+	// +optional
+	PayloadRef *ObjectRef `json:"payloadRef,omitempty"`
+	// Surface is the channel this message was typed on, empty when no surface
+	// displayed it (an alert, a job tick, a posted task).
+	// +optional
+	Surface string `json:"surface,omitempty"`
+	// Sender is who typed it, when a sender was named. Attribution only.
+	// +optional
+	Sender string `json:"sender,omitempty"`
+	// +optional
+	ReceivedAt *metav1.Time `json:"receivedAt,omitempty"`
+}
+
+// Record renders one queued input as the record entry the run keeps, applying
+// the inline cap in the ONE place it is applied.
+//
+// text is the resolved message — the inline payload, or the referenced
+// ConversationInput's — and labels are that object's, so surface and sender are
+// resolved by the same helpers the delivery rule uses.
+func (i *InputItem) Record(text string, labels map[string]string) RecordedInput {
+	rec := RecordedInput{
+		ID: i.ID, Type: i.Type, PayloadRef: i.PayloadRef,
+		Surface: i.OriginSurface(labels), Sender: i.OriginSender(labels),
+	}
+	if !i.ReceivedAt.IsZero() {
+		at := i.ReceivedAt
+		rec.ReceivedAt = &at
+	}
+	// Rune-safe: a byte cut would halve a multi-byte character, and chat input
+	// is exactly where non-ASCII shows up.
+	if runes := []rune(text); len(runes) > MaxRecordedInputText {
+		rec.Text, rec.Truncated = string(runes[:MaxRecordedInputText]), true
+	} else {
+		rec.Text = text
+	}
+	return rec
 }
 
 // DeliveredTo reports whether this run's reply already reached a channel.

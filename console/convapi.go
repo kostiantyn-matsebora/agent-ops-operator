@@ -216,7 +216,7 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 		// typed a reply: their own message made the buffer non-empty, the
 		// durable answers stopped being served, and the history vanished
 		// mid-conversation.
-		messages = mergeTranscript(summary.ConsoleThread, messages, summary.Runs)
+		messages = mergeTranscript(summary.ConsoleThread, a.adapter.PrimaryChannel(), messages, summary.Runs)
 	}
 	out := map[string]any{
 		"conversation": summary,
@@ -499,12 +499,10 @@ func (a *API) handleStart(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Remembered BEFORE posting: the conversation can exist before this call
-	// returns, and a hint that arrives after the input has been rendered is a
-	// hint that did nothing.
-	if a.typedInputs != nil {
-		a.typedInputs.RememberOrigination(strings.TrimSpace(in.Task), Identity(r))
-	}
+	// Nothing is remembered here. The message this starts comes BACK as an
+	// ordinary delivery carrying its own sender, and a reload reads it from the
+	// conversation's record — which is what the hint map, the text matching and
+	// the as-typed recovery were all standing in for.
 	reason, err := a.originator.Start(r.Context(), a.adapter.PrimaryChannel(), Identity(r),
 		a.adapter.ReaderKey(Identity(r)), in.Task)
 	if err != nil {

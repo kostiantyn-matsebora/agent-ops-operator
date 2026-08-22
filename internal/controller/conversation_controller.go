@@ -329,10 +329,10 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if conv.Status.Reopens > 0 && r.Router != nil {
 			r.Router.FanOutReopenNotice(ctx, &conv)
 		}
-		// Input cards, posted PARALLEL to dispatch rather than sequenced with
-		// it: the human reads the event while the agent is already working, and
-		// a run that hangs or dies still leaves the thread saying what happened.
-		r.postInputCards(ctx, &conv)
+		// Input delivery, PARALLEL to dispatch rather than sequenced with it:
+		// the human reads the event while the agent is already working, and a
+		// run that hangs or dies still leaves the thread saying what happened.
+		chat.DeliverInputs(ctx, r.Client, r.Ops, &conv)
 		// The BACKSTOP that makes a reply derivable rather than queue-resident.
 		if err := r.deliverRunReplies(ctx, &conv); err != nil {
 			logger.Error(err, "re-deriving undelivered run replies")
@@ -963,7 +963,7 @@ func (r *ConversationReconciler) topicDescriptor(ctx context.Context, conv *agen
 	for i := range conv.Spec.Inputs {
 		if o := conv.Spec.Inputs[i].Origin; o != nil {
 			d.Source, d.Kind = o.Name, o.SignalKind
-			if payload := r.inputPayload(ctx, conv, &conv.Spec.Inputs[i]); payload != nil {
+			if payload := chat.InputPayload(ctx, r.Client, conv.Namespace, &conv.Spec.Inputs[i]); payload != nil {
 				d.Labels = payload.Spec.Labels
 			}
 			break
@@ -981,64 +981,6 @@ func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *age
 		return p.Name
 	}
 	return ""
-}
-
-// inputPayload reads an input's out-of-line ConversationInput, or nil when the
-// payload is inline or the object is gone (pruned after processing).
-func (r *ConversationReconciler) inputPayload(ctx context.Context, conv *agentopsv1alpha1.Conversation,
-	item *agentopsv1alpha1.InputItem) *agentopsv1alpha1.ConversationInput {
-
-	if item.PayloadRef == nil {
-		return nil
-	}
-	var ci agentopsv1alpha1.ConversationInput
-	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: item.PayloadRef.Name}, &ci); err != nil {
-		return nil
-	}
-	return &ci
-}
-
-// postInputCards posts every input a human has not already seen to every bound
-// channel that has a thread.
-//
-// Three properties make this safe to run on EVERY reconcile:
-//
-//   - the op id is stable per conversation×input×channel, so a re-enqueue
-//     dedups against both the pending map and the completed window;
-//   - the posting rule is read off the input's recorded origin
-//     (InputItem.PostToChannels), so a channel never sees its own echo and
-//     pre-provenance inputs post nothing at all;
-//   - a channel with no thread binding yet is skipped, and picked up on the
-//     reconcile the binding triggers — enqueuing earlier would drop the card.
-func (r *ConversationReconciler) postInputCards(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
-	pipeline := ""
-	resolved := false
-	for i := range conv.Spec.Inputs {
-		item := &conv.Spec.Inputs[i]
-		if !item.PostToChannels() {
-			continue
-		}
-		if !resolved { // one lookup per reconcile, and only when something posts
-			pipeline, resolved = r.inferredPipeline(ctx, conv), true
-		}
-		body, inputRef, labels := item.Payload, "", map[string]string(nil)
-		if ci := r.inputPayload(ctx, conv, item); ci != nil {
-			body, inputRef, labels = ci.Spec.Payload, ci.Name, ci.Spec.Labels
-		}
-		msg := chat.SignalMessage(pipeline, item.Origin.Name, conv.Spec.Title, inputRef, labels, body)
-		for _, ref := range conv.Spec.ChannelRefs {
-			tid := conv.ThreadFor(ref.Name)
-			if tid == nil {
-				continue
-			}
-			var ch agentopsv1alpha1.Channel
-			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil ||
-				ch.Spec.Adapter == "" {
-				continue
-			}
-			r.Ops.EnqueueInputCard(ctx, &ch, conv.Name, item.ID, tid, msg)
-		}
-	}
 }
 
 // deliverRunReplies re-derives the answer for every completed run that a bound
@@ -1174,6 +1116,17 @@ func (r *ConversationReconciler) backfillDelivered(ctx context.Context, conv *ag
 	return fmt.Errorf("conflict backfilling delivery markers on %s", conv.Name)
 }
 
+// pruneProcessed removes queue entries dispatch has consumed, and deletes the
+// out-of-line payload object with them. UNCHANGED, deliberately: pruning is
+// what stops answered work from running twice, and that is all it was ever for.
+//
+// What changed is what it is allowed to be the last copy of. The RECORD is
+// written into status.runs[].inputs by the same write that marks these ids
+// processed (see httpapi.handleWorkDone), so by the time an id can appear in
+// ProcessedInputIDs its message is already durable. That ordering is the
+// guarantee this depends on, and it is one-directional: recording afterwards
+// would let a crash in between destroy what somebody said, with the queue entry
+// gone and nothing to re-read it from.
 func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
 	if len(conv.Status.ProcessedInputIDs) == 0 {
 		return nil

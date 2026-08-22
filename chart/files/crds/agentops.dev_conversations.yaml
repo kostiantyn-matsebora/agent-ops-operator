@@ -111,12 +111,28 @@ spec:
                           description: Name is the SignalSource or Channel the input
                             came from.
                           type: string
+                        sender:
+                          description: |-
+                            Sender is the transport-side identity that typed this input, when the
+                            serving adapter supplied one. Attribution, never authority: nothing is
+                            resolved through it and no permission reads it.
+
+                            It is recorded because a person's message is now delivered to every OTHER
+                            bound surface, and reconciliation composes that delivery from the
+                            conversation alone. An in-memory sender would leave the same message
+                            attributed on the fast path and anonymous when re-derived after a
+                            restart — the same class of bug the delivery markers on runs fixed.
+                            A chat signal carries the same fact in its labels
+                            (LabelChatSender); this is where the CHANNEL lane keeps it.
+                          type: string
                         signalKind:
                           description: |-
                             SignalKind is the originating signal's lane (alert | job | task | chat)
-                            for `signal` origins, empty otherwise. Carried because CHAT is the one
-                            signal a bound channel must NOT be shown: the person typed it, so posting
-                            it back is an echo — and origin kind alone cannot tell it from an alert.
+                            for `signal` origins, empty otherwise. It says whether a PERSON typed
+                            this input — which decides how it is rendered on the surfaces that did
+                            not show it (somebody's words, or the event that woke the agent). It does
+                            NOT decide whether it is delivered: that is per destination, read off the
+                            origin SURFACE.
                           type: string
                       required:
                       - kind
@@ -522,6 +538,80 @@ spec:
                     inputIds:
                       items:
                         type: string
+                      type: array
+                    inputs:
+                      description: |-
+                        Inputs are the messages this run consumed, kept where the run keeps its
+                        answer — so a conversation records the questions as well as the answers
+                        and its whole timeline reads off status in order.
+
+                        The queue is a QUEUE: spec.inputs[] is pruned once dispatch has consumed
+                        an entry, which is what stops answered work running twice, and it took
+                        the only copy of what a person said with it. This is the copy that stays.
+
+                        Written in the SAME status write that marks the inputs processed, and
+                        therefore strictly before the reconciler prunes them: a record written
+                        afterwards would be lost by a crash in between, permanently.
+
+                        Absent on runs written before this existed. A viewer renders what it has
+                        and invents nothing.
+                      items:
+                        description: |-
+                          RecordedInput is one message a run consumed: what was said, when, and where
+                          it entered the system — everything a reader needs to render it without
+                          inference.
+                        properties:
+                          id:
+                            description: ID is the input's id, the same one runs[].inputIds
+                              names.
+                            type: string
+                          payloadRef:
+                            description: |-
+                              PayloadRef names the ConversationInput the full text was read from, when
+                              there was one. A CITATION of where the message lived, not a live pointer:
+                              that object is deleted with the queue entry, which is why the beginning of
+                              the text is kept here rather than only referenced.
+                            properties:
+                              name:
+                                description: Name of the referenced object.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          receivedAt:
+                            format: date-time
+                            type: string
+                          sender:
+                            description: Sender is who typed it, when a sender was
+                              named. Attribution only.
+                            type: string
+                          surface:
+                            description: |-
+                              Surface is the channel this message was typed on, empty when no surface
+                              displayed it (an alert, a job tick, a posted task).
+                            type: string
+                          text:
+                            description: Text is the message, inlined up to MaxRecordedInputText.
+                            type: string
+                          truncated:
+                            description: |-
+                              Truncated says Text is NOT the whole message — it was longer than the cap
+                              and what is kept here is its beginning. A reader must present it as a
+                              fragment rather than as what somebody said.
+                            type: boolean
+                          type:
+                            description: InputType classifies a work unit.
+                            enum:
+                            - task
+                            - alert
+                            - reply
+                            - recurrence
+                            - job
+                            type: string
+                        required:
+                        - id
+                        type: object
                       type: array
                     jobKind:
                       type: string

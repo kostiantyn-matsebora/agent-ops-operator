@@ -324,7 +324,7 @@ func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			// park it on the channel's own pseudo-thread so it is still visible
 			thread = "channel:" + op.Channel
 		}
-		a.transcripts.AppendOp(op.ID, thread, op.Message)
+		a.transcripts.AppendOp(op.ID, thread, op.Message, op.Channel)
 		return "", ""
 	case "delete-conversation":
 		// The CR is about to vanish from the watch cache. The transcript is
@@ -333,7 +333,7 @@ func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		// there is no composer offering to reply to something that is gone.
 		if op.ThreadID != nil {
 			if op.Message != nil {
-				a.transcripts.AppendOp(op.ID, *op.ThreadID, op.Message)
+				a.transcripts.AppendOp(op.ID, *op.ThreadID, op.Message, op.Channel)
 			}
 			a.transcripts.Archive(*op.ThreadID)
 		}

@@ -146,9 +146,11 @@ func TestAlertConversationPostsItsCard(t *testing.T) {
 	}
 }
 
-// 6.6 — a chat message produces no card. It arrives as a `signal` origin like
-// everything else, so origin kind alone would echo the user's own words back.
-func TestChatSignalProducesNoCard(t *testing.T) {
+// 6.6 — a chat message is not delivered back to the surface it was typed on.
+// The rule is per DESTINATION and reads the origin SURFACE, so the chat lane
+// needs no clause of its own: here the only bound channel IS that surface, and
+// its transport shows a person their own message.
+func TestChatSignalIsNotDeliveredToItsOwnSurface(t *testing.T) {
 	mkProfile(t, "prof-nocard")
 	mkChannel(t, "chan-nocard", "tg-nocard")
 	mkChatSource(t, "src-nocard", "chan-nocard")
@@ -173,8 +175,10 @@ func TestChatSignalProducesNoCard(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		reconcileWithOps(t, srv, conv.Name)
 	}
-	if n := len(cardsFor(drainOps(t, srv, "tg-nocard"))); n != 0 {
-		t.Fatalf("a chat message must not be posted back at the person who typed it, got %d card(s)", n)
+	for _, op := range drainOps(t, srv, "tg-nocard") {
+		if op.Message != nil && (op.Message.Kind == chat.MsgSignal || op.Message.Kind == chat.MsgRelay) {
+			t.Fatalf("a message must not go back to the surface that displayed it: %+v", op.Message)
+		}
 	}
 }
 
@@ -207,9 +211,9 @@ func TestTaskSignalPostsItsCard(t *testing.T) {
 	}
 }
 
-// 6.11 (second half) — an input predating provenance produces no card, so
+// 6.11 (second half) — an input predating provenance is delivered nowhere, so
 // upgrading does not fill every open thread with history.
-func TestInputWithoutOriginProducesNoCard(t *testing.T) {
+func TestInputWithoutOriginIsDeliveredNowhere(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-legacy")
 	mkChannel(t, "chan-legacy", "tg-legacy")
@@ -233,8 +237,10 @@ func TestInputWithoutOriginProducesNoCard(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		reconcileWithOps(t, srv, conv.Name)
 	}
-	if n := len(cardsFor(drainOps(t, srv, "tg-legacy"))); n != 0 {
-		t.Fatalf("pre-provenance inputs must post nothing, got %d card(s)", n)
+	for _, op := range drainOps(t, srv, "tg-legacy") {
+		if op.Message != nil && (op.Message.Kind == chat.MsgSignal || op.Message.Kind == chat.MsgRelay) {
+			t.Fatalf("pre-provenance inputs must deliver nothing: %+v", op.Message)
+		}
 	}
 }
 

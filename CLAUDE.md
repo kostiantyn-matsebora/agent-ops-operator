@@ -189,7 +189,8 @@ adopter-documentation rules at the foot of this file instead.
   A `kind: task` signal posted to a source X claims carries X's bindings —
   channels AND tooling both; reaching a pipeline gets its wiring, not half of it.
   Multi-channel conversations: manager fans replies/acks to every bound
-  thread, relays user messages to sibling channels as attributed text, and
+  thread, delivers a user message to every bound channel EXCEPT the surface that
+  displayed it (attributed text, per DESTINATION — not "siblings"), and
   dispatches once ≥1 thread binding exists.
   **The OPERATOR delivers** — agent output is posted to every bound thread by
   the manager via the adapters, for single- and multi-channel alike. Agents
@@ -996,6 +997,10 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   predates the mechanism, and no timestamp can tell it from a run lost to a
   restart, since both completed before the current process started. Without it,
   upgrading re-posts every recent answer to every bound thread.
+  **A person's WORDS are a fact too** — `status.runs[].inputs[]`, written by the
+  same status write that marks the inputs processed. They were never declared
+  lossy and were lost anyway, because the only copy lived in a queue built to be
+  pruned. See the message-record invariant above.
   **Cooldown lives on `SignalSource.status.cooldown[]`**, written only when a
   fingerprint is ADMITTED — a suppressed re-delivery must stay free, or the
   high-volume case cooldown exists for becomes a write storm.
@@ -1055,19 +1060,57 @@ CHANGELOG.md             every chart-version migration guide, newest first —
   markdown subset, because an adapter escapes what it is given — the first
   version of this change left format.md on HTML and every agent answer reached
   Telegram with its tags showing.
-- **A thread opens with the event that caused it.** Every input a human has not
-  already seen is posted to the bound threads as a `signal` card, from
-  `InputItem.Origin` — `signal` posts, `channel` does not, `kind: chat` does
-  not (the person typed it), and an ABSENT origin does not, so upgrading cannot
-  spray history into every open thread. Read the rule off the origin
-  (`InputItem.PostToChannels`), never by enumerating input types. Card op ids
-  are stable per conversation×input×channel or every reconcile reposts the
-  alert. A card names its pipeline from `chat.PipelineForConversation`, which
-  now READS `spec.pipelineRef` and falls back to binding-matching only for
-  conversations predating it — omitting the name when even that is ambiguous.
+- **A thread opens with the event that caused it — and DELIVERY IS DECIDED PER
+  DESTINATION.** Every input is delivered to every bound channel EXCEPT the
+  surface it entered on, because that surface displayed it as it was typed.
+  ONE rule, ONE implementation (`chat.DeliverInputs`), called from the
+  reconciler (the backstop that makes it derivable) and from the router the
+  moment an input is appended (the fast path that keeps a thread in the order
+  things happened) — exactly as a run's reply is.
+  **"Already seen" is a fact about a SURFACE, never about a message.** The
+  origin-KIND rule (`InputItem.PostToChannels`: `signal` posts, `channel`
+  does not, `kind: chat` does not) and its stated chat exception are DELETED.
+  They asked the question once, per message, and so withheld a person's words
+  from channels that had never shown them — a console transcript that began at
+  the agent's answer was that bug. Re-adding either, in any layer, is the
+  regression.
+  Whether the origin surface displayed it is TRANSPORT knowledge, declared by
+  the implementation: `ChannelAdapter.spec.echoesOwnMessages`, default TRUE, and
+  FALSE on a viewer that renders only what it is sent — which is why the console
+  receives its own users' messages. An unreadable channel or adapter answers
+  TRUE, the conservative half.
+  The SURFACE itself is resolved in one place for both lanes
+  (`InputItem.OriginSurface`): a channel origin names its channel, a chat signal
+  carries `agentops.dev/channel` in its labels.
+  What ARRIVES depends on who said it: an event is a `signal` card, a person's
+  words are a `relay` keeping `origin` and `sender` structured. An ABSENT origin
+  is delivered nowhere, so upgrading cannot spray history into every open
+  thread. Op ids stay stable per conversation×input×channel or every reconcile
+  reposts everything. A card names its pipeline from
+  `chat.PipelineForConversation`, which READS `spec.pipelineRef` and falls back
+  to binding-matching only for conversations predating it — omitting the name
+  when even that is ambiguous.
+- **A CONVERSATION'S MESSAGES ARE KUBERNETES-API STATE.** `status.runs[].inputs[]`
+  holds what each run was asked — text (capped at `MaxRecordedInputText`,
+  marked `truncated` beyond it), arrival time, origin surface, sender — beside
+  what it answered. THE QUEUE AND THE RECORD ARE DIFFERENT THINGS: `spec.inputs[]`
+  is a work queue and `pruneProcessed` keeps emptying it, which is what stops
+  answered work running twice. **Pruning must never be the only copy of what a
+  person said** — it was, so a conversation kept the answers and dropped the
+  questions and a viewer could rebuild half a thread.
+  The ORDERING is the guarantee: the record is written by the SAME status write
+  that marks the inputs processed (`handleWorkDone`), therefore strictly before
+  anything may prune them. Recording in a second pass would let a crash in
+  between destroy the message permanently.
+  A viewer's buffer is a CACHE of that record, never its only copy. The console
+  workaround that watched the queue and matched text is deleted, not kept as a
+  fallback.
 - **No relay loops**: channel implementations (adapters AND in-process
   providers) must never re-ingest their own outbound posts as inbound —
-  cross-channel relay depends on it.
+  cross-channel relay depends on it. LOAD-BEARING IN ONE MORE PLACE now: one
+  adapter may serve several surfaces of one conversation, so a message can be
+  delivered TOWARD the transport it entered through, and an implementation that
+  echoed its own outbound posts would loop rather than merely duplicate.
 - **No signal loops** (the same rule one lane over): an observing signal
   adapter must NEVER emit a signal about agent-ops' own machinery. A runtime
   pod that cannot start emits a Warning event; that event becomes a signal, the

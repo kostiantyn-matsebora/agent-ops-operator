@@ -44,8 +44,10 @@ credentials never leave the adapter:
 3. Push user REPLIES with `POST /channel/inbound
    {"channel","threadId","text"}` — `threadId` is REQUIRED. This endpoint
    continues an existing conversation and never starts one; a message in a
-   thread the manager does not know is dropped, not adopted. Relay to sibling
-   channels and busy-acks happen manager-side in the shared router.
+   thread the manager does not know is dropped, not adopted. Delivery to the
+   other bound surfaces and busy-acks happen manager-side — a reply you push is
+   delivered back to you only if your adapter declares
+   `echoesOwnMessages: false`.
    To ORIGINATE, your transport's general surface belongs to a chat
    `SignalSource`: post `{"kind":"chat","fingerprint":…,"payload":…,"labels":
    {"agentops.dev/channel":…,"agentops.dev/sender":…}}` to `/signal/inbound`
@@ -179,7 +181,7 @@ An op carries STRUCTURE, never rendered text. There is no `op.text` and no
 |---|---|---|
 | `signal` | `pipeline?`, `source`, `title`, `labels{}`, `body`, `inputRef` | the event that opened or advanced the conversation, as it arrived |
 | `answer` | `body`, `status` | agent output, reported through `/work/done` |
-| `relay` | `origin`, `sender?`, `body` | a user message from a sibling channel |
+| `relay` | `origin`, `sender?`, `body` | a user message, from any surface but this one — including THIS surface's own users when the adapter declares `echoesOwnMessages: false` |
 | `notice` | `level` (`info`/`warn`), `body` | the manager on its own behalf: acks, listings, refusals |
 
 `ensure-topic` carries `op.topic`, a descriptor — `conversation`, `pipeline?`,
@@ -279,16 +281,24 @@ A `Channel` whose adapter nothing serves (no in-process provider, no Ready
 `ChannelAdapter`, no adapter-reported readiness) carries a `Served=False`
 condition — typos fail visibly instead of queueing ops forever.
 
-**A thread opens with the event that caused it.** When an input is appended and
-a thread binding exists, the manager posts it as a `signal` message — so an
-alert thread reads as the event, then the work, then the answer, and a run that
-hangs or dies still leaves the thread saying what happened. The rule is "post
-what a human has not already seen": inputs with a `signal` origin are posted,
-`chat` signals and channel-originated inputs are not (the person typed those,
-and siblings get them as a `relay`), and inputs predating provenance post
-nothing at all. Card op ids are stable per conversation×input×channel, so
-reconcile-driven re-enqueues dedup. Posting runs parallel to dispatch — it
-neither gates nor is gated by the run.
+**A thread opens with the event that caused it, and delivery is decided per
+DESTINATION.** When an input is appended and a thread binding exists, the
+manager delivers it to every bound channel EXCEPT the surface it entered on —
+because that surface displayed it as it was typed. An event nobody typed
+entered on no surface, so every channel receives it.
+
+What arrives depends on who said it: an event goes out as a `signal` message
+(so an alert thread reads as the event, then the work, then the answer), and a
+person's words go out as a `relay` with `origin` and `sender`.
+
+Whether the origin surface displayed it is a fact about YOUR transport, so you
+declare it: `ChannelAdapter.spec.echoesOwnMessages`, default true. A viewer
+that renders only what it is sent sets it false and receives its own users'
+messages like any other destination.
+
+An input predating provenance is delivered nowhere. Op ids are stable per
+conversation×input×channel, so reconcile-driven re-enqueues dedup, and delivery
+runs parallel to dispatch — it neither gates nor is gated by the run.
 
 **The operator delivers, always.** An agent's printed answer is its whole
 deliverable: the runtime reports it via `/work/done` and the manager posts it
@@ -298,7 +308,9 @@ runtime holds a channel's credentials — the surface is the adapter's business
 alone. A conversation dispatches once at least one of
 its topics exists (one broken channel never deadlocks it), and channel
 implementations must never re-ingest their own outbound posts as inbound
-(relayed messages would loop otherwise).
+(relayed messages would loop otherwise). That rule is load-bearing in one more
+place now: one adapter may serve several surfaces of one conversation, so a
+message can be delivered toward the transport it entered through.
 
 **Conversation context travels as an OPAQUE HANDLE.** A work unit carries
 `runtimeContextId` — the runtime's own identifier for everything this

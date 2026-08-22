@@ -173,8 +173,8 @@ func TestTaskSignalsOpenOneConversationEach(t *testing.T) {
 			in.Origin.SignalKind != "task" {
 			t.Fatalf("%s: a posted task records a signal origin of kind task: %+v", c.Name, in.Origin)
 		}
-		if !in.PostToChannels() {
-			t.Fatalf("%s: a posted task is news to the channel and must be carded", c.Name)
+		if !in.DeliverTo("chan-multi-a", in.OriginSurface(nil), true) {
+			t.Fatalf("%s: a posted task entered on no surface, so every channel is owed it", c.Name)
 		}
 	}
 }

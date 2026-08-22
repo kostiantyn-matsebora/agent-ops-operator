@@ -40,6 +40,24 @@ type ChannelAdapterSpec struct {
 	Singleton *bool `json:"singleton,omitempty"`
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+	// EchoesOwnMessages says whether this transport shows a person the message
+	// they just typed on it. INTERFACE METADATA, like configSchema: it holds no
+	// configuration and grants nothing — it states one fact about the
+	// implementation that only the implementation knows.
+	//
+	// It is what makes the delivery rule per DESTINATION. A message is
+	// delivered to every bound channel except the surface that DISPLAYED it,
+	// and displaying is a property of the transport: a chat app puts your own
+	// message in your thread, a viewer that renders only what it is sent does
+	// not — so withholding it there is how a console user's own question went
+	// missing from the transcript it started.
+	//
+	// Defaults to TRUE, which is the conservative reading: an adapter that has
+	// not been asked keeps today's behaviour, and nobody sees their own message
+	// twice. A viewer sets it false.
+	// +kubebuilder:default=true
+	// +optional
+	EchoesOwnMessages *bool `json:"echoesOwnMessages,omitempty"`
 	// ConfigSchema is a JSON Schema (draft 2020-12) describing spec.config on
 	// the Channels/SignalSources this adapter serves. OPTIONAL — declaring
 	// nothing behaves exactly as before. This is interface metadata, not
@@ -56,6 +74,13 @@ type ChannelAdapterSpec struct {
 	// no Secrets, so it can never verify these.
 	// +optional
 	CredentialKeys []CredentialKeyDoc `json:"credentialKeys,omitempty"`
+}
+
+// Echoes reports whether a surface served by this adapter displays a person's
+// own message back to them. Absent = true: an adapter that declares nothing
+// behaves as every adapter did before the field existed.
+func (s *ChannelAdapterSpec) Echoes() bool {
+	return s.EchoesOwnMessages == nil || *s.EchoesOwnMessages
 }
 
 // ChannelAdapterStatus reports workload and serving state.

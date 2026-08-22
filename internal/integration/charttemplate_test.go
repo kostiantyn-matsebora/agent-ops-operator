@@ -75,6 +75,11 @@ func TestConsoleBundleIsCRsAndRBACOnly(t *testing.T) {
 		"kubernetesAccess: true",
 		"singleton: true",
 		"port: 8080",
+		// A VIEWER, not a transport: it renders only what it is sent, so the
+		// manager must deliver it its own users' messages. Without this the
+		// console shows an answer with no question above it, which is the bug
+		// the per-destination delivery rule was written for.
+		"echoesOwnMessages: false",
 		"kind: Channel",
 		"adapter: console",
 		"credentialsSecretRef",
