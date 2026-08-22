@@ -46,9 +46,12 @@ The adapter SHALL present the same spelling everywhere it names that Pipeline to
 a person on that transport, so what the menu completes and what a listing prints
 are the same string.
 
-Where the mapping is not unambiguously reversible — two Pipelines whose names
-share one transport-local spelling — the adapter SHALL register neither, because
-a selection that could mean two Pipelines is worse than one that must be typed.
+The mapping SHALL be INJECTIVE BY CONSTRUCTION rather than by detection. Only
+characters that cannot occur in a Kubernetes object name may be introduced, so
+the reverse is a pure function of the string and two Pipelines can never share
+one spelling. An entry the mapping cannot render injectively SHALL simply not be
+registered — it stays typable, and nothing is refused, reported or conditioned
+on it.
 
 #### Scenario: A hyphenated pipeline autocompletes
 - **WHEN** a Pipeline whose name Telegram rejects as a command is published
@@ -64,10 +67,10 @@ a selection that could mean two Pipelines is worse than one that must be typed.
 - **WHEN** the adapter posts a listing naming Pipelines
 - **THEN** each is named in the same spelling the menu completes
 
-#### Scenario: An ambiguous mapping is not registered
-- **WHEN** two Pipelines would share one transport-local spelling
-- **THEN** neither is registered, and both remain reachable by typing the
-  Pipeline name
+#### Scenario: Two Pipelines can never share a spelling
+- **WHEN** any two Pipelines are published
+- **THEN** their transport-local spellings differ, because the mapping only
+  introduces characters a Kubernetes name cannot contain
 
 #### Scenario: The real name still works
 - **WHEN** a person types the Pipeline's real name as a command

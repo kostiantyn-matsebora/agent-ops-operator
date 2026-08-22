@@ -17,7 +17,7 @@ import (
 
 func TestLongBodyIsSplitAndEveryPartFits(t *testing.T) {
 	body := strings.TrimSpace(strings.Repeat("line of investigation output\n", 400)) // ~11k
-	parts := splitHTML(renderMessage(Message{Kind: MsgAnswer, Body: body}))
+	parts := splitHTML(renderMessage(newMenu(), Message{Kind: MsgAnswer, Body: body}))
 	if len(parts) < 2 {
 		t.Fatalf("a 10k body must split, got %d part(s)", len(parts))
 	}
@@ -38,7 +38,7 @@ func TestLongBodyIsSplitAndEveryPartFits(t *testing.T) {
 
 func TestPayloadWithMarkupCharactersSurvives(t *testing.T) {
 	payload := `image: <none>, cmd: a && b, cond: x > 1 && y < 2`
-	out := renderMessage(Message{Kind: MsgSignal, Title: "Broken pod", Body: payload})
+	out := renderMessage(newMenu(), Message{Kind: MsgSignal, Title: "Broken pod", Body: payload})
 	if strings.Contains(out, "<none>") {
 		t.Fatalf("unescaped payload would break HTML parsing: %q", out)
 	}
@@ -197,7 +197,7 @@ func TestLabelsRenderInStableOrder(t *testing.T) {
 // An unknown kind renders its prose rather than nothing: a manager that adds a
 // fifth kind must degrade to plain text, not to an empty message.
 func TestUnknownKindStillRendersItsBody(t *testing.T) {
-	if got := renderMessage(Message{Kind: "something-new", Body: "still says this"}); got != "still says this" {
+	if got := renderMessage(newMenu(), Message{Kind: "something-new", Body: "still says this"}); got != "still says this" {
 		t.Fatalf("unknown kind rendered %q", got)
 	}
 }

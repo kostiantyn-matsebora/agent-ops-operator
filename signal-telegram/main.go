@@ -36,6 +36,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -48,7 +49,39 @@ import (
 const (
 	labelChannel = "agentops.dev/channel"
 	labelSender  = "agentops.dev/sender"
+	// labelMessage carries Telegram's own handle for the arriving message. The
+	// manager treats it as OPAQUE — it stores and returns it unaltered — and it
+	// is what lets a reply say which message it answers, so a control offered
+	// on somebody's own words can carry those words forward without anything
+	// being retained in between.
+	labelMessage = "agentops.dev/message"
 )
+
+// THE TRANSPORT-LOCAL SPELLING, REVERSED.
+//
+// Telegram command names admit only [a-z0-9_], so channel-telegram registers a
+// hyphenated Pipeline under an underscored spelling — that is the only way
+// Telegram will complete it as a person types. What the menu inserts therefore
+// arrives here as `/k8s_observe`, and must leave as `k8s-observe`.
+//
+// The two halves need NO shared state, because the mapping is INJECTIVE BY
+// CONSTRUCTION: a Kubernetes object name is a DNS-1123 subdomain and cannot
+// contain an underscore, so `_` in a command word is always one we introduced
+// and `_` -> `-` reverses it exactly. That is why this is one line in each
+// module rather than a map either would have to fetch — and it is load-bearing,
+// since this adapter cannot read a channel endpoint at all.
+//
+// Nothing beyond the COMMAND WORD is touched: the task is the person's text.
+func reverseSpelling(text string) string {
+	if !strings.HasPrefix(text, "/") {
+		return text
+	}
+	end := strings.IndexAny(text, " \t\n")
+	if end < 0 {
+		end = len(text)
+	}
+	return strings.ReplaceAll(text[:end], "_", "-") + text[end:]
+}
 
 // sourceConfig is this adapter's interpretation of SignalSource spec.config.
 type sourceConfig struct {
@@ -68,20 +101,43 @@ type servedSource struct {
 
 // tgUpdate is the slice of the Telegram update shape this adapter reads. The
 // router forwards updates verbatim, so this parses the wire format directly.
-type tgUpdate struct {
-	UpdateID int64 `json:"update_id"`
-	Message  *struct {
-		Text string `json:"text"`
-		From *struct {
-			ID       int64  `json:"id"`
-			Username string `json:"username"`
-		} `json:"from"`
-		Chat *struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		IsTopicMessage bool `json:"is_topic_message"`
-	} `json:"message"`
+type tgFrom struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
 }
+
+type tgChat struct {
+	ID int64 `json:"id"`
+}
+
+type tgMessage struct {
+	MessageID      int64      `json:"message_id"`
+	Text           string     `json:"text"`
+	From           *tgFrom    `json:"from"`
+	Chat           *tgChat    `json:"chat"`
+	IsTopicMessage bool       `json:"is_topic_message"`
+	ReplyToMessage *tgMessage `json:"reply_to_message"`
+}
+
+type tgUpdate struct {
+	UpdateID int64      `json:"update_id"`
+	Message  *tgMessage `json:"message"`
+	// CallbackQuery is a person SELECTING a control the manager offered. The
+	// message it is attached to is the manager's own reply, and the message
+	// THAT answered is the person's original — which is how a selection carries
+	// their words forward with nothing held in between.
+	CallbackQuery *struct {
+		ID      string     `json:"id"`
+		Data    string     `json:"data"`
+		From    *tgFrom    `json:"from"`
+		Message *tgMessage `json:"message"`
+	} `json:"callback_query"`
+}
+
+// ChoicePrefix marks callback data this adapter owns. The payload after it is
+// the Pipeline's REAL name — callback data is never displayed, so there is
+// nothing to gain from spelling it for the transport.
+const ChoicePrefix = "p:"
 
 type adapter struct {
 	mgr        *Manager
@@ -240,51 +296,126 @@ func (a *adapter) handleUpdate(w http.ResponseWriter, r *http.Request) {
 // branch — but if one does, it is dropped rather than turned into a second
 // conversation alongside the one it belongs to.
 func (a *adapter) normalize(upd tgUpdate) (string, Signal, bool) {
+	if upd.CallbackQuery != nil {
+		return a.normalizeSelection(upd)
+	}
 	m := upd.Message
 	if m == nil || m.Chat == nil || m.Text == "" || m.IsTopicMessage {
 		return "", Signal{}, false
 	}
-	chatID := strconv.FormatInt(m.Chat.ID, 10)
+	match, cfg, ok := a.sourceFor(m.Chat.ID)
+	if !ok {
+		return "", Signal{}, false
+	}
+	if !approved(cfg, m.From) {
+		return "", Signal{}, false // not an approved user — ignore silently
+	}
 
+	// The menu inserts the transport-local spelling; the manager only knows the
+	// real one. Reversed HERE, so nothing outside this adapter ever sees it.
+	text := reverseSpelling(m.Text)
+
+	return match, Signal{
+		// update_id is unique per bot, so identical text twice never
+		// collapses on cooldown — repeating yourself is not dedup.
+		Fingerprint: "tg-" + strconv.FormatInt(upd.UpdateID, 10),
+		Labels:      a.chatLabels(cfg, m.From, m.MessageID),
+		Kind:        "chat",
+		Payload:     text,
+		Title:       title(text),
+	}, true
+}
+
+// normalizeSelection turns a tap on an offered control into the addressed
+// command the person meant.
+//
+// STATELESS. The manager's offer was posted as a REPLY to the person's own
+// message, so Telegram itself still holds that text — this adapter can restart
+// between the offer and the tap and the selection still works. Nothing is kept
+// on either side.
+//
+// An original that cannot be recovered is NOT an error to report: the addressed
+// command goes out with no task, and the manager answers with its own usage
+// reply on the surface the person is looking at. This adapter holds no Telegram
+// credential and could not tell them itself.
+func (a *adapter) normalizeSelection(upd tgUpdate) (string, Signal, bool) {
+	cb := upd.CallbackQuery
+	if cb.Message == nil || cb.Message.Chat == nil || cb.Message.IsTopicMessage {
+		return "", Signal{}, false
+	}
+	name, found := strings.CutPrefix(cb.Data, ChoicePrefix)
+	if !found || name == "" {
+		return "", Signal{}, false // not a control this adapter offered
+	}
+	match, cfg, ok := a.sourceFor(cb.Message.Chat.ID)
+	if !ok {
+		return "", Signal{}, false
+	}
+	if !approved(cfg, cb.From) {
+		return "", Signal{}, false
+	}
+
+	payload := "/" + name
+	var handle int64
+	if orig := cb.Message.ReplyToMessage; orig != nil {
+		handle = orig.MessageID
+		if orig.Text != "" {
+			payload += " " + orig.Text
+		}
+	}
+	return match, Signal{
+		// The callback id is unique per tap, so tapping twice is two requests
+		// rather than one collapsed by cooldown.
+		Fingerprint: "tg-cb-" + cb.ID,
+		Labels:      a.chatLabels(cfg, cb.From, handle),
+		Kind:        "chat",
+		Payload:     payload,
+		Title:       title(payload),
+	}, true
+}
+
+// sourceFor resolves the served source whose chat this is.
+func (a *adapter) sourceFor(chatID int64) (string, sourceConfig, bool) {
+	id := strconv.FormatInt(chatID, 10)
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	names := make([]string, 0, len(a.sources))
 	for name := range a.sources {
 		names = append(names, name)
 	}
 	sort.Strings(names) // stable pick when two sources name one chat
-	var match string
-	var cfg sourceConfig
 	for _, name := range names {
-		if a.sources[name].cfg.ChatID == chatID {
-			match, cfg = name, a.sources[name].cfg
-			break
+		if a.sources[name].cfg.ChatID == id {
+			return name, a.sources[name].cfg, true
 		}
 	}
-	a.mu.Unlock()
-	if match == "" {
-		return "", Signal{}, false
-	}
-	if len(cfg.Approvers) > 0 && (m.From == nil || !containsID(cfg.Approvers, m.From.ID)) {
-		return "", Signal{}, false // not an approved user — ignore silently
-	}
+	return "", sourceConfig{}, false
+}
 
+// approved applies the source's approver list (empty = anyone in the chat).
+func approved(cfg sourceConfig, from *tgFrom) bool {
+	if len(cfg.Approvers) == 0 {
+		return true
+	}
+	return from != nil && containsID(cfg.Approvers, from.ID)
+}
+
+// chatLabels renders the reserved labels every chat signal carries. The message
+// handle is omitted when there is none — it is optional, and an adapter that
+// cannot supply one loses the reply linkage and nothing else.
+func (a *adapter) chatLabels(cfg sourceConfig, from *tgFrom, messageID int64) map[string]string {
 	labels := map[string]string{labelChannel: cfg.Channel}
-	if m.From != nil {
-		sender := m.From.Username
+	if from != nil {
+		sender := from.Username
 		if sender == "" {
-			sender = strconv.FormatInt(m.From.ID, 10)
+			sender = strconv.FormatInt(from.ID, 10)
 		}
 		labels[labelSender] = sender
 	}
-	return match, Signal{
-		// update_id is unique per bot, so identical text twice never
-		// collapses on cooldown — repeating yourself is not dedup.
-		Fingerprint: "tg-" + strconv.FormatInt(upd.UpdateID, 10),
-		Labels:      labels,
-		Kind:        "chat",
-		Payload:     m.Text,
-		Title:       title(m.Text),
-	}, true
+	if messageID != 0 {
+		labels[labelMessage] = strconv.FormatInt(messageID, 10)
+	}
+	return labels
 }
 
 // title renders a short conversation title from the message text.

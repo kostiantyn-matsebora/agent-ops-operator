@@ -161,7 +161,21 @@ func (r *router) poll(ctx context.Context) {
 
 // route is the entire routing rule: topic → continuation → channel adapter;
 // general surface → origination → signal adapter. The update goes on verbatim.
+//
+// A SELECTION takes the same rule, on the message its control was attached to,
+// and is acknowledged FIRST — Telegram spins the tapper's client until the bot
+// answers, and the downstream result may take longer than they should watch a
+// spinner for. The acknowledgement says nothing; what they see is the message
+// that follows.
 func (r *router) route(ctx context.Context, upd update) {
+	if upd.CallbackID != "" {
+		if err := r.tg.Acknowledge(ctx, upd.CallbackID); err != nil {
+			// Already forwarded below regardless: a spinner that keeps turning
+			// is a worse outcome than a dropped acknowledgement, but a dropped
+			// SELECTION is worse than both.
+			log.Printf("acknowledge selection on update %d: %v", upd.UpdateID, err)
+		}
+	}
 	target := r.cfg.SignalTarget
 	if upd.IsTopicMessage {
 		target = r.cfg.ChannelTarget

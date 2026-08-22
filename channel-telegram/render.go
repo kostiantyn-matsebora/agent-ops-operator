@@ -87,7 +87,7 @@ func markdownToHTML(md string) string {
 // An unknown kind renders its body rather than nothing: a manager that adds a
 // fifth kind should degrade to plain prose here, not silently post an empty
 // message.
-func renderMessage(m Message) string {
+func renderMessage(mn *menu, m Message) string {
 	switch m.Kind {
 	case MsgSignal:
 		return renderSignal(m)
@@ -96,11 +96,16 @@ func renderMessage(m Message) string {
 		if m.Sender != "" {
 			who = m.Origin + "/" + m.Sender
 		}
+		// A relayed message is somebody's OWN words. Never rewritten.
 		return "💬 <b>" + escape(who) + "</b>: " + markdownToHTML(m.Body)
 	case MsgAnswer:
 		return markdownToHTML(m.Body)
 	default:
-		return markdownToHTML(m.Body)
+		// ONE SPELLING PER SURFACE. The manager names a Pipeline as it is
+		// published; the composer completes the spelling Telegram accepts.
+		// Showing both would be two strings for one thing, so what the manager
+		// says is rendered in the form the menu offers.
+		return mn.rewriteCommands(markdownToHTML(m.Body))
 	}
 }
 
