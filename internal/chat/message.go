@@ -137,6 +137,24 @@ type Message struct {
 	// Choices are the actions this message offers. Optional on every kind.
 	Choices []Choice `json:"choices,omitempty"`
 
+	// ExpectsReply marks a message that ASKS THE READER FOR SOMETHING, and
+	// cannot proceed until they answer.
+	//
+	// It exists because a transport's own command menu SENDS on tap: a person
+	// picking `/k8s-ops` from Telegram's list posts it bare, with no room to
+	// type the task. Answering "usage: /k8s-ops <task>" makes the menu useless
+	// for the thing it exists to start.
+	//
+	// The manager states that an answer is wanted. What a surface DOES about it
+	// is the surface's business — Telegram opens the reply box on the reader's
+	// behalf, a console focuses its composer, and an adapter that does neither
+	// is still conformant because the prose says what to send.
+	//
+	// It pairs with InReplyTo: the reply arrives linked to this message, and
+	// this message is linked to the one that prompted it, which is how the
+	// answer finds its way back to the command without anything being stored.
+	ExpectsReply bool `json:"expectsReply,omitempty"`
+
 	// InReplyTo is the transport's OWN handle for the message this one answers,
 	// supplied by the surface the original arrived on.
 	//

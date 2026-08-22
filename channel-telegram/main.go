@@ -348,6 +348,28 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		if err != nil {
 			return "", err.Error()
 		}
+		// POINT AT THE NEW TOPIC, for a conversation a PERSON started.
+		//
+		// Telegram cannot move somebody's client, and the person who typed the
+		// command is standing in the general surface with no sign anything
+		// happened — the answer is in a topic they have to go and find. A link
+		// is the closest a transport gets to taking them there.
+		//
+		// Only for the lanes a person initiated. An alert or a cron tick opens
+		// a topic nobody is waiting in front of, and a pointer for each would
+		// turn the general surface into a log of links.
+		//
+		// Best-effort: the topic EXISTS, and failing the op over a signpost
+		// would make the manager create a second one.
+		if op.Topic.Kind == "chat" || op.Topic.Kind == "task" {
+			if link := topicLink(sc.cfg.ChatID, id); link != "" {
+				name := renderTopicName(*op.Topic)
+				if err := tg.Send(ctx, sc.cfg.ChatID, nil,
+					`💬 <a href="`+escape(link)+`">`+escape(name)+`</a>`); err != nil {
+					log.Printf("point at topic %d: %v", id, err)
+				}
+			}
+		}
 		return strconv.FormatInt(id, 10), ""
 	case "send":
 		if op.Message == nil {
@@ -385,6 +407,9 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			}
 			if i == len(chunks)-1 {
 				extras.Keyboard = inlineKeyboard(op.Message.Choices)
+				// The ASK goes on the last chunk too — that is where the reader
+				// ends up, and it is what they are answering.
+				extras.ForceReply = op.Message.ExpectsReply
 			}
 			if err := tg.SendWith(ctx, sc.cfg.ChatID, tid, chunk, extras); err != nil {
 				return "", err.Error()

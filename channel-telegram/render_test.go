@@ -255,3 +255,23 @@ func TestAlignmentCountsRunesNotBytes(t *testing.T) {
 		t.Fatalf("multi-byte cell padded wrong:\n%s", out)
 	}
 }
+
+// ---- pointing at a new topic ---------------------------------------------
+//
+// Telegram cannot move somebody's client. The person who typed the command is
+// left in the general surface with no sign anything happened, so a link is the
+// closest a transport gets to taking them to the answer.
+
+func TestTopicLink(t *testing.T) {
+	for _, c := range []struct{ chat, want string }{
+		{"-1001234567890", "https://t.me/c/1234567890/7"},
+		// Not a supergroup, so there is no such link to build.
+		{"123456", ""},
+		{"-100", ""},
+		{"", ""},
+	} {
+		if got := topicLink(c.chat, 7); got != c.want {
+			t.Errorf("topicLink(%q) = %q, want %q", c.chat, got, c.want)
+		}
+	}
+}

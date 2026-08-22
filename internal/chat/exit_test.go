@@ -228,7 +228,7 @@ func TestExitOnGeneralSurfaceAnswersWithUsage(t *testing.T) {
 	if !ok {
 		t.Fatal("parse")
 	}
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -255,7 +255,7 @@ func TestAgentsListingNamesBothThreadCommands(t *testing.T) {
 	if !ok {
 		t.Fatal("parse")
 	}
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")

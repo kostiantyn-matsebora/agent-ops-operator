@@ -223,6 +223,11 @@ type SendExtras struct {
 	ReplyTo string
 	// Keyboard is the inline keyboard markup, already built. Nil for none.
 	Keyboard any
+	// ForceReply opens the reply box on the reader's behalf, pre-aimed at this
+	// message. Telegram allows ONE reply_markup, so a message offering controls
+	// keeps its keyboard — a reader who has buttons to press is not being asked
+	// to type.
+	ForceReply bool
 }
 
 // SendWith posts a message with its optional reply linkage and controls.
@@ -235,8 +240,13 @@ func (t *Telegram) SendWith(ctx context.Context, chatID string, threadID *int64,
 	if threadID != nil {
 		body["message_thread_id"] = *threadID
 	}
-	if extras.Keyboard != nil {
+	switch {
+	case extras.Keyboard != nil:
 		body["reply_markup"] = extras.Keyboard
+	case extras.ForceReply:
+		// `selective` aims it at the person being asked rather than opening a
+		// reply box for everyone in the group.
+		body["reply_markup"] = map[string]any{"force_reply": true, "selective": true}
 	}
 	if extras.ReplyTo != "" {
 		if id, err := strconv.ParseInt(extras.ReplyTo, 10, 64); err == nil {
@@ -344,4 +354,21 @@ func (t *Telegram) SendDocument(ctx context.Context, chatID string, threadID *in
 		return fmt.Errorf("sendDocument: %s", out.Description)
 	}
 	return nil
+}
+
+// topicLink builds a deep link to a forum topic, or "" when it cannot.
+//
+// Telegram's private-group links use the chat id with its `-100` supergroup
+// prefix removed — `-1001234567890` becomes `1234567890` — and a topic is a
+// second path segment. There is no API for this and no field that carries it,
+// so the shape is reproduced here, where being wrong costs one dead link rather
+// than a failed operation.
+func topicLink(chatID string, threadID int64) string {
+	id := strings.TrimPrefix(chatID, "-100")
+	// A chat that is not a supergroup has no such link, and a public one is
+	// addressed by username rather than id. Neither is worth guessing at.
+	if id == chatID || id == "" {
+		return ""
+	}
+	return "https://t.me/c/" + id + "/" + strconv.FormatInt(threadID, 10)
 }

@@ -291,3 +291,73 @@ func TestSelectionRespectsApprovers(t *testing.T) {
 		t.Fatal("unapproved tapper originated a conversation")
 	}
 }
+
+// ---- answering a prompt --------------------------------------------------
+//
+// Telegram's command menu SENDS on tap, so `/k8s_ops` arrives bare and the
+// manager asks what the task is. The answer has to find its way back to the
+// Pipeline — and it does so through Telegram's own reply chain, with nothing
+// remembered on either side.
+
+const promptChain = `{"update_id":90,"message":{"message_id":12,"text":"check the disk",
+	"chat":{"id":-1001},"from":{"id":42,"username":"operator"},
+	"reply_to_message":{"message_id":11,"text":"What should k8s-ops do? Reply with the task.",
+		"reply_to_message":{"message_id":10,"text":"/k8s_ops@ExampleOpsBot"}}}}`
+
+func TestReplyToAPromptRebuildsTheAddressedCommand(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	_, sig, ok := a.normalize(mustUpdate(t, promptChain))
+	if !ok {
+		t.Fatal("a prompted answer should originate")
+	}
+	// The pipeline comes from the person's OWN command two links up, not from
+	// parsing the manager's prose — and the menu spelling is reversed on the way.
+	if sig.Payload != "/k8s-ops check the disk" {
+		t.Fatalf("payload = %q", sig.Payload)
+	}
+}
+
+// An ordinary reply inside the general surface is not an answer to a prompt.
+func TestOrdinaryReplyIsNotTreatedAsAPrompt(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	upd := mustUpdate(t, `{"update_id":91,"message":{"message_id":12,"text":"thanks",
+		"chat":{"id":-1001},"reply_to_message":{"message_id":11,"text":"some answer",
+			"reply_to_message":{"message_id":10,"text":"what do you think?"}}}}`)
+	_, sig, _ := a.normalize(upd)
+	if sig.Payload != "thanks" {
+		t.Fatalf("payload = %q — an ordinary reply was rewritten", sig.Payload)
+	}
+}
+
+// A command that ALREADY carried a task was never prompted, so a later reply to
+// it must not be prefixed a second time.
+func TestAddressedCommandWithATaskIsNotAPrompt(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	upd := mustUpdate(t, `{"update_id":92,"message":{"message_id":12,"text":"and the memory?",
+		"chat":{"id":-1001},"reply_to_message":{"message_id":11,"text":"here you go",
+			"reply_to_message":{"message_id":10,"text":"/k8s_ops check the disk"}}}}`)
+	_, sig, _ := a.normalize(upd)
+	if sig.Payload != "and the memory?" {
+		t.Fatalf("payload = %q", sig.Payload)
+	}
+}
+
+// One link is not enough: replying straight to a bare command is somebody
+// quoting it, not answering a question about it.
+func TestReplyDirectlyToACommandIsNotAPrompt(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{
+		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+	})
+	upd := mustUpdate(t, `{"update_id":93,"message":{"message_id":12,"text":"check the disk",
+		"chat":{"id":-1001},"reply_to_message":{"message_id":10,"text":"/k8s_ops"}}}`)
+	_, sig, _ := a.normalize(upd)
+	if sig.Payload != "check the disk" {
+		t.Fatalf("payload = %q", sig.Payload)
+	}
+}

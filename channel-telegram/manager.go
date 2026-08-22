@@ -73,6 +73,11 @@ type Message struct {
 	// prose. The manager states which actions are on offer and nothing about how
 	// they look; rendering them as controls is this adapter's decision.
 	Choices []Choice `json:"choices,omitempty"`
+	// ExpectsReply marks a message that asks the reader for something. Telegram
+	// can open the reply box for them, which is the whole reason it matters
+	// here: its command menu SENDS on tap, so a bare command leaves nowhere to
+	// type the task.
+	ExpectsReply bool `json:"expectsReply,omitempty"`
 	// InReplyTo is Telegram's own message id for the message this one answers,
 	// handed back exactly as this adapter supplied it. It is what lets a control
 	// offered on somebody's own words carry those words forward.

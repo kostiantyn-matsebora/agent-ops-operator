@@ -455,7 +455,7 @@ func (r *Router) boundChannels(origin *agentopsv1alpha1.Pipeline, ch *agentopsv1
 // It is carried because an addressed command is a MESSAGE like any other: it is
 // delivered to every surface that did not display it, and one with no sender
 // arrives there anonymous.
-func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender string) error {
+func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender, messageID string) error {
 	if isListCommand(cmd.Pipeline) {
 		// List PIPELINES: they are what a message addresses, and what carries
 		// the capabilities the resulting conversation will have. Listing
@@ -518,7 +518,16 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		return err
 	}
 	if cmd.Rest == "" {
-		r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf("⚠️ Usage: `/%s <task>`", cmd.Pipeline)))
+		// ASK, rather than refuse. A command menu SENDS on tap, so a bare
+		// command is overwhelmingly somebody who picked the Pipeline and was
+		// given nowhere to type the task — not somebody who got the form wrong.
+		//
+		// Linked to the command that provoked it, so the answer can be traced
+		// back to the Pipeline without anything being remembered in between.
+		ask := Warn(fmt.Sprintf("💬 What should **%s** do? Reply with the task.", cmd.Pipeline))
+		ask.ExpectsReply = true
+		ask.InReplyTo = messageID
+		r.Ops.EnqueueMessage(ctx, ch, nil, ask)
 		return nil
 	}
 	_, err := r.CreateTaskConversation(ctx, ch, pipe.Spec.ProfileRef.Name, cmd.Rest, sender, &pipe)
