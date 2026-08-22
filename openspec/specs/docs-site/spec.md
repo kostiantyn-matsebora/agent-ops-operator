@@ -240,10 +240,15 @@ Installation page.
 
 The panel set's panels SHALL be, in order:
 
-1. the product diagram exported from `docs/diagrams/`;
-2. a real `Pipeline` manifest, written in the page as a fenced code block;
-3. one panel per console view, each carrying the question that view answers and
-   a screenshot of it.
+1. a **recording of the product working**, carrying one piece of work from the
+   event that starts it to the answer a person replies to;
+2. the product diagram exported from `docs/diagrams/`;
+3. a real `Pipeline` manifest, written in the page as a fenced code block.
+
+**The landing page SHALL NOT tour the console's views.** They belong to the
+Console page, which takes each in turn with the question it answers, and
+publishing them in both places is one tour at two altitudes. The landing page
+SHALL instead link the Console page for them.
 
 The manifest panel SHALL be page text rather than an exported image, so it can be
 selected, copied and searched, and every field name on it SHALL exist on the
@@ -317,14 +322,21 @@ page that owns that content.
 #### Scenario: The first panel is read at the page's own width
 
 - **WHEN** the landing page is opened and the first panel is on screen
+- **THEN** the recording's poster frame reads as the product at the width the
+  content column gives it, without being opened full size
+
+#### Scenario: The diagram is read at the page's own width
+
+- **WHEN** the landing page is opened and the diagram panel is selected
 - **THEN** every label on the diagram is legible without opening it full size,
   at the width the content column gives it
 
 #### Scenario: A reader wants to see the product
 
 - **WHEN** a visitor who has installed nothing opens the landing page
-- **THEN** the strip's later panels show each console view with the question it
-  answers, without leaving the page
+- **THEN** the first panel plays one piece of work from its signal to its answer,
+  without leaving the page
+- **AND** the console's own views are one link away, on the page that owns them
 
 #### Scenario: The manifest is copied from the page
 
@@ -517,10 +529,10 @@ SHALL NOT be styling introduced for one page. Content SHALL NOT move into
 no product prose.
 
 The site SHALL provide a **card grid** for a set of peer concepts, a **callout**
-for a statement a page is built around, and a **tabbed panel set** for a series
-of alternative views of one subject. The callout SHALL be visually distinct from
-the plain blockquote, which sets a passage ASIDE: the two carry opposite emphasis
-and SHALL NOT render alike.
+for a statement a page is built around, a **tabbed panel set** for a series of
+alternative views of one subject, and a **player** for a recording. The callout
+SHALL be visually distinct from the plain blockquote, which sets a passage ASIDE:
+the two carry opposite emphasis and SHALL NOT render alike.
 
 The tabbed panel set SHALL be named on an ordinary markdown list, one list item
 per panel, whose leading emphasised phrase is the tab's label and whose remaining
@@ -528,9 +540,16 @@ content is the panel. **Every word and every image SHALL live in the page.** The
 theme SHALL supply only the tab strip, the panel geometry and the selection
 behaviour.
 
-**With scripting unavailable the component SHALL degrade to its own content** —
-the labelled list, in order, with every panel visible. A page SHALL NOT depend on
-the tab behaviour to make its content complete or comprehensible.
+**The player SHALL be named on an ordinary markdown link** whose target is the
+recording and whose content is the poster image with its alt text. The page
+therefore names the two files and writes the words, and the theme supplies the
+element, its controls and its frame. A page SHALL NOT write a video element,
+a source, a control or a poster attribute.
+
+**With scripting unavailable every component SHALL degrade to its own content** —
+the tabbed panel set to the labelled list, in order, with every panel visible,
+and the player to the poster image linking to the recording. A page SHALL NOT
+depend on a component's behaviour to make its content complete or comprehensible.
 
 A component no page uses SHALL be removed rather than kept for a future one.
 
@@ -551,6 +570,12 @@ carrying a baked-in one.
 - **WHEN** a page names the tabbed panel set on a markdown list
 - **THEN** one tab is shown per list item, labelled with that item's leading
   emphasised phrase, and selecting a tab shows that item's content
+
+#### Scenario: A page publishes a recording
+
+- **WHEN** a page names the player on a link wrapping a poster image
+- **THEN** the theme renders a player with controls, the poster on its face, and
+  the recording fetched only when the reader starts it
 
 #### Scenario: Scripting is unavailable
 
@@ -1038,15 +1063,15 @@ name it belongs to is already beside it.
 
 ### Requirement: A themed image is named once by the page and resolved by the theme
 
-A page publishing an image that has a per-theme variant SHALL name **one** image
-file. The theme SHALL resolve which variant is shown from the reader's resolved
-theme, and SHALL re-resolve it when the theme is changed while the image is on
-screen. A page SHALL NOT name both variants, and SHALL NOT carry any class,
-markup or wording that states which theme it is for — that is theme knowledge in
-content.
+A page publishing an asset that has a per-theme variant SHALL name **one** file.
+The theme SHALL resolve which variant is shown from the reader's resolved theme,
+and SHALL re-resolve it when the theme is changed while the asset is on screen. A
+page SHALL NOT name both variants, and SHALL NOT carry any class, markup or
+wording that states which theme it is for — that is theme knowledge in content.
 
-This SHALL hold for every themed image alike, screenshot and diagram, so a page
-publishing one learns no new rule.
+This SHALL hold for every themed asset alike — screenshot, diagram, recording and
+the poster frame that stands in for one — so a page publishing any of them learns
+no new rule.
 
 Resolution happens in a DEFERRED script, so the variant a page names is on the
 page before the swap — briefly for a dark-theme reader, and permanently for one
@@ -1064,6 +1089,13 @@ export on an already-dark page is not a mismatched colour but invisible ink.
 - **WHEN** a page names a diagram that ships light and dark exports
 - **THEN** it names one file, and the theme shows the reader's variant, exactly
   as it does for a screenshot
+
+#### Scenario: A reader switches theme with a recording on screen
+
+- **WHEN** a reader changes the site's theme while a recording and its poster are
+  on screen
+- **THEN** both resolve to the variant matching the new theme, and the page named
+  neither of them
 
 #### Scenario: The dark theme is applied before the swap runs
 
@@ -1100,3 +1132,127 @@ way that suggests the other project endorses this one.
 - **WHEN** an upstream project publishes a new mark
 - **THEN** the recorded URL is enough to re-fetch it, and no build step
   generates it
+
+### Requirement: The landing page demonstrates the product with a generated recording
+
+The landing page SHALL carry a **recording of the product working**, showing one
+piece of work from the event that starts it to the answer a person replies to,
+and then the machinery that carried it. It SHALL be the strip's first panel.
+
+**The machinery is part of the claim, not an appendix**: what is waiting and what
+is stuck, the wiring that routed the signal, and that every part of it is an
+ordinary Kubernetes resource. The last SHALL be shown as an actual MANIFEST — a
+grid of object counts asserts that resources exist, while the object shows that
+the incident itself is one and that `kubectl` already knows it.
+
+**Every manifest a published asset shows SHALL be appliable**: each field name
+SHALL exist on the CRD it claims to be. A screenshot of a manifest nobody can
+apply teaches a field that does not exist, and is worse than no manifest.
+
+**It SHALL be produced by a committed, repeatable command**, on the same terms as
+the site's screenshots: driving the application's own built bundle against a
+fixture the command owns, and writing committed files into the site's assets. A
+hand-made screen capture SHALL NOT be published.
+
+**The fixture SHALL be a TIMELINE, not a single state.** The recording's story
+requires ordered beats — a signal admitted, a conversation opened, a run
+answered, a reply relayed — so the command SHALL script those beats and the
+console SHALL reach each of them the way it does in an install: from the data it
+is served and the events it is streamed, never by the recorder painting them.
+
+**Nothing in it SHALL come from a real installation** — no cluster name,
+namespace, hostname, identity or image digest.
+
+**The recording SHALL carry no text of its own.** No burned-in caption, title
+card, subtitle or narration overlay: text in a recording cannot be selected,
+translated, searched or read aloud. What the recording is showing SHALL be stated
+by the PAGE, beside it, in the page's own words. Words the console itself renders
+are the console's and are not affected.
+
+**It MAY carry a caption track**, as a separate timed-text file the page names
+and the viewer can turn off. That is text, not pixels — selectable, translatable
+and available to a screen reader — so it is the form signposting takes here.
+Its words SHALL come from the same source as the beats the page prints, so the
+two cannot drift, and it SHALL ship ONE file for every theme, because the words
+do not change with the palette.
+
+**There SHALL be no audio track.** A silent recording needs no narration and no
+music: narration would lock the demo to one language and re-record with every
+voice change, and music carries nothing the page does not already say.
+
+**Beats MAY cross-fade**, and the fade SHALL be taken out of the beats it joins
+rather than added between them, so the recording's stated length is its real
+length and the caption cues stay in step with it.
+
+The recording SHALL be silent, SHALL ship **one variant per theme**, and SHALL
+be delivered:
+
+- **without autoplay** — the reader starts it;
+- with a **poster frame** drawn from the recording itself, so the panel shows
+  the product before a byte of video is fetched;
+- with the file **not fetched until the reader asks for it**.
+
+**It SHALL be bounded and the bounds SHALL be stated where the command lives**:
+a duration a visitor will actually watch, and a per-variant byte budget the site
+can carry. Exceeding either is a fault in the recording, never a reason to raise
+the budget.
+
+**The site SHALL NOT depend on the command to publish.** The produced files are
+committed, exactly as the screenshots are, and the command SHALL NOT run as part
+of the ordinary test suite.
+
+#### Scenario: A visitor who has installed nothing opens the landing page
+
+- **WHEN** a first-time visitor opens the site root
+- **THEN** the first panel shows one piece of work carried from its signal to its
+  answer, and they can watch it without installing anything
+- **AND** it goes on to show the queue, the wiring, and the conversation as a
+  Kubernetes object
+
+#### Scenario: A published manifest is read
+
+- **WHEN** a reader reads a manifest in a published screenshot or recording
+- **THEN** every field on it exists on that CRD, so copying it produces an object
+  the cluster accepts
+
+#### Scenario: A beat's words are reworded
+
+- **WHEN** a beat's caption is rewritten
+- **THEN** nothing else silently changes behaviour — what the poster frame is,
+  and which beat it comes from, are declared rather than matched on the text
+
+#### Scenario: The console's UI changes
+
+- **WHEN** the console's UI changes such that the recording no longer shows it
+- **THEN** re-running the committed command reproduces the recording, and no
+  frame is re-captured by hand
+
+#### Scenario: A reader arrives on a metered connection
+
+- **WHEN** the landing page loads
+- **THEN** the poster frame is what is fetched, and the recording itself is
+  requested only when the reader starts it
+
+#### Scenario: The page is read with scripting unavailable
+
+- **WHEN** a reader without scripting opens the landing page
+- **THEN** the panel is the poster image and a link to the recording, and no
+  panel is empty or replaced by a placeholder
+
+#### Scenario: A beat needs explaining
+
+- **WHEN** what happens in the recording would not be obvious from the console's
+  own screens
+- **THEN** the page states it in prose beside the recording, and no caption is
+  burned into the frames
+
+#### Scenario: The fixture is authored
+
+- **WHEN** the timeline behind the recording is written or edited
+- **THEN** it carries only invented names, and nothing identifying a real
+  installation appears in any published frame
+
+#### Scenario: The recording grows past its budget
+
+- **WHEN** a re-recording exceeds the stated duration or byte budget
+- **THEN** the recording is shortened or re-encoded, and the budget stands
