@@ -96,9 +96,11 @@ The audit starts where a wrong spec costs the most:
 4. **Everything else**, by requirement count descending, so the large specs are
    done while attention is freshest.
 
-## Open questions
+## D7. A capability with no true requirements is DELETED
 
-- **Does a capability with no remaining true requirements get deleted, or kept
-  with a note?** Deleting loses the trace of why it existed; keeping publishes a
-  capability that describes nothing. Decide on the first one the audit finds,
-  and apply that answer to the rest.
+`openspec/specs/` describes what IS. A capability whose requirements are all
+false describes nothing, and a note saying so is not a specification.
+
+The trace is not lost: the archive holds why it existed and the change that
+retired it. Keeping an empty capability publishes a heading that has to be read
+before it can be dismissed.

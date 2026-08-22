@@ -139,10 +139,11 @@ private repository but its INTERNAL LAYOUT and the object names of the install
 they were verified against, which together describe someone's deployment rather
 than merely naming it.
 
-## Open questions
+## D8. There is no fifth class
 
-- **A legacy component name** appears in several module sources and in one
-  sample's opening comment. In the code it reads as an ordinary historical
-  name; in the sample it reads as the author's prior personal setup. Owner's
-  call whether it is a fifth class or simply history — resolved before task 1.1,
-  and named nowhere until then.
+A legacy component name appears in several module sources and one sample
+comment. The owner has confirmed it is a retired project name, not a personal
+one: it identifies nobody and describes nothing private.
+
+It stays. Scrubbing it would delete the provenance of ported semantics —
+several comments name it precisely to say where a behaviour came from.
