@@ -1,9 +1,10 @@
 # The agent-ops console
 
 A browser view of the whole install — what is configured, what is running, what
-is moving between components right now — that is **also a channel** (so you can
-reply to an agent from the screen you are watching it on) and **also a signal
-source** (so you can start one).
+is moving between components right now.
+
+It is **also a channel**, so you can reply to an agent from the screen you are
+watching it on, and **also a signal source**, so you can start one.
 
 It ships as its own pod, **enabled by default**, and is disabled with one value.
 
@@ -34,8 +35,8 @@ It fans in five sources the browser never touches directly:
 | CR state, every `agentops.dev` kind | Kubernetes list/watch | RBAC belongs to a ServiceAccount, not a browser token |
 | Install facts — Deployments, pods, images, digests, restarts | Kubernetes list/watch | needs a read grant the browser cannot hold |
 | Per-hop activity | manager `GET /activity/stream` | one upstream connection multiplexed to N browsers |
-| Runtime state — op queues, slots, cooldowns, leader | manager `GET /status` | in-memory only; exists nowhere else |
-| Resolved capabilities | manager `GET /pipelines/{name}/resolved` | authoritative; recomputing it invites disagreement |
+| Runtime state — op queues, slots, cooldowns, leader | manager `GET /status` | in-memory only, and exists nowhere else |
+| Resolved capabilities | manager `GET /pipelines/{name}/resolved` | authoritative — recomputing it invites disagreement |
 
 Plus two write paths, both through the manager: `POST /channel/inbound` (reply)
 and `POST /signal/inbound` (originate).
@@ -62,7 +63,7 @@ because they fail differently:
 - **Work queue** — conversations waiting for a runtime slot, and inputs waiting
   behind an inflight run (dispatch is strictly serial per conversation).
 - **Delivery queue** — channel ops waiting for an adapter to claim them, and ops
-  claimed but never completed. This exists in **no Kubernetes object**; without
+  claimed but never completed. This exists in **no Kubernetes object**. Without
   the manager's `/status` it is reported unavailable rather than rendered empty.
 
 Every row carries an age, and stuck items are flagged with the cause, because
@@ -84,11 +85,13 @@ Per-kind inventory with kind-specific columns → detail with conditions, the fu
 spec, YAML, and inbound references ("used by these 2 pipelines" — the *is it safe
 to delete this* answer).
 
-A Pipeline's detail additionally shows its **resolved capabilities**: the composed
-tool allowlist, the composition mode, effective toolsets, MCP configs and servers,
-and the resolving runtime — fetched from the manager and rendered verbatim. The
-console does not recompute composition; a second implementation would eventually
-disagree with the one that runs.
+A Pipeline's detail additionally shows its **resolved capabilities**: the
+composed tool allowlist, the composition mode, effective toolsets, MCP configs
+and servers, and the resolving runtime — fetched from the manager and rendered
+verbatim.
+
+The console does not recompute composition. A second implementation would
+eventually disagree with the one that runs.
 
 Beyond rendering, the page validates **across** objects: dangling refs, sources no
 pipeline claims, channels whose adapter is absent, profiles whose runtime does not
@@ -111,18 +114,19 @@ The wiring graph with live traffic.
 - **Health comes from reconciler conditions only** (`Ready`, `Served`, `Wired`).
   The console asserts no health of its own, so the graph cannot disagree with
   `kubectl`.
-- **Traffic animates from recorded hops**, not from status transitions. Edge dash
-  speed scales with event rate; error events mark the edge; an edge the manager
-  enqueued but no adapter confirmed renders as **sent, unconfirmed** rather than
-  as success — adapter reporting is optional, and an adapter that reports nothing
-  must not look like one that delivered.
+- **Traffic animates from recorded hops**, not from status transitions.
+  - Edge dash speed scales with event rate.
+  - Error events mark the edge.
+  - An edge the manager enqueued but no adapter confirmed renders as **sent,
+    unconfirmed** rather than as success. Adapter reporting is optional, and an
+    adapter that reports nothing must not look like one that delivered.
 - An edge with no events is **visibly idle**, which is a different statement from
   absent.
 - **Every graph fits its viewing area and centres in it** when first displayed —
   including one rendered inside a tab that was not the open one. It re-fits when
   the area resizes, and stops once you pan or zoom, so an automatic fit never
   overrules a view you chose.
-- Unclaimed sources render **detached** with their `Wired=False` reason; dangling
+- Unclaimed sources render **detached** with their `Wired=False` reason. Dangling
   refs render as broken edges to placeholder nodes.
 
 #### Scoped view
@@ -172,9 +176,11 @@ Selections persist across navigation and reload.
 
 **Hiding is presentation only.** A hidden class still counts toward the graph's
 health summary and the overview's problem rollup, and the panel says when hidden
-classes contain failures. A filter that could conceal a broken component without
-saying so is the one way this view could mislead, so the counts are computed
-before filtering and never move because you hid something.
+classes contain failures.
+
+A filter that could conceal a broken component without saying so is the one way
+this view could mislead, so the counts are computed before filtering and never
+move because you hid something.
 
 The capability layer (toolsets, MCP configs, runtime pods) starts folded away:
 it is what you bring forward when debugging reach, not what you want between you
@@ -182,28 +188,33 @@ and the wiring on first look.
 
 #### Time windows
 
-Windows are bounded by the manager's in-memory activity buffer (~15 minutes under
-load). Longer ranges come from a metrics backend when one is configured
+Windows are bounded by the manager's in-memory activity buffer (~15 minutes
+under load). Longer ranges come from a metrics backend when one is configured
 (`console.metrics.url`), rendered as clearly labelled **aggregates** — rates,
-percentiles, depths, no per-item identity. With none configured, long windows are
-reported unavailable rather than drawn empty: an empty chart claims "there was no
-traffic", which the console cannot honestly say about a window it never had data
-for.
+percentiles, depths, no per-item identity.
+
+With none configured, long windows are reported unavailable rather than drawn
+empty. An empty chart claims "there was no traffic", which the console cannot
+honestly say about a window it never had data for.
 
 #### Gaps in recorded activity
 
 The buffer is in memory, so its history ends two ways: it wraps, or the manager
-restarts and begins its sequence again at 1. Either way the manager answers an
-unservable cursor with a **resync**, and the console records that as an
-`activity.gap` marker at the point it happened — not just as a counter. The
-Topology page carries a banner and the Overview's telemetry card names the time
-before which nothing is available.
+restarts and begins its sequence again at 1.
+
+Either way the manager answers an unservable cursor with a **resync**, and the
+console records that as an `activity.gap` marker at the point it happened — not
+just as a counter.
+
+The Topology page carries a banner and the Overview's telemetry card names the
+time before which nothing is available.
 
 The gap rides on the **stream health** (`stream.lastGap`), which every view
-already reads, rather than only on the live event stream. That is deliberate:
-the reader who matters is usually the one who opens the console *after*
-something went wrong, and a live-only signal is invisible to exactly that
-person.
+already reads, rather than only on the live event stream.
+
+That is deliberate: the reader who matters is usually the one who opens the
+console *after* something went wrong, and a live-only signal is invisible to
+exactly that person.
 
 That is the whole reason it exists: a stretch with no recorded hops and a
 stretch in which nothing happened look identical, and only one of them means the
@@ -212,9 +223,12 @@ system was idle. Edge rates spanning a gap under-report and say so.
 #### The `live` chip, and who owns reconnection
 
 The masthead chip reports the browser's own stream to the console. **The SPA
-reconnects it, not the browser.** `EventSource` retries a dropped connection by
-itself, but on an HTTP error — a 502 while the console pod rolls, a 401 once the
-session expires — it sets `readyState` to `CLOSED` and gives up permanently.
+reconnects it, not the browser.**
+
+`EventSource` retries a dropped connection by itself, but on an HTTP error — a
+502 while the console pod rolls, a 401 once the session expires — it sets
+`readyState` to `CLOSED` and gives up permanently.
+
 Nothing reopened it, so the chip read `stream disconnected` and the graph stayed
 frozen until the page was reloaded. The client now reopens with backoff (1s
 doubling to 30s), leaves genuine transport blips to the browser, and stops on
@@ -224,26 +238,30 @@ A chip that only tells the truth after a reload is the same failure this surface
 exists to prevent, one layer up: a viewer that cannot tell "the link died" from
 "the system is idle".
 
-Everything else is unaffected, because everything else is read from Kubernetes:
-conversations, topology, configuration and run history come back complete after
-any restart. Only the per-hop timeline has a hole in it — the console persists
-nothing and needs no volume, since its config cache rebuilds by list→watch and
-its activity index by cursor replay.
+Everything else is unaffected, because everything else is read from Kubernetes.
+Conversations, topology, configuration and run history come back complete after
+any restart.
+
+Only the per-hop timeline has a hole in it. The console persists nothing and
+needs no volume, since its config cache rebuilds by list→watch and its activity
+index by cursor replay.
 
 ### Conversations
 
 Server-side filtering (phase, pipeline, profile, channel, errored, unread,
-search), sorting by last activity, and pagination with a total match count — an
-event storm makes thousands, and shipping them all so the browser can hide most
-is how a viewer becomes an API-server problem. Run history is dropped from list
-rows; a result is a whole agent message, and each row carries its read state
-instead.
+search), sorting by last activity, and pagination with a total match count.
+
+An event storm makes thousands, and shipping them all so the browser can hide
+most is how a viewer becomes an API-server problem.
+
+Run history is dropped from list rows. A result is a whole agent message, and
+each row carries its read state instead.
 
 Detail is tabbed:
 
 - **Transcript** with a composer. Conversations the console started are joined
   automatically. For ones another source started, the composer is live when the
-  console channel holds a thread; when it does not, the tab explains why and shows
+  console channel holds a thread. When it does not, the tab explains why and shows
   the exact patch. The console never edits a Pipeline — showing the edit is the
   answer.
 
@@ -275,8 +293,10 @@ Detail is tabbed:
 
 Conversations whose console thread has activity newer than its watermark are
 marked in the list, an **Unread only** switch narrows to them, and the count
-rides on the *Conversations* navigation item. Opening a conversation reports its
-console thread read; **Mark read** over a selection clears a batch of them.
+rides on the *Conversations* navigation item.
+
+Opening a conversation reports its console thread read. **Mark read** over a
+selection clears a batch of them.
 
 **Read is per PERSON where the console can tell people apart, and per console
 otherwise.** Which install you have depends on one thing — whether a request
@@ -284,7 +304,7 @@ arrives with a forwarded identity:
 
 | Authentication | Who a "reader" is | Effect |
 |---|---|---|
-| A proxy forwards an identity (oauth2-proxy et al.) | each person | your badge is yours; a colleague reading does not clear it |
+| A proxy forwards an identity (oauth2-proxy et al.) | each person | your badge is yours — a colleague reading does not clear it |
 | The shared UI token | everyone, as one reader | whoever reads clears it for all holders — there is one credential and no person behind it |
 | No reader salt projected | everyone, as one reader | per-channel marks, exactly as before this existed |
 
@@ -292,17 +312,20 @@ Reading a conversation in Telegram never clears it here, and reading it here
 never clears it there — that part is per channel in every install.
 
 **No identity is stored.** The console hashes the resolved identity with a salt
-projected as a channel credential and sends only that opaque key; the manager
-stores it verbatim and can neither reverse it nor tell whose it is. So a
-conversation records that N people read it and when, and never who. The salt is
-generated on install (and added on the first upgrade that finds the Secret
-without one) — don't rotate it casually: a new salt orphans every stored key and
-silently resets everyone to the channel-wide mark.
+projected as a channel credential and sends only that opaque key. The manager
+stores it verbatim and can neither reverse it nor tell whose it is.
 
-**Starting a conversation marks it read for you** — and for nobody else. The
-opaque key travels with the chat signal, and the manager stamps that reader's
-watermark the moment it creates their thread. Without it a conversation you had
-just typed came straight back as unread, before an answer could exist.
+So a conversation records that N people read it and when, and never who.
+
+The salt is generated on install, and added on the first upgrade that finds the
+Secret without one. **Don't rotate it casually** — a new salt orphans every
+stored key and silently resets everyone to the channel-wide mark.
+
+**Starting a conversation marks it read for you** — and for nobody else.
+
+The opaque key travels with the chat signal, and the manager stamps that
+reader's watermark the moment it creates their thread. Without it a conversation
+you had just typed came straight back as unread, before an answer could exist.
 
 The rest of what it does, and why:
 
@@ -322,7 +345,7 @@ The rest of what it does, and why:
   matching the filter", for the reason there is no close-everything.
 - **It is authenticated and attributed, but NOT behind the write gate.**
   `console.write.enabled` makes the console a strict viewer by removing its
-  ability to instruct an agent or start work; a read watermark does neither. A
+  ability to instruct an agent or start work. A read watermark does neither. A
   read-only console still selects rows and marks them read — one that could show
   a backlog and never clear it would be broken in the way the unread mark exists
   to fix.
@@ -342,26 +365,31 @@ reopened** — closing is reversible.
 
 **It is `/close`, fanned out.** Each selected conversation is sent the literal
 text `/close` on its own console thread, exactly as a person typing it would.
+
 The manager intercepts it on the reply path, posts the farewell to every bound
 thread, archives them and moves the conversation to phase `Closed` — inert, but
-intact. The runtime pod and the MCP ConfigMap go, the freed slot admits a
-waiting conversation, and the conversation's recorded answers, context handle
-and workspace all stay. There is exactly one implementation of closing, so a
-batch cannot drift from a typed close.
+intact.
+
+The runtime pod and the MCP ConfigMap go, the freed slot admits a waiting
+conversation, and the conversation's recorded answers, context handle and
+workspace all stay.
+
+There is exactly one implementation of closing, so a batch cannot drift from a
+typed close.
 
 What that costs, and why each cost is the right one:
 
 - **Reach is the threads the console holds.** A conversation the console merely
-  *observes* has no console thread and so nowhere to post; it comes back
+  *observes* has no console thread and so nowhere to post. It comes back
   `skipped` with the fix — add the console channel to that conversation's
   pipeline `channels[]`. This is the joined/observed distinction made visible,
   not a permission gap.
 - **Working conversations are left alone** unless the confirmation's
   *include working — abandons in-progress runs* toggle is turned on. The phase is
-  read server-side from the conversation's own state; nothing the browser asserts
+  read server-side from the conversation's own state. Nothing the browser asserts
   decides it.
 - **The result is per conversation** — closed / skipped / failed with a reason
-  for anything not closed. A mixed batch is a successful request; "12 of 15
+  for anything not closed. A mixed batch is a successful request. "12 of 15
   closed" is the honest summary and a single verdict cannot carry the reasons.
 - **The batch is bounded at 50**, the list page size, enforced by the server. The
   selection is over the rows on screen: there is no "close everything matching
@@ -379,16 +407,21 @@ What that costs, and why each cost is the right one:
 ### Reopening one
 
 A `Closed` row offers **Reopen**. It goes back to `Idle` with its wiring, its
-recorded runs and its context handle exactly as they were — the materialized
-refs are not re-resolved, so a Pipeline edit made in the meantime does not leak
-into a conversation that already exists. Under `contextStorage: volume` the
-agent resumes with its workspace; under `none` it answers fresh and says so.
+recorded runs and its context handle exactly as they were.
+
+The materialized refs are not re-resolved, so a Pipeline edit made in the
+meantime does not leak into a conversation that already exists.
+
+Under `contextStorage: volume` the agent resumes with its workspace. Under
+`none` it answers fresh and says so.
 
 Threads come back through an ordinary `ensure-topic` carrying the archived
 thread id as a hint: Telegram un-archives and you continue in the same topic, an
-adapter whose transport cannot opens a fresh one. A reopen whose profile or
-channel no longer exists fails and **names the missing object** rather than
-producing a conversation that looks alive and can never dispatch.
+adapter whose transport cannot opens a fresh one.
+
+A reopen whose profile or channel no longer exists fails and **names the missing
+object** rather than producing a conversation that looks alive and can never
+dispatch.
 
 **There is no bulk reopen, deliberately.** Reopening re-materialises threads on
 every bound channel, so a batch of them would announce itself on surfaces nobody
@@ -412,11 +445,14 @@ disk**.
   same write gate, identity and logging.
 
 **Delete and reopen are manager verbs the console calls**, not Kubernetes
-writes — the console still has no write path to the API. Their reach is the
-**binding**: a surface may act on a conversation whose `spec.channelRefs` names
-its channel, read from the conversation and never taken from the request. That
-is the amendment the archived-thread case forces on "no remote close verb
-exists": holding a live thread was how membership was proven, and a closed
+writes — the console still has no write path to the API.
+
+Their reach is the **binding**: a surface may act on a conversation whose
+`spec.channelRefs` names its channel, read from the conversation and never taken
+from the request.
+
+That is the amendment the archived-thread case forces on "no remote close verb
+exists". Holding a live thread was how membership was proven, and a closed
 conversation has none, so the binding that put the thread there stands in.
 
 Disk is **not** reclaimed by deleting. The conversation's workspace directory
@@ -447,26 +483,31 @@ Four things fall out of that:
    thread. No pipeline edit, no copy-paste patch.
 
 **It requires a claim** — which a bundle that ships a route now makes for you.
+
 Where the k8s bundle renders its route, that route claims the console source and
 binds the console as a channel, so a turnkey install can start a conversation in
-the console with no wiring step. The names come from `global.agentops.console`,
-and the render fails if they disagree with the console's own
-(see [the k8s bundle](k8s-bundle.md)).
+the console with no wiring step.
 
-Nothing else claims it for you. Wiring names a profile, sources and channels from
-different bundles, so only the installer sees all of it. Until a Ready Pipeline
-claims the console source it sits at `Wired=False`, the picker is unavailable,
-and the UI shows that reason with the patch:
+The names come from `global.agentops.console`, and the render fails if they
+disagree with the console's own (see [the k8s bundle](k8s-bundle.md)).
+
+Nothing else claims it for you. Wiring names a profile, sources and channels
+from different bundles, so only the installer sees all of it.
+
+Until a Ready Pipeline claims the console source it sits at `Wired=False`, the
+picker is unavailable, and the UI shows that reason with the patch:
 
 ```sh
 kubectl patch pipeline <name> --type=json \
   -p '[{"op":"add","path":"/spec/signalSourceRefs/-","value":{"name":"console"}}]'
 ```
 
-A source is **shareable**: several Pipelines may list the console source, and all
-of them stay Ready and addressable. What you can start is still exactly what is
-wired — the picker is a rendering of the topology, not a free-text field that can
-name something no wiring supports.
+A source is **shareable**: several Pipelines may list the console source, and
+all of them stay Ready and addressable.
+
+What you can start is still exactly what is wired — the picker is a rendering of
+the topology, not a free-text field that can name something no wiring
+supports.
 
 ### Addressing an agent
 
@@ -477,14 +518,18 @@ address it: `/<pipeline> <task>`.
 
 The composer offers them. Typing `/` at the start of the task lists the Ready
 Pipelines with their answering profile, narrows as you keep typing, and inserts
-`/<name> ` with the cursor after it. Arrow keys move, Enter or Tab picks, Escape
-dismisses without sending; a surface with nothing addressable shows no menu
-rather than an empty one.
+`/<name> ` with the cursor after it.
 
-The listing is served by `GET /api/agents` from the Pipelines the console already
-list/watches — **no new RBAC, no manager endpoint, no CRD field.** It is
-Ready-filtered for the same reason `/agents` is: an unready Pipeline names wiring
-that does not resolve, so offering it would invite a request nothing can serve.
+Arrow keys move, Enter or Tab picks, Escape dismisses without sending. A surface
+with nothing addressable shows no menu rather than an empty one.
+
+The listing is served by `GET /api/agents` from the Pipelines the console
+already list/watches — **no new RBAC, no manager endpoint, no CRD field.**
+
+It is Ready-filtered for the same reason `/agents` is: an unready Pipeline names
+wiring that does not resolve, so offering it would invite a request nothing can
+serve.
+
 The two must never disagree, and tests on both sides pin that they do not.
 
 The listing is advisory — the console's cache can lag a moment, and an addressed
@@ -513,8 +558,8 @@ instruct an agent that, in a `rbacMode: full` install, holds `cluster-admin`.
     correct and the post-install warning can be ignored — but it warns, because
     the alternative is exposing the token silently.
   - **A forward-auth proxy** — oauth2-proxy against your OIDC provider is the
-    usual one. When a trusted identity header is present the console records it;
-    when it is absent it records `token`, so an install without a proxy has an
+    usual one. When a trusted identity header is present the console records it.
+    When it is absent it records `token`, so an install without a proxy has an
     audit trail that names nobody. Once one is in place you can stop
     authenticating twice — see below.
 - **Root of a hostname only.** The SPA is embedded at build time with an
@@ -527,7 +572,7 @@ instruct an agent that, in a `rbacMode: full` install, holds `cluster-admin`.
   said what to an agent.
 - **`console.write.enabled: false`** makes it a strict viewer: the composer and the
   new-conversation action disappear, and both endpoints refuse server-side. The UI
-  hiding a button is presentation; the server refuses regardless.
+  hiding a button is presentation. The server refuses regardless.
 
 What it **cannot** do: write anything to the Kubernetes API. Its Role carries no
 write verb, and no write path exists in the module.
@@ -545,22 +590,27 @@ Three sources, in this order — the first one available wins:
 A fourth option sits outside the order: `console.auth.existingSecret` supplies the
 whole Secret, and the chart creates none.
 
-**A redeploy does not sign anyone out.** When the token was generated, the Secret
-is rendered on install only and carries `helm.sh/resource-policy: keep`, so an
-upgrade neither regenerates it nor reports it as changed — including on a renderer
-with no cluster (`helm template` piped to apply, CI, a GitOps controller, a
-client-side dry run), where a cluster `lookup` returns nothing and the old
-template therefore minted a fresh token. Signing every browser out is a
-consequence an operator asks for, never one a deploy causes.
+**A redeploy does not sign anyone out.** When the token was generated, the
+Secret is rendered on install only and carries `helm.sh/resource-policy: keep`,
+so an upgrade neither regenerates it nor reports it as changed.
+
+That includes a renderer with no cluster — `helm template` piped to apply, CI, a
+GitOps controller, a client-side dry run — where a cluster `lookup` returns
+nothing and the old template therefore minted a fresh token.
+
+Signing every browser out is a consequence an operator asks for, never one a
+deploy causes.
 
 **Rotating is a values edit**: set `console.auth.uiToken` and upgrade. It wins
 over the existing Secret, so it takes effect on an install that already has a
 token — it used to be checked last, which made it a silent no-op exactly there.
 
-The trade for stability: once generated, the Secret is no longer part of the
-release. Deleting it by hand leaves the console pod unable to start (the Channel
-projects it with `envFrom`), and the way back is `console.auth.uiToken`, not
-another upgrade. The same trade the CRDs and the persistence claims already make.
+**The trade for stability:** once generated, the Secret is no longer part of the
+release.
+
+Deleting it by hand leaves the console pod unable to start (the Channel projects
+it with `envFrom`), and the way back is `console.auth.uiToken`, not another
+upgrade. The same trade the CRDs and the persistence claims already make.
 
 The adapter master token behaves identically via `adapterAuth.token` /
 `adapterAuth.existingSecret` — with a wider blast radius, since every per-adapter
@@ -580,8 +630,8 @@ console:
 ```
 
 The name is not verified — the chart cannot see what sits in front of it. It is
-**recorded**, so "what protects this console?" is answerable from `helm get
-values`, from the post-install notes and from review, rather than from memory.
+**recorded**, so "what protects this console?" is answerable from
+`helm get values`, from the post-install notes and from review, rather than from memory.
 
 With ingress-nginx and an oauth2-proxy deployed alongside, that is four
 annotations on the console Ingress (`console.ingress.annotations`):
@@ -593,13 +643,16 @@ nginx.ingress.kubernetes.io/auth-cache-duration: "200 202 401 5m"
 nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Preferred-Username,X-Forwarded-User,X-Forwarded-Email,X-Forwarded-Preferred-Username
 ```
 
-The last one does **two** jobs, and the second is the one worth understanding:
+The last one does **two** jobs, and the second is the one worth understanding.
+
 nginx sets each listed header from the auth subrequest, which also means a
 client-supplied copy of it never reaches the console — a header oauth2-proxy
-does not send is set empty and therefore dropped. List **all six** the console
-trusts, not just the ones your proxy populates. Listing only
-`X-Auth-Request-Email` would leave `X-Forwarded-Preferred-Username` passing
-straight through from the client, and the console prefers that one first.
+does not send is set empty and therefore dropped.
+
+**List all six the console trusts**, not just the ones your proxy populates.
+Listing only `X-Auth-Request-Email` would leave
+`X-Forwarded-Preferred-Username` passing straight through from the client, and
+the console prefers that one first.
 
 The proxy also needs `set_xauthrequest = true`, or its `/oauth2/auth` response
 carries no identity for nginx to copy and the console stays read-only.
@@ -610,7 +663,7 @@ What this mode requires of the proxy:
   the namespace, reaches `agentops-adapter-console:8080` directly and is served
   without question. In a shared namespace, restrict that with a NetworkPolicy.
 - **It must STRIP client-supplied identity headers.** The console *believes*
-  `X-Forwarded-Email` and its five siblings; it cannot distinguish a header the
+  `X-Forwarded-Email` and its five siblings. It cannot distinguish a header the
   proxy set from one a client sent, since both arrive on the same connection. A
   proxy that passes them through lets a caller choose their own identity. This
   is a requirement of every forward-auth deployment, not a peculiarity of this
@@ -624,7 +677,7 @@ What this mode requires of the proxy:
 What does **not** change:
 
 - **An empty `uiToken` still authorizes nobody.** "No credential configured" and
-  "no credential required" stay independent settings; the entire hazard is one
+  "no credential required" stay independent settings. The entire hazard is one
   being read as the other. A `false` with no authenticator named is half a
   declaration and leaves the console closed — in the chart, which refuses to
   render, and in the pod, which ignores it.
@@ -661,35 +714,37 @@ console that cannot see a CrashLoopBackOff is not one.
 | `console.write.enabled` | `true` | gates both write paths |
 | `console.metrics.url` | `""` | optional Prometheus/VictoriaMetrics query endpoint for long windows |
 | `console.image.*` | | image, bumped per release |
-| `console.port` | `8080` | browser-facing port; the reconciler owns the Service |
+| `console.port` | `8080` | browser-facing port. The reconciler owns the Service |
 | `console.auth.existingSecret` / `.uiToken` | `""` | supply or pin the browser token instead of generating one |
-| `console.auth.enabled` | `true` | whether the console authenticates browsers itself; `false` requires the next value |
+| `console.auth.enabled` | `true` | whether the console authenticates browsers itself. `false` requires the next value |
 | `console.auth.externalAuthenticator` | `""` | **required** when `auth.enabled: false` — names what authenticates instead (see the trust boundary) |
 | `console.ingress.enabled` | `false` | see the trust boundary above before enabling |
 | `console.ingress.host` | `""` | **required** when enabled — a hostname cannot be guessed |
-| `console.ingress.extraHosts` | `[]` | additional hostnames serving the same console; each gets a rule and is covered by the derived certificate |
+| `console.ingress.extraHosts` | `[]` | additional hostnames serving the same console. Each gets a rule and is covered by the derived certificate |
 | `console.ingress.className` | `""` | `ingressClassName` |
 | `console.ingress.annotations` | `{}` | merged with the cert-manager annotation when `tls.clusterIssuer` is set |
 | `console.ingress.labels` | `{}` | merged onto the Ingress alongside the chart's own |
 | `console.ingress.path` | `/` | root only — a non-root value fails the render (see the trust boundary) |
-| `console.ingress.pathType` | `Prefix` | `Prefix`, `ImplementationSpecific` or `Exact`; all work at the root |
-| `console.ingress.tls.secretName` | `""` | existing certificate Secret; `tls[].hosts` is derived from `host` + `extraHosts` |
+| `console.ingress.pathType` | `Prefix` | `Prefix`, `ImplementationSpecific` or `Exact` — all work at the root |
+| `console.ingress.tls.secretName` | `""` | existing certificate Secret. `tls[].hosts` is derived from `host` + `extraHosts` |
 | `console.ingress.tls.clusterIssuer` | `""` | cert-manager issuer: adds the annotation and derives `secretName` when unset |
 | `console.ingress.tls.existing` | `[]` | raw `tls[]` entries, used verbatim and taking precedence over the derived form |
 
 `console.ingress.tls` also still accepts the pre-6.x **list** form (raw Ingress
 `tls` entries), rendered verbatim so existing values files and
-`helm upgrade --reuse-values` keep working. The map form above is its
-replacement — it derives the hostnames, so a rule host and a certificate host
-cannot drift apart.
+`helm upgrade --reuse-values` keep working.
+
+The map form above is its replacement — it derives the hostnames, so a rule host
+and a certificate host cannot drift apart.
 
 ## Building it
 
 The frontend is React 18 + TypeScript + Vite + PatternFly 6 — Kiali's stack, so
-Kiali familiarity is inherited rather than imitated. It is built in a Docker stage
-and embedded into the Go binary with `go:embed all:ui/dist`, so the deployable
-artifact is what every other adapter is: **one Go image serving one port**, with
-nothing fetched at runtime.
+Kiali familiarity is inherited rather than imitated.
+
+It is built in a Docker stage and embedded into the Go binary with
+`go:embed all:ui/dist`, so the deployable artifact is what every other adapter
+is: **one Go image serving one port**, with nothing fetched at runtime.
 
 npm exists at build time only, inside `console/` and its image. No other module,
 and not the manager, gains a build step.

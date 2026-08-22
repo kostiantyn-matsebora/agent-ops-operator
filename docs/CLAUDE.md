@@ -18,10 +18,12 @@ path. Plugins are limited to the set Pages enables by default.
 | `installation.md` | the REAL install, and the PARENT chart's values |
 
 `console-guide.md` is published at `/console/`. `console.md` is the untouched
-reference and keeps its own URL. **What the console is FOR goes to the guide,
-what it IS goes to the reference.** The screenshots on both the guide and the
-landing page are build output — `npm run screenshots` in `console/ui`, never a
-hand capture.
+reference and keeps its own URL.
+
+**What the console is FOR goes to the guide, what it IS goes to the reference.**
+
+The screenshots on both the guide and the landing page are build output —
+`npm run screenshots` in `console/ui`, never a hand capture.
 
 The landing strip and the guide's tour show the SAME six images at different
 altitudes: one line each there, the full tour here. Keep the labels identical.
@@ -133,10 +135,13 @@ script in a page.
 Content never moves into `_includes/` or `_data/` to get a look.
 
 **Integration marks live in `assets/img/logos/`**, committed unaltered from each
-project's own source with their terms in that directory's README. The PAGE names
-each file — a vendor list in `agentops.css` would be product knowledge in the
-theme. Never repaint one to fit the palette: a mark that does not read on a
-ground is dropped instead.
+project's own source with their terms in that directory's README.
+
+The PAGE names each file — a vendor list in `agentops.css` would be product
+knowledge in the theme.
+
+Never repaint one to fit the palette: a mark that does not read on a ground is
+dropped instead.
 
 **An `<img>`-loaded SVG is parsed STRICTLY.** XML forbids a double hyphen inside
 a comment, so a comment mentioning a `--custom-property` makes the whole mark
@@ -146,12 +151,15 @@ checking before blaming the CSS.
 **A themed image is named ONCE.** A page writes the `-light` file and nothing
 else — `assets/js/tabs.js` rewrites it to `-dark` from the resolved theme, for
 screenshots and diagrams alike, and for a link in a panel as well as an image.
+
 A page that named both would be carrying theme knowledge.
 
 That rewrite is a DEFERRED script, so the light file is on the page before it
-runs. **A published image therefore carries its own ground**, never a transparent
-one that borrows the page's canvas — on a dark page a transparent light export is
-not a mismatched colour, it is invisible ink.
+runs.
+
+**A published image therefore carries its own ground**, never a transparent one
+that borrows the page's canvas. On a dark page a transparent light export is not
+a mismatched colour, it is invisible ink.
 
 ## Tables
 
@@ -168,11 +176,13 @@ not a mismatched colour, it is invisible ink.
 
 ```sh
 # 1. the prose rules, mechanically
-awk '/^---$/{fm=!fm;next} fm{next} /^```/{b=!b;next} b{next}
-     /;/ && !/&[a-z]+;/ {printf "%s:%d SEMICOLON\n", FILENAME, NR}
-     /^\|/||/^[0-9]+\./||/^ /||/^>/{next}
+awk 'FNR==1{fm=0;b=0;n=0}
+     /^---$/{fm=!fm;next} fm{next} /^```/{b=!b;next} b{next}
+     {t=$0; gsub(/`[^`]*`/,"",t); gsub(/&[a-z]+;/,"",t)
+      if (t ~ /;/) printf "%s:%d SEMICOLON\n", FILENAME, FNR}
+     /^\|/||/^[0-9]+\./||/^[-*] /||/^ /||/^>/{next}
      /^$/{if(n>45)printf "%s:%d LONG PARAGRAPH (%d words)\n",FILENAME,s,n;n=0;next}
-     {if(n==0)s=NR;n+=NF}' docs/*.md
+     {if(n==0)s=FNR;n+=NF}' docs/*.md
 
 # 2. build it and LOOK at it — a rendering fault is invisible in markdown
 #    (see the root CLAUDE.md for the container build and playwright)
@@ -180,3 +190,12 @@ awk '/^---$/{fm=!fm;next} fm{next} /^```/{b=!b;next} b{next}
 
 Silence is the pass on 1. Step 2 is not optional: the squeezed column, the
 wrapped key and the headerless table were all invisible until rendered.
+
+## Authoring rules (binding)
+Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
+Structure over prose:
+Steps → numbered list.
+Choices / mappings → table.
+"X means Y" → **X.** Y on its own line.
+Multi-rule bullet → parent + sub-bullets, one rule per line.
+Prose paragraph stating > 2 rules → restructure.
