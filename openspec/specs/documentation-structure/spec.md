@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change organize-docs. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: README is a bounded one-page overview
 
 `README.md` SHALL answer two questions and no others: **what this is** and **how
@@ -155,10 +157,16 @@ what the console IS — its endpoints, RBAC grant, values reference and internal
 structure — goes to `docs/console.md`. A rule naming only one of a pair is how
 the next writer picks at random.
 
-It SHALL further record that a product screenshot published on the site is a
-**build output**: the command that regenerates it SHALL be named, and the routing
-rule SHALL state that a change to the console's UI is not complete until those
-screenshots have been regenerated.
+It SHALL further record that every product asset published on the site is a
+**build output**, and SHALL name the command that regenerates **each kind**: the
+screenshots of the console's views, and the landing page's recording of the
+product working. The rule SHALL state that a change to the console's UI is not
+complete until both have been re-run, and SHALL name where each kind of asset is
+published, so a contributor does not have to work out which pages a UI change
+made stale.
+
+A page's rule SHALL NOT be stated in two files. Where `docs/CLAUDE.md` governs
+how a page reads, the routing rule SHALL route to it rather than restating it.
 
 #### Scenario: Contributor finishes a behavior change
 
@@ -188,8 +196,15 @@ screenshots have been regenerated.
 #### Scenario: The console's UI changes
 
 - **WHEN** a change alters what a console view looks like
-- **THEN** the routing rule names the command that regenerates the site's
-  screenshots, and the change is not complete until it has been run
+- **THEN** the routing rule names both commands that regenerate the site's
+  product assets — the screenshots and the recording — and the change is not
+  complete until both have been run
+
+#### Scenario: A published asset's home is looked up
+
+- **WHEN** a contributor asks which pages a console UI change made stale
+- **THEN** the routing rule names where each kind of generated asset is
+  published, and no page is discovered stale by a reader instead
 
 #### Scenario: Contributor changes the site
 
@@ -225,4 +240,3 @@ reader past an entry that sits between them in the navigation.
 - **WHEN** a reader starts at the landing page and follows only the what-next
   card on each page
 - **THEN** they visit every page in the *Start here* group, in navigation order
-
