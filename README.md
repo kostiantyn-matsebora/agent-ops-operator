@@ -120,11 +120,12 @@ For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).
 | [docs/prometheus-bundle.md](docs/prometheus-bundle.md) | The Alertmanager alert lane and its metrics tooling |
 | [docs/ha-bundle.md](docs/ha-bundle.md) | The Home Assistant lane, and its two agents split by privilege |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Every chart-version upgrade guide, newest first |
-| [CLAUDE.md](CLAUDE.md) | Working notes: terminology, invariants, the gotchas that cost debugging |
+| [.claude/rules/](.claude/rules/) | Working notes, one topic per file: terminology, wiring, invariants, and the gotchas that cost debugging |
 
 ## Development
 
-See [CLAUDE.md](CLAUDE.md) for build/test workflow. `go test ./...` covers unit
+See [.claude/rules/build-test.md](.claude/rules/build-test.md) for the
+build/test workflow. `go test ./...` covers unit
 semantics (grouping, cooldown, dispatch, addressing, MCP compilation) and
 envtest integration (real API server: lifecycle, alert routing, runtime selection).
 
