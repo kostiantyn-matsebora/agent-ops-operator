@@ -1,0 +1,20 @@
+# The manager build context is the repository root, and the Dockerfile copies
+# exactly five things: go.mod, go.sum, api/, cmd/, internal/. Everything else —
+# the chart, the docs, openspec, every sibling module, .git — was being uploaded
+# to the daemon on every build for nothing.
+#
+# EXCLUDE-THEN-REINCLUDE, deliberately. A denylist has to name every module
+# directory, so module number fourteen silently rejoins the context on the day
+# it is added. This form is what the release matrices are: derived from what the
+# build actually needs, not from a list somebody has to remember to edit.
+*
+
+!go.mod
+!go.sum
+!api/
+!cmd/
+!internal/
+
+# ...and nothing under those that the build has no use for.
+**/*_test.go
+**/testdata/

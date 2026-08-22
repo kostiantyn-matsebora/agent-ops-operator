@@ -1,0 +1,82 @@
+# Action pinning drift, Go CVEs and a lockfile nothing else updates are the
+# maintenance costs the workflows create. Dependabot is the proportionate
+# answer to exactly those three.
+#
+# Docker base images are deliberately EXCLUDED: golang:1.23, node:22-alpine and
+# distroless/static already float, and a pull request per Dockerfile across
+# thirteen of them would cost more attention than it returns.
+#
+# The gomod list is the one place in .github/ that names modules. It cannot be
+# derived — Dependabot reads this file directly — so a new module adds four
+# lines here, and CI keeps covering it either way.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/channel-telegram"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/console"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/context-sync"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/egress-proxy"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/housekeeping"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/signal-alertmanager"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/signal-cron"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/signal-ha"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/signal-k8s-events"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/signal-telegram"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: "/telegram-router"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: "/console/ui"
+    schedule:
+      interval: weekly

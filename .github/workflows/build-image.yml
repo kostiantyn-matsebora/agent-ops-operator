@@ -1,0 +1,112 @@
+# Publishing ONE image, and proving what was published.
+#
+# Called by release.yml per component. Three properties are load-bearing and
+# each replaced a rule that lived only in someone's memory:
+#
+#   1. The target tag is checked BEFORE the build (never overwrite a pushed tag).
+#   2. The pushed manifest's platforms are asserted to EQUAL the component's
+#      declaration, in both directions.
+#   3. Nothing floats: the exact version is published, and no `latest`.
+name: build-image
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: Component name; the image is agentops-<component>.
+        required: true
+        type: string
+      context:
+        required: true
+        type: string
+      dockerfile:
+        required: true
+        type: string
+      platforms:
+        description: Comma-separated platform list, from .github/components.sh.
+        required: true
+        type: string
+      version:
+        description: Semver, without the leading v.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/agentops-${{ inputs.component }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # BEFORE THE BUILD, deliberately. A mistaken re-tag costs seconds rather
+      # than a full build, and the recovery this enforces — cut a new patch
+      # version — is what the rule always intended.
+      - name: Refuse to overwrite a published tag
+        run: |
+          if docker manifest inspect "$IMAGE:${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::$IMAGE:${{ inputs.version }} is already published."
+            echo "::error::Published tags are immutable — cut a new patch version instead of re-pushing."
+            exit 1
+          fi
+          echo "$IMAGE:${{ inputs.version }} is free"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # The exact version and nothing else. No `latest`, no floating minor —
+          # this project pins tags everywhere it references an image.
+          tags: type=raw,value=${{ inputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ inputs.component }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.component }}
+
+      # THE ASSERTION. A build command is a request; only the manifest is
+      # evidence. An amd64-only console ran in production for weeks because
+      # every reschedule happened to land on an amd64 node — nothing in the
+      # chart or the CR was wrong, and nothing at build, push or render time
+      # said a word. Equality, so a lost architecture and an undeclared extra
+      # one both fail.
+      - name: Assert the pushed manifest matches the declaration
+        run: |
+          set -euo pipefail
+          want=$(echo "${{ inputs.platforms }}" | tr ',' '\n' | sort -u)
+          got=$(docker buildx imagetools inspect "$IMAGE:${{ inputs.version }}" --raw \
+            | jq -r '.manifests[]?.platform | select(.os != "unknown") | "\(.os)/\(.architecture)"' \
+            | sort -u)
+          echo "declared: $(echo "$want" | tr '\n' ' ')"
+          echo "published: $(echo "$got" | tr '\n' ' ')"
+          if [ "$want" != "$got" ]; then
+            echo "::error::$IMAGE:${{ inputs.version }} published platforms do not equal its declaration."
+            echo "::error::Fix .github/components.sh or the build — never the assertion."
+            exit 1
+          fi
