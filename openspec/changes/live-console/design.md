@@ -91,6 +91,37 @@ produces no loading state. Conventions of this kind decay one call site at a
 time — that is precisely how twelve queries came to differ from the one that
 had it right.
 
+### D7. The cache is bounded in TIME, not held for the tab's lifetime
+
+Applying events means a cached view stays correct without being re-read — which
+also means it would stay RESIDENT indefinitely if nothing evicted it. A
+conversation opened once an hour ago should not still cost memory.
+
+Two settings, both explicit rather than inherited:
+
+- **Eviction of unused data** — a view's data is released once it has been off
+  screen for a bounded idle period. React-query calls this `gcTime`; it applies
+  only to data no component is holding, so nothing on screen is ever collected
+  from under a reader.
+- **Freshness on remount** — returning to a view after that period loads fresh
+  instead of rendering whatever was last applied. Because the previous data is
+  either gone or shown while a background load runs, this never blanks.
+
+Five minutes for eviction and a minute for freshness are the starting points:
+long enough that flicking between two pages costs nothing, short enough that a
+tab left open all afternoon is not carrying every conversation somebody glanced
+at. They are stated in ONE place with this reasoning beside them, so changing
+them is a decision rather than a discovery.
+
+**Nothing is persisted.** No `localStorage`, no IndexedDB, no service worker
+cache. The console holds a snapshot of cluster state and a transcript of what
+agents said, and writing either to a browser's disk is a durability promise this
+component has no business making — it would also survive a logout.
+
+The bound is about MEMORY. Correctness is the resync rule's job: applied state
+is replaced wholesale whenever the client may have missed an event, so a cache
+that lives longer is not a cache that drifts further.
+
 ## Risks / Trade-offs
 
 | Risk | Mitigation |
@@ -100,6 +131,7 @@ had it right.
 | **Larger events on a busy install.** | One object per change, against a snapshot of all of them per change today. Strictly less traffic. |
 | **A view forgets to read a newly applied kind.** | Views read the cache, not events, so a newly applied kind reaches every reader of that cache entry without per-view work. |
 | **Deletion.** | A delta carries its type. A delete removes the object from the views that hold it, rather than leaving a row nothing refetches away. |
+| **Applied data resident forever**, because nothing re-reads it and nothing drops it. | Explicit eviction for off-screen data, and a freshness bound on remount — see D7. Correctness is unaffected either way; this is a memory bound. |
 
 ## Open Questions
 
