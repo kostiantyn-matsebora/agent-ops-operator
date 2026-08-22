@@ -1781,6 +1781,39 @@ The corollary: a `lookup`-driven guard is silent under `helm template`, so it
 cannot be pinned by a chart render test. Verify it with
 `helm upgrade --dry-run=server`.
 
+**A HAND-PATCHED FIELD SURVIVES EVERY LATER `helm upgrade`.**
+
+Helm's three-way merge diffs the PREVIOUS rendered manifest against the NEW
+one, and patches only what differs there. A field whose rendered value did not
+change generates no patch, so a `kubectl patch` applied during debugging is
+never corrected — the release reports success, `helm get manifest` shows the
+declared value, and the live object keeps the other one indefinitely.
+
+`k8s-ops` sat on a debugging icon through five chart upgrades that way.
+
+**So a live patch is undone by ANOTHER live patch**, not by re-syncing. Check
+the object, never the release, when the cluster disagrees with the values.
+
+**CILIUM ANSWERS A BACKEND-LESS SERVICE WITH EPERM, NOT ECONNREFUSED.**
+
+Under `kube-proxy-replacement: strict` the socket load balancer fails
+`connect()` in the pod's own kernel when a ClusterIP has no READY endpoints, so
+Go reports:
+
+```
+dial tcp 10.43.240.187:8080: connect: operation not permitted
+```
+
+That reads exactly like a NetworkPolicy denial and is not one — it is an
+ordinary rollout race, and it clears the moment an endpoint goes ready. Under
+kube-proxy the same instant would have said `connection refused`.
+
+`telegram-router` logs it once at startup when it reads the offset while
+`channel-telegram` is mid-rollout, then retries every 5s and recovers.
+**Confirm it against the endpoint list and the ReplicaSet timestamps before
+suspecting policy** — three separate sessions read that line as a policy
+problem.
+
 **`reply_to_message` IS ONE LEVEL DEEP AND NEVER NESTS.**
 
 A reply carries the message it answers; that message carries no
