@@ -99,3 +99,31 @@ A timed refetch for anything else SHALL NOT exist.
 #### Scenario: Nothing else polls
 - **WHEN** the console is inspected for timed refreshes
 - **THEN** every one names a decaying value, and none exists to observe change
+
+### Requirement: The cache is bounded
+Applying events keeps a view's data current for as long as it is held, so
+holding it forever is a decision the console SHALL NOT make by default.
+
+- Data for a view NOT CURRENTLY ON SCREEN SHALL be evicted after a bounded
+  idle period. A conversation read an hour ago SHALL NOT still occupy memory.
+- A view remounted after that bound SHALL load fresh rather than render
+  whatever was last applied to it.
+- Nothing SHALL be persisted beyond the browsing session. The console SHALL
+  write no cache to disk, so closing the tab SHALL leave nothing behind.
+
+The bound exists for MEMORY, not for correctness: correctness comes from the
+resync rule, which replaces applied state wholesale whenever the client may
+have missed an event.
+
+#### Scenario: An unused view is evicted
+- **WHEN** a view has not been on screen for longer than the bound
+- **THEN** its data is released, and returning to it loads fresh
+
+#### Scenario: A held view stays current without refetching
+- **WHEN** a view is on screen and events arrive for it
+- **THEN** it stays current from those events, and the bound does not cause a
+  refetch while it is held
+
+#### Scenario: Nothing outlives the tab
+- **WHEN** the console is closed and reopened
+- **THEN** it starts from a snapshot, having stored nothing locally

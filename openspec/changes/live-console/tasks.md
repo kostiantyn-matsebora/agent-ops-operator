@@ -15,19 +15,25 @@
 - [ ] 3.2 Keep `placeholderData: keepPreviousData` only where the key changes on USER input (paging, filters) and remove it elsewhere — and verify the remaining uses are each justified in a comment
 - [ ] 3.3 Verify the four refetch reasons are the only ones left — first load, resync, explicit action, and a time-decaying value — and that each timed refresh names its decaying value where it is set
 
-## 4. Every page
+## 4. A bounded cache
 
-- [ ] 4.1 Verify Overview updates in place from a delta, with no request and no loading state
-- [ ] 4.2 Verify the same for Queues
-- [ ] 4.3 Verify the same for Topology, and that its timer remains only for rates
-- [ ] 4.4 Verify the same for Configuration, including a kind detail view
-- [ ] 4.5 Verify the same for the Conversations list, including a conversation appearing, changing phase and being deleted
-- [ ] 4.6 Verify the same for one Conversation: a message, a run advancing, and the composer's own send
-- [ ] 4.7 Add the standing test — after first paint, delivering any stream event leaves no view in a loading state — covering all six pages
+- [ ] 4.1 Set eviction and freshness explicitly in the query client, in one place with the reasoning beside them — and verify a test asserts data for an off-screen view is released after the bound
+- [ ] 4.2 Verify a view remounted after the bound loads fresh, and that one held on screen is never refetched by the bound alone
+- [ ] 4.3 Verify nothing is persisted — no localStorage, IndexedDB or service-worker cache — so closing the tab leaves nothing behind
 
-## 5. Whole-change verification
+## 5. Every page
 
-- [ ] 5.1 Run the console's Go and UI suites and verify both pass
-- [ ] 5.2 Verify a reconnect still resyncs and converges to a cold load, and that a manager-restart gap still renders as a gap
-- [ ] 5.3 Smoke on a cluster: send a message and confirm the transcript updates with no blank and no request beyond the send itself
-- [ ] 5.4 Update `docs/console.md` for how the console stays current, and regenerate screenshots if the UI moved
+- [ ] 5.1 Verify Overview updates in place from a delta, with no request and no loading state
+- [ ] 5.2 Verify the same for Queues
+- [ ] 5.3 Verify the same for Topology, and that its timer remains only for rates
+- [ ] 5.4 Verify the same for Configuration, including a kind detail view
+- [ ] 5.5 Verify the same for the Conversations list, including a conversation appearing, changing phase and being deleted
+- [ ] 5.6 Verify the same for one Conversation: a message, a run advancing, and the composer's own send
+- [ ] 5.7 Add the standing test — after first paint, delivering any stream event leaves no view in a loading state — covering all six pages
+
+## 6. Whole-change verification
+
+- [ ] 6.1 Run the console's Go and UI suites and verify both pass
+- [ ] 6.2 Verify a reconnect still resyncs and converges to a cold load, and that a manager-restart gap still renders as a gap
+- [ ] 6.3 Smoke on a cluster: send a message and confirm the transcript updates with no blank and no request beyond the send itself
+- [ ] 6.4 Update `docs/console.md` for how the console stays current, and regenerate screenshots if the UI moved
