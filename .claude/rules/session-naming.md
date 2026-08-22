@@ -22,9 +22,33 @@ That writes the title and paints it.
 - **The script is a silent no-op** with no title file, no terminal or no `jq`,
   so a hook never becomes an error.
 
-**BOTH LIVE IN THIS REPO AND ARE COMMITTED**, so a clone gets the behaviour and
-the rule that names it in one checkout. `$CLAUDE_PROJECT_DIR` is what keeps the
-wiring path-independent.
+### A PAINTED TITLE IS NOT A DISPLAYED ONE
+
+**VS Code's integrated terminal DISCARDS the OSC title sequence by default.** It
+captures it as `${sequence}`, but the default tab label is
+`terminal.integrated.tabs.title: "${process}"`, which never names it. Every tab
+then reads `claude` forever and neither side reports a failure.
+
+```json
+"terminal.integrated.tabs.title": "${process}${separator}${sequence}"
+```
+
+- **`${process}` stays FIRST**, so a terminal no session has painted still reads
+  `bash`. VS Code elides the separator along with the empty sequence.
+- **`.vscode/settings.json` is committed here**, and is read ONLY when the repo
+  is opened as a workspace folder ROOT. Opened from a PARENT directory it is
+  inert, and the setting belongs in that root's own `.vscode/settings.json` or
+  in user settings.
+- **A MULTI-ROOT workspace cannot take it from a folder at all.** The setting is
+  WINDOW-scoped, so there it must live in the `.code-workspace` file.
+- **DIAGNOSE THE TERMINAL BEFORE THE HOOK.** This cost a session, because the
+  hook half is entirely healthy: it fires, receives `CLAUDE_PID` and
+  `CLAUDE_PROJECT_DIR`, falls back past the `/dev/tty` a hook subprocess never
+  has, and writes to the right pty. Everything works and nothing shows.
+
+**THE SCRIPT, THE SETTING AND THIS RULE ALL LIVE IN THIS REPO AND ARE
+COMMITTED**, so a clone gets the behaviour and the rule that names it in one
+checkout. `$CLAUDE_PROJECT_DIR` is what keeps the wiring path-independent.
 
 - **Deliberately NOT `~/.claude`.** The rule is about THIS repo's changes and
   its opsx phases, and a title convention that only exists on the machine that
