@@ -6,18 +6,24 @@ agent that answers, and its opt-in route.
 
 `chart/charts/prometheus-bundle/` packages the whole "an alert fires and an
 agent investigates it" experience as five independently toggleable components.
-**Off by default and never enabled by demo mode** — every component consumes an
+
+**Off by default and never enabled by demo mode.** Every component consumes an
 endpoint no demo cluster has: an Alertmanager that can reach the webhook, and a
 metrics backend to query.
 
 **The bundle is named for the payload format and the query API it speaks, not
-for one implementation of them.** The ingest core reads the standard Alertmanager
-webhook payload and nothing else, so any Prometheus Alertmanager can post to it.
+for one implementation of them.**
+
+The ingest core reads the standard Alertmanager webhook payload and nothing
+else, so any Prometheus Alertmanager can post to it.
+
 VictoriaMetrics answers the Prometheus HTTP query API — `/api/v1/query`,
-`/api/v1/labels`, and `/api/v1/status/buildinfo` reports a Prometheus version for
-clients that version-gate — and MetricsQL is a PromQL superset, so a single query
-server serves both backends. VictoriaMetrics is a supported backend here, not the
-subject; the only VictoriaMetrics-specific feature is
+`/api/v1/labels`, and `/api/v1/status/buildinfo` reports a Prometheus version
+for clients that version-gate — and MetricsQL is a PromQL superset, so a single
+query server serves both backends.
+
+VictoriaMetrics is a supported backend here, not the subject. The only
+VictoriaMetrics-specific feature is
 [self-registration](#self-registration-is-victoriametrics-only).
 
 | Component | Flag | What it renders |
@@ -29,11 +35,13 @@ subject; the only VictoriaMetrics-specific feature is
 | Wiring | `pipelines.enabled` (**off**) | One `Pipeline` claiming the source above with the profile above — see [The bundle's own wiring](#the-bundles-own-wiring) |
 
 **The bundle ships no substrate.** There is no `AgentRuntime`, no runtime
-ServiceAccount, no LLM credential Secret and no runtime RBAC here: those are
-release-wide facts and live in the parent chart's `runtime:` block and
+ServiceAccount, no LLM credential Secret and no runtime RBAC here.
+
+Those are release-wide facts and live in the parent chart's `runtime:` block and
 `global.agentops.runtime.*`
-([concepts](concepts.md#the-substrate-runtime-and-globalagentopsruntime)). The
-profile executes on the parent's `AgentRuntime` named `default`;
+([concepts](concepts.md#the-substrate-runtime-and-globalagentopsruntime)).
+
+The profile executes on the parent's `AgentRuntime` named `default`.
 `profile.runtimeRef` points it at a different one you applied yourself.
 
 > **Renamed in chart 5.13.0.** This was `vm-bundle`. Every `vm-bundle.*` value
@@ -80,9 +88,11 @@ print the matching `http_config.authorization` block alongside it.
 ### Self-registration is VictoriaMetrics-only
 
 With `registration.enabled=true` (plus its target) the **adapter configures the
-sender itself**: it writes a `VMAlertmanagerConfig agentops-<source>` — a webhook
-receiver pointing at its own endpoint, with a route carrying `continue: true` so
-existing receivers keep their alerts — and the bundle renders the least-privilege
+sender itself**.
+
+It writes a `VMAlertmanagerConfig agentops-<source>` — a webhook receiver
+pointing at its own endpoint, with a route carrying `continue: true` so existing
+receivers keep their alerts — and the bundle renders the least-privilege
 Role/RoleBinding that makes it possible.
 
 **This cannot be generalized to vanilla Alertmanager**, and that is a property of
@@ -93,11 +103,16 @@ off and paste the receiver above.
 The routing decision lives entirely in the source's `register` block
 (`matchers`, `groupWait`, `groupInterval`, `repeatInterval`, `maxAlerts`,
 `sendResolved`), so it can **replace** a hand-written receiver rather than sit
-beside one. Two things decide whether the replacement actually receives anything,
-and both live on the sender: vm-operator appends these routes *after* the ones in
-your base config, so an earlier route matching the same alerts needs
-`continue: true` or it terminates matching first; and it scopes them to their own
-namespace unless the VMAlertmanager sets `spec.disableNamespaceMatcher`.
+beside one.
+
+**Two things decide whether the replacement actually receives anything, and both
+live on the sender:**
+
+- **Order.** vm-operator appends these routes *after* the ones in your base
+  config, so an earlier route matching the same alerts needs `continue: true` or
+  it terminates matching first.
+- **Namespace scope.** It scopes them to their own namespace unless the
+  VMAlertmanager sets `spec.disableNamespaceMatcher`.
 
 Registration failure never unserves the source: the webhook stays live and the
 source's Ready condition names the cause plus the manual step, retried every 15s
@@ -115,7 +130,7 @@ server it may not call:
   silently strip an agent's tools instead of failing.
 - **`mcpServers`** deploys the server itself
   (`ghcr.io/pab1it0/prometheus-mcp-server`) against a required `backend` URL.
-  With it deployed, an empty `mcp.url` defaults onto the deployed Service; an
+  With it deployed, an empty `mcp.url` defaults onto the deployed Service. An
   explicit `url` still wins.
 
 The toolset is **wildcarded**, unlike `k8s-bundle`'s enumerated lists. All six
@@ -131,15 +146,18 @@ definition.
 
 **The backend URL is never derived.** Single-node VictoriaMetrics serves
 `/api/v1`, cluster mode serves `/select/<accountID>/prometheus/api/v1`, and
-Prometheus serves `/api/v1` under whatever external URL it was given. No template
-can guess among those, and guessing wrong produces a server that starts and
-answers nothing. An enabled `mcp` component with neither a deployed server nor a
-URL fails the render.
+Prometheus serves `/api/v1` under whatever external URL it was given.
+
+No template can guess among those, and guessing wrong produces a server that
+starts and answers nothing. An enabled `mcp` component with neither a deployed
+server nor a URL fails the render.
 
 The server runs under **its own ServiceAccount**, never the runtime's — setting
-them equal fails the render. It needs no Kubernetes RBAC at all, because it reads
-an HTTP query endpoint rather than the API server, so the bundle renders none for
-it; the separate identity is where a backend credential would be projected.
+them equal fails the render.
+
+It needs no Kubernetes RBAC at all, because it reads an HTTP query endpoint
+rather than the API server, so the bundle renders none for it. The separate
+identity is where a backend credential would be projected.
 
 ```sh
 # deploy the server and let the config default onto it
@@ -165,6 +183,7 @@ whichever Pipeline routes it.
 Because it has **no repository**, no `.claude/agents/<name>.md` can be resolved
 for it, so the inline `systemPrompt` is not decoration: without it an alert would
 wake a personality-free agent whose only inputs are an allowlist and a payload.
+
 The shipped role tells it to query the metric that fired before concluding
 anything, to show the evidence behind its finding, and to recommend rather than
 claim to have applied a fix.
@@ -203,7 +222,7 @@ from `status.runs[].result`. A ref to a component you turned off is omitted
 rather than left dangling.
 
 **Sources are shareable.** The bundle's route and a route you declared under the
-parent chart's `pipelines:` may both claim `alerts`; both render, and each
+parent chart's `pipelines:` may both claim `alerts`. Both render, and each
 admitted alert opens one conversation **per claiming Pipeline**, under each
 profile's own capabilities. That is reported in the post-install notes, never
 refused. Declare the route yourself instead when one agent should answer these
