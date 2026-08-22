@@ -39,8 +39,12 @@ Migration guides for every breaking change. The ONLY place upgrade steps live.
 Follows <https://keepachangelog.com/en/1.1.0/>. Binding, not a suggestion:
 
 - **Newest first.** Unreleased at the top, then versions descending.
-- **One `##` heading per version**, `## [<version>] — <YYYY-MM-DD>`. A version is
-  a CHART version — image tags move independently and are named in the entry.
+- **One `##` heading per version**, `## [<version>] — <YYYY-MM-DD>`. Usually a
+  CHART version, with the image tags it ships named in the entry. A release that
+  bumps ONE component and no chart gets its own heading, named for it —
+  `## [console 0.15.9]`.
+- **One heading per version, not per change.** Two things shipped in one chart
+  version are one entry with two bullets, never two headings.
 - **Group changes under the six `###` types**, in this order, omitting empty
   ones: `Added` · `Changed` · `Deprecated` · `Removed` · `Fixed` · `Security`.
 - **A breaking change is marked in its entry**, not given a type of its own.
