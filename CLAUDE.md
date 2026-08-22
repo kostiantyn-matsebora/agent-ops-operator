@@ -11,6 +11,7 @@ names.
 |---|---|
 | `chart.md` | `chart/**` |
 | `palette-and-mark.md` | the console theme, the site's css/js, the mark's three files |
+| `signal-rules.md` | the event and log adapters, `internal/ingest/`, their chart values |
 
 **The published site carries its own context** — `docs/CLAUDE.md` plus
 `docs/.claude/`, loaded on demand when working under `docs/` and never at
