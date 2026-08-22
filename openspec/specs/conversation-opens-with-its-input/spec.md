@@ -3,8 +3,8 @@
 ## Purpose
 
 A thread reads as the event followed by the work: every input records where it
-came from, and every input the channel did not originate is posted to the bound
-channels as a semantic message — in parallel with dispatch, once per input and
+came from, and every input is delivered to every bound channel EXCEPT the
+surface that displayed it — in parallel with dispatch, once per input and
 channel, so the human sees what happened even if the agent never answers.
 ## Requirements
 ### Requirement: Inputs record where they came from; the pipeline is inferred
@@ -32,67 +32,72 @@ pipeline that is a guess.
 - **WHEN** a conversation's bindings match more than one Ready pipeline
 - **THEN** the message renders without a pipeline name and is otherwise complete
 
-### Requirement: Bound channels receive every input the channel did not originate
+### Requirement: Bound channels receive every input the destination has not already seen
 
-When an input is appended to a conversation, it SHALL be posted to the
-conversation's bound channels as a `signal` message, unless a human has already
-seen it. Inputs whose origin kind is `signal` SHALL be posted; inputs whose
-origin kind is `channel` SHALL NOT, since the originating surface already shows
-them and sibling surfaces receive them through the existing relay. An input
-carrying NO origin SHALL NOT be posted, so inputs predating this change do not
-produce cards on the first reconcile after upgrade. The decision SHALL be made
-from the recorded origin rather than by enumerating input types, so a new input
-type inherits correct behavior.
+When an input is appended to a conversation, it SHALL be delivered to every
+bound channel EXCEPT the surface it entered on.
 
-One exception SHALL be stated rather than derived: an input originating from a
-`kind: chat` signal SHALL NOT be posted. A chat message reaches the manager
-through a `SignalSource` like any other signal, so its origin kind is `signal`,
-but the person who typed it has already seen it on their own surface.
+The decision SHALL be made per DESTINATION, never once per message. "Already
+seen" is a fact about a surface: a message typed on surface A was displayed by A
+when it was typed, and is new to every other bound channel. Deciding once, from
+the input's origin KIND, is what withheld a person's words from channels that
+had never shown them.
 
-Posted messages SHALL name the originating source, and the pipeline when it can
+The rule SHALL be read off the origin SURFACE — the source or channel the input
+entered through — so a new input kind inherits correct behavior without the rule
+being edited. There SHALL be no separate clause for chat: a `kind: chat` signal
+entered on a surface like any other message, and that surface is the one
+destination it is not delivered to.
+
+An input carrying NO origin SHALL be delivered nowhere, so inputs predating
+provenance do not fill open threads on the first reconcile after upgrade.
+
+Delivered messages SHALL name where they came from, and the pipeline when it can
 be inferred.
 
 #### Scenario: An alert thread opens with the alert
-
 - **WHEN** an alert opens a conversation bound to a channel
 - **THEN** the thread's first message is the event — its pipeline, source,
   title, labels, and payload — before the agent has produced anything
 
+#### Scenario: A person's message reaches the surfaces that did not show it
+- **WHEN** a person sends a message on surface A of a conversation bound to A and B
+- **THEN** B receives it attributed to its sender, and A receives nothing,
+  because A displayed it when it was typed
+
+#### Scenario: A single-surface viewer receives its own users' messages
+- **WHEN** a person sends a message on a surface that does not display it itself
+- **THEN** that surface receives it like any other destination, because whether
+  a transport echoes is a fact about the transport and not about the message
+
+#### Scenario: A chat message needs no special case
+- **WHEN** a `kind: chat` signal opens a conversation bound to several channels
+- **THEN** every bound channel except the originating surface receives it, with
+  no rule naming the chat lane
+
 #### Scenario: A new input type inherits the rule
-
-- **WHEN** an input type is added whose origin kind is `signal`
-- **THEN** it is posted without the posting rule being edited
-
-#### Scenario: A recurrence posts into the existing thread
-
-- **WHEN** the same problem recurs and appends an input to an existing
-  conversation
-- **THEN** the recurrence is posted to the bound threads, so the thread reads as
-  a log of what happened
+- **WHEN** an input type is added
+- **THEN** it is delivered by the same per-destination rule, unedited
 
 #### Scenario: A posted task explains itself
 
 - **WHEN** a `kind: task` signal opens a conversation on a claimed source
-- **THEN** the task text is posted to the bound channels, so the topic does not
-  appear without a stated cause
+- **THEN** the task text is delivered to the bound channels, so the topic does
+  not appear without a stated cause
 
-#### Scenario: A user's own message is not echoed
+#### Scenario: A recurrence posts into the existing thread
+- **WHEN** the same problem recurs and appends an input to an existing
+  conversation
+- **THEN** the recurrence is delivered to the bound threads, so the thread reads
+  as a log of what happened
 
-- **WHEN** a chat signal or a thread reply becomes an input
-- **THEN** it is not posted back to the channel it came from, even though a chat
-  signal carries a `signal` origin
+#### Scenario: Inputs predating provenance are delivered nowhere
+- **WHEN** a conversation created before provenance existed is reconciled
+- **THEN** its origin-less inputs deliver nothing
 
-#### Scenario: Inputs predating provenance produce no cards
-
-- **WHEN** a conversation created before this change is reconciled after upgrade
-- **THEN** its origin-less inputs post nothing, so upgrading does not fill open
-  threads with history
-
-#### Scenario: Siblings still see relayed user messages
-
-- **WHEN** a user replies on one channel of a multi-channel conversation
-- **THEN** the sibling channels receive it through the existing relay, not as an
-  input card
+#### Scenario: A source nobody reads still reaches every channel
+- **WHEN** an input enters on a source that is no channel's surface
+- **THEN** every bound channel receives it, because none of them displayed it
 
 ### Requirement: Input posting runs in parallel with dispatch
 
