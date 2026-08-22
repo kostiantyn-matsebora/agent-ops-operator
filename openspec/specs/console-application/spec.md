@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change rich-console-ui. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: One service fans in every source the browser must not touch
 The console SHALL be a single Go service that aggregates Kubernetes CR list/watch, the manager's activity stream, install facts (Deployments and pods), and the manager's channel and signal contracts, and serves a browser API plus the frontend. The browser SHALL NOT hold Kubernetes credentials or reach the Kubernetes API, the manager, or the activity stream directly.
 
@@ -17,15 +19,23 @@ The service SHALL make no write to the Kubernetes API. Its only writes SHALL be 
 - **THEN** no Kubernetes object is created, updated or deleted by the console
 
 ### Requirement: Snapshots are authoritative and the stream carries cursors
-The console SHALL serve a snapshot endpoint per view and a single SSE stream carrying CR deltas, activity events and transcript appends, each with a monotonic cursor. The browser SHALL treat snapshots as authoritative and re-fetch on delta; a missed event SHALL cost staleness, never a wrong screen. First connect and reconnect SHALL follow the same path.
+The console SHALL serve a snapshot endpoint per view and a single SSE stream carrying CR deltas, activity events and transcript appends, each with a monotonic cursor. The browser SHALL treat snapshots as authoritative and re-fetch on RESYNC; a missed event SHALL cost staleness, never a wrong screen. First connect and reconnect SHALL follow the same path.
+
+**A DELTA CARRIES ITS OBJECT, AND IS APPLIED.** An event SHALL carry the changed object as the console would have fetched it, and the browser SHALL apply it to what it already holds. Re-fetching on every delta was the mechanism, and it cost a request and a blank page per change while the answer was already on the wire.
+
+A snapshot stays AUTHORITATIVE, which is what makes applying safe: a resync replaces applied state wholesale, so an applier that is ever wrong is corrected by the next reconnect rather than persisting.
 
 #### Scenario: A sleeping tab converges
 - **WHEN** a browser is disconnected while many changes occur, then reconnects
 - **THEN** it receives a resync, re-fetches snapshots, and its rendered state equals a cold load
 
+#### Scenario: A delta updates the view without a request
+- **WHEN** a watched object changes while a view holding it is open
+- **THEN** the view updates from the event, and no snapshot is re-fetched
+
 #### Scenario: The wire format survives CRD evolution
 - **WHEN** a CRD gains fields
-- **THEN** delta events still carry only kind, name and cursor, and the browser re-reads the snapshot
+- **THEN** the browser renders the fields it knows and ignores the rest, exactly as it does from a snapshot
 
 ### Requirement: The overview page reports the installation and what is wrong with it
 The console SHALL serve an overview covering: chart version and `appVersion`; the manager's image, readiness, replica state and uptime; every adapter with its image, readiness, port and served-CR count; every runtime image; `MAX_RUNTIMES` against runtime pods in use; active conversations and queued inputs; and a rollup of EVERY condition across every watched kind that is not `True`, newest first, each linking to its object.
@@ -165,4 +175,3 @@ The console SHALL NOT gain a second, undocumented way to assert an identity.
 
 - **WHEN** the published list is compared to the console's own source
 - **THEN** the two contain the same headers in the same order
-

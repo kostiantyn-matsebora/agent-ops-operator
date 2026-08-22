@@ -190,8 +190,34 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "conversation " + name + " not found"})
 		return
 	}
-	summary := summarize(obj, a.cache.List("pipelines"), a.adapter.PrimaryChannel(), a.adapter.ReaderKey(Identity(r)))
+	out := a.ConversationView(obj, a.adapter.ReaderKey(Identity(r)))
+	summary := out["conversation"].(ConversationSummary)
 	var messages []Message
+	if summary.ConsoleThread != "" {
+		messages = a.transcripts.Thread(summary.ConsoleThread)
+		// MERGE with the durable record, always — never only when the buffer
+		// looks empty. Conditioning on emptiness broke the moment a reader
+		// typed a reply: their own message made the buffer non-empty, the
+		// durable answers stopped being served, and the history vanished
+		// mid-conversation.
+		messages = mergeTranscript(summary.ConsoleThread, a.adapter.PrimaryChannel(), messages, summary.Runs)
+	}
+	out["transcript"] = messages
+	out["events"] = a.activity.ForConversation(name)
+	writeJSON(w, http.StatusOK, out)
+}
+
+// ConversationView projects one conversation into what its page shows, MINUS
+// the two parts that arrive on streams of their own: the transcript, which the
+// message events append to, and the activity events.
+//
+// The stream sends this on a conversations delta, so a browser holding the page
+// writes the new phase, run and bindings straight in. Splitting the transcript
+// out is what keeps that cheap: a run advancing changes the object, and the
+// answer it produced arrives once, as a message, rather than again inside every
+// later delta.
+func (a *API) ConversationView(obj *Object, reader string) map[string]any {
+	summary := summarize(obj, a.cache.List("pipelines"), a.adapter.PrimaryChannel(), reader)
 	// Archived — "there is nothing here to reply to" — is read from the
 	// CONVERSATION's phase first, and only then from this console's own
 	// transcript state.
@@ -209,24 +235,15 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 	// observed.
 	archived := strings.EqualFold(summary.Phase, "Closed")
 	if summary.ConsoleThread != "" {
-		messages = a.transcripts.Thread(summary.ConsoleThread)
 		archived = archived || a.transcripts.Archived(summary.ConsoleThread)
-		// MERGE with the durable record, always — never only when the buffer
-		// looks empty. Conditioning on emptiness broke the moment a reader
-		// typed a reply: their own message made the buffer non-empty, the
-		// durable answers stopped being served, and the history vanished
-		// mid-conversation.
-		messages = mergeTranscript(summary.ConsoleThread, a.adapter.PrimaryChannel(), messages, summary.Runs)
 	}
 	out := map[string]any{
 		"conversation": summary,
 		"object":       obj,
 		"yaml":         objectYAML(obj),
-		"transcript":   messages,
 		// archived: a close-topic op ended this thread. The transcript stays
 		// readable; there is just nothing left to reply to.
 		"archived": archived,
-		"events":   a.activity.ForConversation(name),
 	}
 	if pod := a.cache.Get("pods", summary.RuntimePod); pod != nil {
 		ps := decodeSpec[podStatusView](pod.Status)
@@ -239,7 +256,19 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 	if !summary.Joined {
 		out["joinHint"] = a.joinHint(summary)
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out
+}
+
+// ConversationRow projects one conversation into the row its listing shows.
+//
+// Run history is dropped exactly as the listing drops it: a result is a whole
+// agent message, and a delta that carried thousands of them per change would be
+// heavier than the re-fetch it replaces.
+func (a *API) ConversationRow(obj *Object, reader string) ConversationSummary {
+	s := summarize(obj, a.cache.List("pipelines"), a.adapter.PrimaryChannel(), reader)
+	s.RunCount = len(s.Runs)
+	s.Runs = nil
+	return s
 }
 
 // joinHint explains why there is no composer and what to change.

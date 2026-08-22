@@ -452,6 +452,17 @@ console:
   displayName: agent-ops console
   image:
     repository: kmatsebora/agentops-console
+    # 0.25.1 makes the console LIVE rather than polling. A stream event now
+    # carries the changed object, projected into the shapes the snapshots serve,
+    # so a listing, a kind detail and an open conversation update in place. A
+    # change counter used to sit in every query key, which made each event a
+    # cache miss and blanked the page for a second — sending a message did it
+    # three times. Views that cannot be applied — install counts, the traffic
+    # graph, cross-object findings, resolved capabilities — re-read on a stable
+    # key, so they change without blanking. The browser cache is bounded to five
+    # minutes off screen and persists nothing. Sending a message asks for
+    # nothing either: the manager delivers it back to this channel, so the
+    # bubble arrives on the stream like any other.
     # 0.15.13 scopes the graph to what you clicked, and fixes a graph that
     # rendered tiny in a corner. Selecting an element narrows the picture to the
     # ROUTE THROUGH IT — everything upstream and everything downstream, to a
@@ -473,7 +484,7 @@ console:
     # The corner: a graph inside an inactive tab measured a 0x0 host, fitted to
     # it, and clamped to minimum zoom for good. The fit now waits for a host
     # with a size, so it works in a tab, a drawer, or wherever one lands next.
-    tag: 0.24.0
+    tag: 0.25.1
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:

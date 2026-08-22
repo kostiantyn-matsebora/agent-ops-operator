@@ -1,12 +1,13 @@
-## Purpose
+# console-live-updates Specification
 
+## Purpose
 The console holds one stream for its whole lifetime and still reloaded its data
 over HTTP whenever anything changed, blanking the page each time. This
 capability covers how a LOADED console stays current: what an event carries, how
 it is applied, when a refetch is still the right answer, and the rule that a
 view which has painted never goes back to a spinner.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: A change event carries what changed
 An event announcing a change SHALL carry the changed object, not only its
@@ -16,9 +17,19 @@ now is.
 This SHALL hold for every kind the console renders. An event that can only be
 answered by a request is a request with extra steps.
 
+The object SHALL be carried in the SHAPES that view serves it in, projected by
+the SAME code the snapshot endpoints use. A consumer SHALL NOT have to
+reconstruct a projection the server already performs, because a second
+implementation of it eventually disagrees with the first.
+
 #### Scenario: A delta carries its object
 - **WHEN** a watched object is created or updated
 - **THEN** the event carries the object as the console would have fetched it
+
+#### Scenario: An applied entry equals a fetched one
+- **WHEN** the same object state is applied from an event and fetched from a
+  snapshot
+- **THEN** the two are the same shape, field for field
 
 #### Scenario: A message carries its content
 - **WHEN** a message is appended to a conversation
@@ -85,8 +96,16 @@ each SHALL be named where it happens:
 - A DERIVED value that decays with TIME rather than with change, such as a rate.
   A rate is not wrong because something changed; it is wrong because time
   passed, and no event announces that.
+- An AGGREGATE the browser cannot reconstruct from the object that changed — a
+  count across every kind, a graph resolved over all of them, a relation BETWEEN
+  objects, or an answer the manager alone computes. Recomputing one in the
+  browser would be a second implementation of what the server says.
 
 A timed refetch for anything else SHALL NOT exist.
+
+An aggregate re-read SHALL keep its view on screen — the identity of the view
+does not change, so the read happens underneath what is already rendered. A
+burst of changes SHALL cost one re-read per view rather than one per change.
 
 #### Scenario: A reconnect reloads
 - **WHEN** the stream reconnects, or reports a gap
@@ -99,6 +118,11 @@ A timed refetch for anything else SHALL NOT exist.
 #### Scenario: Nothing else polls
 - **WHEN** the console is inspected for timed refreshes
 - **THEN** every one names a decaying value, and none exists to observe change
+
+#### Scenario: An aggregate re-reads without blanking
+- **WHEN** an object changes and a view derived from many objects is on screen
+- **THEN** it re-reads, its content stays on screen throughout, and a burst
+  costs one re-read rather than one per change
 
 ### Requirement: The cache is bounded
 Applying events keeps a view's data current for as long as it is held, so

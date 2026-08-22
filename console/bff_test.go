@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -506,4 +507,200 @@ func TestStreamOpensWithResyncAndMultiplexes(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+// deltaEvents pulls the `delta` events out of an SSE body.
+func deltaEvents(t *testing.T, body string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, block := range strings.Split(body, "\n\n") {
+		if !strings.HasPrefix(block, "event: delta\n") {
+			continue
+		}
+		data := strings.TrimPrefix(strings.SplitN(block, "\n", 2)[1], "data: ")
+		var m map[string]any
+		if err := json.Unmarshal([]byte(data), &m); err != nil {
+			t.Fatalf("delta event is not JSON: %v (%s)", err, data)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// A delta CARRIES what changed, in the shapes the snapshots serve.
+//
+// It used to carry `{type, kind, name}`, so a browser told that something had
+// changed had to ask what it now was — a request per change per browser, and a
+// blank page while the answer came back. What is pinned here is that the answer
+// is already on the wire: a create and an update arrive complete, and a delete
+// carries its identity and type, which is all that dropping a row needs.
+func TestDeltaCarriesTheChangedObject(t *testing.T) {
+	api, _, _, cache := apiWithOptions(t, "tok", true, fixtureInstall()...)
+	h := api.Handler(http.NotFoundHandler())
+
+	req := httptest.NewRequest("GET", "/api/stream", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	ctx, cancel := contextWithCancel(req)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() { h.ServeHTTP(rec, req); close(done) }()
+	waitForNamed(t, "the opening resync", func() bool { return strings.Contains(rec.Body.String(), "event: resync") })
+
+	cache.apply("ADDED", obj("channels", "fresh", "2", `{"adapter":"console"}`, cond("Served", "True", "")))
+	cache.apply("MODIFIED", obj("conversations", "conv-1", "3",
+		`{"profileRef":{"name":"k8s-engineer"}}`, `{"phase":"Running"}`))
+	cache.apply("ADDED", obj("pipelines", "extra", "2",
+		`{"profileRef":{"name":"k8s-engineer"}}`, cond("Ready", "True", "")))
+	cache.apply("DELETED", obj("channels", "slack", "4", `{"adapter":"slack"}`, "{}"))
+	waitForNamed(t, "four deltas", func() bool { return len(deltaEvents(t, rec.Body.String())) >= 4 })
+
+	cancel()
+	<-done
+
+	byName := map[string]map[string]any{}
+	for _, d := range deltaEvents(t, rec.Body.String()) {
+		byName[d["kind"].(string)+"/"+d["name"].(string)] = d
+	}
+
+	created := byName["channels/fresh"]
+	if created["type"] != "ADDED" {
+		t.Fatalf("a create must say so: %v", created["type"])
+	}
+	row, ok := created["row"].(map[string]any)
+	if !ok || row["name"] != "fresh" || row["health"] == nil {
+		t.Fatalf("a created object must arrive as the row a listing shows: %v", created["row"])
+	}
+	detail, ok := created["detail"].(map[string]any)
+	if !ok || detail["object"] == nil || detail["yaml"] == "" {
+		t.Fatalf("a created object must arrive as the detail a kind page shows: %v", created["detail"])
+	}
+
+	updated := byName["conversations/conv-1"]
+	if updated["type"] != "MODIFIED" {
+		t.Fatalf("an update must say so: %v", updated["type"])
+	}
+	cr, ok := updated["conversationRow"].(map[string]any)
+	if !ok || cr["phase"] != "Running" {
+		t.Fatalf("a conversation delta must carry its listing row: %v", updated["conversationRow"])
+	}
+	cv, ok := updated["conversationView"].(map[string]any)
+	if !ok || cv["conversation"] == nil || cv["yaml"] == "" {
+		t.Fatalf("a conversation delta must carry its page: %v", updated["conversationView"])
+	}
+	// The transcript is NOT in it: messages arrive once, as message events, and
+	// repeating them inside every later delta is what would make this heavier
+	// than the re-fetch it replaces.
+	if _, present := cv["transcript"]; present {
+		t.Fatal("a conversation delta must not repeat the transcript")
+	}
+
+	// Pipeline detail is the stated exception: it carries the manager's
+	// resolved capabilities, which the console must not recompute.
+	pipeline := byName["pipelines/extra"]
+	if pipeline["row"] == nil {
+		t.Fatal("a pipeline delta still carries its listing row")
+	}
+	if pipeline["detail"] != nil {
+		t.Fatal("pipeline detail is fetched, not streamed — the resolved capabilities are the manager's answer")
+	}
+
+	deleted := byName["channels/slack"]
+	if deleted["type"] != "DELETED" || deleted["name"] != "slack" || deleted["kind"] != "channels" {
+		t.Fatalf("a delete must carry its identity and type: %v", deleted)
+	}
+	if deleted["row"] != nil || deleted["detail"] != nil {
+		t.Fatalf("a delete carries no object — there is none left: %v", deleted)
+	}
+}
+
+// An applied view must be a shape a re-fetch would also produce.
+//
+// This is what makes applying safe rather than a second source of truth: the
+// stream and the snapshot endpoints run the SAME projection over the same
+// object, so a browser writing a delta into its cache cannot end up rendering
+// something the server would never have sent it.
+func TestDeltaShapesEqualTheSnapshots(t *testing.T) {
+	objs := append(fixtureInstall(),
+		obj("conversations", "conv-1", "1",
+			`{"profileRef":{"name":"k8s-engineer"},"channelRefs":[{"name":"console"}]}`,
+			`{"phase":"Running","threads":[{"channel":"console","threadId":"th-1"}]}`))
+	api, _, _, _ := apiWithOptions(t, "tok", true, objs...)
+	h := api.Handler(http.NotFoundHandler())
+
+	// A CHANNEL: row against the listing, detail against the kind page.
+	channel := api.cache.Get("channels", "console")
+	ev := api.deltaEventFor(Delta{Type: "MODIFIED", Kind: "channels", Name: "console", Object: channel}, "")
+
+	var rows []InventoryRow
+	getJSON(t, h, "/api/config/channels", &rows)
+	var fetchedRow InventoryRow
+	for _, r := range rows {
+		if r.Name == "console" {
+			fetchedRow = r
+		}
+	}
+	if !jsonEqual(t, ev.Row, fetchedRow) {
+		t.Fatalf("the streamed row is not the row the listing serves:\n stream: %s\n fetch:  %s",
+			mustJSON(t, ev.Row), mustJSON(t, fetchedRow))
+	}
+
+	var fetchedDetail Detail
+	getJSON(t, h, "/api/config/channels/console", &fetchedDetail)
+	if !jsonEqual(t, ev.Detail, fetchedDetail) {
+		t.Fatalf("the streamed detail is not the detail the kind page serves:\n stream: %s\n fetch:  %s",
+			mustJSON(t, ev.Detail), mustJSON(t, fetchedDetail))
+	}
+
+	// A CONVERSATION: the listing row, and the page minus the two parts that
+	// arrive on streams of their own.
+	conv := api.cache.Get("conversations", "conv-1")
+	cev := api.deltaEventFor(Delta{Type: "MODIFIED", Kind: "conversations", Name: "conv-1", Object: conv}, "")
+
+	var page struct {
+		Items []ConversationSummary `json:"items"`
+	}
+	getJSON(t, h, "/api/conversations", &page)
+	var fetchedSummary ConversationSummary
+	for _, c := range page.Items {
+		if c.Name == "conv-1" {
+			fetchedSummary = c
+		}
+	}
+	if !jsonEqual(t, cev.ConversationRow, fetchedSummary) {
+		t.Fatalf("the streamed conversation row is not the row the listing serves:\n stream: %s\n fetch:  %s",
+			mustJSON(t, cev.ConversationRow), mustJSON(t, fetchedSummary))
+	}
+
+	var fetchedPage map[string]any
+	getJSON(t, h, "/api/conversations/conv-1", &fetchedPage)
+	for key, streamed := range cev.ConversationView {
+		if !jsonEqual(t, streamed, fetchedPage[key]) {
+			t.Fatalf("conversation view %q differs from the page:\n stream: %s\n fetch:  %s",
+				key, mustJSON(t, streamed), mustJSON(t, fetchedPage[key]))
+		}
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
+}
+
+// jsonEqual compares two values as the browser sees them — over the wire.
+func jsonEqual(t *testing.T, a, b any) bool {
+	t.Helper()
+	var av, bv any
+	if err := json.Unmarshal([]byte(mustJSON(t, a)), &av); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := json.Unmarshal([]byte(mustJSON(t, b)), &bv); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return reflect.DeepEqual(av, bv)
 }
