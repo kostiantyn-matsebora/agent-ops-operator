@@ -43,6 +43,7 @@ filename — so the routing is explicit:
 | A change to the console's UI | re-run BOTH `npm run screenshots` and `npm run demo` in `console/ui` — the site's screenshots and its landing recording are build output, and the change is not done until both match |
 | The pitch, the kind list, the demo, the install command | `README.md` |
 | The site's SHELL — Jekyll source, diagrams, what each page owes beyond its row | `docs/.claude/site.md` |
+| A colour token, the theme choice, or the mark | `.claude/rules/palette-and-mark.md` — always a TWO-FILE change |
 | How the site LOOKS or navigates | `docs/_layouts/`, `_includes/`, `_data/nav.yml`, `assets/` |
 | What the site SAYS to an adopter | a markdown page under `docs/` |
 | How a page READS — structure, tabs, components, tables, the lint | `docs/CLAUDE.md` |
@@ -62,42 +63,6 @@ the pages hold no theme, and neither holds the rules.**
 - So is a markdown page that opens with a `<div>` or an inline style.
 - Adding a page to the site is a page plus one line in `_data/nav.yml`, never
   navigation markup written a second time.
-
-### The palette and the mark are COPIED, and the copy is one block
-
-**The site's `--ao-*` palette is copied from `console/ui/src/theme/theme.css`**
-into the token blocks at the head of `docs/assets/css/agentops.css`. Changing a
-token is a TWO-FILE change.
-
-**The copy is deliberate and one-directional** — a Jekyll site must not need a
-Node build to publish a paragraph.
-
-**What makes it survivable is that no colour is stated literally anywhere else
-in the site CSS**, so the sync is one block, not a hunt:
-
-```sh
-grep -n '#[0-9a-fA-F]\{3,6\}' docs/assets/css/agentops.css
-```
-
-That must return hits only inside those blocks.
-
-**The theme-choice semantics are copied on the same terms** —
-`assets/js/theme.js` from `theme/useTheme.ts`.
-
-**The MARK is copied on those terms across THREE files:**
-
-| File | Is |
-|---|---|
-| `console/ui/src/components/Logo.tsx` | the source |
-| `docs/_includes/logo.svg` | the masthead's theme-driven copy |
-| `docs/assets/img/logos/agent-ops.svg` | the standalone one an `<img>` can load |
-
-The standalone one states its colours literally, because an `<img>` is its own
-document and inherits no custom properties.
-
-**Integration marks sit beside it**, committed unaltered from each project's own
-source with their terms in that directory's README, and the PAGE names each
-file. A vendor list in the stylesheet would be product knowledge in the theme.
 
 ### README.md has a budget: 150 lines
 

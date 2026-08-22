@@ -36,10 +36,15 @@ holds nothing else.
 only when one of them is READ. A file without it loads at launch.
 
 - **Scope a rule ONLY IF every way to get it wrong is preceded by reading a
-  matching file.** Most of these fail that test: they fire on a shell command,
-  on a chat answer, or while writing a file that does not exist yet, and none of
-  those is a read.
-- **`chart.md` is the only one that passes** — a chart mistake is a chart edit.
+  matching file.** Editing a file requires reading it first, so a rule whose
+  whole harm is a BAD EDIT to named files qualifies — `chart.md` and
+  `palette-and-mark.md` are the two.
+- **A rule whose harm is a WRONG SENTENCE or a SHELL ACTION cannot be scoped.**
+  Neither is a read: `wiring` is claimed in chat, `gotchas` fires on `helm` and
+  `docker`, `build-test` on being asked to ship.
+- **When a scoped rule is extracted, the always-loaded rule NAMES it.** The
+  routing table carries the row, the detail loads with the files. Otherwise
+  splitting a checklist deletes an item from it.
 - **A scoped rule is LOST at compaction** until a matching file is read again.
   An unscoped one is re-injected from disk, exactly as the root `CLAUDE.md` is,
   which is the second reason to scope sparingly.
