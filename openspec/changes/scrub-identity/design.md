@@ -117,9 +117,32 @@ allowed to contain. Without it, the next person documenting a new field pastes
 their own real value in, exactly as happened here — and the guard would catch
 it, but nothing would have told them why.
 
+## D7. The archive keeps its reasoning and loses its identifiers
+
+The archive is a historical record, so its DECISIONS are immutable — a change
+that argued for something later reversed stays as it was argued, because the
+reversal is the most useful thing the record holds.
+
+**An identifier in an archived document is not part of the decision it
+records.** A clone URL in a task line, a directory path inside a private
+repository, the names of objects in one person's live install — these are facts
+about the author's machine, not about what was decided. Substituting them leaves
+the record intact and its argument unchanged; leaving them publishes a person.
+
+So the archive gets exactly one operation: **substitution in place**. Not
+rewriting, not summarising, not deleting entries that read as dated. A section
+titled after a private repository keeps its heading and its position; only the
+name inside it changes.
+
+The class is wider here than in the tree. Archived tasks reference not only the
+private repository but its INTERNAL LAYOUT and the object names of the install
+they were verified against, which together describe someone's deployment rather
+than merely naming it.
+
 ## Open questions
 
-- **`claude-runner`** appears in several modules and one sample comment. It
-  reads as a legacy component name in the code and as the author's prior
-  personal setup in the sample. Owner's call whether it is a fifth class or
-  simply history. Resolved before task 1.1.
+- **A legacy component name** appears in several module sources and in one
+  sample's opening comment. In the code it reads as an ordinary historical
+  name; in the sample it reads as the author's prior personal setup. Owner's
+  call whether it is a fifth class or simply history — resolved before task 1.1,
+  and named nowhere until then.

@@ -52,10 +52,21 @@ most natural way to reintroduce exactly what was removed.
 
 - [ ] 3.1 Substitute across archived changes. These are published with
       everything else and are the largest concentration of one class
-- [ ] 3.2 Leave the SHAPE of each archived document intact — a substitution, not
-      a rewrite. An archived change is a record of what was decided; editing its
-      reasoning to suit a later cleanup falsifies it
-- [ ] 3.3 `openspec validate --specs --strict` and `--changes --strict` pass
+- [ ] 3.2 Treat the archive class as WIDER than a name. Archived tasks reference
+      the private repository, the directory layout INSIDE it, and the object
+      names of the install each change was verified against — together a
+      description of someone's deployment, not merely a mention of it
+- [ ] 3.3 Leave the SHAPE of each archived document intact — substitution in
+      place, never rewriting, summarising or deleting an entry that reads as
+      dated. A section titled after a private repository keeps its heading and
+      its position; only the name inside it changes. An archived change records
+      what was decided, and the identifiers in it were never part of that
+      decision — see `design.md` D7
+- [ ] 3.4 Decide, once, which live object names identify the author's install
+      and which are ordinary vocabulary an adopter would choose too. Substitute
+      the first kind; leave the second, because renaming generic vocabulary
+      makes the record harder to read for no gain
+- [ ] 3.5 `openspec validate --specs --strict` and `--changes --strict` pass
 
 ## 4. The history — LAST, once
 
