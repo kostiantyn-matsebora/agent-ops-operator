@@ -6,6 +6,11 @@ OPEN — each agent's purpose shapes its own — while the fold and the caps are
 CLOSED, so every surface can present any agent's answer without knowing what that
 agent does.
 
+This capability owns the GRAMMAR, the parse and the cap. Who gets the format
+specification injected belongs to `profile-is-identity`, and whether a signal
+body is parsed at all belongs to `signal-adapter-contract` — each stated ONCE, in
+the capability that owns it.
+
 ## ADDED Requirements
 
 ### Requirement: Agent output is parsed into blocks
@@ -19,11 +24,22 @@ recognized tag SHALL yield a single above-the-fold block holding the whole text,
 which is how output written before this grammar — or by an agent that ignores it
 — keeps rendering exactly as it does today.
 
+Parsing SHALL follow AGENT-REPORTED text rather than the message kind that
+carries it. A run that failed and explained itself is reported as a notice, and
+that explanation SHALL be parsed exactly as an answer is — it is the longest
+thing a failed investigation produces, and so the output the fold serves best.
+
 #### Scenario: Untagged output still renders
 
 - **WHEN** an agent reports plain prose with no block tags
 - **THEN** it becomes one above-the-fold block, and every surface renders it as
   it renders agent output today
+
+#### Scenario: A failed run's explanation is folded too
+
+- **WHEN** a run fails and its own explanation is what reaches the thread
+- **THEN** that explanation is parsed into blocks and folded, the same as a
+  successful run's answer
 
 #### Scenario: Adapters receive blocks, never grammar
 
@@ -112,52 +128,3 @@ reader who does not expand anything reads a bounded amount.
 
 - **WHEN** any output is parsed, capped and rendered
 - **THEN** the full text the agent reported remains reachable on the surface
-
-### Requirement: A profile decides whether the format spec is injected
-
-`AgentProfile` SHALL carry a flag declaring that the shared output-format
-specification is appended to its agent's prompt. When the flag is set, the spec
-is injected. When it is unset, NOTHING is injected and the profile's own prompt
-owns formatting entirely.
-
-The flag SHALL gate the PROMPT only. Parsing SHALL remain unconditional, so a
-profile that declines the shared spec and instructs its own agent to emit blocks
-still gets them parsed.
-
-#### Scenario: A profile opts out and formats itself
-
-- **WHEN** a profile leaves the flag unset and its own prompt instructs the agent
-  to emit `<title>` and `<details>`
-- **THEN** no shared spec is injected, and the emitted blocks are still parsed
-  and folded
-
-#### Scenario: A profile opts in
-
-- **WHEN** a profile sets the flag and says nothing about output in its own prompt
-- **THEN** the shared spec is injected, carrying the grammar and a default set of
-  sections
-
-### Requirement: A signal body is parsed only when its producer says so
-
-A signal's body SHALL be treated as raw text unless the producing adapter
-declares it tagged on the inbound signal. Absent that declaration the body is
-passed through unparsed, exactly as today.
-
-A chat signal's body is a person's typed words. Parsing it by default would
-consume text somebody deliberately typed.
-
-#### Scenario: A person's words survive intact
-
-- **WHEN** a person types a chat message containing `<details>`
-- **THEN** those characters reach the thread as typed, and nothing is folded
-
-#### Scenario: An adapter emits a structured signal
-
-- **WHEN** a signal adapter declares its body tagged
-- **THEN** the body is parsed into blocks and rendered with its fold
-
-#### Scenario: Existing adapters are unaffected
-
-- **WHEN** an adapter that predates this grammar posts a signal
-- **THEN** it carries no declaration, its payload is raw, and the card renders as
-  it does today
