@@ -57,12 +57,18 @@ and which is idle on a docs tweak.
 .claude/hooks/session-title.sh set 'opsx:apply discoverable-addressing'
 ```
 
-That writes the title and paints it. Hooks on `UserPromptSubmit`, `Stop` and
-`SessionStart` REPAINT it at every turn boundary, because Claude Code writes the
-terminal title itself and a one-off escape does not survive. `SessionEnd`
-forgets it. All four are wired in `.claude/settings.json`; the script is a
-silent no-op with no title file, no terminal or no `jq`, so a hook never becomes
-an error.
+That writes the title and paints it.
+
+| Hook | Does |
+|---|---|
+| `UserPromptSubmit`, `Stop`, `SessionStart` | REPAINT at every turn boundary |
+| `SessionEnd` | forgets the title |
+
+- **The repaint is required, not belt-and-braces.** Claude Code writes the
+  terminal title itself, so a one-off escape does not survive.
+- **All four are wired in `.claude/settings.json`.**
+- **The script is a silent no-op** with no title file, no terminal or no `jq`,
+  so a hook never becomes an error.
 
 **BOTH LIVE IN THIS REPO AND ARE COMMITTED**, so a clone gets the behaviour and
 the rule that names it in one checkout. `$CLAUDE_PROJECT_DIR` is what keeps the
@@ -1043,10 +1049,12 @@ prose, the command tabs, the components a page may name, the table rules and the
 pre-flight lint. This file routes what goes where, that one governs how it
 reads.
 
-**`docs/CHANGELOG.md`** holds every chart-version migration guide, newest first
-— the ONLY place upgrade steps live. Keep a Changelog 1.1.0 format, TEN
-versions. Older ones move verbatim to `docs/changelog/CHANGELOG-<range>.md`,
-linked from its foot.
+**`docs/CHANGELOG.md`** holds every chart-version migration guide.
+
+- **The ONLY place upgrade steps live.**
+- **Newest first**, Keep a Changelog 1.1.0 format.
+- **TEN versions.** Older ones move VERBATIM to
+  `docs/changelog/CHANGELOG-<range>.md`, linked from its foot.
 
 #### The site's pages
 
@@ -1783,59 +1791,63 @@ cannot be pinned by a chart render test. Verify it with
 
 **A HAND-PATCHED FIELD SURVIVES EVERY LATER `helm upgrade`.**
 
-Helm's three-way merge diffs the PREVIOUS rendered manifest against the NEW
-one, and patches only what differs there. A field whose rendered value did not
-change generates no patch, so a `kubectl patch` applied during debugging is
-never corrected — the release reports success, `helm get manifest` shows the
-declared value, and the live object keeps the other one indefinitely.
+Helm's three-way merge patches only what differs between the PREVIOUS rendered
+manifest and the NEW one, so an unchanged rendered value generates no patch at
+all.
 
-`k8s-ops` sat on a debugging icon through five chart upgrades that way.
-
-**So a live patch is undone by ANOTHER live patch**, not by re-syncing. Check
-the object, never the release, when the cluster disagrees with the values.
+- **A `kubectl patch` made while debugging is therefore never corrected.**
+  `k8s-ops` carried a debugging icon through five chart upgrades that way.
+- **Every signal says it worked.** The release reports success and
+  `helm get manifest` shows the DECLARED value, while the live object holds the
+  other one.
+- **A live patch is undone by ANOTHER live patch**, never by re-syncing.
+- **Check the OBJECT, not the release**, when the cluster disagrees with the
+  values.
 
 **CILIUM ANSWERS A BACKEND-LESS SERVICE WITH EPERM, NOT ECONNREFUSED.**
 
 Under `kube-proxy-replacement: strict` the socket load balancer fails
-`connect()` in the pod's own kernel when a ClusterIP has no READY endpoints, so
-Go reports:
+`connect()` in the pod's own kernel when a ClusterIP has no READY endpoint:
 
 ```
 dial tcp 10.43.240.187:8080: connect: operation not permitted
 ```
 
-That reads exactly like a NetworkPolicy denial and is not one — it is an
-ordinary rollout race, and it clears the moment an endpoint goes ready. Under
-kube-proxy the same instant would have said `connection refused`.
-
-`telegram-router` logs it once at startup when it reads the offset while
-`channel-telegram` is mid-rollout, then retries every 5s and recovers.
-**Confirm it against the endpoint list and the ReplicaSet timestamps before
-suspecting policy** — three separate sessions read that line as a policy
-problem.
+- **It is a rollout race, not a denial**, and clears the moment an endpoint goes
+  ready. kube-proxy would have said `connection refused` at the same instant.
+- **`telegram-router` logs it once at startup**, reading the offset while
+  `channel-telegram` is mid-rollout, then retries every 5s and recovers.
+- **Confirm against the ENDPOINT LIST and the ReplicaSet timestamps before
+  suspecting policy.** Three sessions read that line as a NetworkPolicy problem.
 
 **`reply_to_message` IS ONE LEVEL DEEP AND NEVER NESTS.**
 
-A reply carries the message it answers; that message carries no
-`reply_to_message` of its own, whatever it was itself replying to. So a chain
-walked two links up to recover an original command finds nil, every time.
+A reply carries the message it answers, and that message carries no
+`reply_to_message` of its own. A chain walked two links up to recover an
+original command finds nil, every time.
 
-That is why the menu prompt NAMES the addressed form in its own text —
-`Reply with the task for /<pipeline>` — and `signal-telegram` reads the first
-slash-token back out, guarded on `from.is_bot` so quoting `/ha-ops` at a
-colleague starts nothing. **The question's wording is load-bearing**, and is
-stated on both sides for that reason.
-
-It shipped broken because the test hand-wrote NESTED JSON Telegram does not
-send: an assumption asserting itself. A payload shape is settled by the live
-transport or not at all — a fixture cannot testify about the wire.
+- **The menu prompt NAMES the addressed form in its own text** —
+  `Reply with the task for /<pipeline>` — and `signal-telegram` reads the first
+  slash-token back out.
+- **Guarded on `from.is_bot`**, so quoting `/ha-ops` at a colleague starts
+  nothing.
+- **The question's WORDING is load-bearing**, and is stated on both sides for
+  that reason.
+- **A payload shape is settled by the live transport or not at all.** It shipped
+  broken because the test hand-wrote NESTED JSON Telegram never sends — an
+  assumption asserting itself, which a fixture cannot catch.
 
 **Never run two getUpdates consumers against one Telegram bot token** — 409s and
 stolen updates.
 
-When migrating from another system, or from the old single-container adapter,
-stop its poller and CONFIRM none remains before starting `telegram-router`.
-`Channel.spec.config.pollingEnabled` is gone: ingest is on when the router runs.
+Migrating from another system, or from the old single-container adapter:
+
+1. Stop its poller.
+2. CONFIRM none remains.
+3. Start `telegram-router`.
+
+**`Channel.spec.config.pollingEnabled` is gone.** Ingest is on when the router
+runs.
 
 **The router's bot Secret is the SAME one the Channel uses**, since it polls the
 bot the channel sends as, injected by the chart as `TELEGRAM_BOT_TOKEN`.
@@ -1996,3 +2008,25 @@ development and status. **Nothing else.**
   it is linked.
 - **Reference material and migration guides do not belong in it.**
 - **If it is over budget, something is in the wrong file.**
+
+## Authoring rules (binding)
+
+**They govern THIS file, not only the pages under `docs/`.** A rule stated in
+prose here is as unfindable as one stated in prose there.
+
+**Concise and LLM-optimized.** Cut filler, marketing tone and preambles — every
+sentence earns its tokens.
+
+**Structure over prose:**
+
+| Content | Shape |
+|---|---|
+| Steps | numbered list |
+| Choices / mappings | table |
+| "X means Y" | **X.** Y, on its own line |
+| Multi-rule bullet | parent + sub-bullets, ONE rule per line |
+| Prose paragraph stating > 2 rules | restructure |
+
+**Reasoning is not filler.** A rule keeps the sentence saying what it cost —
+that is what stops the next reader undoing it. What gets cut is the RESTATEMENT
+of the rule, never its why.
