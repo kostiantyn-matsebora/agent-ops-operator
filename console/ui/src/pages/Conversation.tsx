@@ -2,17 +2,20 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Alert, Button, Card, CardBody, CardTitle, ClipboardCopy,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
-  Label, LabelGroup, PageSection, Stack, StackItem, Tab, TabTitleText, Tabs, TextArea,
+  Label, LabelGroup, Menu, MenuContent, MenuItem, MenuList,
+  PageSection, Stack, StackItem, Tab, TabTitleText, Tabs, TextArea,
   Title, Tooltip,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useParams } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../App'
-import { useConversation, useConversationGraph, useMarkRead, useSession } from '../api/hooks'
+import { useConversation, useConversationGraph, useMarkRead, useSession, useVocabulary } from '../api/hooks'
 import { PlainText } from '../components/Text'
 import { Graph } from '../graph/Graph'
 import { api, ApiError } from '../api/client'
 import { Crumbs } from '../components/Crumbs'
+import { matchEntries } from './NewConversation'
+import type { VocabularyEntry } from '../api/types'
 import { Yaml } from '../components/Yaml'
 import { MetadataCard, age } from '../components/Metadata'
 import type { ActivityEvent } from '../api/types'
@@ -149,6 +152,51 @@ function Transcript({
 }) {
   const session = useSession()
   const [text, setText] = useState('')
+  // The composer attached to a conversation offers what ACTS on one: releasing
+  // its runtime and ending it. It never offers a Pipeline — inside a thread that
+  // text is input for the agent, not a command.
+  //
+  // The pair is presented TOGETHER by construction, because both carry
+  // position `thread` and the filter takes the whole position. They are one
+  // word apart and only one of them ends the conversation, so showing either
+  // alone is what this avoids.
+  const vocabulary = useVocabulary()
+  const [dismissed, setDismissed] = useState(false)
+  const [cursor, setCursor] = useState(0)
+  const textRef = useRef<HTMLTextAreaElement>(null)
+  const commands = dismissed
+    ? null
+    : matchEntries(text, vocabulary.data?.entries ?? [], 'thread')
+  const activeCommand = commands ? Math.min(cursor, commands.length - 1) : 0
+
+  function chooseCommand(entry: VocabularyEntry) {
+    // These commands take no argument, so the whole message IS the command.
+    const next = '/' + entry.name
+    setText(next)
+    setDismissed(true)
+    setCursor(0)
+    requestAnimationFrame(() => {
+      textRef.current?.focus()
+      textRef.current?.setSelectionRange(next.length, next.length)
+    })
+  }
+
+  function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!commands) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setCursor((c) => (c + 1) % commands.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setCursor((c) => (c - 1 + commands.length) % commands.length)
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      chooseCommand(commands[activeCommand])
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setDismissed(true)
+    }
+  }
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const messages = detail.transcript ?? []
@@ -264,6 +312,24 @@ function Transcript({
                     {/* Cluster- and wire-sourced text, rendered as plain text. */}
                     <PlainText multiline>{m.text}</PlainText>
                   </div>
+                  {/* Offered actions, as controls. ADDITIVE — the body above
+                      already names every choice and its addressed form, which
+                      is what a surface with no controls shows. These only save
+                      the typing. */}
+                  {m.choices && m.choices.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                      {m.choices.map((c) => (
+                        <Button
+                          key={c.command}
+                          variant="secondary"
+                          isDisabled={!canWrite}
+                          onClick={() => setText(c.command + ' ')}
+                        >
+                          <PlainText>{c.label || c.command}</PlainText>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -287,11 +353,37 @@ function Transcript({
         <StackItem>
           <TextArea
             aria-label="message"
+            ref={textRef}
             value={text}
-            onChange={(_e, v) => setText(v)}
+            onChange={(_e, v) => {
+              setText(v)
+              // Typing re-opens the menu: dismissal applies to the text the
+              // person escaped out of, not to the field forever.
+              setDismissed(false)
+              setCursor(0)
+            }}
+            onKeyDown={onComposerKeyDown}
             rows={3}
-            placeholder="Reply to the agent…"
+            placeholder="Reply to the agent, or / for commands"
           />
+          {commands && (
+            <Menu aria-label="commands" data-testid="command-typeahead" isScrollable>
+              <MenuContent>
+                <MenuList>
+                  {commands.map((c, i) => (
+                    <MenuItem
+                      key={c.name}
+                      isFocused={i === activeCommand}
+                      onClick={() => chooseCommand(c)}
+                      description={c.description}
+                    >
+                      /{c.name}
+                    </MenuItem>
+                  ))}
+                </MenuList>
+              </MenuContent>
+            </Menu>
+          )}
           {error && <Alert variant="danger" isInline title={error} />}
           <Button onClick={send} isDisabled={busy || !text.trim()}>
             Send

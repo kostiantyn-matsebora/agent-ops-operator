@@ -71,6 +71,15 @@ type Message struct {
 	// Pending marks a locally-typed message the manager has not confirmed yet.
 	Pending bool `json:"pending,omitempty"`
 
+	// Choices are the actions this message OFFERS. Kept STRUCTURED all the way
+	// to the browser: the console is the surface that can render them as
+	// controls, and flattening them into the text here would throw that away.
+	//
+	// An adapter that cannot render controls prints the same list, which the
+	// manager's own prose already carries — so these are additive, never the
+	// only account of what is on offer.
+	Choices []OpChoice `json:"choices,omitempty"`
+
 	// recordID is the conversation input this bubble stands for, when it stands
 	// for one. Internal correlation only — never rendered, never sent to the
 	// browser — and it is what lets a read MERGE the buffer with the durable
@@ -147,7 +156,8 @@ func (t *Transcripts) AppendOp(opID, thread string, m *OpMessage, ownChannel str
 			return true
 		}
 	}
-	msg := Message{ID: opID, Thread: thread, Kind: kind, Sender: sender, Text: text, At: nowRFC3339(), recordID: record}
+	msg := Message{ID: opID, Thread: thread, Kind: kind, Sender: sender, Text: text,
+		At: nowRFC3339(), Choices: m.Choices, recordID: record}
 	t.append(msg, kind == MsgAck || kind == MsgRelay)
 	return true
 }

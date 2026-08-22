@@ -9,7 +9,7 @@ describe('plain', () => {
   it('strips the chat HTML subset the adapters emit', () => {
     // Telegram wants <b>; the console is not that transport, and rendering a tag
     // because an adapter wrote one would be trusting a string from a channel.
-    expect(plain('<b>Agents</b>: /k8s-ops')).toBe('Agents: /k8s-ops')
+    expect(plain('<b>Pipelines</b>: /k8s-ops')).toBe('Pipelines: /k8s-ops')
     expect(plain('a <i>very</i> <code>odd</code> message')).toBe('a very odd message')
   })
 
@@ -19,7 +19,7 @@ describe('plain', () => {
   })
 
   it('decodes the entities adapters escape', () => {
-    expect(plain('Usage: /&lt;agent&gt; &lt;task&gt;')).toBe('Usage: /<agent> <task>')
+    expect(plain('Usage: /&lt;pipeline&gt; &lt;task&gt;')).toBe('Usage: /<pipeline> <task>')
     expect(plain('a &amp; b')).toBe('a & b')
   })
 })

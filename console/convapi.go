@@ -772,13 +772,27 @@ const notJoinedReason = "the console holds no thread on this conversation — " 
 	"add the console channel to its pipeline's channels[] to join it"
 
 // Agent is one addressable pipeline offered by the composer's typeahead.
-type Agent struct {
+// Entry is one thing a person may type, as the composer offers it.
+//
+// NAMED FOR WHAT IT IS. It used to be `Agent`, which was wrong twice: an agent
+// in this project is a DEFINITION inside a profile's repository, and this list
+// has never held one. What a message addresses is a PIPELINE.
+type Entry struct {
+	// Kind is `builtin` or `pipeline`.
+	Kind string `json:"kind"`
 	Name string `json:"name"`
-	// Profile is what tells two agents apart when their names do not.
+	// Description is menu text — for a pipeline, the profile answering for it.
+	Description string `json:"description,omitempty"`
+	// Position is `general` (the composer that starts a conversation) or
+	// `thread` (the one attached to an existing conversation). The two take
+	// disjoint sets, and the console is a surface that can honour the
+	// difference.
+	Position string `json:"position"`
+	// Profile is what tells two pipelines apart when their names do not.
 	Profile string `json:"profile,omitempty"`
 }
 
-// handleAgents lists the pipelines a message can address, for the composer
+// handleVocabulary lists what a message can address, for the composer
 // typeahead.
 //
 // READY ONLY, and that is not a detail: `/agents` filters the same way, so
@@ -793,20 +807,40 @@ type Agent struct {
 //
 // It is not scoped to the console's own signal source, because addressing is
 // not scoped either — a command resolves by NAME, with no claim check. Scoping
-// the list would hide agents that would in fact answer.
-func (a *API) handleAgents(w http.ResponseWriter, r *http.Request) {
-	out := []Agent{}
+// the list would hide pipelines that would in fact answer.
+func (a *API) handleVocabulary(w http.ResponseWriter, r *http.Request) {
+	// PROJECTED FROM THE MANAGER'S OWN VOCABULARY, not walked from the Pipeline
+	// cache a second time. The typeahead here and a chat transport's command
+	// menu answer the same question, and two derivations of one fact drift —
+	// which is the whole reason the manager publishes it.
+	if a.mgr != nil {
+		if v, err := a.mgr.Vocabulary(r.Context()); err == nil {
+			out := make([]Entry, 0, len(v.Entries))
+			for _, e := range v.Entries {
+				out = append(out, Entry(e))
+			}
+			sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+			writeJSON(w, http.StatusOK, map[string]any{"entries": out, "revision": v.Revision})
+			return
+		}
+	}
+	// The manager is unreachable or predates the vocabulary. Fall back to the
+	// Pipeline view this console already holds: a composer with no listing is
+	// worse than one built from a second source, and this path offers exactly
+	// what the old endpoint did.
+	out := []Entry{}
 	for _, p := range a.cache.List("pipelines") {
 		if c := p.Condition("Ready"); c == nil || c.Status != "True" {
 			continue
 		}
-		out = append(out, Agent{
-			Name:    p.Metadata.Name,
-			Profile: decodeSpec[pipelineSpec](p.Spec).ProfileRef.Name,
+		profile := decodeSpec[pipelineSpec](p.Spec).ProfileRef.Name
+		out = append(out, Entry{
+			Kind: "pipeline", Name: p.Metadata.Name, Position: "general",
+			Description: profile, Profile: profile,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	writeJSON(w, http.StatusOK, map[string]any{"agents": out})
+	writeJSON(w, http.StatusOK, map[string]any{"entries": out})
 }
 
 // plural renders "1 source" / "2 sources".

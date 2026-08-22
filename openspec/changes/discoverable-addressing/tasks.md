@@ -43,14 +43,14 @@
 
 ## 6. Console: one source, two composers
 
-- [ ] 6.1 Fetch the vocabulary over the channel contract rather than deriving it from the Pipeline cache — and verify a BFF test asserts the fetch and that the Pipeline watch still serves only topology and config
-- [ ] 6.2 Reproject `/api/agents` onto the vocabulary and rename its payload for what it carries — and verify `agents_test.go` assertions hold and a new one asserts entries carry `position`
-- [ ] 6.3 Offer thread-position entries in the conversation reply composer with the same typeahead behaviour as `NewConversation` — and verify a `Conversation.test.tsx` case covers the prefix opening the list, narrowing, and insertion
-- [ ] 6.4 Present `/exit` and `/close` together with the difference stated, never one without the other — and verify a test asserts both appear whenever either does
-- [ ] 6.5 Exclude Pipeline entries from the thread composer — and verify a test asserts no Pipeline is offered there
-- [ ] 6.6 Render `choices` as buttons in the console transcript — and verify a test covers a message carrying choices
-- [ ] 6.7 Replace "agent" with "Pipeline" in every console string naming an addressable thing — and verify a test or grep asserts no user-visible console string calls a Pipeline an agent
-- [ ] 6.8 Re-run `npm run screenshots` in `console/ui` and verify the twelve site PNGs under `docs/assets/img/console/` match the changed UI
+- [x] 6.1 Fetch the vocabulary over the channel contract rather than deriving it from the Pipeline cache — and verify a BFF test asserts the fetch and that the Pipeline watch still serves only topology and config
+- [x] 6.2 Reproject `/api/agents` onto the vocabulary and rename its payload for what it carries — and verify `agents_test.go` assertions hold and a new one asserts entries carry `position`
+- [x] 6.3 Offer thread-position entries in the conversation reply composer with the same typeahead behaviour as `NewConversation` — and verify a `Conversation.test.tsx` case covers the prefix opening the list, narrowing, and insertion
+- [x] 6.4 Present `/exit` and `/close` together with the difference stated, never one without the other — and verify a test asserts both appear whenever either does
+- [x] 6.5 Exclude Pipeline entries from the thread composer — and verify a test asserts no Pipeline is offered there
+- [x] 6.6 Render `choices` as buttons in the console transcript — and verify a test covers a message carrying choices
+- [x] 6.7 Replace "agent" with "Pipeline" in every console string naming an addressable thing — and verify a test or grep asserts no user-visible console string calls a Pipeline an agent
+- [x] 6.8 Re-run `npm run screenshots` in `console/ui` and verify the twelve site PNGs under `docs/assets/img/console/` match the changed UI
 
 ## 7. Documentation
 
