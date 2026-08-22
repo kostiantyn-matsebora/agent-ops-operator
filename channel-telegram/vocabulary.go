@@ -77,10 +77,11 @@ func commandsFor(v Vocabulary) []BotCommand {
 		if desc == "" {
 			desc = e.Name
 		}
-		// The icon LEADS the description, because a Telegram command name takes
-		// no emoji and the description is the rest of the row.
-		if e.Icon != "" {
-			desc = e.Icon + " " + desc
+		// The icon LEADS the description, because a Telegram command NAME takes
+		// no emoji and the description is the rest of the row. A reference this
+		// transport cannot draw contributes nothing rather than its own text.
+		if emoji := emojiFor(e.Icon); emoji != "" {
+			desc = emoji + " " + desc
 		}
 		cmd := BotCommand{Command: spelled, Description: truncate(desc, telegramMaxDescription)}
 		if e.Kind == "builtin" {
@@ -254,6 +255,55 @@ func commandFingerprint(cmds []BotCommand) string {
 		b.WriteByte(0)
 	}
 	return b.String()
+}
+
+// ---- icons -----------------------------------------------------------------
+
+// TELEGRAM DRAWS EMOJI, AND NOTHING ELSE.
+//
+// A command menu takes no image, no SVG and no URL — the description is text.
+// So the built-in set is rendered here as the nearest emoji, and every other
+// form is DROPPED rather than printed: a description reading "aops:home
+// ha-user" is worse than one reading "ha-user", because it shows a reader
+// plumbing they cannot act on.
+//
+// This is the adapter resolving a reference it was handed, exactly as the
+// console resolves the same reference into an inline SVG. The manager publishes
+// one string and neither surface asks it to know what a surface can draw.
+var builtinEmoji = map[string]string{
+	"kubernetes": "☸",
+	"observe":    "🔎",
+	"operate":    "🔧",
+	"alert":      "🚨",
+	"home":       "🏠",
+	"chat":       "💬",
+	"workload":   "📦",
+	"user":       "👤",
+	"agent":      "🤖",
+	"system":     "⚙",
+}
+
+// emojiFor renders an icon reference as something Telegram can show, or "" when
+// it cannot show it at all.
+//
+// An EMOJI passes through: it is already the thing. `aops:<name>` becomes its
+// emoji. A URL or a named set from a public library — `mdi:`, `si:` — resolves
+// to nothing here, which is the honest answer for a text-only menu.
+func emojiFor(icon string) string {
+	ref := strings.TrimSpace(icon)
+	if ref == "" {
+		return ""
+	}
+	if name, ok := strings.CutPrefix(ref, "aops:"); ok {
+		return builtinEmoji[name]
+	}
+	// Any other `prefix:name` is a set this transport cannot fetch, and a URL
+	// is an image it cannot render.
+	if strings.Contains(ref, ":") || strings.Contains(ref, "/") {
+		return ""
+	}
+	// Not a reference at all — an emoji, or whatever the author typed.
+	return ref
 }
 
 // ---- offered controls ----------------------------------------------------
