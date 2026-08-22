@@ -40,6 +40,16 @@ pushed tag" rule.
   platform declaration, as equality. A silently single-arch image is a failure
   this project has already had in production (`agentops-console`, 2026-08-21),
   and nothing at build, push or render time reported it.
+- **A publication hygiene guard in CI**, because this repository is going
+  public. It is an ALLOWLIST of permitted shapes — reserved example domains,
+  cluster-internal names, this repo's own clone URL, the documented placeholder
+  identifiers — covering the whole tree AND the commit messages of the range
+  under review. Never a denylist: a list of forbidden strings has to spell out
+  what it protects, publishing it in the guard itself, and catches only what
+  someone already thought of. It reports positions and rules, never the matched
+  text, because a public repository has public build logs.
+  **It lands before any cleanup change is written**, so that a change naming
+  what it removes fails the build rather than being archived and republished.
 - **Helm chart published as an OCI artifact** on a `chart-v<semver>` tag:
   `oci://ghcr.io/kostiantyn-matsebora/charts`, installable with
   `helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator --version <v>`.
@@ -115,7 +125,7 @@ public, or a release-notes generator.
   `README.md` (commands only), `CLAUDE.md` build/test and image sections, and a
   `CHANGELOG.md` migration entry for the registry cut-over.
   `CLAUDE.md`'s inventory is corrected as part of that: it says "Nine Go
-  modules" and **omits `egress-proxy/` entirely**, including from the image
+  modules" and **omits `platform/egress-proxy/` entirely**, including from the image
   build block — so the one document that lists what this repo ships is missing
   a shipped image. A release process derived from the repo rather than from
   prose is the fix; correcting the prose is what stops the two disagreeing
