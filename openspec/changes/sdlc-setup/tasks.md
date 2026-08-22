@@ -152,10 +152,10 @@
       `gomod` directories (weekly), and `console/ui`'s npm manifest (weekly)
 - [x] 8.5 Correct `CLAUDE.md`'s module and image inventory in the same pass:
       the opening line still says "Nine Go modules" and lists nine, and
-      **`egress-proxy/` appears nowhere in that file** — not in the count, not
+      **`platform/egress-proxy/` appears nowhere in that file** — not in the count, not
       in the Map, and not in the image build block this change replaces, so
       anyone following it today ships twelve of the thirteen images. Add it
-      beside `context-sync/` and `housekeeping/`, and state the count as what it
+      beside `platform/context-sync/` and `platform/housekeeping/`, and state the count as what it
       is
 - [x] 8.6 Correct `CLAUDE.md`'s multi-arch section: "The exception is a runtime
       whose UPSTREAM is single-arch. `runtime-claude` is the case" is FALSE —
@@ -168,3 +168,41 @@
       not one: the tag, the package visibility flip, and the platform
       declaration the release asserts — a component that skips any of them
       fails at a different layer
+
+## 9. Publication hygiene guard
+
+This section lands BEFORE any cleanup change is written, and that ordering is
+the whole point. A change that removes identifying content has to NAME what it
+removes; archived, that naming is republished by the very repository it was
+cleaning. With the guard already in CI, an artifact that names a literal fails
+the build instead of reaching the archive.
+
+- [ ] 9.1 Write the guard as an ALLOWLIST of permitted shapes — reserved example
+      domains, cluster-internal service names, loopback, this repository's own
+      clone URL, the documented placeholder identifiers, and a documented set of
+      private-range address literals. Never a list of forbidden strings: a
+      denylist publishes what it protects and catches only what someone already
+      thought of
+- [ ] 9.2 Scope it to the WHOLE repository — `openspec/`, `docs/`, `chart/`,
+      every module, and the agent context under `.claude/` — with binary and
+      lockfile exclusions declared in the allowlist rather than hardcoded
+- [ ] 9.3 Extend it over the commit MESSAGES in the range under review. Messages
+      live outside the tree, so a tree-only guard leaves the one hole that
+      cannot be fixed by editing a file later
+- [ ] 9.4 Report shape: file, line and the rule violated — never the matched
+      text. A public repository has public build logs, so a guard that quotes
+      its findings leaks them to the audience it exists to protect the tree
+      from. A `--show` flag prints matches for local fixing
+- [ ] 9.5 Wire it into `ci.yml` as its own job, required on every pull request
+      and on pushes to `master`
+- [ ] 9.6 Prove it fails, and prove the report is clean: add a scratch commit
+      carrying an out-of-allowlist hostname in a file and another in a commit
+      message, confirm both fail, and confirm the CI log names positions and
+      rules without reproducing either value
+- [ ] 9.7 Run it over the repository as it stands and record ONLY the count of
+      violations per rule. The list of actual findings is a local artifact and
+      is never committed — it is the input to the cleanup change, not a document
+- [ ] 9.8 Record in `.claude/rules/` the one rule this creates for every future
+      change: verification is recorded as "the guard passes", never as the text
+      it matched. Pasting a grep result into a ticked task is the most natural
+      way to reintroduce exactly what was removed

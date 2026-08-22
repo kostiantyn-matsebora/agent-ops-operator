@@ -106,3 +106,63 @@ enumerated in prose.
 
 - **WHEN** CI runs for a pull request
 - **THEN** no image or chart is pushed to any registry
+
+### Requirement: CI refuses content that identifies a person or a private deployment
+
+The repository is to be published, so every file AND every commit message SHALL
+be readable by strangers without disclosing who runs the author's cluster, what
+it is called, or how to reach it.
+
+CI SHALL enforce this with an ALLOWLIST of permitted shapes, never a list of
+forbidden strings. A denylist has to spell out the thing it protects, which
+publishes it in the guard — and a denylist only catches what someone already
+thought of.
+
+The guard SHALL cover the whole repository, `openspec/` included, and the commit
+messages of the range under review.
+
+#### Scenario: A hostname outside the documented example space
+
+- **WHEN** a change adds a hostname that is not a reserved example domain, a
+  cluster-internal service name, or a loopback name
+- **THEN** CI fails, naming the file and line
+
+#### Scenario: A chat identifier that is not the documented placeholder
+
+- **WHEN** a change adds a chat, group or thread identifier other than the one
+  the documentation carries as its example
+- **THEN** CI fails
+
+#### Scenario: A repository URL that is not this project's
+
+- **WHEN** a change adds a clone or remote URL naming a repository other than
+  this one
+- **THEN** CI fails
+
+#### Scenario: An address literal outside the documented example set
+
+- **WHEN** a change adds a private-range address literal that is not one of the
+  documented examples
+- **THEN** CI fails
+
+#### Scenario: A commit message carries what the tree does not
+
+- **WHEN** a pull request's commit messages contain a violation its tree does
+  not
+- **THEN** CI fails on the message
+
+#### Scenario: The report does not republish what it caught
+
+- **WHEN** the guard fails in CI
+- **THEN** it prints the file, the line number and the rule that was violated,
+  and NOT the text that matched — a public repository has public build logs, so
+  a guard that quotes its findings leaks them to the same audience it protects
+  the tree from
+- **AND** a local invocation MAY print the matched text, because that is where
+  the fixing happens
+
+#### Scenario: The guard names nothing it forbids
+
+- **WHEN** the guard and its allowlist are read
+- **THEN** they contain no personal name, no private hostname and no real
+  identifier — only the shapes that are permitted
