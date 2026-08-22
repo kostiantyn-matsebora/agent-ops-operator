@@ -46,6 +46,48 @@ evidence trail, or the full design.
 Applies to chat answers only. Written deliverables under `docs/` follow
 `docs/CLAUDE.md` instead.
 
+## Session naming (say what this window is doing)
+
+**NAME THE SESSION `<phase> <change>`, AND RENAME IT WHENEVER EITHER CHANGES.**
+Several of these run at once, in several windows and over Remote Control, and a
+row reading `agent-ops-operator-05` says nothing about which one is mid-migration
+and which is idle on a docs tweak.
+
+```sh
+~/.claude/hooks/session-title.sh set 'opsx:apply discoverable-addressing'
+```
+
+That writes the title and paints it. Hooks on `UserPromptSubmit`, `Stop` and
+`SessionStart` REPAINT it at every turn boundary, because Claude Code writes the
+terminal title itself and a one-off escape does not survive. `SessionEnd`
+forgets it. All four are wired in `~/.claude/settings.json`; the script is a
+silent no-op with no title file, no terminal or no `jq`, so a hook never becomes
+an error.
+
+The phase is the opsx verb driving the work — `opsx:explore`, `opsx:propose`,
+`opsx:update`, `opsx:apply`, `opsx:archive` — and the change is its directory
+name under `openspec/changes/`. Set it at the START of the work and again at
+every transition, not once at the end: the title exists to be read while the
+work is still running.
+
+Work with no change behind it says what it is instead, in the same two-word
+shape: `review chart-values`, `debug telegram-409`, `docs installation`. A title
+that reads only `claude` is the failure this rule names.
+
+**The script moves the TERMINAL TITLE ONLY.** Two other names exist and neither
+is reachable from inside a session:
+
+| name | where it shows | who sets it |
+|---|---|---|
+| terminal title | the window or tab | this script, every turn |
+| session display name | prompt box, `/resume` picker, terminal title | the USER: `/rename <name>`, or `claude -n "<name>"` at launch |
+| peer name (`agent-ops-operator-05`) | `ListAgents`, Remote Control rows | nobody — derived from the directory |
+
+So when a window's name matters somewhere other than its own title bar, ASK for
+`/rename` rather than reporting a rename that did not happen. Its terminal-title
+half is governed by `terminalTitleFromRename`, which defaults on and therefore
+wins over this script until the next repaint.
+
 ## Terminology (binding)
 
 ### Agent runtime, never "worker"
