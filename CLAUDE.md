@@ -1375,11 +1375,13 @@ very next page, twice, and caught each time by the reader rather than the writer
 So the mechanical ones are a command, run before any adopter page is called done:
 
 ```sh
-awk '/^---$/{fm=!fm;next} fm{next} /^```/{b=!b;next} b{next}
-     /;/ && !/&[a-z]+;/ {printf "%s:%d SEMICOLON\n", FILENAME, NR}
-     /^\|/||/^[0-9]+\./||/^ /||/^>/{next}
+awk 'FNR==1{fm=0;b=0;n=0}
+     /^---$/{fm=!fm;next} fm{next} /^```/{b=!b;next} b{next}
+     {t=$0; gsub(/`[^`]*`/,"",t); gsub(/&[a-z]+;/,"",t)
+      if (t ~ /;/) printf "%s:%d SEMICOLON\n", FILENAME, FNR}
+     /^\|/||/^[0-9]+\./||/^[-*] /||/^ /||/^>/{next}
      /^$/{if(n>45)printf "%s:%d LONG PARAGRAPH (%d words)\n",FILENAME,s,n;n=0;next}
-     {if(n==0)s=NR;n+=NF}' docs/*.md
+     {if(n==0)s=FNR;n+=NF}' docs/*.md
 ```
 
 Silence is the pass. Then BUILD it and look — the squeezed column, the wrapped
