@@ -1781,6 +1781,22 @@ The corollary: a `lookup`-driven guard is silent under `helm template`, so it
 cannot be pinned by a chart render test. Verify it with
 `helm upgrade --dry-run=server`.
 
+**`reply_to_message` IS ONE LEVEL DEEP AND NEVER NESTS.**
+
+A reply carries the message it answers; that message carries no
+`reply_to_message` of its own, whatever it was itself replying to. So a chain
+walked two links up to recover an original command finds nil, every time.
+
+That is why the menu prompt NAMES the addressed form in its own text —
+`Reply with the task for /<pipeline>` — and `signal-telegram` reads the first
+slash-token back out, guarded on `from.is_bot` so quoting `/ha-ops` at a
+colleague starts nothing. **The question's wording is load-bearing**, and is
+stated on both sides for that reason.
+
+It shipped broken because the test hand-wrote NESTED JSON Telegram does not
+send: an assumption asserting itself. A payload shape is settled by the live
+transport or not at all — a fixture cannot testify about the wire.
+
 **Never run two getUpdates consumers against one Telegram bot token** — 409s and
 stolen updates.
 
