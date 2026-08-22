@@ -52,6 +52,10 @@ stats:
   - your own
 
 {: .ao-tabs #tour}
+- **Watch it work** — One signal, start to finish. A minute, no sound.
+
+  [![The console showing one conversation: the cluster-events signal that opened it, the agent's answer explaining an OOM-killed container, and the box to reply in.]({{ '/assets/video/console-demo-poster-light.png' | relative_url }})]({{ '/assets/video/console-demo-light.mp4' | relative_url }}){: .ao-demo data-captions="{{ '/assets/video/console-demo.vtt' | relative_url }}"}
+
 - **How it works** — Something happens, you declare what to do about it in your own cluster, the operator runs it.
 
   ![Something happens — an alert fires, a pod crashloops, a schedule comes due, a room gets too warm, someone asks — and each feeds into one Helm install in your own cluster. There you declare it as custom resources: a Pipeline for what wakes it, an AgentProfile for what it should do, an MCPToolset for what it may touch, shown as a real Pipeline manifest naming its signal source, profile, toolset and channel. The operator then runs it: one conversation per incident in its own thread, its own isolated pod, picking up where it stopped.]({{ '/assets/img/agent-ops-landing-light.svg' | relative_url }}){: .ao-diagram}
@@ -75,34 +79,11 @@ stats:
       - name: telegram            # where you talk to it
   ```
 
-- **Overview** — Everything the install is doing, and every condition that is not `True`.
+The console is what the recording shows, and it ships enabled. The
+[Console page]({{ '/console/' | relative_url }}) takes each of its six views in
+turn, at full size.
 
-  ![Manager version and leader, two of five runtime slots in use, the runtime images, live-activity telemetry, tables of workloads and adapters, and one problem: a signal source no pipeline claims.]({{ '/assets/img/console/overview-light.png' | relative_url }})
-
-- **Topology** — The wiring as a live graph: where signals enter, what claims them, who answers.
-
-  ![Signal adapters and sources on the left, then three pipelines, the profiles and runtimes that execute them, and the channels the answers reach, with traffic rates on the edges between them.]({{ '/assets/img/console/topology-light.png' | relative_url }})
-
-- **Conversations** — The whole fleet, filtered by phase, pipeline or profile. Unread is per identity.
-
-  ![Six conversations with mixed phases — Working, Pending, Idle and Closed — two marked unread, each showing its pipeline, run count, queue depth and last activity.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
-
-- **Conversation** — One agent's transcript, every run with its result, and the box you reply in.
-
-  ![One conversation: the signal that started it, the agent's answer explaining an OOM-killed container, a reply relayed in from another channel, and a box to reply from.]({{ '/assets/img/console/conversation-light.png' | relative_url }})
-
-- **Queues** — What is waiting, and what is stuck. Every stalled row names its cause.
-
-  ![The work queue with three conversations, one flagged at runtime ceiling, the delivery queue per adapter with the oldest operation in each, and a suppressed-signal cooldown.]({{ '/assets/img/console/queues-light.png' | relative_url }})
-
-- **Configuration** — Every kind, and the columns that matter. A Pipeline row is the whole route on one line.
-
-  ![Three pipelines, each showing its profile, the sources it claims, the channels it posts to, its toolsets, tools mode, MCP configs and Ready status.]({{ '/assets/img/console/configuration-light.png' | relative_url }})
-
-The last six are the console, which ships enabled. The
-[Console page]({{ '/console/' | relative_url }}) takes each view in turn.
-
-## What "takes care of it" means
+## When it wakes
 
 - **Investigates** — queries the system, reads state.
 - **Explains** — in a thread you can reply to.

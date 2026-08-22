@@ -1,0 +1,37 @@
+WEBVTT
+
+1
+00:00:00.000 --> 00:00:04.500
+A healthy install, with nothing waiting
+
+2
+00:00:05.000 --> 00:00:09.500
+A signal arrives — alert, schedule, message, event — and a conversation opens
+
+3
+00:00:10.000 --> 00:00:15.500
+The thread it opened, and the agent already working
+
+4
+00:00:16.000 --> 00:00:24.500
+The answer — what is wrong, what changed, and what it did not touch
+
+5
+00:00:25.000 --> 00:00:33.100
+You reply in the thread, and the conversation carries on
+
+6
+00:00:33.600 --> 00:00:39.100
+What is waiting, and what is stuck — every stalled row names its cause
+
+7
+00:00:39.600 --> 00:00:46.100
+The wiring behind it: where the signal entered, who claimed it, where the answer went
+
+8
+00:00:46.600 --> 00:00:52.100
+Every part of it is a Kubernetes resource — one API, one RBAC model
+
+9
+00:00:52.600 --> 00:00:59.600
+The conversation itself is an object — kubectl, GitOps and RBAC already work
