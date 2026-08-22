@@ -1,0 +1,203 @@
+# What must pass before a change lands.
+#
+# The matrices are DERIVED (.github/components.sh), never listed here: this
+# repository went from five images to thirteen while its release procedure stood
+# still, and the one document that listed them had already lost track of one.
+# A matrix somebody has to remember to edit is a matrix that quietly stops
+# covering things.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# One run per ref. A superseded push is cancelled rather than raced.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ENVTEST_K8S_VERSION: "1.31.x"
+
+jobs:
+  # WHAT EXISTS, asked once and answered for every matrix below.
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.list.outputs.modules }}
+      images: ${{ steps.list.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          echo "modules=$(./.github/components.sh modules)" >> "$GITHUB_OUTPUT"
+          echo "images=$(./.github/components.sh images)" >> "$GITHUB_OUTPUT"
+
+  # The operator, against a REAL API server. Its own suite file records that
+  # envtest schedules nothing, so this proves the API-server half and nothing
+  # about the kubelet — which is what the e2e-testing change is for.
+  operator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache envtest assets
+        uses: actions/cache@v4
+        with:
+          path: ~/.envtest
+          key: envtest-${{ runner.os }}-${{ env.ENVTEST_K8S_VERSION }}
+      - name: Provision envtest
+        run: |
+          ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19 \
+            use "$ENVTEST_K8S_VERSION" --bin-dir ~/.envtest -p path)
+          echo "KUBEBUILDER_ASSETS=$ASSETS" >> "$GITHUB_ENV"
+      - run: go build ./...
+      - run: go vet ./...
+      # -count=1 so a cached PASS can never stand in for a run that did not
+      # happen; the integration suite must actually execute.
+      - run: go test -count=1 ./...
+      # The suite FAILS without assets rather than skipping (verified: envtest
+      # start returns an error and the package reports FAIL), so `go test ./...`
+      # above already proves it ran. This only catches provisioning that
+      # silently produced an empty path.
+      - name: Assert envtest was provisioned
+        run: test -n "$KUBEBUILDER_ASSETS" || { echo "envtest assets were never provisioned"; exit 1; }
+
+  # Every submodule. Dependency-free by design, so these are seconds each, and
+  # separate from `operator` so a module break is legible without reading an
+  # envtest log.
+  modules:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.discover.outputs.modules) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+
+  # The console's browser application. The only non-Go job, and it exists
+  # because these tests run nowhere today: a broken bundle currently surfaces
+  # inside the console IMAGE build, at the end of a long log, and a failing
+  # component test surfaces for nobody.
+  #
+  # Screenshots are deliberately out: they need a browser, and they are
+  # regenerated when the UI changes, not on every pull request.
+  console-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console/ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: console/ui/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  # Render AND validate. A lint proves the templates parse; only rendering
+  # every meaningful permutation and validating the result proves they produce
+  # objects a cluster would accept.
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: Install kubeconform
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: Convert this repo's CRDs into validation schemas
+        run: python3 .github/scripts/crd-schemas.py chart/files/crds "$RUNNER_TEMP/crd-schemas"
+      - run: helm lint chart
+      # EACH PERMUTATION CARRIES THE VALUES ITS SUBJECT REQUIRES. `ha-bundle`
+      # and a Telegram surface refuse to render without a credential and an
+      # endpoint — a matrix that omitted them would be testing the guards and
+      # never reaching the templates.
+      - name: Render and validate every permutation
+        run: |
+          set -euo pipefail
+          HA='--set ha-bundle.enabled=true
+              --set ha-bundle.homeAssistant.endpoint=https://ha.example.org
+              --set ha-bundle.homeAssistant.credentials.operatorToken=ci-token'
+          PROM='--set prometheus-bundle.enabled=true
+                --set prometheus-bundle.metrics.url=http://metrics.example:8428'
+          TG='--set telegram-bundle.enabled=true
+              --set telegram-bundle.surface.enabled=true
+              --set telegram-bundle.surface.chatId=-1001234567890
+              --set telegram-bundle.surface.credentials.botToken=ci:token'
+          declare -A PERMUTATIONS=(
+            [default]=""
+            [demo]="--set global.demo.enabled=true"
+            [k8s-bundle]="--set k8s-bundle.enabled=true"
+            [prometheus-bundle]="$PROM"
+            [ha-bundle]="$HA"
+            [telegram-bundle]="$TG"
+            [no-console]="--set console.enabled=false"
+            [everything]="--set global.demo.enabled=true --set k8s-bundle.enabled=true $PROM $HA $TG"
+          )
+          failed=0
+          for name in "${!PERMUTATIONS[@]}"; do
+            echo "::group::$name"
+            if ! helm template ci chart ${PERMUTATIONS[$name]} > "$RUNNER_TEMP/$name.yaml"; then
+              echo "::error::chart permutation '$name' failed to render"
+              failed=1; echo "::endgroup::"; continue
+            fi
+            if ! kubeconform -strict -summary \
+                 -schema-location default \
+                 -schema-location "$RUNNER_TEMP/crd-schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
+                 "$RUNNER_TEMP/$name.yaml"; then
+              echo "::error::chart permutation '$name' rendered objects that do not validate"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $failed
+
+  # Every Dockerfile builds. amd64 only and never pushed: pull-request feedback
+  # speed matters more than arch coverage here, and the multi-arch build is
+  # exercised at release, where a manifest is actually produced to assert on.
+  images:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.discover.outputs.images) }}
+    name: images (${{ matrix.image.component }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=${{ matrix.image.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.component }}

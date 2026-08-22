@@ -3,11 +3,16 @@
 Go/controller-runtime Kubernetes operator (README.md for the product view,
 docs/concepts.md for the CRD detail).
 Self-contained modules — no dependencies outside this directory; keep it that
-way. Nine Go modules: the operator (root), `channel-telegram/` (reference
+way. TWELVE Go modules: the operator (root), `channel-telegram/` (reference
 channel adapter), `console/` (the console — a channel adapter that is also the
-viewer), `telegram-router/` (the single getUpdates consumer), and
+viewer), `telegram-router/` (the single getUpdates consumer),
 `signal-cron/`, `signal-alertmanager/`, `signal-k8s-events/`, `signal-ha/`,
-`signal-telegram/` (signal adapters) — the adapters dependency-free.
+`signal-telegram/` (signal adapters), and the three that run BESIDE a
+conversation rather than serving a CR — `context-sync/`, `egress-proxy/`,
+`housekeeping/`. All eleven submodules are dependency-free.
+Thirteen images: those twelve plus `runtime-claude/`, which has no `go.mod`.
+Count from the repo, not from this sentence — it was wrong twice, and
+`egress-proxy/` was missing from this file entirely.
 
 ## Answering (how to report findings)
 
@@ -340,10 +345,25 @@ the CR was wrong; the image simply had no arm64 half. Every adapter here is
 dependency-free Go and cross-compiles for free, so there is no reason to ship
 one arch.
 
-The exception is a runtime whose UPSTREAM is single-arch. `runtime-claude` is the
-case: pin those with a `nodeSelector` so they only ever schedule where they can
-run, and say so in the values — a pod that crash-loops on the wrong
-architecture is the same failure one layer down.
+**THERE IS NO EXCEPTION.** This file used to name one — "a runtime whose
+UPSTREAM is single-arch, `runtime-claude` is the case" — and it was wrong.
+Building the image settles it:
+
+```
+docker buildx build --platform linux/arm64 ./runtime-claude/     # succeeds
+docker run --platform linux/arm64 … claude --version
+arch: aarch64 / v22.23.2 / 2.1.239 (Claude Code)
+```
+
+`node:22-bookworm-slim` + apt + one npm global is multi-arch throughout. The
+constraint was the `--platform linux/amd64` in the build command below, and the
+runtime `nodeSelector` the chart ships was compensating for a build flag rather
+than for the vendor — it can be relaxed once a multi-arch runtime image is
+published.
+
+A component may still be single-arch one day. Establish that by BUILDING it on
+the other architecture and running the binary, never by inheriting a claim from
+prose — including this prose.
 
 Images (bump the tag on every change — never overwrite a pushed tag):
 
@@ -362,10 +382,9 @@ $BX -t <registry>/agentops-signal-k8s-events:<tag> ./signal-k8s-events/
 $BX -t <registry>/agentops-signal-ha:<tag> ./signal-ha/
 $BX -t <registry>/agentops-console:<tag> ./console/
 $BX -t <registry>/agentops-context-sync:<tag> ./context-sync/
+$BX -t <registry>/agentops-egress-proxy:<tag> ./egress-proxy/
 $BX -t <registry>/agentops-housekeeping:<tag> ./housekeeping/
-# runtime-claude is the exception — upstream is amd64-only, so it ships amd64
-# and its AgentRuntime carries a nodeSelector.
-docker build --platform linux/amd64 -t <registry>/agentops-runtime-claude:<tag> ./runtime-claude/
+$BX -t <registry>/agentops-runtime-claude:<tag> ./runtime-claude/
 
 # VERIFY before believing it — the failure mode is invisible until it schedules:
 docker manifest inspect <registry>/agentops-console:<tag> \
@@ -521,6 +540,22 @@ housekeeping/            the disk half of conversation retention (own module,
                          invariant). Named agentops-housekeeping so
                          signal-k8s-events' prefix self-exclusion catches it — a
                          CronJob fails on a SCHEDULE
+egress-proxy/            the tool-access wall INSIDE the runtime pod (own
+                         module, no deps) — ONE binary, two subcommands:
+                         `install-redirect` (privileged init container, writes
+                         the redirect rules) and `proxy` (serves the redirected
+                         connections). One binary because the two must agree
+                         exactly on the port and the uid, and a second image is
+                         a second place for that agreement to rot.
+                         It exists because `--allowedTools` configures a
+                         COOPERATING agent: one with a shell can open a socket
+                         to a bound MCP server and call anything that server
+                         registers. This is the wall for an agent that does not
+                         cooperate. It terminates no TLS, inspects no non-MCP
+                         byte and holds no Kubernetes credential — other traffic
+                         is copied through untouched. Opt-in via
+                         `runtime.egressMediation.enabled`; see
+                         docs/adr/0001-bound-component-reach.md
 context-sync/            the context sidecar (own module, no deps) — keeps the
                          LIVE context on pod-local storage and a SNAPSHOT on the
                          durable volume. PROXIES the work contract (the agent's

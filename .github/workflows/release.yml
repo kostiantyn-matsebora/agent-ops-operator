@@ -1,0 +1,165 @@
+# One tag publishes one component.
+#
+# `<component>-v<semver>`: manager-v0.38.2, console-v0.16.1, chart-v5.26.0.
+# Fourteen independently-versioned artifacts (thirteen images plus the chart),
+# which is what a repo-wide version line would collapse — forcing a manager
+# release every time an adapter changes.
+name: release
+
+on:
+  push:
+    tags: ['*-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  # A typo'd tag must FAIL, never skip. A path- or if-filtered job that quietly
+  # does nothing is indistinguishable from a successful release.
+  determine:
+    runs-on: ubuntu-latest
+    outputs:
+      component: ${{ steps.parse.outputs.component }}
+      version: ${{ steps.parse.outputs.version }}
+      platforms: ${{ steps.parse.outputs.platforms }}
+      context: ${{ steps.parse.outputs.context }}
+      dockerfile: ${{ steps.parse.outputs.dockerfile }}
+      is_image: ${{ steps.parse.outputs.is_image }}
+      is_chart: ${{ steps.parse.outputs.is_chart }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: parse
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF#refs/tags/}"
+          component="${ref%-v*}"
+          version="${ref##*-v}"
+
+          valid=$(./.github/components.sh images | jq -r '.[].component')
+          usage() {
+            echo "::error::Tag '$ref' is not a release tag."
+            echo "::error::Use <component>-v<semver>, where <component> is one of:"
+            echo "::error::  $(echo "$valid" | tr '\n' ' ') chart"
+            exit 1
+          }
+
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || usage
+
+          if [ "$component" = "chart" ]; then
+            echo "is_chart=true"  >> "$GITHUB_OUTPUT"
+            echo "is_image=false" >> "$GITHUB_OUTPUT"
+          elif echo "$valid" | grep -qx "$component"; then
+            entry=$(./.github/components.sh images | jq -c --arg c "$component" '.[] | select(.component == $c)')
+            echo "is_chart=false" >> "$GITHUB_OUTPUT"
+            echo "is_image=true"  >> "$GITHUB_OUTPUT"
+            echo "platforms=$(jq -r .platforms <<<"$entry")"   >> "$GITHUB_OUTPUT"
+            echo "context=$(jq -r .context <<<"$entry")"       >> "$GITHUB_OUTPUT"
+            echo "dockerfile=$(jq -r .dockerfile <<<"$entry")" >> "$GITHUB_OUTPUT"
+          else
+            usage
+          fi
+          echo "component=$component" >> "$GITHUB_OUTPUT"
+          echo "version=$version"     >> "$GITHUB_OUTPUT"
+
+  # ONE reusable job for all thirteen images. The component decides the context,
+  # the Dockerfile and the platforms; nothing here is per-component.
+  image:
+    needs: determine
+    if: needs.determine.outputs.is_image == 'true'
+    uses: ./.github/workflows/build-image.yml
+    with:
+      component: ${{ needs.determine.outputs.component }}
+      context: ${{ needs.determine.outputs.context }}
+      dockerfile: ${{ needs.determine.outputs.dockerfile }}
+      platforms: ${{ needs.determine.outputs.platforms }}
+      version: ${{ needs.determine.outputs.version }}
+
+  chart:
+    needs: determine
+    if: needs.determine.outputs.is_chart == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      CHARTS: oci://ghcr.io/${{ github.repository_owner }}/charts
+      VERSION: ${{ needs.determine.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      # The OCI artifact's tag and its embedded metadata disagreeing is
+      # invisible until somebody debugs a deployment.
+      - name: Assert Chart.yaml agrees with the tag
+        run: |
+          declared=$(grep -E '^version:' chart/Chart.yaml | awk '{print $2}')
+          if [ "$declared" != "$VERSION" ]; then
+            echo "::error::tag says $VERSION, chart/Chart.yaml says $declared"
+            exit 1
+          fi
+
+      # SHIPPING A CHART THAT POINTS AT IMAGES NOBODY PUSHED is the likeliest
+      # release-day mistake in a multi-artifact repo, and it is cheap to
+      # prevent. Resolved ANONYMOUSLY, which doubles as the check that every
+      # package was actually made public.
+      #
+      # Rendered with EVERYTHING ON, because a bundle that is off by default
+      # renders no image and would gate nothing — and its images are exactly the
+      # ones a release forgets. Matched by image NAME rather than by the `image:`
+      # key: the context sidecar and the egress proxy reach their pods as
+      # manager configuration, so a key-based scan misses both.
+      #
+      # `signal-cron` is deliberately absent from this gate: the chart ships no
+      # cron bundle, so the chart cannot point at it. CI still builds it and a
+      # tag still publishes it.
+      - name: Assert every first-party image the chart renders exists
+        run: |
+          set -euo pipefail
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          rendered=$(helm template ci chart \
+            --set global.demo.enabled=true \
+            --set k8s-bundle.enabled=true \
+            --set prometheus-bundle.enabled=true \
+            --set prometheus-bundle.metrics.url=http://metrics.example:8428 \
+            --set ha-bundle.enabled=true \
+            --set ha-bundle.homeAssistant.endpoint=https://ha.example.org \
+            --set ha-bundle.homeAssistant.credentials.operatorToken=ci-token \
+            --set telegram-bundle.enabled=true \
+            --set telegram-bundle.surface.enabled=true \
+            --set telegram-bundle.surface.chatId=-1001234567890 \
+            --set telegram-bundle.surface.credentials.botToken=ci:token \
+            --set housekeeping.enabled=true \
+            --set runtime.egressMediation.enabled=true \
+            --set 'runtime.contextSync.paths={.claude/projects/**}')
+          # Ours by NAMESPACE, never a hardcoded vendor list — the third-party
+          # set has already turned over once.
+          refs=$(grep -Eo "(ghcr\.io/$owner/|kmatsebora/)agentops-[a-z0-9-]+:[A-Za-z0-9._-]+" <<<"$rendered" | sort -u)
+          [ -n "$refs" ] || { echo "::error::no first-party image references found — the extraction is broken"; exit 1; }
+          missing=0
+          while read -r ref; do
+            if docker manifest inspect "$ref" >/dev/null 2>&1; then
+              echo "ok       $ref"
+            else
+              echo "::error::chart references $ref, which cannot be resolved anonymously"
+              echo "::error::either it was never pushed, or its package is still private"
+              missing=1
+            fi
+          done <<< "$refs"
+          exit $missing
+
+      - name: Refuse to overwrite a published chart version
+        run: |
+          if helm show chart "$CHARTS/agent-ops-operator" --version "$VERSION" >/dev/null 2>&1; then
+            echo "::error::agent-ops-operator $VERSION is already published — cut a new patch version."
+            exit 1
+          fi
+
+      - name: Package and push
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm package chart --destination "$RUNNER_TEMP"
+          helm push "$RUNNER_TEMP/agent-ops-operator-$VERSION.tgz" "$CHARTS"
+
+      - name: Verify it installs from the registry
+        run: helm show chart "$CHARTS/agent-ops-operator" --version "$VERSION"

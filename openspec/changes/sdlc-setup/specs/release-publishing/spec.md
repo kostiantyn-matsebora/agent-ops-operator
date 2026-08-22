@@ -3,8 +3,7 @@
 ### Requirement: A per-component git tag publishes exactly one artifact
 
 Publishing SHALL be triggered by a git tag of the form `<component>-v<semver>`
-where `<component>` is one of `manager`, `channel-telegram`, `signal-cron`,
-`signal-alertmanager`, `runtime-claude`, or `chart`. Pushing such a tag SHALL
+where `<component>` names one image in the repository, or `chart`. Pushing such a tag SHALL
 publish that component alone at that version, leaving every other component
 untouched, so components keep their independent version lines. A tag naming an
 unknown component or a malformed version SHALL fail the workflow with a message
@@ -12,8 +11,8 @@ listing the valid forms, rather than skipping silently.
 
 #### Scenario: Releasing one adapter
 
-- **WHEN** the tag `channel-telegram-v0.4.1` is pushed
-- **THEN** only `ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.4.1`
+- **WHEN** the tag `channel-telegram-v0.12.1` is pushed
+- **THEN** only `ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.12.1`
   is published
 - **AND** no other image or chart version is published
 
@@ -28,12 +27,21 @@ listing the valid forms, rather than skipping silently.
 - **WHEN** a commit is pushed to `master` without a release tag
 - **THEN** no image and no chart is published
 
-### Requirement: Images are published as multi-architecture manifest lists
+### Requirement: Every image declares its architectures, and the push is verified against that declaration
 
-Each published image SHALL be a single manifest list covering `linux/amd64` and
-`linux/arm64` under one tag. Images whose Dockerfile cross-compiles SHALL be
-built without emulation; emulation SHALL be enabled only for the component that
-requires executing target-architecture instructions during the build.
+Each component SHALL declare the platforms it is published for, in one place
+both workflows read. Every image SHALL be published as a manifest list covering
+`linux/amd64` and `linux/arm64` under one tag, without emulation, unless its
+declaration says otherwise.
+
+After pushing, the publish job SHALL inspect the pushed manifest and FAIL unless
+its platforms EQUAL the declaration — an image that lost an architecture and one
+that gained an undeclared one both fail. A build command is a request; only the
+manifest is evidence.
+
+A component SHALL NOT be declared single-architecture on the strength of how it
+has been built before. The declaration describes what the image CAN do, and is
+established by building it.
 
 #### Scenario: Pulling on either architecture
 
@@ -41,11 +49,18 @@ requires executing target-architecture instructions during the build.
   image tag
 - **THEN** the pull resolves to a matching architecture from the same tag
 
-#### Scenario: The runtime image carries an architecture-matched kubectl
+#### Scenario: An image silently loses an architecture
 
-- **WHEN** the `runtime-claude` image is built for `linux/arm64`
-- **THEN** the bundled `kubectl` is the arm64 binary
-- **AND** a wrong-architecture binary fails the build rather than the running pod
+- **WHEN** a component declared multi-architecture is pushed with only one
+- **THEN** the publish job fails naming the missing platform, rather than the
+  gap surfacing weeks later as `ImagePullBackOff` on the first reschedule onto
+  the other architecture
+
+#### Scenario: A single-architecture claim is tested, not inherited
+
+- **WHEN** a component is believed to be single-architecture
+- **THEN** the belief is settled by building and running it on the other
+  architecture before the declaration records it
 
 ### Requirement: Published tags are immutable
 
@@ -66,11 +81,12 @@ A `chart-v<semver>` tag SHALL package `chart/` and push it to
 `helm install ... oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator --version <semver>`.
 The job SHALL fail unless `Chart.yaml`'s `version` equals the tag's version,
 and SHALL fail if any first-party image reference the chart renders by default
-is absent from the registry.
+— in the parent chart's values or in any bundled subchart's — is absent from
+the registry.
 
 #### Scenario: Chart version disagrees with its tag
 
-- **WHEN** `chart-v1.15.0` is pushed while `Chart.yaml` declares `version: 1.14.0`
+- **WHEN** `chart-v5.26.0` is pushed while `Chart.yaml` declares `version: 5.25.0`
 - **THEN** the job fails and nothing is published
 
 #### Scenario: Chart points at an unpublished image
@@ -79,35 +95,48 @@ is absent from the registry.
   was never pushed to the registry
 - **THEN** the chart job fails and names the missing image reference
 
+#### Scenario: A bundle's image is checked too
+
+- **WHEN** a bundled subchart's default values reference a first-party image
+  tag that was never pushed
+- **THEN** the chart job fails and names it, exactly as for the parent chart's
+  own references
+
 #### Scenario: Third-party images are not gated
 
-- **WHEN** the chart references a third-party image such as the VictoriaMetrics
-  MCP server images
-- **THEN** that reference is excluded from the existence check
+- **WHEN** the chart references an image outside this project's namespace, such
+  as a third-party MCP server
+- **THEN** that reference is excluded from the existence check, by namespace
+  rather than by a hardcoded list
 
-### Requirement: Cluster workloads can pull from a private registry
+### Requirement: Published packages are pullable with no credential
 
-The chart SHALL support a `global.imagePullSecrets` value, empty by default,
-rendered onto the manager, runtime, and adapter ServiceAccounts so that manager
-pods, runtime pods, and adapter pods created by the controllers all inherit the
-pull secret. The chart SHALL NOT create the Secret itself, and no CRD or
-controller change SHALL be required to carry the pull secret.
+Every published package SHALL be readable anonymously, so a cluster installs
+the chart and pulls every image without holding a registry credential. The
+chart SHALL NOT require an `imagePullSecrets` value, and no CRD, controller or
+pod-spec code SHALL carry registry credentials.
 
-#### Scenario: Private GHCR install
+Publishing SHALL fail rather than ship an artifact nobody can pull: the chart
+release SHALL resolve each first-party image reference anonymously, so a
+package that is still private is caught at release time instead of at install
+time.
 
-- **WHEN** `global.imagePullSecrets` names an existing Secret and the release is
-  installed against a private registry
-- **THEN** manager, adapter, and runtime pods all pull successfully
+#### Scenario: A fresh install pulls nothing but public artifacts
 
-#### Scenario: Default remains unchanged
+- **WHEN** the chart is installed into a cluster holding no registry credential
+- **THEN** the manager, adapter, runtime, sidecar and job pods all pull
+  successfully
 
-- **WHEN** `global.imagePullSecrets` is empty
-- **THEN** the rendered ServiceAccounts carry no `imagePullSecrets` field
+#### Scenario: A package left private is caught before anyone installs it
 
-#### Scenario: No API surface added
+- **WHEN** a first-party package has not been made public
+- **THEN** the anonymous resolution in the chart release fails and names it
 
-- **WHEN** pull-secret support is in place
-- **THEN** no CRD type, deepcopy, or controller pod-spec code has changed
+#### Scenario: No credential surface is added
+
+- **WHEN** publishing is in place
+- **THEN** the chart has no pull-secret value, and no CRD type, deepcopy or
+  controller pod-spec code has changed
 
 ### Requirement: Published artifacts carry provenance and repository linkage
 

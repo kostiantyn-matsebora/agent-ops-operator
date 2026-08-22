@@ -3,61 +3,81 @@
 ## Why
 
 The repository has **no `.github/` directory at all**. Every artifact this
-project ships — five container images and a Helm chart — is built by hand from
-the `docker buildx` command lines pasted in `CLAUDE.md`, pushed to a personal
-Docker Hub namespace (`kmatsebora/*`), and versioned by remembering to bump a
-tag. Nothing verifies that `go build`, `go vet`, `go test` (including the
-envtest suite) or `helm lint` pass before a change lands, and nothing enforces
-the project's own "never overwrite a pushed tag" rule. A release today is a
-sequence of five manual commands that must not be typed wrong.
+project ships — **thirteen container images** and a Helm chart — is built by
+hand from the `docker buildx` command lines pasted in `CLAUDE.md`, pushed to a
+personal Docker Hub namespace (`kmatsebora/*`), and versioned by remembering to
+bump a tag. The inventory has tripled since this was written and the release
+procedure has not changed: it is still a sequence of hand-typed commands, one
+per image, each of which must not be typed wrong. Nothing verifies that `go build`, `go vet`, `go test` (including the envtest
+suite) or `helm lint` pass before a change lands, nothing runs the console UI's
+own tests at all, and nothing enforces the project's own "never overwrite a
+pushed tag" rule.
 
 ## What Changes
 
 - **CI on every PR and push to `master`** (`.github/workflows/ci.yml`):
   build + vet + test the operator module against a real API server (envtest,
-  Kubernetes 1.31.x per `CLAUDE.md`), build + vet + test each of the three
-  dependency-free adapter modules, `helm lint`/`helm template` the chart across
-  its meaningful value permutations (default, `demo.enabled`,
-  `vm-bundle.enabled`) with schema validation of the rendered manifests, and
-  build all five images without pushing so a broken Dockerfile fails the PR.
+  Kubernetes 1.31.x per `CLAUDE.md`), build + vet + test each of the **eleven**
+  dependency-free submodules, run the **console UI's** npm build and vitest
+  suite, `helm lint`/`helm template` the chart across its meaningful value
+  permutations (default, `global.demo.enabled`, each of the four bundles, and
+  `console.enabled=false`) with schema validation of the rendered manifests,
+  and build all thirteen images without pushing so a broken Dockerfile fails
+  the PR.
 - **Tag-driven publishing to GHCR** (`.github/workflows/release.yml` + a
   reusable `build-image.yml`): a tag of the form `<component>-v<semver>`
-  (`manager-v0.13.2`, `channel-telegram-v0.4.1`, `runtime-claude-v0.1.2`,
-  `signal-cron-v…`, `signal-alertmanager-v…`) publishes exactly that one
-  component. Preserves today's independent per-component versioning.
-- **Multi-arch images (`linux/amd64` + `linux/arm64`)** published as a single
-  manifest list per tag. The four Go images already cross-compile
-  (`BUILDPLATFORM` + `TARGETARCH`); **`runtime-claude` is fixed to be
-  buildable at all on arm64** — it currently hardcodes an amd64 kubectl
-  download URL — and is built for both arches via QEMU emulation.
+  (`manager-v0.38.2`, `console-v0.16.1`, `channel-telegram-v0.12.1`,
+  `runtime-claude-v0.6.1`, …) publishes exactly that one component. Preserves
+  today's independent per-component versioning, which is now thirteen version
+  lines plus the chart.
+- **Multi-arch images (`linux/amd64` + `linux/arm64`)** for ALL THIRTEEN,
+  published as a single manifest list per tag, with **no emulation and no
+  exception**. The twelve Go images cross-compile; `runtime-claude` was verified
+  to build AND run on arm64 (`claude --version` reports 2.1.239 on `aarch64`),
+  which retires this repo's belief that its upstream is single-arch. That image
+  is amd64-only today because the hand-run build command says so.
+- **The release workflow asserts what it pushed** against a per-component
+  platform declaration, as equality. A silently single-arch image is a failure
+  this project has already had in production (`agentops-console`, 2026-08-21),
+  and nothing at build, push or render time reported it.
 - **Helm chart published as an OCI artifact** on a `chart-v<semver>` tag:
   `oci://ghcr.io/kostiantyn-matsebora/charts`, installable with
   `helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator --version <v>`.
 - **Tag immutability is enforced in CI**: a publish job that finds its tag
   already present in the registry fails before building. The project rule
   becomes a gate instead of a note in `CLAUDE.md`.
-- **Registry cut-over to GHCR — BREAKING for new installs.** Chart defaults
-  repoint from `kmatsebora/*` to `ghcr.io/kostiantyn-matsebora/agentops-*`
-  (manager, telegram adapter, vm-alertmanager adapter, demo runtime). Existing
+- **Registry cut-over to GHCR — BREAKING for new installs.** All twelve
+  first-party image references the chart renders repoint from `kmatsebora/*` to
+  `ghcr.io/kostiantyn-matsebora/agentops-*` — in `chart/values.yaml` (manager,
+  console, housekeeping, runtime, context-sync, egress-proxy) and in the four
+  bundles' own values (telegram ×3, alertmanager, k8s-events, ha). Existing
   Docker Hub tags stay pullable, so running installs are unaffected until they
   upgrade.
-- **`imagePullSecrets` support in the chart — required, not optional.** The
-  repo is private, so GHCR packages are private by default and **nothing in the
-  cluster can pull them today**: there is no `imagePullSecrets` handling in the
-  chart, in `runtimepod/podspec.go`, or in `adapterworkload.go`. The chart gains
-  a `global.imagePullSecrets` value attached to the three ServiceAccounts
-  (`agentops-manager`, `agentops-runtime`, the adapter SA), which covers manager
-  pods, runtime pods, and adapter pods **without any Go or CRD change**.
+- **GHCR packages are PUBLIC; no pull secrets anywhere.** A GHCR package is
+  created private on first push and is flipped to public by hand, once per
+  package. That flip is a release prerequisite, not a nicety: pulling stays
+  anonymous, the chart needs no `imagePullSecrets` value, and nothing in
+  `runtimepod/podspec.go` or `adapterworkload.go` has to learn about
+  credentials.
+  The alternative — private packages — was rejected on a fact about this
+  codebase: **adapter ServiceAccounts are created by the manager's reconciler,
+  not by the chart** (`adapterworkload.go`), so a chart-rendered pull secret
+  cannot reach adapter pods at all. Six of the thirteen images run under those
+  SAs. The repository itself stays private; only the packages are public.
 - **Release provenance**: build provenance attestations and SBOMs attached to
   each published image, and `org.opencontainers.image.source` set so GHCR
   packages link back to the repo.
-- **Docs**: install instructions gain the OCI path and the pull-secret
-  prerequisite; the registry cut-over is recorded as a migration entry;
+- **A LICENSE, before the first publish.** Public packages publish the built
+  binaries, and `README.md` still says "License TBD". This stops being a
+  footnote and becomes a prerequisite of the first release.
+- **Docs**: `docs/installation.md` gains the OCI path (it owns the parent
+  chart's install), `README.md` keeps only the commands within its 150-line
+  budget, the registry cut-over is a `CHANGELOG.md` migration entry, and
   `CLAUDE.md`'s manual `docker build` block is replaced by the tag-driven flow.
 
 Not in scope: adding a linter beyond `go vet`, signing images with cosign,
-publishing a `latest` tag, dual-publishing to Docker Hub, choosing a LICENSE
-(the repo has none — see Impact), or a release-notes generator.
+publishing a `latest` tag, dual-publishing to Docker Hub, making the REPOSITORY
+public, or a release-notes generator.
 
 ## Capabilities
 
@@ -79,21 +99,33 @@ publishing a `latest` tag, dual-publishing to Docker Hub, choosing a LICENSE
   `.github/workflows/build-image.yml` (reusable), `.github/dependabot.yml`,
   `.dockerignore` (absent today — the manager build context currently uploads
   the whole tree including `chart/` and `openspec/`).
-- **`runtime-claude/Dockerfile`**: kubectl URL becomes `TARGETARCH`-aware; this
-  is the only image whose Dockerfile is not already multi-arch-capable.
-- **`chart/`**: `values.yaml` image repositories repoint to GHCR;
-  `global.imagePullSecrets` value plus ServiceAccount template changes;
-  `Chart.yaml` version bump. No template logic beyond the SA additions.
-- **Docs**: `README.md` install section; `CLAUDE.md` build/test and image
-  sections. The registry cut-over is a migration note — it belongs in
-  `CHANGELOG.md` if the in-flight `organize-docs` change has landed, otherwise
-  in the README's migration sections.
-- **No Go code, CRD, or API change**, and no test change — the SA-level pull
-  secret is deliberately chosen to keep it that way.
-- **Repo settings (manual, outside the diff)**: GHCR package visibility per
-  package. Default here is private-to-match-the-repo with pull secrets; making
-  a package public removes the pull-secret requirement but publishes the built
-  binaries — that call stays with the owner.
-- **Flag, not blocking**: the repo has no LICENSE and `README.md` says "License
-  TBD". That is fine while packages are private; it should be settled before
-  any package is made public.
+- **No Dockerfile change.** All thirteen build multi-arch as they stand. The
+  earlier plan to make `runtime-claude` `TARGETARCH`-aware described a `kubectl`
+  download that image no longer performs (dropped in 0.5.0), and the plan after
+  that declared it single-arch on a premise the build disproved.
+- **`CLAUDE.md` correction**: its "the exception is a runtime whose UPSTREAM is
+  single-arch" note is wrong and is removed. The chart's runtime `nodeSelector`
+  becomes optional once the multi-arch image ships — relaxing it is the
+  operator's call, after, not part of this change.
+- **`chart/`**: image repositories repoint to GHCR in `values.yaml` and in all
+  four bundles' `values.yaml`; `Chart.yaml` version bump. **No other chart
+  change** — public packages mean no pull-secret value and no ServiceAccount
+  edits.
+- **Docs**: `docs/installation.md` (the parent chart's install and values),
+  `README.md` (commands only), `CLAUDE.md` build/test and image sections, and a
+  `CHANGELOG.md` migration entry for the registry cut-over.
+  `CLAUDE.md`'s inventory is corrected as part of that: it says "Nine Go
+  modules" and **omits `egress-proxy/` entirely**, including from the image
+  build block — so the one document that lists what this repo ships is missing
+  a shipped image. A release process derived from the repo rather than from
+  prose is the fix; correcting the prose is what stops the two disagreeing
+  again.
+- **No Go code, CRD, or API change**, and no test change.
+- **Repo settings (manual, outside the diff)**: each GHCR package is created
+  private by its first push and must be flipped to public once. `GITHUB_TOKEN`
+  cannot do it, so it is a documented per-package step — thirteen images plus
+  the chart — and a package left private is an `ImagePullBackOff` for whoever
+  installs next.
+- **BLOCKING**: the repo has no LICENSE and `README.md` says "License TBD".
+  Public packages publish the built binaries, so this is settled before the
+  first publish, not after.
