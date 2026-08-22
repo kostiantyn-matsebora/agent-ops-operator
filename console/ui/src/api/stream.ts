@@ -1,15 +1,20 @@
 import { create } from 'zustand'
-import type { ActivityEvent, Queues } from './types'
+import type { QueryClient } from '@tanstack/react-query'
+import { applyDelta, applyMessage, invalidateDerived } from './apply'
+import type { ActivityEvent, DeltaEvent, Message, Queues } from './types'
 
-// ONE SSE connection into a Zustand store, with cursor-driven query
-// invalidation.
+// ONE SSE connection into a Zustand store and the react-query cache.
 //
-// Snapshots are authoritative and the stream carries deltas. So a CR delta does
-// not update anything here — it bumps a per-kind revision, and the components
-// showing that kind re-fetch. That keeps the wire format stable no matter how
-// the CRDs evolve, and makes a dropped event cost one stale second rather than a
-// wrong screen. Activity events are the exception: they ARE the animation, so
-// they are kept whole.
+// EVERY EVENT CARRIES ITS CONTENT, so an event is APPLIED rather than used as a
+// signal to go and ask. A CR delta brings the changed object in the shapes the
+// snapshots serve, a message brings the message, activity events and queue
+// state travel whole. Nothing here bumps a counter that a query key reads —
+// that mechanism is what made every change a cache miss, and a cache miss is a
+// spinner where content used to be.
+//
+// Snapshots stay AUTHORITATIVE. A resync reloads everything, so a browser that
+// misses events converges, and an applier that is ever wrong is corrected at
+// the next reconnect rather than persisting.
 
 /** How many live events the store keeps for animation. */
 const MAX_LIVE_EVENTS = 500
@@ -27,25 +32,15 @@ export const ACTIVITY_GAP = 'activity.gap'
 
 export interface StreamState {
   connected: boolean
-  /** Bumped per resource kind on any delta; queries key off it to refetch. */
-  revisions: Record<string, number>
-  /** Bumped whenever the server tells us to resync — every query refetches. */
-  resyncs: number
   events: ActivityEvent[]
   cursor: string
   queues?: Queues
-  /** Transcript appends, keyed by thread id. */
-  messageRevision: number
-  lastMessageThread?: string
 }
 
 export const useStream = create<StreamState>(() => ({
   connected: false,
-  revisions: {},
-  resyncs: 0,
   events: [],
   cursor: '',
-  messageRevision: 0,
 }))
 
 /** Recent events touching one conversation, oldest first. */
@@ -58,45 +53,39 @@ let retryTimer: ReturnType<typeof setTimeout> | undefined
 let stopped = false
 
 /**
- * How long delta bumps are gathered before the revision moves, in ms.
+ * How long derived-view invalidations are gathered before they are issued, in ms.
  *
  * DELTAS ARRIVE IN BURSTS. Closing fifty conversations writes fifty statuses and
- * fifty deletions within a couple of seconds, and a revision is folded into a
- * query KEY — so an uncoalesced burst is fifty cold cache entries, fifty
- * refetches, and a list that flips to its loading state between each one. One
- * bump per kind per window carries the same information: a revision says "this
- * kind moved", never how many times.
+ * fifty deletions within a couple of seconds. The rows themselves are applied
+ * one by one — that costs nothing and is what keeps the table live — but the
+ * views the server DERIVES from many objects cannot be applied, and re-reading
+ * the overview fifty times to learn one new count is a burst of requests for one
+ * answer.
  *
- * The cost is bounded and known: a delta can take a quarter second longer to
- * show. Snapshots stay authoritative, so that is the same staleness the design
- * already accepts for a dropped event.
+ * The cost is bounded and known: a derived view can be a quarter second behind
+ * the row that moved. Snapshots stay authoritative, so that is the same
+ * staleness the design already accepts for a dropped event.
  */
-const DELTA_COALESCE_MS = 250
+const DERIVED_COALESCE_MS = 250
 
 let pendingKinds: Set<string> | null = null
 let coalesceTimer: ReturnType<typeof setTimeout> | undefined
 
-/** flushDeltas bumps every kind seen during the window exactly once. */
-function flushDeltas() {
+/** flushDerived re-reads every derived view the window's kinds moved. */
+function flushDerived(client: QueryClient) {
   coalesceTimer = undefined
   const kinds = pendingKinds
   pendingKinds = null
   if (!kinds || kinds.size === 0) return
-  useStream.setState((s) => {
-    const revisions = { ...s.revisions }
-    for (const kind of kinds) {
-      revisions[kind] = (revisions[kind] ?? 0) + 1
-    }
-    return { revisions }
-  })
+  invalidateDerived(client, kinds)
 }
 
-/** noteDelta records that a kind moved. Exported for the coalescing test. */
-export function noteDelta(kind: string) {
+/** noteDerived records that a kind moved. Exported for the coalescing test. */
+export function noteDerived(client: QueryClient, kind: string) {
   if (!pendingKinds) pendingKinds = new Set()
   pendingKinds.add(kind)
   if (coalesceTimer === undefined) {
-    coalesceTimer = setTimeout(flushDeltas, DELTA_COALESCE_MS)
+    coalesceTimer = setTimeout(() => flushDerived(client), DERIVED_COALESCE_MS)
   }
 }
 
@@ -118,7 +107,7 @@ const RETRY_MAX = 30_000
  * the failure this whole surface exists to avoid, and a chip that only tells
  * the truth after F5 is that failure with extra steps.
  */
-export function connectStream(onResync: () => void): () => void {
+export function connectStream(client: QueryClient): () => void {
   if (source) return () => undefined
   stopped = false
   let backoff = RETRY_MIN
@@ -142,7 +131,7 @@ export function connectStream(onResync: () => void): () => void {
       backoff = Math.min(backoff * 2, RETRY_MAX)
     }
 
-    wire(es, onResync)
+    wire(es, client)
   }
 
   open()
@@ -160,17 +149,22 @@ export function connectStream(onResync: () => void): () => void {
 }
 
 /** Attach the message handlers. Re-run per connection, so a reconnect is whole. */
-function wire(es: EventSource, onResync: () => void) {
+function wire(es: EventSource, client: QueryClient) {
   es.addEventListener('resync', () => {
     // First connect and reconnect are the SAME path: both start with a resync,
     // so there is no "have I been here before" branch to get wrong.
-    useStream.setState((s) => ({ resyncs: s.resyncs + 1 }))
-    onResync()
+    //
+    // This is one of the four reasons a refetch still happens: the client has
+    // provably missed events and cannot know which.
+    void client.invalidateQueries()
   })
 
   es.addEventListener('delta', (ev) => {
-    const d = JSON.parse((ev as MessageEvent).data) as { kind: string }
-    noteDelta(d.kind)
+    const d = JSON.parse((ev as MessageEvent).data) as DeltaEvent
+    applyDelta(client, d)
+    // What one object cannot answer for — counts, graphs, cross-object findings
+    // — is re-read on a stable key, so the page updates without blanking.
+    noteDerived(client, d.kind)
   })
 
   es.addEventListener('activity', (ev) => {
@@ -181,9 +175,10 @@ function wire(es: EventSource, onResync: () => void) {
       cursor: e.cursor > s.cursor ? e.cursor : s.cursor,
     }))
     // The gap itself lives on the stream HEALTH, so that a browser opened after
-    // the fact still sees it. Refetching is how a browser already open learns
-    // of one without a second copy of the fact in this store.
-    if (e.kind === ACTIVITY_GAP) onResync()
+    // the fact still sees it. Reloading is how a browser already open learns of
+    // one without a second copy of the fact in this store — and it is a resync
+    // in every sense: history the client provably missed.
+    if (e.kind === ACTIVITY_GAP) void client.invalidateQueries()
   })
 
   es.addEventListener('queues', (ev) => {
@@ -191,10 +186,6 @@ function wire(es: EventSource, onResync: () => void) {
   })
 
   es.addEventListener('message', (ev) => {
-    const m = JSON.parse((ev as MessageEvent).data) as { threadId: string }
-    useStream.setState((s) => ({
-      messageRevision: s.messageRevision + 1,
-      lastMessageThread: m.threadId,
-    }))
+    applyMessage(client, JSON.parse((ev as MessageEvent).data) as Message)
   })
 }

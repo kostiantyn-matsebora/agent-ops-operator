@@ -52,6 +52,28 @@ exactly as before.
 - A hyphenated Pipeline is completed on Telegram under an underscored spelling
   (`/k8s_observe`). **The CR is not renamed** and the manager never sees the
   other form — the adapter translates it back. Both forms work when typed.
+- **The console applies stream events instead of reloading.** Its `delta` event
+  now carries the changed object, projected into the shapes its own snapshot
+  endpoints serve, so a listing, a kind detail and an open conversation update
+  in place. A message appears from the message event itself.
+- **Sending a message from the console asks for nothing.** The echo, the
+  acknowledgement and the answer all arrive on the stream. The composer used to
+  re-read the whole conversation on every send — the heaviest read on the page,
+  for what was already on its way.
+- **A console view that has painted never goes back to a spinner.** A change
+  counter used to sit in every query key, so each event asked for a cache entry
+  that had never been filled — which is what made the page blank for a second
+  every time anything moved. Sending a message did it three times.
+- **Refetching in the console keeps four reasons**: first load, a resync, an
+  explicit action, and a value that decays with time. Overview and Topology keep
+  their timers, because rates and ages are wrong when time passes rather than
+  when something changes. Aggregates the browser cannot recompute — install
+  counts, the traffic graph, cross-object findings, resolved capabilities — are
+  re-read on a stable key, so the page stays on screen while the read lands.
+- **The browser cache is bounded.** Data for a view that is off screen is
+  released after five minutes, and returning to a view after a minute loads
+  fresh. Nothing is persisted — no `localStorage`, no IndexedDB — so closing the
+  tab still leaves nothing behind.
 
 ### Removed
 

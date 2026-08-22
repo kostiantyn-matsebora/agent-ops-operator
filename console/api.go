@@ -331,14 +331,70 @@ func (a *API) handleOriginationSources(w http.ResponseWriter, r *http.Request) {
 
 // ---- stream -------------------------------------------------------------------
 
+// deltaEvent is one CR change as the browser receives it: the identity of what
+// moved, plus the object PROJECTED into the shapes this console serves for it.
+//
+// It used to carry `{type, kind, name}` and nothing else, so every browser
+// answered every change with a request for what it had just been told had
+// changed — and, because a change counter sat in the query key, blanked the
+// page while the answer came back. The projection is done HERE because it is
+// done here already: `row` and `detail` are what the snapshot endpoints return,
+// from the same functions, so an applied view cannot be a shape a re-fetch
+// would never produce.
+type deltaEvent struct {
+	Type   string        `json:"type"`
+	Kind   string        `json:"kind"`
+	Name   string        `json:"name,omitempty"`
+	Row    *InventoryRow `json:"row,omitempty"`
+	Detail *Detail       `json:"detail,omitempty"`
+	// The conversation views, on a conversations delta only. A Conversation is
+	// two things at once — a CR in the configuration listing and a thread on
+	// its own page — so it is projected both ways.
+	ConversationRow  *ConversationSummary `json:"conversationRow,omitempty"`
+	ConversationView map[string]any       `json:"conversationView,omitempty"`
+}
+
+// deltaEventFor projects one cache delta for one connection.
+//
+// The reader is per CONNECTION, because unreadness is answered for whoever is
+// asking — the same reason the listing takes it from the request.
+func (a *API) deltaEventFor(d Delta, reader string) deltaEvent {
+	ev := deltaEvent{Type: d.Type, Kind: d.Kind, Name: d.Name}
+	// A DELETE carries its identity and type ALONE: there is no object left to
+	// project, and dropping a row needs nothing else. A RESYNC likewise — its
+	// whole meaning is "stop trusting what you hold and read the snapshot".
+	if d.Object == nil || d.Type == "DELETED" || d.Type == DeltaResync {
+		return ev
+	}
+	if knownKind(d.Kind) {
+		row := a.InventoryRowFor(d.Kind, d.Object)
+		ev.Row = &row
+		// Pipeline detail carries the manager's RESOLVED capabilities, which
+		// this console must not recompute and cannot fetch per delta per
+		// browser. A detail without them would be the page missing the half an
+		// operator opened it for, so none is sent and that one view re-reads.
+		if d.Kind != "pipelines" {
+			det := a.DetailFor(d.Kind, d.Object)
+			ev.Detail = &det
+		}
+	}
+	if d.Kind == "conversations" {
+		row := a.ConversationRow(d.Object, reader)
+		ev.ConversationRow = &row
+		ev.ConversationView = a.ConversationView(d.Object, reader)
+	}
+	return ev
+}
+
 // handleStream multiplexes THREE sources onto one SSE connection: CR watch
 // deltas, activity events, and transcript appends. One connection per browser,
 // not three — and the BFF holds one upstream activity connection for all of them.
 //
-// CR deltas are HINTS carrying kind and name; the browser re-fetches the
-// snapshots it is showing. That keeps the wire format stable no matter how the
-// CRDs evolve. Activity events travel WHOLE, because they are the animation
-// itself and re-fetching would defeat the point.
+// EVERY EVENT CARRIES ITS CONTENT. A CR delta brings the changed object in the
+// shapes the snapshots serve, an activity event and a transcript append travel
+// whole — so a browser applies what it is told rather than asking what it now
+// is. Snapshots stay authoritative: a resync replaces applied state wholesale,
+// which is what makes applying safe rather than a second source of truth.
 func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -351,6 +407,7 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no") // proxies must not buffer SSE
 	w.WriteHeader(http.StatusOK)
 
+	reader := a.adapter.ReaderKey(Identity(r))
 	deltas, cancelDeltas := a.cache.Subscribe()
 	defer cancelDeltas()
 	messages, cancelMessages := a.transcripts.Subscribe()
@@ -395,7 +452,7 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if !send("delta", map[string]string{"type": d.Type, "kind": d.Kind, "name": d.Name}) {
+			if !send("delta", a.deltaEventFor(d, reader)) {
 				return
 			}
 		case e, ok := <-events:

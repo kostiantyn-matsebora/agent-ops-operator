@@ -495,6 +495,41 @@ export interface ConversationGraph extends Topology {
   drift?: string[]
 }
 
+// ---- the stream --------------------------------------------------------------
+
+/**
+ * One CR change, carrying the object in the shapes the snapshots serve.
+ *
+ * A DISCRIMINATED UNION on purpose: a delete has no object to carry, so the
+ * type system refuses a handler that reads one off it. The event used to be
+ * `{type, kind, name}` for every case, and every consumer answered it with a
+ * request for what it had just been told had changed.
+ */
+export type DeltaEvent =
+  | {
+      type: 'ADDED' | 'MODIFIED'
+      kind: string
+      name: string
+      /** The row this object's listing shows. Absent for kinds with no listing. */
+      row?: InventoryRow
+      /** The kind page. Absent for pipelines, whose resolved capabilities are
+       * the manager's answer and are fetched rather than streamed. */
+      detail?: Detail
+      /** Conversations only: the row its own listing shows. */
+      conversationRow?: ConversationSummary
+      /** Conversations only: the page, minus the transcript and the events —
+       * both arrive on streams of their own. */
+      conversationView?: Omit<ConversationDetail, 'transcript' | 'events'>
+    }
+  | { type: 'DELETED'; kind: string; name: string }
+  | { type: 'RESYNC'; kind: string }
+
+/** The stream's opening event, and its answer to a cursor it cannot serve. */
+export interface ResyncEvent {
+  reason: string
+  cursor?: string
+}
+
 // ---- origination + session ---------------------------------------------------
 
 export interface OriginationSource {

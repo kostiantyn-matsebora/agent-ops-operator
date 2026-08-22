@@ -92,7 +92,7 @@ function Avatar({ kind, icon }: { kind: string; icon?: string }) {
 
 export function ConversationPage() {
   const { name = '' } = useParams()
-  const { data, isLoading, error, refetch } = useConversation(name)
+  const { data, isLoading, error } = useConversation(name)
   const [tab, setTab] = useState<string | number>(0)
 
   // Opening a conversation reports its CONSOLE thread read, and reports again
@@ -186,7 +186,12 @@ export function ConversationPage() {
                   newest message when this tab is shown again. Its message list
                   is unchanged by a tab switch, so nothing else would tell it
                   to. */}
-              <Transcript detail={data} onSent={() => refetch()} active={tab === 0} />
+              {/* Nothing to re-read after a send: the manager delivers the
+                  message back to this channel, so the bubble arrives on the
+                  stream like any other. Asking for the whole conversation here
+                  was the heaviest read on the page, and it asked for what was
+                  already on its way. */}
+              <Transcript detail={data} active={tab === 0} />
             </Tab>
             <Tab eventKey={1} title={<TabTitleText>Runs</TabTitleText>}>
               <RunTimeline detail={data} />
@@ -217,11 +222,9 @@ export function ConversationPage() {
 
 function Transcript({
   detail,
-  onSent,
   active,
 }: {
   detail: NonNullable<ReturnType<typeof useConversation>['data']>
-  onSent: () => void
   active: boolean
 }) {
   const session = useSession()
@@ -328,7 +331,6 @@ function Transcript({
     try {
       await api.send(detail.conversation.name, text)
       setText('')
-      onSent()
     } catch (e) {
       setError((e as ApiError).message)
     } finally {

@@ -321,16 +321,38 @@ func (a *API) handleInventory(w http.ResponseWriter, r *http.Request) {
 	objs := a.cache.List(kind)
 	rows := make([]InventoryRow, 0, len(objs))
 	for _, o := range objs {
-		h, _, _ := health(o)
-		rows = append(rows, InventoryRow{
-			Name: o.Metadata.Name, UID: o.Metadata.UID,
-			Created: o.Metadata.CreationTimestamp,
-			Labels:  o.Metadata.Labels, Annotations: o.Metadata.Annotations,
-			Health: h, Conditions: o.Conditions(), Summary: summaryLine(o),
-			Columns: kindColumns(o), Findings: byObject[o.Metadata.Name],
-		})
+		rows = append(rows, inventoryRow(o, byObject[o.Metadata.Name]))
 	}
 	writeJSON(w, http.StatusOK, rows)
+}
+
+// inventoryRow projects one object into the row a listing shows.
+//
+// Factored out because the STREAM sends it too: a delta carries the row the
+// snapshot would have served, so a browser holding that listing writes it
+// straight in. Two implementations of this projection would be two answers to
+// "what does this object look like in a list", and the day they disagree is the
+// day a live row and a re-fetched row show different things.
+func inventoryRow(o *Object, findings int) InventoryRow {
+	h, _, _ := health(o)
+	return InventoryRow{
+		Name: o.Metadata.Name, UID: o.Metadata.UID,
+		Created: o.Metadata.CreationTimestamp,
+		Labels:  o.Metadata.Labels, Annotations: o.Metadata.Annotations,
+		Health: h, Conditions: o.Conditions(), Summary: summaryLine(o),
+		Columns: kindColumns(o), Findings: findings,
+	}
+}
+
+// InventoryRowFor is the stream's entry: one object, its own findings counted.
+func (a *API) InventoryRowFor(kind string, o *Object) InventoryRow {
+	n := 0
+	for _, f := range a.findings() {
+		if f.Kind == kind && f.Name == o.Metadata.Name {
+			n++
+		}
+	}
+	return inventoryRow(o, n)
 }
 
 // kindColumns is the per-kind column set. Purpose-built on purpose: a Pipeline
@@ -437,6 +459,27 @@ type Detail struct {
 	ResolvedError string                `json:"resolvedError,omitempty"`
 }
 
+// DetailFor projects one object into the detail a kind page shows, WITHOUT the
+// manager's resolved capabilities.
+//
+// Resolved composition is the manager's answer and is fetched per request — the
+// console must not recompute it — so the stream cannot carry it, and a Pipeline
+// detail is therefore re-read rather than applied. Every other kind's detail is
+// this projection whole.
+func (a *API) DetailFor(kind string, obj *Object) Detail {
+	h, _, _ := health(obj)
+	out := Detail{
+		Object: obj, Health: h, Conditions: obj.Conditions(),
+		YAML: objectYAML(obj), UsedBy: a.inboundRefs(kind, obj.Metadata.Name), Findings: []Finding{},
+	}
+	for _, f := range a.findings() {
+		if f.Kind == kind && f.Name == obj.Metadata.Name {
+			out.Findings = append(out.Findings, f)
+		}
+	}
+	return out
+}
+
 func (a *API) handleDetail(w http.ResponseWriter, r *http.Request) {
 	kind, name := r.PathValue("kind"), r.PathValue("name")
 	if !knownKind(kind) {
@@ -448,16 +491,7 @@ func (a *API) handleDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": Singular[kind] + " " + name + " not found"})
 		return
 	}
-	h, _, _ := health(obj)
-	out := Detail{
-		Object: obj, Health: h, Conditions: obj.Conditions(),
-		YAML: objectYAML(obj), UsedBy: a.inboundRefs(kind, name), Findings: []Finding{},
-	}
-	for _, f := range a.findings() {
-		if f.Kind == kind && f.Name == name {
-			out.Findings = append(out.Findings, f)
-		}
-	}
+	out := a.DetailFor(kind, obj)
 	if kind == "pipelines" {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()

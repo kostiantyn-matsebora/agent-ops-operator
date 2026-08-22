@@ -43,6 +43,16 @@ order, and the older answer wins.
 Size is bounded by what the console already serves per snapshot; a delta is one
 object where a snapshot is all of them.
 
+**It carries the object PROJECTED, not raw.** Every snapshot this console serves
+is a projection — a listing row is `health()` plus `summaryLine()` plus
+`kindColumns()`, a conversation row is `summarize()`. A raw object would be
+something the browser could not turn into what the page shows without
+reimplementing all of that in TypeScript, which is the "an applier writes a
+shape the snapshot would never produce" risk, made structural.
+
+So the BFF runs the SAME functions its endpoints run and puts the result on the
+event. Pinned by a test comparing each streamed shape to the fetched one.
+
 ### D2. Appliers live in one place, keyed by kind
 
 A single module maps `(kind, type, object)` onto cache writes. Views do not
@@ -75,6 +85,24 @@ user action; and a value that decays with TIME rather than with change.
 The fourth is the one worth naming: topology and overview show RATES. A rate is
 not wrong because something changed, it is wrong because time passed, and no
 event announces that. Those keep their timers and say so.
+
+### D4a. A DERIVED view is re-read, and that is the fifth case
+
+Some views cannot be applied at all: the install counts, the traffic graph, the
+cross-object findings, the unread badge, and a Pipeline's resolved capabilities.
+Each is an aggregate over many objects, or the manager's own answer, and none is
+recoverable from the one object that changed.
+
+Recomputing them in the browser would be a second implementation of what the
+server says — the one thing this console must never disagree with.
+
+They are **invalidated on a stable key**, which is the whole difference from
+what the revision-in-the-key did: the data stays, the page stays on screen, and
+the read lands underneath it. Bursts coalesce into one re-read per window.
+
+The requirement they must still meet is the one that matters — a view that has
+painted never returns to a spinner — and each states in code why it is
+excluded from applying.
 
 ### D5. Correctness rests on the snapshot staying authoritative
 
@@ -126,7 +154,8 @@ that lives longer is not a cache that drifts further.
 
 | Risk | Mitigation |
 |---|---|
-| **An applier writes a shape the snapshot would not have produced**, and the view renders something impossible. | The applier writes the object the BFF sent, in the same shape the snapshot serves. Pinned by a test comparing an applied cache entry against a fetched one for the same state. |
+| **An applier writes a shape the snapshot would not have produced**, and the view renders something impossible. | The BFF projects with the SAME functions its endpoints use, and the applier writes that through unaltered. Pinned by a test comparing each streamed shape against the fetched one for the same state. |
+| **A derived view is re-read on every change**, so the request-per-change is only moved. | Coalesced into one re-read per window per view, and only for the views whose kinds moved. It never blanks, because the key is stable. |
 | **A delta is missed and the cache silently drifts.** | Unchanged from today: a gap or reconnect forces a resync, and the snapshot is authoritative. Applying does not weaken it. |
 | **Larger events on a busy install.** | One object per change, against a snapshot of all of them per change today. Strictly less traffic. |
 | **A view forgets to read a newly applied kind.** | Views read the cache, not events, so a newly applied kind reaches every reader of that cache entry without per-view work. |
@@ -135,6 +164,10 @@ that lives longer is not a cache that drifts further.
 
 ## Open Questions
 
-- **Whether the activity ring should apply the same way.** It already appends
-  from the stream, so it may need nothing — worth confirming rather than
-  assuming while touching the same file.
+- **Whether the activity ring should apply the same way.** RESOLVED: it already
+  appends from the stream and needed nothing. The one change beside it was the
+  gap, which reloads because it means events were provably missed.
+- **Whether a conversation's detail should ride every delta.** It does today,
+  minus the transcript and the events, which are the parts that grow. If a long
+  run history makes that heavy on a busy install, the answer is to trim the
+  projection rather than to go back to asking.

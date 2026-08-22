@@ -41,6 +41,68 @@ It fans in five sources the browser never touches directly:
 Plus two write paths, both through the manager: `POST /channel/inbound` (reply)
 and `POST /signal/inbound` (originate).
 
+## How it stays current
+
+One SSE connection, open for the browser's lifetime, and **every event carries
+its content**. A view is UPDATED from what arrives, never reloaded because
+something arrived.
+
+| Event | Carries | Applied to |
+|---|---|---|
+| `delta` | the changed object, in the shapes the snapshots serve | the listing, the detail and the conversation page holding it |
+| `message` | the message itself | the transcript of the conversation whose thread it names |
+| `activity` | the hop | the live timeline |
+| `queues` | queue state whole | the Queues page |
+| `resync` | nothing — it is an instruction | every view reloads |
+
+A delta is **projected server-side**, by the same functions the snapshot
+endpoints use. So an applied row is a row a re-fetch would have produced, and
+the browser recomputes nothing.
+
+### A refetch is an exception, and each one has a reason
+
+1. **First load** — the console holds nothing yet.
+2. **A resync** — a reconnect, or a reported activity gap, where the client has
+   provably missed events and cannot know what.
+3. **An explicit action** — closing a batch, marking read, logging in.
+4. **A value that decays with TIME** — Overview and Topology show rates and
+   ages. A rate is not wrong because something changed, it is wrong because time
+   passed, and no event announces that.
+
+**Sending a message is not one of them.** The manager delivers the message back
+to this channel, so the bubble arrives on the stream like any other. The console
+used to answer its own send by re-reading the whole conversation, which is the
+heaviest read on the page and asked for what was already on its way.
+
+**There is no fifth reason.** A timed refresh that exists to observe change does
+not survive the test that scans for it.
+
+### Derived views are re-read, not applied
+
+An aggregate over many objects — the install counts, the traffic graph, the
+cross-object findings, a Pipeline's resolved capabilities — cannot be
+reconstructed from one changed object. Recomputing it in the browser would be a
+second implementation of the server's answer.
+
+Those views are **invalidated**, and the key stays stable, so the page on screen
+stays on screen while the read lands. Bursts are coalesced into one re-read per
+window.
+
+**A view that has painted never returns to a spinner.** That is a test, one case
+per page, not a convention.
+
+### What the browser keeps
+
+| Bound | Value | Why |
+|---|---|---|
+| Eviction of unused data | 5 minutes | a conversation glanced at an hour ago should not still cost memory |
+| Freshness on remount | 1 minute | returning to a view loads fresh rather than rendering what was last applied |
+
+**Nothing is persisted.** No `localStorage`, no IndexedDB, no service worker —
+closing the tab leaves nothing behind. Correctness comes from the resync rule
+rather than from cache lifetime: applied state is replaced wholesale whenever
+the client may have missed an event.
+
 ## Pages
 
 ### Overview
