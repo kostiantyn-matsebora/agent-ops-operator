@@ -1,0 +1,10 @@
+{
+  // Show the title `.claude/hooks/session-title.sh` writes. VS Code captures the
+  // OSC title sequence as ${sequence} but its default tab label is "${process}"
+  // alone, so the escape is received and discarded — which is what made the
+  // session-title hooks look broken. See .claude/rules/session-naming.md.
+  //
+  // ${process} stays first so a plain shell in this workspace still reads
+  // "bash"; the separator is elided when no session has set a title.
+  "terminal.integrated.tabs.title": "${process}${separator}${sequence}"
+}
