@@ -348,7 +348,7 @@ helm upgrade agent-ops ./chart -n agent-ops
 helm upgrade agent-ops ./chart -n agent-ops
 ```
 
-Read [CHANGELOG.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/CHANGELOG.md)
+Read [CHANGELOG.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
 first. It is the only place migration steps live, newest first, keyed by chart
 version.
 
