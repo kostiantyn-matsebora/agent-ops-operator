@@ -15,6 +15,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { agentDeclaredTools, composeAllowedTools } = require('./tools');
+const { DEFAULT_LIMIT, newSpinWatch, noteToolUse, spinMessage, discardedNotice } = require('./spin');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
@@ -27,6 +28,13 @@ const GIT_TOKEN = process.env.GIT_TOKEN || '';
 const TTL_MS = (parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
 const WORKSPACE = process.env.WORKSPACE || '/data/workspace';
 const MCP_CONFIG = process.env.MCP_CONFIG || '/etc/agentops/mcp.json';
+// How many identical unparsable tool calls in a row end a run. 0 disables the
+// breaker entirely, which is a decision an install can make and this file will
+// not make for it.
+const SPIN_LIMIT = (() => {
+  const v = parseInt(process.env.RUNTIME_UNPARSED_REPEAT_LIMIT || '', 10);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_LIMIT;
+})();
 
 if (!CONTROL_URL || !CONVO_ID) {
   console.error('[runtime] CONTROL_URL and CONVO_ID are required');
@@ -180,6 +188,11 @@ async function spawnClaude(args, unit, isResume) {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let buf = '', sessionId = null, result = '', stderr = '';
+      // Tool calls the model could not FORM. Nothing executes them, so a run
+      // that only makes those looks busy and answers from whatever it already
+      // had — see spin.js.
+      const watch = newSpinWatch(SPIN_LIMIT);
+      let spin = null, kill = null;
       p.stdout.on('data', (c) => {
         buf += c;
         let nl;
@@ -193,6 +206,24 @@ async function spawnClaude(args, unit, isResume) {
           if (ev.type === 'result') result = (ev.result || '').slice(0, 2000);
           const txt = formatEvent(ev, line);
           if (txt) process.stdout.write(txt);
+          if (ev.type === 'assistant' && !spin) {
+            for (const b of ev.message?.content || []) {
+              if (b.type !== 'tool_use') continue;
+              const verdict = noteToolUse(watch, b.name, b.input);
+              if (!verdict) continue;
+              spin = verdict;
+              console.log(
+                `[runtime] ${verdict.name} called ${verdict.repeats}x with the same unparsable arguments — ` +
+                  `nothing ran, ending the run: ${verdict.raw.slice(0, 160)}`,
+              );
+              // TERM first, KILL only if it does not go: an outright kill is
+              // a last resort, and a CLI that ignores TERM must still not be
+              // able to hold the pod.
+              p.kill('SIGTERM');
+              kill = setTimeout(() => p.kill('SIGKILL'), 5000);
+              break;
+            }
+          }
         }
       });
       p.stderr.on('data', (c) => {
@@ -200,8 +231,26 @@ async function spawnClaude(args, unit, isResume) {
         process.stderr.write(c);
       });
       p.on('error', (e) => resolve({ status: 'failed', exitCode: -1, sessionId, result: `spawn: ${e.message}`, stderr }));
-      p.on('close', (code) =>
-        resolve({ status: code === 0 ? 'succeeded' : 'failed', exitCode: code, sessionId, result, stderr }));
+      p.on('close', (code) => {
+        if (kill) clearTimeout(kill);
+        if (spin) {
+          // FAILED, and said plainly. The alternative is what happened before
+          // this existed: a run reported success while every tool call in it
+          // had been discarded unread.
+          return resolve({ status: 'failed', exitCode: code ?? -1, sessionId, result: spinMessage(spin), stderr });
+        }
+        if (watch.total > 0) {
+          // Recovered on its own, which is the common case — by ABANDONING the
+          // tool and answering from what the session already held, twice out of
+          // twice observed. The log line is for whoever operates this; the
+          // notice on the answer is for whoever asked, because the answer does
+          // not say it.
+          console.log(`[runtime] ${watch.total} tool call(s) never ran — the arguments were not valid JSON`);
+          const notice = discardedNotice(watch);
+          if (notice && result) result = `${result}\n\n${notice}`;
+        }
+        resolve({ status: code === 0 ? 'succeeded' : 'failed', exitCode: code, sessionId, result, stderr });
+      });
     });
 
   const first = await attempt(args);
