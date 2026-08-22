@@ -42,6 +42,7 @@ filename — so the routing is explicit:
 | What the console IS — endpoints, RBAC grant, values reference, internals | `docs/console.md` |
 | A change to the console's UI | re-run BOTH `npm run screenshots` and `npm run demo` in `console/ui` — the site's screenshots and its landing recording are build output, and the change is not done until both match |
 | The pitch, the kind list, the demo, the install command | `README.md` |
+| The site's SHELL — Jekyll source, diagrams, what each page owes beyond its row | `docs/.claude/site.md` |
 | How the site LOOKS or navigates | `docs/_layouts/`, `_includes/`, `_data/nav.yml`, `assets/` |
 | What the site SAYS to an adopter | a markdown page under `docs/` |
 | How a page READS — structure, tabs, components, tables, the lint | `docs/CLAUDE.md` |

@@ -3,6 +3,10 @@
 **Go/controller-runtime Kubernetes operator.** `README.md` for the product
 view, `docs/concepts.md` for the CRD detail.
 
+**The published site carries its own context** — `docs/CLAUDE.md` plus
+`docs/.claude/`, loaded on demand when working under `docs/` and never at
+launch.
+
 @.claude/answering.md
 
 @.claude/session-naming.md
@@ -18,8 +22,6 @@ view, `docs/concepts.md` for the CRD detail.
 @.claude/structure.md
 
 @.claude/chart.md
-
-@.claude/docs-site.md
 
 @.claude/invariants.md
 

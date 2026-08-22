@@ -3,6 +3,8 @@
 Rules for the pages an adopter reads. The root `CLAUDE.md` routes WHICH document
 receives what. This file governs HOW a page under `docs/` is written and built.
 
+@.claude/site.md
+
 **`docs/` IS the site root.** GitHub Pages builds it from `master` (Deploy from a
 branch → `/docs`), so there is no workflow, no Gemfile and no Ruby in anyone's
 path. Plugins are limited to the set Pages enables by default.
