@@ -96,9 +96,11 @@ Two of them would be noise on their own and are not here:
 week here. A public repository adds contributors on other platforms, which is
 the condition that turns an occasional annoyance into recurring churn.
 
-## Open questions
+## D7. The CRD kind table stays in the README
 
-- **Does the CRD kind table stay in the README?** Eleven rows is a large part of
-  a two-minute read, and the site's Introduction owns the model. Keeping it
-  makes the README self-contained; dropping it makes the two-minute promise
-  easier to keep. Decide when the rewrite is drafted, not before.
+Eleven kinds IS the product. A reader who cannot see the shape of the model
+without following a link has not been told what this is.
+
+The two-minute budget is met by cutting what the site says better — the
+behaviours section, the expanded start — not by removing the one table that
+answers the first question.
