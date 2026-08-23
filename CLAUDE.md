@@ -19,6 +19,16 @@ lends its singular as a prefix (`signals/cron` → `agentops-signal-cron`), a
 singular one lends nothing (`platform/console` → `agentops-console`). The
 operator is `platform/manager/`. See `.claude/rules/structure.md`.
 
+**DOCUMENTATION IS PART OF EVERY CHANGE, AND IT IS NOT OPTIONAL.** Both halves —
+the reference docs AND the adopter site — are updated to match what the change
+did, before the change is finished. **Every openspec change carries a DEDICATED
+documentation task, and it is the LAST task before the change is done.** Not a
+line inside another task, not a follow-up, not "docs later".
+
+**IT IS ENFORCED, NOT TRUSTED** — `openspec/config.yaml` injects it when a tasks
+file is written, and a `PreToolUse` hook REFUSES `openspec archive` while the
+documentation task is unticked. See `.claude/rules/documentation.md`.
+
 **The published site carries its own context** — `docs/CLAUDE.md` plus
 `docs/.claude/`, loaded on demand when working under `docs/` and never at
 launch.

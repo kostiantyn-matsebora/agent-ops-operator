@@ -5,76 +5,113 @@ Several of these run at once, in several windows and over Remote Control, and a
 row reading `agent-ops-operator-05` says nothing about which one is mid-migration
 and which is idle on a docs tweak.
 
+- **The PHASE is the opsx verb driving the work** — `opsx:explore`,
+  `opsx:propose`, `opsx:update`, `opsx:apply`, `opsx:archive`.
+- **The CHANGE is its directory name** under `openspec/changes/`.
+- **Work with no change behind it says what it is**, in the same two-word shape:
+  `review chart-values`, `debug telegram-409`, `docs installation`.
+
+### THE DISPLAY NAME IS THE ONLY HANDLE. SET IT AT LAUNCH
+
 ```sh
-.claude/hooks/session-title.sh set 'opsx:apply discoverable-addressing'
+claude -n "opsx:apply discoverable-addressing"
 ```
 
-That writes the title and paints it.
+`--name` is documented as setting the name shown in "the picker, and terminal
+title" — so ONE flag reaches every surface at once: the terminal title, the
+`/resume` picker, the prompt box, the claude.ai row and Remote Control.
 
-| Hook | Does |
+**Mid-session, when the phase changes, ASK THE USER for `/rename`:**
+
+```
+/rename opsx:apply discoverable-addressing
+```
+
+- **A session cannot rename itself.** This is a REQUEST, never something to
+  report as done.
+- **An unnamed session shows ACTIVITY TEXT** in those rows, so a row reading
+  `Interrupted request` means nobody named it — not that anything is broken.
+- **A title reading only `claude` is the same failure**, one surface over.
+
+### DO NOT REBUILD THE TITLE HOOK. IT WAS DELETED FOR CAUSE
+
+This repo carried `.claude/hooks/session-title.sh` — an OSC title painter wired
+to `UserPromptSubmit`, `Stop`, `SessionStart` and `SessionEnd`. It is GONE, and
+the next person to think "a hook could just paint the title" is who this section
+is for.
+
+**CLAUDE CODE OWNS THE TERMINAL TITLE AND REPAINTS IT FROM THE SESSION'S OWN
+STATE, CONTINUOUSLY WHILE THE SESSION IS ACTIVE.** Nothing painting from outside
+can hold it:
+
+| Attempt | Result |
 |---|---|
-| `UserPromptSubmit`, `Stop`, `SessionStart` | REPAINT at every turn boundary |
-| `SessionEnd` | forgets the title |
+| paint at every turn boundary | overwritten moments later — the title visibly snaps back |
+| one detached repaint 1.5s after the boundary | lost too: it lands mid-burst while the session is still transitioning |
+| a burst of repaints over ~16s | the tab ALTERNATES between two names. Worse than losing |
+| `terminalTitleFromRename: false` in `~/.claude/settings.json` | does not stop it. Verified across a session restart |
 
-- **The repaint is required, not belt-and-braces.** Claude Code writes the
-  terminal title itself, so a one-off escape does not survive.
-- **All four are wired in `.claude/settings.json`.**
-- **The script is a silent no-op** with no title file, no terminal or no `jq`,
-  so a hook never becomes an error.
+**The fix is not to out-write Claude Code, it is to tell it what to write** —
+which is the display name, and `-n` / `/rename` are the only things that set it.
+
+**Four sessions were spent on this, and the script was healthy in all four.** It
+fired, resolved the tty, and painted correctly every time. What made it look
+broken were two failures downstream that are invisible from inside a terminal:
+
+1. **The VS Code tab template** discarded the escape — see below. That one is
+   real, and its fix is KEPT.
+2. **Claude Code's repaint**, above.
+
+**A HOOK THAT NEVER RAN AND A TITLE THAT NEVER DISPLAYED ARE
+INDISTINGUISHABLE.** Anything that paints a title again must log its
+invocations, or the next four sessions go the same way.
 
 ### A PAINTED TITLE IS NOT A DISPLAYED ONE
+
+Still true, and still worth knowing — Claude Code's own title reaches the tab
+only if the tab is willing to show it.
 
 **VS Code's integrated terminal DISCARDS the OSC title sequence by default.** It
 captures it as `${sequence}`, but the default tab label is
 `terminal.integrated.tabs.title: "${process}"`, which never names it. Every tab
-then reads `claude` forever and neither side reports a failure.
+then reads `bash` forever and neither side reports a failure.
 
 ```json
 "terminal.integrated.tabs.title": "${process}${separator}${sequence}"
 ```
 
-- **`${process}` stays FIRST**, so a terminal no session has painted still reads
-  `bash`. VS Code elides the separator along with the empty sequence.
-- **`.vscode/settings.json` is committed here**, and is read ONLY when the repo
-  is opened as a workspace folder ROOT. Opened from a PARENT directory it is
-  inert, and the setting belongs in that root's own `.vscode/settings.json` or
-  in user settings.
-- **A MULTI-ROOT workspace cannot take it from a folder at all.** The setting is
-  WINDOW-scoped, so there it must live in the `.code-workspace` file.
-- **DIAGNOSE THE TERMINAL BEFORE THE HOOK.** This cost a session, because the
-  hook half is entirely healthy: it fires, receives `CLAUDE_PID` and
-  `CLAUDE_PROJECT_DIR`, falls back past the `/dev/tty` a hook subprocess never
-  has, and writes to the right pty. Everything works and nothing shows.
+- **`${process}` stays FIRST**, so a terminal with no title still reads `bash`.
+  VS Code elides the separator along with the empty sequence.
+- **THE SETTING IS WINDOW-SCOPED**, so where it must live depends on what VS
+  Code has open, and both wrong places look identical from inside the terminal:
 
-**THE SCRIPT, THE SETTING AND THIS RULE ALL LIVE IN THIS REPO AND ARE
-COMMITTED**, so a clone gets the behaviour and the rule that names it in one
-checkout. `$CLAUDE_PROJECT_DIR` is what keeps the wiring path-independent.
+  | What is open | Where the setting must live |
+  |---|---|
+  | this repo as the folder ROOT | its own `.vscode/settings.json` |
+  | a `.code-workspace` file | that file's own `settings` — a folder cannot supply it |
+  | a PARENT folder of this repo | that folder's `.vscode/settings.json`, or user settings |
 
-- **Deliberately NOT `~/.claude`.** The rule is about THIS repo's changes and
-  its opsx phases, and a title convention that only exists on the machine that
-  wrote it is a rule nobody else follows.
-- **The title file itself stays per-session under `$XDG_RUNTIME_DIR`**, never in
-  the repo. It is scratch keyed by session id, not configuration.
+- **On the machine this repo is developed on it is the second row**, a
+  `.code-workspace` over `Projects/` — so the repo's committed
+  `.vscode/settings.json` is inert twice over.
+- **ASK VS CODE WHAT IT HAS OPEN before editing any settings file:**
 
-- **The PHASE is the opsx verb driving the work** — `opsx:explore`,
-  `opsx:propose`, `opsx:update`, `opsx:apply`, `opsx:archive`.
-- **The CHANGE is its directory name** under `openspec/changes/`.
-- **Set it at the START and again at every transition**, never once at the end.
-  The title exists to be read while the work is still running.
-- **Work with no change behind it says what it is**, in the same two-word shape:
-  `review chart-values`, `debug telegram-409`, `docs installation`.
-- **A title reading only `claude` is the failure this rule names.**
+  ```sh
+  python3 -c "import json,os;print(json.load(open(os.path.expanduser(
+    '~/.config/Code/User/globalStorage/storage.json')))['windowsState'])"
+  ```
 
-**The script moves the TERMINAL TITLE ONLY.** Two other names exist and neither
-is reachable from inside a session:
+  A `configURIPath` means a workspace FILE holds the setting. A `folderUri`
+  means the FOLDER it names does.
+
+### The three names, and who can set each
 
 | name | where it shows | who sets it |
 |---|---|---|
-| terminal title | the window or tab | this script, every turn |
-| session display name | prompt box, `/resume` picker, terminal title | the USER: `/rename <name>`, or `claude -n "<name>"` at launch |
+| session display name | terminal title, prompt box, `/resume`, claude.ai, Remote Control | the USER: `claude -n "<name>"` at launch, or `/rename <name>` |
+| terminal title | the window or tab | CLAUDE CODE, from the display name and session state |
 | peer name (`agent-ops-operator-05`) | `ListAgents`, Remote Control rows | nobody — derived from the directory |
 
-- **When a window's name matters anywhere but its own title bar, ASK for
-  `/rename`** rather than reporting a rename that did not happen.
-- **`terminalTitleFromRename` governs the terminal-title half**, defaults ON,
-  and therefore beats this script until the next repaint.
+**Only the first row is settable, and only by the USER.** That is why naming a
+window is a request rather than an action, and why a peer row naming the work is
+impossible without a display name behind it.
