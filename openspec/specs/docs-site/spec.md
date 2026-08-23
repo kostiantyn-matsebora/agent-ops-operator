@@ -223,27 +223,36 @@ else is a site deliverable yet.
 - **THEN** one entry in `_data/nav.yml` is the only theme-side change needed
 - **AND** no navigation markup is written a second time
 
-### Requirement: The landing page is an adopter hub, not a second README
+### Requirement: The landing page opens with what it is, then how it works
 
 `docs/index.md` SHALL be the site's landing page: a short orientation for an
-adopter — what the operator is, what "takes care of it" means, where it is
-pluggable, and the paths onward grouped by what the reader is trying to do.
+adopter — what the operator is, where it earns its keep, and the paths onward
+grouped by what the reader is trying to do.
 
-Its opening SHALL be, in this order: **what it plugs into**, then a **tabbed
-panel set**, then the stat tiles.
+Its opening SHALL be, in this order: the **project's name**, **one sentence**
+saying what it is, the **claim chips**, and then a **tabbed panel set**. Nothing
+SHALL stand between the name and the panel set except those two lines and the
+chips.
 
-What it plugs into SHALL be grouped by the QUESTION A READER ASKS, not by which
-subchart ships it: what wakes an agent, what an agent can reach, and where it
-answers. A reader deciding whether this fits their stack is asking those three,
-and "which of these is in the chart" is a packaging fact they ask later, on the
-Installation page.
+**The one sentence is the whole of the standfirst.** A second explanatory
+paragraph SHALL NOT be added beneath it: the panel set immediately below states
+the model in full, and a page that explains itself twice before showing anything
+has buried what it is showing.
 
 The panel set's panels SHALL be, in order:
 
-1. a **recording of the product working**, carrying one piece of work from the
+1. the **presentation**, which states the model one beat at a time;
+2. the **recording of the product working**, carrying one piece of work from the
    event that starts it to the answer a person replies to;
-2. the product diagram exported from `docs/diagrams/`;
 3. a real `Pipeline` manifest, written in the page as a fenced code block.
+
+The presentation SHALL come first because it answers the question a first-time
+reader actually has — what is this and how does it fit together — and the
+recording answers the next one.
+
+**No exported drawing SHALL be shown in the opening.** The presentation carries
+the model, and a still restating it would be the same claim in two forms, one of
+which cannot be selected, translated or searched.
 
 **The landing page SHALL NOT tour the console's views.** They belong to the
 Console page, which takes each in turn with the question it answers, and
@@ -254,32 +263,35 @@ The manifest panel SHALL be page text rather than an exported image, so it can b
 selected, copied and searched, and every field name on it SHALL exist on the
 `Pipeline` CRD.
 
-The diagram and the page SHALL NOT disagree about what the product claims, and
-**nothing SHALL be said twice**: a claim the page states in prose SHALL NOT also
-be drawn. The drawio source therefore carries a LANDING page distinct from the
-standalone poster, carrying neither the poster's masthead nor the sections the
-page states as prose.
+Words the page can say SHALL be said by the page. The name, the sentence and the
+chips are page text, because text in an exported image cannot be selected,
+translated, searched, or read except through alt text.
 
-Words the page can say SHALL be said by the page, not by the drawing — the
-eyebrow pills, the headline and the standfirst are page text, because text in
-an exported image cannot be selected, translated, searched, or read except
-through alt text.
+**What the install reaches SHALL be named once, as a single labelled group**
+below the panel set, rather than as several labelled rows above it. A reader
+decides whether this fits their stack after they know what it is, not before.
+Anything named there SHALL ship in the release being described.
 
-The exported asset SHALL be self-contained (no third-party request) and SHALL
-ship as one variant per theme, selected by the applied theme. Both SHALL be
-produced by a committed export script rather than by remembered commands, since
-the dark variant requires a correction the exporter cannot make itself. The
-diagram SHALL use the product's own palette.
+The page SHALL carry a section headed by a **question the reader is asking** —
+where this earns its keep — introduced by one sentence and answered by a
+**two-column table** naming each area of use and what happens there. Each row MAY
+carry the mark of the system it names.
 
-Headline figures SHALL be presented as a row of stat tiles whose words come
-from the page and whose markup comes from the layout. They are a KPI row, not
-hero figures: values wear ink, identity is carried by a mark beside them, and
-the number is never the only thing distinguishing one tile from another.
+**A table SHALL be used rather than a grid of tiles.** The rows are read against
+each other, and a tile grid spends most of its area on ornament for six lines of
+text.
 
-The layout SHALL place them by **splitting the page's rendered content at its
-first section heading** — everything before the page's first section is its
-opening, the tiles close that opening, and the sections follow. The page SHALL
-NOT write a marker, a wrapper or any other instruction about where they go.
+**The viewer SHALL be given its own full-width strip** beneath that table rather
+than a row within it. It is not one more area of use — it is where every area is
+watched and answered — and a row would state that it is a peer.
+
+**Headline figures SHALL NOT be presented.** A count of resource kinds, contracts
+or bundles answers a question a first-time reader has not yet asked, and it
+occupies the position where the reader is deciding whether the product is for
+them at all. Such counts belong on the reference pages that own them.
+
+The layout SHALL place the page's sections **in the order the page writes them**
+and SHALL NOT split the page's content to insert anything of its own.
 
 It SHALL NOT duplicate `README.md`'s CRD table, demo transcript, install
 commands or status; those stay in the README, which the landing page links to.
@@ -289,53 +301,40 @@ page that owns that content.
 #### Scenario: An adopter opens the site root
 
 - **WHEN** a first-time visitor opens the site root
-- **THEN** they see what the project is and a grouped set of paths onward
-- **AND** every path is a link to the document that owns that content
+- **THEN** they see the project's name, one sentence saying what it is, and the
+  presentation, before anything else
+
+#### Scenario: A reader asks whether it is for them
+
+- **WHEN** the landing page is read past its opening
+- **THEN** a question-headed section answers where the product earns its keep, as
+  a table of areas of use rather than a grid of figures
 
 #### Scenario: A reader asks whether it fits their stack
 
-- **WHEN** the landing page is opened
-- **THEN** what ships in the chart is named before the reader scrolls, and so is
-  the fact that anything else goes through the contracts
+- **WHEN** the landing page is read
+- **THEN** what the install reaches is named once, below the panel set, and not
+  before the page has said what the product is
 
 #### Scenario: An integration does not ship yet
 
-- **WHEN** an integration is named in the opening
-- **THEN** the release being described ships it — the groups answer what the
-  product DOES, so there is no group meaning "coming soon" and no honest place
-  to put one
+- **WHEN** an integration is named in the `works with` group
+- **THEN** the release being described ships it — the group answers what the
+  product DOES, so there is no honest place for a "coming soon" entry
 - **AND** an integration whose bundle slips out of the release is removed from
-  the opening in the same change that slips it
+  the group in the same change that slips it
 
-#### Scenario: One thing answers two of the questions
+#### Scenario: The page adds a section
 
-- **WHEN** an integration is both where work arrives from and where answers go
-- **THEN** it appears in both groups, because each group answers its own
-  question and neither is a list of distinct things
-
-#### Scenario: The page adds a section to its opening
-
-- **WHEN** a page's opening gains or loses a block before its first heading
-- **THEN** the tiles still close that opening, and nothing in the page changed
-  to make that so
-
-#### Scenario: The first panel is read at the page's own width
-
-- **WHEN** the landing page is opened and the first panel is on screen
-- **THEN** the recording's poster frame reads as the product at the width the
-  content column gives it, without being opened full size
-
-#### Scenario: The diagram is read at the page's own width
-
-- **WHEN** the landing page is opened and the diagram panel is selected
-- **THEN** every label on the diagram is legible without opening it full size,
-  at the width the content column gives it
+- **WHEN** a section is added to the landing page
+- **THEN** it renders where the page wrote it, and the layout inserts nothing of
+  its own between the page's sections
 
 #### Scenario: A reader wants to see the product
 
 - **WHEN** a visitor who has installed nothing opens the landing page
-- **THEN** the first panel plays one piece of work from its signal to its answer,
-  without leaving the page
+- **THEN** the presentation states the model without them installing anything,
+  and the recording is one tab away
 - **AND** the console's own views are one link away, on the page that owns them
 
 #### Scenario: The manifest is copied from the page
@@ -343,31 +342,6 @@ page that owns that content.
 - **WHEN** a reader selects the `Pipeline` panel and copies its contents
 - **THEN** they get text, not an image, and every field on it exists on the
   `Pipeline` CRD
-
-#### Scenario: The diagram is viewed in the dark theme
-
-- **WHEN** a reader with the dark theme opens the landing page
-- **THEN** the dark variant is shown, legible down to its icons, on its own
-  opaque ground
-
-#### Scenario: The landing page and the diagram disagree
-
-- **WHEN** the product pitch changes in `docs/diagrams/`
-- **THEN** the landing page's prose is updated from the diagram's copy and the
-  asset is re-exported, so the page never states a claim the diagram contradicts
-
-#### Scenario: A claim is stated in both places
-
-- **WHEN** a section of prose on the landing page is also drawn on its diagram
-- **THEN** it is removed from the drawing, which carries only what the prose
-  does not
-
-#### Scenario: The diagram is re-exported
-
-- **WHEN** the drawio source changes and the diagram is exported again
-- **THEN** one command produces every variant of every exported page with the
-  dark ones' icons already corrected
-- **AND** no manual repair step stands between the export and the site
 
 #### Scenario: Content would be duplicated
 
@@ -1163,9 +1137,10 @@ name it belongs to is already beside it.
 
 #### Scenario: A reader asks what this plugs into
 
-- **WHEN** the landing page's opening is read
-- **THEN** it answers what wakes an agent, what an agent can reach and where it
-  answers, rather than which subchart ships each one
+- **WHEN** the landing page's `works with` group is read
+- **THEN** it names what the install can reach, in one row of marks, and the
+  reader is not asked to read three labelled rows before the page has said what
+  the product is
 
 ### Requirement: A themed image is named once by the page and resolved by the theme
 
@@ -1243,11 +1218,20 @@ way that suggests the other project endorses this one.
 
 The landing page SHALL carry a **recording of the product working**, showing one
 piece of work from the event that starts it to the answer a person replies to,
-and then the machinery that carried it. It SHALL be the strip's first panel.
+and then the machinery that carried it. It SHALL be the strip's SECOND panel,
+after the presentation: the presentation states the model, the recording shows
+it happening, and a reader who wants the model first is not made to infer it
+from footage.
 
 **The machinery is part of the claim, not an appendix**: what is waiting and what
 is stuck, the wiring that routed the signal, and that every part of it is an
-ordinary Kubernetes resource. The last SHALL be shown as an actual MANIFEST — a
+ordinary Kubernetes resource.
+
+**It SHALL also show a person STARTING a conversation and choosing which
+pipeline answers.** Everything else in the story is signal-driven, and without
+this beat the recording never shows that a person can address a particular agent
+by name. It SHALL come AFTER the beat in which a person replies in the thread, so
+that a signal opening the work remains the story's opening claim. The last SHALL be shown as an actual MANIFEST — a
 grid of object counts asserts that resources exist, while the object shows that
 the incident itself is one and that `kubectl` already knows it.
 
@@ -1309,9 +1293,9 @@ of the ordinary test suite.
 
 #### Scenario: A visitor who has installed nothing opens the landing page
 
-- **WHEN** a first-time visitor opens the site root
-- **THEN** the first panel shows one piece of work carried from its signal to its
-  answer, and they can watch it without installing anything
+- **WHEN** a first-time visitor opens the site root and selects the recording
+- **THEN** it shows one piece of work carried from its signal to its answer, and
+  they can watch it without installing anything
 - **AND** it goes on to show the queue, the wiring, and the conversation as a
   Kubernetes object
 
@@ -1362,3 +1346,9 @@ of the ordinary test suite.
 
 - **WHEN** a re-recording exceeds the stated duration or byte budget
 - **THEN** the recording is shortened or re-encoded, and the budget stands
+
+#### Scenario: A reader asks whether they can start work themselves
+
+- **WHEN** the recording is watched to the end
+- **THEN** it has shown a person opening a conversation and choosing the pipeline
+  that answers it, and not only signals arriving
