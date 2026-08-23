@@ -65,7 +65,7 @@ exists so that the switch is safe, and §7 is the gate that says so.
 - [x] 5.3 Add `.gitattributes` normalising line endings to LF. Endings flipped
       under editing twice in one week here, and a public repository adds
       contributors on platforms where the default differs
-- [ ] 5.4 Confirm the packed repository size after §5.1 and the rewrite, so the
+- [x] 5.4 Confirm the packed repository size after §5.1 and the rewrite, so the
       artifact is known to be gone rather than assumed
 
 ## 6. Repository settings and the site
