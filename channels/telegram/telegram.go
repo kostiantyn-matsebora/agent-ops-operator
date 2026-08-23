@@ -258,7 +258,18 @@ func (t *Telegram) SendWith(ctx context.Context, chatID string, threadID *int64,
 			}
 		}
 	}
-	if _, err := t.API(ctx, "sendMessage", body); err != nil {
+	_, err := t.API(ctx, "sendMessage", body)
+	// THE ONE FEATURE PROBE THIS ADAPTER HAS. `<blockquote expandable>` needs
+	// Bot API 7.2 and there is no way to ask an endpoint its version — getMe
+	// says nothing, and a self-hosted local Bot API server may be any age. So
+	// the probe is the send itself: refused for the quote tag, latch it off and
+	// re-render degraded. Once per process, not once per message.
+	if unsupportedQuote(err) && expandableQuotes.Load() {
+		expandableQuotes.Store(false)
+		body["text"] = degradeQuotes(html)
+		_, err = t.API(ctx, "sendMessage", body)
+	}
+	if err != nil {
 		if threadID == nil {
 			return err
 		}

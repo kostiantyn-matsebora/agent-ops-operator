@@ -1442,7 +1442,6 @@ func (r *ConversationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-
 // degradedSuffix names a pod started without its context volume, so the reason
 // is on the hop rather than only in a condition.
 func degradedSuffix(degraded bool) string {

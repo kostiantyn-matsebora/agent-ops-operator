@@ -18,4 +18,4 @@ You are running headless in a Kubernetes agent runtime pod as the agent `{{AGENT
 
 {{DELIVERY_INSTRUCTIONS}}
 
-Format the answer per the MESSAGE FORMAT SPECIFICATION below — **Template 1** (Investigation report). Then print `INVESTIGATE: <diagnosed|hypothesis|insufficient-data>`.
+Lead with the root cause and the fix. Evidence and everything you ruled out belong in the fold.

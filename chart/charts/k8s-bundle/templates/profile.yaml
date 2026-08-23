@@ -28,6 +28,10 @@ spec:
   systemPrompt: |
 {{ . | trim | indent 4 }}
   {{- end }}
+  # REQUIRED, and with no default on purpose: `none` leaves output unformatted
+  # unless this profile's prompt says otherwise, and `blocks` shapes it by
+  # something the author never asked for. The author declares it.
+  outputFormat: {{ $p.outputFormat }}
   {{- with $p.runtimeRef }}
   runtimeRef:
     name: {{ . }}

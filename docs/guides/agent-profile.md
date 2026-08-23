@@ -78,6 +78,7 @@ kind: AgentProfile
 metadata:
   name: my-agent
 spec:
+  outputFormat: blocks   # blocks | none
   systemPrompt: <systemPrompt>
   maxTurns: 60
   runtimeRef:
@@ -184,6 +185,10 @@ spec:
     or would affect the control plane, describe what you would do and stop.
     
     Answer briefly. Lead with the finding, then the evidence.
+  # REQUIRED, and with no default on purpose: `none` leaves output unformatted
+  # unless this profile's prompt says otherwise, and `blocks` shapes it by
+  # something the author never asked for. The author declares it.
+  outputFormat: blocks
 ```
 <!-- /generated -->
 

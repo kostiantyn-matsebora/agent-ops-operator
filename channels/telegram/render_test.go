@@ -275,3 +275,285 @@ func TestTopicLink(t *testing.T) {
 		}
 	}
 }
+
+// ---- blocks ----------------------------------------------------------------
+
+// blockMsg builds a message the way the manager now sends one: the agent's TEXT,
+// tags and all. The adapter parses it — nothing upstream has.
+func blockMsg(kind MessageKind, bs ...Block) Message {
+	var b strings.Builder
+	for _, blk := range bs {
+		name := blk.Label
+		switch blk.Role {
+		case RoleTitle:
+			name = "title"
+		case RoleDetails:
+			name = "details"
+		}
+		if name == "" {
+			b.WriteString(blk.Text + "\n")
+			continue
+		}
+		b.WriteString("<" + name + ">\n" + blk.Text + "\n</" + name + ">\n")
+	}
+	return Message{Kind: kind, Body: b.String()}
+}
+
+// The adapter renders what the manager parsed: title first, sections labelled
+// and in order, the fold collapsed.
+func TestRenderBlocks(t *testing.T) {
+	expandableQuotes.Store(true)
+	html := renderMessage(newMenu(), blockMsg(MsgAnswer,
+		Block{Role: RoleTitle, Text: "Pod is looping"},
+		Block{Role: RoleSection, Label: "root-cause", Text: "OOM at **512Mi**."},
+		Block{Role: RoleSection, Label: "fix", Text: "Raise the limit."},
+		Block{Role: RoleDetails, Text: "the long tail"},
+	))
+	for _, want := range []string{
+		"<b>Pod is looping</b>",
+		"<b>Root cause</b>",
+		"<b>Fix</b>",
+		"<blockquote expandable>the long tail</blockquote>",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %q in:\n%s", want, html)
+		}
+	}
+	// Order is the agent's and is never rearranged.
+	if strings.Index(html, "Root cause") > strings.Index(html, "Fix") {
+		t.Error("named sections must render in the order the agent wrote them")
+	}
+	if strings.Index(html, "Pod is looping") > strings.Index(html, "Root cause") {
+		t.Error("the title leads")
+	}
+	// Inline markdown inside a block still renders.
+	if !strings.Contains(html, "<b>512Mi</b>") {
+		t.Errorf("inline markdown inside a block was not rendered:\n%s", html)
+	}
+}
+
+// NO BLOCKS, NO CHANGE. This is the whole backward-compatibility story on this
+// surface: a manager older than contract 3, or any manager-composed text.
+func TestUnstructuredMessageRendersFromBody(t *testing.T) {
+	m := Message{Kind: MsgAnswer, Body: "**done** — restarted `api`"}
+	if got, want := renderMessage(newMenu(), m), markdownToHTML(m.Body); got != want {
+		t.Fatalf("blockless answer changed:\n got  %q\n want %q", got, want)
+	}
+	notice := Message{Kind: MsgNotice, Body: "⚠️ nothing to do"}
+	if !strings.Contains(renderMessage(newMenu(), notice), "nothing to do") {
+		t.Fatal("a blockless notice must render its body")
+	}
+}
+
+// A notice MAY carry blocks — a failed run that explained itself.
+func TestNoticeWithBlocksIsFolded(t *testing.T) {
+	expandableQuotes.Store(true)
+	html := renderMessage(newMenu(), blockMsg(MsgNotice,
+		Block{Role: RoleTitle, Text: "Could not continue"},
+		Block{Role: RoleDetails, Text: "stack trace"},
+	))
+	if !strings.Contains(html, "<blockquote expandable>stack trace</blockquote>") {
+		t.Fatalf("a failed run's explanation must fold like an answer:\n%s", html)
+	}
+}
+
+// THE CONCLUSION LEADS THE FIRST CHUNK. Above-the-fold content is bounded by
+// the manager, so it fits together and a reader who sees only one message still
+// sees the answer.
+func TestSplitPrefersBlockBoundaries(t *testing.T) {
+	expandableQuotes.Store(true)
+	chunks := renderChunks(newMenu(), blockMsg(MsgAnswer,
+		Block{Role: RoleTitle, Text: "Big answer"},
+		Block{Role: RoleSection, Label: "fix", Text: "restart it"},
+		Block{Role: RoleDetails, Text: strings.Repeat("log line\n", 2000)},
+	))
+	if len(chunks) < 2 {
+		t.Fatalf("a fold this long must split, got %d chunk(s)", len(chunks))
+	}
+	if !strings.Contains(chunks[0], "<b>Big answer</b>") || !strings.Contains(chunks[0], "<b>Fix</b>") {
+		t.Fatalf("the first chunk must carry the title and the named sections:\n%s", chunks[0])
+	}
+	for i, c := range chunks {
+		if len(c) > telegramMessageLimit {
+			t.Fatalf("chunk %d is %d bytes, over the %d limit", i, len(c), telegramMessageLimit)
+		}
+		// Every piece of a split fold carries its own balanced quote tags, or
+		// Telegram rejects the message outright.
+		if got, want := strings.Count(c, "<blockquote"), strings.Count(c, "</blockquote>"); got != want {
+			t.Fatalf("chunk %d has %d open and %d close quote tags", i, got, want)
+		}
+	}
+}
+
+// The degraded path is what a Bot API older than 7.2 gets. A plain blockquote
+// is NOT collapsed, so the marker is what tells a reader the fold from the
+// answer — without it the long tail simply arrives.
+func TestQuoteDegradesWithAVisibleMarker(t *testing.T) {
+	expandableQuotes.Store(false)
+	defer expandableQuotes.Store(true)
+	html := renderMessage(newMenu(), blockMsg(MsgAnswer, Block{Role: RoleDetails, Text: "tail"}))
+	if strings.Contains(html, "expandable") {
+		t.Fatalf("the latch did not take: %s", html)
+	}
+	if !strings.Contains(html, "<blockquote>") || !strings.Contains(html, "<b>Details</b>") {
+		t.Fatalf("the degraded fold must still be marked:\n%s", html)
+	}
+}
+
+// Only a refusal ABOUT the quote tag disables it. Any parse error disabling a
+// working feature would be a silent downgrade nobody could explain later.
+func TestOnlyQuoteErrorsLatchTheFeatureOff(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{fmt.Errorf(`telegram sendMessage: Bad Request: unsupported start tag "blockquote"`), true},
+		{fmt.Errorf(`telegram sendMessage: Bad Request: can't parse entities: unsupported start tag "blockquote expandable"`), true},
+		// The one that shipped broken: Telegram blamed the PRE, not the quote,
+		// so a latch keyed on the word "blockquote" never fired and the message
+		// retried forever.
+		{fmt.Errorf(`telegram sendMessage: Bad Request: can't parse entities: Can't find end tag corresponding to start tag "pre"`), true},
+		{fmt.Errorf(`telegram sendMessage: Too Many Requests`), false},
+		{nil, false},
+	} {
+		if got := unsupportedQuote(tc.err); got != tc.want {
+			t.Errorf("unsupportedQuote(%v) = %v, want %v", tc.err, got, tc.want)
+		}
+	}
+}
+
+// THE BLOCK GRAMMAR IS NOT A WIRE VERSION.
+//
+// This adapter gained a parser and the contract did not move, because no field
+// was added and none changed meaning: a body that was markdown is now markdown
+// plus a grammar, read by the component that already read the markdown.
+//
+// A version bump would only mean something if the manager could serve the older
+// shape, which would mean the manager parsing — the thing this design removed.
+// Compatibility is `AgentProfile.spec.sharedOutputFormat`, which is off until an
+// install whose adapters understand the grammar turns it on.
+func TestTheGrammarIsNotAWireVersion(t *testing.T) {
+	if ContractVersion != "2" {
+		t.Fatalf("contract moved to %q — parsing a body needs no new version", ContractVersion)
+	}
+}
+
+// THE ADAPTER PARSES. Nothing upstream did, and the body arrives with its tags.
+func TestTheAdapterParsesTheBodyItself(t *testing.T) {
+	raw := "<title>\nDisk filling\n</title>\n<fix>\nrotate the logs\n</fix>"
+	got := renderMessage(newMenu(), Message{Kind: MsgAnswer, Body: raw})
+	if !strings.Contains(got, "<b>Disk filling</b>") || !strings.Contains(got, "<b>Fix</b>") {
+		t.Fatalf("the adapter did not parse the body it was given:\n%s", got)
+	}
+	if strings.Contains(got, "&lt;title&gt;") {
+		t.Errorf("tags reached the transport as text:\n%s", got)
+	}
+}
+
+// A RELAY IS SOMEBODY'S WORDS and is never parsed. A person asking why
+// `<details>` will not render in their docs must see their own characters.
+func TestARelayIsNotParsed(t *testing.T) {
+	typed := "why won't\n<details>\nwork in my docs?\n</details>"
+	got := renderMessage(newMenu(), Message{Kind: MsgRelay, Origin: "telegram", Sender: "kim", Body: typed})
+	if !strings.Contains(got, "&lt;details&gt;") {
+		t.Fatalf("a person's typed tags were consumed:\n%s", got)
+	}
+	if strings.Contains(got, "blockquote") {
+		t.Error("a relay was folded")
+	}
+}
+
+// A MARKDOWN LIST BECOMES BULLETS, because Telegram has no list markup.
+//
+// The agent writes `- item`, never the glyph: a surface that HAS lists renders
+// a typed `•` as one running paragraph, which is exactly the wall of text the
+// list was meant to prevent. Each adapter turns the real list into its own mark.
+func TestMarkdownListsBecomeBullets(t *testing.T) {
+	got := markdownToHTML("Findings:\n- Ready=True, restartCount 0\n- started at 07:40\n")
+	for _, want := range []string{"• Ready=True, restartCount 0", "• started at 07:40"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	// ITEMS ARE SEPARATED BY A BLANK LINE. Telegram sets messages tight, and
+	// consecutive bullets run together into something that reads as a paragraph.
+	if !strings.Contains(got, "• Ready=True, restartCount 0\n\n• started at 07:40") {
+		t.Errorf("items are not separated by a blank line:\n%q", got)
+	}
+	// But the line INTRODUCING the list keeps its bullet tight beneath it —
+	// a gap there detaches the list from what it belongs to.
+	if strings.Contains(got, "Findings:\n\n• ") {
+		t.Errorf("a gap was opened before the first item:\n%q", got)
+	}
+	if strings.Contains(got, "- Ready") {
+		t.Errorf("the markdown marker survived into the output:\n%s", got)
+	}
+	// A hyphen that is not a list marker is left alone.
+	if plain := markdownToHTML("read-only access, 3 - 1 = 2"); strings.Contains(plain, "•") {
+		t.Errorf("a mid-line hyphen became a bullet: %s", plain)
+	}
+	// Indentation is kept, so a nested list still reads as nested.
+	if nested := markdownToHTML("- top\n  - under"); !strings.Contains(nested, "  • under") {
+		t.Errorf("nesting lost:\n%s", nested)
+	}
+}
+
+// A TAGGED FENCE IS HIGHLIGHTED. Telegram renders
+// `<pre><code class="language-X">` with syntax colouring, and the tag is the
+// difference between a readable payload and a wall of JSON.
+func TestFencedCodeCarriesItsLanguage(t *testing.T) {
+	got := markdownToHTML("```json\n{\"a\": 1}\n```")
+	if !strings.Contains(got, `<pre><code class="language-json">`) {
+		t.Errorf("language lost:\n%s", got)
+	}
+	if !strings.Contains(got, "{&quot;a&quot;: 1}") && !strings.Contains(got, `{"a": 1}`) {
+		t.Errorf("body mangled:\n%s", got)
+	}
+	// An UNTAGGED fence stays a plain pre — unchanged from before.
+	if plain := markdownToHTML("```\nraw\n```"); plain != "<pre>raw</pre>" {
+		t.Errorf("untagged fence changed: %q", plain)
+	}
+	// Case is normalised, so `JSON` and `json` are one thing.
+	if up := markdownToHTML("```JSON\n{}\n```"); !strings.Contains(up, `class="language-json"`) {
+		t.Errorf("language not lowercased:\n%s", up)
+	}
+	// A language Telegram does not know is still tagged — it renders the block
+	// unhighlighted rather than failing.
+	if odd := markdownToHTML("```c#\nvar x = 1;\n```"); !strings.Contains(odd, `class="language-c#"`) {
+		t.Errorf("unusual language dropped:\n%s", odd)
+	}
+	// Escaping is unchanged: a payload full of angle brackets is still safe.
+	if esc := markdownToHTML("```xml\n<a href=\"x\">&\n```"); strings.Contains(esc, "<a href=") {
+		t.Errorf("fence body was not escaped:\n%s", esc)
+	}
+}
+
+// A TALL SIGNAL PAYLOAD IS FOLDED. It is the evidence behind the card, and
+// unfolded it is the tallest thing in the thread.
+func TestSignalPayloadFoldsWhenTall(t *testing.T) {
+	expandableQuotes.Store(true)
+	tall := Message{Kind: MsgSignal, Title: "Unhealthy: share-manager",
+		Body: strings.Repeat("\"field\": \"value\",\n", 12)}
+	got := renderSignal(tall)
+	// FOLDED, AND WITHOUT A NESTED `<pre>`. Telegram rejects that nesting with
+	// `Can't find end tag corresponding to start tag "pre"` and drops the whole
+	// message — it shipped, and retried in a loop.
+	if !strings.Contains(got, "<blockquote expandable>") {
+		t.Fatalf("a tall payload must be folded:\n%s", got)
+	}
+	if strings.Contains(got, "<blockquote expandable><pre>") {
+		t.Fatalf("pre nested in a quote — the Bot API refuses this:\n%s", got)
+	}
+	// The card's own heading stays OUTSIDE the fold — folding the thing that
+	// says what happened would leave a collapsed stub saying nothing.
+	if strings.Index(got, "Unhealthy: share-manager") > strings.Index(got, "<blockquote") {
+		t.Error("the title was folded with the payload")
+	}
+
+	// A SHORT one stays open: a tap to read three lines that would have fitted
+	// is worse than showing them.
+	short := Message{Kind: MsgSignal, Title: "t", Body: "reason: Unhealthy\ncount: 1"}
+	if got := renderSignal(short); strings.Contains(got, "blockquote") {
+		t.Errorf("a short payload must not be folded:\n%s", got)
+	}
+}

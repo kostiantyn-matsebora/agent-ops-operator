@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -42,18 +43,25 @@ import (
 // ownChannel is this console's Channel, which is how a recorded message is
 // attributed: typed HERE, typed on another surface, or an event no surface
 // displayed at all.
-func mergeTranscript(thread, ownChannel string, live []Message, runs []Run) []Message {
-	// A MULTISET of what the buffer already shows as agent output. A count,
-	// not a set: an agent that answered the same thing twice produced two runs
-	// and two messages, and collapsing them would silently drop one.
-	liveAgentText := map[string]int{}
+func mergeTranscript(thread, ownChannel string, live []Message, runs []Run, conv ConversationSummary) []Message {
+	// The RUNS the buffer already shows, by id.
+	//
+	// This was a multiset of the answer TEXT, and structured output broke it in
+	// one release: the manager sends `body` flattened from the blocks it
+	// parsed, while `status.runs[].result` holds the raw text the agent
+	// printed. The two stopped comparing equal, so every answer rendered TWICE
+	// — once from the record as text, once from the buffer as blocks.
+	//
+	// An id also fixes the case the multiset was built for, and better: two
+	// runs that answered identically are two ids, so neither is collapsed.
+	liveRuns := map[string]bool{}
 	// The inputs the buffer already stands for, by id. An id, not the text:
 	// a bubble typed here, its delivered copy and the record entry are ONE
 	// message wearing three ids, and text matching is what made that guesswork.
 	liveInputs := map[string]bool{}
 	for _, m := range live {
-		if m.Kind == MsgAgent {
-			liveAgentText[m.Text]++
+		if m.Kind == MsgAgent && m.runID != "" {
+			liveRuns[m.runID] = true
 		}
 		if m.recordID != "" {
 			liveInputs[m.recordID] = true
@@ -68,14 +76,13 @@ func mergeTranscript(thread, ownChannel string, live []Message, runs []Run) []Me
 			if in.Text == "" || liveInputs[in.ID] {
 				continue
 			}
-			out = append(out, recordedMessage(thread, ownChannel, in))
+			out = append(out, recordedMessage(thread, ownChannel, in, conv))
 		}
 		if r.Result == "" {
 			continue // a run with no result said nothing; an empty line would be a lie
 		}
-		if liveAgentText[r.Result] > 0 {
-			liveAgentText[r.Result]-- // already on screen; do not double it
-			continue
+		if liveRuns[r.RunID] {
+			continue // already on screen as a live op; do not double it
 		}
 		at := r.FinishedAt
 		if at == "" {
@@ -106,7 +113,7 @@ func mergeTranscript(thread, ownChannel string, live []Message, runs []Run) []Me
 // rule reads: this console's own surface means somebody typed it here, another
 // surface means somebody else's words, and no surface at all means an event —
 // an alert, a job tick, a posted task — that no person typed anywhere.
-func recordedMessage(thread, ownChannel string, in RecordedInput) Message {
+func recordedMessage(thread, ownChannel string, in RecordedInput, conv ConversationSummary) Message {
 	msg := Message{
 		ID: "input:" + in.ID, Thread: thread, Text: in.Text, At: in.ReceivedAt,
 		recordID: in.ID,
@@ -117,6 +124,14 @@ func recordedMessage(thread, ownChannel string, in RecordedInput) Message {
 	switch {
 	case in.Surface == "":
 		msg.Kind = MsgSignal
+		// A REBUILT SIGNAL IS STILL A CARD.
+		//
+		// The live path composes one from the op's structured fields; the record
+		// keeps only the payload text, so a reopened conversation showed a raw
+		// JSON document as prose. What the CR still knows — the title and the
+		// source that opened it — rebuilds the head, and the payload moves into
+		// the field the browser already folds.
+		msg.Text, msg.Payload = recordedSignalCard(conv), signalPayload(in)
 	case ownChannel != "" && in.Surface == ownChannel:
 		msg.Kind, msg.Sender = MsgLocal, in.Sender
 	default:
@@ -155,4 +170,47 @@ func parseAt(s string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// recordedSignalCard rebuilds an event card from what the CONVERSATION records.
+//
+// It is the same card the live path composes, because the same facts are now on
+// the CR: the source and the labels used to live only on things built to be
+// pruned — `spec.inputs[].origin` and the ConversationInput — so a reopened
+// conversation lost its source and its whole label table.
+func recordedSignalCard(conv ConversationSummary) string {
+	var parts []string
+	if conv.Title != "" {
+		parts = append(parts, "📣 **"+conv.Title+"**")
+	}
+	var from []string
+	if conv.Source != "" {
+		from = append(from, "**Source** `"+conv.Source+"`")
+	}
+	if conv.Pipeline != "" {
+		from = append(from, "**Pipeline** `"+conv.Pipeline+"`")
+	}
+	if len(from) > 0 {
+		parts = append(parts, strings.Join(from, " · "))
+	}
+	// LABELS AS A TABLE, dropping any the card already states — the same rule
+	// the live card uses, so the two do not diverge in what they show.
+	shown := map[string]bool{conv.Source: true, conv.Pipeline: true}
+	for _, w := range strings.Fields(strings.ReplaceAll(conv.Title, ":", " ")) {
+		shown[w] = true
+	}
+	if rows := labelRows(&OpMessage{Labels: conv.SignalLabels}, shown); len(rows) > 0 {
+		parts = append(parts, "| label | value |\n|---|---|\n"+strings.Join(rows, "\n"))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// signalPayload is the recorded event document, carried apart from the card so
+// the browser can collapse it — the same shape the live path produces.
+func signalPayload(in RecordedInput) string {
+	body := strings.TrimSpace(in.Text)
+	if in.Truncated {
+		body += "\n\n…truncated — the full payload is not kept in the conversation record."
+	}
+	return body
 }

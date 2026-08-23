@@ -229,3 +229,57 @@ func TestWorkUnitAgentFollowsQueuedOverride(t *testing.T) {
 		t.Fatalf("agent: want k8s-engineer, got %q", u.Agent)
 	}
 }
+
+// THE DECLARATION GATES THE PROMPT, NEVER THE PARSE.
+//
+// Decoupling them is what makes the flag harmless, and it is the property most
+// likely to be "tidied" later into a single switch — which would allow a state
+// where the model emits tags nothing is looking for. That is the
+// literal-tags-in-chat failure, offered as a configuration option. The other
+// half is pinned in internal/chat: the parse runs whatever a profile declared.
+func TestOutputFormatGatesThePromptOnly(t *testing.T) {
+	build := func(p *agentopsv1alpha1.AgentProfile) WorkUnit {
+		c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "check the disk"})
+		u, _, ok, err := dispatchNext(c, p)
+		if err != nil || !ok {
+			t.Fatalf("dispatch: ok=%v err=%v", ok, err)
+		}
+		return u
+	}
+	const marker = "MESSAGE FORMAT"
+
+	// `none` is a DECLARATION, not a default — the field is required, so a
+	// profile reaching dispatch has stated its contract either way.
+	none := profile()
+	none.Spec.OutputFormat = agentopsv1alpha1.OutputFormatNone
+	off := build(none)
+	if strings.Contains(off.SystemPrompt, marker) || strings.Contains(off.PromptText, marker) {
+		t.Fatal("a profile declaring `none` must have NOTHING injected — it owns its own formatting")
+	}
+
+	p := profile()
+	p.Spec.OutputFormat = agentopsv1alpha1.OutputFormatBlocks
+	if on := build(p); !strings.Contains(on.SystemPrompt, marker) {
+		t.Fatalf("a profile that asked for the shared format did not get it: %q", on.SystemPrompt)
+	}
+
+	// BOTH LANES, because only one of them is a string the manager holds. A
+	// profile with its own prompt FILE used to be silently exempt, which made
+	// "is this agent told how to format" a property of whether `prompt` was set.
+	pf := profile()
+	pf.Spec.OutputFormat, pf.Spec.Prompt = agentopsv1alpha1.OutputFormatBlocks, "prompts/task.md"
+	file := build(pf)
+	if file.PromptFile == "" {
+		t.Fatal("a profile prompt must still dispatch as a file")
+	}
+	if !strings.Contains(file.SystemPrompt, marker) {
+		t.Fatal("a profile with its own prompt file asked for the shared format and must get it")
+	}
+
+	// The profile's own role text is kept, never replaced.
+	pb := profile()
+	pb.Spec.OutputFormat, pb.Spec.SystemPrompt = agentopsv1alpha1.OutputFormatBlocks, "You are terse."
+	if both := build(pb); !strings.Contains(both.SystemPrompt, "You are terse.") {
+		t.Fatal("the profile's own role text was replaced rather than appended to")
+	}
+}

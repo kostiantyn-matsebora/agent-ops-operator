@@ -200,7 +200,7 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 		// typed a reply: their own message made the buffer non-empty, the
 		// durable answers stopped being served, and the history vanished
 		// mid-conversation.
-		messages = mergeTranscript(summary.ConsoleThread, a.adapter.PrimaryChannel(), messages, summary.Runs)
+		messages = mergeTranscript(summary.ConsoleThread, a.adapter.PrimaryChannel(), messages, summary.Runs, summary)
 	}
 	out["transcript"] = messages
 	out["events"] = a.activity.ForConversation(name)

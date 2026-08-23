@@ -337,6 +337,12 @@ export interface ConversationSummary {
   title?: string
   profile?: string
   pipeline?: string
+  /**
+   * The SignalSource that opened this conversation. Empty on one a channel
+   * started, and on any created before the manager recorded it — render as
+   * absent, never guessed.
+   */
+  source?: string
   phase?: string
   inflight?: { runId: string; dispatchedAt?: string }
   runs?: Run[]
@@ -468,6 +474,30 @@ export interface Message {
    * form, for surfaces that cannot render controls. These save the typing.
    */
   choices?: Choice[]
+  /**
+   * A SIGNAL's raw event document, carried apart from `text` so it can be put
+   * behind a disclosure control.
+   *
+   * It is the tallest thing in an event card and the least often read. Left
+   * inside the text it is a wall of JSON between the card and the reply box.
+   */
+  payload?: string
+}
+
+/**
+ * One block of parsed agent output. Produced by `api/blocks.ts` IN THE BROWSER,
+ * never received from the wire — the manager sends the agent's text as written.
+ *
+ * The section vocabulary is OPEN — every agent names its own sections for its
+ * own job — so a label is rendered generically and this app carries no
+ * knowledge of any particular agent's names.
+ */
+export interface Block {
+  /** "title" — the heading. "details" — THE FOLD. Anything else is a section. */
+  role: 'title' | 'section' | 'details'
+  /** The agent's own name for a section, absent on title and details. */
+  label?: string
+  text: string
 }
 
 /** One offered action. */

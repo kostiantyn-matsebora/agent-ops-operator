@@ -31,6 +31,10 @@ func NewManager(baseURL, token string) *Manager {
 // manager refuses the ops long-poll without it: version 1 carried rendered
 // `text`, and an adapter still reading that field would post empty messages
 // forever rather than fail. Bump only alongside the renderer.
+//
+// IT DOES NOT MOVE FOR THE BLOCK GRAMMAR. No field was added and none changed
+// meaning: a body that was markdown is now markdown plus a grammar, read by the
+// component that already read the markdown — this one.
 const ContractVersion = "2"
 
 // MessageKind names what the manager is saying.

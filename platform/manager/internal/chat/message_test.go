@@ -184,3 +184,30 @@ func TestOriginSurfaceAndSender(t *testing.T) {
 		t.Fatalf("channel sender = %q, want the recorded sender", got)
 	}
 }
+
+// THE MANAGER RETURNS THE AGENT'S TEXT UNCHANGED.
+//
+// It used to parse the grammar and replace the body with a flattened form. Both
+// are gone: the adapters parse, and a body the manager rewrote could not be the
+// same characters a viewer reads back from `status.runs[].result`.
+func TestAgentTextIsPassedThroughUnaltered(t *testing.T) {
+	raw := "<title>\nDisk filling\n</title>\n<details>\nthe long tail\n</details>"
+
+	if got := AnswerMessage(raw, StatusSucceeded).Body; got != raw {
+		t.Errorf("an answer was rewritten:\n got  %q\n want %q", got, raw)
+	}
+	// A failed run that explained itself leaves as a notice, and that body is
+	// the agent's too.
+	failed := RunReplyMessage(&agentopsv1alpha1.RunStatus{Status: "failed", Result: raw})
+	if failed.Kind != MsgNotice || failed.Level != NoticeWarn {
+		t.Fatalf("a failed run with an explanation is a warn notice: %+v", failed)
+	}
+	if failed.Body != raw {
+		t.Errorf("the explanation was rewritten:\n got  %q\n want %q", failed.Body, raw)
+	}
+	// A signal is a card, and its payload is never touched either.
+	typed := "why won't\n<details>\nwork in my docs?\n</details>"
+	if got := SignalMessage("p", "src", "", "", nil, typed).Body; got != typed {
+		t.Errorf("a signal payload was rewritten:\n got  %q\n want %q", got, typed)
+	}
+}

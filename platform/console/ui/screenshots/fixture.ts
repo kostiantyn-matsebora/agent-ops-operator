@@ -393,30 +393,50 @@ const conversationDetail: ConversationDetail = {
     },
     {
       id: 'm2', thread: 'console/cluster-events-7c1d4e', kind: 'agent',
-      // THE FORMAT THE PRODUCT MANDATES, not prose. `internal/dispatch/
-      // templates/format.md` Template 1 is what an investigating agent is told
-      // to write, so a published transcript that shows a wall of text shows
-      // something the product asks its agents not to produce.
+      // THE FORMAT THE PRODUCT MANDATES, not prose.
+      //
+      // `internal/dispatch/templates/format.md` is what an agent is told to
+      // write when its profile declares `outputFormat: blocks`: a title, sections it
+      // names for its own job, and `<details>` for the fold. A published
+      // transcript showing a wall of text shows something the product asks its
+      // agents not to produce.
+      //
+      // THE TAGS ARE HERE ON PURPOSE. The console parses them — the manager
+      // passes an agent's text through untouched — so a fixture carrying the
+      // raw output is exactly what a real conversation carries, and the
+      // screenshot shows the fold a reader actually gets.
       text: [
-        '🔍 **checkout-api is restarting** — `storefront/checkout-api` · diagnosed',
+        '<title>',
+        '🔍 checkout-api is restarting — storefront/checkout-api · diagnosed',
+        '</title>',
         '',
-        '**Root cause**',
+        '<root-cause>',
+        'OOM-killed, not a bug. Requests 256Mi, working set reaches 244Mi',
+        'before each restart — running against the limit, not leaking.',
+        '</root-cause>',
         '',
-        'OOM-killed, not crashing on a bug. The container requests 256Mi and its',
-        'working set reaches 244Mi before each restart, so it is running against',
-        'the limit rather than leaking.',
-        '',
-        '**Evidence**',
+        '<evidence>',
         '- Last 3 restarts ended `OOMKilled`, exit code 137',
         '- Rolled to `checkout-api:2.14.0` 20m before the first restart',
-        '- `CACHE_ENTRIES` went 5000 → 50000 in the `storefront-config` ConfigMap',
+        '- `CACHE_ENTRIES` went 5000 → 50000 in `storefront-config`',
+        '</evidence>',
         '',
-        '**Fix** — ⚠️ manual',
-        '',
-        'Revert the cache size first. Raising the memory limit would hide it.',
-        'This route grants observing tools only, so I have changed nothing.',
-        '',
+        '<fix>',
+        'Revert the cache size. Raising the memory limit would hide it.',
         '`kubectl -n storefront rollout undo deploy/checkout-api`',
+        '</fix>',
+        '',
+        '<details>',
+        'This route grants observing tools only, so nothing was changed.',
+        '',
+        'Ruled out: a node-pressure eviction (no pressure taints in the window),',
+        'a bad image (the digest is unchanged since 2.14.0 rolled), and a',
+        'liveness misconfiguration (the probe never fired).',
+        '',
+        '```json',
+        '{"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137}}}',
+        '```',
+        '</details>',
       ].join('\n'),
       at: ago(58),
     },

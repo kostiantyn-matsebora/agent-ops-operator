@@ -31,6 +31,31 @@ const (
 	OriginChannel OriginKind = "channel"
 )
 
+// SignalProvenance is the originating signal, kept for attribution.
+//
+// ONE STANZA rather than a scatter of `signal`-prefixed fields on the spec:
+// these are facts about the SAME thing, and grouping them is what makes room
+// for the next one without widening the object's top level again.
+type SignalProvenance struct {
+	// SourceRef is the SignalSource this conversation came from.
+	// +optional
+	SourceRef *ObjectRef `json:"sourceRef,omitempty"`
+
+	// Labels are the signal's grouping labels, as the adapter sent them.
+	//
+	// BOUNDED at MaxSignalLabels. A Conversation is long-lived where the
+	// ConversationInput that used to hold these was not, and an adapter's label
+	// set is its own business — an unbounded map on a durable object is an etcd
+	// cost nobody chose.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+}
+
+// MaxSignalLabels bounds SignalProvenance.Labels. Comfortably above what the
+// shipped adapters send (k8s-events sends eight) and below anything that makes
+// a conversation object expensive.
+const MaxSignalLabels = 32
+
 // InputOrigin records where one input came from. MATERIALIZED state, written at
 // creation and never set by hand.
 //
@@ -211,6 +236,30 @@ type ConversationSpec struct {
 	// source).
 	// +optional
 	PipelineRef *ObjectRef `json:"pipelineRef,omitempty"`
+
+	// Signal is what the ORIGINATING SIGNAL was, for attribution.
+	//
+	// PROVENANCE, exactly like PipelineRef: written once at creation, read only
+	// for display, and nothing is ever resolved through it.
+	//
+	// It is on the CONVERSATION because a conversation has exactly one
+	// originating signal — reuse is scoped to one signature and one pipeline,
+	// so every signal that lands here came from the same source with the same
+	// grouping labels.
+	//
+	// IT USED TO LIVE ONLY ON THINGS BUILT TO BE PRUNED. The source was on
+	// `spec.inputs[].origin.name`, which `pruneProcessed` empties, and the
+	// labels were on the `ConversationInput`, which is DELETED with the queue
+	// entry. So a finished conversation kept its answer, kept the question, and
+	// could not say what started it — a viewer showed the phase, the profile
+	// and the pipeline of an alert and not the source that fired it or a single
+	// one of its labels. The same loss `status.runs[].inputs[]` was added to
+	// fix, two fields over.
+	//
+	// Absent on conversations created before this field, and on anything a
+	// channel started. Render it as absent rather than guessing.
+	// +optional
+	Signal *SignalProvenance `json:"signal,omitempty"`
 	// +optional
 	Title string `json:"title,omitempty"`
 	// Signature groups same/similar problems into one conversation

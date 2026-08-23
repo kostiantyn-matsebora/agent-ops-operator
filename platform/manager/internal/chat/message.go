@@ -33,6 +33,14 @@ import (
 // post empty strings, so the endpoint refuses it rather than serving nothing.
 // Same posture as the retired `?type=` parameter: fail loudly, name the
 // replacement.
+//
+// IT DOES NOT MOVE FOR THE BLOCK GRAMMAR. A body that was markdown is now
+// markdown PLUS a block grammar, and both are read by the ADAPTER — the same
+// component that already read the markdown. Nothing was added to the wire.
+//
+// The manager does not parse either one. Carrying a parsed representation beside
+// the body would be a second copy of text the message already has, and one the
+// manager cannot keep in step with a body it does not read.
 const ContractVersion = "2"
 
 // MessageKind names what the manager is saying. Four kinds cover everything it
@@ -224,6 +232,10 @@ type TopicDescriptor struct {
 
 // SignalMessage builds the card for an input that reached the manager as a
 // signal.
+//
+// A SIGNAL IS NOT PROSE. Its structured fields ARE the message and an adapter
+// renders a CARD from them — the block grammar never applies to it, and its
+// payload is a machine document or a person's typed words either way.
 func SignalMessage(pipeline, source, title, inputRef string, labels map[string]string, body string) Message {
 	return Message{
 		Kind: MsgSignal, Pipeline: pipeline, Source: source, Title: title,
@@ -232,6 +244,10 @@ func SignalMessage(pipeline, source, title, inputRef string, labels map[string]s
 }
 
 // AnswerMessage builds agent output with its run outcome.
+//
+// THE BODY IS WHAT THE AGENT PRINTED, byte for byte. Whatever grammar it wrote
+// travels as written, and the adapter serving each surface reads it — which is
+// how this contract has always treated markdown.
 func AnswerMessage(body, status string) Message {
 	return Message{Kind: MsgAnswer, Body: body, Status: status}
 }
@@ -253,6 +269,9 @@ func RunReplyMessage(run *agentopsv1alpha1.RunStatus) Message {
 		// discarding it in favour of "run failed" is exactly the inarticulate
 		// failure that made answering-without-context look like the lesser evil.
 		// The reader gets the reason; the level still says something went wrong.
+		// The body is the agent's own text and reaches the adapter as written —
+		// an adapter parses it exactly as it parses an answer, because the
+		// grammar follows the TEXT and not the message kind.
 		return Warn(body)
 	case run.Status != "succeeded":
 		return Warn("❌ run failed (" + run.Status + ")")

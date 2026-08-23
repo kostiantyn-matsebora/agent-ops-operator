@@ -11,8 +11,11 @@ import { useParams } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../App'
 import { useConversation, useConversationGraph, useMarkRead, useSession, useVocabulary } from '../api/hooks'
 import { useStream } from '../api/stream'
-import { PlainText } from '../components/Text'
+import { PlainText, RawText } from '../components/Text'
 import { Markdown } from '../components/Markdown'
+import { Blocks, Fold, agentText } from '../components/Blocks'
+import { parse } from '../api/blocks'
+import { fence } from '../api/fence'
 import { Graph } from '../graph/Graph'
 import { api, ApiError } from '../api/client'
 import { Crumbs } from '../components/Crumbs'
@@ -157,26 +160,68 @@ export function ConversationPage() {
           {/* The whole identity of the run, as chips: phase, attribution,
               profile, the runtime pod, and the capabilities it MATERIALIZED. */}
           <LabelGroup numLabels={10}>
-            <Label isCompact color="blue">{c.phase}</Label>
+            {/* EVERY CHIP CARRIES AN ICON AND A HINT.
+                The icon makes the row scannable by shape, which is why no chip
+                repeats its kind in words — "source cluster-events" beside a
+                source icon says it twice.
+                THAT IS EXACTLY WHY THE HINT IS NOT OPTIONAL, and why it is on
+                ALL of them: an icon alone does not distinguish a profile from a
+                pipeline, so a row where only one chip explains itself is worse
+                than one where none did. */}
+            <Chip hint="the conversation's phase" color="blue" icon="aops:system">
+              {c.phase}
+            </Chip>
+            {/* WHERE IT CAME FROM, right after the phase. It is the first thing
+                anybody asks of an alert, and it used to be nowhere on this page
+                — the header could name the phase, the pipeline, the profile and
+                the pod of a conversation and not what started it. */}
+            {c.source && (
+              <Chip hint="the SignalSource that opened this conversation" color="red" icon="aops:alert">
+                {c.source}
+              </Chip>
+            )}
             {c.pipeline ? (
-              <Label isCompact color="blue" icon={<Icon icon={pipelineIcon} />}>
-                pipeline {c.pipeline}
-              </Label>
+              <Chip hint="the Pipeline that routed it — the wiring" color="blue" icon={pipelineIcon}>
+                {c.pipeline}
+              </Chip>
             ) : (
-              <Tooltip content="a Conversation records no pipelineRef; attribution is inferred from its bindings and left blank when ambiguous">
-                <Label isCompact color="grey">unattributed</Label>
+              <Chip
+                hint="a Conversation records no pipelineRef; attribution is inferred from its bindings and left blank when ambiguous"
+                color="grey"
+              >
+                unattributed
+              </Chip>
+            )}
+            {c.profile && (
+              <Chip hint="the AgentProfile that answers — who the agent is" color="purple" icon="aops:agent">
+                {c.profile}
+              </Chip>
+            )}
+            {c.runtimePod && (
+              <Chip hint="the runtime pod executing this conversation" color="grey" icon="aops:workload">
+                {c.runtimePod}
+              </Chip>
+            )}
+            {c.errored && (
+              <Tooltip content="the last run finished non-zero">
+                <Label isCompact status="danger">last run failed</Label>
               </Tooltip>
             )}
-            {c.profile && <Label isCompact color="purple">profile {c.profile}</Label>}
-            {c.runtimePod && <Label isCompact color="grey">pod {c.runtimePod}</Label>}
-            {c.errored && <Label isCompact status="danger">last run failed</Label>}
-            <Label isCompact color="grey">{c.runCount} run(s)</Label>
-            <Label isCompact color="grey">age {age(c.created)}</Label>
+            <Chip hint="completed runs on this conversation" color="grey" icon="aops:observe">
+              {c.runCount} run(s)
+            </Chip>
+            <Chip hint={`created ${new Date(c.created ?? '').toLocaleString()}`} color="grey" icon="⏱">
+              {age(c.created)}
+            </Chip>
             {(c.toolsets ?? []).map((t) => (
-              <Label key={t} isCompact color="orange">{t}</Label>
+              <Chip key={t} hint="a bound MCPToolset — tools this conversation may call" color="orange" icon="aops:operate">
+                {t}
+              </Chip>
             ))}
             {(c.mcpConfigs ?? []).map((m) => (
-              <Label key={m} isCompact color="teal">{m}</Label>
+              <Chip key={m} hint="a bound MCPConfig — the MCP servers behind those tools" color="teal" icon="aops:kubernetes">
+                {m}
+              </Chip>
             ))}
           </LabelGroup>
         </StackItem>
@@ -474,8 +519,19 @@ function Transcript({
 
                         Still never HTML: the renderer has raw HTML disabled and
                         the text is tag-stripped first, so nothing an agent
-                        writes reaches the DOM as markup. */}
-                    <Markdown>{m.text}</Markdown>
+                        writes reaches the DOM as markup.
+
+                        WHEN THE MANAGER PARSED IT, render the STRUCTURE — the
+                        conclusion above a fold the reader opens. A message with
+                        no blocks is manager-composed text, or came from a
+                        manager older than contract 3, and renders exactly as it
+                        did before. */}
+                    {agentText(m.kind) ? <Blocks blocks={parse(m.text)} /> : <Markdown>{m.text}</Markdown>}
+                    {/* A SIGNAL's event document, behind its own control. It is
+                        the tallest thing in a card and the least often read —
+                        the same argument `<details>` makes for an answer, and
+                        what the Telegram adapter does with an expandable quote. */}
+                    {m.payload && <Fold text={fence(m.payload)} label="Payload" />}
                   {m.choices && m.choices.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                       {m.choices.map((c) => (
@@ -642,7 +698,13 @@ function RunTimeline({ detail }: { detail: NonNullable<ReturnType<typeof useConv
                       </Td>
                       <Td dataLabel="Result">
                         {r.result ? (
-                          <PlainText multiline>{r.result}</PlainText>
+                          /* VERBATIM, TAGS AND ALL. This column is the RECORD —
+                             what the agent actually printed — and the transcript
+                             above is where it is rendered. Stripping the block
+                             tags here showed a version of the answer nobody
+                             produced, which is the one thing a record must not
+                             do. */
+                          <RawText>{r.result}</RawText>
                         ) : r.status !== 'succeeded' ? (
                           // A failure with NO output is the one an operator
                           // cannot act on, so say what it usually means rather
@@ -860,5 +922,33 @@ function Sequence({ events }: { events: ActivityEvent[] }) {
         </Table>
       </CardBody>
     </Card>
+  )
+}
+
+/**
+ * Chip is one header fact: an icon for its KIND, a value, and a hint saying
+ * which kind that is.
+ *
+ * All three together, in one component, because the row only works if it is
+ * consistent — the chips carry no words for their kind, so a chip without a
+ * hint is a coloured glyph and a bare value.
+ */
+function Chip({
+  children,
+  hint,
+  color,
+  icon,
+}: {
+  children: React.ReactNode
+  hint: string
+  color: React.ComponentProps<typeof Label>['color']
+  icon?: string
+}) {
+  return (
+    <Tooltip content={hint}>
+      <Label isCompact color={color} icon={icon ? <Icon icon={icon} /> : undefined}>
+        {children}
+      </Label>
+    </Tooltip>
   )
 }

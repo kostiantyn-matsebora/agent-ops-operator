@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"io"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"

@@ -68,6 +68,11 @@ Six views, one question each.
   The transcript reads from the **message that started it**, and rebuilds after
   a reload or a restart. Only acks are lost.
 
+  A long answer opens with its **conclusion**. Named sections sit above the
+  fold, and the detail behind a control you expand in place. That shape comes
+  from the agent, when its profile declares `outputFormat: blocks` — an answer
+  without the grammar renders as one block, as before.
+
   The reply box completes commands. Type `/` and it offers what acts on **this**
   conversation — `/exit` to release its runtime, `/close` to end it — with the
   difference stated. It never offers a Pipeline: inside a conversation that text

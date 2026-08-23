@@ -5,6 +5,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// OutputFormat is an agent's declared output contract. See
+// AgentProfileSpec.OutputFormat — required, and with no default on purpose.
+type OutputFormat string
+
+const (
+	// OutputFormatBlocks appends the shared output-format specification.
+	OutputFormatBlocks OutputFormat = "blocks"
+	// OutputFormatNone appends nothing; the profile's prompt owns formatting.
+	OutputFormatNone OutputFormat = "none"
+)
+
 // RepoAuthType selects the git auth mechanism.
 // +kubebuilder:validation:Enum=ssh;https
 type RepoAuthType string
@@ -75,6 +86,37 @@ type AgentProfileSpec struct {
 	// tools; this exists so a repo-less profile is not silently personality-free.
 	// +optional
 	SystemPrompt string `json:"systemPrompt,omitempty"`
+
+	// OutputFormat declares this agent's OUTPUT CONTRACT. REQUIRED, and
+	// deliberately without a default, because both candidate defaults are wrong:
+	//
+	//   blocks — the operator's shared output-format specification is appended
+	//            to the prompt: the block grammar, the fold, the markdown subset
+	//            and a default section set
+	//   none   — NOTHING is appended, and the profile's own prompt owns
+	//            formatting entirely
+	//
+	// NO DEFAULT ON PURPOSE. `none` leaves output unformatted unless the author
+	// wrote a format into the prompt; `blocks` shapes output by something the
+	// author never asked for. Refusing to guess is the honest resolution, so the
+	// author declares it and a profile omitting the field is REFUSED.
+	//
+	// IDENTITY, NEVER CAPABILITY. It shapes how the agent SPEAKS, not what it
+	// may call — the allowlist and the MCP servers remain exclusively the
+	// originating Pipeline's.
+	//
+	// IT GATES THE PROMPT, NEVER THE PARSE. Adapters parse whatever they are
+	// given, so a profile declaring `none` whose agent emits tags anyway is
+	// still rendered as blocks. Decoupling them is what keeps this safe: a
+	// switch that moved the parser too could be configured into a state where
+	// the model emits tags nothing is looking for.
+	//
+	// IT DOES NOT GATE THE OPERATOR'S OWN PROMPT CONTENT. Text stating that the
+	// printed answer IS the deliverable is a fact about the system rather than a
+	// preference, and is injected whatever this says.
+	//
+	// +kubebuilder:validation:Enum=blocks;none
+	OutputFormat OutputFormat `json:"outputFormat"`
 
 	// RuntimeRef selects the AgentRuntime (execution backend) for this
 	// profile. Falls back to the AgentRuntime named "default", then to the

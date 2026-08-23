@@ -1824,3 +1824,42 @@ func TestHaAdminMcpServerHasItsOwnIdentity(t *testing.T) {
 		t.Fatalf("sharing the runtime identity collapses the two walls, got:\n%s", msg)
 	}
 }
+
+// EVERY CHART-SHIPPED PROFILE DECLARES ITS OUTPUT CONTRACT.
+//
+// The field is REQUIRED on the CR with no default, so a template that forgets
+// it renders a profile the API refuses. That failure is at apply time, on an
+// install, which is exactly where a render test is cheaper.
+func TestEveryShippedProfileDeclaresItsOutputFormat(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "crds.enabled=false",
+		"--set", "k8s-bundle.enabled=true",
+		"--set", "prometheus-bundle.enabled=true",
+		"--set", "ha-bundle.enabled=true",
+		"--set", "ha-bundle.homeAssistant.endpoint=https://ha.example.org",
+		"--set", "ha-bundle.homeAssistant.credentials.operatorToken=t",
+	)
+	profiles := []string{"k8s-engineer", "alert-investigator", "ha-user", "ha-operator"}
+	for _, name := range profiles {
+		if !strings.Contains(out, "name: "+name) {
+			t.Fatalf("%s is not in the render — this test would pass vacuously", name)
+		}
+	}
+	// One declaration per profile, and all of them `blocks`: the shipped agents
+	// are written against the shared specification.
+	if got := strings.Count(out, "outputFormat: blocks"); got != len(profiles) {
+		t.Errorf("got %d outputFormat declarations, want %d", got, len(profiles))
+	}
+}
+
+// An install may decline it per profile, which is what `none` is for.
+func TestOutputFormatCanBeDeclined(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "crds.enabled=false",
+		"--set", "k8s-bundle.enabled=true",
+		"--set", "k8s-bundle.profile.outputFormat=none",
+	)
+	if !strings.Contains(out, "outputFormat: none") {
+		t.Fatal("an install must be able to decline the shared format")
+	}
+}

@@ -14,6 +14,25 @@ long-poll plus inbound push.
 
 `status.threadId` is an opaque STRING.
 
+#### A CHANNEL ADAPTER PARSES THE BODY GRAMMAR
+
+**A free-text body is markdown in the contract's subset PLUS the block grammar**
+— `<title>`, `<details>` and agent-named sections. The manager parses neither
+and hands over what the agent printed.
+
+- **`answer` and `notice` ONLY.** A relay is somebody's typed words, and parsing
+  those consumes characters a person deliberately wrote.
+- **A `signal` is a CARD.** Its structured fields are the message and the
+  grammar never applies — the one place an adapter needs a second renderer.
+- **The section vocabulary is OPEN**, so a label is rendered generically. An
+  adapter naming a particular agent's sections is wrong.
+- **Recognition rules live in the `structured-agent-output` capability**, and
+  both implementations — `channels/telegram/blocks.go` and the console's
+  `ui/src/api/blocks.ts` — are written against them. Change one, change both.
+- **Parsing in the SURFACE is what makes history work.** The tags are in
+  `status.runs[].result`, so a viewer rebuilding a transcript parses the same
+  characters a live message carried.
+
 #### READ IS PER THREAD, THEREFORE PER CHANNEL
 
 `status.threads[].readAt` + `.readTracked`, written ONLY by the manager on an

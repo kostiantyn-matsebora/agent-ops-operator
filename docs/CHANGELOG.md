@@ -27,13 +27,37 @@ partial:
 | `housekeeping` | 0.2.0 | | `channel-telegram` | 0.20.0 |
 | | | | `gateway-telegram` | 0.5.0 |
 
-No CRD field is removed and the adapter contract version stays `2`.
+No CRD field is removed and **the adapter contract version stays `2`**.
 
 **One thing to do on upgrade**, and only for Telegram: `gateway-telegram` is
 `telegram-router` renamed, workload included — see the entry below. Everything
 else is a tag bump.
 
 ### Added
+
+- **Structured agent output.** An agent's answer now reaches chat as named
+  blocks with a fold, so a reader gets the conclusion first and the long tail
+  only on request.
+
+  - **Two reserved block tags** — `<title>` and `<details>`, THE FOLD. Every
+    other tag is a section the agent names for its own job, rendered above the
+    fold in the order written.
+  - **Each channel adapter parses the grammar** and renders it to what its
+    transport has. The manager passes an agent's text through untouched, exactly
+    as it already passes markdown through.
+  - **Nothing shortens an agent's output.** What sits above the fold is what the
+    agent put there.
+  - **`AgentProfile.spec.outputFormat`** — REQUIRED, `blocks` or `none`, with no
+    default. It gates the prompt only: output is parsed either way.
+  - **Telegram** folds `<details>` into an expandable blockquote and splits at
+    block boundaries, so the first message always carries the conclusion.
+  - **The console** renders the fold as a real disclosure control.
+  - **A `signal` is never parsed.** Its structured fields are the message and the
+    adapter renders a card from them — the source stated plainly, labels as a
+    table, the payload behind its own control.
+  - **History renders like live output.** The tags are in `status.runs[].result`,
+    so a conversation reopened after a restart parses the same characters a live
+    message carried.
 
 - **`GET /channel/vocabulary`** — what may be typed on a chat surface: the
   manager commands and every Ready Pipeline, each with a `position` (`general`
@@ -57,6 +81,35 @@ else is a tag bump.
   transport's handle for the arriving message.
 
 ### Changed
+
+- **BREAKING: `AgentProfile.spec.outputFormat` is REQUIRED.** Every profile must
+  declare `blocks` or `none`. There is no default, because both candidates are
+  wrong — `none` leaves output unformatted unless the prompt says otherwise, and
+  `blocks` shapes it by something the author never asked for.
+
+  **`kubectl apply` on a profile omitting it FAILS**, naming the valid values.
+  Chart-managed profiles are re-applied with the field by the same upgrade.
+  Hand-written ones need a one-line edit.
+
+- **BREAKING (prompt only): the five report templates in the shared format
+  specification are REMOVED.** `format.md` is rewritten in the block grammar,
+  and its numbered templates become a default set of SECTIONS — a starting
+  point, not a mandatory form.
+
+  A profile that relied on the built-in investigation or action templates keeps
+  a shared shape only by declaring `outputFormat: blocks`, which injects the
+  new default sections instead.
+
+  **Nothing breaks silently.** An agent that formats however it likes produces
+  one block, which renders exactly as agent output does today.
+
+- **The outbound contract version does NOT move.** The block grammar adds no
+  field and changes no meaning: a body that was markdown is now markdown plus a
+  grammar, read by the component that already read the markdown.
+
+  **An adapter with no parser for it renders the tags literally.** That is
+  prevented by a profile declaring `outputFormat: none` — the compatibility
+  boundary is the profile, not the wire.
 
 - **`/agents` is now `/pipelines`.** The old name still works and always will,
   but it is never printed, offered or registered. It listed Pipelines, and

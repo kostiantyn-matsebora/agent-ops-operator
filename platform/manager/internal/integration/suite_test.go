@@ -125,7 +125,7 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		// volume would (correctly) withhold every handle and make the resume
 		// tests assert the wrong thing.
 		Runtime: rt,
-		Ops:                    ops,
+		Ops:     ops,
 		// The router carries the SAME runtime config, exactly as main.go wires
 		// it: /exit reports whether a released conversation keeps its context,
 		// and it must not answer that differently from dispatch.
@@ -144,6 +144,9 @@ func mkProfile(t *testing.T, name string) {
 	p.Spec.Repository = agentopsv1alpha1.RepositorySpec{URL: "https://example.com/repo.git", Ref: "main"}
 	p.Spec.Agent = "tester"
 	p.Spec.MaxTurns = 5
+	// REQUIRED, no default — the API refuses a profile that omits it. `none`
+	// keeps these fixtures about the thing they test rather than about prompts.
+	p.Spec.OutputFormat = agentopsv1alpha1.OutputFormatNone
 	if err := k8sClient.Create(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}

@@ -16,4 +16,4 @@ Same environment and role as before. If the input is marked `[automatic notifica
 
 {{DELIVERY_INSTRUCTIONS}}
 
-Format the answer per the MESSAGE FORMAT SPECIFICATION below — **Template 4** (Action report) after acting or refusing, **Template 5** (Recurrence update) for automatic recurrences, **Template 6** (Clarification) when asking. Then print `REPLY: <done|manual|clarify|refused>`.
+Lead with what changed and how you verified it. For an automatic recurrence, say in one line whether anything changed.

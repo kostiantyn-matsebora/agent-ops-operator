@@ -27,7 +27,7 @@ channelAdapter:
   name: telegram
   image:
     repository: kmatsebora/agentops-channel-telegram
-    tag: 0.23.0
+    tag: 0.24.0
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080

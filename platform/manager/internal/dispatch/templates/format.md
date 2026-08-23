@@ -1,86 +1,176 @@
-# MESSAGE FORMAT SPECIFICATION (MANDATORY)
+# MESSAGE FORMAT SPECIFICATION
 
-Every chat message you send MUST follow one of these templates. No free-form
-prose walls. Pick the template named in your task; if none fits, use the
-nearest one and keep its section order.
+Your printed answer IS the message. The operator parses it and hands the parts
+to whichever chat surfaces the conversation is bound to, and each surface
+renders them its own way.
 
-## Global rules
+## The block grammar
 
-- **Markdown**, in this subset only: `**bold**`, `*italic*`, `` `inline code` ``, ```` ``` ```` fenced blocks, `[text](url)`. NEVER HTML — `<b>` and `<code>` are not markup here, they are literal characters and will be shown as typed.
-- Your printed answer is the MESSAGE. The operator hands it to whichever chat surface the conversation is bound to, and each surface renders this markdown its own way — so write meaning, not markup for one transport.
-- Total ≤ 3800 chars. A good report fits in ~1200.
-- **First line = status line**: emoji + bold subject. The reader must understand the state from line 1 alone.
-- Section labels in `**bold**`, blank line between sections. Bullets use `•`, one line each.
-- Commands/config/ids in backticks or a fenced block. Never paste raw JSON dumps — summarize.
-- Numbers over adjectives ("26 restarts in 4h", not "restarting a lot").
-- Omit empty sections entirely.
-- Emoji vocabulary (status prefixes ONLY): ✅ done/applied · ⚠️ needs attention/manual · ❌ failed · 🔍 investigation · 🔁 recurrence · ❓ need input · 🛠 task · 🤖 agent
-
-## Template 1 — Investigation report
+Wrap a section in a tag ALONE ON ITS OWN LINE, at the start of the line:
 
 ```
-🔍 **{signal name}** — `{scope}` · {diagnosed|hypothesis|insufficient data}
+<title>
+Pod is looping
+</title>
 
-**Root cause**
-{1–3 lines. If hypothesis: what's missing to confirm.}
+<root-cause>
+OOM at 512Mi.
+</root-cause>
 
-**Evidence**
-• {fact, ≤1 line, max 3 bullets}
-
-**Fix** — {auto-appliable | ⚠️ manual}
-{1 line}
-`{command / snippet, trimmed}`
-
-↩️ Reply: **approve** to apply · or give instructions.
+<details>
+Everything a reader only wants if they ask.
+</details>
 ```
 
-## Template 3 — Task / agent answer
+**Two tags are reserved. Every other tag name is yours.**
+
+| Tag | Is |
+|---|---|
+| `<title>` | one line, shown FIRST wherever you wrote it. At most one |
+| `<details>` | THE FOLD — collapsed by default on every surface |
+| anything else | a section YOU name, shown above the fold, in the order you wrote it |
+
+- **Name sections for your job.** An investigation wants `<root-cause>`,
+  `<evidence>`, `<fix>`. An action report wants `<changed>`, `<verification>`.
+  Nothing downstream knows or cares what you called them.
+- **Order is yours and is never rearranged**, so put the conclusion first.
+- **`<details>` is where length goes.** Logs, full command output, the
+  reasoning behind the conclusion, alternatives you rejected.
+
+## What is NOT a tag
+
+A tag counts only when it stands alone on its own line AND you close it AND it
+is outside a fenced code block. Everything else is ordinary text:
+
+- `if x < y` and `Deployment<T>` mid-line are prose.
+- A line reading `<details>` inside ``` fences is code.
+- `` `<details>` `` in backticks is code.
+
+So write `<` freely. You do not need to escape anything.
+
+## Above the fold: NO PROSE. This is the rule that matters
+
+**This is operations, not writing.** Above the fold a reader is scanning for
+what broke and what to do. Every sentence they have to read to find that is a
+cost.
+
+| Above the fold | In `<details>` |
+|---|---|
+| the title, one line | paragraphs |
+| **≤ 2 lines** per section, or **≤ 3 bullets** | evidence, tool output, logs |
+| numbers, names, commands | reasoning, what you ruled out |
+| what broke · what to do | anything a reader would only ask for |
+
+- **NEVER a paragraph above the fold.** If a section runs past two lines, the
+  second half belongs in `<details>`.
+- **Bullets beat sentences.** `- restartCount 0, Ready since 07:14:16` says
+  more than a sentence containing the same facts.
+- **Drop the connective tissue.** "This appears to have been caused by" is four
+  words before the answer starts. Write the answer.
+- **Do not explain what you did.** The tools you called and the things you ruled
+  out are `<details>`, always.
+
+**Hard cap: title plus all named sections under ~600 characters.** Past that the
+operator moves the overflow into the fold for you — nothing is lost, but it cuts
+at a line break and you would choose better.
+
+If you write no tags at all, your whole answer becomes one above-the-fold block.
+That is fine for a one-line answer and wrong for anything longer.
+
+## Give every fact the SHAPE that fits it
+
+**Structure is the message.** A paragraph that enumerates is a list that has not
+been written yet.
+
+| What you are saying | Write it as |
+|---|---|
+| several facts of the same kind | bullets, one line each |
+| a comparison across items | a **table** |
+| an order of operations | a numbered list |
+| one fact | a line |
+| a command, a path, an id, a value | backticks |
+| output from a tool | a fenced block, in `<details>` |
+| code, config, a payload | a fenced block **tagged with its language** |
+
+- **Tables render on every surface.** Use one whenever you would otherwise write
+  "X is A while Y is B and Z is C".
+- **Numbers, not adjectives.** `26 restarts in 4h` — never "restarting a lot".
+- **One idea per line.** If a line needs a comma to hold two facts, it is two
+  lines.
+- **TAG EVERY FENCE with its language** — ` ```json `, ` ```yaml `, ` ```sh `,
+  ` ```go `. Surfaces syntax-highlight from that tag, and an untagged block is
+  rendered as flat grey text. It costs four characters.
+
+## Inline text
+
+**Markdown, in this subset only:** `**bold**`, `*italic*`, `` `inline code` ``,
+```` ``` ```` fenced blocks, `[text](url)`, and GFM tables.
+
+- **NEVER HTML inline.** `<b>` and `<code>` are not markup here — they are
+  literal characters and will be shown as typed.
+- **The block tags above are the ONE exception**, and only in the standalone
+  form. They are the grammar, not markup: they are consumed, never displayed.
+- Commands, config and ids in backticks or a fenced block.
+- Numbers over adjectives — "26 restarts in 4h", not "restarting a lot".
+- **Lists are MARKDOWN lists** — a line starting `- `, one fact each:
+
+  ```
+  - Pod is Ready, restartCount 0
+  - Ganesha started cleanly at 07:40:10Z
+  ```
+
+  **Never a literal `•`.** It is a character, not a list: every surface renders
+  it as one running paragraph, which is the wall of text lists exist to avoid.
+  Each surface turns a real list into its own bullet.
+
+## Status emoji (prefixes only)
+
+✅ done/applied · ⚠️ needs attention/manual · ❌ failed · 🔍 investigation ·
+🔁 recurrence · ❓ need input · 🛠 task · 🤖 agent
+
+## A default shape, when nothing better fits
+
+**A STARTING POINT, NOT A FORM.** Drop what does not apply, add what does, and
+rename anything for your own job.
 
 ```
-{🛠|🤖} **{3–6 word answer headline}**
+<title>
+🔍 api OOMKilled — prod, 26 restarts in 4h
+</title>
 
-{≤4 short lines or ≤5 bullets. Lead with the conclusion, not the journey.}
+<cause>
+Memory limit 512Mi, working set peaks at 780Mi.
+</cause>
 
-**Changed**
-{only if you changed something: what + verification, 1–2 lines}
+<fix>
+`kubectl -n prod set resources deploy/api --limits=memory=1Gi`
+</fix>
 
-**Next**
-{only if follow-up needed: 1 line}
+<details>
+Restart history, the memory profile over 24h, and what was ruled out:
+node pressure (none), a leak (RSS is flat between restarts), a bad
+rollout (image unchanged for 9 days).
+</details>
 ```
 
-## Template 4 — Action report (after approve / instructions)
+**Note the shape.** Two short sections and a command. Everything explaining HOW
+that was established is below the fold — and that is where most of an
+investigation belongs.
 
-```
-{✅|❌|⚠️} **{Applied|Failed|Partially applied}: {one-line what}**
+Common section names, by what you are doing:
 
-**Verification**
-{check + result, 1–2 lines. ❌ → what state things are left in.}
+| Doing | Sections that usually fit |
+|---|---|
+| investigating | `<root-cause>` `<evidence>` `<fix>` |
+| answering a task | `<summary>` `<next>` |
+| reporting an action | `<changed>` `<verification>` `<next>` |
+| a repeat signal | `<what-changed>` — or say nothing changed in one line |
+| needing input | `<question>` `<options>` |
 
-**Next**
-{only if something remains: 1 line or a short fenced block}
-```
+## Never
 
-## Template 5 — Recurrence update
-
-```
-🔁 **{signal name}** — {unchanged, occurrence #{n} | situation changed}
-
-{unchanged: 1 line, done. changed: 2–4 lines + updated Fix section per Template 1.}
-```
-
-## Template 6 — Clarification / need input
-
-```
-❓ **{the question}**
-
-{≤2 lines why it matters}
-• **A:** {option + consequence}
-• **B:** {option + consequence}
-```
-
-## Anti-patterns (never)
-
-- Narrating your process ("First I checked… then I…") — report findings, not the journey.
-- Restating the task/signal text back in full.
-- More than 3 evidence bullets; headers with no content; multiple messages where one fits.
-- HTML tags of any kind. They are escaped and shown literally.
+- Narrating your process ("First I checked… then I…"). Report findings.
+- Restating the task or signal text back in full.
+- A header with no content under it.
+- Raw JSON dumps — summarize, and put the dump in `<details>`.
+- Several messages where one fits.

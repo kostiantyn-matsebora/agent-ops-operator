@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -642,8 +643,19 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			// Provenance, written once here. Everything the conversation RUNS
 			// with is materialized above it; this names where that came from.
 			PipelineRef: &agentopsv1alpha1.ObjectRef{Name: pipeline.Name},
-			Title:       title,
-			Signature:   signature,
+			// PROVENANCE, written once beside the pipeline. Without it a
+			// finished conversation cannot say what STARTED it: the source's
+			// other copy is `spec.inputs[].origin`, which pruning empties, and
+			// the labels' other copy is the ConversationInput, which is deleted
+			// with the queue entry.
+			Signal: &agentopsv1alpha1.SignalProvenance{
+				SourceRef: &agentopsv1alpha1.ObjectRef{Name: source.Name},
+				// The first signal's labels represent the group: they share a
+				// signature, so they agree on everything grouping keyed off.
+				Labels: boundedLabels(group[0].Labels),
+			},
+			Title:     title,
+			Signature: signature,
 		}
 		// Only for a person on a chat surface: an alert has no reader, and a
 		// machine posting a task is not owed a read mark.
@@ -970,4 +982,28 @@ func (s *Server) handleSignalStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// boundedLabels copies a signal's labels for durable storage, capped.
+//
+// Sorted before truncation, so which labels survive is DETERMINISTIC — a
+// conversation that kept a different subset on each write would make its own
+// card unstable, and two adapters sending the same map would disagree.
+func boundedLabels(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(in))
+	for k := range in {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > agentopsv1alpha1.MaxSignalLabels {
+		keys = keys[:agentopsv1alpha1.MaxSignalLabels]
+	}
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		out[k] = in[k]
+	}
+	return out
 }
