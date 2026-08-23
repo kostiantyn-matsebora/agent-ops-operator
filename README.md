@@ -143,4 +143,6 @@ selection). Every other module is a `go build ./... && go vet ./... && go test
 
 `v1alpha1` — young but running in production for its author. Roadmap: approve
 buttons (inline keyboards), cron + k8s Events signal sources, custom metrics,
-Helm chart. License TBD.
+Helm chart.
+
+Licensed under the [Apache License 2.0](LICENSE).

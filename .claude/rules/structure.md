@@ -31,8 +31,24 @@ container IS at runtime.
   `go.mod` where the module says it lives, so a module claiming the repository
   root from two directories down is unfetchable.
 - **A DIRECTORY HOLDS EVERYTHING ITS CONTAINER BUILDS FROM.** The build context
-  IS the Dockerfile's directory, so `COPY ../shared` cannot work. Shared code
+  IS the component's directory, so `COPY ../shared` cannot work. Shared code
   lives inside its consumer until sharing is a decision someone makes.
+  - **THE CONTEXT IS PER-DIRECTORY. THE RECIPE NEED NOT BE.** `docker build -f`
+    separates the two, so nine components sharing
+    `.github/docker/go-module.Dockerfile` still build from their own directory
+    and still copy nothing across a boundary. This rule constrains what a build
+    may READ, and that has not moved.
+  - **Nine byte-identical Dockerfiles were the state before**, and the tell was
+    an edit that had to be SCRIPTED across all of them. A base-image bump was
+    nine places to apply it in eight of.
+  - **AN OWN DOCKERFILE ALWAYS WINS**, so needing something different is
+    declared by putting one in the directory — `manager`, `console`,
+    `egress-proxy` and `runtime-claude` are the four. `.github/components.sh`
+    takes the union of Dockerfile-bearing and `go.mod`-bearing directories, so
+    neither list restates the other.
+  - **The shared image's binary is `/app`, and that is FORCED.** An exec-form
+    `ENTRYPOINT` does not expand build arguments and distroless has no shell for
+    the shell form, so a per-component entrypoint path cannot be parameterised.
 - **Self-contained modules.** Every submodule has ZERO requires — standard
   library only — and nothing outside `platform/manager/` imports its `api/` or
   `internal/`.

@@ -255,3 +255,36 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.image.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.component }}
+
+  # WHAT MAY BE PUBLISHED. This repository goes public, so no file and no commit
+  # message may say who runs the author's cluster, what it is called, or how to
+  # reach it.
+  #
+  # The guard is an ALLOWLIST of permitted shapes, never a list of forbidden
+  # strings — a denylist would have to spell out what it protects, publishing it
+  # in the guard itself, and would catch only what somebody already thought of.
+  #
+  # It reports FILE, LINE and RULE and never the matched text: build logs on a
+  # public repository are public, so a guard that quoted its findings would leak
+  # them to the audience it exists to protect the tree from. `--show` prints
+  # matches locally, where the fixing happens.
+  publication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The message scan needs the range under review, so the shallow
+          # default clone is not enough.
+          fetch-depth: 0
+
+      - name: Scan the tree
+        run: python3 .github/scripts/publication-guard.py
+
+      # Messages live OUTSIDE the tree, so a tree-only guard leaves the one hole
+      # that cannot be fixed by editing a file later.
+      - name: Scan the commit messages under review
+        if: github.event_name == 'pull_request'
+        run: |
+          python3 .github/scripts/publication-guard.py \
+            --path /dev/null \
+            --messages "origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }}"

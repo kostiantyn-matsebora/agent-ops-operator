@@ -1,5 +1,5 @@
 # egress-proxy — the enforcing proxy AND the redirect installer, one image.
-# docker buildx build --platform linux/amd64,linux/arm64 --push -t kmatsebora/agentops-egress-proxy:<tag> ./platform/egress-proxy/
+# docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/kostiantyn-matsebora/agentops-egress-proxy:<tag> ./platform/egress-proxy/
 #
 # NOT distroless, unlike every other component here, and the reason is the one
 # thing this image does that Go cannot: writing the redirect rules.
@@ -15,6 +15,11 @@
 # The privilege this needs is confined to the init container, which exits before
 # the agent container starts. The PROXY runs from the same image as an ordinary
 # unprivileged user.
+#
+# PUBLISHED BY TAG, never by hand: `egress-proxy-v<semver>` runs .github/workflows/release.yml,
+# which refuses a tag already in the registry and asserts the pushed manifest's
+# architectures against the declaration in .github/components.sh. The command above
+# builds locally; it does not publish.
 FROM --platform=$BUILDPLATFORM golang:1.23 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src

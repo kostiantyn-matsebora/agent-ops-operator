@@ -6,8 +6,13 @@
 # port with nothing fetched at runtime.
 #
 #   docker buildx build --platform linux/amd64,linux/arm64 \
-#     -t kmatsebora/agentops-console:<tag> ./platform/console/
+#     -t ghcr.io/kostiantyn-matsebora/agentops-console:<tag> ./platform/console/
 # Never overwrite a pushed tag — bump it on every change.
+#
+# PUBLISHED BY TAG, never by hand: `console-v<semver>` runs .github/workflows/release.yml,
+# which refuses a tag already in the registry and asserts the pushed manifest's
+# architectures against the declaration in .github/components.sh. The command above
+# builds locally; it does not publish.
 
 FROM --platform=$BUILDPLATFORM node:22-alpine AS ui
 WORKDIR /ui

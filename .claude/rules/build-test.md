@@ -75,7 +75,7 @@ Two traps that are not the container's fault but look like it:
 
 ### EVERY IMAGE IS MULTI-ARCH WHEREVER IT CAN BE
 
-**Use `buildx --platform linux/amd64,linux/arm64 --push`.**
+**Every published manifest carries `linux/amd64` AND `linux/arm64`.**
 Never `docker build --platform linux/amd64`.
 
 **A single-arch image fails at SCHEDULE TIME, not at build, push or render** —
@@ -104,50 +104,80 @@ arch: aarch64 / v22.23.2 / 2.1.239 (Claude Code)
 
 `node:22-bookworm-slim` plus apt plus one npm global is multi-arch throughout.
 
-**The constraint was the `--platform linux/amd64` in the build command below.**
-The runtime `nodeSelector` the chart ships compensates for a build flag rather
-than for the vendor, and can be relaxed once a multi-arch runtime image is
-published.
+**The constraint was the `--platform linux/amd64` in the hand-run build
+command.** The runtime `nodeSelector` the chart ships compensates for a build
+flag rather than for the vendor, and can be relaxed once a multi-arch runtime
+image is published.
 
 **A component may still be single-arch one day.** Establish that by BUILDING it
 on the other architecture and running the binary, never by inheriting a claim
-from prose — including this prose.
+from prose — including this prose. The declaration lives in the `SINGLE_ARCH`
+map in `.github/components.sh`, which is EMPTY, and the release asserts what it
+pushed against it as EQUALITY — an image that lost an arch and one that gained
+an undeclared one both fail.
 
-**Bump the tag on every change. Never overwrite a pushed tag.**
+### PUBLISHING IS A GIT TAG. NOTHING IS PUSHED BY HAND
+
+**`<component>-v<semver>` publishes exactly that component**, and `chart-v<semver>`
+publishes the chart. The component name is the one `.github/components.sh`
+derives from the directory, so a tag names a path.
 
 ```sh
-# MULTI-ARCH, and --push in the same command: buildx cannot export a
-# multi-platform result to the local daemon, so a separate `docker push` would
-# silently ship whichever single arch got loaded.
-BX="docker buildx build --platform linux/amd64,linux/arm64 --push"
-# The image name is the DIRECTORY's name, which is why this list can be derived
-# rather than remembered — and why renaming a directory renames an image:
-.github/components.sh images | jq -r '.[] | "\(.component) \(.context)"' |
-  while read -r component context; do
-    $BX -t "<registry>/agentops-$component:<tag>" "$context"
-  done
-
-# or one at a time:
-$BX -t <registry>/agentops-manager:<tag> ./platform/manager/
-$BX -t <registry>/agentops-console:<tag> ./platform/console/
-$BX -t <registry>/agentops-context-sync:<tag> ./platform/context-sync/
-$BX -t <registry>/agentops-egress-proxy:<tag> ./platform/egress-proxy/
-$BX -t <registry>/agentops-housekeeping:<tag> ./platform/housekeeping/
-$BX -t <registry>/agentops-runtime-claude:<tag> ./runtimes/claude/
-$BX -t <registry>/agentops-signal-cron:<tag> ./signals/cron/
-$BX -t <registry>/agentops-signal-alertmanager:<tag> ./signals/alertmanager/
-$BX -t <registry>/agentops-signal-k8s-events:<tag> ./signals/k8s-events/
-$BX -t <registry>/agentops-signal-ha:<tag> ./signals/ha/
-$BX -t <registry>/agentops-signal-telegram:<tag> ./signals/telegram/
-$BX -t <registry>/agentops-channel-telegram:<tag> ./channels/telegram/
-$BX -t <registry>/agentops-gateway-telegram:<tag> ./gateways/telegram/
-
-# VERIFY before believing it — the failure mode is invisible until it schedules:
-docker manifest inspect <registry>/agentops-console:<tag> \
-  | jq -r '.manifests[].platform | "\(.os)/\(.architecture)"'
+git tag manager-v0.44.1 && git push origin manager-v0.44.1
+git tag chart-v7.0.1    && git push origin chart-v7.0.1
 ```
 
-Then:
+- **`.github/workflows/release.yml` splits the ref at the last `-v`**, validates
+  the component against the derived list and the version against semver, and
+  FAILS naming the valid forms when either is wrong. A typo'd tag never
+  silently publishes nothing.
+- **`build-image.yml` refuses a tag already in the registry**, before building.
+  This repo's "never overwrite a pushed tag" rule is a gate now, not a note, and
+  the recovery from a partial failure is a NEW PATCH VERSION.
+- **Images go to `ghcr.io/kostiantyn-matsebora/agentops-<component>`**, the
+  chart to `oci://ghcr.io/kostiantyn-matsebora/charts`. Docker Hub
+  (`kmatsebora/*`) is frozen, not deleted.
+
+**PUBLISHING A NEW IMAGE IS THREE THINGS, AND EACH FAILS AT A DIFFERENT LAYER:**
+
+| Thing | Skipped, it fails | Where |
+|---|---|---|
+| the **tag** `<component>-v<semver>` | nothing publishes | no workflow run at all |
+| the **package visibility flip** to public | `ImagePullBackOff` for whoever installs | in a cluster, later |
+| the **platform declaration** in `.github/components.sh` | the post-push equality assert | in the release job |
+
+- **A GHCR package is created PRIVATE by its first push**, and `GITHUB_TOKEN`
+  cannot change that. Flipping it is a manual step, once per package, and the
+  chart's image-existence gate is what catches a forgotten one — it resolves
+  every first-party reference ANONYMOUSLY at chart-release time.
+- **A component that skips any of the three looks fine at the layer it was
+  skipped in.** That is why they are listed together rather than in three
+  places.
+
+**Building locally is still ordinary**, and it does not publish:
+
+```sh
+# no --push: buildx cannot export a multi-platform result to the local daemon,
+# so this verifies the build rather than shipping it.
+#
+# -f IS NOT OPTIONAL. Nine components have no Dockerfile of their own — they are
+# built by the shared recipe at .github/docker/go-module.Dockerfile, with their
+# OWN directory as the context. components.sh answers both, per component.
+.github/components.sh images |
+  jq -r '.[] | "\(.component) \(.context) \(.dockerfile)"' |
+  while read -r component context dockerfile; do
+    docker buildx build --platform linux/amd64,linux/arm64 \
+      -f "$dockerfile" -t "agentops-$component:dev" "$context"
+  done
+```
+
+- **`docker build ./signals/cron` on its own NO LONGER WORKS**, and that is the
+  price of the collapse. The context is unchanged, the recipe moved.
+- **The shared image's entrypoint is `/app`**, not `/signal-cron`. Exec-form
+  `ENTRYPOINT` cannot expand a build argument and distroless has no shell, so a
+  per-component path was never available.
+
+After a release, to move an install onto it:
 
 1. **Update the image refs** — chart values for the manager, `AgentRuntime` CRs
    for runtimes.

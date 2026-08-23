@@ -1,6 +1,11 @@
 # agentops claude agent runtime — the default AgentRuntime image.
-# docker buildx build --platform linux/amd64,linux/arm64 --push \
-#   -t kmatsebora/agentops-runtime-claude:<tag> ./runtimes/claude/
+# docker buildx build --platform linux/amd64,linux/arm64 \
+#   -t ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:<tag> ./runtimes/claude/
+#
+# PUBLISHED BY TAG, never by hand: `runtime-claude-v<semver>` runs .github/workflows/release.yml,
+# which refuses a tag already in the registry and asserts the pushed manifest's
+# architectures against the declaration in .github/components.sh. The command above
+# builds locally; it does not publish.
 FROM node:22-bookworm-slim
 
 RUN apt-get update -qq && \

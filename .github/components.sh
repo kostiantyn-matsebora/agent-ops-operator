@@ -9,10 +9,20 @@
 # remember to edit is a matrix that silently stops covering things.
 #
 # Discovery rules:
-#   images  — every Dockerfile. The component is derived from its PATH:
-#             <group>/<leaf>, where a PLURAL group names a kind of component and
-#             contributes its singular as a prefix, and a singular group is a
-#             namespace and contributes nothing.
+#   images  — every directory that ships one: it has a Dockerfile of its OWN, or
+#             it is a Go module and is built by the SHARED recipe at
+#             .github/docker/go-module.Dockerfile. Nine components were served by
+#             byte-identical copies of that file, which is nine places for a
+#             base-image bump to be applied in eight of.
+#
+#             An own Dockerfile always wins, so a component needing something
+#             different declares it by putting one in its directory — manager,
+#             console, egress-proxy and runtime-claude are the four today.
+#
+#             The component is derived from its PATH: <group>/<leaf>, where a
+#             PLURAL group names a kind of component and contributes its singular
+#             as a prefix, and a singular group is a namespace and contributes
+#             nothing.
 #
 #               signals/cron       -> signal-cron        -> agentops-signal-cron
 #               channels/telegram  -> channel-telegram   -> agentops-channel-telegram
@@ -72,17 +82,29 @@ component_for() {
   esac
 }
 
+SHARED_DOCKERFILE="./.github/docker/go-module.Dockerfile"
+
 images() {
   local out=()
-  while IFS= read -r dockerfile; do
-    local dir component context
-    dir="$(dirname "$dockerfile")"
+  local dirs
+  # A directory ships an image if it has a Dockerfile or a go.mod. The union is
+  # taken here so neither list has to restate the other, and the CONTEXT is the
+  # directory in both cases — the shared recipe is reached with `-f`, so nothing
+  # ever copies across a component boundary.
+  dirs="$( { find . -name Dockerfile -not -path '*/node_modules/*' -not -path './.github/*' -printf '%h\n'
+             find . -name go.mod    -not -path '*/node_modules/*' -mindepth 2 -printf '%h\n'
+           } | sed 's|^\./|./|' | sort -u )"
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    local component context dockerfile
     component="$(component_for "$dir")"
     context="$dir"
+    dockerfile="$dir/Dockerfile"
+    [ -f "$dockerfile" ] || dockerfile="$SHARED_DOCKERFILE"
     out+=("$(jq -nc --arg c "$component" --arg ctx "$context" --arg df "$dockerfile" \
       --arg p "$(platforms_for "$component")" \
       '{component:$c, context:$ctx, dockerfile:$df, platforms:$p}')")
-  done < <(find . -name Dockerfile -not -path '*/node_modules/*' | sed 's|^\./|./|' | sort)
+  done <<< "$dirs"
   # UNIQUE, asserted rather than assumed. A flat directory name was unique by
   # construction; a derived one is not — two groups could produce one component
   # name, and the release workflow matches a tag against exactly this list.

@@ -1,0 +1,166 @@
+{
+  "_": [
+    "WHAT MAY APPEAR IN A PUBLIC REPOSITORY, stated as SHAPES.",
+    "",
+    "This is an ALLOWLIST and it is never inverted. A list of forbidden strings",
+    "would have to spell out the hostnames, addresses and identifiers it exists",
+    "to keep out of a public tree — publishing them in the guard itself — and it",
+    "would catch only what somebody had already thought of. Everything here is a",
+    "shape that is SAFE to publish, and the guard reports anything else.",
+    "",
+    "Nothing in this file names a person, a private host or a real identifier.",
+    "That property is the point of the file and is worth checking on every edit.",
+    "",
+    "Read by .github/scripts/publication-guard.py."
+  ],
+
+  "skipPaths": [
+    "_comment: binaries, vendored trees and lockfiles. DECLARED here rather than hardcoded, so widening the scan is an edit to data.",
+    ".git/*",
+    "*/node_modules/*",
+    "node_modules/*",
+    "*/__pycache__/*",
+    "*.png", "*.jpg", "*.jpeg", "*.gif", "*.ico", "*.webp", "*.pdf",
+    "*.woff", "*.woff2", "*.ttf", "*.otf", "*.eot",
+    "*.pyc", "*.zip", "*.tgz", "*.gz",
+    "*.drawio",
+    "docs/diagrams/*.svg",
+    "**/package-lock.json",
+    "**/go.sum"
+  ],
+
+  "hostname": {
+    "_": [
+      "A candidate is a dotted name whose last label is a TLD below, or a name",
+      "reached through a scheme, or a cluster-internal suffix. Everything else",
+      "is not treated as a host at all — which is why a source filename never",
+      "becomes a finding."
+    ],
+    "tlds": [
+      "com", "org", "net", "io", "dev", "ai", "cloud", "app", "xyz",
+      "me", "local", "internal", "lan", "edu", "gov"
+    ],
+    "clusterSuffixes": ["svc", "svc.cluster.local", "cluster.local"],
+    "ignoredLastLabels": [
+      "_comment: extensions that collide with a TLD. A filename is not a host.",
+      "go", "md", "yaml", "yml", "json", "js", "jsx", "ts", "tsx", "py", "sh",
+      "txt", "html", "css", "tpl", "mod", "sum", "lock", "toml", "xml", "csv",
+      "tf", "rb", "rs", "java", "c", "h", "cpp", "sql", "env", "cfg", "ini"
+    ],
+    "allowed": [
+      "_comment: RESERVED EXAMPLE SPACE — RFC 2606 and RFC 6761.",
+      "example.com", "*.example.com",
+      "example.org", "*.example.org",
+      "example.net", "*.example.net",
+      "*.example", "*.test", "*.invalid",
+      "localhost", "*.localhost",
+
+      "_comment: CLUSTER-INTERNAL. Meaningless outside a cluster, so it identifies nothing.",
+      "*.svc", "*.svc.cluster.local", "*.cluster.local", "*.local",
+
+      "_comment: THIS PROJECT, and the forge it is published from.",
+      "github.com", "*.github.com", "github.io", "*.github.io",
+      "ghcr.io", "raw.githubusercontent.com",
+
+      "_comment: THE OTHER PUBLIC FORGES, so the repository rule can name where it applies.",
+      "gitlab.com", "*.gitlab.com", "bitbucket.org", "*.bitbucket.org",
+      "codeberg.org", "*.codeberg.org", "sr.ht", "*.sr.ht",
+
+      "_comment: KUBERNETES API GROUPS. Not hosts at all — they wear the shape.",
+      "k8s.io", "*.k8s.io", "kubernetes.io", "*.kubernetes.io",
+      "agentops.dev", "*.agentops.dev",
+      "cert-manager.io", "*.cert-manager.io",
+      "monitoring.coreos.com", "*.coreos.com",
+      "victoriametrics.com", "*.victoriametrics.com",
+      "kubebuilder.io", "*.kubebuilder.io",
+      "argoproj.github.io",
+
+      "_comment: TOOLCHAIN, VENDOR AND STANDARDS HOSTS this repository legitimately names.",
+      "golang.org", "*.golang.org", "go.dev", "*.go.dev",
+      "go.uber.org", "gomodules.xyz",
+      "gcr.io", "docker.io", "*.docker.com",
+      "pypi.org", "*.pypi.org", "npmjs.com", "*.npmjs.com", "nodejs.org",
+      "w3.org", "*.w3.org", "apache.org", "*.apache.org",
+      "opencontainers.org", "*.opencontainers.org",
+      "keepachangelog.com", "semver.org",
+      "draw.io", "*.draw.io", "drawio.com", "*.drawio.com",
+      "anthropic.com", "*.anthropic.com", "claude.ai", "agentops.ai",
+      "telegram.org", "*.telegram.org", "t.me",
+      "home-assistant.io", "*.home-assistant.io",
+      "prometheus.io", "*.prometheus.io",
+      "cilium.io", "*.cilium.io",
+      "googleapis.com", "*.googleapis.com", "gstatic.com", "*.gstatic.com",
+      "iconify.design", "*.iconify.design",
+      "sil.org", "*.sil.org",
+      "mozilla.org", "*.mozilla.org"
+    ]
+  },
+
+  "addressLiteral": {
+    "_": [
+      "Loopback, the unspecified address, and the ranges RFC 5737 and RFC 3849",
+      "reserve for documentation. A private-range literal is NOT allowed by its",
+      "range — a 10.x address names somebody's cluster."
+    ],
+    "allowed": [
+      "0.0.0.0/32",
+      "127.0.0.0/8",
+      "192.0.2.0/24",
+      "198.51.100.0/24",
+      "203.0.113.0/24",
+      "255.255.255.255/32"
+    ]
+  },
+
+  "repositoryUrl": {
+    "_": [
+      "CLONE and REMOTE urls only — a bare module path in a go.mod is a",
+      "dependency, not a deployment, and a registry path is not a repository.",
+      "So the rule applies to the FORGES below plus any url ending `.git`, and",
+      "the one repository this project may name in a clone url is itself."
+    ],
+    "forgeHosts": ["github.com", "gitlab.com", "bitbucket.org", "codeberg.org", "git.sr.ht"],
+    "allowed": [
+      "_comment: this project.",
+      "kostiantyn-matsebora/agent-ops-operator",
+      "_comment: UPSTREAM PROJECTS the documentation links. A public project is not a private deployment, and each is declared so the list stays readable as what it is.",
+      "homeassistant-ai/ha-mcp",
+      "containers/kubernetes-mcp-server",
+      "pab1it0/prometheus-mcp-server",
+      "yannh/kubeconform"
+    ]
+  },
+
+  "chatIdentifier": {
+    "_": [
+      "Chat, group and thread identifiers. ONE placeholder is documented, and",
+      "every example carries it. A second VALUE is a real surface \u2014 the two",
+      "entries below are one value in the two spellings the transport itself",
+      "produces, signed and deep-link.",
+      "",
+      "The rule is scoped to where such an identifier LIVES — a field whose",
+      "NAME says so, a transport url that carries one in its path, or the",
+      "signed form a supergroup id takes. Scoping by CONTEXT rather than by",
+      "digit count is what keeps a timestamp or a cursor in a test fixture",
+      "from reading as a surface, and it names no value anywhere."
+    ],
+    "contextKeys": ["chat", "group", "thread", "topic", "channel", "conversation"],
+    "contextPaths": ["t.me/c/"],
+    "signedIdentifierDigits": 10,
+    "allowed": [
+      "_comment: THE documented placeholder, and the same value with its supergroup prefix removed \u2014 the form a deep link carries. One placeholder, two spellings the transport itself produces.",
+      "-1001234567890",
+      "1234567890"
+    ]
+  },
+
+  "email": {
+    "_": "Addresses at the reserved example domains, plus the forge's own no-reply.",
+    "allowedDomains": [
+      "example.com", "example.org", "example.net",
+      "github.com", "users.noreply.github.com",
+      "_comment: the co-author trailer every commit in this repository carries.",
+      "anthropic.com"
+    ]
+  }
+}

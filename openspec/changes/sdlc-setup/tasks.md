@@ -12,6 +12,14 @@
 - [x] 1.3 Verify locally that the declaration is achievable: one multi-arch
       `docker buildx build --platform linux/amd64,linux/arm64` per Go module
       completes, and `runtime-claude` builds amd64
+- [x] 1.4 Collapse the NINE byte-identical Dockerfiles into
+      `.github/docker/go-module.Dockerfile`, reached with `-f` and each
+      component's OWN directory as the context. The tell was an edit to all
+      thirteen headers that had to be SCRIPTED — nine copies of one file is nine
+      places for a base-image bump to be applied in eight of. `components.sh`
+      discovery becomes the UNION of Dockerfile-bearing and `go.mod`-bearing
+      directories, an own Dockerfile winning; verify all thirteen still resolve
+      and all nine still build
 
 ## 2. CI workflow
 
@@ -109,7 +117,7 @@
 
 ## 6. Public packages
 
-- [ ] 6.1 Settle the LICENSE and replace "License TBD" in `README.md`. This
+- [x] 6.1 Settle the LICENSE and replace "License TBD" in `README.md`. This
       GATES the first publish: public packages publish the built binaries
 - [ ] 6.2 After each component's first release, flip its GHCR package to public
       (thirteen images plus the chart). `GITHUB_TOKEN` cannot do this — it is a
@@ -145,7 +153,7 @@
 - [ ] 8.2 Write the registry cut-over migration entry (Docker Hub → GHCR and
       the `--set image.repository=` escape hatch for staying on Docker Hub) into
       `CHANGELOG.md`, newest first
-- [ ] 8.3 Replace the manual `docker build` block in `CLAUDE.md` with the
+- [x] 8.3 Replace the manual `docker build` block in `CLAUDE.md` with the
       tag-driven release flow (tag grammar, what each tag publishes, the
       immutability guard) and note that CI enforces the never-overwrite rule
 - [x] 8.4 Add `.github/dependabot.yml` for `github-actions` (weekly), the twelve
@@ -164,7 +172,7 @@
       image rather than for the vendor, so it becomes optional once the
       multi-arch image ships (relaxing it is the operator's call, and comes
       after)
-- [ ] 8.7 Record in `CLAUDE.md` that publishing a NEW image is three things,
+- [x] 8.7 Record in `CLAUDE.md` that publishing a NEW image is three things,
       not one: the tag, the package visibility flip, and the platform
       declaration the release asserts — a component that skips any of them
       fails at a different layer
@@ -177,32 +185,32 @@ removes; archived, that naming is republished by the very repository it was
 cleaning. With the guard already in CI, an artifact that names a literal fails
 the build instead of reaching the archive.
 
-- [ ] 9.1 Write the guard as an ALLOWLIST of permitted shapes — reserved example
+- [x] 9.1 Write the guard as an ALLOWLIST of permitted shapes — reserved example
       domains, cluster-internal service names, loopback, this repository's own
       clone URL, the documented placeholder identifiers, and a documented set of
       private-range address literals. Never a list of forbidden strings: a
       denylist publishes what it protects and catches only what someone already
       thought of
-- [ ] 9.2 Scope it to the WHOLE repository — `openspec/`, `docs/`, `chart/`,
+- [x] 9.2 Scope it to the WHOLE repository — `openspec/`, `docs/`, `chart/`,
       every module, and the agent context under `.claude/` — with binary and
       lockfile exclusions declared in the allowlist rather than hardcoded
-- [ ] 9.3 Extend it over the commit MESSAGES in the range under review. Messages
+- [x] 9.3 Extend it over the commit MESSAGES in the range under review. Messages
       live outside the tree, so a tree-only guard leaves the one hole that
       cannot be fixed by editing a file later
-- [ ] 9.4 Report shape: file, line and the rule violated — never the matched
+- [x] 9.4 Report shape: file, line and the rule violated — never the matched
       text. A public repository has public build logs, so a guard that quotes
       its findings leaks them to the audience it exists to protect the tree
       from. A `--show` flag prints matches for local fixing
-- [ ] 9.5 Wire it into `ci.yml` as its own job, required on every pull request
+- [x] 9.5 Wire it into `ci.yml` as its own job, required on every pull request
       and on pushes to `master`
-- [ ] 9.6 Prove it fails, and prove the report is clean: add a scratch commit
+- [x] 9.6 Prove it fails, and prove the report is clean: add a scratch commit
       carrying an out-of-allowlist hostname in a file and another in a commit
       message, confirm both fail, and confirm the CI log names positions and
       rules without reproducing either value
-- [ ] 9.7 Run it over the repository as it stands and record ONLY the count of
+- [x] 9.7 Run it over the repository as it stands and record ONLY the count of
       violations per rule. The list of actual findings is a local artifact and
       is never committed — it is the input to the cleanup change, not a document
-- [ ] 9.8 Record in `.claude/rules/` the one rule this creates for every future
+- [x] 9.8 Record in `.claude/rules/` the one rule this creates for every future
       change: verification is recorded as "the guard passes", never as the text
       it matched. Pasting a grep result into a ticked task is the most natural
       way to reintroduce exactly what was removed
