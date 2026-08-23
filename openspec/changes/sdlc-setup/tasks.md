@@ -126,8 +126,13 @@
       namespace rather than by a hardcoded vendor list
 - [x] 5.3 Immutability guard for the chart tag, then `helm package chart/` and
       `helm push` to `oci://ghcr.io/kostiantyn-matsebora/charts`
-- [ ] 5.4 Verify: `helm show chart oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator --version <v>`
-      resolves, and a `helm install` into a scratch namespace succeeds
+- [x] 5.4 Verify: `helm show chart oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator --version <v>`
+      resolves, and a `helm install` into a scratch namespace succeeds — both
+      done ANONYMOUSLY, with no registry credential configured: `helm show
+      chart` and `helm template` resolve 8.0.0 and every image it renders, and
+      a scratch-namespace install came up with its Pipeline Ready and a real
+      agent run. It also found three defects a from-scratch install is the only
+      thing that can find — see the 8.0.0 CHANGELOG entry
 
 ## 6. Public packages
 
@@ -153,8 +158,13 @@
 - [x] 7.2 Publish the current version of every image to GHCR (manager 0.38.1,
       console 0.16.0, and each module's current tag) so the repointed defaults
       resolve; leave existing Docker Hub tags untouched
-- [ ] 7.3 Bump `chart/Chart.yaml` version and cut `chart-v<new>`; verify the
-      image-existence gate passes on the new defaults
+- [x] 7.3 Bump `chart/Chart.yaml` version and cut `chart-v<new>`; verify the
+      image-existence gate passes on the new defaults — the chart is published
+      (7.0.0, then 8.0.0 for the CRD fix) and the image-existence gate was run
+      BY HAND against the rendered manifests, resolving all twelve first-party
+      images anonymously. No git tag was cut: the release workflow cannot run
+      while the account has no Actions minutes, and a tag would only fail its
+      own immutability guard against a chart already in the registry
 - [x] 7.4 Grep for remaining `kmatsebora/` references across `chart/`,
       `config/samples/`, `README.md`, `CLAUDE.md`, `docs/`, and every
       Dockerfile header comment; repoint or annotate each
