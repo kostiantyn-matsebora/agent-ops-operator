@@ -1,10 +1,129 @@
-# Changelog archive — chart 5.0.0 to 5.16.0
+# Changelog archive — chart 5.0.0 to 5.18.0
 
-Migration guides for chart versions **5.0.0 through 5.16.0**, newest first, in
+Migration guides for chart versions **5.0.0 through 5.18.0**, newest first, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
 Moved here from [CHANGELOG.md](../CHANGELOG.md), which holds the ten most recent
 versions.
+
+## [5.18.0] — 2026-08-15
+
+### Added
+
+**Unread conversations in the console.** The conversation list now:
+
+- marks conversations whose **console thread** has activity newer than its
+  watermark,
+- offers an *Unread only* filter and a **Mark read** action over a selection,
+- carries the unread count on the navigation.
+
+Opening a conversation clears its mark.
+
+- **Read is per CHANNEL.** The watermark lives on `status.threads[].readAt`, one
+  per bound channel. Reading a conversation in Telegram does not clear it in the
+  console. Two operators sharing one console share one mark.
+- **The manager writes it**, on an adapter's report to the new, optional
+  `POST /channel/read`. The console still performs no Kubernetes write. An
+  adapter that never reports stays fully conformant.
+- **The watermark is monotonic and clamped to the manager's clock**, so a stale
+  browser cannot un-read a thread and a skewed one cannot mark future activity
+  read.
+- **Marking read is not behind `console.write.enabled`.** It instructs no agent
+  and starts no work, and a read-only console is exactly the install where an
+  unread badge earns its keep. *Close* and *Delete* stay hidden.
+
+**The demo wires the console.** Where the k8s bundle renders a route, that route
+now also claims the console's signal source and binds the console as a channel.
+
+A turnkey install (`global.demo.enabled=true`) can therefore start a conversation
+in the console immediately. It previously installed the console inert — source
+`Wired=False`, composer unavailable, no answer ever delivered.
+
+The names come from a new `global.agentops.console` block, because a subchart
+reads no other parent scope and Helm cannot derive one value from another.
+
+### Upgrade
+
+**The CRDs MUST be re-applied.** `Conversation.status.threads[]` gains two
+fields, and the API server prunes what its schema does not know. With stale CRDs
+every read report answers 200 and changes nothing, so every conversation reads as
+unread forever and no amount of clicking clears it.
+
+```sh
+kubectl apply -f chart/files/crds/          # or helm upgrade with crds.enabled
+```
+
+**Threads bound before this upgrade are treated as READ, once.** A binding
+without the new `readTracked` marker predates the mechanism and cannot be told
+from one nobody has read.
+
+The alternative announces a namespace-sized backlog nobody can act on. The list
+is quiet immediately after the upgrade and fills as new activity arrives.
+
+**One combination now fails the render:** demo mode with the console disabled.
+The published names duplicate `console.signalSourceName` / `console.channelName`,
+so the render fails when they disagree rather than leaving a route claiming a
+source nothing rendered.
+
+```sh
+# demo + console.enabled=false must also clear the published names
+--set console.enabled=false \
+--set global.agentops.console.signalSource= \
+--set global.agentops.console.channel=
+```
+
+Outside demo mode nothing changed, and `console.enabled=false` still removes
+every console object with one value.
+
+## [5.17.0] — 2026-08-15
+
+### Added
+
+**`/exit`, in a conversation's own thread, deletes that conversation's runtime
+pod and nothing else.** The conversation, its threads, its inputs, its run
+history and its context handle all survive. The next message admits it again with
+a fresh pod.
+
+It exists for the half eviction cannot serve. Eviction takes the longest-idle pod
+when a conversation is WAITING for capacity.
+
+With nothing waiting, nobody is blocked. The pod holds its slot, its checkout and
+whatever its runtime keeps resident until the idle TTL expires. Installs that
+RAISE that TTL — to avoid re-cloning a large repository or re-warming a local
+model — wait longest.
+
+**It is not `/close`.** One word apart, and the difference is a thread:
+
+| | releases the pod | ends the conversation | archives the thread |
+|---|---|---|---|
+| `/exit` | yes | no | no |
+| `/close` | yes | yes | yes |
+
+`/agents` now lists both with that distinction.
+
+**It refuses rather than forces.** A `/exit` during a run is declined, naming the
+run and offering `/close`. A `/exit` with queued input is declined because the
+pod would be recreated immediately.
+
+The mid-run refusal is correctness, not manners. Deleting a pod mid-run creates
+the replacement at once, hands it nothing from `/work`, idles it out the LONG TTL
+and reaps it.
+
+That clears the inflight state, makes the input pending again, and re-runs work
+that may already have acted.
+
+The reply says what the release cost, using the same computation dispatch uses.
+Where the runtime can carry context across a pod loss it says so. Where it cannot
+it warns that the next message starts fresh.
+
+One consequence worth knowing: a Pipeline named after a manager command (`exit`,
+`close`, `agents`, `help`, `start`) is not reachable by that command. The
+interception precedes the Pipeline lookup, which is what makes the commands
+reliable.
+
+### Upgrade
+
+Nothing. No CRD change, no contract change.
 
 ## [5.16.0] — 2026-08-14
 

@@ -124,6 +124,8 @@
     "allowed": [
       "_comment: this project.",
       "kostiantyn-matsebora/agent-ops-operator",
+      "_comment: GitHub's OWN placeholder, quoted verbatim where its instructions are.",
+      "owner/repo",
       "_comment: UPSTREAM PROJECTS the documentation links. A public project is not a private deployment, and each is declared so the list stays readable as what it is.",
       "homeassistant-ai/ha-mcp",
       "containers/kubernetes-mcp-server",

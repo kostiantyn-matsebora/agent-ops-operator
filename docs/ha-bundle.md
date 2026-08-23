@@ -442,7 +442,8 @@ a control credential. `ha-operator` renders **only** with an operator credential
 mode enables this bundle at all. Turning it on renders up to two routes.
 
 ```sh
-helm upgrade --install agentops ./chart -n agentops \
+helm upgrade --install agentops \
+  oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator -n agentops \
   --set ha-bundle.enabled=true \
   --set ha-bundle.homeAssistant.endpoint=https://ha.example.org \
   --set ha-bundle.homeAssistant.credentials.controlToken="$CONTROL_TOKEN" \
@@ -453,7 +454,8 @@ helm upgrade --install agentops ./chart -n agentops \
 ```
 
 ```powershell
-helm upgrade --install agentops ./chart -n agentops `
+helm upgrade --install agentops `
+  oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator -n agentops `
   --set ha-bundle.enabled=true `
   --set ha-bundle.homeAssistant.endpoint=https://ha.example.org `
   --set ha-bundle.homeAssistant.credentials.controlToken="$CONTROL_TOKEN" `

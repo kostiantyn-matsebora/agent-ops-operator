@@ -66,13 +66,17 @@ follow-up later.
    a laptop.
 
    ```sh
-   helm install agent-ops ./chart -n agent-ops --create-namespace \
+   helm install agent-ops \
+     oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+     -n agent-ops --create-namespace \
      --set global.demo.enabled=true \
      --set console.auth.uiToken=demo
    ```
 
    ```powershell
-   helm install agent-ops ./chart -n agent-ops --create-namespace `
+   helm install agent-ops `
+     oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
+     -n agent-ops --create-namespace `
      --set global.demo.enabled=true `
      --set console.auth.uiToken=demo
    ```

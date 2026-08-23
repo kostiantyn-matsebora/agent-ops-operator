@@ -13,8 +13,8 @@ alertmanager:
   # SignalAdapter CR name, and the routing key sources name in spec.adapter.
   name: alertmanager
   image:
-    repository: kmatsebora/agentops-signal-alertmanager
-    tag: 0.7.0
+    repository: ghcr.io/kostiantyn-matsebora/agentops-signal-alertmanager
+    tag: 0.7.1
   resources: {}
   # Sender self-registration. VICTORIAMETRICS ONLY — it writes a
   # VMAlertmanagerConfig, and vanilla Alertmanager has no such object.

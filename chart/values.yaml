@@ -1,5 +1,5 @@
 image:
-  repository: kmatsebora/agentops-manager
+  repository: ghcr.io/kostiantyn-matsebora/agentops-manager
   tag: 0.53.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
@@ -143,7 +143,7 @@ runtime:
   # 0.2.0+ composes the allowlist with the agent definition's own `tools:` and
   # passes it verbatim — no substituted `Read` when nothing is declared.
   # Pinning an older tag keeps that substitution and ignores toolsets.mode.
-  image: kmatsebora/agentops-runtime-claude:0.8.0
+  image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
   # Empty = follow runtimeIdleTtlMinutes above, so the release has ONE number.
   # Set it only to give THIS runtime a different one. (It is always written to
   # the CR: the CRD defaults this field to 10, so an omitted field is not unset
@@ -189,7 +189,7 @@ runtime:
     retain: 3
     # The sidecar image. Release-wide, like the manager's own: it implements a
     # contract rather than being a backend choice.
-    image: kmatsebora/agentops-context-sync:0.2.0
+    image: ghcr.io/kostiantyn-matsebora/agentops-context-sync:0.2.1
     # Bounds the pod-local live context. In this mode the WHOLE home is
     # ephemeral — caches and tool state included — so it must be generous.
     # Empty leaves it unbounded, which is Kubernetes' own default.
@@ -213,7 +213,7 @@ runtime:
     enabled: false
     # The proxy image. Release-wide like the sidecar above: a contract, not a
     # backend choice.
-    image: kmatsebora/agentops-egress-proxy:0.2.1
+    image: ghcr.io/kostiantyn-matsebora/agentops-egress-proxy:0.2.2
     # The image that installs the redirect. Empty uses the proxy image, which
     # ships both. Point it elsewhere only to keep the privileged image minimal.
     initImage: ""
@@ -604,7 +604,7 @@ console:
   signalSourceName: ""
   displayName: agent-ops console
   image:
-    repository: kmatsebora/agentops-console
+    repository: ghcr.io/kostiantyn-matsebora/agentops-console
     # 0.25.1 makes the console LIVE rather than polling. A stream event now
     # carries the changed object, projected into the shapes the snapshots serve,
     # so a listing, a kind detail and an open conversation update in place. A
@@ -968,8 +968,8 @@ housekeeping:
   enabled: false
   schedule: "17 3 * * *"
   image:
-    repository: kmatsebora/agentops-housekeeping
-    tag: 0.2.0
+    repository: ghcr.io/kostiantyn-matsebora/agentops-housekeeping
+    tag: 0.2.1
   # Reports what it would remove and removes nothing. Take it off only after a
   # run has named no directory belonging to a conversation you are keeping.
   dryRun: true

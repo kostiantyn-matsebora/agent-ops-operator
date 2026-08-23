@@ -122,38 +122,38 @@
 
 - [x] 6.1 Settle the LICENSE and replace "License TBD" in `README.md`. This
       GATES the first publish: public packages publish the built binaries
-- [ ] 6.2 After each component's first release, flip its GHCR package to public
+- [x] 6.2 After each component's first release, flip its GHCR package to public
       (thirteen images plus the chart). `GITHUB_TOKEN` cannot do this — it is a
       manual per-package step, recorded as a checklist beside the tag grammar
 - [x] 6.3 Confirm the chart needs NO pull-secret value and no ServiceAccount
       change: `git status` shows no `api/`, `internal/` or ServiceAccount
       template modifications from this group
-- [ ] 6.4 Verify anonymously: `docker pull` each published image and
+- [x] 6.4 Verify anonymously: `docker pull` each published image and
       `helm show chart oci://…` with no credential configured, then install into
       a scratch cluster holding no pull secret and confirm manager, adapter,
       runtime, sidecar and job pods all pull
 
 ## 7. Registry cut-over
 
-- [ ] 7.1 Repoint every first-party image default to
+- [x] 7.1 Repoint every first-party image default to
       `ghcr.io/kostiantyn-matsebora/agentops-*` — the six in
       `chart/values.yaml` and the six across `chart/charts/*/values.yaml` —
       keeping existing tags and changing only the registry prefix
-- [ ] 7.2 Publish the current version of every image to GHCR (manager 0.38.1,
+- [x] 7.2 Publish the current version of every image to GHCR (manager 0.38.1,
       console 0.16.0, and each module's current tag) so the repointed defaults
       resolve; leave existing Docker Hub tags untouched
 - [ ] 7.3 Bump `chart/Chart.yaml` version and cut `chart-v<new>`; verify the
       image-existence gate passes on the new defaults
-- [ ] 7.4 Grep for remaining `kmatsebora/` references across `chart/`,
+- [x] 7.4 Grep for remaining `kmatsebora/` references across `chart/`,
       `config/samples/`, `README.md`, `CLAUDE.md`, `docs/`, and every
       Dockerfile header comment; repoint or annotate each
 
 ## 8. Docs and maintenance
 
-- [ ] 8.1 Update `docs/installation.md` (the OCI `helm install` command and the
+- [x] 8.1 Update `docs/installation.md` (the OCI `helm install` command and the
       GHCR image names — no credential step, the packages are public) and keep
       `README.md` to the commands alone, within its 150-line budget
-- [ ] 8.2 Write the registry cut-over migration entry (Docker Hub → GHCR and
+- [x] 8.2 Write the registry cut-over migration entry (Docker Hub → GHCR and
       the `--set image.repository=` escape hatch for staying on Docker Hub) into
       `CHANGELOG.md`, newest first
 - [x] 8.3 Replace the manual `docker build` block in `CLAUDE.md` with the

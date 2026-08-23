@@ -75,15 +75,27 @@ before the first install, not after.
      --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
    ```
 
-2. **Install the chart.**
+2. **Install the chart** from the registry. There is no repo to add and no
+   checkout to clone.
 
    ```sh
-   helm install agent-ops ./chart -n agent-ops
+   helm install agent-ops \
+     oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+     --version 7.0.0 -n agent-ops
    ```
 
    ```powershell
-   helm install agent-ops ./chart -n agent-ops
+   helm install agent-ops `
+     oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
+     --version 7.0.0 -n agent-ops
    ```
+
+   **No registry credential.** The chart and every image it renders are public
+   packages on GHCR, so the pull is anonymous and the install needs no
+   `imagePullSecrets`.
+
+   Working from a checkout instead? `helm install agent-ops ./chart -n
+   agent-ops` still does the same thing.
 
 3. **Verify.**
 
@@ -120,11 +132,11 @@ does not repeat them.
 The values below are the ones you decide. For the exhaustive list:
 
 ```sh
-helm show values ./chart
+helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 ```
 
 ```powershell
-helm show values ./chart
+helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 ```
 
 ### Capacity
@@ -332,7 +344,7 @@ action and says so. Add verbs on evidence, one at a time.
 ```yaml
 runtime:
   # the agent backend — swap it to change vendor
-  image: kmatsebora/agentops-runtime-claude:0.8.0
+  image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
   credentialsSecret:
     # read by the kubelet, never by the operator
     name: agentops-claude
@@ -341,7 +353,7 @@ runtime:
 
 image:
   # the manager itself; its tag moves per release
-  repository: kmatsebora/agentops-manager
+  repository: ghcr.io/kostiantyn-matsebora/agentops-manager
 ```
 
 A wrong credential fails late and quietly. The pod is created, then sits in
@@ -486,11 +498,15 @@ The fields are in
 ## Upgrade and uninstall
 
 ```sh
-helm upgrade agent-ops ./chart -n agent-ops
+helm upgrade agent-ops \
+  oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+  --version <version> -n agent-ops
 ```
 
 ```powershell
-helm upgrade agent-ops ./chart -n agent-ops
+helm upgrade agent-ops `
+  oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
+  --version <version> -n agent-ops
 ```
 
 Read [CHANGELOG.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)

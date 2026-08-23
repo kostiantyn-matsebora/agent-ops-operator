@@ -11,6 +11,103 @@ See [../README.md](../README.md) for the product overview and [./](./) for
 reference material. `CLAUDE.md` in this directory owns the rules this file
 follows.
 
+## [7.0.0] — 2026-08-23
+
+**Every image moves registry.** All twelve first-party images the chart renders
+repoint from Docker Hub `kmatsebora/*` to
+**`ghcr.io/kostiantyn-matsebora/agentops-*`**. No CRD field changes.
+
+Nine of them also move a patch, because nine components now build from one
+shared Dockerfile and their entrypoint became `/app`:
+
+| Component | Tag | | Component | Tag |
+|---|---|---|---|---|
+| `manager` | 0.53.0 | | `channel-telegram` | 0.24.1 |
+| `console` | 0.37.0 | | `gateway-telegram` | 0.5.1 |
+| `runtime-claude` | 0.8.0 | | `signal-telegram` | 0.6.1 |
+| `context-sync` | 0.2.1 | | `signal-alertmanager` | 0.7.1 |
+| `egress-proxy` | 0.2.2 | | `signal-k8s-events` | 0.4.1 |
+| `housekeeping` | 0.2.1 | | `signal-ha` | 0.2.1 |
+
+**Docker Hub keeps the old tags**, unchanged and still pullable. A tag never
+means two different things: where content changed, the number moved.
+
+The chart itself is now published as an **OCI artifact**, so installing no
+longer needs a checkout:
+
+```sh
+helm install agent-ops \
+  oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+  --version 7.0.0 --namespace agent-ops --create-namespace
+```
+
+**No credential anywhere.** The GHCR packages are public, so pulls stay
+anonymous. The chart gains no `imagePullSecrets` value, and no ServiceAccount
+changes — which matters because adapter ServiceAccounts are created by the
+manager's reconciler, not by the chart, so a chart-rendered pull secret could
+never have reached six of the thirteen images.
+
+### Added
+
+- **CI on every pull request** (`.github/workflows/ci.yml`): the twelve Go
+  modules build, vet and test — the operator's against a real API server — the
+  console UI builds and runs its own suite, the chart lints and renders across
+  its value permutations under `kubeconform`, and all thirteen images build.
+- **Tag-driven publishing.** A tag of the form `<component>-v<semver>`
+  publishes exactly that component. `chart-v<semver>` publishes the chart.
+- **Every image is multi-arch** — `linux/amd64` and `linux/arm64` as one
+  manifest list, `runtime-claude` included. The release asserts what it pushed
+  against a declaration, as equality, so an image that quietly loses an
+  architecture fails the release rather than a reschedule weeks later.
+- **A LICENSE.** Apache 2.0. Public packages publish the built binaries, so it
+  stopped being a footnote.
+
+### Changed
+
+- **BREAKING for pinned images.** Every default image repository gains the
+  `ghcr.io/kostiantyn-matsebora/` prefix — six in `chart/values.yaml` (manager,
+  console, housekeeping, `runtime.image`, `contextSync`, `egressMediation`) and
+  six across the bundles.
+- **A published tag can no longer be overwritten.** The release refuses a tag
+  already in the registry, so the recovery from a partial failure is a new
+  patch version. This was a note in `CLAUDE.md` and is now a gate.
+- **Nine images now share one Dockerfile**, and their entrypoint is **`/app`**
+  rather than `/signal-cron`, `/channel-telegram` and so on. The images affected
+  are the five signal adapters, `channel-telegram`, `gateway-telegram`,
+  `context-sync` and `housekeeping`. Nothing the chart renders names an
+  entrypoint path, so this is invisible unless YOU set `command:` on one of
+  those containers yourself.
+- **`runtime-claude` is multi-arch.** It was published amd64-only because the
+  hand-run build command said so, not because its upstream is — building it for
+  `linux/arm64` and running `claude --version` on `aarch64` settled that. The
+  runtime `nodeSelector` the chart still ships is therefore compensating for
+  nothing, and can be relaxed at your discretion.
+
+### Upgrade
+
+**Existing Docker Hub tags stay published and are untouched.** An install that
+does nothing keeps running.
+
+Upgrading pulls from GHCR. If your cluster cannot reach `ghcr.io`, or you mirror
+Docker Hub, stay on the old registry by naming it:
+
+```sh
+helm upgrade agent-ops … \
+  --set image.repository=kmatsebora/agentops-manager \
+  --set runtime.image=kmatsebora/agentops-runtime-claude:0.8.0
+```
+
+The same override applies to `console.image.repository`,
+`housekeeping.image.repository`, `runtime.contextSync.image`,
+`runtime.egressMediation.image`, and each bundle's
+`<bundle>.<component>.image.repository`.
+
+**If you set any image repository yourself, that value wins and nothing
+changes** — repoint it when you are ready.
+
+**If you override `command:` on an adapter, the sidecar or the housekeeping
+job**, change the path to `/app`. Nothing the chart ships does.
+
 ## [6.0.0] — 2026-08-23
 
 **Every image moves.** The repository was regrouped by component type and every
@@ -962,128 +1059,9 @@ moves ownership. Diagnose with:
 kubectl get crd conversations.agentops.dev --show-managed-fields -o json
 ```
 
-## [5.18.0] — 2026-08-15
-
-### Added
-
-**Unread conversations in the console.** The conversation list now:
-
-- marks conversations whose **console thread** has activity newer than its
-  watermark,
-- offers an *Unread only* filter and a **Mark read** action over a selection,
-- carries the unread count on the navigation.
-
-Opening a conversation clears its mark.
-
-- **Read is per CHANNEL.** The watermark lives on `status.threads[].readAt`, one
-  per bound channel. Reading a conversation in Telegram does not clear it in the
-  console. Two operators sharing one console share one mark.
-- **The manager writes it**, on an adapter's report to the new, optional
-  `POST /channel/read`. The console still performs no Kubernetes write. An
-  adapter that never reports stays fully conformant.
-- **The watermark is monotonic and clamped to the manager's clock**, so a stale
-  browser cannot un-read a thread and a skewed one cannot mark future activity
-  read.
-- **Marking read is not behind `console.write.enabled`.** It instructs no agent
-  and starts no work, and a read-only console is exactly the install where an
-  unread badge earns its keep. *Close* and *Delete* stay hidden.
-
-**The demo wires the console.** Where the k8s bundle renders a route, that route
-now also claims the console's signal source and binds the console as a channel.
-
-A turnkey install (`global.demo.enabled=true`) can therefore start a conversation
-in the console immediately. It previously installed the console inert — source
-`Wired=False`, composer unavailable, no answer ever delivered.
-
-The names come from a new `global.agentops.console` block, because a subchart
-reads no other parent scope and Helm cannot derive one value from another.
-
-### Upgrade
-
-**The CRDs MUST be re-applied.** `Conversation.status.threads[]` gains two
-fields, and the API server prunes what its schema does not know. With stale CRDs
-every read report answers 200 and changes nothing, so every conversation reads as
-unread forever and no amount of clicking clears it.
-
-```sh
-kubectl apply -f chart/files/crds/          # or helm upgrade with crds.enabled
-```
-
-**Threads bound before this upgrade are treated as READ, once.** A binding
-without the new `readTracked` marker predates the mechanism and cannot be told
-from one nobody has read.
-
-The alternative announces a namespace-sized backlog nobody can act on. The list
-is quiet immediately after the upgrade and fills as new activity arrives.
-
-**One combination now fails the render:** demo mode with the console disabled.
-The published names duplicate `console.signalSourceName` / `console.channelName`,
-so the render fails when they disagree rather than leaving a route claiming a
-source nothing rendered.
-
-```sh
-# demo + console.enabled=false must also clear the published names
---set console.enabled=false \
---set global.agentops.console.signalSource= \
---set global.agentops.console.channel=
-```
-
-Outside demo mode nothing changed, and `console.enabled=false` still removes
-every console object with one value.
-
-## [5.17.0] — 2026-08-15
-
-### Added
-
-**`/exit`, in a conversation's own thread, deletes that conversation's runtime
-pod and nothing else.** The conversation, its threads, its inputs, its run
-history and its context handle all survive. The next message admits it again with
-a fresh pod.
-
-It exists for the half eviction cannot serve. Eviction takes the longest-idle pod
-when a conversation is WAITING for capacity.
-
-With nothing waiting, nobody is blocked. The pod holds its slot, its checkout and
-whatever its runtime keeps resident until the idle TTL expires. Installs that
-RAISE that TTL — to avoid re-cloning a large repository or re-warming a local
-model — wait longest.
-
-**It is not `/close`.** One word apart, and the difference is a thread:
-
-| | releases the pod | ends the conversation | archives the thread |
-|---|---|---|---|
-| `/exit` | yes | no | no |
-| `/close` | yes | yes | yes |
-
-`/agents` now lists both with that distinction.
-
-**It refuses rather than forces.** A `/exit` during a run is declined, naming the
-run and offering `/close`. A `/exit` with queued input is declined because the
-pod would be recreated immediately.
-
-The mid-run refusal is correctness, not manners. Deleting a pod mid-run creates
-the replacement at once, hands it nothing from `/work`, idles it out the LONG TTL
-and reaps it.
-
-That clears the inflight state, makes the input pending again, and re-runs work
-that may already have acted.
-
-The reply says what the release cost, using the same computation dispatch uses.
-Where the runtime can carry context across a pod loss it says so. Where it cannot
-it warns that the next message starts fresh.
-
-One consequence worth knowing: a Pipeline named after a manager command (`exit`,
-`close`, `agents`, `help`, `start`) is not reachable by that command. The
-interception precedes the Pipeline lookup, which is what makes the commands
-reliable.
-
-### Upgrade
-
-Nothing. No CRD change, no contract change.
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
-| [CHANGELOG-5.0-5.16.md](changelog/CHANGELOG-5.0-5.16.md) | chart 5.0.0 through 5.16.0 |
+| [CHANGELOG-5.0-5.18.md](changelog/CHANGELOG-5.0-5.18.md) | chart 5.0.0 through 5.18.0 |
 | [CHANGELOG-1.0-4.0.md](changelog/CHANGELOG-1.0-4.0.md) | chart 1.0 through 4.0.0 |

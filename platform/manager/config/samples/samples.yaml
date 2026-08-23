@@ -169,7 +169,7 @@ metadata:
   name: telegram
   namespace: agent-ops
 spec:
-  image: kmatsebora/agentops-channel-telegram:0.5.0
+  image: ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.5.0
   # This adapter does NOT poll. gateway-telegram owns the single getUpdates loop
   # and pushes topic updates here, so the reconciler owns Service
   # agentops-adapter-telegram and injects LISTEN_ADDR.
@@ -221,7 +221,7 @@ metadata:
   name: telegram
   namespace: agent-ops
 spec:
-  image: kmatsebora/agentops-signal-telegram:0.1.0
+  image: ghcr.io/kostiantyn-matsebora/agentops-signal-telegram:0.1.0
   port: 8080   # receives general-surface updates from the router
 ---
 apiVersion: agentops.dev/v1alpha1
@@ -293,7 +293,7 @@ metadata:
   name: cron
   namespace: agent-ops
 spec:
-  image: kmatsebora/agentops-signal-cron:0.2.0
+  image: ghcr.io/kostiantyn-matsebora/agentops-signal-cron:0.2.0
   # Optional config contract for SignalSources with `adapter: cron`. Declaring
   # it makes `kubectl get signaladapter cron -o yaml` answer "what do I put in
   # config?" without reading adapter source.
@@ -391,7 +391,7 @@ metadata:
   name: k8s-events
   namespace: agent-ops
 spec:
-  image: kmatsebora/agentops-signal-k8s-events:0.1.0
+  image: ghcr.io/kostiantyn-matsebora/agentops-signal-k8s-events:0.1.0
   kubernetesAccess: true
 ---
 apiVersion: agentops.dev/v1alpha1

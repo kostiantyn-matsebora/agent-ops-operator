@@ -88,7 +88,7 @@ just stops being a second door to the API.
 exists so the runtime is swappable. Derive one:
 
 ```dockerfile
-FROM kmatsebora/agentops-runtime-claude:0.8.0
+FROM ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
 USER root
 RUN curl -fsSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/<ver>/bin/linux/amd64/kubectl \
  && chmod 0755 /usr/local/bin/kubectl
@@ -486,7 +486,7 @@ everything.
 runtime:
   enabled: true                 # false = you manage AgentRuntime CRs yourself
   name: default                 # the name a Pipeline with no runtimeRef resolves
-  image: kmatsebora/agentops-runtime-claude:0.8.0
+  image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
   idleTtlMinutes: ""            # empty = follow runtimeIdleTtlMinutes
   nodeSelector: {}
   resources: {}

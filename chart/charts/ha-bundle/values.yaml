@@ -88,8 +88,8 @@ logsAdapter:
   # implementation with spec.adapter: <name>.
   name: home-assistant
   image:
-    repository: kmatsebora/agentops-signal-ha
-    tag: 0.2.0
+    repository: ghcr.io/kostiantyn-matsebora/agentops-signal-ha
+    tag: 0.2.1
   resources: {}
   # The log source. It is INERT until a Pipeline claims it — wiring is
   # pipeline-only, so either turn the `pipelines:` component below on or declare

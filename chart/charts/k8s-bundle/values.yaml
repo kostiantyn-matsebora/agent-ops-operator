@@ -23,7 +23,7 @@ eventsAdapter:
   # implementation with spec.adapter: <name>.
   name: k8s-events
   image:
-    repository: kmatsebora/agentops-signal-k8s-events
+    repository: ghcr.io/kostiantyn-matsebora/agentops-signal-k8s-events
     # multi-arch from 0.1.1: adapter pods carry no node constraints, so on a
     # mixed-arch cluster an amd64-only adapter image is a coin flip.
     # 0.2.x adds self-exclusion, workload enrichment, the rules engine and the
@@ -32,7 +32,7 @@ eventsAdapter:
     # 0.3.0 adds the time axis (route.timeIntervals / route.muteTimeIntervals);
     # an earlier image ignores those keys, which looks like a window that never
     # fires.
-    tag: 0.4.0
+    tag: 0.4.1
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding
