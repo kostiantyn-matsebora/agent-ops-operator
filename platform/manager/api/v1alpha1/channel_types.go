@@ -12,6 +12,11 @@ import (
 // A Channel describes WHERE output goes, never HOW it is sent: delivery is the
 // operator's job (it hands agent output to the serving adapter), so no agent
 // ever learns a transport and no runtime holds a surface's credentials.
+//
+// The channel carries NO wiring and originates NOTHING — it CARRIES
+// conversations. A message on this surface's general area arrives as a chat
+// signal from a chat SignalSource, and the Pipeline claiming that source
+// declares who answers.
 type ChannelSpec struct {
 	// Adapter names the ChannelAdapter serving this surface — a REFERENCE, not
 	// an attribute: the named adapter's implementation is what defines and
@@ -22,10 +27,6 @@ type ChannelSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.adapter is immutable"
 	Adapter string `json:"adapter"`
-	// NOTE: the channel carries NO wiring and originates NOTHING — it CARRIES
-	// conversations. A message on this surface's general area arrives as a
-	// chat signal from a chat SignalSource, and the Pipeline claiming that
-	// source declares who answers.
 	// CredentialsSecretRef names the Secret holding this surface's transport
 	// credentials (e.g. a bot token) — credentials are per-surface usage, never
 	// per-implementation. The operator only writes the NAME into the serving

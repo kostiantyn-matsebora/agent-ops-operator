@@ -37,6 +37,23 @@
     paint();
   };
 
+  // CONTENT IMAGES THE PAGE NAMED DIRECTLY.
+  //
+  // Until now the only registrations came from the tab strip and the player, so
+  // a themed asset a page named OUTSIDE either — a diagram in ordinary prose —
+  // had no resolver at all. It rendered the light file on a dark page, silently.
+  // The landing diagram was only correct because it happens to sit in a panel.
+  //
+  // Registration is by element reference, so a component that later moves one of
+  // these into a panel changes nothing, and a second registration is a no-op:
+  // paint() rewrites only when the resolved name differs from what is there.
+  var content = document.getElementById('ao-content');
+  if (content) {
+    [].forEach.call(content.querySelectorAll('img[src]'), function (img) {
+      if (VARIANT.test(img.getAttribute('src'))) window.agentops.themed(img, 'src');
+    });
+  }
+
   paint();
   new MutationObserver(paint).observe(document.documentElement, {
     attributes: true, attributeFilter: ['data-theme'],

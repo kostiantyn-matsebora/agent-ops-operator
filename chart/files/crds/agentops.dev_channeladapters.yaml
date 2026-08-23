@@ -86,6 +86,9 @@ spec:
                     — it only makes the expectation discoverable from the adapter CR.
                   properties:
                     description:
+                      description: |-
+                        Description of what this key holds. Documentation only -- the manager
+                        reads no Secrets.
                       type: string
                     key:
                       description: Key is the Secret key (projected as env <credentialEnvPrefix><KEY>).

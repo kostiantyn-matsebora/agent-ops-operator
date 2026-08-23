@@ -19,3 +19,19 @@ groups:
         url: /console/
       - title: Installation
         url: /installation/
+  - title: Guides
+    entries:
+      - title: "Put an agent to work"
+        url: /guides/pipeline/
+      - title: "Add your own agent"
+        url: /guides/agent-profile/
+      - title: "Run your agent from a repository"
+        url: /guides/agent-from-a-repository/
+      - title: "Give your agent tools"
+        url: /guides/toolsets/
+      - title: "React to signals"
+        url: /guides/signal-adapter/
+      - title: "Talk to agents from your own chat"
+        url: /guides/channel-adapter/
+      - title: "Run agents on your own backend"
+        url: /guides/agent-runtime/

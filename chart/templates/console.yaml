@@ -313,8 +313,6 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-console
-  labels:
-    app.kubernetes.io/name: agentops-console
 spec:
   adapter: {{ $c.name }}
   grouping:

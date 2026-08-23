@@ -36,7 +36,7 @@ const (
 //
 // It exists because provenance was previously an accident: `JobName` recorded
 // the source for `kind: job` and dropped it for every other kind, so a
-// conversation could not say what woke it. It replaces that field.
+// conversation could not say what started it. It replaces that field.
 //
 // The conversation's PIPELINE is deliberately NOT here. Conversations carry no
 // pipelineRef; the route is inferred from the materialized bindings
@@ -50,9 +50,9 @@ type InputOrigin struct {
 	// SignalKind is the originating signal's lane (alert | job | task | chat)
 	// for `signal` origins, empty otherwise. It says whether a PERSON typed
 	// this input — which decides how it is rendered on the surfaces that did
-	// not show it (somebody's words, or the event that woke the agent). It does
-	// NOT decide whether it is delivered: that is per destination, read off the
-	// origin SURFACE.
+	// not show it (somebody's words, or the event that opened the conversation).
+	// It does NOT decide whether it is delivered: that is per destination, read
+	// off the origin SURFACE.
 	// +optional
 	SignalKind string `json:"signalKind,omitempty"`
 	// Sender is the transport-side identity that typed this input, when the
@@ -146,7 +146,7 @@ func (i *InputItem) OriginSender(labels map[string]string) string {
 }
 
 // TypedByAPerson reports whether somebody wrote this input, as opposed to an
-// event that woke the agent. It decides how a delivery is RENDERED — somebody's
+// event that opened it. It decides how a delivery is RENDERED — somebody's
 // words carry their attribution, an event is a card — and nothing else.
 func (i *InputItem) TypedByAPerson() bool {
 	if i.Origin == nil {

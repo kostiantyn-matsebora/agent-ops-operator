@@ -13,7 +13,7 @@ The cluster Events lane and the Kubernetes tooling.
 | Component | Renders |
 |---|---|
 | events | adapter + RBAC + `SignalSource`. **The events component renders the source, never the claim on it** |
-| profile | the `k8s-engineer` profile — ONE object, identity only |
+| profile | the `k8s-engineer` profile — ONE object, behaviour only |
 | `pipelines` | the WIRING component — see below |
 | `mcp` / `mcpServers` | the `MCPConfig`, the toolsets and the server workload — see below |
 
@@ -34,7 +34,7 @@ profile and toolsets, channels values-supplied and omitted when unset.
 RBAC. All of that is the parent's `runtime:` + `global.agentops.runtime.*`.
 
 **The profile has no repository**, so it carries an inline `systemPrompt` role.
-Otherwise an event wakes a personality-free agent.
+Otherwise an event reaches a personality-free agent.
 
 **Self-gated on `enabled OR global.demo.enabled`.** Demo mode IS this bundle —
 `chart/templates/demo.yaml` is gone.
@@ -73,7 +73,7 @@ The `mcp` component:
   read-only, so unlike k8s-bundle there is no risk split to enumerate. The
   PINNED tag is what keeps the wildcard honest.
 - **Its deployable server under a SECOND SA.**
-- **The `alert-investigator` profile** — identity only, inline role, no
+- **The `alert-investigator` profile** — behaviour only, inline role, no
   repository, so no agent definition resolves.
 - **ONE default-off route.**
 

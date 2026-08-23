@@ -1,0 +1,233 @@
+---
+title: "Put an agent to work"
+permalink: /guides/pipeline/
+description: >-
+  What a Pipeline is, why it is the only object in agent-ops that carries any
+  wiring, and how to build a working route out of what you already have.
+
+next:
+  eyebrow: Next
+  title: "Add your own agent"
+  body: >-
+    Declare an agent of your own — its role, its bounds, and what executes it —
+    then route to it with a Pipeline.
+  url: /agent-ops-operator/guides/agent-profile/
+---
+
+A `Pipeline` is **the wiring, and the only object in agent-ops that carries
+any**. It names what starts a conversation, which agent answers, where the
+answer goes, and what that agent may touch.
+
+{: .ao-callout}
+> **To learn what an agent can do, read its Pipeline.** There is nowhere else to
+> look. No permission lives on the profile, and none is inherited.
+
+![A SignalSource feeds a Pipeline, and the Pipeline names an AgentProfile to answer, Channels to answer on, and the toolsets and MCP servers it may use.]({{ '/assets/img/guides/pipeline-light.svg' | relative_url }}){: .ao-diagram}
+
+## Before you start
+
+Creating a Pipeline is appropriate when:
+
+- You want a **second route** over what is already installed — a different agent
+  on an existing source, or an existing agent on a new surface.
+- You enabled a **bundle** that ships sources, profiles and tooling but no
+  wiring, and nothing answers yet.
+- You want an agent that is **reachable by name** and claims no source at all.
+
+It is **not** what you want when:
+
+- The agent you need **does not exist yet**. Create it first —
+  [Add your own agent]({{ '/guides/agent-profile/' | relative_url }}).
+- The tool or server you need does not exist yet —
+  [Give your agent tools]({{ '/guides/toolsets/' | relative_url }}).
+
+**You create nothing new here.** Every object a Pipeline names is already in
+your install, which is what makes this the first thing to learn.
+
+Review
+[Pipeline](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md#pipeline)
+first.
+
+## The overall shape
+
+A Pipeline is four sets of references and one composition rule:
+
+1. **`profileRef`** — who answers. The only **required** field.
+2. **`signalSourceRefs`** — the sources it listens on. Omit it and the Pipeline
+   claims nothing, and is reachable only by name.
+3. **`channelRefs`** — where the answer goes. Every conversation is mirrored on
+   all of them.
+4. **`toolsets` and `mcpConfigs`** — what it may touch, plus the `mode` that
+   composes them against the agent's own definition.
+
+Nothing else carries wiring. A `SignalSource` has no profile and no channel. A
+`Channel` has no default profile. That concentration is the point.
+
+**Ready validates every reference.** Until the condition is `True` the Pipeline
+claims nothing, and its message names the object it could not find.
+
+## See what you have to wire
+
+```sh
+kubectl -n agent-ops get agentprofiles,signalsources,channels,mcptoolsets,mcpconfigs
+```
+
+```powershell
+kubectl -n agent-ops get agentprofiles,signalsources,channels,mcptoolsets,mcpconfigs
+```
+
+A demo install answers with a `k8s-engineer` profile, a `console` source and
+channel, a `cluster-events` source, and the three built-in toolsets —
+`agentops-observe` (`Read` `Grep` `Glob`), `agentops-shell` (`Bash`) and
+`agentops-edit` (`Edit` `Write`).
+
+That is enough to build a route with no new objects at all.
+
+## Write the Pipeline
+
+<!-- generated: template kind=Pipeline name=my-route fields=signalSourceRefs,channelRefs,toolsets,toolsets.mode,mcpConfigs comments=off -->
+```yaml
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: my-route
+spec:
+  profileRef:
+    name: <name>
+  signalSourceRefs:
+  - name: <name>
+  channelRefs:
+  - name: <name>
+  toolsets:
+    refs:
+    - name: <name>
+    mode: merge
+  mcpConfigs:
+    refs:
+    - name: <name>
+```
+<!-- /generated -->
+
+**Name it for its JOB**, not for the channel it answers on. `ha-ops` and
+`k8s-observe` say what they are for. `telegram-route` says nothing.
+
+**Refs apply in order.** Tool lists concatenate with dedup, the first occurrence
+keeping its position. Server keys overlay, and a later ref wins a collision.
+
+## Apply it, and check it is Ready
+
+```sh
+kubectl -n agent-ops apply -f my-route.yaml
+kubectl -n agent-ops get pipeline my-route \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+```
+
+```powershell
+kubectl -n agent-ops apply -f my-route.yaml
+kubectl -n agent-ops get pipeline my-route `
+  -o jsonpath='{.status.conditions[?(@.type==\"Ready\")]}'
+```
+
+`Ready=True` means every ref resolved. A source you claimed also flips to
+`WIRED=True`, which you can see with `kubectl get signalsources`.
+
+## Reach it
+
+A Pipeline is reached two ways, and no others:
+
+1. **A signal posted to a source it claims.**
+2. **A `/<pipeline>` command** on any wired chat surface.
+
+```
+/my-route what is running in kube-system?
+```
+
+**Addressing needs no claim.** A Pipeline listing no chat source is still
+reachable by name, and the reply lands in the thread it was asked from.
+
+There is no HTTP form that names a Pipeline. A caller selecting its own wiring
+is the shape this object exists to prevent.
+
+`/pipelines` lists the Ready ones, so an addressable route stays discoverable
+whether or not it claims anything.
+
+## Share a source, or do not
+
+**Wiring is many-to-many in every direction**, and there is no exclusivity
+anywhere:
+
+| Relationship | Allowed |
+|---|---|
+| One Pipeline claims many sources | yes |
+| Many Pipelines claim one source | yes — each opens its **own** conversation, with its own profile and capabilities |
+| One channel carries many Pipelines' conversations | yes |
+
+Two agents watching one thing is an ordinary configuration you choose, not a
+hazard. There is no conflict condition and no tiebreak.
+
+The only consequence of several claimants is on a chat surface:
+
+| Ready Pipelines serving a chat source | An **unaddressed** message |
+|---|---|
+| one | routes to it |
+| several | is answered with the list of agents, so the person names one |
+| none | is **dropped**, and the source reports `Wired=False` |
+
+Listing a chat source on a Pipeline that is only ever addressed grants it
+nothing, while making every unaddressed message on that surface ambiguous.
+
+## Compare against a working route
+
+This is what the chart's `k8s-bundle` renders:
+
+<!-- generated: example preset=tier1 kind=Pipeline name=k8s-observe -->
+```yaml
+# Source: agent-ops-operator/charts/k8s-bundle/templates/pipelines.yaml
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: k8s-observe
+  namespace: agent-ops
+  labels:
+    app.kubernetes.io/name: agentops-k8s-bundle
+spec:
+  # Display only: how this route is recognised in a chat command menu or the
+  # console's typeahead. Nothing routes on it.
+  icon: "aops:observe"
+  profileRef:
+    name: k8s-engineer
+  # Wiring is pipeline-only: without this claim the source reports Wired=False
+  # and DROPS every event it admits.
+  signalSourceRefs:
+    - name: cluster-events
+    - name: console
+  # A class of object this bundle does not render, so each is named from values
+  # and the key is absent when nobody named one. With no channel the
+  # conversation dispatches immediately and its answer lands in
+  # status.runs[].result.
+  channelRefs:
+    - name: console
+  # Declared, not inherited: profiles carry no capabilities and nothing supplies
+  # a default, so this stanza IS the agent's allowlist.
+  toolsets:
+    refs:
+      - name: agentops-observe
+      - name: k8s-observability
+  mcpConfigs:
+    refs:
+      - name: k8s-api
+```
+<!-- /generated -->
+
+Two sources claimed, one channel answered on, the observing toolsets and the
+Kubernetes MCP server granted. Read it and you know exactly what that agent can
+do.
+
+## What comes next
+
+1. **[Add your own agent]({{ '/guides/agent-profile/' | relative_url }})**
+   — when none of the installed agents is the one you want.
+2. **[Give your agent tools]({{ '/guides/toolsets/' | relative_url }})**
+   — declare new toolsets and MCP servers to bind here.
+3. **[Every Pipeline field](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md#pipeline)**
+   — the icon, and the full shape of each ref stanza.

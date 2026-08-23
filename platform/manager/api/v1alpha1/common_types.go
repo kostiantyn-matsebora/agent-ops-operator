@@ -116,6 +116,8 @@ type CredentialKeyDoc struct {
 	// Required marks a key the implementation cannot work without.
 	// +optional
 	Required bool `json:"required,omitempty"`
+	// Description of what this key holds. Documentation only -- the manager
+	// reads no Secrets.
 	// +optional
 	Description string `json:"description,omitempty"`
 }

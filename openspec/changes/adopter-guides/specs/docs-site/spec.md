@@ -12,18 +12,49 @@ YAML and can grant more than an adapter's code ever could — so **each guide
 SHALL state what its own mistake costs**, and no guide may imply that danger
 grows with the tier.
 
-Every guide SHALL have the same four parts: what the reader is doing, a minimal
-custom resource to fill in, a link to the full field reference, and the in-repo
-implementation to copy from.
+**The FIRST guide SHALL be the wiring, and it SHALL create nothing new.** A
+`Pipeline` names only objects a working install already has, so the fundamental
+lesson costs the reader no new resources. A guide that opens by declaring an
+identity teaches an inert object whose purpose is a Pipeline the reader has not
+met.
+
+Every guide SHALL have the same five parts, in order: what the thing IS, when it
+applies and when it does not, the shape it is built from, sections NAMED FOR THE
+TASK with their code beneath them, and where to go next.
 
 A guide SHALL NOT restate reference material. The CRD reference and the contract
 documents are linked, never reproduced.
+
+A guide SHALL NOT consist of instructions alone. Explanation belongs immediately
+before the code it explains — a page that cuts it entirely gives instructions
+with no subject.
+
+**A guide's TITLE SHALL name what the reader gets**, not the custom resource it
+is built from. The kind is named in the page's opening sentence and in its
+description, so the vocabulary stays findable without a title reading as
+implementation.
+
+#### Scenario: A guide is titled for its CRD
+
+- **WHEN** a title names the kind rather than the outcome
+- **THEN** it is wrong, and the outcome is what the title states
 
 #### Scenario: A reader finishes Getting started
 
 - **WHEN** they look for what to do next
 - **THEN** the Introduction's guides section names the guides, and the first one
-  takes them from the demo install to an agent of their own
+  builds a working route out of what the demo install already contains
+
+#### Scenario: A reader wants a second route over installed pieces
+
+- **WHEN** they have a profile, a source and a channel but no wiring between them
+- **THEN** the first guide is sufficient on its own, and asks them to create no
+  resource other than the Pipeline
+
+#### Scenario: A guide would open with a numbered step
+
+- **WHEN** a guide begins instructing before it has said what the thing is
+- **THEN** it is wrong, and the opening states the subject first
 
 #### Scenario: A guide would explain a CRD field in full
 

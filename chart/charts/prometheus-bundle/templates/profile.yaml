@@ -1,4 +1,4 @@
-{{- /* Profile component: WHO the agent is. Identity only — one object. The
+{{- /* Profile component: WHO the agent is and HOW it behaves. One object. The
 runtime, its SA, its credential and that SA's RBAC are the parent chart's. */ -}}
 {{- if and (include "prometheus-bundle.active" .) .Values.profile.enabled }}
 {{- $p := .Values.profile }}
@@ -10,7 +10,7 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-prometheus-bundle
 spec:
-  # Identity only — no repository, no capabilities. What this agent may DO comes
+  # Behaviour only — no repository, no capabilities. What this agent may DO comes
   # from the Pipelines routing it.
   maxTurns: {{ $p.maxTurns }}
   {{- with $p.systemPrompt }}

@@ -49,8 +49,8 @@ subjects:
     namespace: {{ .Release.Namespace }}
 ---
 # Named agentops-housekeeping so signal-k8s-events' name-prefix self-exclusion
-# applies: a CronJob fails on a schedule, and an unexcluded failure would wake
-# an agent about agent-ops' own maintenance, repeatedly.
+# applies: a CronJob fails on a schedule, and an unexcluded failure would open a
+# conversation about agent-ops' own maintenance, repeatedly.
 apiVersion: batch/v1
 kind: CronJob
 metadata:

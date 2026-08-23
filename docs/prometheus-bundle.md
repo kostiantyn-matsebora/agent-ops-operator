@@ -29,7 +29,7 @@ VictoriaMetrics-specific feature is
 | Component | Flag | What it renders |
 |---|---|---|
 | Ingest lane | `alertmanager.enabled` (**on**) | The `SignalAdapter` (`alertmanager`, reference adapter `signals/alertmanager/`, `port: 8080`) and — under `defaultSource.enabled` — a `SignalSource`. **Not the claim on it**: that is the wiring component, or your own `pipelines:` |
-| Profile | `profile.enabled` (**on**) | Exactly one object: the `alert-investigator` `AgentProfile` (identity only, with an inline `systemPrompt` role) |
+| Profile | `profile.enabled` (**on**) | Exactly one object: the `alert-investigator` `AgentProfile` (behaviour only, with an inline `systemPrompt` role) |
 | MCP tooling | `mcp.enabled` | An `MCPConfig` (`prometheus-api`, server key `prometheus`) and an `MCPToolset` (`prometheus-observability`) |
 | MCP server | `mcpServers.enabled` | The query server workload: `Deployment` + `Service` (`agentops-mcp-prometheus`) and **its own `ServiceAccount`** |
 | Wiring | `pipelines.enabled` (**off**) | One `Pipeline` claiming the source above with the profile above — see [The bundle's own wiring](#the-bundles-own-wiring) |
@@ -182,7 +182,8 @@ whichever Pipeline routes it.
 
 Because it has **no repository**, no `.claude/agents/<name>.md` can be resolved
 for it, so the inline `systemPrompt` is not decoration: without it an alert would
-wake a personality-free agent whose only inputs are an allowlist and a payload.
+open a conversation with a personality-free agent whose only inputs are an
+allowlist and a payload.
 
 The shipped role tells it to query the metric that fired before concluding
 anything, to show the evidence behind its finding, and to recommend rather than

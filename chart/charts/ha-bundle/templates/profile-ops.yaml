@@ -1,5 +1,5 @@
 {{- /*
-The house's ADMINISTRATOR — the agent that FIXES it: identity only, same shape
+The house's ADMINISTRATOR — the agent that FIXES it: behaviour only, same shape
 as the user profile.
 
 Its PREREQUISITE is the operator credential. Without one this profile does not

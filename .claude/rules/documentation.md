@@ -41,12 +41,24 @@ filename — so the routing is explicit:
 | What the console is FOR — its views, what each answers, the authentication decision | `docs/console-guide.md` |
 | What the console IS — endpoints, RBAC grant, values reference, internals | `docs/console.md` |
 | A change to the console's UI | re-run BOTH `npm run screenshots` and `npm run demo` in `platform/console/ui` — the site's screenshots and its landing recording are build output, and the change is not done until both match |
+| A CRD field, an api doc comment, or a chart value a guide shows | re-run `python3 .github/scripts/docs-generate.py` — every CR template, every worked example and `docs/cr-reference.md` are build output, and CI fails on a stale one |
+| A guide under `docs/guides/` | the page's prose is hand-written, its `yaml` blocks are NOT — edit the `<!-- generated: … -->` marker and re-run the generator |
 | The pitch, the kind list, the demo, the install command | `README.md` |
 | The site's SHELL — Jekyll source, diagrams, what each page owes beyond its row | `docs/.claude/site.md` |
 | A colour token, the theme choice, or the mark | `.claude/rules/palette-and-mark.md` — always a TWO-FILE change |
 | How the site LOOKS or navigates | `docs/_layouts/`, `_includes/`, `_data/nav.yml`, `assets/` |
 | What the site SAYS to an adopter | a markdown page under `docs/` |
 | How a page READS — structure, tabs, components, tables, the lint | `docs/CLAUDE.md` |
+
+**A GENERATED BLOCK IS NEVER EDITED IN PLACE.** The three generated rows above
+are the same rule as the screenshots: the source is elsewhere, and a hand-edit
+is reverted by the next run — silently, because the run reports success.
+
+- **The marker is the interface.** A page declares `kind=`, `name=` and
+  `fields=`, and the generator fills the block from the CRDs or from a chart
+  render. Change what a page teaches by changing the marker.
+- **A field the CRDs no longer have FAILS the generator**, naming the file, the
+  marker and the command. That is the point of generating rather than typing.
 
 **Both value rows are "values", so the split is stated.** The PARENT chart's
 belong to `docs/installation.md`, a SUBCHART's to that bundle's own page, and

@@ -189,6 +189,50 @@ jobs:
           done
           exit $failed
 
+  # THE GENERATED DOCUMENTATION, REGENERATED AND DIFFED.
+  #
+  # GitHub Pages builds docs/ from master with no workflow, so a generated file
+  # must be COMMITTED -- and a committed generated file is correct the day it is
+  # written and silently wrong after the next field rename. This job is the only
+  # thing that stops that, which is the whole reason the templates and examples
+  # are generated rather than typed.
+  #
+  # It needs helm because the worked examples ARE chart output: the same render
+  # the job above validates, with its custom resources lifted into the pages.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: Install kubeconform
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      # THREE checks in one run, and the failure names the command to run --
+      # a drift check that reports a difference without the fix is a puzzle.
+      #
+      #   1. every preset value is one the CHART documents, so the site and the
+      #      shipped values cannot come to name different examples
+      #   2. no published page names a real host or a real-shaped identifier
+      #   3. the committed output matches what the sources produce
+      - name: Examples name nothing real, and match their sources
+        run: python3 .github/scripts/docs-generate.py --check
+      # A template a reader copies must be a resource the API server accepts.
+      # Validated against THIS repo's CRDs, so a template that drifts from the
+      # schema fails here rather than in someone's cluster.
+      - name: Generated templates validate against the CRDs
+        run: |
+          python3 .github/scripts/crd-schemas.py chart/files/crds "$RUNNER_TEMP/crd-schemas"
+          python3 .github/scripts/docs-generate.py --emit-templates "$RUNNER_TEMP/templates.yaml"
+          kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location "$RUNNER_TEMP/crd-schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
+            "$RUNNER_TEMP/templates.yaml"
+
   # Every Dockerfile builds. amd64 only and never pushed: pull-request feedback
   # speed matters more than arch coverage here, and the multi-arch build is
   # exercised at release, where a manifest is actually produced to assert on.

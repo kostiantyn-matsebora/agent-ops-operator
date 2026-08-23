@@ -1,5 +1,20 @@
 # Design — adopter guides
 
+## D0. THE PIPELINE IS THE FIRST GUIDE, AND IT CREATES NOTHING
+
+`Pipeline` is the only object that carries any wiring, and every object it names
+— profile, sources, channels, toolsets — a demo install already ships.
+
+So the fundamental lesson costs the reader **no new resources**, which is what
+makes it the right thing to meet first.
+
+- **The profile cannot come first.** On its own it is inert, and its whole
+  purpose is a Pipeline the reader has not been shown.
+- **The two were ONE page for a while**, and that page taught two objects at
+  once while implying an agent needs both to exist before anything works. It
+  does not — a second route over installed pieces is the commonest thing an
+  adopter wants.
+
 ## D1. The tiers are LEARNING order, and each page carries its own risk
 
 The ladder orders what a reader must understand, not what they can break.
@@ -60,6 +75,22 @@ placeholder into the chart values, every rendered example inherits it and the
 publication guard enforces it. Generating before that bakes a real identifier
 into the site instead.
 
+**The ordering is now ENFORCED rather than remembered**, because a note in a
+design document does not survive the session that wrote it:
+
+| Check | Refuses |
+|---|---|
+| `assert_placeholders` | a render value the CHART's own values files do not document — so the site and the shipped values cannot come to name different examples |
+| `audit_identifiers` | a published page naming a host that is not reserved, or an identifier matching a shape this repository has shipped as real |
+
+Both run in `--check`, so CI fails on either.
+
+- **The credential dummies are exempt from the first, by KEY.** A values file
+  carrying an example token teaches someone to ship it, so no chart may
+  document one and the check must not demand that it does.
+- **The second names no literal it guards against.** It works by SHAPE and by
+  allowlist — a guard that spelled out the scrubbed value would re-introduce it.
+
 | Tier | Rendered from |
 |---|---|
 | 1 | k8s-bundle under demo values |
@@ -67,19 +98,35 @@ into the site instead.
 | 3 | telegram-bundle — a Channel, a SignalSource, both adapter CRs |
 | 4 | the parent chart's `runtime:` |
 
-## D5. Four parts, the same four, every page
+## D5. Five parts, the same five, every page
 
 ```
-   what you are doing   →  the task, in a sentence, and what it costs to get wrong
-   fill this in         →  the minimal CR, generated
-   the full surface     →  a link to docs/cr-reference.md
-   something that works →  the in-repo implementation for this tier
+   opening              →  what the thing IS, two or three dense sentences
+   Before you start     →  when it applies, when it does NOT, prerequisite links
+   The overall shape    →  the parts it is built from, as a numbered list
+   task sections        →  named for what you do, each with its code BENEATH it
+   What comes next      →  a numbered list of onward links
 ```
 
-The fourth part is why the tiers are cheap to write: `signals/cron` is the
-reference signal adapter, `channels/telegram` the reference channel adapter,
-`runtimes/claude` the reference runtime. Each page points at one rather than
-inventing a toy.
+**Sections are named for the task, never "Step 3".** `Compose the tool
+allowlist` and `Create the deploy key` say what the reader is doing. A number
+says only where they are.
+
+**Explanation sits immediately before the code it explains**, never piled at the
+front and never cut. A page still points at the in-repo implementation —
+`signals/cron`, `channels/telegram`, `runtimes/claude` — from "What comes next"
+rather than inventing a toy.
+
+### D8. The two failure modes, both of which shipped here
+
+| Draft | Failed because |
+|---|---|
+| Reference material re-headed as a guide | it restated `contracts.md` in full, which the spec forbids and a reader has no reason to read twice |
+| Bare numbered steps with the concept cut | the instructions had no subject — a reader was told to poll `/work` before being told what a runtime is |
+
+**"Before you start" carries the WHEN-NOT.** Half the readers of the adapter
+pages want a `SignalSource` rather than an adapter, and a page that does not say
+so has already cost them the wrong afternoon.
 
 ## D6. The CR reference is a repo file, not a site page
 

@@ -81,7 +81,7 @@ homeAssistant:
 # NOT the wiring — that is the `pipelines:` component at the bottom of this file.
 #
 # Turn it off for an ASK-ONLY install: the agents still answer questions, the
-# house just never wakes one.
+# house just never starts one.
 logsAdapter:
   enabled: true
   # SignalAdapter CR name — also the ROUTING KEY: SignalSources select this
@@ -535,7 +535,7 @@ profiles:
     name: ha-operator
     systemPrompt: |
       You are the administrator of a live Home Assistant installation. You are
-      woken when something in the house is BROKEN, and you are the agent that
+      called when something in the house is BROKEN, and you are the agent that
       fixes it.
 
       HOW YOU REACH THE HOUSE — read this before concluding you cannot do

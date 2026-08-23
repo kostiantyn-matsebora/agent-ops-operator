@@ -141,9 +141,9 @@ spec:
                             SignalKind is the originating signal's lane (alert | job | task | chat)
                             for `signal` origins, empty otherwise. It says whether a PERSON typed
                             this input — which decides how it is rendered on the surfaces that did
-                            not show it (somebody's words, or the event that woke the agent). It does
-                            NOT decide whether it is delivered: that is per destination, read off the
-                            origin SURFACE.
+                            not show it (somebody's words, or the event that opened the conversation).
+                            It does NOT decide whether it is delivered: that is per destination, read
+                            off the origin SURFACE.
                           type: string
                       required:
                       - kind

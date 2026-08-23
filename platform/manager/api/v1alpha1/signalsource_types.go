@@ -27,6 +27,10 @@ type GroupingSpec struct {
 // SignalSourceSpec maps a signal stream to conversations with a profile:
 // type-agnostic routing metadata plus an opaque per-type config that only the
 // serving signal implementation interprets.
+//
+// The source carries NO wiring — which profile answers and which channels
+// mirror is declared exclusively on a Pipeline that claims this source.
+// Unclaimed sources drop signals (Wired=False condition).
 type SignalSourceSpec struct {
 	// Adapter names the SignalAdapter serving this source — a REFERENCE, not an
 	// attribute: the named adapter's implementation defines and validates
@@ -34,9 +38,8 @@ type SignalSourceSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.adapter is immutable"
 	Adapter string `json:"adapter"`
-	// NOTE: the source carries NO wiring — which profile answers and which
-	// channels mirror is declared exclusively on a Pipeline that claims this
-	// source. Unclaimed sources drop signals (Wired=False condition).
+	// Grouping decides which signals share one conversation, and how long a
+	// repeat of the same fingerprint is suppressed.
 	// +optional
 	Grouping GroupingSpec `json:"grouping,omitempty"`
 	// CredentialsSecretRef names the Secret holding this source's transport
