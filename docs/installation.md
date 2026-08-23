@@ -26,7 +26,7 @@ Three choices are cheap now and expensive later.
 | Decision | Default | Change it and |
 |---|---|---|
 | **Storage** — do conversations remember? | a `ReadWriteMany` claim | **every run starts fresh.** The operator says so up front rather than failing a follow-up |
-| **The agent's power** — what may it do? | `none` | see below. `full` is cluster-admin |
+| **The agent's power** — what may it do? | `none`, and a route that names no account gets nothing | see below. Three settings, not one |
 | **CRD ownership** — what survives uninstall? | installed and kept | uninstall takes every Conversation with it |
 
 **Storage.** `ReadWriteMany` matters because more than one agent runs at a time.
@@ -35,14 +35,24 @@ With `ReadWriteOnce` every agent pod lands on one node.
 **The agent's power.** `global.agentops.runtime.rbacMode` is the agent's reach.
 It ships empty, which resolves to `none`.
 
-| Mode | Bound to | When |
+| Mode | Renders | When |
 |---|---|---|
 | `none` | nothing | **the default** |
-| `readonly` | `view`, plus node and metrics reads | the default under demo mode |
-| `full` | **cluster-admin** | never a default. Never inferred |
+| `readonly` | `agentops-runtime-readonly` | the default under demo mode |
+| `full` | `agentops-runtime-acting` | never a default. Never inferred |
 
-`full` gives an LLM-driven process unrestricted control of your cluster. Prefer
-`readonly` plus targeted grants in `rbac.runtime`.
+**A mode renders a NAMED account, and a Pipeline opts into it.** Nothing is
+bound to the account a Pipeline naming none runs as — see
+[silence means no power](#silence-means-no-power).
+
+**`full` used to be `cluster-admin`, and `readonly` used to bind the built-in
+`view`.** Both are gone — see [CHANGELOG](CHANGELOG.md) for the version and the
+upgrade step.
+
+**One more decision comes with it:** whether an agent may run a pod
+([`allowPodExecution`](#allowpodexecution--read-this-before-turning-it-on)).
+That is what makes "agents cannot read your Secrets" true rather than merely
+written down.
 
 **CRD ownership.** The keep annotation protects nothing retroactively. Decide it
 before the first install, not after.
@@ -170,7 +180,152 @@ not close it.
 | `global.agentops.runtime.rbacMode` | the mode above. Empty by default, resolving to `none` |
 | `rbac.runtime.bindClusterRoles` | existing ClusterRoles to bind, additive to the mode. Default `[]` |
 | `rbac.runtime.clusterRoles` | rules to create and bind. Default `[]` |
-| `global.agentops.runtime.serviceAccountName` | the one identity every agent runs as — its RBAC **is** the agent's power. Default `agentops-runtime` |
+| `global.agentops.runtime.serviceAccountName` | the **floor** identity — what a Pipeline naming none runs as. It holds no RBAC. Default `agentops-runtime` |
+| `global.agentops.runtime.allowPodExecution` | may it create or enter a pod. Default `false` |
+| `rbac.runtime.serviceAccounts` | **additional** identities a Pipeline may name. Default `[]` |
+
+#### Silence means no power
+
+**A Pipeline that names no `serviceAccountName` runs as the floor account, and
+nothing is ever bound to it.** That agent can do nothing in the cluster. It
+reaches only what its toolsets and MCP servers give it.
+
+**Acting power is something a route opts into, by name:**
+
+```yaml
+global:
+  agentops:
+    runtime:
+      rbacMode: full            # renders agentops-runtime-acting
+
+pipelines:
+  - name: k8s-observe
+    profile: k8s-engineer
+    toolsets: [agentops-observe, k8s-observability]
+    # names no account, so it gets the floor and no cluster power
+
+  - name: k8s-operate
+    profile: k8s-engineer
+    toolsets: [agentops-observe, k8s-observability, k8s-admin]
+    serviceAccountName: agentops-runtime-acting
+```
+
+**This is a deliberate break.** A Pipeline used to inherit whatever the release
+granted, so a route held cluster power by not typing a field.
+
+- **The parent renders the floor and whatever `rbacMode` produces.**
+- **Each bundle renders the accounts its own routes need**, scoped to what those
+  routes do. `ha-bundle` renders two with no Kubernetes RBAC at all, because
+  neither of its routes touches the Kubernetes API.
+- **`rbac.runtime.serviceAccounts`** is where you declare your own.
+- **A name nothing backs fails at pod admission**, saying which account.
+
+#### The grant is cluster-wide
+
+**Every rule applies in every namespace, including this release's own.** There
+is no namespace list, and a namespace created tomorrow is covered immediately.
+
+What keeps that from exposing anything is **omission, not scope**:
+
+| Never granted | So |
+|---|---|
+| `agentops.dev` | Conversations, Pipelines and profiles are unreadable everywhere |
+| `secrets` | no credential is readable through RBAC |
+| `clusterroles` | an agent cannot map which identity is worth attacking |
+
+No component in this release logs message content, so the pod logs an agent can
+read carry no conversation text. What it gains in the operator's namespace is
+pod names and specs, Services, events and the compiled MCP ConfigMaps.
+
+{: .ao-callout}
+> **Under `full` an agent can also restart or delete those pods** — the manager
+> and the adapters included. It can disrupt its own supervisor.
+
+**Namespaced Roles were tried and reverted.** RBAC cannot express "everywhere
+except", so bounding an agent meant an allow-list: one binding per namespace per
+account, 224 objects on a 28-namespace cluster, and every new namespace
+invisible to the agent until someone edited values and redeployed.
+
+#### `allowPodExecution` — read this before turning it on
+
+{: .ao-callout}
+> **No `secrets` verb is not the same as cannot read Secrets.** The **kubelet**
+> resolves a Secret when it builds a pod. An agent that can create a pod
+> mounting one, or exec into a pod that already has one, reads the value having
+> never asked the API server for a Secret.
+
+Verified against the shipped role on a live cluster: pod created, pod log read,
+secret value returned, with all seven `secrets` verbs denied throughout.
+
+**So the flag is off by default**, and it gates every write that produces or
+enters a pod — `pods: create`, `pods/exec`, and create/update/patch on
+Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs and CronJobs. It is
+the boundary that keeps Secrets genuinely out of reach.
+
+**Gating only `pods: create` would close nothing.** `kubectl create job`
+produces a pod just as well, and patching a Deployment edits a pod template.
+
+**With it off an agent is still an operator.** It reads what it is scoped to,
+scales, restarts, evicts, cordons, deletes workloads, and creates or edits
+ConfigMaps, Services, Ingresses, NetworkPolicies, PDBs, HPAs and PVCs. What it
+cannot do is run new code.
+
+**Turn it on only if you accept the agent reading every Secret in the
+cluster.** The grants are cluster-wide, so that is the scope.
+
+#### What the roles grant
+
+Every grant is a role this chart writes out — no `cluster-admin`, and no
+built-in `view`, `edit` or `admin`. Read them in
+`chart/templates/_helpers.tpl`: `runtimeReadRules` and `runtimeWriteRules`. They are lists, deliberately, so you can see every verb
+without resolving an aggregated role.
+
+| Grant | Covers |
+|---|---|
+| **Reads** | pods and their logs, services, endpoints, ConfigMaps, PVCs, events, workloads, ingresses, PDBs, HPAs, nodes, namespaces, storage classes, CRDs, node metrics, `nodes/proxy` for kubelet stats, and `roles`/`rolebindings` so an agent can explain a `Forbidden` |
+| **Writes** | delete or evict a pod, scale, cordon a node, delete a workload, and create or edit ConfigMaps, Services, Ingresses, NetworkPolicies, PDBs, HPAs, PVCs |
+| **Gated writes** | create or patch a pod, `pods/exec`, and create or patch a workload — only with `allowPodExecution` |
+
+What they will never grant:
+
+- **Any verb on `secrets`.** Not `get`, not `list`, not `watch`.
+- **A `*` in `resources` or `apiGroups`.** A wildcard reaches Secrets without
+  naming them.
+- **`escalate` or `bind` on RBAC.** A role that can widen itself makes every
+  line above advisory.
+- **Any write on RBAC or CRDs.** Reading a Role is how an agent explains a
+  `Forbidden`. Writing one is how it grants itself one.
+- **Cluster-scoped RBAC reads.** `clusterroles` is a map of every identity in
+  the install and which one is worth attacking.
+
+**Verify it rather than trusting this page:**
+
+```sh
+kubectl auth can-i get secrets --as=system:serviceaccount:agent-ops:agentops-runtime
+```
+
+```powershell
+kubectl auth can-i get secrets --as=system:serviceaccount:agent-ops:agentops-runtime
+```
+
+It must answer `no`. For a subresource use `--subresource=`, never the slash
+form — `kubectl auth can-i` misparses `pods/eviction`.
+
+#### Adding a grant the acting role omits
+
+**Do not widen the shipped role.** Add your own, and attach it to the route that
+needs it.
+
+1. **Write your own `ClusterRole`** with the rules you need.
+2. **Render an account for it** under `rbac.runtime.serviceAccounts`, with your
+   role in `bindClusterRoles`.
+3. **Name that account on the Pipeline** that needs it.
+
+The grant is then deliberate, separately reviewable, and attached to one route
+instead of every agent in the install.
+
+**The role will be wrong at first, and it fails closed.** An agent is refused an
+action and says so. Add verbs on evidence, one at a time.
 
 ### The runtime
 
@@ -209,7 +364,8 @@ Nothing restricts which pods may reach this release's components. Several of
 them authenticate nobody.
 
 - The **MCP servers** accept any caller. Under `rbacMode: full` the Kubernetes
-  one runs as cluster-admin.
+  one holds the acting role above — an agent reaches the cluster through it, so
+  it is the same wall.
 - The **manager's work contract** takes no credential.
 - The **console's API** answers below its authenticating proxy.
 
@@ -318,7 +474,13 @@ spec:
 ```
 
 Capability comes from this object and nothing else — the profile carries no
-tools. The fields are in
+tools.
+
+**So does execution.** Add `runtimeRef` to choose what runs it, and
+`serviceAccountName` to choose the identity it runs as. Both are optional, and
+omitting them resolves the `default` runtime and that runtime's own account.
+
+The fields are in
 [concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md).
 
 ## Upgrade and uninstall

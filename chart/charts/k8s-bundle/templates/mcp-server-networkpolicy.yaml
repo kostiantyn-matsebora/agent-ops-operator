@@ -5,7 +5,7 @@
 {{/*
   This server holds the SECOND of the two walls — its own ServiceAccount's RBAC
   — and until this policy exists that wall is reachable by any pod in the
-  cluster with no credential at all. Under `rbacMode: full` that is cluster-admin
+  cluster with no credential at all. Under `rbacMode: full` that is the acting grant
   over HTTP.
 
   Runtime pods only. The manager never calls it, and neither does anything else

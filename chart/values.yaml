@@ -1,6 +1,6 @@
 image:
   repository: kmatsebora/agentops-manager
-  tag: 0.52.0
+  tag: 0.53.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -70,12 +70,48 @@ rbac:
   # on a timeout rather than on the drain finishing.
   drainAware: false
   runtime:
+    # These three add to the account `global.agentops.runtime.rbacMode` renders
+    # — NOT to the floor account, which is never bound to anything. With the
+    # mode at `none` there is no account to add them to and the render says so.
+    #
     # ClusterRoles created + bound to the runtime SA: [{name, rules: [...]}]
     clusterRoles: []
     # Existing ClusterRoles to bind (e.g. ["view"] for cluster-wide reads)
     bindClusterRoles: []
     # Namespaced Roles in other namespaces: [{name, namespace, rules: [...]}]
     namespaced: []
+    # ADDITIONAL runtime identities, for a Pipeline to NAME in
+    # `spec.serviceAccountName`, beyond the one `rbacMode` renders. The FLOOR
+    # account is what a Pipeline naming none gets, and it holds nothing — these
+    # are how an install expresses the postures its routes actually need.
+    #
+    # THIS IS WHAT REPLACED CLONING AN `AgentRuntime`. The account used to have
+    # nowhere to live except the runtime, so a second trust level meant a second
+    # AgentRuntime identical but for one field. Now one runtime image serves
+    # both and the difference is stated on the route, beside the tools that
+    # route grants — one object stating an agent's power instead of two.
+    #
+    # Each entry takes the same shape as the keys above, plus its own posture:
+    #
+    #   serviceAccounts:
+    #     - name: agentops-runtime-actor
+    #       create: true          # default; false references an account you own
+    #       rbacMode: full        # default: the release's own effective mode
+    #       clusterRoles: []
+    #       bindClusterRoles: []
+    #       namespaced: []
+    #
+    # ...then on the acting Pipeline:
+    #
+    #   pipelines:
+    #     - name: k8s-operate
+    #       serviceAccountName: agentops-runtime-actor
+    #
+    # An account this chart does NOT create is fine and is not refused: naming
+    # is a reference, and who may create one and what it is bound to stays an
+    # external grant — the same posture adapters already have. A name nothing
+    # backs fails at pod admission, saying which account.
+    serviceAccounts: []
 
 # HOW AGENTS EXECUTE — the substrate, owned by this chart rather than by any
 # bundle. Bundles contribute domain (signal sources, profiles, tooling,
@@ -83,10 +119,14 @@ rbac:
 # live here, so an install with no bundle — or with only telegram-bundle — can
 # still execute a conversation.
 #
-# Renders ONE AgentRuntime, named `default`: the name a profile with no
-# runtimeRef falls back to. Additional runtimes (a second vendor, a
-# higher-trust identity) stay hand-written CRs — that is what the
-# vendor × trust-level model asks for.
+# Renders ONE AgentRuntime, named `default`: the name a Pipeline with no
+# runtimeRef falls back to. A second VENDOR is a hand-written CR pointed at by
+# `pipelines[].runtimeRef`.
+#
+# A SECOND TRUST LEVEL IS NOT A SECOND RUNTIME ANY MORE. It used to be — the
+# ServiceAccount had nowhere to live but the AgentRuntime, so two postures meant
+# two CRs identical but for one field. The account is now on the Pipeline
+# (`pipelines[].serviceAccountName`), so one image serves both.
 runtime:
   enabled: true
   # AgentRuntime CR name. `default` is the fallback every profile without a
@@ -285,17 +325,70 @@ global:
       # Leave it empty ONLY if you have confirmed your CNI exempts host traffic.
       probesFrom: []
     runtime:
-      # The ServiceAccount every runtime pod runs as — exactly one per release,
-      # created by this chart. Its RBAC IS the agent's power.
+      # THE FLOOR — the ServiceAccount a runtime pod runs as when its Pipeline
+      # names none. IT HOLDS NO RBAC, IN ANY MODE, AND NOTHING EVER BINDS TO IT.
+      #
+      # SILENCE MEANS NO POWER. A route that says nothing about its identity can
+      # do NOTHING in the cluster: it reaches only what its toolsets and MCP
+      # servers give it, which are declared on the same object that could have
+      # named an account. `rbacMode` below renders a SEPARATE, named account and
+      # a route opts into it.
+      #
+      # THE GRANTS `rbacMode` RENDERS ARE CLUSTER-WIDE, including this release's
+      # own namespace. Namespaced Roles were tried and reverted: RBAC cannot say
+      # "everywhere except", so bounding an agent meant an allow-list, one
+      # binding per namespace per account — 224 objects on a 28-namespace
+      # cluster — and a new namespace invisible to the agent until someone
+      # edited values and redeployed.
+      #
+      # What makes that acceptable is what is NEVER granted: `agentops.dev`, so
+      # Conversations and Pipelines are unreadable everywhere, and `secrets`.
+      # No component here logs message content either. What an agent gains in
+      # this namespace is pod names, Services and the compiled MCP ConfigMaps —
+      # and, under `full`, the ability to restart or delete them.
+      #
+      # It shipped the other way round once — the mode bound to this account, so
+      # a route inherited the release's maximum by not typing a field. Three of
+      # four routes in the reference install held pod-delete and node-patch that
+      # way, two of them routes that reach no Kubernetes API at all.
       serviceAccountName: agentops-runtime
       # The agent's in-cluster power, as ONE knob:
       #   none     — bind nothing
       #   readonly — the built-in "view" ClusterRole plus node/namespace/metrics
       #              reads "view" omits
-      #   full     — cluster-admin. An LLM-driven agent with unrestricted
-      #              control of your cluster: never a default, never demo, and
-      #              worth a second thought before you set it. Prefer readonly
-      #              plus targeted grants through `rbac.runtime` above.
+      # IT RENDERS A NAMED ACCOUNT — `<serviceAccountName>-readonly` or
+      # `-acting` — AND BINDS THE POSTURE TO THAT. It never binds the floor
+      # above. A route opts in:
+      #
+      #   pipelines:
+      #     - name: k8s-ops
+      #       serviceAccountName: agentops-runtime-acting
+      #
+      #   none     — render no account, bind nothing
+      #   readonly — `agentops-runtime-readonly`: the built-in "view" plus the
+      #              node/namespace/metrics reads it omits
+      #   full     — `agentops-runtime-acting`, bound to the chart's own
+      #              ENUMERATED acting ClusterRole: everything readonly grants,
+      #              plus the workload verbs an agent fixes things with (restart
+      #              or evict a pod, scale, roll a deployment, re-run a job,
+      #              cordon a node).
+      #
+      # `full` USED TO MEAN `cluster-admin`, AND NO LONGER DOES. That is a
+      # BREAKING change — see docs/CHANGELOG.md. An agent has a shell, so a
+      # cluster-admin binding meant every Secret in the cluster was readable by
+      # a model, and `--allowedTools` does not constrain that: an allowlist
+      # configures a COOPERATING agent, a ServiceAccount binding is what an
+      # uncooperative one actually has.
+      #
+      # NO runtime role this chart renders carries any verb on `secrets`, in any
+      # mode, or a wildcard that would reach them. The manager holds none
+      # either; the component running untrusted model output must not out-rank
+      # the component orchestrating it.
+      #
+      # Need something the acting role omits? Add your OWN ClusterRole and
+      # account (`rbac.runtime.serviceAccounts`) and name it on the Pipeline
+      # that needs it — a grant that is deliberate and separately reviewable,
+      # rather than a mode name that silently means everything.
       #
       # Empty resolves to `readonly` under global.demo.enabled and to `none`
       # otherwise — so demo mode stays a one-flag working install while an
@@ -313,6 +406,39 @@ global:
       # under `full` is the useful one, leaving broad grants nothing can
       # exercise.
       rbacMode: ""
+
+      # MAY AN ACTING AGENT CAUSE A POD TO EXIST, OR ENTER ONE?
+      #
+      # OFF, AND THIS IS THE FLAG THAT DECIDES WHETHER "AGENTS CANNOT READ YOUR
+      # SECRETS" IS TRUE OR MERELY WRITTEN DOWN.
+      #
+      # No runtime role this chart renders carries any verb on `secrets`. That
+      # is not enough on its own. The KUBELET resolves a Secret when it builds a
+      # pod, so an agent that can create a pod mounting one — or exec into a pod
+      # that already has one — reads the value having never asked the API server
+      # for a Secret. `secrets: get` is never evaluated, and no RBAC rule
+      # refusing it applies.
+      #
+      # Verified on a live cluster against this exact role: pod created, pod log
+      # read, secret value returned, with all seven `secrets` verbs denied
+      # throughout.
+      #
+      # WHAT IT GATES is every write that produces or enters a pod, not just
+      # `pods: create`. Creating a Job, Deployment, StatefulSet or DaemonSet
+      # writes a pod spec that can mount a Secret, and patching an existing one
+      # edits that spec. Gating the obvious verb and leaving the rest would be a
+      # flag that reads as a boundary and is not one.
+      #
+      # WITH IT OFF an agent is still a real operator. It reads the cluster,
+      # scales workloads, deletes and evicts pods, cordons nodes, deletes
+      # workloads, and creates or edits ConfigMaps, Services, Ingresses,
+      # NetworkPolicies, PodDisruptionBudgets, HPAs and PVCs. What it cannot do
+      # is RUN NEW CODE — which on Kubernetes is the same capability as reading
+      # a Secret.
+      #
+      # TURN IT ON ONLY IF YOU ACCEPT THE AGENT READING EVERY SECRET IN THE
+      # CLUSTER. The grants are cluster-wide, so that is the scope.
+      allowPodExecution: false
 
     # What a subchart needs to know about the console, in the ONE scope it can
     # read. A bundle that ships a route claims this source and binds this
@@ -373,9 +499,27 @@ global:
 #       toolsets: [agentops-observe, agentops-shell, k8s-observability]
 #       toolsetsMode: merge           # optional: merge (default) | overwrite
 #       mcpConfigs: [k8s-api]
+#       runtimeRef: default           # optional: what EXECUTES this route
+#       serviceAccountName: ""        # optional: UNDER WHOSE IDENTITY
 #
 # One entry can claim every source in the install, which is usually what you
 # want: one route, one set of capabilities, however a conversation started.
+#
+# THE LAST TWO ARE THE SAME DECISION AS THE TOOLSETS. One says which tools may
+# be called, the other with whose credentials, and stating them on one object is
+# what lets a single reviewer approve an agent's power. Both are OPTIONAL and an
+# install setting neither behaves exactly as one that could not set them:
+# `runtimeRef` falls back to the AgentRuntime named `default`, and
+# `serviceAccountName` to that runtime's own account.
+#
+# Set `serviceAccountName` when one runtime image should serve two trust levels
+# — an observing route and an acting one — and render the extra account through
+# `rbac.runtime.serviceAccounts` above. That replaced cloning an AgentRuntime
+# whose only difference was the account it named.
+#
+# The Conversation SNAPSHOTS both at creation, so re-wiring a Pipeline moves
+# only conversations created afterwards. It never changes the identity an
+# already-running one's next pod executes as.
 pipelines: []
 
 service:

@@ -470,6 +470,9 @@ pipelines:
     # network and works air-gapped. `mdi:<name>` or a URL also work, where the
     # surface can fetch one.
     icon: aops:observe
+    # Optional per-route overrides of the two at the bottom of this stanza.
+    runtimeRef: ""
+    serviceAccountName: ""
   admin:
     enabled: null
     # Named k8s-operate, not k8s-admin: k8s-admin is already the MCPToolset this
@@ -477,6 +480,9 @@ pipelines:
     # have to parse.
     name: k8s-operate
     icon: aops:operate
+    # Optional per-route overrides of the two at the bottom of this stanza.
+    runtimeRef: ""
+    serviceAccountName: ""
   # Channels to deliver to, BY NAME — the one class of object this bundle does
   # not render, so it is values-supplied and the key is omitted entirely when
   # this list is empty. Empty is a working configuration, not a degraded one:
@@ -484,3 +490,21 @@ pipelines:
   # answer is read from status.runs[].result. Name one (say the console's
   # channel) to have it delivered somewhere a person is looking.
   channels: []
+  # WHAT EXECUTES these routes, and UNDER WHOSE IDENTITY. Both OPTIONAL and
+  # UNSET, and an install that leaves them so behaves exactly as one that could
+  # not set them: `runtimeRef` resolves the AgentRuntime named `default` and the
+  # identity falls to that runtime's own account.
+  #
+  # THIS BUNDLE RENDERS NEITHER OBJECT. The AgentRuntime, the runtime
+  # ServiceAccount and the credential are the PARENT's — a subchart sees only
+  # itself, and one that rendered an identity would create a second all-powerful
+  # account nobody asked for. Naming here is a reference: render the account
+  # through the parent's `rbac.runtime.serviceAccounts`, or grant it yourself.
+  #
+  #
+  # The per-route keys above override these, which is how one route gets more
+  # power than another on the SAME runtime image. That is what replaced cloning
+  # an AgentRuntime whose only difference was the account it named.
+  runtimeRef: ""
+  serviceAccountName: ""
+

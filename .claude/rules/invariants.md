@@ -3,12 +3,39 @@
 ### THE PARENT CHART OWNS THE SUBSTRATE — BUNDLES CONTRIBUTE DOMAIN
 
 How agents execute — image, LLM credential, idle TTL, node placement, home
-volume, and the ONE identity whose RBAC is the agent's power — is release-wide
-and lives in `chart/values.yaml` (`runtime:` + `global.agentops.runtime.*`).
+volume, and the DEFAULT identity whose RBAC is the agent's power — is
+release-wide and lives in `chart/values.yaml` (`runtime:` +
+`global.agentops.runtime.*`).
 
-- **No subchart renders an `AgentRuntime`, a runtime ServiceAccount or a
-  credential Secret.** Bundles ship sources, profiles, tooling and channels, and
-  REFERENCE it.
+**RELEASE-WIDE BY DEFAULT, PER-ROUTE BY CHOICE.** A `Pipeline` may name its own
+`runtimeRef` and `serviceAccountName`, so an install expresses a second trust
+level on the route rather than by cloning an `AgentRuntime` — see `wiring.md`.
+What stays release-wide is the DEFAULT both fall back to, and the ownership
+below.
+
+- **No subchart renders an `AgentRuntime`, a model credential or a home
+  volume.** That is THE SUBSTRATE and it stays the parent's, exclusively.
+- **A BUNDLE DOES RENDER THE ACCOUNTS ITS OWN ROUTES NEED**, scoped to what
+  those routes do, and names each on its own Pipeline. The bundle is the only
+  scope that knows. "No subchart renders a runtime ServiceAccount" is REVERSED —
+  it guarded against a bundle rendering an account sized for EVERYTHING, and an
+  account sized DOWN to one route is the opposite.
+- **"Exactly one runtime ServiceAccount per release" is DEAD.** A release has
+  the floor, whatever `rbacMode` renders, each bundle's route accounts, and
+  whatever the operator declares.
+- **SILENCE MEANS NO POWER.** The account a Pipeline naming none runs as — the
+  FLOOR — is bound to nothing, in any mode. `rbacMode` renders a separate NAMED
+  account a route opts into. It shipped inverted once, and three of four routes
+  held pod-delete because nobody typed a field.
+- **NO BINDING USES A BUILT-IN ROLE** — not `cluster-admin`, not `view`.
+- **GRANTS ARE CLUSTER-WIDE, and `agentops.dev` is NEVER granted.** That
+  omission is what protects Conversations, not scope. Namespaced Roles were
+  built and reverted: 224 objects, and a new namespace invisible until someone
+  edited values.
+- **`allowPodExecution` DEFAULTS OFF, and it is what makes "no Secrets" true.**
+  The kubelet resolves a Secret when it builds a pod, so pod execution and
+  Secret access are ONE capability. An agent has a shell, so a binding is what
+  it actually has and `--allowedTools` does not constrain it.
 - **Both substrate keys are under `global.`** because a subchart can read no
   other parent scope and k8s-bundle's MCP server derives from them. Restating
   them in a subchart recreates the two-spellings-of-one-fact problem chart 4.0

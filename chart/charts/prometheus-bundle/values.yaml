@@ -155,3 +155,16 @@ pipelines:
   # so the key is omitted entirely when empty. Empty works: the conversation
   # dispatches immediately and the answer lands in status.runs[].result.
   channels: []
+  # WHAT EXECUTES this route, and UNDER WHOSE IDENTITY. Both OPTIONAL and
+  # UNSET, and an install that leaves them so behaves exactly as one that could
+  # not set them: `runtimeRef` resolves the AgentRuntime named `default` and the
+  # identity falls to that runtime's own account.
+  #
+  # THIS BUNDLE RENDERS NEITHER OBJECT. The AgentRuntime, the runtime
+  # ServiceAccount and the credential are the PARENT's — a subchart sees only
+  # itself, and one that rendered an identity would create a second all-powerful
+  # account nobody asked for. Naming here is a reference: render the account
+  # through the parent's `rbac.runtime.serviceAccounts`, or grant it yourself.
+  runtimeRef: ""
+  serviceAccountName: ""
+

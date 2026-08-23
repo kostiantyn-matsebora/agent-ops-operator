@@ -11,7 +11,7 @@ See [../README.md](../README.md) for the product overview and [./](./) for
 reference material. `CLAUDE.md` in this directory owns the rules this file
 follows.
 
-## [Unreleased]
+## [6.0.0] — 2026-08-23
 
 **Every image moves.** The repository was regrouped by component type and every
 component rebuilt and republished, so the version line is uniform rather than
@@ -34,6 +34,42 @@ No CRD field is removed and **the adapter contract version stays `2`**.
 else is a tag bump.
 
 ### Added
+
+- **`Pipeline.spec.runtimeRef` and `Pipeline.spec.serviceAccountName`.** The
+  Pipeline now selects WHAT EXECUTES its conversations and UNDER WHOSE IDENTITY,
+  beside the tools and MCP servers it already granted.
+
+  - **Capabilities and execution identity are the same decision** — one says
+    which tools may be called, the other with whose credentials. Split across
+    two objects, no single object stated an agent's power.
+  - **Both are OPTIONAL and an install setting neither is unchanged.**
+    `runtimeRef` falls back to the `AgentRuntime` named `default`, and the
+    identity to that runtime's own `serviceAccountName`.
+  - **One runtime image can now serve two trust levels.** An observing route and
+    an acting route differ in their account, not in their image, so the second
+    no longer needs a cloned `AgentRuntime`.
+  - **The Conversation SNAPSHOTS both at creation.** Editing a Pipeline never
+    moves a conversation already running onto a different identity — that would
+    be a privilege change applied to work in progress. The runtime name is
+    frozen resolved. The account is frozen only where the Pipeline named one, so
+    correcting a runtime's own account still heals existing conversations.
+  - **Naming an account does not create one.** No reconciler makes a
+    ServiceAccount and `Ready` does not check for one — the pod fails at
+    admission naming it. A dangling `runtimeRef` does report `Ready=False`.
+
+- **`rbac.runtime.serviceAccounts`** — additional runtime identities the parent
+  renders, each with its own `rbacMode` and targeted grants.
+
+- **EVERY BUNDLE RENDERS THE ACCOUNTS ITS OWN ROUTES NEED**, scoped to what
+  those routes do, and names each on its own Pipeline. The bundle is the only
+  scope that knows: `k8s-bundle` renders one per route, `ha-bundle` renders two
+  with no Kubernetes RBAC at all because neither route touches that API, and
+  `telegram-bundle` renders none because it ships no Pipeline.
+
+  **"No subchart renders a runtime ServiceAccount" is REVERSED.** That rule was
+  protecting against a bundle rendering the SUBSTRATE — a runtime, a credential,
+  an account sized for everything. An account sized DOWN to one route is the
+  opposite. The substrate stays the parent's, exclusively.
 
 - **Structured agent output.** An agent's answer now reaches chat as named
   blocks with a fold, so a reader gets the conclusion first and the long tail
@@ -111,6 +147,88 @@ else is a tag bump.
   written and silently wrong after the next field rename.
 
 ### Changed
+
+- **BREAKING: A Pipeline that names no `serviceAccountName` now has NO CLUSTER
+  POWER.** It runs as a floor account the chart renders and binds to nothing.
+
+  A route used to inherit whatever the release granted, so it held cluster
+  power by not typing a field. Three of four routes in the reference install
+  held pod-delete and node-patch that way, and two of them reached no Kubernetes
+  API at all.
+
+  **Acting power is now something a route OPTS INTO by name.** `rbacMode`
+  renders `agentops-runtime-acting` (or `-readonly`) and a Pipeline names it.
+
+- **The grant is CLUSTER-WIDE, and `clusterroles` is no longer readable.**
+
+  Namespaced Roles were built and reverted before release. RBAC cannot express
+  "everywhere except", so bounding an agent meant an allow-list: one binding per
+  namespace per account — 224 objects on a 28-namespace cluster — and every new
+  namespace invisible to the agent until someone edited values and redeployed.
+
+  **What makes cluster-wide safe is OMISSION, not scope.** `agentops.dev` is
+  never granted in any rule, so Conversations and Pipelines are unreadable
+  everywhere. Neither is `secrets`. `clusterroles` is dropped too — that listing
+  maps every identity in the install and which one is worth attacking.
+
+  **What it costs:** under `full` an agent can restart or delete pods in the
+  operator's own namespace, the manager and adapters included.
+
+- **BREAKING: `global.agentops.runtime.allowPodExecution` is OFF, and it is what
+  makes "agents cannot read your Secrets" TRUE.**
+
+  No role carries a verb on `secrets`. That was never enough on its own: the
+  KUBELET resolves a Secret when it builds a pod, so an agent that can create a
+  pod mounting one — or exec into a pod that already has one — reads the value
+  having never asked the API server. `secrets: get` is never evaluated.
+
+  Verified on a live cluster against the shipped role: pod created, pod log
+  read, secret value returned, all seven `secrets` verbs denied throughout.
+
+  **It gates every write that produces or enters a pod**, not just
+  `pods: create` — creating a Job or Deployment writes a pod spec, and patching
+  one edits it. With it off an agent still scales, restarts, evicts, cordons,
+  deletes workloads and edits ConfigMaps, Services and Ingresses. What it loses
+  is the ability to run new code.
+
+- **BREAKING: `rbacMode: full` no longer binds `cluster-admin`, and `readonly`
+  no longer binds the built-in `view`.** Every grant is now a role this chart
+  writes out, so an operator can read it without resolving an aggregated or
+  built-in role. **No runtime role carries any verb on `secrets`, in any mode.**
+
+  An agent has a shell. `--allowedTools` configures a COOPERATING agent, while a
+  ServiceAccount binding is what an uncooperative one actually has — so
+  `cluster-admin` meant every credential in the cluster was readable by a model,
+  and no allowlist changed that. The manager itself holds no `secrets` verbs.
+
+  **BOTH WALLS MOVED.** `k8s-bundle`'s MCP server bound `cluster-admin` under
+  `full` and the built-in `view` under `readonly` — and an agent reaches the
+  cluster THROUGH it, so fixing one wall and not the other would have left the
+  hole one indirection along. It now carries the same split from the same
+  values, and cannot read this release's own namespace either.
+
+  **The role grants** every read `readonly` grants, plus the workload verbs an
+  agent fixes things with: delete or patch a pod, create a `pods/eviction`,
+  update or patch a Deployment / StatefulSet / DaemonSet / ReplicaSet, scale
+  through `*/scale`, create, delete or patch a Job, patch a CronJob, patch a
+  Node. RBAC objects are readable and never writable, and there is no `escalate`
+  or `bind`.
+
+  **It will be wrong at first, and it fails CLOSED** — an agent is refused an
+  action and says so, rather than quietly holding power nobody reviewed.
+
+- **BREAKING: `AgentProfile.spec.runtimeRef` is DEPRECATED**, moved to
+  `Pipeline.spec.runtimeRef`, and read for ONE release only.
+
+  An `AgentRuntime` carries the ServiceAccount an agent runs as, so a profile
+  choosing one chose the agent's power in the cluster — which made profile-edit
+  rights into service-account-choice rights. A profile is prompts, a repo ref
+  and limits, while a Pipeline already grants tools and MCP servers.
+
+  **Nothing changes for an install that does not act.** The profile ref is read
+  below the Pipeline's own field, so a profile applied before the upgrade keeps
+  dispatching where it named, and setting both is harmless with the Pipeline
+  winning.
 
 - **BREAKING: `AgentProfile.spec.outputFormat` is REQUIRED.** Every profile must
   declare `blocks` or `none`. There is no default, because both candidates are
@@ -247,6 +365,98 @@ else is a tag bump.
 - `Conversation.spec.inputs[].agent`. Nothing writes it. Dispatch reads it for
   one release so an input queued before the upgrade still reaches the agent it
   was parsed with. The field is removed in a later release.
+- `AgentProfile.spec.runtimeRef`. Moved to `Pipeline.spec.runtimeRef` and read
+  for ONE release, below the Pipeline's own field. Removed in the next major.
+
+### Upgrade
+
+**Every route loses its cluster reach until you say otherwise.** That is the
+point of the change, and it fails CLOSED — an agent is refused and says so.
+
+**1. Name an account on every route that needs cluster power.** A Pipeline that
+names none now runs as an account bound to nothing.
+
+```yaml
+global:
+  agentops:
+    runtime:
+      rbacMode: full                # renders agentops-runtime-acting
+
+pipelines:
+  - name: <the route that acts>
+    profile: <its profile>
+    serviceAccountName: agentops-runtime-acting
+  - name: <a route that only observes>
+    profile: <its profile>
+    # name nothing: no cluster power at all
+```
+
+**2. Decide `allowPodExecution`, and read why before you set it.**
+
+It is off, and it is what makes "agents cannot read your Secrets" true rather
+than merely written down. With it off your agents cannot create a pod, edit a
+workload's pod template, or exec into a container.
+
+**Turn it on only if you accept an agent reading every Secret in the cluster** —
+the kubelet resolves a Secret when it builds a pod, so pod execution and Secret
+access are the same capability.
+
+```yaml
+global:
+  agentops:
+    runtime:
+      allowPodExecution: true    # grants pods_run and pods_exec, and Secret reach
+```
+
+**3. If you ran `rbacMode: full`, check what the enumerated roles omit.**
+
+```sh
+helm template <release> agentops/agent-ops-operator -f your-values.yaml \
+  | awk '/^kind: (Cluster)?Role$/,/^---/' | grep -A400 'agentops-runtime-acting'
+```
+
+```powershell
+helm template <release> agentops/agent-ops-operator -f your-values.yaml `
+  | Select-String -Pattern 'agentops-runtime-acting' -Context 0,400
+```
+
+Need something they omit? **Add your own `ClusterRole`** rather than widening
+the shipped one, and attach it to the route that needs it:
+
+```yaml
+rbac:
+  runtime:
+    serviceAccounts:
+      - name: agentops-runtime-special
+        rbacMode: full
+        clusterRoles:
+          - name: extra
+            rules:
+              - apiGroups: ["example.com"]
+                resources: ["widgets"]
+                verbs: ["get", "list", "patch"]
+
+pipelines:
+  - name: <the route that needs it>
+    serviceAccountName: agentops-runtime-special
+```
+
+**4. If any `AgentProfile` sets `runtimeRef`, move it to every Pipeline that
+routes to that profile.**
+
+```sh
+kubectl -n agent-ops get agentprofiles \
+  -o jsonpath='{range .items[?(@.spec.runtimeRef)]}{.metadata.name}{"\t"}{.spec.runtimeRef.name}{"\n"}{end}'
+```
+
+```powershell
+kubectl -n agent-ops get agentprofiles `
+  -o jsonpath='{range .items[?(@.spec.runtimeRef)]}{.metadata.name}{\"`t\"}{.spec.runtimeRef.name}{\"`n\"}{end}'
+```
+
+Empty output means there is nothing to do. Otherwise set `runtimeRef` on each
+routing Pipeline — the profile field keeps working for this release, and the
+Pipeline wins wherever both are set, so routes can move one at a time.
 
 ## [5.25.0] — 2026-08-22
 

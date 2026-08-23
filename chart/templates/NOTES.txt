@@ -123,7 +123,7 @@ authenticator, and the console now serves any request that reaches it: every
 agentops CR in this namespace, conversation payloads included, plus the ability
 to instruct any agent it is joined to.
 {{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
-That agent holds cluster-admin in this install (global.agentops.runtime.rbacMode=full).
+That agent can act on your cluster in this install (global.agentops.runtime.rbacMode=full).
 {{- end }}
 
 So {{ $auth.externalAuthenticator }} must be the ONLY route to it. A port-forward, a pod in this
@@ -340,8 +340,8 @@ or point it at an MCP server you already run:
 or, if you meant to keep a CLI, build a derived runtime image and set
 runtime.image — see docs/concepts.md#runtime-images-are-generic.
 {{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
-Note also that global.agentops.runtime.rbacMode=full currently grants
-cluster-admin to an identity nothing can exercise.
+Note also that global.agentops.runtime.rbacMode=full currently grants acting
+RBAC to an identity nothing can exercise.
 {{- end }}
 {{- end }}
 {{- /* The bundle's own wiring, re-derived through its OWN helpers so this
@@ -480,7 +480,8 @@ WHAT IS STILL OPEN IF IT IS NOT ENFORCED:
 {{- if $mcpDeployed }}
   - the MCP servers, which authenticate nobody
 {{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
-    and one of which runs as cluster-admin in this install
+    and one of which can ACT on your cluster in this install (rbacMode=full),
+    so reaching it is that grant, with no credential
 {{- end }}
 {{- end }}
 {{- if and .Values.console .Values.console.enabled }}
@@ -504,8 +505,8 @@ NOTHING RESTRICTS WHO MAY REACH THIS RELEASE'S COMPONENTS.
 Any pod in the cluster can reach them, and several authenticate nobody:
   - the MCP servers accept any caller
 {{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
-    and the Kubernetes one runs as cluster-admin (rbacMode=full), so reaching it
-    IS cluster-admin, with no credential
+    and the Kubernetes one can ACT on your cluster (rbacMode=full), so reaching
+    it IS that grant, with no credential
 {{- end }}
   - the manager's work contract requires no credential
 
@@ -513,5 +514,70 @@ Restrict it with:
   --set global.agentops.networkPolicy.enabled=true
 
 Read the note it prints before trusting it — enforcement depends on your CNI.
+{{- end }}
+{{- end }}
+
+{{- $rbacMode := include "agentops.runtimeRbacMode" . }}
+{{- $podExec := eq (include "agentops.runtimePodExecutionAllowed" .) "true" }}
+{{- if ne $rbacMode "none" }}
+
+────────────────────────────────────────────────────────────────────────────
+WHAT YOUR AGENTS CAN REACH IN THIS CLUSTER
+
+An agent has a shell. An allowlist configures a COOPERATING one — a
+ServiceAccount binding is what an uncooperative one actually has. So what
+follows is the grant, not the intention.
+
+  a route naming no account       {{ include "agentops.runtimeServiceAccount" . }}
+                                  -> no RBAC at all, in any mode
+  rbacMode={{ $rbacMode }} renders           {{ include "agentops.runtimeModeServiceAccount" . }}
+                                  -> a route must NAME it to get it
+
+THE GRANT IS CLUSTER-WIDE. It reaches every namespace, INCLUDING this one
+({{ .Release.Namespace }}), where the manager, the adapters and the MCP servers run.
+
+What that does NOT expose, and this is what makes it defensible:
+  - `agentops.dev` is never granted, so Conversations, Pipelines and profiles
+    are unreadable everywhere
+  - `secrets` is never granted either
+  - no component here logs message content, so readable pod logs carry no
+    conversation text
+
+What it DOES mean: an agent can see this release's pods, Services and ConfigMaps
+{{- if eq $rbacMode "full" }}, and can DELETE OR RESTART them — the manager and the
+adapters included. An agent can disrupt its own supervisor
+{{- end }}.
+{{- if $podExec }}
+
+⚠  AND SECRETS ARE READABLE, because you set
+   global.agentops.runtime.allowPodExecution=true.
+
+   THE KUBELET RESOLVES A SECRET WHEN IT BUILDS A POD. An agent that may create
+   a pod mounting one — or exec into a pod that already has one — reads the
+   value having never asked the API server for a Secret. The rules refusing
+   `secrets` are never evaluated, and nothing in Kubernetes stops it.
+
+   Verified against this exact role on a live cluster: pod created, pod log
+   read, secret value returned, with all seven `secrets` verbs denied.
+
+   THE DAMAGE, PLAINLY. An agent can read EVERY Secret in the cluster — database
+   passwords, API tokens, TLS private keys, cloud credentials — and can run
+   arbitrary code inside your workloads. A prompt injection in an alert body, a
+   log line or a chat message is enough to ask it to.
+
+   TURN IT OFF unless you accept that:
+     --set global.agentops.runtime.allowPodExecution=false
+{{- else }}
+
+Pod execution is OFF (global.agentops.runtime.allowPodExecution=false), so the
+no-Secrets rule HOLDS: an agent cannot create a pod, edit a workload's pod
+template, or exec into a container, and those are the ways a Secret is read
+without asking for one.
+
+Your agents can still scale, restart, evict, cordon, delete workloads, and edit
+ConfigMaps, Services and Ingresses. What they cannot do is run new code.
+
+Turning it on grants the `k8s-admin` tools `pods_run` and `pods_exec` — and,
+unavoidably, read access to every Secret in the cluster.
 {{- end }}
 {{- end }}

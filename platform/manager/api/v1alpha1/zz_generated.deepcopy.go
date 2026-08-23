@@ -761,6 +761,11 @@ func (in *ConversationSpec) DeepCopyInto(out *ConversationSpec) {
 		*out = new(ToolingBinding)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.RuntimeRef != nil {
+		in, out := &in.RuntimeRef, &out.RuntimeRef
+		*out = new(ObjectRef)
+		**out = **in
+	}
 	if in.Inputs != nil {
 		in, out := &in.Inputs, &out.Inputs
 		*out = make([]InputItem, len(*in))
@@ -1354,6 +1359,11 @@ func (in *PipelineSpec) DeepCopyInto(out *PipelineSpec) {
 		copy(*out, *in)
 	}
 	out.ProfileRef = in.ProfileRef
+	if in.RuntimeRef != nil {
+		in, out := &in.RuntimeRef, &out.RuntimeRef
+		*out = new(ObjectRef)
+		**out = **in
+	}
 	if in.Toolsets != nil {
 		in, out := &in.Toolsets, &out.Toolsets
 		*out = new(ToolsetBinding)

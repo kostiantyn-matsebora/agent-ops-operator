@@ -170,3 +170,10 @@ an operator to verify rather than assume.
 Authentication for the surfaces that lack it — the manager's work contract, the
 console's model, the adapters' inbound push — and the MCP server's cluster-admin
 binding. D1 narrows the exposure of all of them. It resolves none.
+
+> **Update.** The `cluster-admin` binding named above is GONE, in both walls.
+> `rbacMode: full` now renders an enumerated acting ClusterRole for the runtime
+> account and for `agentops-mcp-k8s` alike, and no role either holds carries a
+> verb on `secrets`. The rest of this section still stands: those surfaces still
+> authenticate nobody, so an unauthenticated caller reaching the MCP server now
+> gets that role instead of everything.

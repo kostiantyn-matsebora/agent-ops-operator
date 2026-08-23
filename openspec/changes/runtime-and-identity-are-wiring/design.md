@@ -90,7 +90,11 @@ Resolution runs in this order and no other:
 | Field | Order |
 |---|---|
 | runtime | `conversation.spec.runtimeRef` → `pipeline.spec.runtimeRef` → **`profile.spec.runtimeRef` (deprecated)** → `AgentRuntime/default` → bootstrap |
-| service account | `conversation.spec.serviceAccountName` → `pipeline.spec.serviceAccountName` → `runtime.spec.serviceAccountName` → chart default |
+| service account | `conversation.spec.serviceAccountName` → `pipeline.spec.serviceAccountName` → `runtime.spec.serviceAccountName` → **THE MINIMUM-PRIVILEGE ACCOUNT** |
+
+**THE BOTTOM OF THE IDENTITY CHAIN IS THE LEAST POWER, NOT THE MOST.** See D8.
+A route that names no account gets an identity that can do NOTHING in the
+cluster.
 
 - **The conversation comes FIRST because it is the snapshot** (D4). Nothing
   reads the Pipeline at dispatch time.
@@ -135,22 +139,91 @@ runtime's `contextStorage`, and the resolved runtime is now resolved differently
 Its callers ask the same question and get the same answer for every install that
 has not adopted the new fields.
 
-### D6 — The chart's SA becomes a default, and RBAC may bind several
+### D8 — SILENCE MEANS NO POWER. The fallback account is MINIMUM-PRIVILEGE
 
-`global.agentops.runtime.serviceAccountName` stays, still defaults to
-`agentops-runtime`, and is still what a Pipeline naming no SA gets.
+**Chosen:** the chart always renders an account with NO bindings at all, and a
+Pipeline naming none runs as that. An agent whose route says nothing can do
+nothing in the cluster — it reaches only what its MCP servers and toolsets give
+it, which are declared on the same object.
 
-What changes is that `runtime-rbac.yaml` must be able to render bindings for
-MORE THAN ONE, because a second trust level is now expressible without a second
-runtime.
+**Rejected, and it is what this change first shipped:** absent → the runtime's
+`serviceAccountName` → whatever `rbacMode` bound to it. That made SILENCE MEAN
+MAXIMUM, which is the exact shape this change exists to end.
 
-- **The parent still owns every SA it renders.** A bundle naming an SA in its
-  Pipeline values does NOT create one — the invariant that no subchart renders a
-  runtime SA holds, and `agent-runtime-ownership`'s "exactly one per release"
-  becomes "exactly one DEFAULT per release".
-- **A Pipeline may name an SA the chart did not create.** That is an external
-  grant, the same posture adapters already have, and the render does not fail
-  on it.
+**The argument that killed it is the change's own.** D7 says a `cluster-admin`
+default means "every Pipeline naming the same all-powerful account states
+nothing". Shrinking that role's CONTENTS and leaving the FALLBACK pointed at it
+fixes the blast radius and not the model: three of four routes in the reference
+install held pod-delete and node-patch because nobody typed a field, and two of
+them were Home Assistant routes that need no cluster access whatever.
+
+**`rbacMode` therefore stops applying to the fallback account.** Acting power is
+attached to a NAMED account a route opts into. A mode that silently widens
+whatever a route inherits is the same defect one level up.
+
+**Cost, accepted, and it is the third breaking half:** an install running
+`rbacMode: full` loses cluster reach on every route until each names an account.
+That is the point — the grant becomes something written down per route rather
+than a release-wide default nobody re-reads.
+
+- **FAILS CLOSED.** An agent is refused and says so, which is recoverable. The
+  inverse failed OPEN and was silent.
+- **The account still EXISTS** rather than being absent, so a pod spec always
+  names one and a cluster-side audit can enumerate what each route holds.
+
+### D9 — A BUNDLE RENDERS THE ACCOUNTS ITS OWN ROUTES NEED
+
+**Chosen:** a bundle that ships Pipelines also ships the ServiceAccounts and
+RBAC those Pipelines require, scoped to exactly what those routes do.
+
+**Rejected, and it is the rule this change first restated:** "the parent owns
+every runtime SA, a bundle naming one creates nothing."
+
+**Why it reverses:** the bundle is the only scope that KNOWS what its routes
+need. `k8s-bundle` knows `k8s-operate` deletes pods and `k8s-observe` does not.
+`ha-bundle` knows neither of its routes touches Kubernetes at all. Forcing every
+account through the parent means the parent must restate each bundle's needs,
+which is the two-spellings-of-one-fact problem, and in practice means one shared
+account sized to the most demanding route.
+
+**THE OLD RULE IS NOT WRONG ABOUT WHAT IT WAS PROTECTING.** `invariants.md` says
+putting the runtime in a bundle "made TWO runtime SAs exist, one granted
+everything". That failure was a bundle rendering THE SUBSTRATE — the runtime,
+its credential, an account sized for everything. This is the opposite: an
+account sized DOWN to one route.
+
+**So the invariant splits rather than falls:**
+
+| Still the parent's, exclusively | Now the bundle's |
+|---|---|
+| `AgentRuntime`, the model credential, the home volume, the idle TTL | the ServiceAccount + RBAC for each Pipeline the bundle itself renders |
+
+- **A bundle that ships NO Pipeline ships no account.** `telegram-bundle` stays
+  exactly as it is.
+- **A bundle's account is named on the bundle's own route**, never inherited by
+  anything else.
+- **The parent keeps the MINIMUM-PRIVILEGE fallback** (D8) and any accounts the
+  operator declares.
+
+### D6 — MANY ACCOUNTS PER RELEASE, and the parent's is the FLOOR
+
+`global.agentops.runtime.serviceAccountName` stays and still defaults to
+`agentops-runtime` — but what it names changes meaning under D8. It is the
+MINIMUM-PRIVILEGE floor a Pipeline naming nothing gets, not a default posture
+that `rbacMode` widens.
+
+`runtime-rbac.yaml` renders bindings for MORE THAN ONE account, because a second
+trust level is now expressible without a second runtime.
+
+- **"Exactly one runtime ServiceAccount per release" is DEAD**, not weakened to
+  "one default". A release has as many as its routes need: the floor, whatever
+  its bundles render for their own routes (D9), and whatever the operator
+  declares.
+- **The floor account NEVER receives `rbacMode` bindings.** Widening it would
+  re-create the fail-open default D8 exists to remove.
+- **A Pipeline may name an account the chart did not create.** That is an
+  external grant, the same posture adapters already have, and neither the render
+  nor a reconciler refuses it.
 
 ### D7 — The acting role is ENUMERATED, and `cluster-admin` goes
 
@@ -188,6 +261,10 @@ acting half.
 Pipeline.** That is the shape this change creates: a grant that is deliberate,
 separately reviewable, and attached to the route it serves. A mode name that
 silently means everything is what it replaces.
+
+**AND THE ROLE IS NEVER BOUND TO THE FLOOR ACCOUNT** (D8). `rbacMode: full`
+declares that an acting account EXISTS and what it may do. It does not decide
+what an unnamed route inherits, because an unnamed route inherits nothing.
 
 ## Risks / Trade-offs
 

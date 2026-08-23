@@ -34,6 +34,22 @@ spec:
   {{- end }}
   profileRef:
     name: {{ .Values.profile.name }}
+  {{- with $p.runtimeRef }}
+  # WHAT EXECUTES this route. Unset resolves the AgentRuntime named `default`,
+  # which the PARENT renders — no bundle renders a runtime, an identity or a
+  # credential, and naming one here creates nothing.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with ($p.serviceAccountName | default (include "prometheus-bundle.routeServiceAccount" (dict "ctx" $ "route" $p.name))) }}
+  # UNDER WHOSE IDENTITY, overriding the runtime's own. The same decision as the
+  # toolsets below — which tools, and with whose credentials — which is why both
+  # are on this one object.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. This bundle renders no ServiceAccount.
+  serviceAccountName: {{ . }}
+  {{- end }}
   {{- with $sources }}
   # Without this claim the source reports Wired=False and DROPS every alert.
   signalSourceRefs:

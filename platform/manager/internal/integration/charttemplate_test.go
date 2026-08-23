@@ -776,17 +776,24 @@ func TestRuntimeRbacModeResolution(t *testing.T) {
 		notWant []string
 	}{
 		{"unset grants nothing", nil, nil,
-			[]string{"agentops-runtime-view", "agentops-runtime-cluster-admin"}},
+			[]string{"agentops-runtime-readonly", "agentops-runtime-acting"}},
+		// A mode renders its OWN account, named for the posture. The FLOOR
+		// account is never in the want column of any row — see
+		// TestNothingEverBindsToTheFloorAccount, which is the guard that matters.
 		{"demo is read-only", []string{"--set", "global.demo.enabled=true"},
-			[]string{"agentops-runtime-view", "agentops-runtime-cluster-ro"},
-			[]string{"agentops-runtime-cluster-admin"}},
+			[]string{"agentops-runtime-readonly"},
+			[]string{"agentops-runtime-acting"}},
 		{"none", []string{"--set", "global.agentops.runtime.rbacMode=none", "--set", "global.demo.enabled=true"}, nil,
-			[]string{"agentops-runtime-view", "agentops-runtime-cluster-admin"}},
+			[]string{"agentops-runtime-readonly", "agentops-runtime-acting"}},
+		// `full` renders the chart's own ENUMERATED acting role, bound to an
+		// account a route must NAME. It was a cluster-admin binding on the
+		// inherited account until this change, so `cluster-admin` stays in the
+		// notWant column — this row is what catches it coming back.
 		{"full", []string{"--set", "global.agentops.runtime.rbacMode=full"},
-			[]string{"agentops-runtime-cluster-admin"}, nil},
+			[]string{"agentops-runtime-acting"}, []string{"name: cluster-admin"}},
 		{"targeted grants compose with the mode",
 			[]string{"--set", "global.agentops.runtime.rbacMode=readonly", "--set", "rbac.runtime.bindClusterRoles={edit}"},
-			[]string{"agentops-runtime-view", "agentops-runtime-edit"}, nil},
+			[]string{"agentops-runtime-readonly", "agentops-runtime-readonly-edit"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out := helmTemplate(t, tc.args...)
@@ -845,8 +852,15 @@ func TestMCPServerDerivesFromRuntimeRbacMode(t *testing.T) {
 	if !strings.Contains(full, "name: k8s-admin") {
 		t.Error("rbacMode=full must render the mutating toolset with no other value set")
 	}
-	if !strings.Contains(full, "name: agentops-mcp-k8s-cluster-admin") {
-		t.Error("rbacMode=full must yield a full server ServiceAccount")
+	// The server's account gets the SAME split grant the runtime's does — an
+	// agent reaches the cluster THROUGH this server, so leaving it on
+	// cluster-admin would have kept the hole one indirection along. The
+	// cluster-scoped half is a ClusterRole named for the account.
+	if !strings.Contains(full, "name: agentops-mcp-k8s\n") {
+		t.Error("rbacMode=full must yield an acting role for the server account")
+	}
+	if strings.Contains(full, "name: cluster-admin") {
+		t.Error("the MCP server must not be bound to cluster-admin under any mode")
 	}
 
 	recovered := helmTemplate(t, "--set", "k8s-bundle.enabled=true",

@@ -54,8 +54,13 @@ spec:
               referenced signal source's signals become conversations bound to ALL
               referenced channels with the pipeline's profile, and conversations started
               from any referenced channel are bound to all of them (full mirroring).
-              Runtime selection stays profile.runtimeRef — the Pipeline binds no runtime,
-              credentials, or config.
+
+              It also selects WHAT EXECUTES those conversations and UNDER WHOSE IDENTITY —
+              `runtimeRef` and `serviceAccountName`. Capabilities and execution identity
+              are the same decision: one says which tools may be called, the other with
+              whose credentials, and split across two objects no single object states an
+              agent's power. The Pipeline still carries no credentials and no server or
+              tool definitions.
             properties:
               channelRefs:
                 description: |-
@@ -134,6 +139,47 @@ spec:
                 required:
                 - name
                 type: object
+              runtimeRef:
+                description: |-
+                  RuntimeRef selects the AgentRuntime executing this wiring's
+                  conversations. Absent, the AgentRuntime named "default" — the one the
+                  parent chart renders — then the manager's bootstrap configuration.
+
+                  IT REPLACES `AgentProfile.spec.runtimeRef`, which is deprecated. An
+                  AgentRuntime carries the ServiceAccount an agent runs as, so selecting
+                  one is selecting the agent's power in the cluster — and that is a wiring
+                  decision, made beside the tools and servers the same route grants, not an
+                  attribute of the prompts an agent is written with.
+
+                  The CONVERSATION snapshots the resolved name at creation, so editing this
+                  field re-wires only conversations created afterwards. The referenced CR's
+                  CONTENT — image, idle TTL, volumes — is re-read at every pod build, so
+                  fixing a runtime heals conversations already running.
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              serviceAccountName:
+                description: |-
+                  ServiceAccountName is the identity the runtime executes under,
+                  OVERRIDING the AgentRuntime's own `serviceAccountName`. Absent, the
+                  runtime's — which the chart still defaults to `agentops-runtime`.
+
+                  This is what makes one runtime image serve several trust levels: an
+                  observing route and an acting route differ in their account, not in their
+                  image, so the second no longer needs a cloned AgentRuntime to carry it.
+
+                  NAMING IS NOT CREATING. No reconciler creates a ServiceAccount, and
+                  nothing here validates that one exists or that its RBAC is sufficient:
+                  who may create an account and what it is bound to stays an EXTERNAL
+                  grant, the same posture adapters already have. A name nothing backs fails
+                  at pod admission, naming the account.
+                maxLength: 253
+                type: string
               signalSourceRefs:
                 description: |-
                   SignalSourceRefs: the sources feeding this pipeline. A source is

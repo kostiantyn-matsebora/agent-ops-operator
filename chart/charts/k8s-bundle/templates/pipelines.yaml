@@ -57,10 +57,16 @@ question was asked in. Values-named channels still win a place beside it. */ -}}
 {{- end }}
 {{- $routes := list }}
 {{- if include "k8s-bundle.observePipelineEnabled" . }}
-{{- $routes = append $routes (dict "name" $p.observe.name "icon" ($p.observe.icon | default "") "tools" $readTools) }}
+{{- $routes = append $routes (dict "name" $p.observe.name "icon" ($p.observe.icon | default "")
+      "runtimeRef" ($p.observe.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" ($p.observe.serviceAccountName | default $p.serviceAccountName | default (include "k8s-bundle.routeServiceAccount" (dict "ctx" $ "route" $p.observe.name)))
+      "tools" $readTools) }}
 {{- end }}
 {{- if include "k8s-bundle.adminPipelineEnabled" . }}
-{{- $routes = append $routes (dict "name" $p.admin.name "icon" ($p.admin.icon | default "") "tools" (concat $readTools $writeTools)) }}
+{{- $routes = append $routes (dict "name" $p.admin.name "icon" ($p.admin.icon | default "")
+      "runtimeRef" ($p.admin.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" ($p.admin.serviceAccountName | default $p.serviceAccountName | default (include "k8s-bundle.routeServiceAccount" (dict "ctx" $ "route" $p.admin.name)))
+      "tools" (concat $readTools $writeTools)) }}
 {{- end }}
 {{- range $routes }}
 ---
@@ -79,6 +85,22 @@ spec:
   {{- end }}
   profileRef:
     name: {{ $.Values.profile.name }}
+  {{- with .runtimeRef }}
+  # WHAT EXECUTES this route. Unset resolves the AgentRuntime named `default`,
+  # which the PARENT renders — no bundle renders a runtime, an identity or a
+  # credential, and naming one here creates nothing.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with .serviceAccountName }}
+  # UNDER WHOSE IDENTITY, overriding the runtime's own. The same decision as the
+  # toolsets below — which tools, and with whose credentials — which is why both
+  # are on this one object.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. This bundle renders no ServiceAccount.
+  serviceAccountName: {{ . }}
+  {{- end }}
   {{- with $sources }}
   # Wiring is pipeline-only: without this claim the source reports Wired=False
   # and DROPS every event it admits.

@@ -290,7 +290,7 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: p.Spec.ProfileRef.Name}, &profile); err != nil {
 		out.Unresolved = append(out.Unresolved, "AgentProfile/"+p.Spec.ProfileRef.Name)
 	} else {
-		out.Runtime = s.runtimeName(ctx, &profile)
+		out.Runtime = s.pipelineRuntimeName(ctx, &p, &profile)
 	}
 
 	// Composed through the SAME function dispatch uses, over the same inputs.

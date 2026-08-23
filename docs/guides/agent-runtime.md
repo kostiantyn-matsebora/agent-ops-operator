@@ -59,9 +59,9 @@ An agent runtime is three parts:
 1. **A container image** implementing the work contract — poll for a unit,
    execute it, report the outcome, exit when idle.
 2. **An `AgentRuntime` resource** declaring that image, the ServiceAccount it
-   runs as, and what continuity it can promise.
-3. **An `AgentProfile` naming it** through `runtimeRef`. A profile that names
-   none falls back to the runtime called `default`.
+   runs as **by default**, and what continuity it can promise.
+3. **A `Pipeline` naming it** through `runtimeRef`. A Pipeline that names none
+   falls back to the runtime called `default`.
 
 The manager creates one pod per conversation from part 2, and that pod is your
 image. It gives the pod `CONTROL_URL`, `CONVO_ID`, `POD_NAME` and
@@ -195,25 +195,44 @@ follow-up keeps its context:
 | `external` | somewhere the manager does not manage |
 | `none` | nowhere — every unit starts fresh |
 
-**The ServiceAccount is the agent's in-cluster power**, and it is runtime-level
-on purpose. A Pipeline choosing its own would make the right to edit a Pipeline
-a privilege escalation.
+**The ServiceAccount is the agent's in-cluster power**, and a `Pipeline` may
+name its own and override what you declare here.
 
-## Point a profile at it, and verify
+**That is what lets one image serve two trust levels.** An observing route and
+an acting route differ in their account, not in their engine, so you write one
+`AgentRuntime` and not two.
+
+**A route that names no account gets one bound to nothing.** Leaving this field
+empty is the safe default — it falls through to that floor rather than to
+anything the release granted.
+
+**If you write your own account, hold it to the rules the chart's own follow**:
+no verb on `secrets`, no wildcard, no `escalate` or `bind`, and nothing in the
+operator's own namespace.
+
+**And letting an agent create or exec into a pod grants it every Secret in that
+namespace, whatever its RBAC says.** The kubelet does the reading. See
+[installation](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/installation.md).
+
+## Point a Pipeline at it, and verify
 
 ```sh
 kubectl -n agent-ops apply -f my-runtime.yaml
-kubectl -n agent-ops patch agentprofile my-agent --type=merge \
+kubectl -n agent-ops patch pipeline my-route --type=merge \
   -p '{"spec":{"runtimeRef":{"name":"my-runtime"}}}'
 kubectl -n agent-ops logs -f agentops-conv-<conversation>
 ```
 
 ```powershell
 kubectl -n agent-ops apply -f my-runtime.yaml
-kubectl -n agent-ops patch agentprofile my-agent --type=merge `
+kubectl -n agent-ops patch pipeline my-route --type=merge `
   -p '{\"spec\":{\"runtimeRef\":{\"name\":\"my-runtime\"}}}'
 kubectl -n agent-ops logs -f agentops-conv-<conversation>
 ```
+
+**Conversations already open keep the runtime they were created with.** The
+choice is recorded when a conversation starts, so patch the Pipeline and then
+ask something new.
 
 Ask your agent something. The pod log should show the unit arriving, then the
 allowlist you composed, then the answer.

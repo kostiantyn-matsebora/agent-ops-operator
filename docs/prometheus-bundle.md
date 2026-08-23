@@ -42,7 +42,16 @@ Those are release-wide facts and live in the parent chart's `runtime:` block and
 ([concepts](concepts.md#the-substrate-runtime-and-globalagentopsruntime)).
 
 The profile executes on the parent's `AgentRuntime` named `default`.
-`profile.runtimeRef` points it at a different one you applied yourself.
+`pipelines.runtimeRef` points it at a different one you applied yourself.
+
+**This bundle renders its route's own ServiceAccount** (`agentops-alert-triage`)
+and names it on the Pipeline.
+
+It holds no Kubernetes RBAC. The lane reaches a Prometheus query API through an
+MCP server that has its own account, so the agent's pod needs no Kubernetes
+permission to investigate an alert.
+
+`pipelines.serviceAccountName` names your own instead.
 
 > **Renamed in chart 5.13.0.** This was `vm-bundle`. Every `vm-bundle.*` value
 > must be restated under `prometheus-bundle:` — the render FAILS while the old

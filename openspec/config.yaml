@@ -36,6 +36,23 @@ rules:
       introduction.md, getting-started.md, installation.md, docs/guides/*).
       They are skipped independently, so they are listed independently.
 
+  design:
+    - >-
+      If the approach was settled against a PROTOTYPE — a mockup, a sketch, a
+      rendering — that prototype MUST be committed inside the change and
+      referenced BY PATH. Never by an external or account-scoped URL: it is the
+      one artifact that does not survive archiving, another reader, or next
+      month.
+    - >-
+      State the split it creates: the prototype is the reference for
+      COMPOSITION and the specs are the reference for BEHAVIOUR. The numbers a
+      prototype settles — geometry, timings, spacing, wording — are exactly the
+      ones a spec should not carry, and they are then written down nowhere else.
+    - >-
+      Name the places the prototype is deliberately NOT the target, because a
+      standalone artifact always differs from the thing it models somewhere.
+      Unnamed, each of those differences ships.
+
   tasks:
     - >-
       THE LAST SECTION MUST BE A DEDICATED DOCUMENTATION SECTION. Not a bullet
@@ -58,3 +75,8 @@ rules:
       If a change alters the console UI, the documentation section MUST include
       re-running BOTH `npm run screenshots` and `npm run demo` in
       platform/console/ui.
+    - >-
+      Where a change carries a committed prototype, the tasks MUST say PORT
+      from it and name it, and a task list MUST NOT merely restate the specs.
+      An implementer who re-derives an agreed design arrives somewhere else,
+      which is the whole cost the prototype was committed to avoid.

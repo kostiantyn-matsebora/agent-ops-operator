@@ -4,8 +4,8 @@ description: >-
   Kubernetes operator for agents you can address — monitoring signals and chat
   tasks become Conversations executed by per-conversation agent runtime pods.
 type: application
-version: 5.38.0
-appVersion: "0.43.0"
+version: 6.0.0
+appVersion: "0.53.0"
 dependencies:
   # embedded subchart (chart/charts/prometheus-bundle); templates are
   # additionally self-gated on prometheus-bundle.enabled

@@ -10,14 +10,25 @@ That snapshot SHALL cover both tooling bindings (`toolsets`, `mcpConfigs`) AND
 THE RESOLVED RUNTIME AND SERVICE ACCOUNT. That Pipeline is the only source: no
 profile default, no baseline, no inheritance.
 
-THE RESOLVED NAMES ARE SNAPSHOTTED, NOT THE PIPELINE'S RAW FIELDS. A conversation
-created while its Pipeline named no runtime SHALL keep the default it actually
-ran with, rather than picking up a later edit to that Pipeline.
+THE RESOLVED RUNTIME NAME IS SNAPSHOTTED, NOT THE PIPELINE'S RAW FIELD. A
+conversation created while its Pipeline named no runtime SHALL keep the one it
+actually ran on, rather than picking up a later edit to that Pipeline — or to
+the deprecated profile ref below it.
+
+THE SERVICE ACCOUNT IS SNAPSHOTTED ONLY WHERE THE PIPELINE NAMED ONE, and the
+asymmetry is the ref/content rule, not an inconsistency. A Pipeline's account is
+WIRING and is frozen. An `AgentRuntime`'s own account is that runtime's CONTENT,
+so a conversation whose Pipeline named none SHALL leave the field empty and
+resolve the runtime's at every pod build — otherwise correcting a mistyped
+account would strand every conversation already created on a name the operator
+has already fixed. Leaving it empty is SAFE against the escalation this rule
+guards, because resolution never reads a Pipeline: the empty case falls to the
+runtime, never to the edited wiring.
 
 CONTENT SHALL be re-resolved at each use — toolset and MCPConfig contents at MCP
-compilation and work-unit dispatch, and the `AgentRuntime`'s image, idle TTL and
-volume at every pod build — so content edits reach existing conversations while
-re-wiring affects only new ones.
+compilation and work-unit dispatch, and the `AgentRuntime`'s image, idle TTL,
+volume AND its own service account at every pod build — so content edits reach
+existing conversations while re-wiring affects only new ones.
 
 **THE IDENTITY SNAPSHOT IS THE SHARPEST CASE OF THIS RULE.** Without it, editing
 a Pipeline changes what service account an INFLIGHT conversation's next pod runs
@@ -56,6 +67,13 @@ them read the same Pipeline for the same fields.
 - **WHEN** the `AgentRuntime` a conversation snapshotted has its image corrected
 - **THEN** the next pod uses the corrected image, because the REF is frozen and
   the CONTENT is not
+
+#### Scenario: Fixing a runtime's own account heals them too
+
+- **WHEN** a conversation whose Pipeline named NO service account runs on an
+  `AgentRuntime` whose `serviceAccountName` is then corrected
+- **THEN** the next pod uses the corrected account, because the Pipeline named
+  none to freeze and the runtime's is content
 
 #### Scenario: A conversation predating the snapshot resolves as before
 

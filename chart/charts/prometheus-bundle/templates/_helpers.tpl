@@ -36,3 +36,8 @@ true
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{- /* The runtime identity for this bundle's route, named after the route. */ -}}
+{{- define "prometheus-bundle.routeServiceAccount" -}}
+{{- printf "agentops-%s" .route -}}
+{{- end -}}

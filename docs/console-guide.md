@@ -128,9 +128,9 @@ Six views, one question each.
 
 ## Authentication
 
-The console can instruct an agent. In an install where that agent holds
-cluster-admin, this is a control plane rather than a viewer, so decide this
-before you expose it.
+The console can instruct an agent. In an install where that agent may act on the
+cluster, this is a control plane rather than a viewer, so decide this before you
+expose it.
 
 {: .ao-callout}
 > **An unconfigured token authorizes nobody.** "No token set" never means "no

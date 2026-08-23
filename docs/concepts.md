@@ -26,7 +26,10 @@ idle TTL, storage volumes, service account (the agent's RBAC).
 
 - **Any image speaking the [work contract](contracts.md#the-work-contract)
   plugs in.** A claude-code runtime ships with the chart.
-- **Resolution order**: `profile.runtimeRef` → CR named `default` → manager env.
+- **Resolution order**: the conversation's snapshot → `profile.runtimeRef`
+  (deprecated) → CR named `default` → manager env. A `Pipeline` chooses it, and
+  its choice is resolved into that snapshot at creation — see
+  [Execution is wiring too](#execution-is-wiring-too).
 - **The chart renders the `default` one for you**
   ([below](#the-substrate-runtime-and-globalagentopsruntime)).
 
@@ -340,7 +343,9 @@ then sat at `Wired=False`.
 
 **The wiring.** N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus
 the agent's **capabilities** (`toolsets` / `mcpConfigs`, see
-[below](#capabilities-are-wiring)) — the only place they are declared.
+[below](#capabilities-are-wiring)) and its **execution** (`runtimeRef` /
+`serviceAccountName`, see [below](#execution-is-wiring-too)) — the only place
+either is declared.
 
 **It is reached two ways and no others**:
 
@@ -480,7 +485,7 @@ everything.
 ```yaml
 runtime:
   enabled: true                 # false = you manage AgentRuntime CRs yourself
-  name: default                 # the name a profile with no runtimeRef resolves
+  name: default                 # the name a Pipeline with no runtimeRef resolves
   image: kmatsebora/agentops-runtime-claude:0.8.0
   idleTtlMinutes: ""            # empty = follow runtimeIdleTtlMinutes
   nodeSelector: {}
@@ -495,13 +500,16 @@ runtime:
 global:
   agentops:
     runtime:
-      serviceAccountName: agentops-runtime
+      serviceAccountName: agentops-runtime   # the FLOOR, bound to nothing
       rbacMode: ""              # none | readonly | full
 ```
 
-- **One runtime, named `default`.** Additional runtimes — a second vendor, a
-  higher-trust identity — stay hand-written CRs, which is what the vendor ×
-  trust-level model asks for. A profile points at one with `runtimeRef`.
+- **One runtime, named `default`.** A second VENDOR is a hand-written CR a
+  Pipeline points at with `runtimeRef`.
+- **A second TRUST LEVEL is not a second runtime.** Name a different account on
+  the Pipeline instead — see [Execution is wiring too](#execution-is-wiring-too).
+- **The account named here is the FLOOR**, bound to nothing. `rbacMode` renders
+  a separate, named account for a route to opt into.
 - **`home.pvcRef` is wired, not copied.** With `persistence.enabled` (or
   `persistence.existingClaim`) the rendered `AgentRuntime` takes the chart's own
   claim. `runtime.homePvcRef` exists only for a claim the chart did not create.
@@ -525,12 +533,93 @@ global:
 
 ### `rbacMode` — the agent's in-cluster power
 
-| mode | what binds to the runtime SA |
-|---|---|
-| `none` | nothing |
-| `readonly` | the built-in `view` ClusterRole, plus `get`/`list`/`watch` on `nodes` and `namespaces` and `get`/`list` on `metrics.k8s.io` nodes/pods — the cluster-scoped reads `view` omits |
-| `full` | `cluster-admin`: unrestricted cluster control for an LLM-driven agent |
-| `""` (default) | `readonly` when `global.demo.enabled`, otherwise `none` |
+**The mode renders a NAMED account and binds a posture to it.** A route opts in
+by naming it. Nothing binds to the floor.
+
+| mode | renders | bound to |
+|---|---|---|
+| `none` | nothing | — |
+| `readonly` | `agentops-runtime-readonly` | cluster-scoped reads, plus namespaced reads in the namespaces you list |
+| `full` | `agentops-runtime-acting` | the same, plus the workload writes an agent fixes things with |
+| `""` (default) | `readonly` when `global.demo.enabled`, otherwise `none` | |
+
+**`full` used to be `cluster-admin`, and `readonly` used to bind the built-in
+`view`.** Neither does now — every grant is a role this chart writes out, so an
+operator can read it without resolving an aggregated or built-in role. Both are
+breaking, see [CHANGELOG](CHANGELOG.md).
+
+**No role this chart renders carries any verb on `secrets`**, or a wildcard that
+would reach one, or `escalate` / `bind` on RBAC.
+
+An agent has a shell. `--allowedTools` configures a **cooperating** agent, while
+a ServiceAccount binding is what an uncooperative one actually has. The manager
+holds no `secrets` verbs either — the component running untrusted model output
+must not out-rank the one orchestrating it.
+
+### The grant is cluster-wide, and why that is safe
+
+**Every rule applies in every namespace, including the operator's own.** There
+is no namespace list to maintain, and a namespace created tomorrow is covered
+the moment it exists.
+
+**What keeps that from exposing anything is omission, not scope:**
+
+- **`agentops.dev` is never granted, in any rule.** RBAC is deny-by-default, so
+  Conversations, Pipelines and profiles are unreadable wherever an agent looks.
+- **`secrets` is never granted either.**
+- **`clusterroles` is not readable** — that listing is a map of every identity
+  in the install and which one is worth attacking.
+- **No component logs message content**, so the pod logs an agent can read carry
+  no conversation text.
+
+What an agent gains in the operator's namespace is pod names and specs
+(credentials are `valueFrom` references, not values), Services, events and the
+compiled MCP ConfigMaps.
+
+{: .ao-callout}
+> **Under `full` it can also restart or delete those pods** — the manager and
+> the adapters included. An agent can disrupt its own supervisor.
+
+**Namespaced Roles were tried and reverted.** RBAC cannot express "everywhere
+except", so bounding an agent meant an allow-list: one binding per namespace per
+account, 224 objects on a 28-namespace cluster, and every new namespace
+invisible until someone edited values and redeployed. The maintenance was worse
+than the exposure it bought.
+
+### `allowPodExecution` — the Secret boundary
+
+{: .ao-callout}
+> **No `secrets` verb is not the same as cannot read Secrets.** The **kubelet**
+> resolves a Secret when it builds a pod. An agent that can create a pod
+> mounting one — or exec into a pod that already has one — reads the value
+> having never asked the API server. `secrets: get` is never evaluated.
+
+`global.agentops.runtime.allowPodExecution` is **off by default**, and it is
+what makes the no-Secrets rule true rather than merely written down.
+
+| | Off | On |
+|---|---|---|
+| create a pod, exec into one | no | yes |
+| create or patch a Deployment, Job, StatefulSet, DaemonSet | no | yes |
+| scale, delete, evict, cordon | yes | yes |
+| create or edit ConfigMaps, Services, Ingresses, PDBs, HPAs | yes | yes |
+| **read any Secret in the cluster** | **no** | **yes, unavoidably** |
+
+**It gates every write that produces or enters a pod**, not just
+`pods: create`.
+
+Creating a Job or a Deployment writes a pod spec that can mount a Secret.
+Patching one edits that spec. Gating the obvious verb alone would be a flag that
+reads as a boundary and is not one.
+
+**With it off an agent is still a real operator.** It reads what it is scoped
+to, scales, restarts, evicts, cordons, deletes workloads and edits config.
+
+What it loses is the ability to run new code — which on Kubernetes is the same
+capability as reading a Secret.
+
+**What the roles grant** is in [installation](installation.md#what-the-roles-grant),
+along with how to add a grant they omit.
 
 **Empty resolving two ways is deliberate.**
 
@@ -738,6 +827,120 @@ Two more rules worth knowing:
 
 Conversations that bind `mcpConfigs` compile into their own ConfigMap
 (`agentops-mcp-conv-<conversation>`, garbage-collected with the conversation).
+
+## Execution is wiring too
+
+**A Pipeline also selects WHAT RUNS its conversations and UNDER WHOSE
+IDENTITY.** Two optional fields, beside the capability stanzas:
+
+| Field | Selects | Absent |
+|---|---|---|
+| `spec.runtimeRef` | the `AgentRuntime` | the one named `default` |
+| `spec.serviceAccountName` | the identity that runtime executes under | the **floor** account, which holds no RBAC at all |
+
+**Silence means no power.** A route that names no account can do nothing in the
+cluster. It reaches only what its toolsets and MCP servers give it — declared on
+the same object that could have named an account.
+
+{: .ao-callout}
+> **This is a deliberate break.** A Pipeline used to inherit whatever the
+> release granted. Three of four routes in the reference install held
+> pod-delete and node-patch because nobody typed a field, and two of them
+> reached no Kubernetes API at all.
+
+**Capabilities and execution identity are the same decision.** One says which
+tools may be called. The other says with whose credentials. Split across two
+objects, no single object states an agent's power and no single reviewer can
+approve it.
+
+### One runtime image, two trust levels
+
+```yaml
+pipelines:
+  - name: k8s-observe
+    profile: k8s-engineer
+    toolsets: [agentops-observe, k8s-observability]
+    # names no account: the floor, so no cluster power at all
+  - name: k8s-operate
+    profile: k8s-engineer
+    toolsets: [agentops-observe, k8s-observability, k8s-admin]
+    serviceAccountName: agentops-runtime-acting
+```
+
+Both routes run the same image. They differ in what they may call and in what
+their credentials permit.
+
+**Before this, the account had nowhere to live but the `AgentRuntime`**, so a
+second trust level meant a second runtime CR identical but for one field.
+
+**Where accounts come from:**
+
+| Account | Rendered by |
+|---|---|
+| the floor | the parent chart, always, bound to nothing |
+| `agentops-runtime-acting` / `-readonly` | the parent, from `rbacMode` |
+| one per bundle route | that bundle — it is the only scope that knows what its routes do |
+| anything else | you, or `rbac.runtime.serviceAccounts` |
+
+**A bundle renders the accounts its own routes need.** `k8s-bundle` renders one
+per route, `ha-bundle` renders two with no Kubernetes RBAC at all — neither of
+its routes touches the Kubernetes API — and `telegram-bundle` renders none,
+because it ships no Pipeline.
+
+**The substrate stays the parent's.** No bundle renders an `AgentRuntime`, a
+model credential, a home volume or the floor account.
+
+### Naming an account does not create one
+
+- **No reconciler creates a ServiceAccount.**
+- **`Ready` does not check that one exists.** That would need an API read the
+  manager holds no RBAC for, granted to produce a warning.
+- **A name nothing backs fails at pod admission**, naming the account.
+
+A dangling `runtimeRef` **does** report `Ready=False`. The manager already reads
+that kind.
+
+### Resolution order, stated
+
+| | Chain |
+|---|---|
+| runtime | conversation snapshot → `profile.runtimeRef` (deprecated) → `AgentRuntime/default` → manager env |
+| identity | conversation snapshot → the resolved runtime's `serviceAccountName` → **the floor account** |
+
+**The Pipeline is in neither chain, and that is the guarantee.** Its choice is
+resolved into the conversation at creation, so nothing reads a Pipeline at
+dispatch time.
+
+**Editing a Pipeline never moves a conversation already running onto a different
+identity.** That would be a privilege change applied to work in progress.
+
+### What the snapshot freezes, and what it does not
+
+- **The RUNTIME NAME is frozen, resolved.** A conversation created while its
+  Pipeline named none keeps the one it actually ran on.
+- **The SERVICE ACCOUNT is frozen only where the PIPELINE named one.** The
+  runtime's own account is that runtime's CONTENT, so correcting a mistyped one
+  reaches conversations already created.
+- **The `AgentRuntime`'s image, idle TTL and volumes are re-read at every pod
+  build**, exactly as a toolset's contents are.
+
+Conversations created before these fields carry neither, and nothing backfills
+them.
+
+### `AgentProfile.spec.runtimeRef` is deprecated
+
+**It moved to the Pipeline and is read for ONE release**, below the Pipeline's
+own field.
+
+- **A profile applied before the upgrade keeps working.**
+- **Setting both is harmless and the Pipeline wins**, so adopting the new model
+  needs no profile edit.
+- **An install relying on it must move the ref to every Pipeline routing to that
+  profile** before the next major.
+
+It moved because an `AgentRuntime` carries the ServiceAccount an agent runs as.
+A profile choosing one chose the agent's power in the cluster — and a profile is
+prompts, a repo ref and limits, while a Pipeline already grants tools.
 
 ## Capacity: how many run at once
 

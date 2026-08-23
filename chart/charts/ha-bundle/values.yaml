@@ -655,10 +655,16 @@ pipelines:
     name: ha-control
     # Display only — see k8s-bundle's `pipelines.observe.icon`.
     icon: aops:home
+    # Optional per-route overrides of the two at the bottom of this stanza.
+    runtimeRef: ""
+    serviceAccountName: ""
   ops:
     # The ops route. Claims ha-logs and NOTHING ELSE — see chatSources.
     name: ha-ops
     icon: aops:operate
+    # Optional per-route overrides of the two at the bottom of this stanza.
+    runtimeRef: ""
+    serviceAccountName: ""
   # Chat sources BOTH routes claim, BY NAME. A claim is what puts an agent in
   # the list a person is offered on that surface.
   #
@@ -687,3 +693,21 @@ pipelines:
   # true = both routes get it. false = neither, which leaves `ha-operator` able
   # to call services and unable to reconfigure anything.
   restAccess: null
+  # WHAT EXECUTES these routes, and UNDER WHOSE IDENTITY. Both OPTIONAL and
+  # UNSET, and an install that leaves them so behaves exactly as one that could
+  # not set them: `runtimeRef` resolves the AgentRuntime named `default` and the
+  # identity falls to that runtime's own account.
+  #
+  # THIS BUNDLE RENDERS NEITHER OBJECT. The AgentRuntime, the runtime
+  # ServiceAccount and the credential are the PARENT's — a subchart sees only
+  # itself, and one that rendered an identity would create a second all-powerful
+  # account nobody asked for. Naming here is a reference: render the account
+  # through the parent's `rbac.runtime.serviceAccounts`, or grant it yourself.
+  #
+  # THIS IS WHERE THE BUNDLE'S PRIVILEGE SPLIT WOULD REACH THE CLUSTER. `ha-ops`
+  # fixes what `ha-control` only uses, and until now that split lived entirely in
+  # toolsets — both routes ran as the same account. Naming a stronger one on the
+  # ops route above states the difference where the rest of its power is stated.
+  runtimeRef: ""
+  serviceAccountName: ""
+

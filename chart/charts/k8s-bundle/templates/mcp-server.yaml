@@ -114,53 +114,40 @@ spec:
       targetPort: http
 {{- if $s.rbac.create }}
 {{- /*
-The server's own grants — the first of the two walls. Same vocabulary as the
-parent's global.agentops.runtime.rbacMode (readonly = "view" plus the
-cluster-scoped and metrics reads "view" omits), bound to the SERVER's SA and
-derived from that mode unless set. Revoking these removes the agent's MCP reach
-without touching the runtime SA.
+The server's own grants — the first of the two walls, bound to the SERVER's SA
+and derived from global.agentops.runtime.rbacMode unless set. Revoking these
+removes the agent's MCP reach without touching any runtime account.
+
+IT BINDS NO BUILT-IN ROLE. `view` used to be bound here under `readonly`, and
+`view` is cluster-wide: it reads every namespace including this release's own,
+where the manager, the adapters and every Conversation object live. So a
+"read-only" MCP server could read the conversations it was serving.
+
+Every rule now comes from the shared helpers the parent uses, split the same
+way — cluster-scoped reads in a ClusterRole, everything namespaced in Roles
+bound only where global.agentops.runtime.namespaces says.
 */ -}}
 {{- if eq $rbacMode "readonly" }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ $sa }}-view
-  labels:
-    app.kubernetes.io/name: {{ $name }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: view
-subjects:
-  - kind: ServiceAccount
-    name: {{ $sa }}
-    namespace: {{ .Release.Namespace }}
----
-apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ $sa }}-cluster-ro
+  name: {{ $sa }}
   labels:
     app.kubernetes.io/name: {{ $name }}
 rules:
-  - apiGroups: [""]
-    resources: ["nodes", "namespaces"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["metrics.k8s.io"]
-    resources: ["nodes", "pods"]
-    verbs: ["get", "list"]
+{{ include "agentops.runtimeReadRules" . | indent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ $sa }}-cluster-ro
+  name: {{ $sa }}
   labels:
     app.kubernetes.io/name: {{ $name }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ $sa }}-cluster-ro
+  name: {{ $sa }}
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
@@ -168,15 +155,25 @@ subjects:
 {{- else if eq $rbacMode "full" }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $sa }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+rules:
+{{ include "agentops.runtimeReadRules" . | indent 2 }}
+{{ include "agentops.runtimeWriteRules" . | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ $sa }}-cluster-admin
+  name: {{ $sa }}
   labels:
     app.kubernetes.io/name: {{ $name }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: {{ $sa }}
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}

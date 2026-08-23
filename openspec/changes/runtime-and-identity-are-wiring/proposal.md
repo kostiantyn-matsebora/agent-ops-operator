@@ -32,9 +32,18 @@ are the last two facts violating it.
 - **`Pipeline.spec.runtimeRef`** selects the `AgentRuntime`. Absent, the
   runtime named `default` — the one the parent chart renders — as today.
 - **`Pipeline.spec.serviceAccountName`** names the identity that runtime
-  executes under, OVERRIDING the runtime's own. Absent, the runtime's
-  `serviceAccountName`, which the chart still defaults to `agentops-runtime`.
-  **Nothing changes for an install that sets neither.**
+  executes under, OVERRIDING the runtime's own. **Absent, a MINIMUM-PRIVILEGE
+  account the chart always renders, which holds no RBAC at all** — so a route
+  that names nothing can do nothing in the cluster.
+- **SILENCE MEANS NO POWER.** `rbacMode` no longer binds anything to that floor
+  account: acting power is attached to a NAMED account a route opts into. A
+  route inheriting the most powerful identity in the release by not typing a
+  field is the defect this change exists to remove, one level up from
+  `cluster-admin`.
+- **EVERY BUNDLE RENDERS THE ACCOUNTS ITS OWN ROUTES NEED**, scoped to what
+  those routes do, and names each on its own Pipeline. The bundle is the only
+  scope that knows. The parent keeps the substrate — runtime, credential,
+  volume, floor account — exclusively.
 - **`AgentProfile.spec.runtimeRef` is RETIRED**, dual-read for one release so a
   profile applied before the upgrade keeps dispatching to the runtime it named.
   Same posture the retired `sessionId` got.
@@ -53,7 +62,7 @@ are the last two facts violating it.
   cluster. It is replaced by an ENUMERATED ClusterRole the chart owns, carrying
   no verb on `secrets` and no wildcard that reaches them.
 
-**BREAKING, TWICE.**
+**BREAKING, THREE TIMES.**
 
 - A profile that names a `runtimeRef` keeps working for one release, then stops.
   An install relying on it must move the ref to every Pipeline that routes to
@@ -63,6 +72,10 @@ are the last two facts violating it.
   the install must render its own ClusterRole and name its account on the
   Pipeline. That is the point: the grant becomes visible and reviewable instead
   of being a mode name.
+- **EVERY ROUTE LOSES ITS INHERITED CLUSTER REACH** until it names an account.
+  A Pipeline that named nothing used to get whatever the release granted. It now
+  gets nothing, and the install names an acting account on the routes that need
+  one. This is the half that makes the other two mean anything.
 
 ## Capabilities
 
@@ -71,10 +84,11 @@ are the last two facts violating it.
   and its "carries no runtime selection" requirement is inverted.
 - `profile-is-identity`: `runtimeRef` leaves the profile. Identity stops
   including execution preference.
-- `agent-runtime-ownership`: the parent's runtime SA becomes the DEFAULT rather
-  than the only one, "exactly one runtime ServiceAccount per release" no longer
-  holds, and a new requirement forbids `cluster-admin` and any `secrets` verb on
-  every runtime identity the chart renders.
+- `agent-runtime-ownership`: the parent's runtime SA becomes a MINIMUM-PRIVILEGE
+  FLOOR holding no RBAC, "exactly one runtime ServiceAccount per release" is
+  dead outright, bundles render the accounts their own routes need, and a new
+  requirement forbids `cluster-admin` and any `secrets` verb on every runtime
+  identity the chart renders.
 - `mcp-toolset-model`: the Conversation's materialization rule extends to the
   runtime and the SA — the same snapshot, for the same reason.
 

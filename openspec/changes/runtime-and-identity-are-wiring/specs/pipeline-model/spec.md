@@ -21,10 +21,16 @@ IDENTITY, via two further optional fields:
 
 - `spec.runtimeRef` — the `AgentRuntime`. Absent, the runtime named `default`.
 - `spec.serviceAccountName` — the identity that runtime executes under,
-  OVERRIDING the runtime's own. Absent, the runtime's `serviceAccountName`.
+  OVERRIDING the runtime's own. **Absent, the MINIMUM-PRIVILEGE floor account,
+  which holds no RBAC at all.**
 
-Both SHALL be optional, and an install setting neither SHALL behave exactly as
-one that could not set them.
+Both SHALL be optional. `runtimeRef` unset SHALL behave exactly as an install
+that could not set it.
+
+**`serviceAccountName` UNSET SHALL MEAN NO CLUSTER POWER, and that is a
+DELIBERATE BREAK.** A route inherits nothing by staying silent. What an agent
+may do in the cluster is stated on the route or it does not exist — which is the
+same rule the toolsets already follow, applied to the credential half.
 
 CAPABILITIES AND EXECUTION IDENTITY ARE THE SAME DECISION and SHALL live on the
 same object. One states which tools may be called, the other with whose
@@ -34,6 +40,14 @@ power and no single reviewer can approve it.
 The Pipeline SHALL carry no credentials and no server or tool definitions. It
 SHALL NOT create a ServiceAccount: naming one is a reference, and who may create
 one and what it is bound to remains an external grant.
+
+`Ready` SHALL NOT validate `spec.serviceAccountName`. Checking that an account
+exists needs a `serviceaccounts` read the manager holds no RBAC for, and
+granting a permission to produce a WARNING is a worse trade than the failure it
+would pre-empt — which is already loud, local and named: the pod is refused at
+admission, naming the account. `spec.runtimeRef` IS validated, because the
+manager already reads `AgentRuntime` and a dangling runtime ref is the same
+class of dangling reference every other stanza reports.
 
 A Pipeline SHALL be reachable two ways and no others: a signal posted to a
 source it LISTS, and a chat command NAMING it on a surface whose chat source is
@@ -84,11 +98,18 @@ toolset and mcpConfig refs) without creating any workload.
 - **THEN** their conversations run the same image with different cluster power,
   and no second `AgentRuntime` exists solely to carry the second identity
 
-#### Scenario: Setting neither field changes nothing
+#### Scenario: A Pipeline naming no account has no cluster power
 
 - **WHEN** a Pipeline names no runtime and no service account
 - **THEN** its conversations resolve the runtime named `default` and run under
-  that runtime's service account, exactly as before these fields existed
+  the minimum-privilege floor account, which is denied every verb — whatever
+  `rbacMode` the release sets
+
+#### Scenario: The runtime's own account is still a rung
+
+- **WHEN** a Pipeline names no account and its `AgentRuntime` names one
+- **THEN** the runtime's is used, because a runtime declaring an identity is an
+  explicit statement and the floor is only what remains when nobody stated one
 
 #### Scenario: The Pipeline's service account wins over the runtime's
 
@@ -100,8 +121,14 @@ toolset and mcpConfig refs) without creating any workload.
 #### Scenario: Naming an account does not create one
 
 - **WHEN** a Pipeline names a service account that does not exist
-- **THEN** no reconciler creates it and the render does not fail — the pod fails
-  at admission, naming the account
+- **THEN** no reconciler creates it, the render does not fail and `Ready` stays
+  true — the pod fails at admission, naming the account
+
+#### Scenario: A dangling runtime ref does surface on Ready
+
+- **WHEN** a Pipeline's `runtimeRef` names an `AgentRuntime` that does not exist
+- **THEN** the Pipeline reports `Ready=False` naming it, because the manager
+  already reads that kind and the ref is a reference like any other
 
 ### Requirement: Runtime selection is wiring, never identity
 

@@ -26,8 +26,10 @@ Those are release-wide facts and live in the parent chart's `runtime:` block and
 ([concepts](concepts.md#the-substrate-runtime-and-globalagentopsruntime)),
 including the credential the notes warn about when it is missing.
 
-The profile executes on the parent's `AgentRuntime` named `default`.
-`profile.runtimeRef` points it at a different one you applied yourself.
+The profile executes on the parent's `AgentRuntime` named `default`. A route's
+`pipelines.<route>.runtimeRef` points it at a different one you applied
+yourself, and `pipelines.<route>.serviceAccountName` runs it under a different
+identity.
 
 Two things worth knowing:
 
@@ -36,12 +38,16 @@ Two things worth knowing:
   Either turn the wiring component on (demo mode does) or declare the claim
   under the parent chart's `pipelines:` — the latter is what you want when one
   agent should answer this source *and* a chat surface.
-- **`global.agentops.runtime.rbacMode: full` is cluster-admin.** It binds
-  unrestricted cluster control to an LLM-driven agent, and — because the MCP
-  server and the bundle's own route both derive from it — hands the same power to
-  the second identity and picks the mutating route too. It is never a default and
-  never what demo mode selects. `readonly` plus targeted grants under the parent
-  chart's `rbac.runtime` block is almost always the better answer.
+- **`global.agentops.runtime.rbacMode: full` renders an enumerated acting
+  account.** It is no longer `cluster-admin`, no role it renders can read a
+  Secret, and nothing it renders reaches the operator's own namespace.
+  - **A route must NAME that account to get it.** Naming nothing means no
+    cluster power at all.
+  - **It is scoped to `global.agentops.runtime.namespaces`**, so it grants
+    nothing until you list some.
+  - **`allowPodExecution` is the flag that matters.** Off, an agent cannot run a
+    pod and therefore cannot read a Secret. On, it can read every Secret in
+    every writable namespace, whatever the roles say.
 - **Withholding shell is per-route**: bind
   `toolsets: {refs: [{name: agentops-observe}]}` on one Pipeline and only that
   route loses `Bash`, while every other route sharing the profile keeps it.
@@ -91,8 +97,23 @@ that win in both directions.
 
 The derivation exists for the same reason `mcpServers.readOnly` derives: an
 operator who sets `full`, gets a write-capable server and a rendered `k8s-admin`
-toolset, and a route binding neither, has been granted cluster-admin they cannot
+toolset, and a route binding neither, has been granted acting RBAC they cannot
 use.
+
+**This bundle renders ONE ACCOUNT PER ROUTE it ships**, named after the route
+(`agentops-k8s-observe`, `agentops-k8s-operate`), and names it on that Pipeline.
+
+- **They hold no Kubernetes RBAC, and that is correct.** The runtime image ships
+  no kubectl, so an agent reaches the cluster only through the MCP server —
+  which has its own account, carrying the actual grant. What a route account
+  buys is IDENTITY: a distinct subject per route, so a grant added later lands
+  on one route instead of every agent in the install.
+- **`pipelines.<route>.rbac.clusterRoles` / `.bindClusterRoles`** add a grant to
+  one route.
+- **`pipelines.<route>.serviceAccountName`** names your own instead, and this
+  bundle then renders none.
+- **The SUBSTRATE stays the parent's.** No `AgentRuntime`, no credential, no
+  home volume, no floor account.
 
 The CR is named `k8s-operate` rather than `k8s-admin` because `k8s-admin` is
 already the `MCPToolset` it binds, and "bind `k8s-admin` on `k8s-admin`" is a
@@ -510,8 +531,20 @@ and `mcpServers.rbac.mode` are `null` by default and follow
 
 | `rbacMode` | `--read-only` | server SA RBAC | `k8s-admin` toolset |
 |---|---|---|---|
-| `full` | off | `full` | rendered |
-| `readonly`, `none`, `""` | on | `readonly` | absent |
+| `full` | off | the enumerated **acting** grant | rendered |
+| `readonly`, `none`, `""` | on | the enumerated **read** grant | absent |
+
+**This server's account used to be bound to `cluster-admin` under `full` and to
+the built-in `view` under `readonly`.** Neither now.
+
+An agent reaches the cluster THROUGH this server, so those bindings were the
+same holes the runtime account's were, one indirection along.
+
+**And `view` is cluster-wide**, so a "read-only" server could read the
+Conversations it was serving.
+
+Both walls now carry the same chart-owned split, from the same values, scoped to
+the same namespaces.
 
 They derive because they are bound by an invariant operators used to maintain by
 hand in every install's values: an operator who grants the agent `full` and

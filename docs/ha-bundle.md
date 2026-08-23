@@ -22,6 +22,19 @@ and administering it are two jobs, and they get two agents.
 read-only role, so neither credential is a safe one that merely looks. Both
 agents act. What separates them is the job and the reach it needs.
 
+**Neither route touches the Kubernetes API.** This bundle renders one
+ServiceAccount per route — `agentops-ha-control` and `agentops-ha-ops` — with no
+Kubernetes RBAC at all, and names each on its own Pipeline.
+
+That is deliberate, and this bundle is the case that proves the rule.
+
+Both routes used to run as the release's shared runtime account, so a Home
+Assistant agent held whatever cluster power that account was granted, for no
+capability it uses.
+
+**The bundle knows what its routes do and the parent chart cannot.** That is why
+the account is rendered here.
+
 | Component | Flag | What it renders |
 |---|---|---|
 | Ingest lane | `logsAdapter.enabled` (**on**) | The `SignalAdapter` (`home-assistant`, adapter `signals/ha/`) and — under `source.create` — a `SignalSource` (`ha-logs`). **Not the claim on it** |

@@ -36,6 +36,23 @@ spec:
   {{- end }}
   profileRef:
     name: {{ $p.profile }}
+  {{- with $p.runtimeRef }}
+  # WHAT EXECUTES this route's conversations. Unset resolves the AgentRuntime
+  # named `default` — the one this chart renders — exactly as before the field
+  # existed.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with $p.serviceAccountName }}
+  # UNDER WHOSE IDENTITY, overriding the runtime's own. This and the toolsets
+  # below are the same decision read two ways — which tools may be called, and
+  # with whose credentials — which is why they live on one object.
+  #
+  # Naming is not creating: render the account through
+  # `rbac.runtime.serviceAccounts`, or grant it yourself. A name nothing backs
+  # fails at pod admission, saying which account.
+  serviceAccountName: {{ . }}
+  {{- end }}
   {{- with $p.signalSources }}
   # Wiring is pipeline-only: a source no Pipeline claims reports Wired=False
   # and DROPS every signal. One Pipeline may claim many.

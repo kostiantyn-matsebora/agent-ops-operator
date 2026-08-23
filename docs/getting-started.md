@@ -92,7 +92,7 @@ Four objects matter here:
 | Object | What it is |
 |---|---|
 | `SignalSource/console` | where your questions enter |
-| `AgentProfile/k8s-engineer` | who the agent is. Identity only, no tools |
+| `AgentProfile/k8s-engineer` | who the agent is. Behaviour only, no tools and no runtime |
 | `Pipeline/k8s-observe` | the wiring: those sources, that profile, a read-only toolset |
 | `AgentRuntime/default` | the image it runs in, and the credential it uses |
 

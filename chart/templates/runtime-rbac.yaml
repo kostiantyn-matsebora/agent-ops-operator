@@ -1,74 +1,121 @@
 {{- /*
-What the agent may actually do, bound to the runtime ServiceAccount — because
-that SA's permissions ARE the agent's powers, whichever bundle originated the
+What an agent may actually do, bound to a runtime ServiceAccount — because that
+SA's permissions ARE the agent's powers, whichever bundle originated the
 conversation. Hence the parent chart, not a domain bundle.
 
-Two layers, and they compose:
-  * the MODE (global.agentops.runtime.rbacMode) — the canned postures. Empty
-    resolves to readonly under demo mode and to none otherwise, so the chart
-    keeps granting NOTHING unless configured.
-  * rbac.runtime.{clusterRoles,bindClusterRoles,namespaced} — targeted
-    additions, ADDITIVE to whatever the mode granted.
-Object names: <runtime-sa>-<entry-name>.
+THE FLOOR ACCOUNT IS NEVER BOUND TO ANYTHING.
+`global.agentops.runtime.serviceAccountName` is what a Pipeline naming no
+`serviceAccountName` runs as, and it holds NO RBAC in any mode. A route that
+names nothing can do NOTHING in the cluster.
+
+That is the correction this file carries. It first shipped with the mode bound
+to that account, so a route inherited the release's maximum by not typing a
+field — three of four routes in the reference install held pod-delete and
+node-patch that way, two of them routes that reach no Kubernetes API at all.
+
+So a MODE renders its own account, named for the posture
+(`agentops.runtimeModeServiceAccount`), and a route opts in BY NAME:
+
+    pipelines:
+      - name: k8s-ops
+        serviceAccountName: agentops-runtime-acting
+
+THE GRANTS ARE CLUSTER-SCOPED. Namespaced Roles were tried and reverted: RBAC
+cannot say "everywhere except", so bounding an agent meant an allow-list, one
+binding per namespace per account — 224 objects on a 28-namespace cluster — and
+a new namespace invisible to the agent until someone edited values and
+redeployed. See `agentops.runtimeReadRules` for why the exposure that bought is
+smaller than it looks: `agentops.dev` and `secrets` are never granted, so
+Conversations and credentials are unreachable wherever an agent looks.
+
+Two sources of accounts, and they compose:
+  * the MODE (global.agentops.runtime.rbacMode) — <floor>-readonly or
+    <floor>-acting. Empty resolves to readonly under demo mode and none
+    otherwise, so the chart still grants NOTHING unless configured.
+  * rbac.runtime.serviceAccounts — additional accounts with their own posture.
+`rbac.runtime.{clusterRoles,bindClusterRoles,namespaced}` add to the MODE's
+account. Object names: <sa>-<entry-name>.
+
+BUNDLES RENDER THEIR OWN ROUTES' ACCOUNTS. A bundle knows what its routes do and
+this chart does not, so `k8s-bundle` renders an account per route and `ha-bundle`
+renders accounts with no Kubernetes RBAC at all. The parent keeps the SUBSTRATE
+exclusively — runtime, credential, home volume, and this floor.
 */ -}}
-{{- $sa := include "agentops.runtimeServiceAccount" . }}
 {{- $ns := .Release.Namespace }}
-{{- $mode := include "agentops.runtimeRbacMode" . }}
-{{- if eq $mode "readonly" }}
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ $sa }}-view
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: view
-subjects:
-  - kind: ServiceAccount
-    name: {{ $sa }}
-    namespace: {{ $ns }}
+{{- $floor := include "agentops.runtimeServiceAccount" . }}
+{{- $rt := .Values.rbac.runtime }}
+{{- $modeSA := include "agentops.runtimeModeServiceAccount" . }}
+{{- $accounts := list }}
+{{- /* The mode's account, when the mode grants anything at all. The floor is
+absent from this list ON PURPOSE — it renders in rbac.yaml and is bound here by
+nothing. */ -}}
+{{- if $modeSA }}
+{{- $accounts = append $accounts (dict
+      "name" $modeSA
+      "mode" (include "agentops.runtimeRbacMode" .)
+      "clusterRoles" ($rt.clusterRoles | default list)
+      "bindClusterRoles" ($rt.bindClusterRoles | default list)
+      "namespaced" ($rt.namespaced | default list)) }}
+{{- else if or $rt.clusterRoles $rt.bindClusterRoles $rt.namespaced }}
+{{- fail "rbac.runtime.{clusterRoles,bindClusterRoles,namespaced} add to the account global.agentops.runtime.rbacMode renders, and that mode is `none` — so there is no account to add them to. The floor account is never bound to anything, deliberately: a Pipeline naming no serviceAccountName must have no cluster power. Set a mode, or declare an account under rbac.runtime.serviceAccounts and name it on the Pipelines that need it" }}
+{{- end }}
+{{- range $i, $extra := ($rt.serviceAccounts | default list) }}
+{{- if not $extra.name }}
+{{- fail (printf "rbac.runtime.serviceAccounts[%d]: every entry needs a name — it is what a Pipeline's spec.serviceAccountName refers to" $i) }}
+{{- end }}
+{{- if eq $extra.name $floor }}
+{{- fail (printf "rbac.runtime.serviceAccounts[%d]: %q is the FLOOR account (global.agentops.runtime.serviceAccountName), which holds no RBAC in any mode — that is what makes a Pipeline naming no serviceAccountName powerless. Binding to it would make silence mean maximum power again. Use a different name and name it on the Pipelines that need it" $i $extra.name) }}
+{{- end }}
+{{- if eq $extra.name $modeSA }}
+{{- fail (printf "rbac.runtime.serviceAccounts[%d]: %q is already rendered by global.agentops.runtime.rbacMode. Two entries for one account render two competing binding sets under one name — configure it through rbacMode and rbac.runtime instead" $i $extra.name) }}
+{{- end }}
+{{- $mode := $extra.rbacMode | default "none" }}
+{{- if not (has $mode (list "none" "readonly" "full")) }}
+{{- fail (printf "rbac.runtime.serviceAccounts[%s].rbacMode must be \"none\", \"readonly\" or \"full\", got %q" $extra.name $mode) }}
+{{- end }}
+{{- $accounts = append $accounts (dict
+      "name" $extra.name
+      "mode" $mode
+      "clusterRoles" ($extra.clusterRoles | default list)
+      "bindClusterRoles" ($extra.bindClusterRoles | default list)
+      "namespaced" ($extra.namespaced | default list)) }}
+{{- end }}
+{{- range $acct := $accounts }}
+{{- $sa := $acct.name }}
+{{- if ne $acct.mode "none" }}
 ---
-# "view" omits cluster-scoped reads and metrics; an agent asked why a node is
-# unhealthy needs both.
+# ONE ROLE PER ACCOUNT, cluster-scoped. `readonly` gets the reads, `full` gets
+# the reads plus the writes — and the writes are themselves gated by
+# global.agentops.runtime.allowPodExecution, which is what keeps Secrets
+# genuinely out of reach rather than merely unnamed in these rules.
+#
+# The built-in `view` ClusterRole used to be bound here under `readonly`, and
+# `cluster-admin` under `full`. Neither is, now: every grant is a role this
+# chart writes out and an operator can read.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ $sa }}-cluster-ro
+  name: {{ $sa }}
 rules:
-  - apiGroups: [""]
-    resources: ["nodes", "namespaces"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["metrics.k8s.io"]
-    resources: ["nodes", "pods"]
-    verbs: ["get", "list"]
+{{ include "agentops.runtimeReadRules" $ | indent 2 }}
+{{- if eq $acct.mode "full" }}
+{{ include "agentops.runtimeWriteRules" $ | indent 2 }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ $sa }}-cluster-ro
+  name: {{ $sa }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ $sa }}-cluster-ro
-subjects:
-  - kind: ServiceAccount
-    name: {{ $sa }}
-    namespace: {{ $ns }}
-{{- else if eq $mode "full" }}
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ $sa }}-cluster-admin
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
+  name: {{ $sa }}
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
     namespace: {{ $ns }}
 {{- end }}
-{{- range .Values.rbac.runtime.clusterRoles }}
+{{- range $acct.clusterRoles }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -90,7 +137,7 @@ subjects:
     name: {{ $sa }}
     namespace: {{ $ns }}
 {{- end }}
-{{- range .Values.rbac.runtime.bindClusterRoles }}
+{{- range $acct.bindClusterRoles }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -105,7 +152,7 @@ subjects:
     name: {{ $sa }}
     namespace: {{ $ns }}
 {{- end }}
-{{- range .Values.rbac.runtime.namespaced }}
+{{- range $acct.namespaced }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -128,4 +175,5 @@ subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
     namespace: {{ $ns }}
+{{- end }}
 {{- end }}

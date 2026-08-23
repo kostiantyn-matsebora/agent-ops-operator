@@ -72,6 +72,8 @@ everyday agent needs nothing beyond the intents. */ -}}
 {{- $routes = append $routes (dict
       "name" $p.control.name
       "icon" ($p.control.icon | default "")
+      "runtimeRef" ($p.control.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" ($p.control.serviceAccountName | default $p.serviceAccountName | default (include "ha-bundle.routeServiceAccount" (dict "ctx" $ "route" $p.control.name)))
       "profile" .Values.profiles.user.name
       "sources" ($p.chatSources | default list)
       "tools" $controlTools
@@ -81,6 +83,8 @@ everyday agent needs nothing beyond the intents. */ -}}
 {{- $routes = append $routes (dict
       "name" $p.ops.name
       "icon" ($p.ops.icon | default "")
+      "runtimeRef" ($p.ops.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" ($p.ops.serviceAccountName | default $p.serviceAccountName | default (include "ha-bundle.routeServiceAccount" (dict "ctx" $ "route" $p.ops.name)))
       "profile" .Values.profiles.ops.name
       "sources" (concat ($p.chatSources | default list) $logSource)
       "tools" $opsTools
@@ -103,6 +107,22 @@ spec:
   {{- end }}
   profileRef:
     name: {{ .profile }}
+  {{- with .runtimeRef }}
+  # WHAT EXECUTES this route. Unset resolves the AgentRuntime named `default`,
+  # which the PARENT renders — no bundle renders a runtime, an identity or a
+  # credential, and naming one here creates nothing.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with .serviceAccountName }}
+  # UNDER WHOSE IDENTITY, overriding the runtime's own. The same decision as the
+  # toolsets below — which tools, and with whose credentials — which is why both
+  # are on this one object.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. This bundle renders no ServiceAccount.
+  serviceAccountName: {{ . }}
+  {{- end }}
   {{- with .sources }}
   # Wiring is pipeline-only: without a claim a source reports Wired=False and
   # DROPS every signal it admits.

@@ -126,27 +126,64 @@ type Resolved struct {
 	EgressMediation *agentopsv1alpha1.EgressMediation
 }
 
-// ResolveFor picks the execution backend for a profile — its `runtimeRef`, else
-// the CR named `default`, else the manager's bootstrap config — and reports
-// whether a named runtime was missing.
+// ResolveFor picks the execution backend for a CONVERSATION and reports whether
+// a named runtime was missing.
 //
 // ONE resolution rule, in one place: the reconciler builds pods from it and the
 // dispatch path asks it whether continuity is possible here, and those two
 // answering differently would mean a conversation promised continuity by one
 // component and denied it by the other.
+//
+// IT TAKES THE CONVERSATION, NOT THE PROFILE, because the profile is no longer
+// an input to the answer. Leaving one in the signature would leave a caller
+// free to pass it and believe it mattered, which is the state this change ended.
+// The deprecated profile ref is read INSIDE, off the conversation's own
+// profileRef, for the one release it survives.
+//
+// PRECEDENCE, and no other order — see design D3:
+//
+//	runtime:  conversation.spec.runtimeRef -> profile.spec.runtimeRef
+//	          (DEPRECATED) -> AgentRuntime/default -> bootstrap
+//	identity: conversation.spec.serviceAccountName -> runtime.spec.serviceAccountName
+//	          -> chart default (which reaches here as the bootstrap config)
+//
+// THE PIPELINE IS NOT IN EITHER CHAIN AT THIS POINT, and that is the guarantee
+// rather than an omission: its fields were RESOLVED into the conversation at
+// creation, so nothing reads a Pipeline at dispatch time and editing one cannot
+// move a running conversation onto a different identity.
 func ResolveFor(ctx context.Context, r client.Reader, namespace string,
-	profile *agentopsv1alpha1.AgentProfile, fallback Config) (Resolved, error) {
+	conv *agentopsv1alpha1.Conversation, fallback Config) (Resolved, error) {
 
 	name, explicit := "default", false
-	if profile != nil && profile.Spec.RuntimeRef != nil {
-		name, explicit = profile.Spec.RuntimeRef.Name, true
+	if conv != nil && conv.Spec.RuntimeRef != nil && conv.Spec.RuntimeRef.Name != "" {
+		name, explicit = conv.Spec.RuntimeRef.Name, true
+	} else if conv != nil {
+		// DEPRECATED, one release: a profile applied before the upgrade keeps
+		// dispatching to the runtime it named. Read below the conversation's
+		// own snapshot — which already carries the Pipeline's choice — so an
+		// install that adopts the new model needs no profile edit. Delete this
+		// branch with AgentProfileSpec.RuntimeRef.
+		if n := deprecatedProfileRuntime(ctx, r, namespace, conv); n != "" {
+			name, explicit = n, true
+		}
+	}
+	// The conversation's snapshotted identity OVERRIDES the runtime's own, and
+	// survives the runtime being missing entirely: a Pipeline naming an account
+	// meant that account, whichever backend answers.
+	sa := ""
+	if conv != nil {
+		sa = conv.Spec.ServiceAccountName
 	}
 	var rt agentopsv1alpha1.AgentRuntime
 	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &rt); err != nil {
 		if explicit {
 			return Resolved{}, err // a named runtime must exist
 		}
-		return Resolved{Config: fallback}, nil
+		cfg := fallback
+		if sa != "" {
+			cfg.ServiceAccount = sa
+		}
+		return Resolved{Config: cfg}, nil
 	}
 	// A bad contextSync declaration fails HERE, where the error reaches the
 	// Conversation's RuntimeStarted condition. Nothing writes AgentRuntime
@@ -157,12 +194,41 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 	if err := rt.Spec.ContextSync.Validate(); err != nil {
 		return Resolved{}, fmt.Errorf("runtime %q: %w", name, err)
 	}
+	cfg := FromRuntime(&rt.Spec, fallback)
+	if sa != "" {
+		cfg.ServiceAccount = sa
+	}
 	return Resolved{
-		Config:          FromRuntime(&rt.Spec, fallback),
+		Config:          cfg,
 		ContextStorage:  rt.Spec.ContextStorage,
 		ContextSync:     rt.Spec.ContextSync,
 		EgressMediation: rt.Spec.EgressMediation,
 	}, nil
+}
+
+// deprecatedProfileRuntime reads AgentProfile.spec.runtimeRef off the
+// conversation's profile. DELETE WITH THE FIELD — it is the whole of the
+// one-release dual read, kept in one named function so its removal is one
+// deletion rather than a sweep.
+//
+// A profile that cannot be read answers "" rather than failing: the caller then
+// falls through to `default`, which is what a conversation with no snapshot and
+// no readable profile ran on before this branch existed.
+func deprecatedProfileRuntime(ctx context.Context, r client.Reader, namespace string,
+	conv *agentopsv1alpha1.Conversation) string {
+
+	if conv.Spec.ProfileRef.Name == "" {
+		return ""
+	}
+	var profile agentopsv1alpha1.AgentProfile
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
+		return ""
+	}
+	if profile.Spec.RuntimeRef == nil {
+		return ""
+	}
+	return profile.Spec.RuntimeRef.Name
 }
 
 // ContinuityPossible reports whether a conversation on this backend can carry

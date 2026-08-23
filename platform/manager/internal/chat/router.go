@@ -278,16 +278,14 @@ func (r *Router) releaseText(ctx context.Context, conv *agentopsv1alpha1.Convers
 	const fresh = "♻️ Runtime released — the slot is free. This conversation and its thread " +
 		"stay open, but this runtime does not keep context between runs, so the next " +
 		"message starts fresh."
-	var profile agentopsv1alpha1.AgentProfile
-	if err := r.Reader.Get(ctx, types.NamespacedName{
-		Namespace: conv.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
+	// The profile is NOT read here any more: it is no longer an input to what
+	// executes a conversation, and reading one to answer this would be the
+	// habit this change ended.
+	resolved, err := runtimepod.ResolveFor(ctx, r.Reader, conv.Namespace, conv, r.Runtime)
+	if err != nil {
 		// Degrade to the neutral wording rather than failing: the pod is already
 		// gone, and refusing to report a completed release because a Get failed
 		// would be the worst of both outcomes.
-		return neutralRelease
-	}
-	resolved, err := runtimepod.ResolveFor(ctx, r.Reader, conv.Namespace, &profile, r.Runtime)
-	if err != nil {
 		return neutralRelease
 	}
 	if resolved.ContinuityPossible() {
@@ -575,6 +573,11 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 	if origin != nil {
 		conv.Spec.Toolsets = origin.Spec.Toolsets.DeepCopy()
 		conv.Spec.MCPConfigs = origin.Spec.MCPConfigs.DeepCopy()
+		// Same helper the signal lane calls, over the same Pipeline. An
+		// addressed command grants the pipeline's wiring, and the execution
+		// identity is part of that wiring, not half of it.
+		conv.Spec.RuntimeRef, conv.Spec.ServiceAccountName =
+			runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin)
 		// Provenance, written once at creation like the bindings above it and
 		// read for the same reasons they are not: attribution and reuse
 		// scoping, never to resolve wiring. An addressed command is the one

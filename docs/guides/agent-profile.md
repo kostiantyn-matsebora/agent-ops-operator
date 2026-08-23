@@ -53,25 +53,29 @@ first.
 
 ## The overall shape
 
-A profile is three declarations and one dependency:
+A profile is two declarations and one dependency:
 
 1. **The behaviour** — `systemPrompt` for inline role text, or `repository` plus
    `agent` to take it from git. This is the substance of the object.
 2. **The bounds** — `maxTurns`, and `resources` for the runtime pod.
-3. **What executes it** — `runtimeRef`, or the `AgentRuntime` called `default`.
-4. **A Pipeline that names it.** Not part of the profile, and nothing happens
+3. **A Pipeline that names it.** Not part of the profile, and nothing happens
    without one.
 
 That last line is the whole model in one sentence. Behaviour and reach are two
 objects because the same agent, reached two ways, may touch two different
 things.
 
+**A profile does NOT select what executes it.** `runtimeRef` moved to the
+Pipeline, because an `AgentRuntime` carries the ServiceAccount an agent runs as
+— so choosing one chose the agent's power in the cluster, and that belongs
+beside the tools the same route grants.
+
 ## Write the profile
 
 `systemPrompt` is inline role text, appended to the runtime's own system prompt.
 It is what a profile with no repository uses.
 
-<!-- generated: template kind=AgentProfile name=my-agent fields=systemPrompt,maxTurns,runtimeRef comments=off -->
+<!-- generated: template kind=AgentProfile name=my-agent fields=systemPrompt,maxTurns comments=off -->
 ```yaml
 apiVersion: agentops.dev/v1alpha1
 kind: AgentProfile
@@ -81,8 +85,6 @@ spec:
   outputFormat: blocks   # blocks | none
   systemPrompt: <systemPrompt>
   maxTurns: 60
-  runtimeRef:
-    name: <name>
 ```
 <!-- /generated -->
 
@@ -105,9 +107,11 @@ profiles the chart ships all declare it.
 `maxTurns` bounds the agent's turns within **one work unit**. It is a runaway
 bound, not a budget, and the conversation is unaffected.
 
-Leave `runtimeRef` out unless you have declared a second runtime. The profile
-then falls back to the one called `default`, which is what the parent chart
-ships.
+`spec.runtimeRef` on a profile is **deprecated**. It is read for one release so
+an existing profile keeps working, and is removed in the next major.
+
+**Move it to every Pipeline that routes to this profile.** Setting both is
+harmless and the Pipeline wins, so the two can be moved one route at a time.
 
 ## Route to it
 

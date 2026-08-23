@@ -47,13 +47,18 @@ pods `agentops-conv-<conversation>`.
 
 | Kind | Is |
 |---|---|
-| `AgentProfile` | **who the agent is and HOW IT BEHAVES** — repo, role, prompts, env, limits |
+| `AgentProfile` | **who the agent is and HOW IT BEHAVES** — repo, role, prompts, env, limits. **NOT what executes it**: `spec.runtimeRef` is DEPRECATED and moved to the Pipeline |
 | `AgentRuntime` | **what executes it** |
 | `Conversation` | **session + serial input queue + one thread PER bound channel** (`spec.channelRefs[]` / `status.threads[]{channel,threadId}`) |
 | `Pipeline` | **the wiring** — see below |
 
 **`AgentProfile` carries NO capabilities.** No `allowedTools`, no `mcp`. What an
 agent MAY DO comes exclusively from the Pipeline routing it.
+
+**AND IT SELECTS NO EXECUTION.** `spec.runtimeRef` is deprecated and dual-read
+for one release. An `AgentRuntime` carries the ServiceAccount an agent runs as,
+so a profile choosing one chose the agent's POWER IN THE CLUSTER — see
+`wiring.md` for why that failed the symmetry test.
 
 **BUT "IDENTITY ONLY" IS THE WRONG SHORTHAND FOR THAT, AND IT IS DELETED.** The
 split is BEHAVIOUR against REACH, not identity against everything else.
@@ -66,9 +71,20 @@ split is BEHAVIOUR against REACH, not identity against everything else.
 - **Two profiles over one runtime are two different agents.** A phrase implying
   a profile is a name and a role makes that sound impossible.
 
-**`Conversation.spec.toolsets` / `.mcpConfigs` mirror the originating
-Pipeline's bindings.** MATERIALIZED state like `profileRef` / `channelRefs`,
-never hand-set.
+**`Conversation.spec.toolsets` / `.mcpConfigs` / `.runtimeRef` /
+`.serviceAccountName` mirror the originating Pipeline's bindings.** MATERIALIZED
+state like `profileRef` / `channelRefs`, never hand-set.
+
+**THE IDENTITY SNAPSHOT IS THE SHARPEST CASE OF THE REFS/CONTENT RULE.** Without
+it, editing a Pipeline changes what account an INFLIGHT conversation's next pod
+runs as — a privilege change applied to work already in progress.
+
+- **The RUNTIME NAME is snapshotted RESOLVED**, so a conversation created while
+  its Pipeline named none keeps the one it actually ran on.
+- **The SERVICE ACCOUNT is snapshotted ONLY where the PIPELINE named one.** A
+  Pipeline's account is wiring and is frozen; an `AgentRuntime`'s own account is
+  that runtime's CONTENT, so correcting a mistyped one must heal conversations
+  already created. Empty is safe because resolution never reads a Pipeline.
 
 **REFS are snapshotted, CONTENT is not.** Every use re-reads the CRs, so edits
 heal running conversations while re-wiring affects only new ones.

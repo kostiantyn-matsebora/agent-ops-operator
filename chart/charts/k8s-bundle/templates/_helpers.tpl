@@ -137,3 +137,10 @@ as a fourth thing to remember. */ -}}
 true
 {{- end -}}
 {{- end -}}
+
+{{- /* The runtime identity for one of this bundle's routes, named AFTER the
+route so `kubectl get sa` reads as the wiring does. Rendered by
+pipeline-identity.yaml unless the route names its own. */ -}}
+{{- define "k8s-bundle.routeServiceAccount" -}}
+{{- printf "agentops-%s" .route -}}
+{{- end -}}

@@ -172,7 +172,7 @@ It has no `SignalAdapter` CR and no served CR. The bundle owns its Deployment
 (`agentops-gateway-telegram`) and injects the two forwarding URLs and the bot
 token as env, and it never contacts the manager.
 
-**It was `telegram-router` until chart 5.38.0**, image and Deployment both. The
+**It was `telegram-router` until chart 6.0.0**, image and Deployment both. The
 values key stayed `router:` — see [the changelog](CHANGELOG.md) for the one
 upgrade step, which exists because Helm creates the new Deployment before
 deleting the old one and two consumers must never poll one bot token.

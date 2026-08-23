@@ -347,8 +347,22 @@ spec:
               runtimeRef:
                 description: |-
                   RuntimeRef selects the AgentRuntime (execution backend) for this
-                  profile. Falls back to the AgentRuntime named "default", then to the
-                  manager's bootstrap configuration.
+                  profile.
+
+                  Deprecated: moved to `Pipeline.spec.runtimeRef` and REMOVED IN THE NEXT
+                  CHART MAJOR. It is read for one release only, below the Pipeline's own
+                  field, so a profile applied before the upgrade keeps dispatching to the
+                  runtime it named — the same posture the retired `sessionId` got.
+
+                  It moved because an AgentRuntime carries the ServiceAccount an agent runs
+                  as, so a profile choosing one chose the agent's power in the cluster.
+                  That made profile-edit rights into service-account-choice rights, while a
+                  profile is prompts and a repo ref and a Pipeline already grants tools.
+                  Whoever is trusted to grant capabilities is more qualified to choose an
+                  execution identity, not less.
+
+                  An install setting this moves the ref to every Pipeline routing to this
+                  profile; setting both is harmless, and the Pipeline wins.
                 properties:
                   name:
                     description: Name of the referenced object.

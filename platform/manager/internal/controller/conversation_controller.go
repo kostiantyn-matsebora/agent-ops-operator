@@ -1227,8 +1227,12 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 	}
 	r.setToolingCondition(ctx, conv, metav1.ConditionTrue, "Resolved", "")
 
-	// resolve the execution backend: profile.runtimeRef -> "default" CR -> bootstrap
-	resolved, err := runtimepod.ResolveFor(ctx, r.Client, conv.Namespace, &profile, r.Runtime)
+	// resolve the execution backend from the conversation's OWN snapshot:
+	// conv.runtimeRef -> profile.runtimeRef (deprecated) -> "default" CR ->
+	// bootstrap, with conv.serviceAccountName overriding the runtime's identity.
+	// The Pipeline is deliberately absent — its choice was resolved into these
+	// fields at creation, so editing it cannot re-wire this pod.
+	resolved, err := runtimepod.ResolveFor(ctx, r.Client, conv.Namespace, conv, r.Runtime)
 	if err != nil {
 		return false, err
 	}

@@ -359,7 +359,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	// declaration: it answers each message fresh and says so, instead of failing
 	// every follow-up for a configuration the operator deliberately chose.
 	contextID := ""
-	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Namespace, &profile, s.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Namespace, &conv, s.Runtime)
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -397,7 +397,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	s.Activity.Emit(activity.Event{
 		Kind:     activity.KindRunDispatched,
 		From:     s.originNode(pipeline, conv.Name),
-		To:       activity.Node(activity.NodeRuntime, s.runtimeName(ctx, &profile)),
+		To:       activity.Node(activity.NodeRuntime, s.runtimeName(ctx, &conv)),
 		Pipeline: pipeline, Conversation: conv.Name, RunID: unit.RunID,
 		Detail: fmt.Sprintf("%d input(s) to %s", len(ids), profile.Name),
 	})
@@ -426,12 +426,42 @@ func (s *Server) originNode(pipeline, conversation string) *activity.NodeRef {
 	return activity.Node(activity.NodeConversation, conversation)
 }
 
-// runtimeName resolves the AgentRuntime a profile executes on, matching the
-// runtime pod builder's own fallback (profile ref, then "default").
-func (s *Server) runtimeName(ctx context.Context, profile *agentopsv1alpha1.AgentProfile) string {
-	if profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
-		return profile.Spec.RuntimeRef.Name
+// runtimeName names the AgentRuntime a CONVERSATION executes on, for telemetry
+// attribution. It follows the pod builder's own chain — the conversation's
+// snapshot, then the deprecated profile ref, then "default" — because a graph
+// edge naming a different runtime than the pod ran on is worse than no edge.
+func (s *Server) runtimeName(ctx context.Context, conv *agentopsv1alpha1.Conversation) string {
+	if conv != nil && conv.Spec.RuntimeRef != nil && conv.Spec.RuntimeRef.Name != "" {
+		return conv.Spec.RuntimeRef.Name
 	}
+	if conv != nil && conv.Spec.ProfileRef.Name != "" {
+		var profile agentopsv1alpha1.AgentProfile
+		if err := s.Client.Get(ctx, types.NamespacedName{
+			Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err == nil {
+			if profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
+				return profile.Spec.RuntimeRef.Name // DEPRECATED, one release
+			}
+		}
+	}
+	return s.defaultRuntimeName(ctx)
+}
+
+// pipelineRuntimeName answers what a PIPELINE would run on, for the resolved
+// endpoint the console reads before any conversation exists. Same chain, minus
+// the snapshot there is nothing to snapshot from yet.
+func (s *Server) pipelineRuntimeName(ctx context.Context, p *agentopsv1alpha1.Pipeline,
+	profile *agentopsv1alpha1.AgentProfile) string {
+
+	if p != nil && p.Spec.RuntimeRef != nil && p.Spec.RuntimeRef.Name != "" {
+		return p.Spec.RuntimeRef.Name
+	}
+	if profile != nil && profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
+		return profile.Spec.RuntimeRef.Name // DEPRECATED, one release
+	}
+	return s.defaultRuntimeName(ctx)
+}
+
+func (s *Server) defaultRuntimeName(ctx context.Context) string {
 	var rt agentopsv1alpha1.AgentRuntime
 	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: "default"}, &rt); err == nil {
 		return rt.Name
@@ -607,11 +637,9 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pipeline := s.pipelineName(ctx, &conv)
-	var doneProfile agentopsv1alpha1.AgentProfile
-	_ = s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &doneProfile)
 	runEvent := activity.Event{
 		Kind:     activity.KindRunCompleted,
-		From:     activity.Node(activity.NodeRuntime, s.runtimeName(ctx, &doneProfile)),
+		From:     activity.Node(activity.NodeRuntime, s.runtimeName(ctx, &conv)),
 		To:       s.originNode(pipeline, conv.Name),
 		Pipeline: pipeline, Conversation: conv.Name, RunID: d.RunID,
 		LatencyMs: latencyMs, Detail: d.Status,

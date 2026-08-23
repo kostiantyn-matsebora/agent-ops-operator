@@ -11,7 +11,7 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | Kind | You write it | Fields |
 |---|---|---|
 | [AgentProfile](#agentprofile) | yes | 40 |
-| [Pipeline](#pipeline) | yes | 14 |
+| [Pipeline](#pipeline) | yes | 17 |
 | [MCPToolset](#mcptoolset) | yes | 1 |
 | [MCPConfig](#mcpconfig) | yes | 5 |
 | [SignalSource](#signalsource) | yes | 8 |
@@ -19,7 +19,7 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | [Channel](#channel) | yes | 4 |
 | [ChannelAdapter](#channeladapter) | yes | 16 |
 | [AgentRuntime](#agentruntime) | yes | 54 |
-| [Conversation](#conversation) | no — the operator does | 35 |
+| [Conversation](#conversation) | no — the operator does | 38 |
 | [ConversationInput](#conversationinput) | no — the operator does | 5 |
 
 ## AgentProfile
@@ -67,7 +67,7 @@ AgentProfileSpec is an addressable agent IDENTITY: repository, agent role, promp
 | `resources.claims[].request` | `string` |  | Request is the name chosen for a request in the referenced claim. If empty, everything from the claim is made available, otherwise only the result of this request. |
 | `resources.limits` | `map[string]object` |  | Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
 | `resources.requests` | `map[string]object` |  | Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
-| `runtimeRef` | `object` |  | RuntimeRef selects the AgentRuntime (execution backend) for this profile. Falls back to the AgentRuntime named "default", then to the manager's bootstrap configuration. |
+| `runtimeRef` | `object` |  | RuntimeRef selects the AgentRuntime (execution backend) for this profile. Deprecated: moved to `Pipeline.spec.runtimeRef` and REMOVED IN THE NEXT CHART MAJOR. It is read for one release only, below the Pipeline's own field, so a profile applied before the upgrade keeps dispatching to the runtime it named — the same posture the retired `sessionId` got. It moved because an AgentRuntime carries the ServiceAccount an agent runs as, so a profile choosing one chose the agent's power in the cluster. That made profile-edit rights into service-account-choice rights, while a profile is prompts and a repo ref and a Pipeline already grants tools. Whoever is trusted to grant capabilities is more qualified to choose an execution identity, not less. An install setting this moves the ref to every Pipeline routing to this profile; setting both is harmless, and the Pipeline wins. |
 | `runtimeRef.name` | `string` | **yes** | Name of the referenced object. |
 | `systemPrompt` | `string` |  | SystemPrompt is INLINE role text appended to the agent's system prompt, for profiles with no repository — where `agent` can name no `.claude/agents/<agent>.md` because nothing is checked out. It is identity, not capability: it shapes how the agent behaves, never what it may call (that is the Pipeline's toolsets, always). Appended, never replacing: the runtime keeps its own system prompt and adds this. A profile WITH a repository should carry its role in the definition file instead, which is version-controlled and can declare tools; this exists so a repo-less profile is not silently personality-free. |
 
@@ -88,7 +88,7 @@ Written by the operator. Read it, never set it.
 
 ## Pipeline
 
-PipelineSpec declares the wiring between the pipeline elements: every referenced signal source's signals become conversations bound to ALL referenced channels with the pipeline's profile, and conversations started from any referenced channel are bound to all of them (full mirroring). Runtime selection stays profile.runtimeRef — the Pipeline binds no runtime, credentials, or config.
+PipelineSpec declares the wiring between the pipeline elements: every referenced signal source's signals become conversations bound to ALL referenced channels with the pipeline's profile, and conversations started from any referenced channel are bound to all of them (full mirroring). It also selects WHAT EXECUTES those conversations and UNDER WHOSE IDENTITY — `runtimeRef` and `serviceAccountName`. Capabilities and execution identity are the same decision: one says which tools may be called, the other with whose credentials, and split across two objects no single object states an agent's power. The Pipeline still carries no credentials and no server or tool definitions.
 
 ### spec
 
@@ -102,6 +102,9 @@ PipelineSpec declares the wiring between the pipeline elements: every referenced
 | `mcpConfigs.refs[].name` | `string` | **yes** | Name of the referenced object. |
 | `profileRef` | `object` | **yes** | ProfileRef: the agent answering the conversations this pipeline originates — those from the signal sources it WATCHES, and those a chat command addresses to it by name. Channels supply no default. |
 | `profileRef.name` | `string` | **yes** | Name of the referenced object. |
+| `runtimeRef` | `object` |  | RuntimeRef selects the AgentRuntime executing this wiring's conversations. Absent, the AgentRuntime named "default" — the one the parent chart renders — then the manager's bootstrap configuration. IT REPLACES `AgentProfile.spec.runtimeRef`, which is deprecated. An AgentRuntime carries the ServiceAccount an agent runs as, so selecting one is selecting the agent's power in the cluster — and that is a wiring decision, made beside the tools and servers the same route grants, not an attribute of the prompts an agent is written with. The CONVERSATION snapshots the resolved name at creation, so editing this field re-wires only conversations created afterwards. The referenced CR's CONTENT — image, idle TTL, volumes — is re-read at every pod build, so fixing a runtime heals conversations already running. |
+| `runtimeRef.name` | `string` | **yes** | Name of the referenced object. |
+| `serviceAccountName` | `string` |  | ServiceAccountName is the identity the runtime executes under, OVERRIDING the AgentRuntime's own `serviceAccountName`. Absent, the runtime's — which the chart still defaults to `agentops-runtime`. This is what makes one runtime image serve several trust levels: an observing route and an acting route differ in their account, not in their image, so the second no longer needs a cloned AgentRuntime to carry it. NAMING IS NOT CREATING. No reconciler creates a ServiceAccount, and nothing here validates that one exists or that its RBAC is sufficient: who may create an account and what it is bound to stays an EXTERNAL grant, the same posture adapters already have. A name nothing backs fails at pod admission, naming the account. |
 | `signalSourceRefs` | `[]object` |  | SignalSourceRefs: the sources feeding this pipeline. A source is SHAREABLE exactly as a channel is — any number of pipelines may list one, and a signal admitted there opens a conversation on EVERY Ready pipeline listing it, each with its own profile and capabilities. Listing a source means "I watch this", not "I own this". |
 | `signalSourceRefs[].name` | `string` | **yes** | Name of the referenced object. |
 | `toolsets` | `object` |  | Toolsets binds MCPToolset CRs contributing to the allowlist of this wiring's conversations, plus the mode composing them with what the AGENT'S OWN DEFINITION declares (merge unions, overwrite replaces). |
@@ -416,6 +419,9 @@ ConversationSpec pins a conversation to its chat surfaces and an agent profile, 
 | `pipelineRef.name` | `string` | **yes** | Name of the referenced object. |
 | `profileRef` | `object` | **yes** | ObjectRef references another object by name (same namespace). |
 | `profileRef.name` | `string` | **yes** | Name of the referenced object. |
+| `runtimeRef` | `object` |  | RuntimeRef / ServiceAccountName are the originating Pipeline's execution wiring, snapshotted at creation exactly as Toolsets and MCPConfigs are. THESE ARE THE RESOLVED NAMES, NOT THE PIPELINE'S RAW FIELDS. A conversation created while its Pipeline named no runtime keeps the default it actually ran with, rather than picking up a later edit to that Pipeline. THE IDENTITY SNAPSHOT IS THE SHARPEST CASE OF THE MATERIALIZATION RULE. Without it, editing a Pipeline changes what service account an INFLIGHT conversation's next pod runs as — not a re-wiring inconvenience but a privilege change applied to work already in progress. The REF is frozen and the CONTENT is not: the AgentRuntime's image, idle TTL and volumes are re-read at every pod build, so correcting a runtime reaches conversations already running. Absent on conversations predating these fields. Nothing backfills them — resolution falls through to the Pipeline, the deprecated profile ref and the `default` runtime, exactly as it did before. |
+| `runtimeRef.name` | `string` | **yes** | Name of the referenced object. |
+| `serviceAccountName` | `string` |  |  |
 | `signal` | `object` |  | Signal is what the ORIGINATING SIGNAL was, for attribution. PROVENANCE, exactly like PipelineRef: written once at creation, read only for display, and nothing is ever resolved through it. It is on the CONVERSATION because a conversation has exactly one originating signal — reuse is scoped to one signature and one pipeline, so every signal that lands here came from the same source with the same grouping labels. IT USED TO LIVE ONLY ON THINGS BUILT TO BE PRUNED. The source was on `spec.inputs[].origin.name`, which `pruneProcessed` empties, and the labels were on the `ConversationInput`, which is DELETED with the queue entry. So a finished conversation kept its answer, kept the question, and could not say what started it — a viewer showed the phase, the profile and the pipeline of an alert and not the source that fired it or a single one of its labels. The same loss `status.runs[].inputs[]` was added to fix, two fields over. Absent on conversations created before this field, and on anything a channel started. Render it as absent rather than guessing. |
 | `signal.labels` | `map[string]string` |  | Labels are the signal's grouping labels, as the adapter sent them. BOUNDED at MaxSignalLabels. A Conversation is long-lived where the ConversationInput that used to hold these was not, and an adapter's label set is its own business — an unbounded map on a durable object is an etcd cost nobody chose. |
 | `signal.sourceRef` | `object` |  | SourceRef is the SignalSource this conversation came from. |

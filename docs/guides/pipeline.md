@@ -50,7 +50,7 @@ first.
 
 ## The overall shape
 
-A Pipeline is four sets of references and one composition rule:
+A Pipeline is five sets of references and one composition rule:
 
 1. **`profileRef`** — who answers. The only **required** field.
 2. **`signalSourceRefs`** — the sources it listens on. Omit it and the Pipeline
@@ -59,12 +59,58 @@ A Pipeline is four sets of references and one composition rule:
    all of them.
 4. **`toolsets` and `mcpConfigs`** — what it may touch, plus the `mode` that
    composes them against the agent's own definition.
+5. **`runtimeRef` and `serviceAccountName`** — what executes it, and under whose
+   identity. Both optional.
 
 Nothing else carries wiring. A `SignalSource` has no profile and no channel. A
 `Channel` has no default profile. That concentration is the point.
 
 **Ready validates every reference.** Until the condition is `True` the Pipeline
 claims nothing, and its message names the object it could not find.
+
+## What runs it, and as whom
+
+**A Pipeline also decides what executes its conversations.** Two optional
+fields, and omitting both is the ordinary case.
+
+| Field | Selects | Omit it and |
+|---|---|---|
+| `runtimeRef` | the `AgentRuntime` | the one named `default` runs it |
+| `serviceAccountName` | the identity that runtime executes under | **it can do nothing in the cluster** |
+
+**This is the same decision as `toolsets`.** One says which tools may be called.
+The other says with whose credentials. Both are here so that ONE object states
+what an agent may do.
+
+{: .ao-callout}
+> **Silence means no power.** A route that names no account runs as an identity
+> bound to nothing. It reaches only what its toolsets and MCP servers give it.
+> Cluster power is something you opt into, by name.
+
+```yaml
+spec:
+  profileRef:
+    name: k8s-engineer
+  toolsets:
+    refs:
+      - name: agentops-observe
+      - name: k8s-admin
+  serviceAccountName: agentops-runtime-acting
+```
+
+**Two routes can share one runtime image and differ only in their account** —
+that is what the field is for. The difference is the credentials, not the
+engine.
+
+**Naming an account does not create one.** The chart renders the ones
+`rbacMode` produces, each bundle renders the accounts its own routes need, and
+`rbac.runtime.serviceAccounts` is where you declare your own. A name nothing
+backs fails when the pod is created, saying which account.
+
+**Re-wiring never moves a conversation already running.** The conversation
+records what it was created with, so changing this field affects only
+conversations started afterwards. Correcting the `AgentRuntime` itself still
+reaches the ones running.
 
 ## See what you have to wire
 
@@ -85,7 +131,7 @@ That is enough to build a route with no new objects at all.
 
 ## Write the Pipeline
 
-<!-- generated: template kind=Pipeline name=my-route fields=signalSourceRefs,channelRefs,toolsets,toolsets.mode,mcpConfigs comments=off -->
+<!-- generated: template kind=Pipeline name=my-route fields=signalSourceRefs,channelRefs,toolsets,toolsets.mode,mcpConfigs,runtimeRef,serviceAccountName comments=off -->
 ```yaml
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
@@ -105,6 +151,9 @@ spec:
   mcpConfigs:
     refs:
     - name: <name>
+  runtimeRef:
+    name: <name>
+  serviceAccountName: <serviceAccountName>
 ```
 <!-- /generated -->
 
@@ -196,6 +245,13 @@ spec:
   icon: "aops:observe"
   profileRef:
     name: k8s-engineer
+  # UNDER WHOSE IDENTITY, overriding the runtime's own. The same decision as the
+  # toolsets below — which tools, and with whose credentials — which is why both
+  # are on this one object.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. This bundle renders no ServiceAccount.
+  serviceAccountName: agentops-k8s-observe
   # Wiring is pipeline-only: without this claim the source reports Wired=False
   # and DROPS every event it admits.
   signalSourceRefs:

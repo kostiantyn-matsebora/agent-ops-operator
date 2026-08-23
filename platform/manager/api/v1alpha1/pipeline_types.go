@@ -8,8 +8,13 @@ import (
 // referenced signal source's signals become conversations bound to ALL
 // referenced channels with the pipeline's profile, and conversations started
 // from any referenced channel are bound to all of them (full mirroring).
-// Runtime selection stays profile.runtimeRef — the Pipeline binds no runtime,
-// credentials, or config.
+//
+// It also selects WHAT EXECUTES those conversations and UNDER WHOSE IDENTITY —
+// `runtimeRef` and `serviceAccountName`. Capabilities and execution identity
+// are the same decision: one says which tools may be called, the other with
+// whose credentials, and split across two objects no single object states an
+// agent's power. The Pipeline still carries no credentials and no server or
+// tool definitions.
 type PipelineSpec struct {
 	// Icon is how this Pipeline is RECOGNISED in a list of them. Optional, and
 	// purely how the name is presented.
@@ -56,6 +61,38 @@ type PipelineSpec struct {
 	// originates — those from the signal sources it WATCHES, and those a chat
 	// command addresses to it by name. Channels supply no default.
 	ProfileRef ObjectRef `json:"profileRef"`
+	// RuntimeRef selects the AgentRuntime executing this wiring's
+	// conversations. Absent, the AgentRuntime named "default" — the one the
+	// parent chart renders — then the manager's bootstrap configuration.
+	//
+	// IT REPLACES `AgentProfile.spec.runtimeRef`, which is deprecated. An
+	// AgentRuntime carries the ServiceAccount an agent runs as, so selecting
+	// one is selecting the agent's power in the cluster — and that is a wiring
+	// decision, made beside the tools and servers the same route grants, not an
+	// attribute of the prompts an agent is written with.
+	//
+	// The CONVERSATION snapshots the resolved name at creation, so editing this
+	// field re-wires only conversations created afterwards. The referenced CR's
+	// CONTENT — image, idle TTL, volumes — is re-read at every pod build, so
+	// fixing a runtime heals conversations already running.
+	// +optional
+	RuntimeRef *ObjectRef `json:"runtimeRef,omitempty"`
+	// ServiceAccountName is the identity the runtime executes under,
+	// OVERRIDING the AgentRuntime's own `serviceAccountName`. Absent, the
+	// runtime's — which the chart still defaults to `agentops-runtime`.
+	//
+	// This is what makes one runtime image serve several trust levels: an
+	// observing route and an acting route differ in their account, not in their
+	// image, so the second no longer needs a cloned AgentRuntime to carry it.
+	//
+	// NAMING IS NOT CREATING. No reconciler creates a ServiceAccount, and
+	// nothing here validates that one exists or that its RBAC is sufficient:
+	// who may create an account and what it is bound to stays an EXTERNAL
+	// grant, the same posture adapters already have. A name nothing backs fails
+	// at pod admission, naming the account.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 	// Toolsets binds MCPToolset CRs contributing to the allowlist of this
 	// wiring's conversations, plus the mode composing them with what the
 	// AGENT'S OWN DEFINITION declares (merge unions, overwrite replaces).

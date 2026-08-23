@@ -31,7 +31,7 @@ Eleven kinds, one line each; the full reference is [docs/concepts.md](docs/conce
 
 | Kind | What it defines |
 |---|---|
-| [`AgentProfile`](docs/concepts.md#agentprofile) | Who the agent is — repo, role file, credentials, limits. Carries no capabilities. |
+| [`AgentProfile`](docs/concepts.md#agentprofile) | Who the agent is — repo, role file, credentials, limits. Carries no capabilities and selects no runtime. |
 | [`AgentRuntime`](docs/concepts.md#agentruntime) | What executes it — image, idle TTL, home volume, service account. |
 | [`Conversation`](docs/concepts.md#conversation) | One incident or task: chat topic + agent session + a serial queue of inputs. |
 | [`ConversationInput`](docs/concepts.md#conversationinput) | Out-of-line payloads, so Conversation objects stay small in etcd. |
@@ -39,7 +39,7 @@ Eleven kinds, one line each; the full reference is [docs/concepts.md](docs/conce
 | [`ChannelAdapter`](docs/concepts.md#channeladapter) | A channel implementation, plugged in as a CR whose name is the type key. |
 | [`SignalSource`](docs/concepts.md#signalsource) | An ingest lane. Inert until a Pipeline claims it. |
 | [`SignalAdapter`](docs/concepts.md#signaladapter) | A signal implementation — the inbound-only sibling of ChannelAdapter. |
-| [`Pipeline`](docs/concepts.md#pipeline) | **The wiring**: sources × channels + profile + capabilities. The only place capabilities are declared. |
+| [`Pipeline`](docs/concepts.md#pipeline) | **The wiring**: sources × channels + profile + capabilities + what executes it and under whose identity. The only place any of them is declared. |
 | [`MCPConfig`](docs/concepts.md#mcpconfig) | Reusable MCP server sets, bound per wiring. |
 | [`MCPToolset`](docs/concepts.md#mcptoolset) | A named list of tool patterns — the allowlist half of a route's tools. |
 
@@ -99,7 +99,7 @@ RBAC it resolves — nothing demo-specific exists.
 > conversation cap as the bounds.
 
 **The chart owns the substrate; bundles contribute domain** — `runtime:` renders
-the one `AgentRuntime` every conversation executes on, so an install with no
+the `AgentRuntime` a Pipeline naming none executes on, so an install with no
 bundle still works.
 [Full reference](docs/concepts.md#the-substrate-runtime-and-globalagentopsruntime).
 For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).

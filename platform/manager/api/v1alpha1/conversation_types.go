@@ -295,6 +295,31 @@ type ConversationSpec struct {
 	Toolsets *ToolsetBinding `json:"toolsets,omitempty"`
 	// +optional
 	MCPConfigs *ToolingBinding `json:"mcpConfigs,omitempty"`
+	// RuntimeRef / ServiceAccountName are the originating Pipeline's execution
+	// wiring, snapshotted at creation exactly as Toolsets and MCPConfigs are.
+	//
+	// THESE ARE THE RESOLVED NAMES, NOT THE PIPELINE'S RAW FIELDS. A
+	// conversation created while its Pipeline named no runtime keeps the
+	// default it actually ran with, rather than picking up a later edit to that
+	// Pipeline.
+	//
+	// THE IDENTITY SNAPSHOT IS THE SHARPEST CASE OF THE MATERIALIZATION RULE.
+	// Without it, editing a Pipeline changes what service account an INFLIGHT
+	// conversation's next pod runs as — not a re-wiring inconvenience but a
+	// privilege change applied to work already in progress.
+	//
+	// The REF is frozen and the CONTENT is not: the AgentRuntime's image, idle
+	// TTL and volumes are re-read at every pod build, so correcting a runtime
+	// reaches conversations already running.
+	//
+	// Absent on conversations predating these fields. Nothing backfills them —
+	// resolution falls through to the Pipeline, the deprecated profile ref and
+	// the `default` runtime, exactly as it did before.
+	// +optional
+	RuntimeRef *ObjectRef `json:"runtimeRef,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 	// +optional
 	Inputs []InputItem `json:"inputs,omitempty"`
 }

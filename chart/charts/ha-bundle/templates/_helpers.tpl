@@ -242,3 +242,8 @@ that starts, answers, and refuses every repair. */ -}}
 {{- define "ha-bundle.adminMcpSecret" -}}
 {{- or .Values.adminMcpServer.credentialsSecret (include "ha-bundle.operatorSecret" .) | default "" -}}
 {{- end -}}
+
+{{- /* The runtime identity for one of this bundle's routes, named after it. */ -}}
+{{- define "ha-bundle.routeServiceAccount" -}}
+{{- printf "agentops-%s" .route -}}
+{{- end -}}

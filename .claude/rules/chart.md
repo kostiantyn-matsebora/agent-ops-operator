@@ -59,7 +59,14 @@ The `mcp` component:
   — so `mcp.enabled: false` leaves an agent that cannot see the cluster.
 - **`readOnly` / `rbac.mode` are null and DERIVE from
   `global.agentops.runtime.rbacMode`.** `full` gives a write-capable server
-  under a full SA, anything else a read-only server under `readonly`.
+  under the chart's enumerated acting grant, anything else a read-only server.
+- **It bound `cluster-admin` under `full` and the built-in `view` under
+  `readonly`, and does NEITHER now.** An agent reaches the cluster THROUGH this
+  server, so both were the same hole the runtime account's was — fixing one wall
+  and not the other moves it one indirection along. And `view` is cluster-wide,
+  so a "read-only" server could read the Conversations it was serving.
+- **It carries the SAME rules as the runtime account**, from the same helpers,
+  so the two walls cannot disagree about what `full` means.
 - **Explicit wins.** `readOnly: true` under `full` is a strictly observing
   agent: broad grants on the runtime SA that nothing can exercise.
 
@@ -154,7 +161,9 @@ Manager Deployment, RBAC and Service, plus CRDs as gated templates.
   `default`, plus its credential Secret when `runtime.credentialsSecret.token`
   is set, with `home.pvcRef` WIRED from the parent's own `persistence` and never
   copied.
-- **`templates/runtime-rbac.yaml`** renders the mode-driven bindings.
+- **`templates/runtime-rbac.yaml`** renders the mode's NAMED account and every
+  entry of `rbac.runtime.serviceAccounts`, one ClusterRole each. It binds
+  NOTHING to the floor account and uses no built-in role — see `invariants.md`.
 - **`templates/_helpers.tpl` resolves BOTH substrate facts from `.Values.global`
   alone**, so a subchart calling them cannot disagree with the parent.
 

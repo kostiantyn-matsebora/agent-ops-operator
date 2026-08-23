@@ -610,7 +610,8 @@ wherever a client cannot present a menu.
 ## Trust boundary
 
 Requirements the console meets make it a control plane, not a viewer: it can
-instruct an agent that, in a `rbacMode: full` install, holds `cluster-admin`.
+instruct an agent that, in a `rbacMode: full` install, may delete pods, scale
+workloads and cordon nodes.
 
 - **The token is the boundary**, generated per install. Whoever holds it can read
   every CR the console's ServiceAccount can read — including conversation

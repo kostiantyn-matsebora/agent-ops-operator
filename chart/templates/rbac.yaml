@@ -10,10 +10,15 @@ metadata:
   name: {{ .Values.serviceAccounts.manager }}
   namespace: {{ .Release.Namespace }}
 ---
-# Agent runtime pods run under this SA — exactly one per release, and the ONLY
-# runtime identity: no bundle creates a second. Its bindings come from
-# global.agentops.runtime.rbacMode plus rbac.runtime (runtime-rbac.yaml); the
-# mode is empty by default, so the chart still grants it NOTHING unconfigured.
+# THE FLOOR runtime identity — what a Pipeline naming no `serviceAccountName`
+# runs as, and it holds NO RBAC IN ANY MODE.
+#
+# NOTHING BINDS TO THIS ACCOUNT, EVER. `runtime-rbac.yaml` renders the mode's
+# grants against a separate, named account. That separation is the point: a
+# route that says nothing about its identity gets no cluster power, rather than
+# inheriting whatever the release granted. Silence meaning maximum is the defect
+# this replaced.
+#
 # Rendered even with runtime.enabled=false: the manager defaults every runtime
 # pod onto it, whoever wrote the AgentRuntime.
 apiVersion: v1
@@ -21,6 +26,34 @@ kind: ServiceAccount
 metadata:
   name: {{ include "agentops.runtimeServiceAccount" . }}
   namespace: {{ .Release.Namespace }}
+{{- with (include "agentops.runtimeModeServiceAccount" .) }}
+---
+# THE MODE'S ACCOUNT. `global.agentops.runtime.rbacMode` renders this and binds
+# its posture to it — never to the floor above, because a route that names
+# nothing must hold nothing. A route opts in by naming this on its Pipeline:
+#
+#   pipelines:
+#     - name: k8s-ops
+#       serviceAccountName: {{ . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ . }}
+  namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- range $i, $extra := (.Values.rbac.runtime.serviceAccounts | default list) }}
+{{- if $extra.create | default true }}
+---
+# An ADDITIONAL runtime identity, for a Pipeline to name. It is what makes a
+# second trust level expressible without cloning the AgentRuntime that used to
+# be the only place an account could live.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $extra.name }}
+  namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

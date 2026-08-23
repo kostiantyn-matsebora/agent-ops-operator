@@ -120,9 +120,105 @@ A Pipeline is reached two ways and no others:
   not a defect to warn about.
 - **Every Pipeline the CHART ships must therefore declare its own tools.**
   Forgetting that is what made every signal-driven conversation toolless once.
-- **Consequence: runtimes are generic** — one `AgentRuntime` per vendor × trust
-  level. The SA stays runtime-level on purpose: a Pipeline choosing an SA would
-  make pipeline-edit rights a privilege escalation.
+- **Consequence: runtimes are generic** — one `AgentRuntime` per VENDOR. Trust
+  level is no longer part of that product; see below.
+
+#### EXECUTION AND IDENTITY ARE WIRING TOO
+
+Two more optional fields, and they complete the object:
+
+| Field | Selects | Absent |
+|---|---|---|
+| `spec.runtimeRef` | the `AgentRuntime` | the one named `default` |
+| `spec.serviceAccountName` | the identity it executes under, OVERRIDING the runtime's | the FLOOR account, bound to NOTHING |
+
+**SILENCE MEANS NO POWER.** A route that names no account can do nothing in the
+cluster. It shipped the other way once — the mode bound to the account every
+unnamed route inherited — and three of four routes in the reference install held
+pod-delete and node-patch because nobody typed a field, two of them routes that
+reach no Kubernetes API at all. Shrinking the ROLE fixed the blast radius and
+left the MODEL inverted.
+
+**CAPABILITIES AND EXECUTION IDENTITY ARE THE SAME DECISION.** One says which
+tools may be called, the other with whose credentials. Split across two objects,
+no single object states an agent's power and no single reviewer can approve it.
+
+**IT USED TO SAY "the SA stays runtime-level on purpose: a Pipeline choosing an
+SA would make pipeline-edit rights a privilege escalation." THAT FAILED THE
+SYMMETRY TEST**, and the history is kept because the argument is seductive:
+
+- **It did not REMOVE the escalation, it moved it to the object you trust
+  LESS.** `AgentProfile.spec.runtimeRef` selected an `AgentRuntime`, and an
+  `AgentRuntime` carries the SA — so profile-edit rights were already
+  SA-choice rights.
+- **A profile is prompts, a repo ref and limits.** A Pipeline already grants
+  tools and MCP servers. **Whoever is trusted to grant tools is more qualified
+  to choose an execution identity, not less.**
+
+**PRECEDENCE, and no other order:**
+
+| | Chain |
+|---|---|
+| runtime | `conversation.spec.runtimeRef` → `profile.spec.runtimeRef` (DEPRECATED) → `AgentRuntime/default` → bootstrap |
+| identity | `conversation.spec.serviceAccountName` → `runtime.spec.serviceAccountName` → THE FLOOR |
+
+- **THE PIPELINE IS IN NEITHER CHAIN.** Its fields are RESOLVED INTO the
+  conversation at creation, and nothing reads a Pipeline at dispatch time —
+  which is what stops an edit moving an INFLIGHT conversation onto different
+  cluster power. See `terminology.md` for what the snapshot freezes.
+- **`AgentProfile.spec.runtimeRef` is DEPRECATED**, dual-read for ONE release,
+  and sits BELOW the Pipeline so adopting the new model needs no profile edit.
+- **NAMING AN SA IS NOT CREATING ONE.** No reconciler makes one and `Ready`
+  does not check it — that would be an API read the manager holds no RBAC for,
+  granted to produce a warning. The pod fails at admission naming the account.
+- **A BUNDLE RENDERS THE ACCOUNTS ITS OWN ROUTES NEED.** It is the only scope
+  that knows what its routes do. `k8s-bundle` renders one per route,
+  `ha-bundle` two with NO Kubernetes RBAC (neither route touches that API),
+  `telegram-bundle` none because it ships no Pipeline. The SUBSTRATE stays the
+  parent's — runtime, credential, home volume, floor account.
+  - **"No subchart renders a runtime SA" is REVERSED, not weakened.** That rule
+    guarded against a bundle rendering the substrate, including an account
+    sized for everything. An account sized DOWN to one route is the opposite.
+
+**NO BINDING USES A BUILT-IN ROLE.** Not `cluster-admin` under `full`, not
+`view` under `readonly`. Every grant is a role the chart writes out
+(`agentops.runtimeReadRules` / `runtimeWriteRules`
+in `chart/templates/_helpers.tpl`), so an operator can read it without resolving
+an aggregated role.
+
+**GRANTS ARE CLUSTER-WIDE, AND WHAT MAKES THAT SAFE IS OMISSION.**
+`agentops.dev` is NEVER granted in any rule, so Conversations and Pipelines are
+unreadable everywhere. Nor is `secrets`, nor `clusterroles`.
+
+- **NAMESPACED ROLES WERE BUILT AND REVERTED.** RBAC cannot say "everywhere
+  except", so bounding an agent meant an allow-list: one binding per namespace
+  per account — 224 objects on a 28-namespace cluster — and a new namespace
+  invisible to the agent until someone edited values. The maintenance was worse
+  than the exposure. Re-adding it needs a better argument than the first one.
+- **THE COST, NAMED:** under `full` an agent can restart or delete pods in the
+  operator's own namespace, the manager and adapters included.
+
+**`allowPodExecution` IS THE SECRETS BOUNDARY, AND IT DEFAULTS OFF.**
+
+- **No `secrets` verb is NOT the same as cannot read Secrets.** The KUBELET
+  resolves a Secret when it builds a pod, so an agent that can create a pod
+  mounting one — or exec into one that has one — reads it having never asked the
+  API server. `secrets: get` is never evaluated. PROVEN on a live cluster
+  against this role: pod created, log read, value returned, all seven verbs
+  denied.
+- **It gates every write that PRODUCES OR ENTERS a pod**, not `pods: create`
+  alone — a Job, a Deployment, a patch to a pod template are the same path.
+  Gating one verb would be a flag that reads as a boundary and is not one.
+- **`--allowedTools` IS NOT A CONTROL HERE.** An allowlist configures a
+  COOPERATING agent; a ServiceAccount binding is what an uncooperative one with
+  a shell actually has. Same argument `platform/egress-proxy/` makes for
+  network reach.
+- **BOTH WALLS MOVE TOGETHER.** k8s-bundle's MCP server is the other wall on the
+  same path — an agent reaches the cluster THROUGH it — so it carries the same
+  split from the same values. Fixing one leaves the hole one indirection along.
+- **The manager keeps the stricter rule already**, holding no `secrets` verbs at
+  all. The component running untrusted model output must not out-rank the one
+  orchestrating it.
 
 ### `MCPToolset`
 

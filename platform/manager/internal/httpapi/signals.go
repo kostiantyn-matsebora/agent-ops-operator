@@ -29,6 +29,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
 // NormalizedSignal is one signal in the contract's normalized shape.
@@ -635,11 +636,18 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			conv.GenerateName = "task-"
 		}
 		conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
+		// The execution wiring is materialized beside the tooling, through the
+		// ONE helper both origination paths call. Freezing it is what stops a
+		// later Pipeline edit changing the identity an inflight conversation's
+		// next pod runs as.
+		runtimeRef, serviceAccount := runtimepod.SnapshotFor(ctx, s.Reader, s.Namespace, pipeline)
 		conv.Spec = agentopsv1alpha1.ConversationSpec{
-			ProfileRef:  pipeline.Spec.ProfileRef,
-			ChannelRefs: append([]agentopsv1alpha1.ObjectRef{}, pipeline.Spec.ChannelRefs...),
-			Toolsets:    pipeline.Spec.Toolsets.DeepCopy(),
-			MCPConfigs:  pipeline.Spec.MCPConfigs.DeepCopy(),
+			ProfileRef:         pipeline.Spec.ProfileRef,
+			ChannelRefs:        append([]agentopsv1alpha1.ObjectRef{}, pipeline.Spec.ChannelRefs...),
+			Toolsets:           pipeline.Spec.Toolsets.DeepCopy(),
+			MCPConfigs:         pipeline.Spec.MCPConfigs.DeepCopy(),
+			RuntimeRef:         runtimeRef,
+			ServiceAccountName: serviceAccount,
 			// Provenance, written once here. Everything the conversation RUNS
 			// with is materialized above it; this names where that came from.
 			PipelineRef: &agentopsv1alpha1.ObjectRef{Name: pipeline.Name},
