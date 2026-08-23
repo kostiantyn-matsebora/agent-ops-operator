@@ -1,33 +1,159 @@
-# Agent Ops Operator
+<div align="center">
 
-A Kubernetes operator for **agents you can address**: monitoring signals and
-direct chat tasks become **Conversations** — each pinned to its own chat topic,
-executed by an isolated per-conversation agent pod, resumable across restarts,
-approvable from your phone.
+<img src="docs/assets/img/logos/agent-ops.svg" width="72" alt="">
 
-> Working name. API group `agentops.dev/v1alpha1` (provisional pre-1.0).
+# agent-ops
 
+**A Kubernetes operator for agents you can address.**
+
+Something happens — an alert fires, a pod crashloops, someone asks. A
+conversation opens, an agent works in its own pod, and answers in a thread you
+can reply to.
+
+<img src="docs/assets/img/claim-thinks.svg" width="18" alt=""> **Automation that thinks** &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/kubernetes.svg" width="18" alt=""> **Kubernetes-native** &nbsp;·&nbsp;
+<img src="docs/assets/img/claim-gitops.svg" width="18" alt=""> **GitOps-ready** &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/claude.svg" width="18" alt=""> **Runs Claude Code**
+
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-agent--ops-informational)](https://kostiantyn-matsebora.github.io/agent-ops-operator/)
+[![API](https://img.shields.io/badge/API-v1alpha1-blueviolet)](docs/cr-reference.md)
+
+### **→ [The documentation site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) is the main source of information.**
+
+This page is the short version of it.
+
+</div>
+
+```mermaid
+flowchart TB
+  subgraph S ["SOMETHING HAPPENS"]
+    direction LR
+    AL["🔔 an alert fires"]
+    EV["📦 a pod crashloops"]
+    CR["🕑 a schedule comes due"]
+    AS["💬 someone asks"]
+  end
+
+  P{{"Pipeline — the wiring<br/>what starts it<br/>what it should do<br/>what it may touch<br/>where it answers"}}
+  C["Conversation<br/>one per incident"]
+  W["its own agent pod<br/>isolated · serial · capped"]
+  O["your channels<br/>Telegram · the console"]
+
+  AL --> P
+  EV --> P
+  CR --> P
+  AS --> P
+  P ==> C
+  C ==>|"work"| W
+  W -.->|"investigates · explains · acts only where granted"| C
+  C ==> O
+  O -.->|"you reply, it continues"| C
+
+  classDef src  fill:#5c656d,stroke:#3f464c,stroke-width:1px,color:#ffffff
+  classDef hero fill:#0d7d76,stroke:#0a615c,stroke-width:2px,color:#ffffff
+  classDef run  fill:#6b4bd6,stroke:#4f35a8,stroke-width:1px,color:#ffffff
+  class AL,EV,CR,AS src
+  class P,O hero
+  class C,W run
+  style S fill:none,stroke:#9aa4ab,stroke-width:1px,stroke-dasharray:4 4
 ```
-  Alertmanager ─┐                                        ┌─▶ Telegram topic per
-  cron          ├─▶ SignalSource ─┐                      │   conversation
-  k8s events ───┤                 │                      │   (reply = continue,
-  kind: task ───┘                 ▼                      │    approve = act)
-  from a script              Conversation CR ◀───────────┤
-  /<agent> <task> ──▶       (queue of inputs)            │
-  in chat                         │                      │
-                                  ▼                      │
-                          manager (this operator)        │
-                          dispatches work units          │
-                                  │ long-poll /work      │
-                                  ▼                      │
-                       agent runtime pod (per convo) ────┘
-                       runs the agent CLI, streams
-                       transcript to pod logs
+
+<sup>The whole story at page scale, as one drawing: [light](docs/assets/img/agent-ops-light.svg) ·
+[dark](docs/assets/img/agent-ops-dark.svg) — or [watch it happen](https://kostiantyn-matsebora.github.io/agent-ops-operator/#tour).</sup>
+
+**Works with**
+<img src="docs/assets/img/logos/kubernetes.svg" width="18" alt=""> Kubernetes &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/prometheus.svg" width="18" alt=""> Prometheus &nbsp;·&nbsp;
+cron schedules &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/home-assistant.svg" width="18" alt=""> Home Assistant &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/telegram.svg" width="18" alt=""> Telegram &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/agent-ops.svg" width="18" alt=""> the console &nbsp;·&nbsp;
+any MCP server &nbsp;·&nbsp; your own
+
+## How it works
+
+1. **Something happens.** An alert fires, a pod crashloops, a schedule comes due,
+   a room gets too warm, someone asks a question in chat.
+2. **One Helm install puts an agent in the path** — your cluster, your credentials.
+3. **You declare the route. One `Pipeline`** — what starts it, what it should
+   do, what it may touch, which servers those tools come from, and where you
+   talk to it.
+4. **Then it runs.** One conversation per incident, in its own isolated pod,
+   strictly serial and capped. A restart loses nothing.
+5. **Every part of it is a Kubernetes object.** `kubectl get conversations`.
+
+## What you write
+
+One `Pipeline`. It is the whole route, and it is the only place wiring lives.
+
+```yaml
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: k8s-ops
+spec:
+  signalSourceRefs:
+    - name: cluster-events      # what starts it
+  profileRef:
+    name: k8s-engineer          # what it should do
+  toolsets:
+    refs:
+      - name: agentops-observe  # what it may touch
+  mcpConfigs:
+    refs:
+      - name: k8s-api           # where those tools live
+  channelRefs:
+    - name: telegram            # where you talk to it
 ```
 
-## Concepts (CRDs)
+## When it runs
 
-Eleven kinds, one line each; the full reference is [docs/concepts.md](docs/concepts.md).
+- **Investigates** — queries the system, reads state.
+- **Explains** — in a thread you can reply to.
+- **Acts** — only where your wiring granted it.
+- **Asks** — when it needs you, it says so.
+
+## Why it is built this way
+
+- **Judgment, not a fixed sequence.** You describe the job in prose. Nobody
+  enumerates the steps, and nothing has to have been predicted in advance.
+- **Self-hosted, end to end.** It runs in your cluster on your credentials. No
+  prompt, transcript or alert is sent to a vendor.
+- **Bounded by construction.** One isolated pod per conversation. Tools come
+  only from the wiring, and the operator itself never reads a Secret.
+
+## Pluggable at three seams
+
+Documented HTTP contracts, no fork.
+
+- **Your own signal source** — Datadog, Dynatrace, Sentry, a sensor on your bench.
+- **Your own agent runtime** — swap the image; the work contract does not change.
+- **Your own channel** — Slack, Teams, Discord, e-mail. The operator sends meaning,
+  your adapter renders it.
+
+## Why agent-ops?
+
+The same wiring, wherever something needs looking at.
+
+| Where | What happens |
+|---|---|
+| **Watch and fix your cluster** | It reads the events, the pods and the logs, and names the cause. |
+| **Answer your alerts** | Every firing alert arrives with the investigation already done. |
+| **Run the checks nobody gets to** | Certificates, drift and capacity, on a schedule. |
+| **An assistant for your home** | Its logs, its devices, its config. Not everything is a cluster. |
+| **Ask it from chat** | It answers in the thread where your team already talks. |
+| **Plug in your own** | Three HTTP contracts: your source, your runtime, your channel. |
+
+**And all of it in one place.** The [console](docs/console.md) ships enabled and
+[read-only on your cluster](docs/console.md) — every conversation as it happens,
+what is queued, what is stuck and why, and the whole wiring as a graph. It is a
+channel too, so you answer the agent right there.
+**[Watch one signal, start to finish](https://kostiantyn-matsebora.github.io/agent-ops-operator/#tour)** — a minute, no sound.
+
+## The kinds you declare
+
+Eleven, one line each. [Every field, in full](docs/concepts.md).
 
 | Kind | What it defines |
 |---|---|
@@ -43,106 +169,64 @@ Eleven kinds, one line each; the full reference is [docs/concepts.md](docs/conce
 | [`MCPConfig`](docs/concepts.md#mcpconfig) | Reusable MCP server sets, bound per wiring. |
 | [`MCPToolset`](docs/concepts.md#mcptoolset) | A named list of tool patterns — the allowlist half of a route's tools. |
 
-## Behaviors that matter
+## Try it
 
-- **One workflow: a signal originates, a channel carries.** Every Conversation
-  starts from a signal on a `SignalSource` some Ready `Pipeline` claims — an
-  alert, a cron job, or a person typing on chat, all one path.
-- **Conversation = topic = session.** Replying in a topic resumes the same agent
-  session; a repeat alert signature within its window reuses the conversation.
-- **Per-conversation pods, on demand.** A pod spawns when work arrives, exits
-  after its idle TTL, respawns with full context;
-  `kubectl logs agentops-conv-<name> -f` streams the transcript.
-- **[Bounded concurrency, queued not dropped](docs/concepts.md#capacity-how-many-run-at-once)** —
-  over-cap work waits in phase `Pending` with nothing provisioned, admitted
-  oldest-first.
-- **Least privilege by construction.** The manager holds no cluster powers
-  beyond its own CRDs plus pod lifecycle in its namespace, and never reads a
-  Secret. No cluster CLI in the runtime image — reach is
-  [wiring](docs/concepts.md#runtime-images-are-generic).
-- **[See it, and answer it, on one screen](docs/console.md)** — the optional
-  console draws the wiring as a graph and is itself a channel, so you can reply
-  from the run you are watching.
-- **Threads open with the event**, so a thread reads event → work → answer. The
-  manager sends MEANING; each adapter renders its own surface.
-- **Structured chat.** Built-in lane prompts embed a six-template message format
-  spec — no stream-of-consciousness walls.
-
-## Get started
-
-A project-agnostic, **read-only k8s-engineer** agent — no chat, no repository,
-no MCP setup. One credential, one flag:
+A read-only **k8s-engineer** agent — no chat, no repository, no MCP setup. One
+credential, one flag, no clone:
 
 ```sh
 kubectl create namespace agent-ops
 kubectl -n agent-ops create secret generic agentops-claude \
   --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
-helm install agent-ops ./chart -n agent-ops --create-namespace --set global.demo.enabled=true
 
-# ask something — a task is an ordinary signal to a source a Pipeline claims
-TOKEN=$(kubectl -n agent-ops get secret agentops-adapter-token -o jsonpath='{.data.token}' | base64 -d)
-kubectl -n agent-ops run q --rm -i --image=curlimages/curl --restart=Never -- \
-  curl -s -X POST http://agentops-manager.agent-ops.svc:8080/signal/inbound -H "Authorization: Bearer $TOKEN" \
-  -d '{"source":"cluster-events","signals":[{"fingerprint":"ask-1","kind":"task","payload":"any pods crashlooping?"}]}'
-
-kubectl -n agent-ops get conversations                  # watch it work
+helm install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+  -n agent-ops --set global.demo.enabled=true
 ```
 
 **[Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/)**
-is the walkthrough: what each command is for, what a good run looks like, what to
-check when nothing happens, and how to write your first route. Demo mode is
-exactly [the k8s bundle with its defaults](docs/k8s-bundle.md) plus the read-only
-RBAC it resolves — nothing demo-specific exists.
+is the walkthrough: how to ask it something, what a good run looks like, and what
+to check when nothing happens.
 
-> **It also watches your cluster**, ingesting `Warning` events and answering them
-> itself — LLM credits on a noisy cluster, with cooldown, grouping and the
-> conversation cap as the bounds.
+> **Demo mode also watches your cluster**, ingesting `Warning` events and
+> answering them itself — LLM credits on a noisy cluster, bounded by cooldown,
+> grouping and the conversation cap.
 
-**The chart owns the substrate; bundles contribute domain** — `runtime:` renders
-the `AgentRuntime` a Pipeline naming none executes on, so an install with no
-bundle still works.
-[Full reference](docs/concepts.md#the-substrate-runtime-and-globalagentopsruntime).
-For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).
+## Where to go next
 
-## Documentation
+**The [site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) first**:
+the [Introduction](https://kostiantyn-matsebora.github.io/agent-ops-operator/introduction/),
+the [console tour](https://kostiantyn-matsebora.github.io/agent-ops-operator/console/),
+[Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/)
+and [seven guides](https://kostiantyn-matsebora.github.io/agent-ops-operator/introduction/#follow-the-guides)
+in learning order. The reference pages are read here:
 
 | | |
 |---|---|
-| [Documentation site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) | The adopter hub: what this is, where to start, and every path onward |
-| [Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/) | The read-only demo: install it and ask an agent about your cluster |
-| [The console](https://kostiantyn-matsebora.github.io/agent-ops-operator/console/) | A tour of its six views, and how to decide who may reach it |
-| [Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/) | The real install: what to decide, what to configure, how to wire a route |
-| [Guides](https://kostiantyn-matsebora.github.io/agent-ops-operator/introduction/#follow-the-guides) | Seven, in learning order: the wiring, an agent, its tools, your own ingest, chat surface and backend |
-| [docs/concepts.md](docs/concepts.md) | Every CRD in full, and how a route's tools are resolved |
+| [docs/concepts.md](docs/concepts.md) | Every CRD in full, capacity and queueing, and how a route's tools resolve |
 | [docs/cr-reference.md](docs/cr-reference.md) | Every field of every kind, generated from the CRDs the chart ships |
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
-| [docs/k8s-bundle.md](docs/k8s-bundle.md) | Cluster events, the agent that answers them, Kubernetes MCP tooling |
-| [docs/telegram-bundle.md](docs/telegram-bundle.md) | The Telegram ingest stack and chat surface |
-| [docs/prometheus-bundle.md](docs/prometheus-bundle.md) | The Alertmanager alert lane and its metrics tooling |
-| [docs/ha-bundle.md](docs/ha-bundle.md) | The Home Assistant lane, and its two agents split by privilege |
-| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Every chart-version upgrade guide, newest first |
-| [.claude/rules/](.claude/rules/) | Working notes, one topic per file: terminology, wiring, invariants, and the gotchas that cost debugging |
+| [k8s](docs/k8s-bundle.md) · [telegram](docs/telegram-bundle.md) · [prometheus](docs/prometheus-bundle.md) · [ha](docs/ha-bundle.md) | The four bundles: what each ships, and the agent that answers its lane |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) · [docs/adr/](docs/adr/) | Upgrade guides newest first, and decisions with the alternatives that were built |
 
-## Development
+## Contributing
 
-**One directory per container, grouped by what it is at runtime** —
-`platform/` `runtimes/` `signals/` `channels/` `gateways/`, with the operator at
-`platform/manager/`. A component's published name comes from its path:
-`signals/cron` is `agentops-signal-cron`, `platform/console` is
-`agentops-console`.
+**[CONTRIBUTING.md](CONTRIBUTING.md)** states the workflow, which cannot be
+inferred from the tree: changes are planned as specifications in `openspec/`, and
+documentation is part of a change rather than a follow-up.
+[`.claude/rules/`](.claude/rules/) is the working context, one topic per file.
+**One directory per container** — `platform/` `runtimes/` `signals/` `channels/`
+`gateways/` — and the path is the published image name; the operator is
+`platform/manager/`.
 
-See [.claude/rules/build-test.md](.claude/rules/build-test.md) for the
-build/test workflow. In `platform/manager`, `go test ./...` covers unit
-semantics (grouping, cooldown, dispatch, addressing, MCP compilation) and
-envtest integration (real API server: lifecycle, alert routing, runtime
-selection). Every other module is a `go build ./... && go vet ./... && go test
-./...` of its own, discovered by `.github/components.sh modules`.
+[SECURITY.md](SECURITY.md): report privately, never in an issue.
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): the Contributor Covenant.
 
 ## Status
 
-`v1alpha1` — young but running in production for its author. Roadmap: approve
-buttons (inline keyboards), cron + k8s Events signal sources, custom metrics,
-Helm chart.
+**`v1alpha1` — young, and running in production for its author.** The API group is
+provisional and may be renamed before 1.0; breaking chart changes carry an upgrade
+entry in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
-Licensed under the [Apache License 2.0](LICENSE).
+© 2026 [kostiantyn-matsebora](https://github.com/kostiantyn-matsebora). Licensed
+under the [Apache License 2.0](LICENSE).

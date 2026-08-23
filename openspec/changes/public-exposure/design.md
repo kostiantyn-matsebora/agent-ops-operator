@@ -37,6 +37,73 @@ Everything else is a link. **What moves out is not deleted** — the existing
 requirement's rule that removed content stays reachable in one hop still holds,
 and the site is where it goes.
 
+### D2a. "Stops restating" is not "stops covering", and TWO drafts got it wrong
+
+D2 as first stated produced a thin index. It answered the four questions and
+said almost nothing a stranger could evaluate the project on, because every
+claim had been ruled a repetition of the landing page.
+
+**That over-read the rule.** The landing page and the README are the same story
+for two audiences — a reader who arrived at the site, and a stranger who landed
+on the forge and may never leave it. The forge audience is the larger one, and
+sending it away to learn what the project IS is not a boundary, it is a gap.
+
+So the line moved:
+
+| | |
+|---|---|
+| **covering** | naming what this is, what it is for, HOW IT WORKS, what a reader declares and why it is built that way. **The README does this.** |
+| **restating** | reproducing a site page's DETAIL — the walkthrough, the installation decisions, the console tour. **The site owns this.** |
+
+**And the README says outright that the site is the main source**, above the
+index rather than inside it, so a reader who wants more never has to infer which
+document is authoritative.
+
+**THE SECOND DRAFT FAILED THE SAME TEST ONE LAYER DOWN**, and is why this is
+written as a section list rather than a principle. It kept the diagram and cut
+the prose the diagram contained — the `pipeline.yaml`, the three seams, the
+three build reasons, how it works at all — reasoning that the picture already
+said it. The result was a page that named the project and then stopped.
+
+**A picture is not content.** It cannot be selected, searched, copied or diffed,
+a screen reader gets only its alt text, and a reader skimming a forge page reads
+headings. The README's sections now TRACK the landing page's, one for one, and a
+section added there is considered here.
+
+### D2b. The media split is what makes the drift argument moot
+
+D2's real worry was two copies of one text drifting apart. That worry does not
+survive contact with how the two surfaces actually render:
+
+| Surface | Carries the story as |
+|---|---|
+| the landing page | its `.ao-presentation` tab set and the console recordings |
+| `README.md` | a mermaid flowchart, rendered by GitHub from source text |
+
+- **GitHub renders neither tabs nor autoplaying video.** The README needs a
+  picture precisely where the site needs a presentation, so there is no shared
+  text to drift.
+- **THE EXPORTED SVG WAS TRIED FIRST AND IS TOO BIG.** `agent-ops-light.svg` is
+  1778×1349, composed for a page; GitHub's ~1012px column shrinks it past
+  legibility. It is now a CLICK-THROUGH under the diagram, which keeps the asset
+  consumed without asking a forge column to hold a page-scale drawing.
+- **Mermaid wins on three counts an image loses:** it scales to the column, it
+  follows the reader's theme without a `<picture>` shipping both halves, and it
+  is TEXT — diffable in review, and current without an export step.
+  `docs/diagrams/message-flow.mmd` is the precedent.
+- **The SVG pair had NO consumer** after the landing-page rebuild moved the site
+  onto the presentation. It is build output of `docs/diagrams/export.py`, kept
+  current through the terminology sweep, and pointed at nothing — the README is
+  now what it is for.
+- **Whatever the diagram also carries, the prose carries anyway.** See D2a:
+  cutting text because a picture has it was tried and read as an empty page.
+
+**The budget went 150 → 240 with this**, because 150 was the number for a README
+that was three documents wearing one filename. **The section list is the bound
+and the number follows it** — the hard rule, no reference material, did not move.
+The mermaid source is ~40 of those lines, which is what a picture the forge
+renders, scales and themes actually costs.
+
 ## D3. The install command decides whether the README can be honest
 
 `helm install ./chart` cannot appear in a README a stranger reads: it requires a

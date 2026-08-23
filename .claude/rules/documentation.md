@@ -88,6 +88,10 @@ filename — so the routing is explicit:
 | A CRD field, an api doc comment, or a chart value a guide shows | re-run `python3 .github/scripts/docs-generate.py` — every CR template, every worked example and `docs/cr-reference.md` are build output, and CI fails on a stale one |
 | A guide under `docs/guides/` | the page's prose is hand-written, its `yaml` blocks are NOT — edit the `<!-- generated: … -->` marker and re-run the generator |
 | The pitch, the kind list, the demo, the install command | `README.md` |
+| How a change is PROPOSED here — the openspec workflow, the commit convention, the build and test commands | `CONTRIBUTING.md` |
+| How a vulnerability is REPORTED, what is supported, what is in scope | `SECURITY.md` |
+| What is expected of participants, and who enforces it | `CODE_OF_CONDUCT.md` — the Contributor Covenant BY REFERENCE, never vendored |
+| What an issue or a pull request must ARRIVE with | `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md` — and there is deliberately NO security template |
 | The site's SHELL — Jekyll source, diagrams, what each page owes beyond its row | `docs/.claude/site.md` |
 | A colour token, the theme choice, or the mark | `.claude/rules/palette-and-mark.md` — always a TWO-FILE change |
 | How the site LOOKS or navigates | `docs/_layouts/`, `_includes/`, `_data/nav.yml`, `assets/` |
@@ -120,15 +124,94 @@ the pages hold no theme, and neither holds the rules.**
 - Adding a page to the site is a page plus one line in `_data/nav.yml`, never
   navigation markup written a second time.
 
-### README.md has a budget: 150 lines
+### README.md IS THE LANDING PAGE'S COUNTERPART ON THE FORGE. BUDGET: 240 LINES
 
 `wc -l README.md`.
 
-**It holds** the pitch and diagram, one line per CRD kind, the behaviors that
-matter, the demo, install, the Documentation index (the site first), development
-and status. **Nothing else.**
+**IT CARRIES WHAT THE LANDING PAGE CARRIES, MORE CONCISELY, AND SAYS THE SITE IS
+THE SOURCE.** The two are one story for two audiences — a reader who arrived at
+the site, and a stranger who landed on the forge and may never leave it. The
+forge audience is the larger one, so sending it away to learn what the project
+IS is a gap, not a boundary.
 
-- **A distinguishing behavior is named in a LINE**, and the document that owns
-  it is linked.
+The sections track the landing page's, and a section added there is considered
+here:
+
+| Landing page | README |
+|---|---|
+| the claims strip | the same three, one line |
+| the `.ao-presentation` build-up | the mermaid flowchart (~40 lines of source), then **How it works** in five numbered steps |
+| the "What you write" tab | **What you write** — the same `Pipeline`, comment-annotated |
+| the console recording | a link to it, plus what the console is |
+| When it runs / Why it is built this way / Pluggable at three seams | the same three lists |
+| Why agent-ops? and the chip set | the same table, and "Works with" as one line |
+| Where to start / Understand the model / Run it | **Where to go next**, site first |
+
+**RESTATING IS THE FAILURE, COVERING IS NOT**, and the difference is where the
+DETAIL lives:
+
+- **The walkthrough, the installation decisions, the console tour and the guides
+  are the SITE's**, in full. The README names them and links.
+- **A README that reproduces a site PAGE is a second source of truth**, and the
+  drift is invisible until a reader follows the wrong one. The old expanded
+  start was that, and was cut.
+- **Naming the same subject in a line is COVERING.** An early draft of this
+  change read the rule as forbidding that, and produced a thin index that told a
+  stranger nothing they could evaluate the project on. That draft is what this
+  section exists to prevent.
+- **The KIND TABLE stays.** Eleven kinds IS the product, and a reader who cannot
+  see the shape of the model without following a link has not been told what
+  this is.
+
+**THE BUDGET WENT 150 → 240, AND THE OLD NUMBER WAS FOR A DIFFERENT DOCUMENT.**
+150 bounded a README that was three documents wearing one filename — reference
+tables, contracts, upgrade guides.
+
+- **THE SECTION LIST IS THE BOUND. The number FOLLOWS it**, and is what those
+  sections currently cost. A section added to the landing page moves it; a
+  paragraph that wandered in does not.
+- **A mermaid diagram costs ~40 lines of SOURCE for one picture**, which is the
+  single largest item and the reason the number is not tighter. That is the
+  price of a diagram the forge renders, scales and themes — an embedded image
+  would be one line and none of those things.
+- **The hard rule is unchanged: NO REFERENCE MATERIAL.** If it is over budget,
+  the first question is which section grew, and the answer is usually that
+  something belongs in a `docs/` page.
+
+**THE TWO SURFACES USE DIFFERENT MEDIA, WHICH IS WHY NEITHER IS A COPY:**
+
+| Surface | Shows the story as |
+|---|---|
+| the site's landing page | the `.ao-presentation` tab set and the console recordings |
+| `README.md` | a MERMAID flowchart, GitHub-rendered, in a ```` ```mermaid ```` fence |
+
+**GitHub renders neither tabs nor autoplaying video**, so the README needs its
+own picture. **Mermaid is the one that fits**, for three reasons that a raster or
+an exported SVG each fail:
+
+1. **It scales to the reader's column.** GitHub's content width is ~1012px.
+2. **It is TEXT** — greppable, diffable, reviewable in a pull request, and it
+   needs no export step to stay current.
+3. **It follows the reader's THEME.** A committed image is one theme unless a
+   `<picture>` ships both halves.
+
+- **`docs/assets/img/agent-ops-{light,dark}.svg` is LINKED, not embedded**, and
+  it is what the caption under the diagram points at. It is a PAGE-SCALE
+  composition, 1778×1349 — GitHub's column shrinks it past legibility, which is
+  the whole reason it is a click-through rather than the diagram itself.
+  - It is BUILD OUTPUT of `docs/diagrams/export.py` from `agent-ops.drawio` — do
+    not delete it as unused, and do not hand-edit it.
+  - `docs/diagrams/message-flow.mmd` is the precedent for mermaid here.
+- **THE DIAGRAM IS THE VISUAL, THE PROSE IS THE CONTENT.** Whatever the picture
+  also contains — the `pipeline.yaml`, the three seams, the three build reasons
+  — is NOT dropped from the text for that reason. A reader skims HEADINGS, and
+  cutting prose because a picture had it was tried here and read as an empty
+  page.
+
+- **The install command must resolve a PUBLISHED artifact.** One naming a path
+  inside the repository is not a start, it is a step that silently assumes a
+  clone the previous line never mentioned.
+- **What moves out is LINKED, never dropped.** Every reader who followed
+  content there before reaches it from the index in ONE hop.
 - **Reference material and migration guides do not belong in it.**
 - **If it is over budget, something is in the wrong file.**
