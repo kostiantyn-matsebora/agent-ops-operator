@@ -485,7 +485,7 @@ func (r *RunStatus) DeliveredTo(channel string) bool {
 	return false
 }
 
-// InflightRun tracks the unit currently dispatched to the worker.
+// InflightRun tracks the unit currently dispatched to the runtime pod.
 type InflightRun struct {
 	RunID string `json:"runId"`
 	// +optional

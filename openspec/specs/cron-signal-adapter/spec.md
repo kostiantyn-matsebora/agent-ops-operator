@@ -36,5 +36,5 @@ The reference cron `SignalAdapter` CR (in `config/samples/`) SHALL declare the c
 - **THEN** its spec declares `schedule` and `input` as required and `title` as optional, discoverable via `kubectl get signaladapter cron -o yaml`
 
 #### Scenario: Missing input flagged manager-side
-- **WHEN** a `type: cron` SignalSource is created with only `config.schedule` while the declaring SignalAdapter exists
+- **WHEN** a SignalSource naming the cron adapter is created with only `config.schedule` while the declaring SignalAdapter exists
 - **THEN** the source gains `ConfigValid=False` naming `input`, while the adapter's own Ready reporting remains authoritative

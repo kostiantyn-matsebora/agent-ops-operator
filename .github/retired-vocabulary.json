@@ -1,0 +1,257 @@
+{
+  "$comment": [
+    "Retired vocabulary: names this project STOPPED using, and must not start using again.",
+    "",
+    "THIS IS A DENYLIST, AND HERE THAT IS THE RIGHT SHAPE. The publication guard is an",
+    "allowlist because naming a private thing in a guard publishes it. Everything below is",
+    "PUBLIC BY CONSTRUCTION — a removed CRD field, a withdrawn tiebreak, a superseded",
+    "command — so listing it costs nothing, and the list IS the value: it is the record of",
+    "what this project stopped doing, in the one place that fails a build when it comes back.",
+    "",
+    "Each entry: `pattern` (Python regex, searched case-insensitively unless `case` is true),",
+    "`says` (what to write instead — printed on a hit), and `allow` (regexes that mark a line",
+    "as RECORDING the removal rather than asserting the thing). The allow list is what lets a",
+    "spec say 'spec.type is removed' while failing one that says 'required spec.type'."
+  ],
+  "scan": [
+    "openspec/specs/**/*.md",
+    "docs/*.md",
+    "docs/guides/*.md",
+    "README.md"
+  ],
+  "terms": [
+    {
+      "id": "channel-spec-type",
+      "pattern": "spec\\.type\\b",
+      "says": "a Channel or SignalSource names its serving adapter in spec.adapter; spec.type was removed",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned",
+        "replaced",
+        "stale manifest",
+        "is now"
+      ]
+    },
+    {
+      "id": "channel-spec-delivery",
+      "pattern": "spec\\.delivery\\b",
+      "says": "a Channel carries no delivery hints; the operator owns delivery",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned"
+      ]
+    },
+    {
+      "id": "channel-default-profile",
+      "pattern": "defaultProfileRef",
+      "says": "a Channel supplies no profile; the Pipelines claiming the chat source decide who answers",
+      "allow": [
+        "removed",
+        "retired",
+        "no longer",
+        "is gone"
+      ]
+    },
+    {
+      "id": "source-conflicts",
+      "pattern": "sourceConflicts",
+      "says": "sources are shareable; the conflict condition was deleted",
+      "allow": [
+        "removed",
+        "deleted",
+        "retired",
+        "no longer",
+        "is gone",
+        "regression"
+      ]
+    },
+    {
+      "id": "oldest-claimant",
+      "pattern": "oldest (ready )?(claimant|pipeline)",
+      "says": "there is no creation-order tiebreak anywhere; several claimants are answered with the choices",
+      "allow": [
+        "removed",
+        "deleted",
+        "retired",
+        "no longer",
+        "is gone",
+        "was not replaced",
+        "previous"
+      ]
+    },
+    {
+      "id": "pipeline-for-channel",
+      "pattern": "PipelineForChannel",
+      "says": "channels originate nothing; there is no pipeline-for-channel lookup",
+      "allow": [
+        "removed",
+        "deleted",
+        "retired",
+        "no longer",
+        "is gone"
+      ]
+    },
+    {
+      "id": "retired-list-command",
+      "pattern": "(?<![\\w-])/agents(?![\\w-])",
+      "says": "the listing command is /pipelines; /agents still answers and is never printed, offered or registered",
+      "allow": [
+        "retired",
+        "removed",
+        "no longer",
+        "never (be )?printed",
+        "still answers",
+        "retired spelling",
+        "is now"
+      ]
+    },
+    {
+      "id": "post-task-endpoint",
+      "pattern": "POST /task\\b|`/task`",
+      "says": "there is no HTTP form that names a Pipeline; POST /task was deleted",
+      "allow": [
+        "removed",
+        "deleted",
+        "retired",
+        "no longer",
+        "is gone",
+        "does not exist",
+        "SHALL NOT use",
+        "404"
+      ]
+    },
+    {
+      "id": "session-id",
+      "pattern": "sessionId",
+      "says": "the handle is runtimeContextId; sessionId is the retired spelling, dual-read for one release",
+      "allow": [
+        "retired",
+        "former",
+        "deprecated",
+        "renamed",
+        "dual-read",
+        "old field",
+        "is now"
+      ]
+    },
+    {
+      "id": "polling-enabled",
+      "pattern": "pollingEnabled",
+      "says": "ingest is on when the router runs; Channel.spec.config.pollingEnabled is gone",
+      "allow": [
+        "removed",
+        "retired",
+        "no longer",
+        "is gone",
+        "there is no"
+      ]
+    },
+    {
+      "id": "max-runtimes",
+      "pattern": "MAX_RUNTIMES",
+      "says": "the cap is MAX_ACTIVE_CONVERSATIONS; MAX_RUNTIMES is the deprecated alias",
+      "allow": [
+        "deprecated",
+        "retired",
+        "alias",
+        "no longer",
+        "is now"
+      ]
+    },
+    {
+      "id": "vm-bundle",
+      "pattern": "vm-bundle|signal-vmalertmanager",
+      "says": "the bundle is prometheus-bundle and the adapter is alertmanager; both were renamed",
+      "allow": [
+        "renamed",
+        "retired",
+        "no longer",
+        "is gone",
+        "fails the render",
+        "was renamed",
+        "is now",
+        "did",
+        "stays published"
+      ]
+    },
+    {
+      "id": "channel-service-name",
+      "pattern": "agentops-channel-",
+      "says": "the channel-adapter workload and Service are agentops-adapter-<name>",
+      "allow": [
+        "does not exist",
+        "no longer",
+        "is gone",
+        "never"
+      ]
+    },
+    {
+      "id": "post-to-channels",
+      "pattern": "PostToChannels",
+      "says": "delivery is decided per DESTINATION; the origin-kind rule was deleted",
+      "allow": [
+        "removed",
+        "deleted",
+        "retired",
+        "no longer",
+        "is gone",
+        "regression"
+      ]
+    },
+    {
+      "id": "worker",
+      "pattern": "(?<![\\w])workers?(?![\\w])",
+      "says": "it is an agent runtime, not a worker",
+      "allow": [
+        "NeedsWorker",
+        "needs no worker",
+        "need no worker",
+        "needs a worker",
+        "needWorker",
+        "service worker"
+      ]
+    },
+    {
+      "id": "wake",
+      "pattern": "(?<![\\w])(wake|wakes|woke|waking|woken)(?![\\w])",
+      "says": "a signal STARTS a conversation; nothing is asleep. 'Wake' is correct only for a PERSON",
+      "allow": [
+        "waking someone",
+        "wakes someone",
+        "wake someone",
+        "banned",
+        "deserves waking"
+      ]
+    },
+    {
+      "id": "sibling-channels",
+      "pattern": "sibling channels?|to its siblings",
+      "says": "delivery is per DESTINATION — every bound channel that has not already displayed it",
+      "allow": [
+        "NOT be scoped",
+        "not scoped",
+        "no longer",
+        "retired"
+      ]
+    },
+    {
+      "id": "one-pipeline-per-source",
+      "pattern": "claimed by (exactly )?(one|a single) [Pp]ipeline",
+      "says": "sources are shareable; any number of Ready Pipelines may claim one",
+      "allow": [
+        "no longer",
+        "is not",
+        "SHALL NOT",
+        "never"
+      ]
+    }
+  ]
+}

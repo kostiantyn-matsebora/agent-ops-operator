@@ -89,7 +89,7 @@ type WorkUnit struct {
 	//
 	// DEPRECATED.
 	ResumeSessionID string            `json:"resumeSessionId,omitempty"`
-	PromptFile      string            `json:"promptFile,omitempty"` // repo-relative; worker renders PromptVars
+	PromptFile      string            `json:"promptFile,omitempty"` // repo-relative; the runtime renders PromptVars
 	PromptText      string            `json:"promptText,omitempty"` // fully rendered by the manager
 	PromptVars      map[string]string `json:"promptVars,omitempty"`
 	Agent           string            `json:"agent,omitempty"`

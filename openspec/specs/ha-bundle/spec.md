@@ -1,7 +1,17 @@
 # ha-bundle Specification
 
 ## Purpose
-TBD - created by archiving change ha-bundle. Update Purpose after archive.
+
+The Home Assistant bundle: the log signal adapter, its MCP tooling, two profiles
+and the wiring for both.
+
+The split by PRIVILEGE is the whole design. Two lanes — an everyday one and an
+acting one — with tooling enumerated per lane and never wildcarded, so the
+everyday agent cannot reach the admin path that lets the acting one repair the
+house. Both routes render their own identity, both claim the install's chat
+sources, and the acting one additionally claims the bundle's log source.
+
+Wiring is behind a flag that defaults off, and no turnkey mode turns it on.
 
 ## Requirements
 
@@ -11,9 +21,15 @@ agent experience. Every template SHALL gate on the bundle being active, with
 `ha-bundle.enabled` defaulting to `false`, so a default install renders nothing
 from it.
 
-The bundle SHALL NOT render the agent execution substrate. The `AgentRuntime`,
-the runtime ServiceAccount, the LLM credential Secret and that SA's RBAC belong
-to the parent chart; the bundle references them and renders none of them.
+The bundle SHALL NOT render the agent execution SUBSTRATE. The `AgentRuntime`,
+the LLM credential Secret, the home volume and the release-wide floor identity
+belong to the parent chart; the bundle references them and renders none of them.
+
+It SHALL render the ServiceAccount each of its own ROUTES executes under, unless
+the install names one, and SHALL bind those accounts NO Kubernetes RBAC —
+neither lane touches the Kubernetes API, so identity is all a route account buys
+here: a distinct subject per lane, and a later grant that lands on one of them
+rather than on every agent in the install.
 
 The bundle SHALL create no Secret. Every credential SHALL be referenced by name
 and reach a pod through `valueFrom`/`envFrom`, never read by the manager.
@@ -24,7 +40,7 @@ and reach a pod through `valueFrom`/`envFrom`, never read by the manager.
 
 #### Scenario: No substrate, no secrets
 - **WHEN** the bundle is enabled with every component on
-- **THEN** the output contains no `AgentRuntime`, no runtime ServiceAccount and no `Secret` of any kind
+- **THEN** the output contains no `AgentRuntime`, no home volume and no `Secret` of any kind, while each route it ships carries its own ServiceAccount bound to nothing
 
 ### Requirement: Components gate independently and partial installs stay valid
 The ingest lane, the MCP configuration, the toolsets, each profile and the

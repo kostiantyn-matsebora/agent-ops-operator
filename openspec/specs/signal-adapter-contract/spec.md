@@ -37,7 +37,7 @@ The manager SHALL expose `POST /signal/inbound` (non-leader-gated) accepting `{s
 The manager SHALL expose no HTTP route that creates a Conversation from a directly named `Pipeline`. A caller that wants to start work SHALL post a signal to a `SignalSource` a Ready Pipeline claims, so that which agent answers, on which channels, with which capabilities is decided by declared wiring rather than chosen by the caller.
 
 #### Scenario: The task endpoint is gone
-- **WHEN** a client posts to `/task` with any body
+- **WHEN** a client posts to the removed `/task` with any body
 - **THEN** the manager responds 404 — the route does not exist, and no compatibility shim answers it
 
 #### Scenario: A caller cannot pick a pipeline

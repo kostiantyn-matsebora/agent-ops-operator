@@ -202,7 +202,7 @@ Written by the operator. Read it, never set it.
 
 ## SignalAdapter
 
-SignalAdapterSpec declares a signal-type IMPLEMENTATION — nothing more. The CR's NAME is the routing key: SignalSources whose spec.type equals it are served by this adapter (one adapter per implementation, by construction). No configuration lives here: per-source settings are on the served SignalSources (config, credentialsSecretRef — projected into the pod by the reconciler, kubelet-resolved, never read through the API).
+SignalAdapterSpec declares a signal-type IMPLEMENTATION — nothing more. The CR's NAME is the routing key: SignalSources whose spec.adapter equals it are served by this adapter (one adapter per implementation, by construction). No configuration lives here: per-source settings are on the served SignalSources (config, credentialsSecretRef — projected into the pod by the reconciler, kubelet-resolved, never read through the API).
 
 ### spec
 
@@ -240,7 +240,7 @@ Written by the operator. Read it, never set it.
 | `conditions[].reason` | `string` | **yes** | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. |
 | `conditions[].status` | `string` | **yes** | status of the condition, one of True, False, Unknown. |
 | `conditions[].type` | `string` | **yes** | type of condition in CamelCase or in foo.example.com/CamelCase. |
-| `servedSources` | `integer` |  | ServedSources counts SignalSources naming this adapter in spec.type. |
+| `servedSources` | `integer` |  | ServedSources counts SignalSources naming this adapter in spec.adapter. |
 
 ## Channel
 
@@ -271,7 +271,7 @@ Written by the operator. Read it, never set it.
 
 ## ChannelAdapter
 
-ChannelAdapterSpec declares a channel-type IMPLEMENTATION — nothing more. The CR's NAME is the routing key: Channels whose spec.type equals it are served by this adapter (one adapter per implementation, by construction). No configuration lives here: per-surface settings are on the served Channels (config, credentialsSecretRef — projected into the pod by the reconciler, kubelet-resolved, never read through the API).
+ChannelAdapterSpec declares a channel-type IMPLEMENTATION — nothing more. The CR's NAME is the routing key: Channels whose spec.adapter equals it are served by this adapter (one adapter per implementation, by construction). No configuration lives here: per-surface settings are on the served Channels (config, credentialsSecretRef — projected into the pod by the reconciler, kubelet-resolved, never read through the API).
 
 ### spec
 
@@ -307,11 +307,11 @@ Written by the operator. Read it, never set it.
 | `conditions[].reason` | `string` | **yes** | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. |
 | `conditions[].status` | `string` | **yes** | status of the condition, one of True, False, Unknown. |
 | `conditions[].type` | `string` | **yes** | type of condition in CamelCase or in foo.example.com/CamelCase. |
-| `servedChannels` | `integer` |  | ServedChannels counts Channels naming this adapter in spec.type. |
+| `servedChannels` | `integer` |  | ServedChannels counts Channels naming this adapter in spec.adapter. |
 
 ## AgentRuntime
 
-AgentRuntimeSpec defines HOW agents execute: the worker image implementing the operator's work contract, and its pod-level defaults. Adopters bring their own agent backend (claude-code, aider, custom) by supplying an image that: 1. long-polls GET $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25 2. executes the returned unit (promptText or promptFile+promptVars against the checked-out repository), streaming progress to STDOUT (pod logs) 3. reports POST $CONTROL_URL/work/done {convo,runId,status,sessionId,result} 4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
+AgentRuntimeSpec defines HOW agents execute: the runtime image implementing the operator's work contract, and its pod-level defaults. Adopters bring their own agent backend (claude-code, aider, custom) by supplying an image that: 1. long-polls GET $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25 2. executes the returned unit (promptText or promptFile+promptVars against the checked-out repository), streaming progress to STDOUT (pod logs) 3. reports POST $CONTROL_URL/work/done {convo,runId,status,runtimeContextId,result} 4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
 
 ### spec
 
@@ -334,7 +334,7 @@ AgentRuntimeSpec defines HOW agents execute: the worker image implementing the o
 | `egressMediation.resources.claims[].request` | `string` |  | Request is the name chosen for a request in the referenced claim. If empty, everything from the claim is made available, otherwise only the result of this request. |
 | `egressMediation.resources.limits` | `map[string]object` |  | Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
 | `egressMediation.resources.requests` | `map[string]object` |  | Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
-| `env` | `[]object` |  | Env: extra environment for every worker of this runtime. |
+| `env` | `[]object` |  | Env: extra environment for every runtime pod of this runtime. |
 | `env[].name` | `string` | **yes** | Name of the environment variable. Must be a C_IDENTIFIER. |
 | `env[].value` | `string` |  | Variable references $(VAR_NAME) are expanded using the previously defined environment variables in the container and any service environment variables. If a variable cannot be resolved, the reference in the input string will be unchanged. Double $$ are reduced to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e. "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)". Escaped references will never be expanded, regardless of whether the variable exists or not. Defaults to "". |
 | `env[].valueFrom` | `object` |  | Source for the environment variable's value. Cannot be used if value is not empty. |
@@ -357,7 +357,7 @@ AgentRuntimeSpec defines HOW agents execute: the worker image implementing the o
 | `home.emptyDir` | `boolean` |  | EmptyDir (default when no pvcRef): session state dies with the pod. |
 | `home.pvcRef` | `object` |  | PVCRef mounts an existing (usually RWX) PVC at /data/home. |
 | `home.pvcRef.name` | `string` | **yes** | Name of the referenced object. |
-| `idleTtlMinutes` | `integer` |  | IdleTTLMinutes before an idle worker exits (respawned on demand). |
+| `idleTtlMinutes` | `integer` |  | IdleTTLMinutes before an idle runtime pod exits (respawned on demand). |
 | `image` | `string` | **yes** | Image implementing the work contract. Derive your own to add tooling: what an agent may REACH is wiring, so an image never grants it. |
 | `nodeSelector` | `map[string]string` |  | NodeSelector placing runtime pods, applied with Tolerations and Affinity below. |
 | `resources` | `object` |  | Resources default for runtime pods (AgentProfile.resources overrides). |
@@ -452,7 +452,7 @@ Written by the operator. Read it, never set it.
 | `contextCheckpoint.bytes` | `integer` |  | Bytes transferred by this checkpoint. Zero is meaningful: it means the copy ran and found nothing changed. |
 | `contextCheckpoint.generation` | `string` |  | Generation names the copy on the volume, so an operator recovering by hand knows which directory to look in and a restore can fall back to an earlier one. |
 | `contextCheckpoint.quiesced` | `boolean` | **yes** | Quiesced reports whether this copy was taken at a WORK BOUNDARY, with nothing inflight, or during a run. A mid-run copy is still worth taking — a long run is exactly what a crash would otherwise lose in full — but it may contain a partially written file. Labelling it is what lets a restore, and a person, tell a known-consistent copy from a best-effort one instead of guessing. |
-| `inflight` | `object` |  | InflightRun tracks the unit currently dispatched to the worker. |
+| `inflight` | `object` |  | InflightRun tracks the unit currently dispatched to the runtime pod. |
 | `inflight.dispatchedAt` | `string` |  |  |
 | `inflight.inputIds` | `[]string` |  |  |
 | `inflight.runId` | `string` | **yes** |  |

@@ -1,7 +1,15 @@
 # state-durability Specification
 
 ## Purpose
-TBD - created by archiving change persistence-in-chart. Update Purpose after archive.
+
+The rule that every piece of live state has ONE declared home, and the matrix
+that records where each one is.
+
+Manager state is a cache of a Kubernetes object, DERIVABLE from Kubernetes
+objects, or declared lossy telemetry — and state fitting none of the three is a
+defect. That is why outbound operations are derivable rather than queued
+in memory, why suppression windows are written on the SignalSource, and why a
+telemetry gap is reported rather than rendered as silence.
 ## Requirements
 ### Requirement: Every piece of live state has one declared home
 The system SHALL classify every piece of live state into exactly one of three

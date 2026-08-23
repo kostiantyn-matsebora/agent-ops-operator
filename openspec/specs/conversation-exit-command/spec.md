@@ -54,8 +54,8 @@ command for the manager.
 
 Releasing the pod SHALL free the conversation's capacity slot through the
 mechanisms that already exist: "active" is counted from live runtime pods, and
-the runtime-pod DELETE watch wakes waiting conversations, which each make their
-own FIFO admission decision.
+the runtime-pod DELETE watch requeues waiting conversations, which each make
+their own FIFO admission decision.
 
 No new scheduling path, priority, or reservation SHALL be introduced. A
 conversation waiting in `Pending` SHALL be admitted by the ordinary FIFO rule
@@ -109,7 +109,8 @@ work that may already have acted a second time — the one outcome a release mus
 never produce.
 
 A `/exit` with queued input SHALL be REFUSED and say why: the conversation needs
-a worker, so the pod would be recreated immediately and nothing would be freed.
+a worker (`dispatch.NeedsWorker`), so the pod would be recreated immediately and
+nothing would be freed.
 
 #### Scenario: A run is in progress
 
@@ -198,7 +199,7 @@ conversation.
 
 ### Requirement: The command is discoverable
 
-The `/agents` listing SHALL name `/exit` alongside `/close` with a one-line
+The `/pipelines` listing SHALL name `/exit` alongside `/close` with a one-line
 statement of the difference: `/exit` releases the runtime and keeps the
 conversation, `/close` ends the conversation and archives the thread.
 
@@ -207,5 +208,5 @@ exactly the pair a person must not have to guess between.
 
 #### Scenario: A person looks up the commands
 
-- **WHEN** a person sends `/agents`
+- **WHEN** a person sends `/pipelines`
 - **THEN** the reply names both `/exit` and `/close` and states what each does

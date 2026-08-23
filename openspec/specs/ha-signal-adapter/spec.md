@@ -1,7 +1,17 @@
 # ha-signal-adapter Specification
 
 ## Purpose
-TBD - created by archiving change ha-bundle. Update Purpose after archive.
+
+The Home Assistant log signal adapter: a standalone dependency-free module
+reading that instance's WebSocket API, with no Kubernetes client at all.
+
+It reuses the cluster-events rule vocabulary exactly rather than inventing a
+second one, fingerprints on Home Assistant's OWN dedup identity — logger plus
+source location, never the occurrence — resumes where it stopped, and takes its
+credential as environment projected per SOURCE.
+
+Its loop breaker is the agent SURFACE: a failed agent call is logged there, and
+reporting it would reach the agent that made it.
 
 ## Requirements
 
@@ -69,8 +79,8 @@ upstream no longer accepts SHALL cause a full re-read rather than a stall.
 
 ### Requirement: The adapter never reports on agent-ops itself
 The adapter SHALL NOT emit a signal about agent-ops' own machinery. Health of
-the system is status, not signal: routing it back through ingest would wake an
-agent whose own failure produces the next signal, and nothing downstream stops
+the system is status, not signal: routing it back through ingest would open a
+conversation with an agent whose own failure produces the next signal, and nothing downstream stops
 that loop — each occurrence carries a fresh fingerprint.
 
 #### Scenario: Self-observation produces nothing

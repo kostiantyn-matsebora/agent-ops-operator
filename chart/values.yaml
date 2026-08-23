@@ -598,9 +598,10 @@ console:
   # Name of the Channel CR pipelines reference (defaults to `name`).
   channelName: ""
   # Name of the SignalSource the console originates from (defaults to `name`).
-  # A source is claimed by exactly ONE Pipeline, so one source means one
-  # destination — declare several (console-k8s, console-ha) to originate to
-  # several agents, each claimed by its own pipeline.
+  # Sources are SHAREABLE: every Ready Pipeline claiming this one is offered
+  # when a message names none, and a `/<pipeline> <task>` command reaches one by
+  # name. Declare several (console-k8s, console-ha) when you want the composer
+  # to present separate starting points rather than one list of choices.
   signalSourceName: ""
   displayName: agent-ops console
   image:

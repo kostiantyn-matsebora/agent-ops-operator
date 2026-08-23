@@ -31,9 +31,9 @@ func SignalAdapterDeploymentName(adapterName string) string {
 
 // SignalAdapterReconciler owns signal-adapter workloads — the SignalAdapter
 // sibling of ChannelAdapterReconciler, on the shared workload machinery:
-// per-adapter derived token (signal derivation context), SOURCE_TYPE env, and
+// per-adapter derived token (signal derivation context), ADAPTER_NAME env, and
 // credential projection from served SignalSources. The adapter CR's NAME is
-// the routing key — SignalSources select it via spec.type. When spec.port is
+// the routing key — SignalSources select it via spec.adapter. When spec.port is
 // declared the reconciler also owns a Service agentops-signal-<name> and
 // injects LISTEN_ADDR, so enabling a webhook-receiving adapter is a complete
 // appliance with no chart-side connectivity.

@@ -59,7 +59,7 @@ const (
 	ContextNone ContextStorage = "none"
 )
 
-// AgentRuntimeSpec defines HOW agents execute: the worker image implementing
+// AgentRuntimeSpec defines HOW agents execute: the runtime image implementing
 // the operator's work contract, and its pod-level defaults. Adopters bring
 // their own agent backend (claude-code, aider, custom) by supplying an image
 // that:
@@ -67,7 +67,7 @@ const (
 //  1. long-polls  GET  $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25
 //  2. executes the returned unit (promptText or promptFile+promptVars against
 //     the checked-out repository), streaming progress to STDOUT (pod logs)
-//  3. reports    POST $CONTROL_URL/work/done {convo,runId,status,sessionId,result}
+//  3. reports    POST $CONTROL_URL/work/done {convo,runId,status,runtimeContextId,result}
 //  4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
 type AgentRuntimeSpec struct {
 	// Image implementing the work contract. Derive your own to add tooling:
@@ -81,7 +81,7 @@ type AgentRuntimeSpec struct {
 	// the image declares it.
 	// +optional
 	Args []string `json:"args,omitempty"`
-	// Env: extra environment for every worker of this runtime.
+	// Env: extra environment for every runtime pod of this runtime.
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 	// ServiceAccountName is this runtime's security identity: its RBAC defines
@@ -95,7 +95,7 @@ type AgentRuntimeSpec struct {
 	// Affinity below.
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
-	// IdleTTLMinutes before an idle worker exits (respawned on demand).
+	// IdleTTLMinutes before an idle runtime pod exits (respawned on demand).
 	// +kubebuilder:default=10
 	// +optional
 	IdleTTLMinutes int32 `json:"idleTtlMinutes,omitempty"`
@@ -255,7 +255,7 @@ type AgentRuntimeStatus struct {
 // +kubebuilder:printcolumn:name="TTL",type=integer,JSONPath=`.spec.idleTtlMinutes`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// AgentRuntime defines an executable agent backend (worker image + pod defaults).
+// AgentRuntime defines an executable agent backend (runtime image + pod defaults).
 // AgentProfiles select one via spec.runtimeRef; the CR named "default" is the
 // namespace fallback.
 type AgentRuntime struct {

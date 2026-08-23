@@ -267,11 +267,12 @@ func (a *API) handleFindings(w http.ResponseWriter, r *http.Request) {
 
 // OriginationSource is one place this console can start a conversation from.
 //
-// The picker is a RENDERING OF THE TOPOLOGY, not a free-text pipeline field: a
-// source is claimed by exactly one Pipeline, so what you can start is what is
-// wired. A source that is not `Wired=True` is listed WITH its reason rather than
-// hidden — "nothing is wired yet" is the state an operator must be able to see
-// and fix.
+// The picker is a RENDERING OF THE TOPOLOGY, not a free-text pipeline field:
+// what you can start is what is WIRED, and which Pipeline answers is the claim's
+// decision rather than the caller's. Sources are shareable, so a source several
+// Ready Pipelines claim offers the choices rather than one destination. A source
+// that is not `Wired=True` is listed WITH its reason rather than hidden —
+// "nothing is wired yet" is the state an operator must be able to see and fix.
 type OriginationSource struct {
 	Name     string `json:"name"`
 	Wired    bool   `json:"wired"`

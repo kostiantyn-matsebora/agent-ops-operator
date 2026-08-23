@@ -2,17 +2,17 @@
 
 ## Purpose
 
-The reference Telegram channel adapter: an external, dependency-free process serving type=telegram via the adapter contract.
+The reference Telegram channel adapter: an external, dependency-free process serving Channels whose `spec.adapter` names it, through the channel adapter contract.
 
 ## Requirements
 
 ### Requirement: Telegram runs as an external reference adapter, not in the manager
-The manager SHALL contain no Telegram-specific code (no poller, no Bot API client, no bot-token reads) **and no Telegram-specific presentation**: HTML composition, entity escaping, the 4096-character message limit, and forum-topic naming limits SHALL live in the adapter alone. A reference adapter in `channels/telegram/` (own binary and image, precedent `runtimes/claude/`) SHALL serve Channels with `adapter: telegram`, consuming the channel adapter contract: offset persistence, approver filtering by Telegram user id, topic creation via `createForumTopic`, and message sends with HTML parse mode and general-topic fallback.
+The manager SHALL contain no Telegram-specific code (no poller, no Bot API client, no bot-token reads) **and no Telegram-specific presentation**: HTML composition, entity escaping, the 4096-character message limit, and forum-topic naming limits SHALL live in the adapter alone. A reference adapter in `channels/telegram/` (own binary and image, precedent `runtimes/claude/`) SHALL serve Channels whose `spec.adapter` names its `ChannelAdapter` CR, consuming the channel adapter contract: offset persistence on behalf of the router, approver filtering by Telegram user id, topic creation via `createForumTopic`, and message sends with HTML parse mode and general-topic fallback.
 
-The adapter SHALL render each typed outbound message for Telegram: composing HTML from markdown bodies, escaping payload content so markup-bearing text cannot break parsing, splitting or truncating messages that exceed the transport limit, and deriving forum-topic names from the `ensure-topic` descriptor within Telegram's own naming limit. It MAY present an oversized `signal` payload as a document rather than text. Routing-visible behavior (commands, adoption, default profile, busy-acks) SHALL be whatever the shared router implements — the adapter adds no routing rules of its own, so a command naming a Pipeline reaches Telegram users through exactly the same path as any other surface.
+The adapter SHALL render each typed outbound message for Telegram: composing HTML from markdown bodies, escaping payload content so markup-bearing text cannot break parsing, splitting or truncating messages that exceed the transport limit, and deriving forum-topic names from the `ensure-topic` descriptor within Telegram's own naming limit. It MAY present an oversized `signal` payload as a document rather than text. Routing-visible behavior (commands, adoption, busy-acks) SHALL be whatever the shared router implements — the adapter adds no routing rules of its own, so a command naming a Pipeline reaches Telegram users through exactly the same path as any other surface.
 
 #### Scenario: End-to-end Telegram flow through the adapter
-- **WHEN** a Telegram user sends `/agents` to a bot whose adapter serves a `adapter: telegram` Channel
+- **WHEN** a Telegram user sends `/pipelines` to a bot whose adapter serves a Channel naming it
 - **THEN** the listing of addressable Pipelines arrives in Telegram, produced by the shared router as a `notice` message and rendered by the adapter
 
 #### Scenario: Manager has no Telegram surface
@@ -36,7 +36,7 @@ The adapter SHALL render each typed outbound message for Telegram: composing HTM
 - **THEN** the adapter shortens it and creates the topic
 
 ### Requirement: Adapter owns its credentials and config parsing
-The adapter SHALL resolve each served channel's bot token from the projected credential environment advertised by the contract's `credentialEnvPrefix` (env `<prefix>botToken`), falling back to the `TELEGRAM_BOT_TOKEN` environment variable for channels without `credentialsSecretRef` (hand-deployed back-compat). It SHALL parse its channel settings (chat id, approvers, polling enablement, feed thread) from `spec.config` of the Channels it serves, reporting config errors — including a missing token from both sources — on the Channel's status condition rather than crashing.
+The adapter SHALL resolve each served channel's bot token from the projected credential environment advertised by the contract's `credentialEnvPrefix` (env `<prefix>botToken`), falling back to the `TELEGRAM_BOT_TOKEN` environment variable for channels without `credentialsSecretRef` (hand-deployed back-compat). It SHALL parse its channel settings (`chatId`, `approvers`, `feedThreadId`, `deleteTopicOnConversationDelete`) from `spec.config` — there is no `pollingEnabled`, because this adapter never polls — of the Channels it serves, reporting config errors — including a missing token from both sources — on the Channel's status condition rather than crashing.
 
 #### Scenario: Per-channel token resolved from projection
 - **WHEN** a served Channel's listing entry maps `botToken` to a projected env var
@@ -47,7 +47,7 @@ The adapter SHALL resolve each served channel's bot token from the projected cre
 - **THEN** the adapter serves it with the fallback token exactly as before
 
 #### Scenario: Invalid config is surfaced on the Channel
-- **WHEN** a `adapter: telegram` Channel's `config` lacks a required field (e.g. chat id) or no token is resolvable
+- **WHEN** a Channel naming the telegram adapter has a `config` lacking a required field (e.g. `chatId`) or no resolvable token
 - **THEN** the adapter sets a not-ready condition with the reason on that Channel and continues serving other Channels
 
 ### Requirement: Single getUpdates consumer preserved
@@ -78,7 +78,7 @@ The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR (gated on `te
 
 #### Scenario: Enabled renders only a CR
 - **WHEN** `telegramAdapter.enabled=true`
-- **THEN** the rendered output contains a `ChannelAdapter` for `adapter: telegram` and no Deployment for it (the reconciler creates the workload)
+- **THEN** the rendered output contains the telegram `ChannelAdapter` and no Deployment for it (the reconciler creates the workload)
 
 ### Requirement: Chart-shipped ChannelAdapter declares the telegram config schema
 The chart's gated telegram `ChannelAdapter` CR SHALL declare the config contract on its spec: a JSON Schema for `spec.config` declaring `chatId` (string, required), `feedThreadId` (integer), `approvers` (array of integers), and `deleteTopicOnConversationDelete` (boolean), plus `credentialKeys` documenting `botToken` (not required — the `TELEGRAM_BOT_TOKEN` fallback exists). The declaration SHALL live beside the `image` reference in the same template so an image bump and its schema update travel in one diff. The adapter binary SHALL be unchanged — it plays no role in the declaration.
@@ -88,7 +88,7 @@ The chart's gated telegram `ChannelAdapter` CR SHALL declare the config contract
 - **THEN** the `ChannelAdapter` for telegram declares exactly the fields the adapter's config parser accepts, with `chatId` required
 
 #### Scenario: Misconfigured channel flagged before the adapter sees it
-- **WHEN** a `type: telegram` Channel is created with `config: {}` while the declaring ChannelAdapter exists
+- **WHEN** a Channel naming the telegram adapter is created with `config: {}` while the declaring ChannelAdapter exists
 - **THEN** the Channel gains `ConfigValid=False` naming `chatId` from the manager, in addition to whatever Ready condition the adapter later reports
 
 #### Scenario: Adapter binary unchanged

@@ -1,7 +1,13 @@
 # runtime-workspace-persistence Specification
 
 ## Purpose
-TBD - created by archiving change persistence-in-chart. Update Purpose after archive.
+
+What a runtime pod keeps on disk between runs: the agent's context by default,
+and — where an `AgentRuntime` declares one — the repository checkout too.
+
+The rule that shapes it is isolation: concurrent runtime pods never share a
+checkout, so persistence is per conversation and the claim ROOT is never handed
+to agent code.
 ## Requirements
 ### Requirement: Agent session persistence is the shipped default
 The chart SHALL provision the runtime home volume by default, so that agent

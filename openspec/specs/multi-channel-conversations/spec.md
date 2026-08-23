@@ -39,7 +39,7 @@ The no-relay-loops rule is load-bearing here: a message may be delivered toward 
 - **THEN** the manager delivers the message to that surface and the viewer renders it, confirming whatever it showed optimistically
 
 #### Scenario: Relay never loops
-- **WHEN** a relayed attributed message is posted to a sibling channel
+- **WHEN** a relayed attributed message is posted to another bound channel
 - **THEN** it is not fed back through `/channel/inbound` (or any provider's inbound path) as a new user message
 
 ### Requirement: Manager fans out agent replies on multi-channel conversations
@@ -60,8 +60,8 @@ Fan-out SHALL be recorded per bound thread in `Conversation.status`, so delivery
 - **THEN** each adapter renders it for its own surface — one may split it, another may show it whole — from the identical semantic message
 
 #### Scenario: Relayed user messages are semantic too
-- **WHEN** a user message on one bound channel is mirrored to its siblings
-- **THEN** each sibling receives a `relay` message carrying origin, sender, and body as fields, and composes the attribution itself
+- **WHEN** a user message on one bound channel is delivered to the others
+- **THEN** each destination receives a `relay` message carrying origin, sender, and body as fields, and composes the attribution itself
 
 #### Scenario: Restart between completion and delivery loses no answer
 - **WHEN** the manager restarts after the run result was recorded but before any bound thread was marked delivered

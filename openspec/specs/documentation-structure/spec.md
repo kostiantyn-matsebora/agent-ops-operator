@@ -1,22 +1,47 @@
 # documentation-structure Specification
 
 ## Purpose
-TBD - created by archiving change organize-docs. Update Purpose after archive.
+
+WHERE each kind of documentation lives, and the rules that keep it there.
+
+One page per audience, a bounded README that is the landing page's counterpart on
+the forge rather than a third document, migration guides in the changelog, and a
+single declared reading order so the site is one chain rather than a pile of
+pages.
+
+The last requirement is the one with teeth outside this repository: a shipped
+example carries a documented PLACEHOLDER and never a real value, because
+documentation, chart values and fixtures are copied by adopters and read by
+strangers.
 
 ## Requirements
 
 ### Requirement: README is a bounded one-page overview
 
-`README.md` SHALL answer two questions and no others: **what this is** and **how
-to start it**. It SHALL contain the product pitch and architecture diagram, a
-one-line-per-kind CRD table, **a bounded start** — the credential, the install
-command, one ask, and a link naming the site's Getting started page as the
-walkthrough — a links-onward index naming the published documentation site
-first, and short development and status sections. It SHALL NOT exceed 150 lines,
-and SHALL NOT contain reference material (adapter or work contracts, HTTP API
+`README.md` IS THE LANDING PAGE'S COUNTERPART ON THE FORGE. It carries what the
+landing page carries, more concisely, and says the site is the source — the two
+are one story for two audiences, and the forge audience is the larger one, so
+sending a stranger away to learn what the project IS is a gap rather than a
+boundary.
+
+Its sections SHALL track the landing page's: the claims strip, the flow diagram
+followed by how it works, what you write as a commented `Pipeline`, the console
+and its recording, when it runs / why it is built this way / pluggable at three
+seams, the comparison table, a one-line-per-kind CRD table, **a bounded start** —
+the credential, the install command, one ask, and a link naming the site's
+Getting started page as the walkthrough — and a links-onward index naming the
+site first, with short contributing and status sections.
+
+**THE SECTION LIST IS THE BOUND, and the line budget FOLLOWS it: at most 215
+lines.** A section added to the landing page moves that number; a paragraph that
+wandered in does not.
+
+It SHALL NOT contain reference material (adapter or work contracts, HTTP API
 tables, tool-access resolution tables, subchart documentation), upgrade
 instructions, or extended descriptions of behaviors — a distinguishing behavior
-is named in a line, and the document that owns it is linked.
+is named in a line, and the document that owns it is linked. RESTATING a site
+page is the failure; naming the same subject in a line is COVERING, and the
+difference is where the DETAIL lives.
 
 The bounded start SHALL remain copy-pasteable without leaving the file, and
 SHALL NOT grow back into the walkthrough: what a run looks like, which flags a
@@ -31,7 +56,7 @@ followed it there before SHALL be able to reach it from the index in one hop.
 - **WHEN** a first-time reader opens `README.md`
 - **THEN** the pitch, the list of CRD kinds, the install command, and one ask are
   all present without following a link
-- **AND** the file is at most 150 lines
+- **AND** the file is at most 215 lines
 
 #### Scenario: A feature change adds reference detail
 
@@ -131,11 +156,16 @@ heading in that file.
 
 ### Requirement: The document routing rule is recorded for contributors
 
-`CLAUDE.md` SHALL state which document receives which kind of update —
-concepts to `docs/concepts.md`, contracts to `docs/contracts.md`, a bundle's
-components or values to that bundle's own `docs/<bundle>.md` page, upgrade steps
-to `CHANGELOG.md`, README only for pitch, kind list, demo, or install — and SHALL
-state the README line budget as a number.
+The repository's own CONTEXT SHALL state which document receives which kind of
+update — concepts to `docs/concepts.md`, contracts to `docs/contracts.md`, a
+bundle's components or values to that bundle's own `docs/<bundle>.md` page,
+upgrade steps to `CHANGELOG.md`, README only for pitch, kind list, demo, or
+install — and SHALL state the README line budget as a number.
+
+That context is `CLAUDE.md` plus the topic files under `.claude/rules/` that it
+indexes: one topic per file, with `CLAUDE.md` naming the routing so a reader
+reaches it in one hop. Where this requirement says `CLAUDE.md`, the index and the
+file it routes to are meant together — a rule stated twice is a rule that drifts.
 
 The routing rule SHALL name bundle pages by the bundle they document, so renaming
 a subchart renames its page and the rule together. `docs/prometheus-bundle.md` is
@@ -209,14 +239,14 @@ how a page reads, the routing rule SHALL route to it rather than restating it.
 #### Scenario: Contributor changes the site
 
 - **WHEN** a contributor wants to restyle the site or add a page to it
-- **THEN** `CLAUDE.md` names the theme files for presentation and a markdown page
-  for prose, and states that `docs/` is a published Jekyll source
+- **THEN** the routing rule names the theme files for presentation and a markdown
+  page for prose, and states that `docs/` is a published Jekyll source
 
 #### Scenario: A palette token is changed in the console
 
 - **WHEN** a contributor edits a `--ao-*` value in the console's theme
-- **THEN** `CLAUDE.md` tells them the site's copied token block is the second
-  half of that change
+- **THEN** the routing rule tells them the site's copied token block is the
+  second half of that change
 
 ### Requirement: The site's reading order is one chain, declared in one place
 

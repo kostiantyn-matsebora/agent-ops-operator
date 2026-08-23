@@ -1,7 +1,16 @@
 # console-deployment Specification
 
 ## Purpose
-TBD - created by archiving change visualize-agent-ops. Update Purpose after archive.
+
+How the console is INSTALLED, as distinct from what it is: a chart bundle of CRs
+and RBAC — ChannelAdapter, Channel, SignalAdapter, SignalSource, the UI token
+Secret, a read-only Role and its binding — and no workload template at all. The
+ChannelAdapter reconciler owns the Deployment and the Service.
+
+It is on by default, which is why the token's source order and the guard on the
+console's published identity are part of this capability: a redeploy must never
+sign every browser out, and a subchart must never name a console identity the
+parent did not render.
 ## Requirements
 ### Requirement: Console ships as an opt-in chart bundle of CRs
 The console SHALL ship as a chart bundle of CRs and RBAC — a ChannelAdapter, a Channel, an externally-served SignalAdapter, a SignalSource, the UI token Secret, and a read-only Role/RoleBinding — and SHALL be **enabled by default** (`console.enabled: true`). The chart SHALL ship no workload or connectivity of its own: the ChannelAdapter reconciler owns the Deployment and, because `spec.port` is set, the Service.

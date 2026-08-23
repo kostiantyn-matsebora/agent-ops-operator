@@ -1,7 +1,15 @@
 # console-topology Specification
 
 ## Purpose
-TBD - created by archiving change visualize-agent-ops. Update Purpose after archive.
+
+The console's picture of the INSTALL: the wiring as a graph, the CR inventory
+behind it, and traffic drawn on it from recorded activity events rather than
+inferred from configuration.
+
+Everything here follows from one rule — the console renders what it was told, and
+never guesses. An edge is drawn because an event travelled it, a scope states
+what it put out of view, and a time window bounds what is claimed rather than
+letting an old event look current.
 
 ## Requirements
 

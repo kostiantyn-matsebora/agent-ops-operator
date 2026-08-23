@@ -1,7 +1,18 @@
 # chart-managed-secrets Specification
 
 ## Purpose
-TBD - created by archiving change stable-generated-secrets. Update Purpose after archive.
+
+Credentials the CHART creates, and the rules that keep an upgrade from silently
+replacing one that is in use.
+
+Three sources in a fixed order — an explicitly configured value, an existing
+Secret, then generation — and generation ONLY on install, because `lookup`
+returns empty on every renderer without a cluster and a generated value on the
+upgrade path APPLIES a new credential rather than merely showing one in a diff.
+
+The guard that refuses an upgrade which would orphan an unretained credential is
+the other half: `helm.sh/resource-policy: keep` is read off the LIVE object, so
+adding it in the same release that stops rendering the Secret deletes it.
 ## Requirements
 ### Requirement: A credential the chart generates has three sources in a fixed order
 For every credential the chart can generate, the value SHALL be taken from the

@@ -1,7 +1,18 @@
 # conversation-close Specification
 
 ## Purpose
-TBD - created by archiving change limit-active-conversations. Update Purpose after archive.
+
+`/close`: ending a conversation from a thread, and everything that follows from
+the decision that closing is not deleting.
+
+Closing writes a phase and tears down the pod, the MCP ConfigMap and the capacity
+slot, while the object, its runs, its results and its context handle all survive —
+which is what makes REOPEN mean anything, and why nobody closed anything back
+when closing deleted.
+
+Two boundaries are load-bearing: closing has exactly ONE implementation whatever
+surface asks for it, and a surface's reach is bounded by the threads it holds —
+you may only end a conversation you are part of.
 ## Requirements
 ### Requirement: /close ends a conversation from its thread
 A message whose text is the command `/close` (optionally bot-suffixed, e.g.

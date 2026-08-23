@@ -494,7 +494,7 @@ An unaddressed message is answered with the list, and you name the one you meant
 
 Addressing works from **any** wired surface regardless of claims —
 `/<pipeline> <task>` resolves by name, with no claim check and no Ready check,
-and the reply lands in the thread you asked from. `/agents` lists them any time.
+and the reply lands in the thread you asked from. `/pipelines` lists them any time.
 
 ### Channels, and what happens without one
 

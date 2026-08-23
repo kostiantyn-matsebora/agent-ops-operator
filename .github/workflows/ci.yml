@@ -299,3 +299,29 @@ jobs:
           python3 .github/scripts/publication-guard.py \
             --path /dev/null \
             --messages "origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }}"
+
+  # The OTHER guard over the same published tree, and the opposite shape.
+  #
+  # `publication` is an ALLOWLIST because naming a private thing in a guard
+  # publishes it. This one is a DENYLIST, and that follows from what its subject
+  # is: a removed CRD field, a withdrawn tiebreak, a superseded command are all
+  # PUBLIC by construction, so listing them costs nothing — and the list IS the
+  # value. It is the record of what this project stopped doing, in the one place
+  # that fails a build when someone brings it back.
+  #
+  # Two guards, opposite shapes, each following from its subject. Neither is a
+  # template for the other.
+  retired-vocabulary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A published spec is READ AS THE CURRENT CONTRACT. A retired name
+      # asserted there tells a stranger the project does something it stopped
+      # doing, which is worse than saying nothing, because a spec is trusted.
+      #
+      # Recording a removal still passes: each term carries the words that mark
+      # a sentence as a record. The report names file, line and term and never
+      # quotes the line — `--show` is for local fixing.
+      - name: No retired vocabulary asserted as a current claim
+        run: python3 .github/scripts/retired-vocabulary-guard.py

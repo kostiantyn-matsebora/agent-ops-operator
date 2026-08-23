@@ -7,7 +7,7 @@ import (
 )
 
 // ChannelAdapterSpec declares a channel-type IMPLEMENTATION — nothing more.
-// The CR's NAME is the routing key: Channels whose spec.type equals it are
+// The CR's NAME is the routing key: Channels whose spec.adapter equals it are
 // served by this adapter (one adapter per implementation, by construction).
 // No configuration lives here: per-surface settings are on the served
 // Channels (config, credentialsSecretRef — projected into the pod by the
@@ -88,7 +88,7 @@ type ChannelAdapterStatus struct {
 	// Conditions: Deployed (workload rendered), Ready (workload available).
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	// ServedChannels counts Channels naming this adapter in spec.type.
+	// ServedChannels counts Channels naming this adapter in spec.adapter.
 	// +optional
 	ServedChannels int32 `json:"servedChannels,omitempty"`
 }

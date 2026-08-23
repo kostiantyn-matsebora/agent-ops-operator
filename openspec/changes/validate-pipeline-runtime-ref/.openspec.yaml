@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-08-24
+# No delta: `pipeline-model` ALREADY requires this, in its own words, with a
+# scenario. The spec is right and the code is behind it — which is the whole
+# reason this change exists rather than an edit to that spec.
+skip_specs: true

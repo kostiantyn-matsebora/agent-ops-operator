@@ -1,7 +1,16 @@
 # console-ingress Specification
 
 ## Purpose
-TBD - created by archiving change console-ingress-tls. Update Purpose after archive.
+
+Exposing the console outside the cluster — a decision an operator makes
+deliberately, never a default. Nothing is rendered unless asked for, the backend
+is always the reconciler-owned Service, and the values surface is the
+conventional Helm one so an existing file keeps rendering what it rendered.
+
+Two rules carry the weight: only root-path hosting is offered, because the SPA's
+asset paths cannot be reparented and a sub-path install fails loudly rather than
+serving a broken page; and plaintext exposure is ANNOUNCED, because a console
+reachable over HTTP hands its bearer token to the first network in the way.
 ## Requirements
 ### Requirement: The console is not exposed unless an operator says so
 The chart SHALL render no Ingress by default. The console's Service SHALL remain

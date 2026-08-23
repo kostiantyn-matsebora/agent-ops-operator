@@ -7,7 +7,7 @@ import (
 )
 
 // SignalAdapterSpec declares a signal-type IMPLEMENTATION — nothing more.
-// The CR's NAME is the routing key: SignalSources whose spec.type equals it
+// The CR's NAME is the routing key: SignalSources whose spec.adapter equals it
 // are served by this adapter (one adapter per implementation, by
 // construction). No configuration lives here: per-source settings are on the
 // served SignalSources (config, credentialsSecretRef — projected into the
@@ -81,7 +81,7 @@ type SignalAdapterStatus struct {
 	// Conditions: Deployed (workload rendered), Ready (workload available).
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	// ServedSources counts SignalSources naming this adapter in spec.type.
+	// ServedSources counts SignalSources naming this adapter in spec.adapter.
 	// +optional
 	ServedSources int32 `json:"servedSources,omitempty"`
 }
@@ -93,7 +93,7 @@ type SignalAdapterStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // SignalAdapter plugs a signal implementation into the operator: apply one
-// naming an image and every SignalSource whose spec.type equals THIS CR's
+// naming an image and every SignalSource whose spec.adapter equals THIS CR's
 // NAME is served by it — no operator or chart change. The reconciler owns the
 // adapter Deployment (zero-RBAC ServiceAccount, no SA token automount), the
 // Service when port is declared, and injects the manager URL, a per-adapter

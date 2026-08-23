@@ -1,8 +1,9 @@
 // Package httpapi is the manager's HTTP surface:
 //
 //	GET  /healthz
-//	GET  /work?convo=&wait=&pod=   worker long-poll dispatch
-//	POST /work/done                worker completion report
+//	GET  /work?convo=&wait=&pod=   runtime long-poll dispatch
+//	POST /work/done                runtime completion report
+//	POST /work/context             context-sync sidecar operation report
 //
 // The manager hosts NO signal transports — alert/webhook ingestion lives in
 // signal adapters feeding POST /signal/inbound. That endpoint is also how work
@@ -11,10 +12,13 @@
 //
 // plus the channel adapter contract (bearer-token auth, see ADAPTER_TOKEN):
 //
-//	GET  /channel/ops?type=&wait=       outbound op long-poll (204 on timeout)
+//	GET  /channel/ops?adapter=&wait=    outbound op long-poll (204 on timeout)
 //	POST /channel/ops/{id}/done         async op completion
-//	POST /channel/inbound               {"channel","threadId"?,"text"} -> router
-//	GET  /channel/channels?type=        channels served by an adapter (+config)
+//	POST /channel/inbound               {"channel","threadId","text"} -> router
+//	GET  /channel/channels?adapter=     channels served by an adapter (+config)
+//	POST /channel/conversations/{name}/reopen         return a Closed one to Idle
+//	POST /channel/conversations/{name}/delete         remove an already-Closed one
+//	POST /channel/conversations/{name}/reset-context  clear its context handle
 //	GET  /channel/vocabulary            what may be typed, + its revision
 //	GET  /channel/state/{channel}/{key} adapter cursor state (annotation-backed)
 //	PUT  /channel/state/{channel}/{key}
@@ -353,7 +357,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 		return dispatch.WorkUnit{}, false, err
 	}
 	// Continuity is PROMISED ONLY WHERE IT IS POSSIBLE. A runtime that keeps
-	// context on its home volume, in a deployment providing none, can never
+	// context on its context volume, in a deployment providing none, can never
 	// continue anything — the pod exits on its idle timeout and takes the context
 	// with it. Withholding the handle makes that conversation single-run by
 	// declaration: it answers each message fresh and says so, instead of failing

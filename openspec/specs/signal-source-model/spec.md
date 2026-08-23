@@ -2,10 +2,10 @@
 
 ## Purpose
 
-The restructured `SignalSource` CRD: an open string `spec.adapter` with opaque per-type `config` and name-only credential references, manager-side grouping policy applied uniformly to every source type, and unchanged in-process compatibility for the built-in `alertmanagerWebhook` type.
+The `SignalSource` CRD: `spec.adapter` naming the serving `SignalAdapter`, opaque per-adapter `config`, name-only credential references, and manager-side grouping policy applied uniformly to every source. There are no built-in signal types — the manager hosts no signal transport, so every source needs a serving adapter.
 ## Requirements
 ### Requirement: SignalSource CRD splits shared metadata from type-specific config
-The `SignalSource` CRD SHALL consist of type-agnostic metadata — required immutable open-string `spec.type`, typed `spec.grouping` (signatureLabels, windowDays, cooldownHours), optional `spec.credentialsSecretRef` — plus an optional opaque `spec.config` (`x-kubernetes-preserve-unknown-fields`) whose shape only the serving signal implementation defines and validates authoritatively. The operator SHALL never interpret `spec.config` semantically and SHALL never read the credential Secret's values (name-only projection). **When the serving `SignalAdapter` CR declares a config schema for the type, the manager SHALL mechanically validate `spec.config` against that adapter-declared schema and report the result as an advisory `ConfigValid` condition — admission still accepts arbitrary config, and a violation never blocks serving or ingestion.** **The source SHALL carry no wiring: `channelRef` and `profileRef` are removed (BREAKING) — a `Pipeline` claim is the only way a source reaches a profile and channels.**
+The `SignalSource` CRD SHALL consist of type-agnostic metadata — required immutable `spec.adapter` (the name of the `SignalAdapter` CR serving this source, a REFERENCE whose implementation defines and validates the sibling config; it replaced the open-string `spec.type`), typed `spec.grouping` (signatureLabels, windowDays, cooldownHours), optional `spec.credentialsSecretRef` — plus an optional opaque `spec.config` (`x-kubernetes-preserve-unknown-fields`) whose shape only the serving signal implementation defines and validates authoritatively. The operator SHALL never interpret `spec.config` semantically and SHALL never read the credential Secret's values (name-only projection). **When the serving `SignalAdapter` CR declares a config schema, the manager SHALL mechanically validate `spec.config` against that adapter-declared schema and report the result as an advisory `ConfigValid` condition — admission still accepts arbitrary config, and a violation never blocks serving or ingestion.** **The source SHALL carry no wiring: `channelRef` and `profileRef` are removed (BREAKING) — a `Pipeline` claim is the only way a source reaches a profile and channels.**
 
 #### Scenario: Wiring fields no longer accepted
 - **WHEN** a manifest sets `spec.channelRef` or `spec.profileRef` against the new CRD
@@ -16,24 +16,20 @@ The `SignalSource` CRD SHALL consist of type-agnostic metadata — required immu
 - **THEN** the operator references that Secret name in the serving adapter's pod spec without ever reading the Secret through the API
 
 #### Scenario: Arbitrary config accepted for any adapter
-- **WHEN** a SignalSource is applied with `adapter: pagerduty` and a `config` object the operator has never seen
-- **THEN** the API server accepts it and the operator stores the config without validation or interpretation
+- **WHEN** a SignalSource is applied with `adapter: pagerduty` and a `config` object the operator has never seen, and no SignalAdapter declares a schema
+- **THEN** the API server accepts it and the operator stores the config without validation or interpretation, and no `ConfigValid` condition is set
 
 #### Scenario: Adapter reference is required and immutable
 - **WHEN** a SignalSource is applied without `spec.adapter`, or an existing one's `spec.adapter` is changed
 - **THEN** the API server rejects the request with a validation error
 
-#### Scenario: Arbitrary config accepted for any type
-- **WHEN** a SignalSource is applied with `type: pagerduty` and a `config` object the operator has never seen, and no SignalAdapter declares a schema for `pagerduty`
-- **THEN** the API server accepts it and the operator stores the config without validation or interpretation, and no `ConfigValid` condition is set
-
 #### Scenario: Schema violation surfaces as an advisory condition
 - **WHEN** a SignalSource's `config` violates the schema its serving SignalAdapter declares
 - **THEN** the API server still accepts the SignalSource, its status gains `ConfigValid=False` naming the violation, and `Served`/`Wired`/signal ingestion are unaffected
 
-#### Scenario: Type is required and immutable
-- **WHEN** a SignalSource is applied without `spec.type`, or an existing one's `spec.type` is changed
-- **THEN** the API server rejects the request with a validation error
+#### Scenario: The former type field is gone
+- **WHEN** a SignalSource is applied carrying the removed `spec.type`
+- **THEN** the field is not part of the schema and is pruned rather than honoured, so a stale manifest cannot silently select an adapter
 
 ### Requirement: Unwired sources are visible and drop signals loudly
 A SignalSource SHALL carry a `Wired` condition: True when at least one Ready `Pipeline` lists it, False otherwise. The condition SHALL name ALL the Pipelines serving it, not the first — a source several Pipelines watch fans its signals out to every one of them, so "who answers here" is only readable if the condition says all of them. Signals arriving for an unwired source SHALL NOT create conversations; the ingest/inbound response SHALL state the reason explicitly.

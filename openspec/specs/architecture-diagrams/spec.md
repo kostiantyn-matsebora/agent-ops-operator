@@ -72,7 +72,7 @@ The page SHALL carry, in this order:
    domain-neutrality is shown rather than asserted.
 4. A boundary marking what one Helm install puts in the reader's own cluster.
 5. The three declarations as their real CRD kinds — `Pipeline`, `AgentProfile`,
-   `MCPToolset` — each subtitled with the question it answers (*what wakes it*,
+   `MCPToolset` — each subtitled with the question it answers (*what starts it*,
    *what it should do*, *what it may touch*).
 6. A real, copy-pasteable `Pipeline` manifest in block YAML, whose field names
    match the CRD.

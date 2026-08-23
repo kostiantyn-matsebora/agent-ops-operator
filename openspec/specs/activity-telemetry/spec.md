@@ -1,7 +1,19 @@
 # activity-telemetry Specification
 
 ## Purpose
-TBD - created by archiving change rich-console-ui. Update Purpose after archive.
+
+The manager's record of every HOP it mediates — signal admitted, conversation
+opened, work dispatched, answer delivered — served for replay and as a stream.
+
+It is the declared-LOSSY class of state, deliberately: a bounded in-memory ring
+buffer, never persisted, never blocking the operation it records. That is why two
+rules matter more than the rest — emission is never itself a signal, and a gap is
+REPORTED rather than rendered as silence, because a cursor answered with an empty
+list reads as "nothing happened".
+
+The one fact that is NOT telemetry is the latest context checkpoint, which is
+durable state on the Conversation: whether a conversation can continue after a
+crash cannot depend on a buffer entry that may have been evicted.
 
 ## Requirements
 

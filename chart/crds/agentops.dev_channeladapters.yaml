@@ -55,7 +55,7 @@ spec:
           spec:
             description: |-
               ChannelAdapterSpec declares a channel-type IMPLEMENTATION — nothing more.
-              The CR's NAME is the routing key: Channels whose spec.type equals it are
+              The CR's NAME is the routing key: Channels whose spec.adapter equals it are
               served by this adapter (one adapter per implementation, by construction).
               No configuration lives here: per-surface settings are on the served
               Channels (config, credentialsSecretRef — projected into the pod by the
@@ -276,7 +276,7 @@ spec:
                 type: array
               servedChannels:
                 description: ServedChannels counts Channels naming this adapter in
-                  spec.type.
+                  spec.adapter.
                 format: int32
                 type: integer
             type: object

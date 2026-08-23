@@ -30,7 +30,7 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          AgentRuntime defines an executable agent backend (worker image + pod defaults).
+          AgentRuntime defines an executable agent backend (runtime image + pod defaults).
           AgentProfiles select one via spec.runtimeRef; the CR named "default" is the
           namespace fallback.
         properties:
@@ -53,7 +53,7 @@ spec:
             type: object
           spec:
             description: |-
-              AgentRuntimeSpec defines HOW agents execute: the worker image implementing
+              AgentRuntimeSpec defines HOW agents execute: the runtime image implementing
               the operator's work contract, and its pod-level defaults. Adopters bring
               their own agent backend (claude-code, aider, custom) by supplying an image
               that:
@@ -61,7 +61,7 @@ spec:
                1. long-polls  GET  $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25
                2. executes the returned unit (promptText or promptFile+promptVars against
                   the checked-out repository), streaming progress to STDOUT (pod logs)
-               3. reports    POST $CONTROL_URL/work/done {convo,runId,status,sessionId,result}
+               3. reports    POST $CONTROL_URL/work/done {convo,runId,status,runtimeContextId,result}
                4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
             properties:
               args:
@@ -244,7 +244,8 @@ spec:
                     type: object
                 type: object
               env:
-                description: 'Env: extra environment for every worker of this runtime.'
+                description: 'Env: extra environment for every runtime pod of this
+                  runtime.'
                 items:
                   description: EnvVar represents an environment variable present in
                     a Container.
@@ -381,7 +382,7 @@ spec:
                 type: object
               idleTtlMinutes:
                 default: 10
-                description: IdleTTLMinutes before an idle worker exits (respawned
+                description: IdleTTLMinutes before an idle runtime pod exits (respawned
                   on demand).
                 format: int32
                 type: integer

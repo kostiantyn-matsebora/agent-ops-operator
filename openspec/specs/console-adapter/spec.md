@@ -1,7 +1,15 @@
 # console-adapter Specification
 
 ## Purpose
-TBD - created by archiving change visualize-agent-ops. Update Purpose after archive.
+
+The console's half of the CHANNEL contract: it is a conforming channel adapter,
+long-polling `/channel/ops?adapter=console`, completing ops, and posting what a
+person types to `/channel/inbound` — so the browser reaches the cluster through
+the same contract Telegram does and through no other path.
+
+Its thread ids are DERIVED from the conversation's UID, so a restart re-resolves
+every binding with nothing stored, and its transcript is a CACHE of
+`status.runs[]`, never the only copy of what was said.
 ## Requirements
 ### Requirement: Console serves the channel adapter contract
 The console SHALL be a conforming channel adapter: it long-polls `GET /channel/ops?adapter=console`, completes operations via `POST /channel/ops/{id}/done`, and submits UI-typed user messages via `POST /channel/inbound`, authenticating every call with its injected per-adapter derived token. It SHALL tolerate at-least-once op delivery by deduplicating on operation id.
@@ -29,7 +37,7 @@ A message SHALL be rendered ONCE however many paths carry it. A message typed in
 
 The speaker SHALL be named for a reader: a message SHALL be attributed to its sender when one is known, and otherwise to a word describing who spoke. Internal message-kind identifiers SHALL NOT be shown as a speaker's name.
 
-#### Scenario: Sibling-channel relay is attributed
+#### Scenario: A relay from another bound channel is attributed
 - **WHEN** a conversation is bound to both a telegram channel and the console, and a user replies in Telegram
 - **THEN** the console transcript shows the relayed message attributed to its Telegram sender, not as agent output
 

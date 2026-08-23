@@ -1,7 +1,26 @@
 # conversation-context-continuity Specification
 
 ## Purpose
-TBD - created by archiving change keep-conversation-context. Update Purpose after archive.
+
+What a conversation's MEMORY is worth and what agent-ops promises about it.
+
+`runtimeContextId` is the runtime's opaque handle on everything a conversation
+has accumulated. The manager stores it, hands it back on the next work unit, and
+interprets nothing inside it — so this capability is about the PROMISE around the
+handle rather than its contents:
+
+- **Latest-wins**, because a run may legitimately end in a different context than
+  it was asked to continue.
+- **Promised only where possible** — `AgentRuntime.spec.contextStorage` against
+  the configured home volume. Never-promised answers fresh and says so;
+  promised-and-lost FAILS the run, because a conversation without its context is
+  a new one wearing its name.
+- **An outage before a loss.** One breaker, fed by both edges — runs that report
+  an unreachable context and pods that cannot be provisioned for a storage
+  reason — holds work rather than destroying every conversation's memory in one
+  storage incident.
+- **Reset is explicit**, never automatic, because an automatic reset is
+  indistinguishable from the silent degradation the rest of this forbids.
 
 ## Requirements
 
@@ -179,7 +198,8 @@ An agent that knows it lost the thread is safer than one that half-remembers.
 
 ### Requirement: Renaming the handle must not discard it
 The field carrying the handle SHALL be renamed from the runtime-specific
-`sessionId` to `runtimeContextId`, and the rename SHALL NOT itself lose context.
+`sessionId` — now the retired spelling — to `runtimeContextId`, and the rename
+SHALL NOT itself lose context.
 
 For one release the manager SHALL READ both fields — preferring the new one and
 adopting the old when only it is present — and SHALL WRITE only the new. The work

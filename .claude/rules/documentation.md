@@ -82,6 +82,7 @@ filename — so the routing is explicit:
 | Terminology | `.claude/rules/terminology.md`, `wiring.md`, `adapters.md` |
 | Invariants | `.claude/rules/invariants.md` |
 | Hard-won gotchas | `.claude/rules/gotchas.md` |
+| A name this project STOPPED using — a removed field, a withdrawn rule, a superseded command | `.claude/rules/retired-vocabulary.md`, and a term in `.github/retired-vocabulary.json` in the same change |
 | What the console is FOR — its views, what each answers, the authentication decision | `docs/console-guide.md` |
 | What the console IS — endpoints, RBAC grant, values reference, internals | `docs/console.md` |
 | A change to the console's UI | re-run BOTH `npm run screenshots` and `npm run demo` in `platform/console/ui` — the site's screenshots and its landing recording are build output, and the change is not done until both match |

@@ -1,7 +1,17 @@
 # console-bulk-close Specification
 
 ## Purpose
-TBD - created by archiving change console-bulk-close-conversations. Update Purpose after archive.
+
+Ending many conversations at once, without giving the console a Kubernetes write
+path. Each conversation in the batch is closed by posting `/close` on the
+console's own thread for it — so every guarantee the typed command already
+carries holds unchanged, and the console gains no new manager endpoint and no new
+contract operation.
+
+The rest of the capability is what makes a batch reviewable: an explicit list and
+never a filter, bounded at one screen, a per-conversation outcome, working
+conversations excluded unless asked for, and the same treatment for bulk
+DELETE — which refuses anything not already closed.
 ## Requirements
 ### Requirement: The console closes a selected batch of conversations
 The console SHALL offer an action that ends several conversations in one

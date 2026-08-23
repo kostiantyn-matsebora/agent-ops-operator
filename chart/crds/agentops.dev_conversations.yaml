@@ -540,7 +540,7 @@ spec:
                 type: object
               inflight:
                 description: InflightRun tracks the unit currently dispatched to the
-                  worker.
+                  runtime pod.
                 properties:
                   dispatchedAt:
                     format: date-time

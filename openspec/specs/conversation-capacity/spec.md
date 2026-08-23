@@ -1,7 +1,19 @@
 # conversation-capacity Specification
 
 ## Purpose
-TBD - created by archiving change limit-active-conversations. Update Purpose after archive.
+
+How many conversations may be POD-BACKED at once, and what happens to the rest.
+
+The cap is decided before anything is provisioned and counted from the live pod
+list, never from status — a pod stuck unschedulable must not invent capacity.
+Over-cap conversations get phase `Pending`, which suppresses `ensure-topic` and
+is what stops a burst becoming a thousand chat threads; `Queued` keeps its own
+meaning of ADMITTED-and-waiting.
+
+Admission is FIFO by creation time over a waiting set defined by PODS, the
+backlog itself is bounded in ingest, and the paths that FREE a slot — idle
+eviction, the start deadline for a pod that never runs, and drain awareness — are
+here because a slot nobody releases is a cap nobody can recover from.
 
 ## Requirements
 
@@ -25,7 +37,7 @@ the manager SHALL honor the deprecated value and log that it is deprecated.
 - **THEN** the conversation reports phase `Idle` and no longer counts against the cap
 
 #### Scenario: Deprecated alias is honored
-- **WHEN** the manager starts with `MAX_RUNTIMES=8` and no `MAX_ACTIVE_CONVERSATIONS`
+- **WHEN** the manager starts with the deprecated `MAX_RUNTIMES=8` and no `MAX_ACTIVE_CONVERSATIONS`
 - **THEN** the effective cap is 8 and a deprecation notice is logged
 
 ### Requirement: Over-cap conversations wait in a Pending phase
@@ -188,8 +200,16 @@ path SHALL be introduced.
 
 When a runtime pod fails to start, the conversation SHALL carry a condition
 reporting that the runtime did not start, and its message SHALL carry the
-evidence from the pod itself — the unmet pod condition and the most recent
-related event — rather than only that a deadline elapsed.
+evidence from the pod itself — the unmet pod condition, in the kubelet's own
+words, plus any waiting container reason — rather than only that a deadline
+elapsed.
+
+Classification SHALL come from POD STATUS ALONE. The manager holds `create` and
+`patch` on events and no read verb at all, and granting it namespace-wide event
+reads to improve one message would be a real privilege expansion for a cosmetic
+gain. `PodReadyToStartContainers` is the discriminator: it stays False exactly
+while a volume will not attach and flips True before image pulling begins, so a
+slow pull can never be mistaken for a bad volume.
 
 A message stating only that a deadline was exceeded SHALL NOT be sufficient. The
 failure this requirement exists for was fifteen hours long and produced nothing

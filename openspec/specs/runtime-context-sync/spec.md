@@ -1,7 +1,19 @@
 # runtime-context-sync Specification
 
 ## Purpose
-TBD - created by archiving change context-survivability. Update Purpose after archive.
+
+The sidecar that keeps a conversation's LIVE context on pod-local storage and a
+SNAPSHOT on the durable volume — opt-in per `AgentRuntime`, and absent by default,
+where the pod is exactly what it was before.
+
+It learns work boundaries by PROXYING the work contract, which is what lets it
+checkpoint without any runtime image changing. Two orderings are guarantees
+rather than details: restore completes before the first `/work` is answered, and
+checkpoint completes before `/work/done` reaches the manager — a handle whose
+bytes were never written names something gone.
+
+Checkpoints are conditional AND incremental, because a conditional-but-full copy
+every two minutes would push the whole context over NFS on every change.
 
 ## Requirements
 

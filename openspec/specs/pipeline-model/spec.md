@@ -10,9 +10,11 @@ The Pipeline CRD: a credential-free wiring layer binding N signal sources and M 
 
 The `Pipeline` CRD SHALL bind N `signalSourceRefs` and M `channelRefs` to one
 `profileRef`: signals from every referenced source SHALL become conversations
-bound to ALL referenced channels with the pipeline's profile, and conversations
-originated from any referenced channel SHALL be bound to all referenced
-channels.
+bound to ALL referenced channels with the pipeline's profile. A channel
+ORIGINATES nothing, so there is no channel-originated case: a conversation
+started by a chat command on a surface binds to the addressed Pipeline's
+channels PLUS the surface it was typed on, which is where the person is
+looking.
 
 The Pipeline SHALL be the SOLE source of its conversations' capabilities, via
 two optional stanzas of ordered refs: `spec.toolsets` (→ `MCPToolset` CRs, the
@@ -66,8 +68,8 @@ toolset and mcpConfig refs) without creating any workload.
 - **THEN** the resulting conversation carries channel bindings for both `home-ops` and `web` and uses the pipeline's profile
 
 #### Scenario: Chat-originated conversations are pipeline-bound
-- **WHEN** a user starts a conversation on a channel referenced by a Pipeline
-- **THEN** the conversation is bound to all the Pipeline's channels, not just the originating one
+- **WHEN** a user starts a conversation with a `/<pipeline> <task>` command on a chat surface
+- **THEN** the conversation is bound to all the addressed Pipeline's channels, not just the originating one, and the originating channel is folded in whether or not that Pipeline lists it
 
 #### Scenario: Dangling references surface on Ready
 - **WHEN** a Pipeline references a SignalSource that does not exist
@@ -164,7 +166,7 @@ A `/<name> <task>` chat command SHALL address a PIPELINE by name — the Pipelin
 - **THEN** a conversation is created for that Pipeline through the signal path, bound to the originating channel
 
 #### Scenario: The listing advertises only addressable names
-- **WHEN** a user asks for the Pipeline listing
+- **WHEN** a user sends `/pipelines`
 - **THEN** it names Ready Pipelines, not AgentProfiles — a profile name cannot be addressed
 
 #### Scenario: The agent is determined by the wiring, never by the caller
@@ -204,7 +206,7 @@ Channels MAY likewise be referenced by multiple Pipelines; a conversation's bind
 
 #### Scenario: Several pipelines serve one chat surface
 - **WHEN** two Ready Pipelines both list the same chat SignalSource
-- **THEN** neither reports a conflict, both stay `Ready=True`, and both appear in the surface's listing of available agents
+- **THEN** neither reports a conflict, both stay `Ready=True`, and both appear in the `/pipelines` listing on that surface
 
 #### Scenario: Channel shared by two pipelines stays valid
 - **WHEN** two Ready Pipelines both reference channel `web`

@@ -775,7 +775,7 @@ An `AgentRuntime` image must:
 1. **Long-poll** `GET $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25`
 2. **Execute the returned unit** — `promptText` (rendered), or
    `promptFile` + `promptVars` relative to the checked-out repo at
-   `/data/workspace`, with `resumeSessionId` when continuing — streaming
+   `/data/workspace`, with `runtimeContextId` when continuing — streaming
    progress to **stdout**
 3. **Report** the outcome:
 

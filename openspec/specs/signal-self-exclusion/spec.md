@@ -1,12 +1,20 @@
 # signal-self-exclusion Specification
 
 ## Purpose
-TBD - created by archiving change smart-k8s-events. Update Purpose after archive.
+
+The loop breaker: an observing signal adapter never emits a signal about
+agent-ops' own machinery. It is the signal-lane twin of the no-relay-loops rule
+for channels, and it is an INVARIANT rather than a filter — a failing runtime pod
+that became a signal would open a conversation that creates another failing
+runtime pod, forever, and nothing downstream catches that.
+
+It also fixes what "own machinery" means: three independent mechanisms, only the
+coarsest of which an installation may turn off.
 ## Requirements
 ### Requirement: agent-ops never ingests its own machinery as a signal
 A signal adapter that observes cluster state SHALL NOT emit a signal for an object that agent-ops itself created. This is an invariant, not a configurable filter: it is the signal-lane twin of the no-relay-loops rule for channels — the system must never re-ingest its own output as input.
 
-The rationale is structural, not aesthetic. A Conversation whose runtime pod cannot start emits a Warning event on that pod; without this rule the event becomes a signal, the signal opens a Conversation, that Conversation creates another runtime pod under a NEW name, and the cycle repeats without bound. Fingerprint cooldown does not break it (the pod name is fresh each turn), workload grouping does not break it (the owner is the Conversation CR, fresh each turn), and the dwell liveness re-check does not break it (the pod genuinely is still broken). `MAX_RUNTIMES` caps concurrent pods but not Conversation creation, so the runaway fills etcd while the pod pool thrashes.
+The rationale is structural, not aesthetic. A Conversation whose runtime pod cannot start emits a Warning event on that pod; without this rule the event becomes a signal, the signal opens a Conversation, that Conversation creates another runtime pod under a NEW name, and the cycle repeats without bound. Fingerprint cooldown does not break it (the pod name is fresh each turn), workload grouping does not break it (the owner is the Conversation CR, fresh each turn), and the dwell liveness re-check does not break it (the pod genuinely is still broken). The conversation cap bounds concurrent pods and `MAX_QUEUED_CONVERSATIONS` throttles the backlog, but neither BREAKS the cycle — the runaway still fills etcd, only more slowly.
 
 agent-ops' own health SHALL be reported as status — conditions on the owning CR — never as a signal.
 
@@ -27,7 +35,7 @@ The adapter SHALL detect its own machinery by all three of the following, indepe
 
 Mechanisms 1 and 2 SHALL NOT be configurable. Mechanism 3 SHALL be overridable, for installations that co-locate their own workloads with the operator.
 
-Every agent-ops workload SHALL carry one of the prefixes mechanism 2 lists. A maintenance workload is the case most likely to be forgotten and the worst to forget: it fails on a schedule, so an unexcluded one wakes an agent about agent-ops' own upkeep on every failure.
+Every agent-ops workload SHALL carry one of the prefixes mechanism 2 lists. A maintenance workload is the case most likely to be forgotten and the worst to forget: it fails on a schedule, so an unexcluded one starts a conversation about agent-ops' own upkeep on every failure.
 
 #### Scenario: Exclusion holds during adapter startup
 - **WHEN** the adapter has just started, its object cache is not yet populated, and a Warning event arrives for `agentops-conv-abc123`

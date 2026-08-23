@@ -26,7 +26,7 @@ The `ChannelAdapter` and `SignalAdapter` CRDs SHALL carry an optional **config s
 - **THEN** its type is served exactly as before, and no schema-related condition appears on its Channels/SignalSources
 
 #### Scenario: The richest config is the one declared
-- **WHEN** an implementation's config carries structure worth getting wrong (matchers, durations, caps — e.g. the vm-alertmanager `register` block)
+- **WHEN** an implementation's config carries structure worth getting wrong (matchers, durations, caps — e.g. the alertmanager adapter's `register` block)
 - **THEN** its adapter CR declares that shape, so a typo'd key or a malformed duration surfaces as a `ConfigValid` violation naming the field instead of silently changing routing
 
 #### Scenario: Declaration without config schema
@@ -45,7 +45,7 @@ When `spec.configSchema` is set, the adapter CR reconciler SHALL compile it and 
 - **THEN** the adapter CR carries `SchemaValid=True`
 
 ### Requirement: Manager validates config against a declared schema, generically and advisorily
-When the serving adapter CR (the CR named by `spec.type`) declares a compilable `configSchema`, the Channel/SignalSource reconciler SHALL validate the CR's `spec.config` (absent config validates as `{}`) against it mechanically — applying the adapter-declared schema with a generic JSON Schema validator, with no type-specific knowledge in the manager — and report the result as a `ConfigValid` condition: True (reason `SchemaValidated`) on conformance, False (reason `SchemaViolation`, message naming the violating fields) otherwise. When no schema is declared for the type (or the adapter CR is absent, or its schema does not compile), the `ConfigValid` condition SHALL be absent (removed if previously set). Validation SHALL be advisory: a False `ConfigValid` SHALL NOT affect `Served`, adapter listings, credential projection, dispatch, or signal ingestion — the adapter's own Ready reporting remains authoritative. Declaring or changing a schema SHALL re-trigger validation of the served CRs without manual intervention.
+When the serving adapter CR (the CR named by `spec.adapter`) declares a compilable `configSchema`, the Channel/SignalSource reconciler SHALL validate the CR's `spec.config` (absent config validates as `{}`) against it mechanically — applying the adapter-declared schema with a generic JSON Schema validator, with no type-specific knowledge in the manager — and report the result as a `ConfigValid` condition: True (reason `SchemaValidated`) on conformance, False (reason `SchemaViolation`, message naming the violating fields) otherwise. When no schema is declared for the type (or the adapter CR is absent, or its schema does not compile), the `ConfigValid` condition SHALL be absent (removed if previously set). Validation SHALL be advisory: a False `ConfigValid` SHALL NOT affect `Served`, adapter listings, credential projection, dispatch, or signal ingestion — the adapter's own Ready reporting remains authoritative. Declaring or changing a schema SHALL re-trigger validation of the served CRs without manual intervention.
 
 #### Scenario: Violation surfaces early as a condition
 - **WHEN** a Channel of a schema-declaring type is applied with `config` missing a schema-required field

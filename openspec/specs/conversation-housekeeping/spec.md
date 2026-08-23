@@ -91,8 +91,8 @@ in the pending backlog.
 
 It SHALL take part in no pipeline and SHALL be excluded from conversation REUSE: a
 signal whose signature matches a closed conversation SHALL open a new conversation
-rather than waking the closed one. A closed conversation is not somewhere work can
-land.
+rather than landing on the closed one. A closed conversation is not somewhere work
+can land.
 
 Everything that makes it a record SHALL be retained: its spec, its materialized
 profile, channel, toolset and MCP references, its runtime context handle, its
@@ -104,7 +104,7 @@ delete window.
 - **WHEN** a conversation is closed
 - **THEN** its runtime pod and MCP ConfigMap are gone, no work unit is dispatched for it, and the capacity it held admits a waiting conversation
 
-#### Scenario: A matching signal does not wake a closed conversation
+#### Scenario: A matching signal does not land on a closed conversation
 - **WHEN** a signal arrives whose signature matches a closed conversation inside the reuse window
 - **THEN** a new conversation is opened and the closed one is untouched
 

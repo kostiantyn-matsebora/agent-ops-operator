@@ -1,7 +1,17 @@
 # manager-introspection Specification
 
 ## Purpose
-TBD - created by archiving change rich-console-ui. Update Purpose after archive.
+
+What the manager tells the outside world about ITSELF, as opposed to about the
+objects it reconciles. The rule that shapes every requirement here: anything
+readable from a Kubernetes object is read from the API server by the client under
+its own RBAC, and the manager exposes only what exists nowhere else — op queue
+depth, slot occupancy, cooldowns, the leader identity, and the capability
+resolution that dispatch would perform.
+
+Three surfaces carry it: `GET /status` for the specific stuck item, Prometheus
+metrics for how deep and how old, and `GET /pipelines/{name}/resolved` so no
+client ever reimplements composition.
 ## Requirements
 ### Requirement: The manager exposes only state that exists nowhere else
 The manager SHALL expose its own runtime state and its own resolution results, and SHALL NOT expose CR snapshots. Anything readable from a Kubernetes object SHALL be read from the API server by the client under its own RBAC, never proxied through the manager.
@@ -15,7 +25,7 @@ The manager SHALL expose its own runtime state and its own resolution results, a
 - **THEN** an authenticated endpoint serves it, because no Kubernetes object carries it
 
 ### Requirement: Manager runtime state is served by GET /status
-The manager SHALL serve `GET /status`, adapter-token authenticated, reporting at minimum: build version; the identity of the replica holding the leader lease; runtime slots in use against `MAX_RUNTIMES`; per-adapter channel op queue depth with the oldest queued op and the oldest claimed-but-uncompleted op; and active cooldowns.
+The manager SHALL serve `GET /status`, adapter-token authenticated, reporting at minimum: build version; the identity of the replica holding the leader lease; runtime slots in use against `MAX_ACTIVE_CONVERSATIONS`; per-adapter channel op queue depth with the oldest queued op and the oldest claimed-but-uncompleted op; and active cooldowns.
 
 This state is in-memory by design — `OpQueue` holds pending and claimed ops in no Kubernetes object — so without this endpoint it is unobservable by any client.
 
@@ -24,7 +34,7 @@ This state is in-memory by design — `OpQueue` holds pending and claimed ops in
 - **THEN** `/status` reports a growing claimed-but-uncompleted count for that adapter with the age of the oldest such op
 
 #### Scenario: The runtime ceiling is visible
-- **WHEN** runtime slots in use equal `MAX_RUNTIMES`
+- **WHEN** runtime slots in use equal `MAX_ACTIVE_CONVERSATIONS`
 - **THEN** `/status` reports the ceiling and the in-use count, so queueing is distinguishable from stalling
 
 #### Scenario: Not a CR mirror

@@ -57,7 +57,7 @@ address.
 #### Scenario: Ambiguous bare message is answered with the choices
 
 - **WHEN** a user sends a bare message on a surface two Ready Pipelines serve
-- **THEN** no Conversation is created, neither Pipeline is woken, and the surface
+- **THEN** no Conversation is created, neither Pipeline opens one, and the surface
   receives the available Pipelines with the `/<pipeline> <task>` form to use
 
 #### Scenario: A non-chat signal on the same shared source still fans out
@@ -118,21 +118,31 @@ A chat signal SHALL carry `kind: chat` and the reserved labels
 
 ### Requirement: Commands are answered without creating a conversation
 
-Chat input that is a command producing only a response — `/agents`, `/help`,
-an unknown agent, or a usage error — SHALL emit a `send` operation to the
-originating channel and SHALL NOT create a Conversation. `/<profile> <task>`
-SHALL create a conversation for the named profile through the signal path.
+Chat input that is a command producing only a response — `/pipelines`, `/help`,
+an unknown Pipeline name, or a usage error — SHALL emit a `send` operation to the
+originating channel and SHALL NOT create a Conversation. `/<pipeline> <task>`
+SHALL create a conversation for the named PIPELINE through the signal path,
+carrying that Pipeline's profile AND its capabilities. The retired spelling of
+the listing command — `/agents` — SHALL keep answering, and SHALL NOT be
+printed, offered or registered anywhere.
 
-#### Scenario: Agent listing
+#### Scenario: Pipeline listing
 
-- **WHEN** a user sends `/agents` on the general surface
-- **THEN** the profile listing is posted to that channel and no Conversation
-  exists for it
+- **WHEN** a user sends `/pipelines` on the general surface
+- **THEN** the listing of Ready Pipelines is posted to that channel and no
+  Conversation exists for it
 
-#### Scenario: Addressed profile still opens a conversation
+#### Scenario: The retired spelling still answers and is never advertised
 
-- **WHEN** a user sends `/k8s-engineer check nodes`
-- **THEN** a task conversation is created for `k8s-engineer` exactly as before
+- **WHEN** a user sends the retired `/agents`
+- **THEN** the same listing is posted, while nothing agent-ops prints, offers or
+  registers as a command ever names that spelling
+
+#### Scenario: An addressed Pipeline still opens a conversation
+
+- **WHEN** a user sends `/k8s-ops check nodes` naming a Ready Pipeline
+- **THEN** a task conversation is created for `k8s-ops`, carrying its profile,
+  channel set and capabilities
 
 ### Requirement: Chat grouping defaults preserve human behavior
 

@@ -1,7 +1,14 @@
 # console-live-runs Specification
 
 ## Purpose
-TBD - created by archiving change visualize-agent-ops. Update Purpose after archive.
+
+What the console shows about work HAPPENING — and where each part of it comes
+from. Run history and results are read from `Conversation.status`, which survives
+a restart; the live transcript is an in-memory overlay whose loss costs only
+unscrolled messages; and where the two describe the same thing, CR status wins.
+
+That split is the whole capability: an overlay that could contradict the objects
+it observes would cost the console its only guarantee.
 
 ## Requirements
 
@@ -108,5 +115,5 @@ Conversations the console started SHALL have a live composer without further wir
 - **THEN** the transcript shows it once
 
 #### Scenario: No relay loop
-- **WHEN** the console receives its own outbound post, or a relay from a sibling channel
+- **WHEN** the console receives its own outbound post, or a relay from another bound channel
 - **THEN** it renders it, attributed, and never feeds it back inbound

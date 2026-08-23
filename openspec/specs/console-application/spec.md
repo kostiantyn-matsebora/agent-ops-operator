@@ -1,7 +1,21 @@
 # console-application Specification
 
 ## Purpose
-TBD - created by archiving change rich-console-ui. Update Purpose after archive.
+
+What the agent-ops console IS as an application: one Go service that fans in
+every source a browser must not touch — the Kubernetes CR watch, the manager's
+activity stream, install facts and the channel and signal contracts — and serves
+a read-mostly browser API plus the frontend over snapshots and one cursored
+stream.
+
+It covers the views that answer "is this install healthy" (overview, queues,
+configuration browser), how agent output is rendered as structure rather than
+text, and the authentication decision: reads behind a token or an external
+authenticator, writes behind a resolved identity and a flag.
+
+Its DEPLOYMENT is `console-deployment`, its exposure `console-ingress`, and its
+place in the adapter contract `console-adapter`. This capability is the
+application itself.
 
 ## Requirements
 
@@ -38,7 +52,7 @@ A snapshot stays AUTHORITATIVE, which is what makes applying safe: a resync repl
 - **THEN** the browser renders the fields it knows and ignores the rest, exactly as it does from a snapshot
 
 ### Requirement: The overview page reports the installation and what is wrong with it
-The console SHALL serve an overview covering: chart version and `appVersion`; the manager's image, readiness, replica state and uptime; every adapter with its image, readiness, port and served-CR count; every runtime image; `MAX_RUNTIMES` against runtime pods in use; active conversations and queued inputs; and a rollup of EVERY condition across every watched kind that is not `True`, newest first, each linking to its object.
+The console SHALL serve an overview covering: chart version and `appVersion`; the manager's image, readiness, replica state and uptime; every adapter with its image, readiness, port and served-CR count; every runtime image; `MAX_ACTIVE_CONVERSATIONS` against runtime pods in use; active conversations and queued inputs; and a rollup of EVERY condition across every watched kind that is not `True`, newest first, each linking to its object.
 
 #### Scenario: Health is answerable on one page
 - **WHEN** any component reports a failing condition, or a pod is not ready
@@ -51,7 +65,7 @@ The console SHALL serve an overview covering: chart version and `appVersion`; th
 ### Requirement: Queue state is a first-class view that separates queued from stalled
 The console SHALL present work and delivery queues as their own view, keeping the two distinct:
 
-- **Work queue** — conversations waiting for a runtime slot against `MAX_RUNTIMES`, and inputs waiting behind an inflight run because dispatch is strictly serial per conversation.
+- **Work queue** — conversations waiting for a runtime slot against `MAX_ACTIVE_CONVERSATIONS`, and inputs waiting behind an inflight run because dispatch is strictly serial per conversation.
 - **Delivery queue** — channel ops queued for an adapter to claim, and ops claimed but not completed, per adapter.
 
 Every entry SHALL carry an age, and the view SHALL flag stuck items explicitly — ops queued with nothing claiming them, ops claimed and never completed beyond a threshold, and conversations inflight far beyond typical run duration — rather than leaving the operator to compare timestamps. Active cooldowns SHALL be shown here, because a suppressed signal lane is otherwise indistinguishable from an idle one.
@@ -65,7 +79,7 @@ Each row SHALL link to the conversation, adapter or pipeline it concerns.
 - **THEN** the view flags the responsible adapter as stalled
 
 #### Scenario: Capacity exhaustion is named as such
-- **WHEN** runtime slots in use equal `MAX_RUNTIMES` and conversations are waiting
+- **WHEN** runtime slots in use equal `MAX_ACTIVE_CONVERSATIONS` and conversations are waiting
 - **THEN** the view reports the ceiling as the cause, distinguishing it from a hung runtime
 
 #### Scenario: Suppression is visible
@@ -94,7 +108,7 @@ The console SHALL store no time series of its own, and SHALL remain fully functi
 - **THEN** it is labeled as aggregate, and per-item drill-down is offered only within the range the activity buffer covers
 
 ### Requirement: The configuration browser renders and cross-checks every CR
-The console SHALL list every `agentops.dev` kind with a per-kind summary, and offer a detail view carrying conditions, the full spec, the raw YAML, and inbound references. It SHALL surface cross-object findings — references resolving to nothing, SignalSources no Pipeline claims, Channels whose adapter is absent, `configSchema` violations, and Pipelines whose profile has no runtime.
+The console SHALL list every `agentops.dev` kind with a per-kind summary, and offer a detail view carrying conditions, the full spec, the raw YAML, and inbound references. It SHALL surface cross-object findings — references resolving to nothing, SignalSources no Pipeline claims, Channels whose adapter is absent, `configSchema` violations, and profiles whose `runtimeRef` resolves to nothing (including the case where it names none and no `AgentRuntime` called `default` exists).
 
 Findings sourced from a reconciler condition SHALL be presented as such; findings the console derives by cross-reference SHALL be marked as the console's own. Configuration SHALL be read-only.
 

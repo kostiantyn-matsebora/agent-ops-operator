@@ -1,7 +1,17 @@
 # k8s-event-suppression Specification
 
 ## Purpose
-TBD - created by archiving change smart-k8s-events. Update Purpose after archive.
+
+Turning a cluster's Event stream into something worth answering.
+
+Ordered first-match-wins rules in Alertmanager's matcher syntax, plus a TIME
+axis spelled in Alertmanager's vocabulary — and the two halves that make it
+honest: a matched event must still be TRUE after its dwell window, and a mute is
+evaluated at EMIT so a problem that outlives the window still surfaces.
+
+Everything else bounds the volume rather than the meaning: bursts coalesce into
+one enriched signal, inhibition suppresses the consequences of a known cause, and
+a per-source emit cap REPORTS its clipping rather than quietly dropping.
 ## Requirements
 ### Requirement: Suppression rules are ordered, first-match-wins, and use Alertmanager matcher syntax
 A source's `config.rules` SHALL be an ordered list evaluated first-match-wins. Each rule carries `matchers` (Alertmanager syntax over the signal's label set: `=`, `!=`, `=~`, `!~`, with quoted values), an optional `for` duration, and an optional `action` (`drop`). A rule with empty `matchers` is a catch-all. A rule with `action: drop` suppresses the event outright; otherwise the event enters the dwell queue for `for` (default 0 = emit immediately).

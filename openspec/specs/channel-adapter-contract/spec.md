@@ -9,7 +9,7 @@ The HTTP contract between the manager and out-of-process channel adapters: outbo
 ### Requirement: Outbound operations delivered to adapters by long-poll
 The manager SHALL expose `GET /channel/ops?adapter=<name>&wait=<seconds>` (non-leader-gated) returning the next pending outbound operation for any Channel served by that adapter, or 204 on timeout. The parameter names the adapter (the same value Channels carry in `spec.adapter`), replacing the former `?type=`; a request carrying the retired parameter SHALL fail with 400 naming the replacement rather than being served an empty list, so an outdated adapter fails loudly instead of appearing to work while delivering nothing. The polling adapter SHALL additionally declare the outbound contract version it speaks, and an absent or unsupported declaration SHALL fail with 400 naming what is expected.
 
-Operations SHALL carry a stable id, the channel and conversation names, a kind (`ensure-topic`, `send`, or `close-topic`), and a kind-specific **structured** payload. `send` SHALL carry a typed message — one of `signal`, `answer`, `relay`, or `notice` — with markdown-valued free text and typed structured fields, plus the target thread id; it SHALL NOT carry pre-rendered display text. `ensure-topic` SHALL carry a topic descriptor (`conversation`, `pipeline?`, `source?`, `title`, `labels`, `kind`) rather than a rendered title string; `pipeline` is inferred and MAY be empty. `close-topic` SHALL carry the target thread id and asks the adapter to archive or close that thread on its transport. Escaping, length limits, chunking, truncation, and thread naming SHALL be the adapter's responsibility; the manager SHALL emit no transport markup and declare no maximum message size. Operations SHALL be derived from CR state or router actions such that an operation lost in flight (manager restart, adapter crash) is regenerated or safely skipped; delivery is at-least-once and adapters MUST tolerate duplicates by id. A `close-topic` operation SHALL be derivable from CR state for as long as it is outstanding, which the deleting conversation's finalizer guarantees.
+Operations SHALL carry a stable id, the channel and conversation names, a kind (`ensure-topic`, `send`, `close-topic` or `delete-conversation`), and a kind-specific **structured** payload. `send` SHALL carry a typed message — one of `signal`, `answer`, `relay`, or `notice` — with markdown-valued free text and typed structured fields, plus the target thread id; it SHALL NOT carry pre-rendered display text. `ensure-topic` SHALL carry a topic descriptor (`conversation`, `pipeline?`, `source?`, `title`, `labels`, `kind`) rather than a rendered title string; `pipeline` is inferred and MAY be empty. `close-topic` SHALL carry the target thread id and asks the adapter to archive or close that thread on its transport. Escaping, length limits, chunking, truncation, and thread naming SHALL be the adapter's responsibility; the manager SHALL emit no transport markup and declare no maximum message size. Operations SHALL be derived from CR state or router actions such that an operation lost in flight (manager restart, adapter crash) is regenerated or safely skipped; delivery is at-least-once and adapters MUST tolerate duplicates by id. A `close-topic` operation SHALL be derivable from CR state for as long as it is outstanding, which the deleting conversation's finalizer guarantees.
 
 #### Scenario: Adapter receives a topic-creation op
 - **WHEN** a Conversation referencing a Channel with `adapter: slack` is reconciled with no `threadId` and an adapter is long-polling `/channel/ops?adapter=slack`
@@ -44,7 +44,7 @@ The manager SHALL expose `POST /channel/ops/{id}/done` accepting the operation r
 
 #### Scenario: Topic id lands asynchronously
 - **WHEN** an adapter completes an `ensure-topic` op with `{threadId: "9876"}`
-- **THEN** the conversation's `status.threadId` becomes `"9876"` and dispatch proceeds normally
+- **THEN** that channel's binding in the conversation's `status.threads[]` carries `"9876"` and dispatch proceeds normally
 
 #### Scenario: Failed op is surfaced, not silently dropped
 - **WHEN** an adapter completes an op with an error
@@ -59,7 +59,7 @@ The manager SHALL expose `POST /channel/ops/{id}/done` accepting the operation r
 - **THEN** the failure is logged, no Conversation condition is written, and deletion proceeds
 
 ### Requirement: Inbound messages enter through the shared router
-The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, text, sender?}` as the CONTINUATION path only: `threadId` is REQUIRED, and the message SHALL be routed through the transport-neutral router as a reply input on the matching conversation (busy-ack preserved). Resulting acks SHALL flow back to the adapter as `send` operations, and the message SHALL be relayed to the conversation's sibling channels as a `relay` message carrying its attribution as fields rather than composed into the text. In-process (registry) providers SHALL use the same operation pipeline so routing behavior is identical for built-in and external types.
+The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, text, sender?}` as the CONTINUATION path only: `threadId` is REQUIRED, and the message SHALL be routed through the transport-neutral router as a reply input on the matching conversation (busy-ack preserved). Resulting acks SHALL flow back to the adapter as `send` operations, and the message SHALL be delivered to every OTHER bound channel that did not already display it as a `relay` message carrying its attribution as fields rather than composed into the text. Whether the originating surface displayed it is the serving adapter's declaration (`ChannelAdapter.spec.echoesOwnMessages`), not a property of the message — the decision is made PER DESTINATION. In-process (registry) providers SHALL use the same operation pipeline so routing behavior is identical for built-in and external types.
 
 The ORIGINATION branch is removed: command parsing and default-profile conversation creation no longer occur here, and a message in an unrecognized thread is no longer adopted as a new conversation. A request without `threadId` SHALL be rejected with a message naming the signal path as the origination route. Channel implementations MAY omit inbound entirely when a separate component handles their ingest.
 
@@ -75,9 +75,9 @@ The ORIGINATION branch is removed: command parsing and default-profile conversat
 - **WHEN** an adapter posts an inbound message whose thread id matches no conversation
 - **THEN** no conversation is created or adopted
 
-#### Scenario: Reply still mirrors to sibling channels
+#### Scenario: Reply still reaches every channel that has not shown it
 - **WHEN** a reply arrives on one channel of a multi-channel conversation
-- **THEN** it is relayed to the sibling channels as a `relay` message, attributed by each adapter's own rendering
+- **THEN** it is delivered as a `relay` message to every other bound channel, attributed by each adapter's own rendering, and to the originating one too when its adapter declares that it does not echo a person's own message
 
 ### Requirement: Adapters need no Kubernetes access
 The contract SHALL carry everything an adapter needs beyond ops and inbound: `GET /channel/channels?adapter=<t>` returns the channels of that type with their opaque `spec.config` **and a `credentialEnvPrefix` locating each channel's projected credentials in the adapter's own environment (Secret key `K` is env `<prefix>K`)**; `GET/PUT /channel/state/{channel}/{key}` persists adapter cursor state (manager-side, as Channel annotations) across adapter restarts; `POST /channel/channels/{name}/status` sets the Channel's Ready condition (adapters report their own config validation results there). The prefix SHALL be derived from projection metadata (the Channel name), never from Secret values or key enumeration.
@@ -153,28 +153,50 @@ can actually do, and both are recorded.
 - **WHEN** `ensure-topic` is delivered for a conversation that was never closed
 - **THEN** `previousThreadId` is absent and the adapter creates a thread as it always has
 
-### Requirement: Manager verbs let a bound surface reopen or delete a conversation
-The manager SHALL expose two operations a channel adapter may call over its
-existing authenticated contract: reopen and delete, each naming a conversation
-and the channel the caller serves.
+### Requirement: Manager verbs let a bound surface act on a conversation it carries
+The manager SHALL expose three operations a channel adapter may call over its
+existing authenticated contract, each naming a conversation and the channel the
+caller serves:
+
+| Verb | Does |
+|---|---|
+| reopen | returns a `Closed` conversation to `Idle` |
+| delete | removes a conversation that is ALREADY `Closed` |
+| reset-context | clears the conversation's runtime context handle |
 
 Reach SHALL be the BINDING — a surface may act on a conversation whose
 `spec.channelRefs` names its channel — read from the CONVERSATION and never
 taken from the request. Delete SHALL additionally refuse any conversation that
 is not already `Closed`, with a reason naming the missing step.
 
+Reset-context SHALL clear the handle under both its current and its retired
+spelling, so the dual-read that exists for upgrades cannot resurrect what the
+call removed, SHALL record a `ContextContinuity=False` condition naming the
+operator as the cause, and SHALL announce itself on every bound thread — a
+conversation that silently resumed without its memory is what the verb exists to
+prevent. A conversation carrying no handle SHALL be reported as success, because
+the caller wanted a conversation with no stale handle and that is what they have.
+
 These are not a remote CLOSE verb. Closing remains reachable only by posting
 `/close` on a thread the surface holds. They exist because a closed conversation
 holds no thread, so the proof of membership that closing relies on is
 unavailable, and the binding that put the thread there is the next-strongest.
 
-#### Scenario: A bound surface may reopen and delete
-- **WHEN** an adapter calls either verb for a conversation whose bindings name its channel
+#### Scenario: A bound surface may use all three verbs
+- **WHEN** an adapter calls any of the three for a conversation whose bindings name its channel
 - **THEN** the manager performs it
 
 #### Scenario: An unbound surface is refused with a reason
-- **WHEN** an adapter calls either verb for a conversation its channel is not bound to
+- **WHEN** an adapter calls any of the three for a conversation its channel is not bound to
 - **THEN** the request is refused and the reason names the binding that would extend its reach
+
+#### Scenario: A reset conversation is told it starts fresh
+- **WHEN** an adapter resets the context of a conversation that carries a handle
+- **THEN** the handle is cleared under both spellings, the conversation carries `ContextContinuity=False` naming the operator, and every bound thread is told
+
+#### Scenario: Resetting a conversation with no handle succeeds
+- **WHEN** an adapter resets the context of a conversation that carries none
+- **THEN** the call succeeds reporting that nothing was cleared, rather than failing
 
 #### Scenario: Delete refuses anything not already closed
 - **WHEN** an adapter asks to delete a conversation that is not `Closed`

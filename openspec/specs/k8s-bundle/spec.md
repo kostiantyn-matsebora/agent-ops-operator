@@ -2,12 +2,12 @@
 
 ## Purpose
 
-The Kubernetes agent Helm subchart composition at `chart/charts/k8s-bundle/`: packages the k8s events signal source, the `k8s-engineer` profile, and the Kubernetes MCP tooling as three individually toggleable components. It ships no execution substrate: the runtime, its ServiceAccount, its credential and that SA's RBAC are the parent chart's (`agent-runtime-ownership`). Self-gated and off by default, it is also what demo mode turns on — demo mode is an enablement path for the bundle's read-only defaults, not a distinct feature set.
+The Kubernetes agent Helm subchart composition at `chart/charts/k8s-bundle/`: packages the k8s events signal source, the `k8s-engineer` profile, the Kubernetes MCP tooling and its own wiring as individually toggleable components. It ships no execution SUBSTRATE: the `AgentRuntime`, the model credential, the home volume and the release-wide floor identity are the parent chart's (`agent-runtime-ownership`). It DOES render the ServiceAccount each route it ships runs as, because it is the only scope that knows what its own routes do. Self-gated and off by default, it is also what demo mode turns on — demo mode is an enablement path for the bundle's read-only defaults, not a distinct feature set.
 ## Requirements
 ### Requirement: The k8s bundle ships as a self-gated subchart, off by default and on in demo mode
 A Helm subchart at `chart/charts/k8s-bundle/` SHALL package the Kubernetes agent experience as four components — events signal source, k8s-engineer profile, its MCP tooling, and its own wiring. Every bundle template SHALL gate on `enabled OR global.demo.enabled` (self-gating, not a Helm `condition:`), with `k8s-bundle.enabled` defaulting to `false`. The parent chart's demo toggle SHALL live at `global.demo.enabled` and there SHALL be no `chart/templates/demo.yaml` — demo mode means exactly "the bundle with its defaults", which includes read-only RBAC resolved by the parent AND the bundle's observing route. Explicit `k8s-bundle.*` values SHALL still apply when enabled via demo.
 
-The bundle SHALL NOT render the agent's execution substrate. The `AgentRuntime`, the runtime ServiceAccount, the LLM credential Secret, and the runtime's RBAC are the parent chart's (`agent-runtime-ownership`), so a default install renders those and still renders nothing from this bundle.
+The bundle SHALL NOT render the agent's execution substrate. The `AgentRuntime`, the LLM credential Secret, the home volume and the release-wide floor identity are the parent chart's (`agent-runtime-ownership`), so a default install renders those and still renders nothing from this bundle. The ServiceAccount a route the bundle SHIPS executes under is the bundle's own, and is covered by the wiring component below.
 
 #### Scenario: Default install renders nothing from the bundle
 - **WHEN** the chart is installed with default values
@@ -96,7 +96,7 @@ The rendered source's default `grouping.signatureLabels` SHALL be `["namespace",
 ### Requirement: The profile component ships the k8s-engineer identity chain
 When active, the `profile` component SHALL render exactly one object: the `k8s-engineer` `AgentProfile` (values-configurable name, `maxTurns`, no repository, and **no capabilities** — no `allowedTools`, no `mcp`). It SHALL render no `AgentRuntime`, no ServiceAccount, and no credential Secret; the profile executes on the parent chart's runtime.
 
-Because the profile has NO repository, no agent definition file can be resolved for it. The component SHALL therefore support an inline role (`systemPrompt`) and ship a sensible default, so the shipped agent is not personality-free: a conversation woken by a cluster event would otherwise arrive with no instructions at all.
+Because the profile has NO repository, no agent definition file can be resolved for it. The component SHALL therefore support an inline role (`systemPrompt`) and ship a sensible default, so the shipped agent is not personality-free: a conversation started by a cluster event would otherwise arrive with no instructions at all.
 
 `profile.runtimeRef` SHALL remain, naming a runtime other than the parent's `default` — a higher-trust or different-vendor runtime the operator applied. Left empty, the profile emits no `runtimeRef` and falls back to `default`, which the parent guarantees exists whenever `runtime.enabled` is true.
 
@@ -185,6 +185,18 @@ Rendering both routes SHALL be possible and SHALL NOT fail: two Ready Pipelines
 claiming one source is a supported shape. It SHALL be documented for what it
 is — one event opening two conversations, under two profiles, with two agents
 acting.
+
+The component SHALL render the ServiceAccount each route it ships executes
+under, unless the install names one on that route, and SHALL bind those accounts
+no Kubernetes RBAC by default. A bundle is the only scope that knows what its own
+routes do, and the parent restating it would be one fact in two places.
+
+Holding no RBAC is the correct default rather than an omission: the runtime image
+ships no `kubectl`, so an agent reaches the cluster ONLY through the MCP server,
+which has its own account carrying the actual grant. What a per-route account
+buys is IDENTITY — each route is a distinct subject, a later grant lands on ONE
+route instead of every agent in the install, and a mistaken grant on the parent's
+floor account cannot reach a bundle route.
 
 Every reference the Pipeline makes to an object the bundle does not itself
 render SHALL be a values-supplied name, omitted when unset. Channels SHALL be

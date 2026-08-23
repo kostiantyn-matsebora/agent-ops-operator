@@ -15,21 +15,30 @@ by hand. It SHALL replace the job-only `jobName` field, so the originating sourc
 is recorded for every input kind rather than for jobs alone. It SHALL be optional
 so inputs created before this change remain valid.
 
-No `pipelineRef` SHALL be introduced on the Conversation. The originating
-Pipeline SHALL be INFERRED from the conversation's materialized bindings at
-render time, exactly as run attribution already is, and SHALL be omitted from a
-rendered message when the inference is ambiguous. A message SHALL NOT name a
-pipeline that is a guess.
+**The originating Pipeline IS recorded**, on `Conversation.spec.pipelineRef` —
+this requirement once said no such field should exist, and `pipeline-model` now
+owns the rule that replaced it: the ref is PROVENANCE, written once at creation
+and never read to resolve wiring. It exists because sources are SHAREABLE, so two
+Pipelines fanning out from one source open conversations with the same signature
+and without it the second's next signal lands on the first's conversation under
+the wrong profile.
+
+A message SHALL name the pipeline by READING that ref. For a conversation
+predating it, the pipeline SHALL be inferred from the materialized bindings and
+OMITTED when the inference is ambiguous. A message SHALL NOT name a pipeline that
+is a guess.
 
 #### Scenario: An alert input names its source
 
-- **WHEN** an alert from source `vm-alerts` is routed by pipeline `prod-oncall`
-- **THEN** the input records `{kind: signal, name: vm-alerts}` and the rendered
-  message names `prod-oncall`, taken from inference rather than a stored ref
+- **WHEN** an alert from source `cluster-alerts` is routed by pipeline `prod-oncall`
+- **THEN** the input records `{kind: signal, name: cluster-alerts}` and the
+  rendered message names `prod-oncall`, read from the conversation's recorded
+  origin
 
 #### Scenario: An ambiguous route is left blank, never guessed
 
-- **WHEN** a conversation's bindings match more than one Ready pipeline
+- **WHEN** a conversation predating `pipelineRef` has bindings matching more than
+  one Ready pipeline
 - **THEN** the message renders without a pipeline name and is otherwise complete
 
 ### Requirement: Bound channels receive every input the destination has not already seen

@@ -2,7 +2,19 @@
 
 ## Purpose
 
-`AgentProfile` answers WHO the agent is — repository, role, prompts, its own credentials, limits, resources, runtime preference — and never WHAT it may do. Capability comes exclusively from the `Pipeline` routing a conversation — the Pipeline that originates it declares what its conversations may do, and there is no per-profile default.
+`AgentProfile` carries the agent's BEHAVIOUR — repository, role, system prompt,
+its own credentials, limits, resources, and the output contract it speaks in.
+The system prompt is the whole of its judgement: how it decides, what it must
+never do, its method.
+
+What the profile lacks is REACH. Tools, MCP servers, channels, the runtime and
+the ServiceAccount it executes under all come from the `Pipeline` that
+originated a conversation, with no per-profile default and no inheritance.
+`spec.runtimeRef` survives only as a DEPRECATED field, dual-read for one release.
+
+"Identity only" is the wrong shorthand for that split and is not used here: two
+profiles over one runtime are two different agents, and a phrase implying a
+profile is a name and a role makes that sound impossible.
 ## Requirements
 ### Requirement: AgentProfile declares identity, never capability
 

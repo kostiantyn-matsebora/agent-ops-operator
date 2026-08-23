@@ -142,7 +142,7 @@ helm template agent-ops chart/ --set global.demo.enabled=true
 ```
 
 CI runs all of it on every pull request, plus `kubeconform` over each rendered
-chart permutation and the publication guard below.
+chart permutation and the two guards over the published tree, below.
 
 ## Commit messages
 
@@ -186,6 +186,32 @@ Two things follow for a contributor:
   passes, write "the guard passes" — pasting a match into a commit message or a
   pull request description reintroduces exactly what the guard removed, in a
   place the guard cannot read.
+
+## The retired-vocabulary guard
+
+**`openspec/specs/` is published and read as the current contract, and so are
+the site's pages.** A removed CRD field, a withdrawn rule or a superseded
+command that reappears there as a CURRENT CLAIM tells a stranger the project
+does something it stopped doing — which is worse than saying nothing, because a
+spec is trusted.
+
+```sh
+python3 .github/scripts/retired-vocabulary-guard.py          # file, line and term
+python3 .github/scripts/retired-vocabulary-guard.py --show   # LOCAL ONLY — prints the line
+```
+
+**It is a DENYLIST, and the guard beside it is an allowlist.** That is not an
+inconsistency: the publication guard protects things that naming would publish,
+so it can only describe what is permitted. Everything in
+`.github/retired-vocabulary.json` is public by construction, so listing it costs
+nothing — and the list is the value, being the record of what this project
+stopped doing, in the one place that fails a build when someone brings it back.
+
+**Recording a removal still passes.** Each term carries the words that mark a
+sentence as a record — "removed", "retired", "no longer" — searched over the
+matched line and the one either side of it. So a spec may say a field was
+removed; what fails is a spec that asserts it. If you are adding a legitimate
+mention, say what happened to the thing in the same sentence.
 
 ## Pull requests
 

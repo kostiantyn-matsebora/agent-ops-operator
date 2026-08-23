@@ -28,13 +28,26 @@ stops being read, so an unguarded rename would present as a bundle that installe
 successfully and rendered nothing.
 
 The bundle SHALL NOT render the agent's execution substrate. The `AgentRuntime`,
-the runtime ServiceAccount, the LLM credential Secret and the runtime's RBAC are
-the parent chart's.
+the LLM credential Secret, the home volume and the release-wide floor identity
+are the parent chart's.
+
+It SHALL render the ServiceAccount its OWN route runs as, and only that — a
+bundle is the only scope that knows what its routes do. That account SHALL hold
+no Kubernetes RBAC, because this lane reaches a Prometheus query API through an
+MCP server with an identity of its own and the agent's pod needs no Kubernetes
+permission to investigate an alert. An install naming its own
+`serviceAccountName` on the route SHALL suppress the rendered one.
 
 #### Scenario: Default install renders nothing from the bundle
 - **WHEN** the chart is installed with default values
 - **THEN** no SignalAdapter, SignalSource, MCPConfig, MCPToolset, AgentProfile,
-  Pipeline or workload from the bundle is rendered
+  Pipeline, route ServiceAccount or workload from the bundle is rendered
+
+#### Scenario: The route's identity is the bundle's, the substrate is not
+- **WHEN** the wiring component renders with no `serviceAccountName` set on it
+- **THEN** a ServiceAccount for that route is rendered with no Kubernetes RBAC
+  bound to it, while the `AgentRuntime`, the model credential and the home volume
+  still come from the parent chart
 
 #### Scenario: Demo mode does not enable this bundle
 - **WHEN** the chart is installed with `global.demo.enabled=true` and default
@@ -43,7 +56,7 @@ the parent chart's.
   demo cluster does not have
 
 #### Scenario: The retired values key fails the render
-- **WHEN** an install upgrades while still carrying a `vm-bundle:` values key
+- **WHEN** an install upgrades while still carrying the renamed `vm-bundle:` values key
 - **THEN** the render FAILS naming `prometheus-bundle`, rather than succeeding
   with a bundle that silently renders nothing
 
@@ -240,7 +253,8 @@ reference and fall back to the runtime the parent guarantees.
 
 Because the profile has NO repository, no agent definition file can be resolved
 for it. The component SHALL therefore ship an inline role, so an alert does not
-wake a personality-free agent whose only inputs are an allowlist and a payload.
+start a conversation with a personality-free agent whose only inputs are an
+allowlist and a payload.
 The role SHALL direct the agent to read the alert, query the metric that fired
 before concluding anything, state the likely cause with its evidence, and answer
 briefly.
@@ -275,6 +289,9 @@ agent to run.
 
 Exactly ONE route SHALL be offered. A metrics query server is read-only, so there
 is no second posture to express and no derivation from the release's RBAC mode.
+
+The component SHALL render the ServiceAccount that route executes under, unless
+the install names one, and SHALL bind it no Kubernetes RBAC by default.
 
 Every reference the Pipeline makes to an object the bundle does not itself render
 SHALL be a values-supplied name, omitted when unset. Channels SHALL be such a

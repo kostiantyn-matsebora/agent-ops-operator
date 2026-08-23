@@ -1,7 +1,15 @@
 # console-origination Specification
 
 ## Purpose
-TBD - created by archiving change rich-console-ui. Update Purpose after archive.
+
+How the console STARTS a conversation: by emitting a `kind: chat` signal to
+`/signal/inbound` for a SignalSource it serves, exactly as any other chat surface
+does. It names no pipeline, no profile and no toolset — which Pipeline answers is
+decided by the claim on that source.
+
+The originating channel is folded into the new conversation's bindings, so a
+console-started conversation is immediately joined and repliable without editing
+any Pipeline's `channelRefs`.
 ## Requirements
 ### Requirement: The console originates conversations from a claimed SignalSource
 The console SHALL start conversations by emitting a `kind: chat` signal to `POST /signal/inbound` naming a SignalSource it serves, authenticated with its signal-adapter identity. It SHALL NOT use `POST /task` and SHALL NOT create Conversation objects directly.

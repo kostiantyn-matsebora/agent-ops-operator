@@ -1,7 +1,23 @@
 # docs-site Specification
 
 ## Purpose
-TBD - created by archiving change gh-pages-docs-site. Update Purpose after archive.
+
+The published adopter site: what it is BUILT by, what it LOOKS like, and what
+each page owes a reader.
+
+- **Built** by GitHub Pages branch deploy from `docs/`, with no workflow, no
+  Gemfile and no plugin outside the Pages set — which is what makes every
+  generated asset a committed file with a CI check behind it.
+- **Looks like** the console, deliberately: the same `--ao-*` tokens, the same
+  mark, the same masthead-over-sidebar shell, the same Red Hat families,
+  self-hosted, with a three-state theme control.
+- **Owes** — one requirement per page, stating the reader it is for and the
+  order it answers them in: landing, Introduction, Getting started, Installation,
+  the Console page and the guides.
+
+The rule that runs through all of it: the theme holds no prose, the pages hold no
+theme, and a page needing a form the prose elements lack NAMES a component the
+theme styles rather than writing markup.
 
 ## Requirements
 
@@ -46,9 +62,10 @@ theme's own CSS/JS rather than switching the build to a workflow.
 ### Requirement: The site delivers the theme and the landing page only
 
 The site's deliverables SHALL be the theme, `docs/index.md`,
-`docs/introduction.md`, `docs/getting-started.md`, `docs/installation.md` and
-`docs/console-guide.md`. The existing `docs/*.md` reference pages SHALL NOT be
-edited for the site — no YAML front matter added, no headings changed, no links
+`docs/introduction.md`, `docs/getting-started.md`, `docs/installation.md`,
+`docs/console-guide.md` and the guides under `docs/guides/`. A page is a
+deliverable exactly when it carries YAML front matter; the remaining `docs/*.md`
+reference pages carry none and SHALL NOT be edited for the site — no YAML front matter added, no headings changed, no links
 rewritten — SHALL NOT appear in the site navigation, and SHALL NOT be treated as
 published documentation by any site page, all of which link to them where they
 live until a later change takes them onto the site.
@@ -208,8 +225,7 @@ assistive technology.
 
 Adding a page to the site SHALL require editing exactly one navigation source.
 A navigation entry pointing at a file that does not exist SHALL be treated as a
-defect. In this change the file SHALL list only the landing page, since nothing
-else is a site deliverable yet.
+defect, and the file SHALL carry an entry for every site deliverable.
 
 #### Scenario: The current page is shown
 
@@ -409,13 +425,13 @@ a reference page.
 
 - The opening SHALL state what the operator is and the structural idea that
   separates it from a bot or a runbook — identity, wiring and execution are
-  separate objects, so what an agent may do comes from the routing that wakes it
-  and never from the agent itself.
+  separate objects, so what an agent may reach comes from the route that STARTED
+  it and never from the agent itself.
 - The concepts section SHALL present the model's parts **as cards**, one per
   part. Each card SHALL be titled with the part's NAME, SHALL carry that kind's
   glyph as the console draws it, SHALL describe it in one or two sentences, and
-  SHALL link to the reference that owns its detail, with the whole card as the
-  target.
+  SHALL link to the page that TEACHES it — the guide for that kind where one
+  exists — with the whole card as the target.
 - The guides section SHALL list the task-shaped walkthroughs when there are any,
   and SHALL say plainly that there are none when there are none. It SHALL NOT
   list guides that do not exist as though they were available.
@@ -423,7 +439,7 @@ a reference page.
 #### Scenario: An adopter reads the Introduction before the reference
 
 - **WHEN** an adopter who has read only the landing page opens the Introduction
-- **THEN** they can name what wakes an agent, what decides what it may touch and
+- **THEN** they can name what STARTS a conversation, what decides what it may touch and
   what executes it, and can see which guide to read next
 
 #### Scenario: A reader arrives from the console
@@ -442,7 +458,7 @@ a reference page.
 #### Scenario: A concept card is followed
 
 - **WHEN** a reader clicks anywhere on a concept's card
-- **THEN** they reach the reference section for that part, and the card carries a
+- **THEN** they reach the page that teaches that part, and the card carries a
   visible affordance that it leads somewhere
 
 #### Scenario: No guides exist yet

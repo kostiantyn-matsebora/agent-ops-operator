@@ -52,5 +52,5 @@ A `SignalSource` whose `spec.adapter` is not claimed by a Ready `SignalAdapter` 
 - **THEN** the source shows `Served=False` instead of silently never producing conversations
 
 #### Scenario: No type is served without an adapter
-- **WHEN** a SignalSource uses `type: alertmanagerWebhook` after the built-in removal and no adapter claims that type
+- **WHEN** a SignalSource names `adapter: alertmanagerWebhook` after the built-in removal and no `SignalAdapter` of that name exists
 - **THEN** it shows `Served=False` — the manager itself serves nothing
