@@ -1,0 +1,94 @@
+# LINE ENDINGS ARE LF IN THE REPOSITORY, ALWAYS.
+#
+# Endings flipped under editing twice in one week here, on one machine — a
+# whole-file diff that says nothing, over a change of one character. A public
+# repository adds contributors on platforms whose default differs, which turns
+# an occasional annoyance into recurring churn nobody can review through.
+#
+# `* text=auto` normalises on the way IN: whatever a working tree holds, what
+# is stored is LF. The explicit `eol=lf` entries below go further and normalise
+# on the way OUT too, for the files where a CRLF checkout actually breaks
+# something rather than merely being noisy.
+
+* text=auto
+
+# SOURCE AND CONFIGURATION — checked out as LF everywhere.
+*.go        text eol=lf
+*.md        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.jsx       text eol=lf
+*.css       text eol=lf
+*.html      text eol=lf
+*.tpl       text eol=lf
+*.py        text eol=lf
+*.toml      text eol=lf
+*.mod       text eol=lf
+*.sum       text eol=lf
+
+# EXECUTED AS FILES — a CRLF here is not cosmetic, it is a failure.
+# A shell script with CRLF fails on its shebang (`bad interpreter: ^M`), and a
+# Dockerfile's RUN lines carry the CR into the container's shell.
+*.sh          text eol=lf
+Dockerfile    text eol=lf
+*.Dockerfile  text eol=lf
+Makefile      text eol=lf
+.gitignore    text eol=lf
+.dockerignore text eol=lf
+
+# SSH KEYS AND PEM MATERIAL — the gotcha this repository already paid for.
+# A deploy key that is not LF-only fails with `error in libcrypto`, and the
+# error names none of this.
+*.pem  text eol=lf
+*.key  text eol=lf
+
+# BINARY — never touched, never diffed as text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.mp4   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+*.zip   binary
+*.tgz   binary
+*.gz    binary
+
+# GENERATED OR VENDORED — still LF, but collapsed in a diff and excluded from
+# the language statistics, so neither drowns what a reviewer is looking at.
+package-lock.json  text eol=lf linguist-generated=true -diff
+go.sum             text eol=lf linguist-generated=true
+*.tsbuildinfo      text eol=lf linguist-generated=true -diff
+docs/cr-reference.md          text eol=lf linguist-generated=true
+platform/manager/api/v1alpha1/zz_generated.deepcopy.go  text eol=lf linguist-generated=true
+chart/files/crds/*.yaml       text eol=lf linguist-generated=true
+
+# The drawing is XML, but a three-way merge of it produces a file draw.io
+# cannot open. Its SVG exports are build output from `docs/diagrams/export.py`.
+*.drawio  text eol=lf -diff merge=binary
+docs/diagrams/*.svg  text eol=lf linguist-generated=true -diff
+
+# The site's mark and logos are hand-authored SVG and stay diffable.
+docs/assets/img/logos/*.svg  text eol=lf
+
+# THE ARCHIVE IS A RECORD, AND A RECORD IS NOT REFORMATTED.
+#
+# `openspec/changes/archive/` holds changes already folded into the specs.
+# Substitution in place is the only operation it gets: a scrub once rewrote one
+# archived tasks file through a text-mode read, and a one-line substitution
+# became a whole-file diff. A reformatting that is invisible when rendered is
+# still the record changing shape under a reader diffing it.
+#
+# `-text` opts these out of the normalisation above entirely, so the one-time
+# LF sweep leaves them exactly as they were written.
+openspec/changes/archive/**  -text
