@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 306" width="1000" height="306" role="img" font-family="system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#5c666d"/></marker><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#43c9bd"/></marker></defs>
+<text x="18" y="26" fill="#a5b0b7" font-size="10.5" font-weight="700" text-anchor="start" letter-spacing="1.4">SOMETHING HAPPENS</text>
+<rect x="16" y="40" width="196" height="46" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
+<g transform="translate(30,55)" fill="none" stroke="#a5b0b7" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.2a3.2 3.2 0 0 0-3.2 3.2v2.8L3.2 10.4h9.6L11.2 8.2V5.4A3.2 3.2 0 0 0 8 2.2z M6.4 12.2a1.7 1.7 0 0 0 3.2 0"/></g>
+<text x="56" y="61" fill="#e8ecee" font-size="13" font-weight="600" text-anchor="start">an alert fires</text>
+<text x="56" y="76" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">Alertmanager</text>
+<path d="M212 63 H236" stroke="#5c666d" stroke-width="1.3" fill="none"/>
+<rect x="16" y="96" width="196" height="46" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
+<g transform="translate(30,111)" fill="none" stroke="#a5b0b7" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.9 13.7 4.8v6.4L8 14.1 2.3 11.2V4.8z M2.3 4.8 8 7.7l5.7-2.9 M8 7.7v6.4"/></g>
+<text x="56" y="117" fill="#e8ecee" font-size="13" font-weight="600" text-anchor="start">a pod crashloops</text>
+<text x="56" y="132" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">cluster events</text>
+<path d="M212 119 H236" stroke="#5c666d" stroke-width="1.3" fill="none"/>
+<rect x="16" y="152" width="196" height="46" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
+<g transform="translate(30,167)" fill="none" stroke="#a5b0b7" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.4a5.6 5.6 0 1 0 0 11.2 5.6 5.6 0 0 0 0-11.2z M8 5.2V8l2.2 1.3"/></g>
+<text x="56" y="173" fill="#e8ecee" font-size="13" font-weight="600" text-anchor="start">a schedule comes due</text>
+<text x="56" y="188" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">cron</text>
+<path d="M212 175 H236" stroke="#5c666d" stroke-width="1.3" fill="none"/>
+<rect x="16" y="208" width="196" height="46" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
+<g transform="translate(30,223)" fill="none" stroke="#a5b0b7" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 3.6h11.2v7.2H7.6l-3.4 2.8v-2.8H2.4z"/></g>
+<text x="56" y="229" fill="#e8ecee" font-size="13" font-weight="600" text-anchor="start">someone asks</text>
+<text x="56" y="244" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">chat</text>
+<path d="M212 231 H236" stroke="#5c666d" stroke-width="1.3" fill="none"/>
+<path d="M236 63 V231" stroke="#5c666d" stroke-width="1.3" fill="none"/>
+<path d="M236 147 H272" stroke="#5c666d" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<text x="282" y="26" fill="#a5b0b7" font-size="10.5" font-weight="700" text-anchor="start" letter-spacing="1.4">YOU DECLARE IT — ONE PIPELINE</text>
+<rect x="282" y="40" width="252" height="214" rx="12" fill="#123b39" stroke="#43c9bd" stroke-width="1.6"/>
+<text x="300" y="68" fill="#7fded5" font-size="15" font-weight="700" text-anchor="start">Pipeline</text>
+<text x="300" y="86" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">the only place wiring lives</text>
+<circle cx="304" cy="108" r="2.6" fill="#43c9bd"/>
+<text x="316" y="112" fill="#e8ecee" font-size="12" font-weight="600" text-anchor="start">what starts it</text>
+<text x="316" y="126" fill="#a5b0b7" font-size="10" font-weight="400" text-anchor="start">signalSourceRefs</text>
+<circle cx="304" cy="143" r="2.6" fill="#43c9bd"/>
+<text x="316" y="147" fill="#e8ecee" font-size="12" font-weight="600" text-anchor="start">what it should do</text>
+<text x="316" y="161" fill="#a5b0b7" font-size="10" font-weight="400" text-anchor="start">profileRef</text>
+<circle cx="304" cy="178" r="2.6" fill="#43c9bd"/>
+<text x="316" y="182" fill="#e8ecee" font-size="12" font-weight="600" text-anchor="start">what it may touch</text>
+<text x="316" y="196" fill="#a5b0b7" font-size="10" font-weight="400" text-anchor="start">toolsets · mcpConfigs</text>
+<circle cx="304" cy="213" r="2.6" fill="#43c9bd"/>
+<text x="316" y="217" fill="#e8ecee" font-size="12" font-weight="600" text-anchor="start">where it answers</text>
+<text x="316" y="231" fill="#a5b0b7" font-size="10" font-weight="400" text-anchor="start">channelRefs</text>
+<path d="M534 147 H580" stroke="#43c9bd" stroke-width="2" fill="none" marker-end="url(#ab)"/>
+<text x="590" y="26" fill="#a5b0b7" font-size="10.5" font-weight="700" text-anchor="start" letter-spacing="1.4">THE OPERATOR RUNS IT</text>
+<rect x="590" y="40" width="190" height="92" rx="12" fill="#2a2350" stroke="#a996f5" stroke-width="1.4"/>
+<text x="608" y="68" fill="#e8ecee" font-size="14" font-weight="700" text-anchor="start">Conversation</text>
+<text x="608" y="87" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">one per incident,</text>
+<text x="608" y="101" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">resumable, its own thread</text>
+<rect x="590" y="148" width="190" height="106" rx="12" fill="#23282c" stroke="#a996f5" stroke-width="1.4"/>
+<text x="608" y="176" fill="#e8ecee" font-size="13" font-weight="700" text-anchor="start">its own agent pod</text>
+<text x="608" y="195" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">isolated · serial · capped</text>
+<text x="608" y="213" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">investigates, explains,</text>
+<text x="608" y="227" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">acts ONLY where</text>
+<text x="608" y="241" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">your wiring granted it</text>
+<path d="M685 132 V148" stroke="#a996f5" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<text x="820" y="26" fill="#a5b0b7" font-size="10.5" font-weight="700" text-anchor="start" letter-spacing="1.4">YOU ANSWER</text>
+<path d="M780 86 H818" stroke="#43c9bd" stroke-width="2" fill="none" marker-end="url(#ab)"/>
+<rect x="818" y="40" width="166" height="92" rx="12" fill="#123b39" stroke="#43c9bd" stroke-width="1.4"/>
+<text x="836" y="68" fill="#e8ecee" font-size="13" font-weight="700" text-anchor="start">your channels</text>
+<text x="836" y="87" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">Telegram, the console,</text>
+<text x="836" y="101" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">your own adapter</text>
+<path d="M901 132 V152 H800 V104 H784" stroke="#5c666d" stroke-width="1.3" fill="none" stroke-dasharray="4 4" marker-end="url(#a)"/>
+<text x="986" y="176" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="end">you reply, and the SAME</text>
+<text x="986" y="190" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="end">conversation continues</text>
+</svg>

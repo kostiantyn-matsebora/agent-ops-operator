@@ -25,39 +25,10 @@ This page is the short version of it.
 
 </div>
 
-```mermaid
-flowchart TB
-  subgraph S ["SOMETHING HAPPENS"]
-    direction LR
-    AL["🔔 an alert fires"]
-    EV["📦 a pod crashloops"]
-    CR["🕑 a schedule comes due"]
-    AS["💬 someone asks"]
-  end
-
-  P{{"Pipeline — the wiring<br/>what starts it<br/>what it should do<br/>what it may touch<br/>where it answers"}}
-  C["Conversation<br/>one per incident"]
-  W["its own agent pod<br/>isolated · serial · capped"]
-  O["your channels<br/>Telegram · the console"]
-
-  AL --> P
-  EV --> P
-  CR --> P
-  AS --> P
-  P ==> C
-  C ==>|"work"| W
-  W -.->|"investigates · explains · acts only where granted"| C
-  C ==> O
-  O -.->|"you reply, it continues"| C
-
-  classDef src  fill:#5c656d,stroke:#3f464c,stroke-width:1px,color:#ffffff
-  classDef hero fill:#0d7d76,stroke:#0a615c,stroke-width:2px,color:#ffffff
-  classDef run  fill:#6b4bd6,stroke:#4f35a8,stroke-width:1px,color:#ffffff
-  class AL,EV,CR,AS src
-  class P,O hero
-  class C,W run
-  style S fill:none,stroke:#9aa4ab,stroke-width:1px,stroke-dasharray:4 4
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/readme-flow-dark.svg">
+  <img alt="Left to right. SOMETHING HAPPENS: an alert fires (Alertmanager), a pod crashloops (cluster events), a schedule comes due (cron), someone asks (chat). YOU DECLARE IT, ONE PIPELINE — the only place wiring lives, naming what starts it (signalSourceRefs), what it should do (profileRef), what it may touch (toolsets and mcpConfigs) and where it answers (channelRefs). THE OPERATOR RUNS IT: a Conversation, one per incident, resumable, with its own thread; and its own agent pod — isolated, serial, capped — which investigates, explains and acts ONLY where your wiring granted it. YOU ANSWER on your channels: Telegram, the console, your own adapter; and when you reply, the same conversation continues." src="docs/assets/img/readme-flow-light.svg" width="1000">
+</picture>
 
 <sup>The whole story at page scale, as one drawing: [light](docs/assets/img/agent-ops-light.svg) ·
 [dark](docs/assets/img/agent-ops-dark.svg) — or [watch it happen](https://kostiantyn-matsebora.github.io/agent-ops-operator/#tour).</sup>

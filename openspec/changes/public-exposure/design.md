@@ -78,7 +78,7 @@ survive contact with how the two surfaces actually render:
 | Surface | Carries the story as |
 |---|---|
 | the landing page | its `.ao-presentation` tab set and the console recordings |
-| `README.md` | a mermaid flowchart, rendered by GitHub from source text |
+| `README.md` | `readme-flow-{light,dark}.svg`, drawn for the column by `readme-flow.py` |
 
 - **GitHub renders neither tabs nor autoplaying video.** The README needs a
   picture precisely where the site needs a presentation, so there is no shared
@@ -87,10 +87,20 @@ survive contact with how the two surfaces actually render:
   1778×1349, composed for a page; GitHub's ~1012px column shrinks it past
   legibility. It is now a CLICK-THROUGH under the diagram, which keeps the asset
   consumed without asking a forge column to hold a page-scale drawing.
-- **Mermaid wins on three counts an image loses:** it scales to the column, it
-  follows the reader's theme without a `<picture>` shipping both halves, and it
-  is TEXT — diffable in review, and current without an export step.
-  `docs/diagrams/message-flow.mmd` is the precedent.
+- **MERMAID WAS THE SECOND ATTEMPT AND IT FAILED ON THE FORGE.** It won on
+  paper — scales to the column, follows the theme, is text — and then GitHub
+  ignored `direction` on a subgraph whose edges cross its boundary, stacked the
+  four sources into a full page of scrolling, and clipped an edge label to its
+  first letter. **It rendered correctly in a local preview**, which is the whole
+  lesson: a README diagram is verified where a README is read.
+- **The third attempt is a drawn SVG PAIR, and it keeps mermaid's properties
+  without its layout engine.** `docs/diagrams/readme-flow.py` writes both themes
+  in one run, so they cannot drift; the source is text and diffs in review; the
+  composition is fixed at 1000×306 rather than left to a solver; and it can
+  carry real icons and shapes, which mermaid cannot.
+  - **The cost is a third diagram source in the repo**, and the rule that keeps
+    that survivable is that each one names what it is for — page scale, README
+    column, or read-as-source. `documentation.md` carries the table.
 - **The SVG pair had NO consumer** after the landing-page rebuild moved the site
   onto the presentation. It is build output of `docs/diagrams/export.py`, kept
   current through the terminology sweep, and pointed at nothing — the README is
@@ -98,11 +108,11 @@ survive contact with how the two surfaces actually render:
 - **Whatever the diagram also carries, the prose carries anyway.** See D2a:
   cutting text because a picture has it was tried and read as an empty page.
 
-**The budget went 150 → 240 with this**, because 150 was the number for a README
+**The budget went 150 → 215 with this**, because 150 was the number for a README
 that was three documents wearing one filename. **The section list is the bound
-and the number follows it** — the hard rule, no reference material, did not move.
-The mermaid source is ~40 of those lines, which is what a picture the forge
-renders, scales and themes actually costs.
+and the number follows it** — the hard rule, no reference material, did not
+move. It briefly went to 240 to hold ~40 lines of inline mermaid source, and
+came back down when the diagram became four lines naming two files.
 
 ## D3. The install command decides whether the README can be honest
 

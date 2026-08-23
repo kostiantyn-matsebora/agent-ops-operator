@@ -124,7 +124,7 @@ the pages hold no theme, and neither holds the rules.**
 - Adding a page to the site is a page plus one line in `_data/nav.yml`, never
   navigation markup written a second time.
 
-### README.md IS THE LANDING PAGE'S COUNTERPART ON THE FORGE. BUDGET: 240 LINES
+### README.md IS THE LANDING PAGE'S COUNTERPART ON THE FORGE. BUDGET: 215 LINES
 
 `wc -l README.md`.
 
@@ -140,7 +140,7 @@ here:
 | Landing page | README |
 |---|---|
 | the claims strip | the same three, one line |
-| the `.ao-presentation` build-up | the mermaid flowchart (~40 lines of source), then **How it works** in five numbered steps |
+| the `.ao-presentation` build-up | the flow diagram, then **How it works** in five numbered steps |
 | the "What you write" tab | **What you write** — the same `Pipeline`, comment-annotated |
 | the console recording | a link to it, plus what the console is |
 | When it runs / Why it is built this way / Pluggable at three seams | the same three lists |
@@ -163,17 +163,15 @@ DETAIL lives:
   see the shape of the model without following a link has not been told what
   this is.
 
-**THE BUDGET WENT 150 → 240, AND THE OLD NUMBER WAS FOR A DIFFERENT DOCUMENT.**
+**THE BUDGET WENT 150 → 215, AND THE OLD NUMBER WAS FOR A DIFFERENT DOCUMENT.**
 150 bounded a README that was three documents wearing one filename — reference
 tables, contracts, upgrade guides.
 
 - **THE SECTION LIST IS THE BOUND. The number FOLLOWS it**, and is what those
   sections currently cost. A section added to the landing page moves it; a
   paragraph that wandered in does not.
-- **A mermaid diagram costs ~40 lines of SOURCE for one picture**, which is the
-  single largest item and the reason the number is not tighter. That is the
-  price of a diagram the forge renders, scales and themes — an embedded image
-  would be one line and none of those things.
+- **The diagram costs FOUR lines** — a `<picture>` naming two files — since it
+  stopped being inline mermaid. See below.
 - **The hard rule is unchanged: NO REFERENCE MATERIAL.** If it is over budget,
   the first question is which section grew, and the answer is usually that
   something belongs in a `docs/` page.
@@ -183,30 +181,37 @@ tables, contracts, upgrade guides.
 | Surface | Shows the story as |
 |---|---|
 | the site's landing page | the `.ao-presentation` tab set and the console recordings |
-| `README.md` | a MERMAID flowchart, GitHub-rendered, in a ```` ```mermaid ```` fence |
+| `README.md` | `assets/img/readme-flow-{light,dark}.svg` in a `<picture>` |
 
 **GitHub renders neither tabs nor autoplaying video**, so the README needs its
-own picture. **Mermaid is the one that fits**, for three reasons that a raster or
-an exported SVG each fail:
+own picture. **THERE ARE NOW THREE DIAGRAM SOURCES AND THEY ARE NOT
+INTERCHANGEABLE:**
 
-1. **It scales to the reader's column.** GitHub's content width is ~1012px.
-2. **It is TEXT** — greppable, diffable, reviewable in a pull request, and it
-   needs no export step to stay current.
-3. **It follows the reader's THEME.** A committed image is one theme unless a
-   `<picture>` ships both halves.
+| Source | Writes | For |
+|---|---|---|
+| `diagrams/agent-ops.drawio` + `export.py` | `agent-ops-{light,dark}.svg` | the PAGE-SCALE picture, 1778×1349 |
+| `diagrams/readme-flow.py` | `readme-flow-{light,dark}.svg` | the README column, 1000×306 |
+| `diagrams/message-flow.mmd` | nothing — read as source | `concepts.md` links it |
 
-- **`docs/assets/img/agent-ops-{light,dark}.svg` is LINKED, not embedded**, and
-  it is what the caption under the diagram points at. It is a PAGE-SCALE
-  composition, 1778×1349 — GitHub's column shrinks it past legibility, which is
-  the whole reason it is a click-through rather than the diagram itself.
-  - It is BUILD OUTPUT of `docs/diagrams/export.py` from `agent-ops.drawio` — do
-    not delete it as unused, and do not hand-edit it.
-  - `docs/diagrams/message-flow.mmd` is the precedent for mermaid here.
+- **MERMAID WAS TRIED FOR THE README AND REMOVED.** It ignores `direction` on a
+  subgraph whose edges cross the boundary, so four source nodes stacked into a
+  full page of scrolling on GitHub, and it clipped an edge label to its first
+  letter. It also offers no real icons and no custom shapes. **It rendered
+  correctly in a local preview and wrongly on GitHub**, which is the reason to
+  check a README diagram on the forge and not only in a harness.
+- **THE PAGE-SCALE SVG IS LINKED, NOT EMBEDDED.** A forge column shrinks
+  1778×1349 past legibility, so it is the caption's click-through. Do not delete
+  it as unused, and do not hand-edit it — `export.py` owns it.
+- **`readme-flow.py` IS THE README'S, AND IT WRITES BOTH THEMES FROM ONE RUN.**
+  Never edit either SVG by hand; the halves would drift, and only one of them is
+  ever on screen for a given reader. Its palette is COPIED from
+  `assets/css/agentops.css`, which copies from the console theme — the same
+  one-directional copy `palette-and-mark.md` documents, so a token change is a
+  THIRD file now.
 - **THE DIAGRAM IS THE VISUAL, THE PROSE IS THE CONTENT.** Whatever the picture
-  also contains — the `pipeline.yaml`, the three seams, the three build reasons
-  — is NOT dropped from the text for that reason. A reader skims HEADINGS, and
-  cutting prose because a picture had it was tried here and read as an empty
-  page.
+  also contains is NOT dropped from the text for that reason. A reader skims
+  HEADINGS, and cutting prose because a picture had it was tried here and read
+  as an empty page.
 
 - **The install command must resolve a PUBLISHED artifact.** One naming a path
   inside the repository is not a start, it is a step that silently assumes a

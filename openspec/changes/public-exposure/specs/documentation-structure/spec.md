@@ -9,7 +9,7 @@ honest status line, **one install command that works without cloning the
 repository**, and a links-onward index naming the published documentation site
 first.
 
-It SHALL NOT exceed 240 lines, and SHALL NOT contain reference material (adapter
+It SHALL NOT exceed 215 lines, and SHALL NOT contain reference material (adapter
 or work contracts, HTTP API tables, tool-access resolution tables, subchart
 documentation), upgrade instructions, or extended descriptions of behaviors — a
 distinguishing behavior is named in a line, and the document that owns it is
@@ -35,9 +35,8 @@ rather than an overview.
 
 **The two surfaces SHALL carry the shared story in different media**, because
 neither medium works on the other surface. The site uses its presentation tabs
-and console recordings; the README SHALL use a diagram the forge renders from
-SOURCE TEXT, scaled to the reader's column and following their theme. Neither is
-a copy of the other.
+and console recordings; the README SHALL use a diagram COMPOSED FOR ITS COLUMN
+and shipped per theme. Neither is a copy of the other.
 
 **A page-scale exported drawing SHALL NOT be the README's diagram.** It is
 composed for a page, and a forge column shrinks it past legibility; it is linked
@@ -61,7 +60,7 @@ followed it there before SHALL be able to reach it from the index in one hop.
   onward are all present without following a link
 - **AND** what the project does, what a reader would declare, and why it is
   built that way are each covered without following a link
-- **AND** the file is at most 240 lines
+- **AND** the file is at most 215 lines
 
 #### Scenario: A feature change adds reference detail
 
@@ -103,8 +102,9 @@ followed it there before SHALL be able to reach it from the index in one hop.
 #### Scenario: A diagram is chosen for the README
 
 - **WHEN** the README needs to show the shape of the system
-- **THEN** it is rendered by the forge from source text, so that it scales to the
-  reader's column, follows their theme, and is reviewable in a diff
+- **THEN** it is generated from a committed SOURCE that writes every theme in
+  one run, sized for the forge's column, and it is verified AS THE FORGE RENDERS
+  IT rather than only in a local harness
 - **AND** a page-scale exported drawing is linked rather than embedded
 
 #### Scenario: A landing page section is added or reworked
