@@ -410,3 +410,64 @@ func TestChannelNoticeWithoutThreadIsStillVisible(t *testing.T) {
 		t.Fatalf("channel-level notice lost: %+v", msg)
 	}
 }
+
+// The browser token is projected into this pod at creation. Reading it must not
+// wait on the manager's channel listing — the console once served the WRONG
+// AUTH MODE for a full minute on a fresh install because it did.
+func TestProjectedCredentialsAreReadFromTheEnvironment(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_CONSOLE_uiToken", "tok-from-env")
+	t.Setenv("AGENTOPS_CRED_CONSOLE_readerSalt", "salt-from-env")
+
+	a := NewAdapter(nil, nil, nil, "console")
+	a.adoptProjectedCredentials()
+
+	a.mu.Lock()
+	tok, salt := a.uiToken, a.readerSalt
+	a.mu.Unlock()
+	if tok != "tok-from-env" {
+		t.Fatalf("token not adopted from the environment: %q", tok)
+	}
+	if salt != "salt-from-env" {
+		t.Fatalf("reader salt not adopted from the environment: %q", salt)
+	}
+}
+
+// Only the contract's own prefix, and only its two keys.
+func TestProjectedCredentialsIgnoreUnrelatedEnvironment(t *testing.T) {
+	t.Setenv("SOMETHING_uiToken", "not-ours")
+	t.Setenv("AGENTOPS_CRED_CONSOLE_botToken", "another-key")
+
+	a := NewAdapter(nil, nil, nil, "console")
+	a.adoptProjectedCredentials()
+
+	a.mu.Lock()
+	tok := a.uiToken
+	a.mu.Unlock()
+	if tok != "" {
+		t.Fatalf("adopted a credential it should not recognise: %q", tok)
+	}
+}
+
+// A listing that has not arrived is a STARTUP race, and its retry is not the
+// steady refresh interval. Serving no channel must be retried in about a second.
+func TestBootstrapRetryIsFasterThanTheRefreshInterval(t *testing.T) {
+	if channelBootstrapInterval >= channelRefreshInterval {
+		t.Fatalf("bootstrap retry %v is not faster than the refresh interval %v",
+			channelBootstrapInterval, channelRefreshInterval)
+	}
+	if channelBootstrapInterval > 5*time.Second {
+		t.Fatalf("bootstrap retry %v is long enough for a browser to meet the wrong auth mode",
+			channelBootstrapInterval)
+	}
+
+	a := NewAdapter(nil, nil, nil, "console")
+	if a.hasChannels() {
+		t.Fatal("a fresh adapter reports channels it has not resolved")
+	}
+	a.mu.Lock()
+	a.channels["console"] = consoleChannelConfig{}
+	a.mu.Unlock()
+	if !a.hasChannels() {
+		t.Fatal("a resolved channel is not reported")
+	}
+}

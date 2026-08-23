@@ -637,7 +637,7 @@ console:
     # The corner: a graph inside an inactive tab measured a 0x0 host, fitted to
     # it, and clamped to minimum zoom for good. The fit now waits for a host
     # with a size, so it works in a tab, a drawer, or wherever one lands next.
-    tag: 0.37.0
+    tag: 0.38.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:

@@ -54,6 +54,18 @@ type consoleChannelConfig struct {
 	MetricsURL string `json:"metricsUrl,omitempty"`
 }
 
+const (
+	// channelRefreshInterval is the steady cadence for re-reading the served
+	// channels once at least one has resolved.
+	channelRefreshInterval = 60 * time.Second
+	// channelBootstrapInterval is how fast the console retries while it serves
+	// NO channel yet — a startup race, not a refresh.
+	channelBootstrapInterval = time.Second
+	// credentialEnvPrefix is what the adapter contract advertises for a
+	// channel's projected credentials: AGENTOPS_CRED_<CHANNEL>_<key>.
+	credentialEnvPrefix = "AGENTOPS_CRED_"
+)
+
 // Adapter runs the /channel/* client loop.
 type Adapter struct {
 	mgr         *Manager
@@ -92,6 +104,7 @@ func NewAdapter(mgr *Manager, cache *Cache, transcripts *Transcripts, adapterNam
 // from the fallback path for no reason.
 func (a *Adapter) Run(ctx context.Context) {
 	a.cache.WaitForSync(ctx)
+	a.adoptProjectedCredentials()
 	a.refreshChannels(ctx)
 	go a.refreshLoop(ctx)
 	for ctx.Err() == nil {
@@ -113,13 +126,68 @@ func (a *Adapter) Run(ctx context.Context) {
 	}
 }
 
+// refreshLoop re-reads the served channels: FAST while none have resolved,
+// then at the steady cadence.
+//
+// A flat 60s was both, and that is what made a fresh install serve the wrong
+// auth mode for a full minute. The console pod is started by the ChannelAdapter
+// reconciler at about the moment the Channel CR is created, so the first listing
+// legitimately comes back empty — and the retry for that is a startup retry, not
+// a refresh interval. A transient listing error had the same cost.
 func (a *Adapter) refreshLoop(ctx context.Context) {
 	for ctx.Err() == nil {
-		sleepCtx(ctx, 60*time.Second)
+		wait := channelRefreshInterval
+		if !a.hasChannels() {
+			wait = channelBootstrapInterval
+		}
+		sleepCtx(ctx, wait)
 		if ctx.Err() == nil {
 			a.refreshChannels(ctx)
 		}
 	}
+}
+
+func (a *Adapter) hasChannels() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.channels) > 0
+}
+
+// adoptProjectedCredentials reads the browser token and the reader salt out of
+// this pod's OWN ENVIRONMENT, without waiting to be told they are there.
+//
+// The values are projected by the kubelet at pod creation, so they are present
+// before the process starts. What the console lacked was never the value — it
+// was the variable NAME, because the prefix is derived from the channel name and
+// the console waited for the manager's listing to learn it. That is a discovery
+// dependency standing in for a data one, and it cost a browser the whole
+// bootstrap window.
+//
+// The prefix shape is fixed by the adapter contract, so it can be recognised
+// rather than asked for. First match wins, which is what refreshChannels does
+// with several channels anyway.
+func (a *Adapter) adoptProjectedCredentials() {
+	token, salt := "", ""
+	for _, kv := range os.Environ() {
+		name, value, ok := strings.Cut(kv, "=")
+		if !ok || value == "" || !strings.HasPrefix(name, credentialEnvPrefix) {
+			continue
+		}
+		switch {
+		case token == "" && strings.HasSuffix(name, "_uiToken"):
+			token = value
+		case salt == "" && strings.HasSuffix(name, "_readerSalt"):
+			salt = value
+		}
+	}
+	a.mu.Lock()
+	if token != "" && a.uiToken == "" {
+		a.uiToken = token
+	}
+	if salt != "" && a.readerSalt == "" {
+		a.readerSalt = salt
+	}
+	a.mu.Unlock()
 }
 
 // refreshChannels re-reads the channels this adapter serves, resolves the
