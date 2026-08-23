@@ -40,6 +40,20 @@ container IS at runtime.
   allocation view and carries that; a component moving between the parent chart
   and a bundle must not move its source.
 
+**THERE IS EXACTLY ONE `docs/`, AT THE ROOT.** No component owns a docs
+directory, and a second one appearing is a broken relative path, never a new
+home for anything.
+
+- **The restructure that gave every component a directory named for its image
+  added a level**, and `platform/console/ui`'s screenshot and demo harnesses
+  still pointed at `../../docs`. That resolves to `platform/docs/`, which is
+  writable — so both wrote there, REPORTED SUCCESS, and the published assets
+  silently stopped updating for a day.
+- **Both harnesses now ASSERT the output directory exists** rather than creating
+  it. A missing path means the file moved and its relative path did not.
+- **Anything else resolving a path out of a component directory owes the same
+  check.** `find . -type d -name docs` returns one line, and that is the test.
+
 **Count from the repo, not from this file.** The counts were wrong twice, and
 `platform/egress-proxy/` was missing from the context entirely — `.github/components.sh
 images` and `modules` answer both questions from the tree.
@@ -203,7 +217,7 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
 - **Verification ladder:** config-entry state, then recurrence.
 - **Its loop breaker is the agent SURFACE** (`mcp_server`, `api`,
   `websocket_api`), because a failed agent call is logged there and reporting it
-  would wake the agent that made it.
+  would reach the agent that made it.
 
 **`signals/k8s-events/`** — cluster Events signal adapter.
 

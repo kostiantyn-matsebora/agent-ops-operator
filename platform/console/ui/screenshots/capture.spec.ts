@@ -1,6 +1,7 @@
 import { test, type Page } from '@playwright/test'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { NOW, answer } from './fixture'
@@ -44,7 +45,32 @@ const MAX_HEIGHT = 1600
 /** Page ground below the last control, so a view does not end flush. */
 const GUTTER = 24
 
-const OUT = join(process.cwd(), '..', '..', 'docs', 'assets', 'img', 'console')
+// THREE LEVELS UP, not two: this file lives at platform/console/ui/.
+//
+// It was `../..` when the console was at console/ui, and the restructure that
+// gave every component a directory named for its image added the `platform/`
+// level without moving this. The run then wrote to platform/docs/assets/ — a
+// junk directory beside the module — and REPORTED SUCCESS, so the published
+// screenshots silently stopped updating.
+const OUT = join(process.cwd(), '..', '..', '..', 'docs', 'assets', 'img', 'console')
+
+// THE OUTPUT PATH IS ASSERTED, NOT ASSUMED.
+//
+// This wrote to a junk directory for a full day and reported SUCCESS every
+// time, because a relative path that no longer resolves still names somewhere
+// writable. The published assets simply stopped updating and nothing said so.
+//
+// THERE IS EXACTLY ONE `docs/` IN THIS REPOSITORY, at the root. If the resolved
+// path is not an existing directory under it, the run FAILS rather than
+// creating a second one.
+if (!existsSync(OUT)) {
+  throw new Error(
+    `output directory does not exist: ${OUT}\n` +
+      `There is one docs/ tree in this repo, at the root. A missing path here means ` +
+      `this file moved and its relative path did not — do NOT let it create the directory.`,
+  )
+}
+
 
 const MIME: Record<string, string> = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
