@@ -1,6 +1,50 @@
 ## After changes
 
-**DOCUMENTATION IS PART OF THE CHANGE, NOT A FOLLOW-UP.**
+**DOCUMENTATION IS PART OF THE CHANGE, NOT A FOLLOW-UP. THIS IS NOT
+NEGOTIABLE.**
+
+### EVERY OPENSPEC CHANGE ENDS WITH A DOCUMENTATION TASK
+
+**A dedicated task, its own section, and the LAST one before the change is
+finished.**
+
+- **Not a bullet inside another task.** A docs line appended to "implement X" is
+  the line that gets ticked with X and never done.
+- **Not first, and not in the middle.** Written last, it documents what the
+  change ACTUALLY did — which is routinely not what the proposal said it would.
+- **BOTH HALVES, listed separately in the task**, because they are skipped
+  independently:
+  1. the reference docs (`docs/concepts.md`, `docs/contracts.md`, a bundle page)
+  2. **the ADOPTER SITE** — the landing page, Introduction, Getting started,
+     Installation, the guides
+- **An `/opsx:archive` with the task unticked is a change reported as finished
+  while half of what a reader meets is stale.** Archiving is what makes it
+  permanent.
+
+**The archive is the deadline, and by then it is already too late to notice.**
+
+**IT IS ENFORCED IN TWO PLACES, NEITHER OF WHICH IS THIS FILE.** A rule stated
+in prose is followed until the evening somebody is tired.
+
+| Where | Does |
+|---|---|
+| `openspec/config.yaml` — `rules.tasks` / `rules.proposal` | injected into the instructions each time a tasks or proposal file is GENERATED, so the section is written in the first place |
+| `.claude/hooks/require-docs-task.sh` — a `PreToolUse` hook on Bash | **REFUSES `openspec archive`** when the last section is not documentation, or when its tasks are unticked |
+
+- **The config half reaches the model at the moment it writes the file**, where
+  a context file may already have been compacted away.
+- **The hook half does not depend on the model at all.** The harness runs it.
+- **ARCHIVING IS THE GATE** because it is the point of no return: the deltas
+  fold into the specs and nobody revisits the change.
+- **The hook FAILS OPEN** on a store-backed change, an unreadable path or a
+  missing tasks file. One that blocks work it does not understand gets disabled,
+  and then it enforces nothing.
+- **This is not the session-title hook.** That one was deleted for competing
+  with Claude Code over the terminal title, a race it could not win. This one
+  validates a file and blocks one command, and nothing else writes that
+  decision.
+
+
 
 Before a change is committed, and certainly before it is ARCHIVED, every
 document the change made untrue is already updated — in the same commit, not a

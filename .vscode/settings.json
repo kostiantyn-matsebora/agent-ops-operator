@@ -1,10 +1,14 @@
 {
-  // Show the title `.claude/hooks/session-title.sh` writes. VS Code captures the
-  // OSC title sequence as ${sequence} but its default tab label is "${process}"
-  // alone, so the escape is received and discarded — which is what made the
-  // session-title hooks look broken. See .claude/rules/session-naming.md.
+  // Show the title Claude Code writes. VS Code captures the OSC title sequence
+  // as ${sequence} but its default tab label is "${process}" alone, so the
+  // escape is received and discarded — which is what made session naming look
+  // broken for four sessions. See .claude/rules/session-naming.md.
   //
   // ${process} stays first so a plain shell in this workspace still reads
-  // "bash"; the separator is elided when no session has set a title.
+  // "bash"; the separator is elided when nothing has set a title.
+  //
+  // WINDOW-SCOPED: this file is read ONLY when the repo is opened as the folder
+  // ROOT. A .code-workspace window needs it in that file's own `settings`
+  // instead — which is the case on the machine this repo is developed on.
   "terminal.integrated.tabs.title": "${process}${separator}${sequence}"
 }

@@ -18,3 +18,43 @@ schema: spec-driven
 #       - Always include a "Non-goals" section
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
+
+# ---------------------------------------------------------------------------
+# THESE RULES ARE INJECTED WHEN THE ARTIFACT IS WRITTEN.
+#
+# That is the point of putting them here rather than only in CLAUDE.md: a rule
+# in a context file is read at launch and may be compacted away, while these
+# reach the model at the exact moment it is generating the file they govern.
+# ---------------------------------------------------------------------------
+
+rules:
+  proposal:
+    - >-
+      The Impact section MUST name every document the change makes untrue, in
+      BOTH halves: the reference docs (docs/concepts.md, docs/contracts.md, a
+      bundle page, CHANGELOG.md) AND the adopter site (the landing page,
+      introduction.md, getting-started.md, installation.md, docs/guides/*).
+      They are skipped independently, so they are listed independently.
+
+  tasks:
+    - >-
+      THE LAST SECTION MUST BE A DEDICATED DOCUMENTATION SECTION. Not a bullet
+      inside another task, not a follow-up, not "docs later" — its own numbered
+      section, and the final one before the change is finished.
+    - >-
+      That documentation section MUST list the reference docs and the ADOPTER
+      SITE as separate subsections. The adopter site is the half that gets
+      skipped, because a behaviour change feels done once concepts.md is right
+      and the adopter never reads concepts.md.
+    - >-
+      Documentation goes LAST because it documents what the change ACTUALLY
+      did, which is routinely not what the proposal said it would.
+    - >-
+      If a change alters a CRD field, a chart value or an api doc comment, the
+      documentation section MUST include re-running
+      `python3 .github/scripts/docs-generate.py` — every generated block and
+      docs/cr-reference.md is build output and CI fails on a stale one.
+    - >-
+      If a change alters the console UI, the documentation section MUST include
+      re-running BOTH `npm run screenshots` and `npm run demo` in
+      platform/console/ui.

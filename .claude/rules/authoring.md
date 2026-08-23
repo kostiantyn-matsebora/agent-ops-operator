@@ -21,8 +21,23 @@ sentence earns its tokens.
 that is what stops the next reader undoing it. What gets cut is the RESTATEMENT
 of the rule, never its why.
 
-**ONE TOPIC PER FILE, under `.claude/rules/`.** `CLAUDE.md` is the index and
-holds nothing else.
+**ONE TOPIC PER FILE, under `.claude/rules/`.** `CLAUDE.md` is the index.
+
+**IT HOLDS A SHORT LIST OF NAMED EXCEPTIONS, AND THEY ARE NOT DRIFT.** A rule
+earns a line there when being LOST AT COMPACTION would cost something the index
+cannot recover — the statement itself has to be in scope, not merely findable.
+Each one is a sentence or two that NAMES the rules file holding the detail:
+
+| In `CLAUDE.md` | Detail in |
+|---|---|
+| a directory is a component | `structure.md` |
+| documentation is part of every change | `documentation.md` |
+
+- **DO NOT DELETE THESE AS INDEX VIOLATIONS.** They are deliberate, and this
+  table is what says so — a future reader tidying `CLAUDE.md` back to pure
+  index is undoing a decision, not enforcing one.
+- **Adding a third needs the same test**, and the bar is high: nearly every
+  rule is fine being loaded from its own file.
 
 - **A new topic is a new file**, never a section appended to an existing one
   because it was open. Every `.md` there is discovered — there is nothing to
