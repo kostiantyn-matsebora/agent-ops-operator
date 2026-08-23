@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-08-23
+goal: Publish one adopter page per integration under docs/integrations/,
+  rewritten from the four bundle reference pages at adopter altitude, with each
+  bundle's component table generated from the chart rather than hand-written.
+  The four <bundle>.md pages are deleted.
