@@ -57,6 +57,20 @@ jobs:
           fi
           echo "$IMAGE:${{ inputs.version }} is free"
 
+      # EMULATION, and the twelve Go images never touch it.
+      #
+      # A Go image cross-compiles: an amd64 toolchain emits an arm64 binary and
+      # no arm64 instruction is ever executed. `runtime-claude` is the exception
+      # and always was — `apt-get` and `npm install` have to run AS arm64, so
+      # that half of its build is emulated.
+      #
+      # It is registered unconditionally rather than per component. A
+      # GitHub-hosted runner may or may not carry binfmt handlers depending on
+      # its image version, this repo's own workstation carries them and so hides
+      # the difference, and the alternative is a per-component flag whose
+      # wrongness only ever shows up as one image failing to build. The step
+      # costs seconds and does nothing for a build that needs nothing.
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:

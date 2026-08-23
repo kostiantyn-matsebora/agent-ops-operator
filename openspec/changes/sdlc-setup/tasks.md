@@ -61,8 +61,11 @@
 - [x] 3.1 Create `.github/workflows/build-image.yml` as `workflow_call` with
       inputs `component`, `context`, `dockerfile`, `platforms`, `version` and
       `permissions: {contents: read, packages: write, id-token: write,
-      attestations: write}`. No `qemu` input — nothing needs emulation once
-      `runtime-claude` is amd64-only
+      attestations: write}` — declared on the CALLING job too, since a called
+      workflow can only downgrade the token and `contents: read` alone makes
+      every push 403. QEMU is registered unconditionally: the twelve Go images
+      cross-compile and never touch it, and `runtime-claude` runs `apt` and
+      `npm` AS arm64, so that half of its build is emulated
 - [x] 3.2 Preflight immutability guard: query
       `ghcr.io/kostiantyn-matsebora/agentops-<component>:<version>` and fail
       before building if it resolves, with a message saying to cut a new patch
