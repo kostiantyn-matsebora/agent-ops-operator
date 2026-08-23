@@ -106,9 +106,12 @@ def build(t):
         o.append(icon(ic, 30, y + 15, c["subtle"]))
         o.append(text(56, y + 21, label, c["ink"], 13, 600))
         o.append(text(56, y + 36, sub, c["subtle"], 10.5))
-        o.append(f'<path d="M212 {y+23} H236" stroke="{c["edge"]}" stroke-width="1.3" fill="none"/>')
-    o.append(f'<path d="M236 67 V235" stroke="{c["edge"]}" stroke-width="1.3" fill="none"/>')
-    o.append(f'<path d="M236 151 H242" stroke="{c["edge"]}" stroke-width="1.6" fill="none" marker-end="url(#a)"/>')
+        o.append(f'<path d="M212 {y+23} H224" stroke="{c["edge"]}" stroke-width="1.3" fill="none"/>')
+    # A manifold: four stubs onto one spine, then ONE arrow into the card. The
+    # arrow needs a RUN — at six pixels its head floated in the gap, detached
+    # from both the spine and the card, and read as a rendering fault.
+    o.append(f'<path d="M224 67 V235" stroke="{c["edge"]}" stroke-width="1.3" fill="none"/>')
+    o.append(f'<path d="M224 151 H248" stroke="{c["edge"]}" stroke-width="1.6" fill="none" marker-end="url(#a)"/>')
 
     # ---- column 2: the Pipeline -----------------------------------------
     o.append(band_label(252, 30, "YOU DECLARE IT — ONE PIPELINE", c["subtle"]))
