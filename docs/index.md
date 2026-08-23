@@ -1,64 +1,86 @@
 ---
-title: Something happens. An agent takes care of it.
-eyebrows:
-  - Automation that thinks
-  - Kubernetes-native, end to end
-lede: >-
-  A signal starts it, your prompt tells it what to do, your YAML decides what it
-  may touch — a crashlooping pod or the hallway lights.
+title: agent-ops
 description: >-
   agent-ops is a Kubernetes operator for agents you can address: a signal starts
   one, your wiring decides what it may touch, and it answers in a thread you can
   reply to.
-
-stats:
-  - value: 11
-    icon: kinds
-    label: custom resource kinds
-    note: kubectl, GitOps and RBAC already work.
-  - value: 3
-    icon: contracts
-    label: pluggable contracts
-    note: Signals, runtimes, channels.
-  - value: 0
-    icon: secrets
-    label: Secrets the operator reads
-    note: Everything secret-shaped is resolved by the kubelet, never read here.
-  - value: 3
-    icon: bundles
-    label: ready-made bundles
-    note: Kubernetes, Telegram, Prometheus — switch one on.
 ---
 
-{: .ao-chipsets}
-- **Work arrives from**
-  - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes events
-  - ![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) Alertmanager
-  - Cron schedules
-  - ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) Home Assistant
-  - ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) A message in chat
-  - ![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console
-  - your own
+A Kubernetes operator for agents you can address.
 
-- **Can reach**
-  - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes API
-  - ![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) Prometheus
-  - ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) Home Assistant
-  - ![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) any MCP server
-
-- **Answers you in**
-  - ![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console
-  - ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) Telegram
-  - your own
+{: .ao-claims}
+- Automation that thinks
+- ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes-native
 
 {: .ao-tabs #tour}
+- **How it works**
+
+  {: .ao-presentation}
+  1. Something happens.
+
+     ```yaml
+     # nothing declared yet
+     ```
+
+  2. One Helm install puts an agent in the path.
+
+     ```text
+     helm install agent-ops agentops/agent-ops
+     ```
+
+  3. You declare the route. One Pipeline.
+
+     ```yaml
+     kind: Pipeline
+     metadata:
+       name: k8s-ops
+     ```
+
+  4. What starts it.
+
+     ```yaml
+       signalSourceRefs:
+         - name: cluster-events
+     ```
+
+  5. What it should do.
+
+     ```yaml
+       profileRef:
+         name: k8s-engineer
+     ```
+
+  6. What it may touch — and nothing else.
+
+     ```yaml
+       toolsets:
+         refs:
+           - name: agentops-observe
+     ```
+
+  7. Where you talk to it.
+
+     ```yaml
+       channelRefs:
+         - name: telegram
+     ```
+
+  8. Then it runs. One conversation, its own pod.
+
+     ```yaml
+     # one Conversation, one pod, strictly serial
+     ```
+
+  9. Every part of it is a Kubernetes object.
+
+     ```text
+     $ kubectl get conversations
+     cluster-events-7c1d4e   Running   2m
+     ```
+
 - **Watch it work** — One signal, start to finish. A minute, no sound.
 
   [![The console showing one conversation: the cluster-events signal that opened it, the agent's answer explaining an OOM-killed container, and the box to reply in.]({{ '/assets/video/console-demo-poster-light.png' | relative_url }})]({{ '/assets/video/console-demo-light.mp4' | relative_url }}){: .ao-demo data-captions="{{ '/assets/video/console-demo.vtt' | relative_url }}"}
-
-- **How it works** — Something happens, you declare what to do about it in your own cluster, the operator runs it.
-
-  ![Something happens — an alert fires, a pod crashloops, a schedule comes due, a room gets too warm, someone asks — and each feeds into one Helm install in your own cluster. There you declare it as custom resources: a Pipeline for what starts it, an AgentProfile for what it should do, an MCPToolset for what it may touch, shown as a real Pipeline manifest naming its signal source, profile, toolset and channel. The operator then runs it: one conversation per incident in its own thread, its own isolated pod, picking up where it stopped.]({{ '/assets/img/agent-ops-landing-light.svg' | relative_url }}){: .ao-diagram}
 
 - **What you write** — One `Pipeline`. It is the whole route, and it is the only place wiring lives.
 
@@ -79,9 +101,43 @@ stats:
       - name: telegram            # where you talk to it
   ```
 
-The console is what the recording shows, and it ships enabled. The
-[Console page]({{ '/console/' | relative_url }}) takes each of its six views in
-turn, at full size.
+{: .ao-chipsets}
+- **Works with**
+  - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes
+  - ![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) Prometheus
+  - Cron schedules
+  - ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) Home Assistant
+  - ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) Telegram
+  - ![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console
+  - ![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) any MCP server
+  - your own
+
+## Why agent-ops?
+
+The same wiring, wherever something needs looking at.
+
+| Where | What happens |
+|---|---|
+| ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) **Watch and fix your cluster** | It reads the events, the pods and the logs, and names the cause. |
+| ![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) **Answer your alerts** | Every firing alert arrives with the investigation already done. |
+| **Run the checks nobody gets to** | Certificates, drift and capacity, on a schedule. |
+| ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) **An assistant for your home** | Its logs, its devices, its config. Not everything is a cluster. |
+| ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) **Ask it from chat** | It answers in the thread where your team already talks. |
+| ![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) **Plug in your own** | Three HTTP contracts: your source, your runtime, your channel. |
+{: .ao-areas}
+
+> ![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }})
+>
+> **And all of it in one place.**
+>
+> Every conversation as it happens, what is queued, what is stuck and why — and
+> the whole wiring as a graph. It is a channel too, so you answer the agent
+> right there.
+>
+> - ships enabled
+> - six views
+> - [read-only on your cluster]({{ '/console/' | relative_url }})
+{: .ao-console-strip}
 
 ## When it runs
 
@@ -117,8 +173,8 @@ Documented HTTP contracts, no fork.
   runs it.
 - **[Getting started]({{ '/getting-started/' | relative_url }})** — a read-only
   demo in fifteen minutes: install it and ask an agent about your cluster.
-- **[The console]({{ '/console/' | relative_url }})** — the six views above at
-  full length, and how to decide who may reach them.
+- **[The console]({{ '/console/' | relative_url }})** — the six views at full
+  length, and how to decide who may reach them.
 - **[Installation]({{ '/installation/' | relative_url }})** — the real install:
   what to decide first, what to configure, and how to wire your first route.
 - **[The kinds you will declare](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)** —

@@ -1,4 +1,4 @@
-import { test, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { execFile } from 'node:child_process'
 import { link, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -7,7 +7,7 @@ import { extname, join, normalize } from 'node:path'
 import { promisify } from 'node:util'
 import type { AddressInfo } from 'node:net'
 import { NOW, responder, type Install } from '../screenshots/fixture'
-import { REPLY, beats, opening } from './story'
+import { ADDRESS_PREFIX, ADDRESSED, REPLY, TASK, beats, opening } from './story'
 
 // The landing page's recording, produced rather than captured.
 //
@@ -271,6 +271,46 @@ async function record(page: Page, harness: Harness, theme: string): Promise<Segm
       await page.evaluate(() => {
         document.querySelector('pre')?.scrollIntoView({ block: 'center' })
       })
+    }
+
+    // A PERSON STARTING WORK, through the console's own composer. Nothing here
+    // paints state: the dialog is opened by clicking the masthead's button, the
+    // typeahead is opened by typing the prefix, and the pipeline is chosen by
+    // clicking the entry the console listed. The server is told nothing until
+    // Start is pressed, exactly as it would be in an install.
+    if (beat.act === 'start') {
+      await page.locator('[data-testid="new-conversation"]').click()
+      const box = page.getByPlaceholder(/what should the agent do/i).first()
+      await box.click()
+
+      // The PREFIX alone, held: this frame is the beat's claim — every pipeline
+      // that can be addressed, listed by the console rather than remembered by
+      // the person.
+      await box.fill(ADDRESS_PREFIX)
+      await page.locator('[data-testid="pipeline-typeahead"]').waitFor({ timeout: 30_000 })
+      await shoot(2)
+
+      await page.getByRole('menuitem').filter({ hasText: ADDRESSED }).first().click()
+      // The chosen name is the field's VALUE, not text on the page, so this
+      // waits on the value the console inserted rather than on a rendered node.
+      await expect(box).toHaveValue(new RegExp(`^${ADDRESS_PREFIX}${ADDRESSED}\\s`))
+      await shoot(1)
+
+      // Typed in runs, for the same reason the reply is: this is the beat where
+      // a PERSON acts, and text that appears whole reads as another server change.
+      const chunks = TASK.match(/.{1,20}(\s|$)/g) ?? [TASK]
+      let typed = `${ADDRESS_PREFIX}${ADDRESSED} `
+      for (const chunk of chunks) {
+        typed += chunk
+        await box.fill(typed)
+        await shoot(0.4)
+      }
+
+      // The beat's own hold is taken by the common `shoot(beat.hold)` below,
+      // exactly as the reply beat's is. Taking it here as well is what made
+      // this beat twice its stated length.
+      await page.getByRole('button', { name: 'Start', exact: true }).click()
+      await page.getByText('is answering', { exact: false }).first().waitFor({ timeout: 30_000 })
     }
 
     if (beat.act === 'reply') {

@@ -13,7 +13,7 @@ path. Plugins are limited to the set Pages enables by default.
 
 | Page | Owns |
 |---|---|
-| `index.md` | the landing pitch, the tab strip (the recording, the diagram, the manifest), paths onward |
+| `index.md` | the name, one sentence, the claim chips, the tab strip (the presentation, the recording, the manifest), `Why agent-ops?` and its areas table, paths onward |
 | `introduction.md` | the model — two sections, concepts and guides, no reference detail |
 | `getting-started.md` | the read-only DEMO walkthrough, console-first |
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
@@ -161,11 +161,24 @@ style, no script in a page.
 | `{: .ao-callout}` | a blockquote that EMPHASISES. The plain one is an ASIDE in `--ao-text-subtle`, so rendering a load-bearing claim in it puts a footnote where the weight belongs |
 | `{: .ao-tabs}` | a list becomes tabbed panels, each item's leading bold phrase the label. With no script it stays the labelled list, so every word and image lives in the page |
 | `{: .ao-icon-*}` | a kind glyph on a card title, copied from the console |
-| `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels |
+| `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels. The landing page shows none — its model is the presentation |
 | `{: .ao-demo}` | on a LINK whose target is a recording and whose content is the poster image, it becomes a player. With no script it stays the poster, linking to the file |
 | `{: .ao-chipsets}` | a list of GROUPS becomes labelled chip rows — each item's leading bold phrase is the label, its nested list the chips. A chip may carry an ordinary markdown image, and the PAGE names that file. With no CSS it stays a labelled list of names |
+| `{: .ao-claims}` | a list becomes the claim chips under the page's opening sentence. A claim may carry a mark the PAGE names |
+| `{: .ao-presentation}` | an ORDERED list becomes the presentation: one item per beat, the item's text its caption, a fenced block under it the manifest stanza that beat is about. The THEME supplies the drawing, the timing and the controls, and it names no integration mark. With no script it stays the beats in order, each with its own lines |
+| `{: .ao-areas}` | a two-column table of areas of use, the left column a name and its mark, the right what happens there. Below the measure the two columns become two lines |
+| `{: .ao-console-strip}` | a blockquote becomes the full-width strip under that table — a mark, one lead line, one paragraph and a list of tags |
 | `next:` in front matter | the what-next card (eyebrow / title / body / url) at the foot of the on-this-page rail. A page declaring none gets no card |
-| `stats:` in front matter | the landing page's stat tiles, through the stat-icon include |
+
+**`lede:`, `eyebrows:` and `stats:` are GONE, and so is the stat-icon include.**
+The landing page's opening is now the page's own content, in the order the page
+writes it, and `home.html` places one `<h1>` and nothing else.
+
+- **The counts went because they answer a question a first-time reader has not
+  asked**, in the position where they are deciding whether the product is for
+  them at all. Such counts belong on the reference pages that own them.
+- **The standfirst went because the page explained itself twice** before showing
+  anything, and the panel set immediately below states the model in full.
 
 **FRONT MATTER is the other half of that division.** Every word is the page's,
 and the include only places it.

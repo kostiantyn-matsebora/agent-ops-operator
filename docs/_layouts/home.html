@@ -4,63 +4,25 @@ layout: default
 {%- comment -%}
 The landing layout.
 
-Every word on this page comes from the page's own front matter or its body —
-the hero line, the stat tiles, the strip below them. This file decides only how
-those are arranged, which is what keeps the theme free of product prose.
+It places the page's NAME and then gets out of the way. Everything else — the
+one sentence, the claim chips, the tab strip, every section — is the page's own
+content, rendered in the order the page writes it.
 
-The product visual is NOT here. It is the first panel of the page's own tab
-strip, so its alt text, its caption and the manifest beside it are the page's
-words — the layout would otherwise own content, which is the one thing it may
-not.
+It used to do more, and each of those was content the layout owned: a lede from
+front matter, a row of stat tiles, and a SPLIT of the rendered content at its
+first `<h2>` to place them. The split is what made the page unable to state its
+own order — anything the page wrote before its first section landed above the
+tiles whether or not it belonged there.
 
-Which is also why the stat tiles are placed by SPLITTING the page's content at
-its first heading rather than by a marker the page writes: everything before
-the page's first section is its opening, the tiles close that opening, and the
-sections follow. The page states its words in order and says nothing about
-where the tiles go.
+The product visual is NOT here either. It is the first panel of the page's own
+tab strip, so its beats, its manifest and its wording are the page's words.
 {%- endcomment -%}
 {%- comment -%}
-The hero is real text, not part of the drawing: the site's diagram page has its
-masthead removed precisely so the headline is selectable, translatable, and
+The name is real text, not part of a drawing: selectable, translatable, and
 readable by a screen reader without going through alt text.
 {%- endcomment -%}
 <div class="ao-hero">
-  {%- if page.eyebrows %}
-  <p class="ao-eyebrows">
-    {%- for eyebrow in page.eyebrows %}
-    <span class="ao-pill{% if forloop.first %} ao-pill--solid{% endif %}">{{ eyebrow }}</span>
-    {%- endfor %}
-  </p>
-  {%- endif %}
   <h1>{{ page.title | default: site.title }}</h1>
-  {%- if page.lede %}
-  <p class="ao-lede">{{ page.lede }}</p>
-  {%- endif %}
 </div>
 
-{%- comment -%}
-`content` is already rendered HTML here, so the split is on the first section
-heading. A page with no `<h2>` simply keeps all of its content above the tiles.
-{%- endcomment -%}
-{%- assign sections = content | split: '<h2' -%}
-{{ sections[0] }}
-
-{%- if page.stats %}
-<ul class="ao-stats">
-  {%- for stat in page.stats %}
-  <li class="ao-stat">
-    <div class="ao-stat-head">
-      {% include stat-icon.html name=stat.icon %}
-      <span class="ao-stat-value">{{ stat.value }}</span>
-    </div>
-    <span class="ao-stat-label">{{ stat.label }}</span>
-    <p class="ao-stat-note">{{ stat.note }}</p>
-  </li>
-  {%- endfor %}
-</ul>
-{%- if page.stats_kicker %}
-<p class="ao-stat-kicker">{{ page.stats_kicker }}</p>
-{%- endif %}
-{%- endif %}
-
-{%- for section in sections offset: 1 %}<h2{{ section }}{% endfor %}
+{{ content }}

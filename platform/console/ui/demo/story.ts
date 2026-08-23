@@ -27,6 +27,23 @@ export const CONVERSATION = 'cluster-events-7c1d4e'
 /** What the person types back. */
 export const REPLY = 'Does the same setting affect the other two services in that namespace?'
 
+/** What the person asks when they start work themselves. */
+export const TASK = 'Check the memory limits across the rest of the namespace.'
+
+/** The pipeline they address, which is one of the three the typeahead lists. */
+export const ADDRESSED = 'k8s-observe'
+
+/**
+ * What opens the typeahead.
+ *
+ * The console spells this once, in `NewConversation.tsx`, and this is a second
+ * spelling of it — deliberately, because importing a React page into the
+ * recorder to borrow one character would pull the whole component tree into a
+ * fixture. It cannot drift silently: a changed prefix means the menu never
+ * opens and the beat fails on its own wait.
+ */
+export const ADDRESS_PREFIX = '/'
+
 /** A moment, as seconds past the pinned clock. */
 const at = (seconds: number) => new Date(NOW.getTime() + seconds * 1000).toISOString()
 
@@ -52,7 +69,7 @@ export interface Beat {
   /** Seconds the recording rests here. */
   hold: number
   /** A person doing something, rather than something arriving. */
-  act?: 'reply' | 'yaml'
+  act?: 'reply' | 'yaml' | 'start'
   /** This beat's last frame stands in for the recording before it is played. */
   poster?: true
   /** What the server answers from here on. */
@@ -88,7 +105,7 @@ export const beats: Beat[] = [
     path: '/overview',
     ready: 'Installation',
     clock: 0,
-    hold: 5,
+    hold: 4,
   },
   {
     label: 'A signal arrives — alert, schedule, message, event — and a conversation opens',
@@ -130,7 +147,7 @@ export const beats: Beat[] = [
     path: `/conversations/${CONVERSATION}`,
     ready: 'Signal from cluster-events',
     clock: 26,
-    hold: 6,
+    hold: 5,
   },
   {
     label: 'The answer — what is wrong, what changed, and what it did not touch',
@@ -181,28 +198,43 @@ export const beats: Beat[] = [
     },
   },
   {
+    // EVERYTHING ELSE HERE IS SIGNAL-DRIVEN, and without this beat the recording
+    // never shows the other half of "agents you can address": a person starting
+    // work themselves and naming which pipeline answers it.
+    //
+    // It comes AFTER the reply on purpose. Opening with a person doing something
+    // would contradict the product's own thesis that a signal starts the work —
+    // here it reads as a capability the reader has just been shown they have.
+    label: 'Or you start it yourself, addressing the pipeline that answers',
+    act: 'start',
+    clock: 92,
+    hold: 6,
+  },
+  {
     label: 'What is waiting, and what is stuck — every stalled row names its cause',
     path: '/queues',
     ready: 'Queues and capacity',
     clock: 100,
-    hold: 6,
+    hold: 5,
   },
   {
     label: 'The wiring behind it: where the signal entered, who claimed it, where the answer went',
     path: '/topology',
     ready: 'k8s-observe',
     clock: 108,
-    hold: 7,
+    hold: 6,
   },
   {
     // NO COUNT. The chart ships eleven CRDs and this view lists the ten a
-    // person configures, so a number here would contradict the stat tile on
-    // the page it appears beside.
+    // person configures, so a number here would be wrong by one wherever it was
+    // read against the chart. The landing page states no counts at all now —
+    // they answer a question a first-time reader has not asked — and this label
+    // never depended on that, which is why it survives the tiles unchanged.
     label: 'Every part of it is a Kubernetes resource — one API, one RBAC model',
     path: '/config',
     ready: 'Pipelines',
     clock: 116,
-    hold: 6,
+    hold: 5,
   },
   {
     // The claim, made concrete. A grid of counts says "there are resources";
@@ -212,6 +244,6 @@ export const beats: Beat[] = [
     act: 'yaml',
     ready: 'runtimeContextId',
     clock: 124,
-    hold: 7,
+    hold: 6,
   },
 ]

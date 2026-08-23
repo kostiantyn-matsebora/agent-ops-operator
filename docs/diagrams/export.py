@@ -5,18 +5,24 @@ Run from the repository root:  python docs/diagrams/export.py
 
 Which pages
 -----------
-The file holds three. `why` is the standalone poster, which carries its own
+The file holds two. `why` is the standalone poster, which carries its own
 eyebrow pills, headline and standfirst because nothing around it does. It is
 NOT exported here — a render for a slide or a post is made at that moment and
 not committed.
 
-The two the site serves are:
+The one the site serves is:
 
-* `landing` — the simplified spine the landing page leads with, authored at
-  960px so its labels still read at the content column's 720px.
-* `site` — the same argument in full, behind the landing page's full-size link.
+* `site` — the whole argument, behind the landing page's full-size link.
 
-Both have the poster's masthead removed: the page states the headline in real,
+There WAS a third, `landing`, compressed to 960px for the landing page's own
+strip. It is gone, and so is its export. The landing page states the model with
+a presentation now — the same argument built one beat at a time, in real text —
+and a still restating it would be the same claim twice, once in a form nobody
+can select, translate or search. Every attempt to add detail to that still had
+to remove an element to pay for it, and that ceiling is what the presentation
+removes.
+
+`site` has the poster's masthead removed: the page states the headline in real,
 selectable, translatable text, and a page that says it twice reads as a mistake.
 
 Why a script rather than two docker commands in a comment
@@ -61,7 +67,6 @@ IMAGE = "rlespinasse/drawio-export:latest"
 
 # page name -> the basename its variants are written under in assets/img/.
 PAGES = {
-    "landing": "agent-ops-landing",
     "site": "agent-ops",
 }
 

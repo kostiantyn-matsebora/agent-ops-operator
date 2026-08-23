@@ -1,0 +1,1689 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>agent-ops landing mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;700;900&family=Red+Hat+Mono:wght@400;500&family=Red+Hat+Text:wght@400;500;700&display=swap">
+
+<style>
+/* Palette copied from docs/assets/css/agentops.css, which copies it from
+   console/ui/src/theme/theme.css. Nothing here invents a colour. */
+:root {
+  --ao-brand: #0d7d76;
+  --ao-brand-strong: #0a615c;
+  --ao-brand-soft: #d3ece9;
+  --ao-accent: #6b4bd6;
+  --ao-accent-soft: #e9e3fb;
+  --ao-success: #1f7a4d;
+  --ao-warning: #a86400;
+  --ao-danger: #b32c3f;
+  --ao-neutral: #6a7178;
+  --ao-surface: #ffffff;
+  --ao-surface-alt: #f3f5f6;
+  --ao-canvas: #eef1f2;
+  --ao-border: #cfd6da;
+  --ao-border-strong: #9aa4ab;
+  --ao-text: #16191c;
+  --ao-text-subtle: #5c656d;
+  --ao-edge-idle: #b6c0c6;
+  --ao-code-bg: #f6f8f8;
+  --ao-shadow: 0 1px 2px rgba(22, 25, 28, .06);
+
+  --ao-font-display: 'Red Hat Display', 'Red Hat Text', system-ui, sans-serif;
+  --ao-font-text: 'Red Hat Text', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ao-font-mono: 'Red Hat Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  --ao-radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ao-brand: #43c9bd;
+    --ao-brand-strong: #7fded5;
+    --ao-brand-soft: #123b39;
+    --ao-accent: #a996f5;
+    --ao-accent-soft: #2a2350;
+    --ao-success: #55c98a;
+    --ao-warning: #e0a63c;
+    --ao-danger: #f2708a;
+    --ao-neutral: #9aa4ab;
+    --ao-surface: #1b1f22;
+    --ao-surface-alt: #23282c;
+    --ao-canvas: #14171a;
+    --ao-border: #3a4247;
+    --ao-border-strong: #5c666d;
+    --ao-text: #e8ecee;
+    --ao-text-subtle: #a5b0b7;
+    --ao-edge-idle: #4a545b;
+    --ao-code-bg: #14181b;
+    --ao-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ao-brand: #43c9bd;
+  --ao-brand-strong: #7fded5;
+  --ao-brand-soft: #123b39;
+  --ao-accent: #a996f5;
+  --ao-accent-soft: #2a2350;
+  --ao-success: #55c98a;
+  --ao-warning: #e0a63c;
+  --ao-danger: #f2708a;
+  --ao-neutral: #9aa4ab;
+  --ao-surface: #1b1f22;
+  --ao-surface-alt: #23282c;
+  --ao-canvas: #14171a;
+  --ao-border: #3a4247;
+  --ao-border-strong: #5c666d;
+  --ao-text: #e8ecee;
+  --ao-text-subtle: #a5b0b7;
+  --ao-edge-idle: #4a545b;
+  --ao-code-bg: #14181b;
+  --ao-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ao-canvas);
+  color: var(--ao-text);
+  font-family: var(--ao-font-text);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 50rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2.25rem;
+}
+
+/* --- annotation chrome: violet, so commentary never reads as page ---------- */
+.note {
+  border-left: 3px solid var(--ao-accent);
+  padding: .1rem 0 .1rem .9rem;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+}
+.note-tag {
+  font-family: var(--ao-font-mono);
+  font-size: .7rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ao-accent);
+}
+.note-tag b { font-weight: 500; }
+.note p { margin: 0; font-size: .92rem; color: var(--ao-text-subtle); }
+.note p em { color: var(--ao-text); font-style: normal; font-weight: 500; }
+.note del { color: var(--ao-danger); text-decoration-color: var(--ao-danger); }
+
+.band {
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  padding: 1.6rem 1.5rem;
+  box-shadow: var(--ao-shadow);
+}
+
+.eyebrow-row { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .7rem; }
+.pill {
+  font-size: .72rem;
+  font-weight: 500;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  padding: .2rem .6rem;
+  border-radius: 999px;
+  border: 1px solid var(--ao-border);
+  color: var(--ao-text-subtle);
+}
+.pill.solid { background: var(--ao-brand); border-color: var(--ao-brand); color: #fff; }
+:root[data-theme="dark"] .pill.solid { color: #10201f; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .pill.solid { color: #10201f; }
+}
+
+h1.hero {
+  margin: 0 0 1rem;
+  font-family: var(--ao-font-display);
+  font-weight: 900;
+  font-size: 2.1rem;
+  line-height: 1.12;
+  letter-spacing: -.015em;
+  text-wrap: balance;
+}
+
+/* ==========================================================================
+   BAND A - the buy-in. A PICTURE. Nine words of label, everything else is
+   an icon. It replaces the lede paragraph as well as the chip rows.
+   ========================================================================== */
+.buyin {
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface-alt);
+  padding: .95rem 1.1rem 1.05rem;
+  display: grid;
+  grid-template-columns: 1fr auto 1.05fr auto .72fr;
+  align-items: start;
+  gap: .55rem;
+}
+
+.zone { display: flex; flex-direction: column; align-items: center; gap: .45rem; min-width: 0; }
+
+.zlabel {
+  font-family: var(--ao-font-mono);
+  font-size: .63rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+  white-space: nowrap;
+}
+
+.tiles { display: grid; grid-template-columns: repeat(3, 40px); gap: .4rem; justify-content: center; }
+
+/* the big primitive icon: one tile, one thing */
+.tile {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ao-border);
+  border-radius: 9px;
+  background: var(--ao-surface);
+  color: var(--ao-text-subtle);
+}
+.tile img { width: 23px; height: 23px; display: block; }
+.tile svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+.tile.more { border-style: dashed; font-family: var(--ao-font-mono); font-size: 1.1rem; }
+
+/* the middle: the mark, big, in a ring */
+.hub {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ao-surface);
+  border: 2px solid var(--ao-brand);
+  box-shadow: 0 0 0 5px var(--ao-brand-soft);
+}
+.hub img { width: 32px; height: 32px; }
+
+.reachrow { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; justify-content: center; }
+.reachrow .cap {
+  font-family: var(--ao-font-mono);
+  font-size: .58rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+}
+.tile.sm { width: 27px; height: 27px; border-radius: 7px; }
+.tile.sm img { width: 16px; height: 16px; }
+.tile.sm svg { width: 15px; height: 15px; }
+
+.arrow { align-self: center; margin-top: 1.1rem; color: var(--ao-border-strong); }
+.arrow svg { width: 26px; height: 12px; display: block; stroke: currentColor; fill: none; stroke-width: 1.5; }
+
+@media (max-width: 44rem) {
+  .buyin { grid-template-columns: 1fr; }
+  .arrow { transform: rotate(90deg); margin: 0 auto; }
+}
+
+.fold {
+  font-family: var(--ao-font-mono);
+  font-size: .66rem;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--ao-danger);
+  border-top: 1px dashed var(--ao-danger);
+  padding-top: .3rem;
+  margin-top: .9rem;
+}
+
+/* ==========================================================================
+   BAND B - the tab strip and the explainer, at about 60% of its old height
+   ========================================================================== */
+.tablist {
+  display: flex;
+  gap: .25rem;
+  border-bottom: 1px solid var(--ao-border);
+}
+.tab {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-text);
+  font-size: .85rem;
+  padding: .35rem .85rem;
+  cursor: pointer;
+}
+.tab:hover { color: var(--ao-text); }
+.tab[aria-selected="true"] {
+  border-bottom-color: var(--ao-brand);
+  color: var(--ao-brand-strong);
+  font-weight: 500;
+}
+.tab:focus-visible { outline: 2px solid var(--ao-accent); outline-offset: 2px; }
+
+.panel { padding-top: .9rem; }
+.panel[hidden] { display: none; }
+
+.stub {
+  border: 1px dashed var(--ao-border-strong);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface-alt);
+  padding: 2rem 1.2rem;
+  text-align: center;
+  color: var(--ao-text-subtle);
+  font-size: .9rem;
+}
+.stub b { display: block; color: var(--ao-text); font-family: var(--ao-font-display); margin-bottom: .3rem; }
+
+.explainer { display: flex; flex-direction: column; gap: .55rem; }
+
+.stage-scroll { overflow: hidden; }
+.stage { position: relative; width: 660px; height: 208px; transform-origin: top left; }
+
+.wire { position: absolute; inset: 0; width: 660px; height: 208px; overflow: visible; }
+/* THE SKELETON IS ALWAYS THERE. A beat lights a piece of a composition that
+   already exists, rather than dropping a box into an empty field -- which is
+   what made the first beat read as a caption hanging in the air. */
+.wire path.track {
+  fill: none;
+  stroke: var(--ao-border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: .55;
+}
+.wire path.draw {
+  fill: none;
+  stroke: var(--ao-edge-idle);
+  stroke-width: 1.5;
+  stroke-dasharray: var(--len) var(--len);
+  stroke-dashoffset: var(--len);
+  transition: stroke-dashoffset .5s ease, stroke .3s ease;
+}
+.wire path.draw.on { stroke-dashoffset: 0; }
+.wire path.draw.lit { stroke: var(--ao-brand); stroke-width: 2; }
+
+.node {
+  position: absolute;
+  border: 1px dashed var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: transparent;
+  padding: .32rem .55rem .38rem;
+  opacity: .3;
+  transition: opacity .35s ease, border-color .25s ease, border-style .25s ease,
+              background .25s ease, box-shadow .25s ease;
+}
+.node.on {
+  opacity: 1;
+  border-style: solid;
+  background: var(--ao-surface-alt);
+}
+.node.lit {
+  border-color: var(--ao-brand);
+  background: var(--ao-surface);
+  box-shadow: 0 0 0 3px var(--ao-brand-soft);
+}
+.node .kind {
+  display: block;
+  font-family: var(--ao-font-mono);
+  font-size: .57rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+}
+.node .name {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  font-family: var(--ao-font-display);
+  font-weight: 700;
+  font-size: .82rem;
+  line-height: 1.25;
+}
+.node .name img { width: 14px; height: 14px; }
+
+#n-src  { left: 0;    top: 8px;  width: 164px; }
+#n-hub  { left: 248px; top: 2px;  width: 164px; text-align: center; }
+#n-hub .name { justify-content: center; font-size: .92rem; }
+#n-chan { left: 496px; top: 8px;  width: 164px; }
+#n-prof { left: 168px; top: 96px; width: 152px; }
+#n-tool { left: 340px; top: 96px; width: 152px; }
+
+.reach {
+  position: absolute;
+  left: 340px;
+  top: 150px;
+  width: 314px;
+  display: flex;
+  gap: .28rem;
+  flex-wrap: wrap;
+  opacity: .28;
+  transition: opacity .35s ease;
+}
+.reach.on { opacity: 1; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .1rem .42rem;
+  border: 1px solid var(--ao-border);
+  border-radius: 999px;
+  background: var(--ao-surface);
+  font-size: .72rem;
+  color: var(--ao-text-subtle);
+  white-space: nowrap;
+}
+.chip img { width: 12px; height: 12px; }
+.chip.granted { border-color: var(--ao-brand); color: var(--ao-brand-strong); }
+.chip.denied { opacity: .6; text-decoration: line-through; }
+
+#frame {
+  position: absolute;
+  left: 212px;
+  top: -6px;
+  width: 448px;
+  height: 214px;
+  border: 1px dashed var(--ao-border-strong);
+  border-radius: 10px;
+  opacity: 0;
+  transition: opacity .45s ease;
+  pointer-events: none;
+}
+#frame.on { opacity: 1; }
+#frame span {
+  position: absolute;
+  top: -.6rem;
+  left: .8rem;
+  background: var(--ao-surface);
+  padding: 0 .4rem;
+  font-family: var(--ao-font-mono);
+  font-size: .6rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+}
+
+#conv {
+  position: absolute;
+  left: 0;
+  top: 132px;
+  width: 160px;
+  border: 1px dashed var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: transparent;
+  padding: .4rem .55rem .5rem;
+  opacity: .3;
+  transition: opacity .4s ease, border-color .3s ease, border-style .3s ease,
+              background .3s ease, box-shadow .3s ease;
+}
+#conv.on {
+  opacity: 1;
+  border-style: solid;
+  border-color: var(--ao-brand);
+  background: var(--ao-surface);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .13);
+}
+#conv .kind {
+  display: block;
+  font-family: var(--ao-font-mono);
+  font-size: .57rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ao-brand-strong);
+}
+#conv .name {
+  display: block;
+  font-family: var(--ao-font-display);
+  font-weight: 700;
+  font-size: .8rem;
+}
+#conv .line { display: block; height: 4px; border-radius: 3px; background: var(--ao-border); margin-top: .25rem; }
+#conv .line.short { width: 55%; }
+#conv .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ao-success); margin-right: .28rem; }
+
+/* the manifest is now a THREE-LINE stanza that changes with the beat, not a
+   fifteen-line block sitting under the drawing */
+.stanza {
+  background: var(--ao-code-bg);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  padding: .45rem .7rem;
+  font-family: var(--ao-font-mono);
+  font-size: .74rem;
+  line-height: 1.55;
+  min-height: 4.1rem;
+  overflow-x: auto;
+  color: var(--ao-text);
+}
+.stanza .l { display: block; white-space: pre; }
+.stanza .k { color: var(--ao-brand-strong); }
+.stanza .c { color: var(--ao-neutral); }
+.stanza .muted { color: var(--ao-text-subtle); opacity: .7; }
+
+.rail {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: .65rem;
+  align-items: start;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface-alt);
+  padding: .6rem .75rem .5rem;
+}
+.play {
+  margin-top: .1rem;
+  appearance: none;
+  width: 1.9rem; height: 1.9rem;
+  border-radius: 50%;
+  border: 1px solid var(--ao-border);
+  background: var(--ao-surface-alt);
+  color: var(--ao-text);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: .66rem;
+}
+.play:hover { border-color: var(--ao-brand); color: var(--ao-brand-strong); }
+.play:focus-visible { outline: 2px solid var(--ao-accent); outline-offset: 2px; }
+
+.caption { min-width: 0; }
+.caption .n {
+  font-family: var(--ao-font-mono);
+  font-size: .64rem;
+  letter-spacing: .08em;
+  color: var(--ao-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.caption .t {
+  display: block;
+  font-family: var(--ao-font-display);
+  font-weight: 500;
+  font-size: .92rem;
+  line-height: 1.32;
+  text-wrap: balance;
+  min-height: 1.35rem;
+}
+.dots { display: flex; gap: .26rem; margin-top: .5rem; }
+.dots button {
+  appearance: none;
+  width: 7px; height: 7px;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: var(--ao-border-strong);
+  cursor: pointer;
+  transition: background .25s ease, transform .25s ease;
+}
+.dots button[aria-current="true"] { background: var(--ao-brand); transform: scale(1.45); }
+.dots button:focus-visible { outline: 2px solid var(--ao-accent); outline-offset: 3px; }
+
+.progress { grid-column: 1 / -1; height: 2px; background: var(--ao-border); border-radius: 2px; }
+.progress i { display: block; height: 100%; width: 0; background: var(--ao-brand); border-radius: 2px; }
+
+.beatlist { margin: .7rem 0 0; padding-left: 1.1rem; font-size: .86rem; color: var(--ao-text-subtle); }
+.beatlist li { margin: .12rem 0; }
+
+.measure {
+  font-family: var(--ao-font-mono);
+  font-size: .66rem;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--ao-brand-strong);
+  border-top: 1px dashed var(--ao-brand);
+  padding-top: .3rem;
+  margin-top: .9rem;
+}
+
+/* ==========================================================================
+   BAND C - areas of use. Icon first, five words of title, one short line.
+   ========================================================================== */
+.areas {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (max-width: 44rem) { .areas { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 26rem) { .areas { grid-template-columns: 1fr; } }
+
+.areas li {
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface-alt);
+  padding: 1rem .9rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: .45rem;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.areas li:hover {
+  border-color: var(--ao-brand);
+  background: var(--ao-surface);
+  transform: translateY(-2px);
+}
+
+.glyph {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--ao-brand-soft);
+  color: var(--ao-brand-strong);
+}
+.glyph img { width: 30px; height: 30px; display: block; }
+.glyph svg { width: 30px; height: 30px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+.areas .what {
+  font-family: var(--ao-font-display);
+  font-weight: 700;
+  font-size: .95rem;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.areas .sub { font-size: .8rem; line-height: 1.45; color: var(--ao-text-subtle); }
+
+.gone {
+  display: flex;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding-top: .8rem;
+  border-top: 1px dashed var(--ao-border);
+}
+.gone span {
+  font-family: var(--ao-font-mono);
+  font-size: .69rem;
+  color: var(--ao-text-subtle);
+  text-decoration: line-through;
+  text-decoration-color: var(--ao-danger);
+}
+
+.cost { width: 100%; border-collapse: collapse; font-size: .87rem; }
+.cost caption {
+  text-align: left;
+  font-family: var(--ao-font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  padding-bottom: .6rem;
+}
+.cost th, .cost td {
+  text-align: left;
+  padding: .5rem .7rem .5rem 0;
+  border-bottom: 1px solid var(--ao-border);
+  vertical-align: top;
+}
+.cost th {
+  font-family: var(--ao-font-mono);
+  font-size: .67rem;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+  font-weight: 400;
+}
+.cost td:first-child { font-weight: 500; white-space: nowrap; }
+.cost td:last-child { color: var(--ao-text-subtle); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: .001ms !important; }
+}
+
+/* ==========================================================================
+   BAND A - AD directions. Not diagrams. Each sells, none explains.
+   The two claim chips sit in OPPOSITE CORNERS, one background, small icon.
+   ========================================================================== */
+.adpanel { position: relative; margin-top: .35rem; }
+.corner {
+  position: absolute;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: .32rem;
+  padding: .24rem .6rem;
+  border-radius: 999px;
+  background: var(--ao-surface-alt);
+  border: 1px solid var(--ao-border);
+  font-size: .67rem;
+  font-weight: 500;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+  white-space: nowrap;
+}
+.corner img { width: 13px; height: 13px; display: block; }
+.corner svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.corner.tl { top: -.68rem; left: 1rem; }
+.corner.br { bottom: -.68rem; right: 1rem; }
+
+.adline {
+  font-family: var(--ao-font-display);
+  font-weight: 900;
+  font-size: 1.8rem;
+  line-height: 1.08;
+  letter-spacing: -.02em;
+  margin: 0 0 1.15rem;
+  text-wrap: balance;
+}
+.adline em { font-style: normal; color: var(--ao-brand-strong); }
+
+/* --- A: the product caught in the act of being useful --------------------- */
+.ad-thread {
+  display: grid;
+  grid-template-columns: .8fr 1.2fr;
+  gap: .85rem;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-canvas);
+  padding: 1.15rem 1.1rem;
+}
+@media (max-width: 40rem) { .ad-thread { grid-template-columns: 1fr; } }
+
+.incident {
+  border: 1px solid var(--ao-danger);
+  border-left-width: 4px;
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface);
+  padding: .8rem .9rem;
+  display: flex;
+  flex-direction: column;
+  gap: .22rem;
+  justify-content: center;
+}
+.incident .sev {
+  font-family: var(--ao-font-mono);
+  font-size: .62rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ao-danger);
+}
+.incident .who { font-family: var(--ao-font-mono); font-size: 1.02rem; font-weight: 500; }
+.incident .what { font-size: .8rem; color: var(--ao-text-subtle); }
+.incident .noise { display: flex; flex-direction: column; gap: 3px; margin-top: .45rem; }
+.incident .noise i { display: block; height: 4px; border-radius: 2px; background: var(--ao-border-strong); opacity: .45; }
+
+.reply-card {
+  border: 1px solid var(--ao-brand);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface);
+  padding: .8rem .9rem;
+  display: flex;
+  gap: .6rem;
+  align-items: flex-start;
+}
+.avatar {
+  flex: none;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ao-brand-soft);
+  border: 1px solid var(--ao-brand);
+}
+.avatar img { width: 18px; height: 18px; }
+.reply-card .said {
+  margin: 0;
+  font-family: var(--ao-font-display);
+  font-weight: 500;
+  font-size: .95rem;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+.reply-card .meta {
+  display: block;
+  margin-top: .4rem;
+  font-family: var(--ao-font-mono);
+  font-size: .63rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+}
+
+/* --- B: the constellation ------------------------------------------------ */
+.ad-orbit {
+  position: relative;
+  height: 250px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-canvas);
+  overflow: hidden;
+}
+.orbit-ring {
+  position: absolute;
+  width: 378px; height: 236px;
+  border: 1px dashed var(--ao-border-strong);
+  border-radius: 50%;
+  opacity: .55;
+}
+.orbit-core {
+  position: relative;
+  z-index: 2;
+  width: 92px; height: 92px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ao-surface);
+  border: 2px solid var(--ao-brand);
+  box-shadow: 0 0 0 9px var(--ao-brand-soft);
+}
+.orbit-core img { width: 50px; height: 50px; }
+.sat {
+  position: absolute;
+  width: 50px; height: 50px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border);
+  box-shadow: var(--ao-shadow);
+}
+.sat img { width: 28px; height: 28px; }
+.sat svg { width: 26px; height: 26px; stroke: var(--ao-text-subtle); fill: none; stroke-width: 1.6; stroke-linecap: round; }
+.sat.more { border-style: dashed; font-family: var(--ao-font-mono); font-size: 1.25rem; color: var(--ao-text-subtle); }
+
+/* --- C: the contrast ----------------------------------------------------- */
+.ad-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  overflow: hidden;
+}
+@media (max-width: 40rem) { .ad-split { grid-template-columns: 1fr; } }
+.half { padding: 1.2rem 1.25rem 1.3rem; display: flex; flex-direction: column; gap: .45rem; min-height: 176px; }
+.half.before { background: var(--ao-surface-alt); border-right: 1px solid var(--ao-border); }
+.half.after { background: var(--ao-brand-soft); }
+.half .stamp {
+  font-family: var(--ao-font-mono);
+  font-size: .7rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .06em;
+  color: var(--ao-text-subtle);
+}
+.half.after .stamp { color: var(--ao-brand-strong); }
+.half .big {
+  font-family: var(--ao-font-display);
+  font-weight: 900;
+  font-size: 1.65rem;
+  line-height: 1.05;
+  letter-spacing: -.018em;
+  color: var(--ao-danger);
+}
+.half.after .big { color: var(--ao-brand-strong); font-size: 1rem; font-weight: 500; line-height: 1.38; }
+.half .tiny { font-size: .79rem; color: var(--ao-text-subtle); }
+.half .bars { display: flex; flex-direction: column; gap: 4px; margin-top: auto; padding-top: .6rem; }
+.half .bars i { display: block; height: 5px; border-radius: 3px; background: var(--ao-border-strong); opacity: .4; }
+
+h1.sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+
+/* --- the console. NOT a seventh area: the six are domains, this is where all
+   six are watched and answered. A peer card would understate it. ----------- */
+.console-strip {
+  margin-top: .9rem;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 1.15rem;
+  align-items: center;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface-alt);
+  padding: 1.15rem 1.2rem;
+}
+@media (max-width: 40rem) { .console-strip { grid-template-columns: 1fr; } }
+
+.mini {
+  border: 1px solid var(--ao-border);
+  border-radius: 7px;
+  background: var(--ao-surface);
+  overflow: hidden;
+  box-shadow: var(--ao-shadow);
+}
+.mini .bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: .3rem .45rem;
+  background: var(--ao-surface-alt);
+  border-bottom: 1px solid var(--ao-border);
+}
+.mini .bar i { width: 6px; height: 6px; border-radius: 50%; background: var(--ao-border-strong); }
+.mini .bar img { width: 12px; height: 12px; margin-left: auto; }
+.mini .body { display: grid; grid-template-columns: 34% 1fr; min-height: 108px; }
+.mini .rail { border-right: 1px solid var(--ao-border); padding: .45rem .4rem; display: flex; flex-direction: column; gap: 6px; background: var(--ao-code-bg); }
+.mini .rail i { display: block; height: 5px; border-radius: 3px; background: var(--ao-border); }
+.mini .rail i.sel { background: var(--ao-brand); opacity: .8; }
+.mini .rows { padding: .45rem .5rem; display: flex; flex-direction: column; gap: 8px; }
+.mini .row { display: flex; align-items: center; gap: 6px; }
+.mini .row u { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.mini .row u.ok { background: var(--ao-success); }
+.mini .row u.run { background: var(--ao-brand); }
+.mini .row u.bad { background: var(--ao-danger); }
+.mini .row i { display: block; height: 5px; border-radius: 3px; background: var(--ao-border); }
+
+.console-say .lead {
+  font-family: var(--ao-font-display);
+  font-weight: 700;
+  font-size: 1.12rem;
+  line-height: 1.25;
+  margin: 0 0 .35rem;
+  text-wrap: balance;
+}
+.console-say .body-txt { margin: 0; font-size: .86rem; line-height: 1.5; color: var(--ao-text-subtle); }
+.console-say .tags { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .6rem; }
+.console-say .tags span {
+  font-family: var(--ao-font-mono);
+  font-size: .64rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: .16rem .5rem;
+  border-radius: 999px;
+  border: 1px solid var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-subtle);
+}
+.console-say .tags span.on { border-color: var(--ao-brand); color: var(--ao-brand-strong); }
+
+
+/* the ad is ONE panel: the contrast on top, the ecosystem along the foot.
+   The logo bar is how an advertisement carries an ecosystem -- it does not
+   fight the contrast above it, it vouches for it. */
+.ad-hero {
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  overflow: hidden;
+}
+.ad-hero .ad-split { border: 0; border-radius: 0; }
+.logobar {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+  padding: .7rem 1.2rem;
+  border-top: 1px solid var(--ao-border);
+  background: var(--ao-surface);
+}
+.logobar .cap {
+  font-family: var(--ao-font-mono);
+  font-size: .63rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+  margin-right: .15rem;
+}
+.logobar img { width: 21px; height: 21px; display: block; opacity: .9; }
+.logobar svg { width: 20px; height: 20px; stroke: var(--ao-text-subtle); fill: none; stroke-width: 1.6; }
+.logobar .plus {
+  font-family: var(--ao-font-mono);
+  font-size: .78rem;
+  color: var(--ao-text-subtle);
+  border: 1px dashed var(--ao-border-strong);
+  border-radius: 6px;
+  padding: .05rem .4rem;
+}
+
+
+/* ONE ad. The contrast is the frame, the incident card and the answer fill the
+   halves, the marks run along the foot. NO line above it -- every word the ad
+   needs is inside the picture. */
+.half.before { justify-content: flex-start; }
+.half .sevrow { display: flex; align-items: center; gap: .4rem; }
+.half .sev {
+  font-family: var(--ao-font-mono);
+  font-size: .6rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ao-danger);
+  border: 1px solid var(--ao-danger);
+  border-radius: 999px;
+  padding: .05rem .42rem;
+}
+.half .subj { font-family: var(--ao-font-mono); font-size: .84rem; color: var(--ao-text-subtle); }
+.half .answer-row { display: flex; gap: .6rem; align-items: flex-start; }
+.half .avatar {
+  flex: none;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-brand);
+}
+.half .avatar img { width: 18px; height: 18px; }
+
+
+/* ==========================================================================
+   THE AD. A PICTURE. Noise in, one answer out. Two words on it, and they are
+   "works with". Density and colour carry the before/after, not sentences.
+   ========================================================================== */
+.ad-scene {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto 1.25fr;
+  align-items: center;
+  gap: .8rem;
+  padding: 1.4rem 1.3rem;
+  background: var(--ao-canvas);
+}
+@media (max-width: 40rem) {
+  .ad-scene { grid-template-columns: 1fr; justify-items: center; }
+  .ad-scene .arrow { transform: rotate(90deg); }
+}
+
+/* left: an alert storm */
+.storm { display: flex; flex-direction: column; gap: 7px; width: 100%; }
+.storm .n { display: flex; align-items: center; gap: 6px; }
+.storm .n svg { width: 13px; height: 13px; flex: none; stroke: var(--ao-danger); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.storm .n span { display: block; height: 7px; border-radius: 4px; background: var(--ao-danger); }
+.storm .n.q span { background: var(--ao-border-strong); opacity: .5; }
+.storm .n.q svg { visibility: hidden; }
+
+/* middle: the mark */
+.ad-mark {
+  width: 74px; height: 74px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ao-surface);
+  border: 2px solid var(--ao-brand);
+  box-shadow: 0 0 0 7px var(--ao-brand-soft);
+}
+.ad-mark img { width: 40px; height: 40px; }
+
+/* right: one calm, answered card */
+.calm {
+  border: 1px solid var(--ao-brand);
+  border-radius: 9px;
+  background: var(--ao-surface);
+  box-shadow: 0 3px 12px rgba(0,0,0,.09);
+  padding: .8rem .85rem;
+  display: flex;
+  gap: .6rem;
+  align-items: flex-start;
+  width: 100%;
+}
+.calm .who {
+  flex: none;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--ao-brand-soft);
+  border: 1px solid var(--ao-brand);
+}
+.calm .who img { width: 16px; height: 16px; }
+.calm .said { flex: 1; display: flex; flex-direction: column; gap: 6px; padding-top: 3px; }
+.calm .said i { display: block; height: 7px; border-radius: 4px; background: var(--ao-border); }
+.calm .tick { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+.calm .tick svg { width: 14px; height: 14px; stroke: var(--ao-success); fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.calm .tick u { display: block; height: 7px; width: 42px; border-radius: 4px; background: var(--ao-brand); opacity: .45; }
+
+
+/* ==========================================================================
+   THE AD. Every A/B study the search turned up says the same thing: for a
+   SaaS product the hero is the PRODUCT ITSELF -- a stylised screenshot of the
+   core value, not an illustration, not an abstract diagram. So it is the
+   console, answering a signal. The logo bar under it is the social-proof row
+   those teardowns put above the fold.
+   ========================================================================== */
+.shot-frame {
+  position: relative;
+  background: var(--ao-canvas);
+  padding: 1rem 1rem .9rem;
+}
+.shot {
+  position: relative;
+  border: 1px solid var(--ao-border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,.14);
+  background: var(--ao-surface);
+}
+.shot .chrome {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: .35rem .55rem;
+  background: var(--ao-surface-alt);
+  border-bottom: 1px solid var(--ao-border);
+}
+.shot .chrome i { width: 7px; height: 7px; border-radius: 50%; background: var(--ao-border-strong); opacity: .7; }
+.shot img { display: block; width: 100%; height: auto; }
+.shot img.dark { display: none; }
+:root[data-theme="dark"] .shot img.dark { display: block; }
+:root[data-theme="dark"] .shot img.light { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shot img.dark { display: block; }
+  :root:not([data-theme="light"]) .shot img.light { display: none; }
+}
+
+/* selective highlighting - the teardowns say a stylised shot with the key
+   moment called out beats a raw one */
+.callout {
+  position: absolute;
+  border: 2px solid var(--ao-brand);
+  border-radius: 7px;
+  box-shadow: 0 0 0 9999px rgba(22, 25, 28, .30);
+  pointer-events: none;
+}
+:root[data-theme="dark"] .callout { box-shadow: 0 0 0 9999px rgba(0, 0, 0, .48); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .callout { box-shadow: 0 0 0 9999px rgba(0, 0, 0, .48); }
+}
+.callout b {
+  position: absolute;
+  top: -.78rem;
+  left: .7rem;
+  background: var(--ao-brand);
+  color: #fff;
+  font-family: var(--ao-font-mono);
+  font-size: .6rem;
+  font-weight: 500;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  padding: .1rem .45rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+:root[data-theme="dark"] .callout b { color: #10201f; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .callout b { color: #10201f; }
+}
+
+
+/* ==========================================================================
+   THE HERO, in the register this project's PEERS actually use.
+   Argo CD is the closest analogue and its shape is: the UI IN MOTION at the
+   very top, the architecture diagram straight after. No ad chrome -- no
+   dimming, no callout tag, no claim badges pinned to the corners. Flux,
+   Crossplane and KEDA are quieter still, and KEDA puts its integration logos
+   BELOW the fold, which is where the marks now sit.
+   ========================================================================== */
+.hero-motion {
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  overflow: hidden;
+  background: var(--ao-surface-alt);
+  line-height: 0;
+}
+.hero-motion video { display: block; width: 100%; height: auto; }
+.hero-motion video.dark { display: none; }
+:root[data-theme="dark"] .hero-motion video.dark { display: block; }
+:root[data-theme="dark"] .hero-motion video.light { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hero-motion video.dark { display: block; }
+  :root:not([data-theme="light"]) .hero-motion video.light { display: none; }
+}
+
+.hero-say {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .5rem 1rem;
+  margin: 0 0 .9rem;
+}
+.hero-say h2 {
+  margin: 0;
+  font-family: var(--ao-font-display);
+  font-weight: 900;
+  font-size: 1.55rem;
+  line-height: 1.15;
+  letter-spacing: -.018em;
+}
+.hero-say p { margin: 0; font-size: .95rem; color: var(--ao-text-subtle); }
+
+.badgerow { display: flex; gap: .4rem; flex-wrap: wrap; margin: .1rem 0 1.15rem; }
+.badgerow span {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-family: var(--ao-font-mono);
+  font-size: .64rem;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  padding: .2rem .55rem;
+  border-radius: 999px;
+  border: 1px solid var(--ao-border);
+  background: var(--ao-surface-alt);
+  color: var(--ao-text-subtle);
+}
+.badgerow span img { width: 13px; height: 13px; }
+.badgerow span svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linejoin: round; }
+
+
+/* Argo CD's shape, with the advertising taken out: what it is, one short
+   sentence, then the presentation. No ad panel, no claim badges, no callouts. */
+.what {
+  margin: 0 0 .5rem;
+  font-family: var(--ao-font-display);
+  font-weight: 900;
+  font-size: 1.9rem;
+  line-height: 1.14;
+  letter-spacing: -.02em;
+  text-wrap: balance;
+}
+.one-line {
+  margin: 0 0 1.35rem;
+  font-size: 1.02rem;
+  line-height: 1.5;
+  color: var(--ao-text-subtle);
+  max-width: 34rem;
+}
+.section-label {
+  display: block;
+  font-family: var(--ao-font-mono);
+  font-size: .66rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+  margin-bottom: .6rem;
+}
+
+
+/* Argo CD's actual hero, measured: the NAME, then ONE short line, then the
+   moving UI. Not a definitional headline plus a second sentence. */
+.name {
+  margin: 0 0 .2rem;
+  font-family: var(--ao-font-display);
+  font-weight: 900;
+  font-size: 2.4rem;
+  line-height: 1.05;
+  letter-spacing: -.028em;
+}
+.tagline {
+  margin: 0 0 .7rem;
+  font-size: 1.05rem;
+  color: var(--ao-text-subtle);
+}
+.manifest {
+  background: var(--ao-code-bg);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  padding: .85rem 1rem;
+  font-family: var(--ao-font-mono);
+  font-size: .78rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  margin: 0;
+}
+.manifest .k { color: var(--ao-brand-strong); }
+.manifest .c { color: var(--ao-neutral); }
+
+
+/* Argo CD's own section heading pattern -- "Why Argo CD?" sits above its value
+   list, and this is the same slot. */
+.section-title {
+  margin: 0 0 .3rem;
+  font-family: var(--ao-font-display);
+  font-weight: 900;
+  font-size: 1.5rem;
+  line-height: 1.15;
+  letter-spacing: -.018em;
+}
+
+.section-sub {
+  margin: 0 0 1.25rem;
+  font-size: .95rem;
+  color: var(--ao-text-subtle);
+  max-width: 34rem;
+}
+
+/* --- Why, option A: a table ------------------------------------------------ */
+.why-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.why-table th {
+  text-align: left;
+  font-family: var(--ao-font-mono);
+  font-size: .65rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ao-text-subtle);
+  font-weight: 400;
+  padding: 0 1rem .45rem 0;
+  border-bottom: 1px solid var(--ao-border);
+}
+.why-table td { padding: .6rem 1rem .6rem 0; border-bottom: 1px solid var(--ao-border); vertical-align: top; }
+.why-table tr:last-child td { border-bottom: 0; }
+.why-table td:last-child { color: var(--ao-text-subtle); padding-right: 0; }
+.why-table .where { display: flex; align-items: center; gap: .5rem; font-weight: 700; white-space: nowrap; }
+.why-table .where img { width: 17px; height: 17px; flex: none; }
+.why-table .where svg { width: 16px; height: 16px; flex: none; stroke: var(--ao-text-subtle); fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* --- Why, option B: a list ------------------------------------------------- */
+.why-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: .55rem; }
+.why-list li { display: flex; align-items: baseline; gap: .55rem; font-size: .92rem; line-height: 1.5; }
+.why-list .m { flex: none; width: 17px; display: grid; place-items: center; transform: translateY(2px); }
+.why-list .m img { width: 17px; height: 17px; }
+.why-list .m svg { width: 16px; height: 16px; stroke: var(--ao-text-subtle); fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.why-list b { font-weight: 700; }
+.why-list span.d { color: var(--ao-text-subtle); }
+
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <h1 class="sr">agent-ops</h1>
+
+  <!-- ============================ BAND A ============================ -->
+  <div class="note">
+    <div class="note-tag">Band 1 &#183; measured against the real Argo CD page</div>
+    <p>argoproj.github.io/cd is the <em>name</em>, then <em>one eight-word line</em>, then the moving UI. So this is one line now, and it is <em>README&#8217;s own opening</em> &#8212; the operator does not run agents, a pluggable runtime does. The tabs are back, in the order you asked for.</p>
+  </div>
+
+  <div class="band">
+    <h1 class="name">agent-ops</h1>
+    <p class="tagline">A Kubernetes operator for agents you can address.</p>
+    <div class="badgerow">
+      <span><svg viewBox="0 0 24 24"><path d="M12 2.6 13.9 9 20.3 11l-6.4 2L12 19.4 10.1 13 3.7 11 10.1 9z"/></svg>Automation that thinks</span>
+      <span><img src="../../../../docs/assets/img/logos/kubernetes.svg" alt="">Kubernetes-native</span>
+    </div>
+
+    <div class="tablist" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="p1" id="t1">How it works</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p2" id="t2">Watch it work</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="p3" id="t3">What you write</button>
+    </div>
+
+    <div class="panel" role="tabpanel" id="p1" aria-labelledby="t1">
+      <div class="explainer">
+              <div class="stage-scroll">
+                <div class="stage" id="stage">
+                  <div id="frame"><span>your cluster &#183; one Helm install</span></div>
+
+                  <svg class="wire" viewBox="0 0 660 208" aria-hidden="true">
+                    <path class="track" d="M164 30 H248"/>
+                    <path class="track" d="M412 30 H496"/>
+                    <path class="track" d="M300 58 V78 H244 V96"/>
+                    <path class="track" d="M360 58 V78 H416 V96"/>
+                    <path class="track" d="M416 142 V150"/>
+                    <path class="track" d="M82 58 V132"/>
+                    <path class="draw" id="w-src"  d="M164 30 H248"          style="--len:85"/>
+                    <path class="draw" id="w-chan" d="M412 30 H496"          style="--len:85"/>
+                    <path class="draw" id="w-prof" d="M300 58 V78 H244 V96"  style="--len:100"/>
+                    <path class="draw" id="w-tool" d="M360 58 V78 H416 V96"  style="--len:100"/>
+                    <path class="draw" id="w-rch"  d="M416 142 V150"         style="--len:20"/>
+                    <path class="draw" id="w-conv" d="M82 58 V132"           style="--len:78"/>
+                  </svg>
+
+                  <div class="node" id="n-src">
+                    <span class="kind">SignalSource</span>
+                    <span class="name"><img src="../../../../docs/assets/img/logos/kubernetes.svg" alt="">cluster-events</span>
+                  </div>
+                  <div class="node" id="n-hub">
+                    <span class="kind">Pipeline</span>
+                    <span class="name">k8s-ops</span>
+                  </div>
+                  <div class="node" id="n-chan">
+                    <span class="kind">Channel</span>
+                    <span class="name"><img src="../../../../docs/assets/img/logos/telegram.svg" alt="">telegram</span>
+                  </div>
+                  <div class="node" id="n-prof">
+                    <span class="kind">AgentProfile</span>
+                    <span class="name">k8s-engineer</span>
+                  </div>
+                  <div class="node" id="n-tool">
+                    <span class="kind">MCPToolset</span>
+                    <span class="name">agentops-observe</span>
+                  </div>
+
+                  <div class="reach" id="reach">
+                    <span class="chip granted"><img src="../../../../docs/assets/img/logos/kubernetes.svg" alt="">read pods, events, logs</span>
+                    <span class="chip granted"><img src="../../../../docs/assets/img/logos/prometheus.svg" alt="">query metrics</span>
+                    <span class="chip denied">delete anything</span>
+                    <span class="chip denied">a shell</span>
+                  </div>
+
+                  <div id="conv">
+                    <span class="kind"><span class="dot"></span>Conversation &#183; running</span>
+                    <span class="name">cluster-events-7c1d4e</span>
+                    <span class="line"></span>
+                    <span class="line short"></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="stanza" id="stanza"></div>
+
+              <div class="rail">
+                <button class="play" id="play" aria-label="Pause">&#9612;&#9612;</button>
+                <div class="caption">
+                  <span class="n" id="beatno">1 / 9</span>
+                  <span class="t" id="beattext">Something happens.</span>
+                </div>
+                <div class="dots" id="dots"></div>
+                <div class="progress"><i id="bar"></i></div>
+              </div>
+            </div>
+      <ol class="beatlist" id="beatlist" hidden></ol>
+    </div>
+
+    <div class="panel" role="tabpanel" id="p2" aria-labelledby="t2" hidden>
+      <div class="hero-motion">
+            <video class="light" src="../../../../docs/assets/video/console-demo-light.mp4" poster="../../../../docs/assets/video/console-demo-poster-light.png" autoplay muted loop playsinline></video>
+            <video class="dark" src="../../../../docs/assets/video/console-demo-dark.mp4" poster="../../../../docs/assets/video/console-demo-poster-dark.png" autoplay muted loop playsinline></video>
+          </div>
+    </div>
+
+    <div class="panel" role="tabpanel" id="p3" aria-labelledby="t3" hidden>
+      <pre class="manifest"><span class="c">apiVersion:</span> agentops.dev/v1alpha1
+<span class="c">kind:</span> Pipeline
+<span class="c">metadata:</span>
+  <span class="c">name:</span> k8s-ops
+<span class="c">spec:</span>
+  <span class="k">signalSourceRefs:</span>
+    - name: cluster-events      <span class="c"># what starts it</span>
+  <span class="k">profileRef:</span>
+    name: k8s-engineer          <span class="c"># what it should do</span>
+  <span class="k">toolsets:</span>
+    refs:
+      - name: agentops-observe  <span class="c"># what it may touch</span>
+  <span class="k">channelRefs:</span>
+    - name: telegram            <span class="c"># where you talk to it</span></pre>
+    </div>
+
+    <div class="logobar" style="border:1px solid var(--ao-border);border-radius:var(--ao-radius);margin-top:1rem">
+          <span class="cap">works with</span>
+          <img src="../../../../docs/assets/img/logos/kubernetes.svg" alt="Kubernetes">
+          <img src="../../../../docs/assets/img/logos/prometheus.svg" alt="Prometheus">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2.1"/></svg>
+          <img src="../../../../docs/assets/img/logos/home-assistant.svg" alt="Home Assistant">
+          <img src="../../../../docs/assets/img/logos/telegram.svg" alt="Telegram">
+          <img src="../../../../docs/assets/img/logos/agent-ops.svg" alt="the console">
+          <img src="../../../../docs/assets/img/logos/mcp.svg" alt="any MCP server">
+          <span class="plus">+ your own</span>
+        </div>
+
+  </div>
+
+  <!-- ============================ BAND C ============================ -->
+  <div class="note">
+    <div class="note-tag">Band 2 &#183; replaces <b>the 11 / 3 / 0 / 3 tiles</b></div>
+    <p>Areas of use, scanned by <em>icon</em> rather than read. Six domains, then <em>the console on its own strip</em> &#8212; it is not a seventh domain, it is where all six are watched and answered, and a peer card would understate it.</p>
+  </div>
+
+  <div class="note">
+    <div class="note-tag">Band 2 &#183; Why agent-ops?</div>
+    <p>Chosen over the tiles and over a plain list. Two columns, a header row, one small mark per row &#8212; the rules give the eye a track, and a reader scanning only the left column gets all six domains in one pass.</p>
+  </div>
+
+  <div class="band">
+    <h2 class="section-title">Why agent-ops?</h2>
+    <p class="section-sub">The same wiring, wherever something needs looking at.</p>
+    <table class="why-table">
+      <thead><tr><th>Where</th><th>What happens</th></tr></thead>
+      <tbody>
+          <tr><td><span class="where"><img src="../../../../docs/assets/img/logos/kubernetes.svg" alt="">Watch and fix your cluster</span></td><td>It reads the events, the pods and the logs, and names the cause.</td></tr>
+          <tr><td><span class="where"><img src="../../../../docs/assets/img/logos/prometheus.svg" alt="">Answer your alerts</span></td><td>Every firing alert arrives with the investigation already done.</td></tr>
+          <tr><td><span class="where"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2.1"/></svg>Run the checks nobody gets to</span></td><td>Certificates, drift and capacity, on a schedule.</td></tr>
+          <tr><td><span class="where"><img src="../../../../docs/assets/img/logos/home-assistant.svg" alt="">An assistant for your home</span></td><td>Its logs, its devices, its config. Not everything is a cluster.</td></tr>
+          <tr><td><span class="where"><img src="../../../../docs/assets/img/logos/telegram.svg" alt="">Ask it from chat</span></td><td>It answers in the thread where your team already talks.</td></tr>
+          <tr><td><span class="where"><svg viewBox="0 0 24 24"><path d="m8.5 8-4.5 4 4.5 4M15.5 8l4.5 4-4.5 4M13.6 5.2l-3.2 13.6"/></svg>Plug in your own</span></td><td>Three HTTP contracts: your source, your runtime, your channel.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <div class="note-tag">Band 3 &#183; the console</div>
+    <p>It is not a seventh row &#8212; it is where all six are watched and answered.</p>
+  </div>
+
+  <div class="band">
+    <div class="console-strip">
+      <div class="mini">
+        <span class="bar"><i></i><i></i><i></i><img src="../../../../docs/assets/img/logos/agent-ops.svg" alt=""></span>
+        <span class="body">
+          <span class="rail"><i style="width:80%"></i><i class="sel" style="width:92%"></i><i style="width:66%"></i><i style="width:74%"></i><i style="width:58%"></i></span>
+          <span class="rows">
+            <span class="row"><u class="run"></u><i style="width:88%"></i></span>
+            <span class="row"><u class="ok"></u><i style="width:64%"></i></span>
+            <span class="row"><u class="ok"></u><i style="width:79%"></i></span>
+            <span class="row"><u class="bad"></u><i style="width:52%"></i></span>
+            <span class="row"><u class="ok"></u><i style="width:71%"></i></span>
+          </span>
+        </span>
+      </div>
+      <div class="console-say">
+        <p class="lead">And all of it in one place.</p>
+        <p class="body-txt">Every conversation as it happens, what is queued, what is stuck and why &#8212; and the whole wiring as a graph. It is a channel too, so you answer the agent right there.</p>
+        <span class="tags"><span class="on">ships enabled</span><span>six views</span><span>read-only on your cluster</span></span>
+      </div>
+  </div>
+
+
+    <div class="gone">
+      <span>11 custom resource kinds</span>
+      <span>3 pluggable contracts</span>
+      <span>0 Secrets the operator reads</span>
+      <span>3 ready-made bundles</span>
+    </div>
+  </div>
+
+  <!-- ============================ COST ============================ -->
+  <div class="band">
+    <table class="cost">
+      <caption>What each band costs to build</caption>
+      <thead>
+        <tr><th>Band</th><th>New machinery</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Hero</td>
+          <td>none</td>
+          <td>A heading and one sentence. <code>lede:</code>, <code>stats:</code> and the chip rows all leave <code>index.md</code>, and nothing replaces them.</td>
+        </tr>
+        <tr>
+          <td>Presentation</td>
+          <td>one component + one script</td>
+          <td>The only real spend. Beats are a markdown list in the page, so with no JS it degrades to the story in order. Retires the <code>landing</code> page in <code>agent-ops.drawio</code>.</td>
+        </tr>
+        <tr>
+          <td>Recording</td>
+          <td>none</td>
+          <td>The asset you already build with <code>npm run demo</code>. It keeps its tab, second in the strip, exactly as you specified.</td>
+        </tr>
+        <tr>
+          <td>Why table</td>
+          <td>one table variant + one strip</td>
+          <td>A two-column table plus the console strip. Delete <code>stats:</code> from front matter and the tile block from <code>home.html</code>.</td>
+        </tr>
+        <tr>
+          <td>Demo beat</td>
+          <td>none &#8212; story edit</td>
+          <td>The fixture already has a wired <code>console</code> source and the pipeline typeahead. Recording is 59.6s against a hard 75s ceiling, so some holds shorten.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+  tabs.forEach(function (tab, i) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (t, j) {
+        t.setAttribute('aria-selected', String(i === j));
+        document.getElementById(t.getAttribute('aria-controls')).hidden = i !== j;
+      });
+    });
+  });
+
+  // A beat says WHAT IS TRUE from here on, names what it turns on, and carries
+  // the three manifest lines it is about. The stage never cuts away.
+  var BEATS = [
+    { t: 'Something happens.',
+      on: ['n-src'], lit: ['n-src'],
+      y: ['<span class="muted"># nothing declared yet</span>'] },
+
+    { t: 'One Helm install puts an agent in the path.',
+      on: ['frame', 'n-hub'], lit: [],
+      y: ['<span class="c">helm install agent-ops agentops/agent-ops</span>'] },
+
+    { t: 'You declare the route. One Pipeline.',
+      lit: ['n-hub'],
+      y: ['<span class="c">kind:</span> Pipeline', '<span class="c">metadata:</span>', '  <span class="c">name:</span> k8s-ops'] },
+
+    { t: 'What starts it.',
+      wires: ['w-src'], lit: ['n-src', 'w-src'],
+      y: ['  <span class="k">signalSourceRefs:</span>', '    - name: cluster-events'] },
+
+    { t: 'What it should do.',
+      on: ['n-prof'], wires: ['w-prof'], lit: ['n-prof', 'w-prof'],
+      y: ['  <span class="k">profileRef:</span>', '    name: k8s-engineer'] },
+
+    { t: 'What it may touch \u2014 and nothing else.',
+      on: ['n-tool', 'reach'], wires: ['w-tool', 'w-rch'], lit: ['n-tool', 'w-tool'],
+      y: ['  <span class="k">toolsets:</span>', '    refs:', '      - name: agentops-observe'] },
+
+    { t: 'Where you talk to it.',
+      on: ['n-chan'], wires: ['w-chan'], lit: ['n-chan', 'w-chan'],
+      y: ['  <span class="k">channelRefs:</span>', '    - name: telegram'] },
+
+    { t: 'Then it runs. One conversation, its own pod.',
+      on: ['conv', 'w-conv'], lit: ['conv', 'w-conv'],
+      y: ['<span class="c"># one Conversation, one pod, strictly serial</span>'] },
+
+    { t: 'Every part of it is a Kubernetes object.',
+      lit: [],
+      y: ['<span class="c">$ kubectl get conversations</span>', 'cluster-events-7c1d4e   Running   2m'] }
+  ];
+
+  var HOLD = 6600;
+  var NODES = ['n-src', 'n-hub', 'n-chan', 'n-prof', 'n-tool', 'reach', 'frame', 'conv'];
+  var WIRES = ['w-src', 'w-chan', 'w-prof', 'w-tool', 'w-rch', 'w-conv'];
+
+  var stage = document.getElementById('stage');
+  if (!stage) return;
+
+  var beatno = document.getElementById('beatno');
+  var beattext = document.getElementById('beattext');
+  var stanza = document.getElementById('stanza');
+  var dotsBox = document.getElementById('dots');
+  var bar = document.getElementById('bar');
+  var play = document.getElementById('play');
+  var list = document.getElementById('beatlist');
+
+  BEATS.forEach(function (b, i) {
+    var li = document.createElement('li');
+    li.textContent = b.t;
+    list.appendChild(li);
+
+    var d = document.createElement('button');
+    d.type = 'button';
+    d.setAttribute('aria-label', 'Beat ' + (i + 1));
+    d.addEventListener('click', function () { pause(); goTo(i); });
+    dotsBox.appendChild(d);
+  });
+  var dots = Array.prototype.slice.call(dotsBox.children);
+
+  function el(id) { return document.getElementById(id); }
+
+  /** Paint the stage as of beat n, from scratch. Idempotent, so scrubbing back
+      is the same code path as playing forward. */
+  function goTo(n) {
+    current = n;
+    var on = {}, lit = {};
+    for (var i = 0; i <= n; i++) {
+      (BEATS[i].on || []).forEach(function (x) { on[x] = 1; });
+      (BEATS[i].wires || []).forEach(function (x) { on[x] = 1; });
+    }
+    (BEATS[n].lit || []).forEach(function (x) { lit[x] = 1; });
+
+    NODES.concat(WIRES).forEach(function (id) {
+      var e = el(id);
+      e.classList.toggle('on', !!on[id]);
+      e.classList.toggle('lit', !!lit[id]);
+    });
+
+    stanza.innerHTML = BEATS[n].y.map(function (l) {
+      return '<span class="l">' + l + '</span>';
+    }).join('');
+
+    beatno.textContent = (n + 1) + ' / ' + BEATS.length;
+    beattext.textContent = BEATS[n].t;
+    dots.forEach(function (d, i) { d.setAttribute('aria-current', String(i === n)); });
+  }
+
+  var current = 0, timer = null, started = 0, raf = null;
+
+  function tick() {
+    bar.style.width = Math.min(1, (Date.now() - started) / HOLD) * 100 + '%';
+    raf = requestAnimationFrame(tick);
+  }
+  function advance() {
+    goTo((current + 1) % BEATS.length);
+    started = Date.now();
+    timer = setTimeout(advance, HOLD);
+  }
+  function start() {
+    if (timer) return;
+    started = Date.now();
+    timer = setTimeout(advance, HOLD);
+    raf = requestAnimationFrame(tick);
+    play.innerHTML = '\u258c\u258c';
+    play.setAttribute('aria-label', 'Pause');
+  }
+  function pause() {
+    clearTimeout(timer);
+    cancelAnimationFrame(raf);
+    timer = null;
+    bar.style.width = '0%';
+    play.innerHTML = '\u25b6';
+    play.setAttribute('aria-label', 'Play');
+  }
+  play.addEventListener('click', function () { timer ? pause() : start(); });
+
+  // The stage is authored at 660px and SCALED to the width it is given. A
+  // fixed-width stage in a narrower column produced a scrollbar inside the
+  // presentation, which is not a thing a presentation may have.
+  var scroller = stage.parentNode;
+  function fit() {
+    var k = Math.min(1, scroller.clientWidth / 660);
+    stage.style.transform = 'scale(' + k + ')';
+    scroller.style.height = Math.ceil(208 * k) + 'px';
+  }
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(scroller);
+  window.addEventListener('resize', fit);
+  fit();
+
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    goTo(BEATS.length - 1);
+    NODES.concat(WIRES).forEach(function (id) { el(id).classList.add('on'); });
+    list.hidden = false;
+    pause();
+  } else {
+    goTo(0);
+    start();
+  }
+})();
+</script>
+
+</body>
+</html>

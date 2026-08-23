@@ -14,12 +14,15 @@ exported diagrams, the console screenshots and the landing recording).
 
 ### What each page owes, beyond the table
 
-- **`index.md`'s order is not written in the page.** `home.html` SPLITS the
-  rendered content at its first `<h2>` and drops the tiles in the seam, so the
-  page states its words in order and says nothing about placement.
+- **`index.md`'s order IS written in the page**, and `home.html` places one
+  `<h1>` and nothing else.
+  - **The layout used to SPLIT the rendered content at its first `<h2>`** and
+    drop a row of stat tiles into the seam. Both are gone, along with `lede:`,
+    `eyebrows:` and `stats:` — so a section now renders where the page wrote it,
+    and the page can put its own chips between its sentence and its panel set.
   - **There is no diagram block in the layout and no `diagram:` front matter.**
-    The strip is page content, which is what lets the alt text and the manifest
-    be the page's own words.
+    The strip is page content, which is what lets the presentation's beats and
+    the manifest be the page's own words.
 - **`introduction.md` carries no sentence a field rename would break.** That
   belongs in `concepts.md`.
   - **It is TWO SECTIONS — understand the concepts, follow the guides — and
@@ -46,22 +49,28 @@ exported diagrams, the console screenshots and the landing recording).
 
 **Holds the drawio SOURCE plus `export.py`.**
 
-**Run that, never the exporter by hand.** It writes BOTH theme variants of BOTH
-site pages (four SVGs) and repaints the dark ones' icon ink, which drawio cannot
-do because the icons are embedded images.
+**Run that, never the exporter by hand.** It writes BOTH theme variants of the
+one exported page (two SVGs) and repaints the dark one's icon ink, which drawio
+cannot do because the icons are embedded images.
 
-THREE drawio pages, and only two are exported:
+TWO drawio pages, and only one is exported:
 
 | Page | Is |
 |---|---|
-| `landing` | the poster's own COMPOSITION, compressed to 950px |
-| `site` | the full argument behind its full-size link |
+| `site` | the whole argument behind the landing page's full-size link |
 | `why` | the standalone poster — rendered on demand, never committed |
 
-**950 BECAUSE the content column is 720 and there is no breakout.** Displayed
-size is type over canvas, so making it fit means REMOVING ELEMENTS and
-tightening layout, never shrinking type. Adding detail back is what makes it
-unreadable.
+**There WAS a third**, `landing`, compressed to 950px for the landing page's own
+strip, and it is deleted along with its two exports.
+
+- **The landing page carries a PRESENTATION now** — the same argument built one
+  beat at a time, in real text, scaled to whatever width it is given.
+- **The still had a ceiling the presentation does not.** 950 because the content
+  column is 720 and there is no breakout, so making it fit meant REMOVING
+  ELEMENTS rather than shrinking type, and every attempt to add detail had to
+  pay for it that way.
+- **Keeping it as well would be two statements of one model** that have to
+  agree, one of which nobody would remember to re-export.
 
 ### The site shell
 

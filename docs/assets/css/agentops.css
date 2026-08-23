@@ -1098,6 +1098,426 @@ a:hover {
   text-decoration: none;
 }
 
+/* --- the presentation ----------------------------------------------------
+   A drawing that accretes across an ordered set of beats. The page names it
+   with `{: .ao-presentation}` on an ordinary ordered list — one item per beat,
+   the item's text is that beat's caption, and a fenced block under it is the
+   manifest stanza that beat is about. `assets/js/presentation.js` reads the
+   list, builds the stage and the transport, and removes the list.
+
+   WITHOUT JAVASCRIPT THE LIST IS THE CONTENT: nine beats in order, each with
+   the lines it concerns. Nothing is hidden and no claim is lost — which is why
+   the beats are a list rather than a script's array.
+
+   THE STAGE IS AUTHORED AT ONE WIDTH AND SCALED. Connectors are drawn between
+   known points, so reflowing at narrow widths would mean re-authoring every
+   connector per breakpoint. The script sets the transform and the container's
+   height together: a `transform: scale()` does NOT reduce layout width, so
+   scaling without the height would leave the container tall and the overflow
+   showing — a scrollbar inside the explanation, which is the defect this
+   component exists to avoid. */
+.ao-content ol.ao-presentation {
+  margin: 0.75rem 0 0;
+  padding-left: 1.15rem;
+  font-size: 0.92rem;
+  color: var(--ao-text-subtle);
+}
+
+.ao-content ol.ao-presentation > li + li {
+  margin-top: 0.5rem;
+}
+
+.ao-pres {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.ao-pres-viewport {
+  overflow: hidden;
+}
+
+/* 212, not 208: the drawing is 208 and the last 4px are SLACK, so the install
+   frame's bottom border never lands on the clipped edge of the viewport. */
+.ao-pres-stage {
+  position: relative;
+  width: 660px;
+  height: 212px;
+  transform-origin: top left;
+}
+
+/* THE SKELETON IS ALWAYS THERE. Every element the presentation will ever show
+   is laid out before the first beat, dashed and faint, and a beat brings one
+   forward rather than dropping it into an empty field — which is what made the
+   first beat read as a caption hanging in the air. */
+.ao-pres-wire {
+  position: absolute;
+  inset: 0;
+  width: 660px;
+  height: 208px;
+  overflow: visible;
+}
+
+.ao-pres-wire path.ao-pres-track {
+  fill: none;
+  stroke: var(--ao-border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.55;
+}
+
+.ao-pres-wire path.ao-pres-draw {
+  fill: none;
+  stroke: var(--ao-edge-idle);
+  stroke-width: 1.5;
+  stroke-dasharray: var(--ao-pres-len) var(--ao-pres-len);
+  stroke-dashoffset: var(--ao-pres-len);
+  transition: stroke-dashoffset 0.5s ease, stroke 0.3s ease;
+}
+
+.ao-pres-wire path.ao-pres-draw.is-on {
+  stroke-dashoffset: 0;
+}
+
+.ao-pres-wire path.ao-pres-draw.is-lit {
+  stroke: var(--ao-brand);
+  stroke-width: 2;
+}
+
+.ao-pres-node {
+  position: absolute;
+  padding: 0.32rem 0.55rem 0.38rem;
+  background: transparent;
+  border: 1px dashed var(--ao-border);
+  border-radius: var(--ao-radius);
+  opacity: 0.3;
+  transition: opacity 0.35s ease, border-color 0.25s ease, border-style 0.25s ease,
+    background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.ao-pres-node.is-on {
+  background: var(--ao-surface-alt);
+  border-style: solid;
+  opacity: 1;
+}
+
+.ao-pres-node.is-lit {
+  background: var(--ao-surface);
+  border-color: var(--ao-brand);
+  box-shadow: 0 0 0 3px var(--ao-brand-soft);
+}
+
+.ao-pres-kind {
+  display: block;
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-mono);
+  font-size: 0.57rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ao-pres-name {
+  display: block;
+  font-family: var(--ao-font-display);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+/* The five declared objects, at the coordinates the connectors are drawn
+   between. Changing one is changing the drawing's geometry. */
+.ao-pres-node[data-node="source"] {
+  left: 0;
+  top: 8px;
+  width: 164px;
+}
+
+.ao-pres-node[data-node="pipeline"] {
+  left: 248px;
+  top: 2px;
+  width: 164px;
+  text-align: center;
+}
+
+.ao-pres-node[data-node="pipeline"] .ao-pres-name {
+  font-size: 0.92rem;
+}
+
+.ao-pres-node[data-node="channel"] {
+  left: 496px;
+  top: 8px;
+  width: 164px;
+}
+
+.ao-pres-node[data-node="profile"] {
+  left: 168px;
+  top: 96px;
+  width: 152px;
+}
+
+.ao-pres-node[data-node="toolset"] {
+  left: 340px;
+  top: 96px;
+  width: 152px;
+}
+
+/* What the wiring granted, and what it did not. The denied chips are the half
+   that makes the granted ones a claim rather than a list. */
+.ao-pres-reach {
+  position: absolute;
+  left: 340px;
+  top: 150px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  width: 314px;
+  opacity: 0.28;
+  transition: opacity 0.35s ease;
+}
+
+.ao-pres-reach.is-on {
+  opacity: 1;
+}
+
+.ao-pres-chip {
+  padding: 0.1rem 0.42rem;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border);
+  border-radius: 999px;
+  color: var(--ao-text-subtle);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.ao-pres-chip.is-granted {
+  border-color: var(--ao-brand);
+  color: var(--ao-brand-strong);
+}
+
+.ao-pres-chip.is-denied {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.ao-pres-frame {
+  position: absolute;
+  left: 212px;
+  top: -6px;
+  width: 448px;
+  height: 214px;
+  border: 1px dashed var(--ao-border-strong);
+  border-radius: 10px;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  pointer-events: none;
+}
+
+.ao-pres-frame.is-on {
+  opacity: 1;
+}
+
+.ao-pres-frame > span {
+  position: absolute;
+  top: -0.6rem;
+  left: 0.8rem;
+  padding: 0 0.4rem;
+  background: var(--ao-surface);
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ao-pres-conv {
+  position: absolute;
+  left: 0;
+  top: 132px;
+  width: 160px;
+  padding: 0.4rem 0.55rem 0.5rem;
+  background: transparent;
+  border: 1px dashed var(--ao-border);
+  border-radius: var(--ao-radius);
+  opacity: 0.3;
+  transition: opacity 0.4s ease, border-color 0.3s ease, border-style 0.3s ease,
+    background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.ao-pres-conv.is-on {
+  background: var(--ao-surface);
+  border-color: var(--ao-brand);
+  border-style: solid;
+  opacity: 1;
+}
+
+.ao-pres-conv .ao-pres-kind {
+  color: var(--ao-brand-strong);
+}
+
+.ao-pres-conv .ao-pres-name {
+  font-size: 0.8rem;
+}
+
+.ao-pres-conv i {
+  display: block;
+  height: 4px;
+  margin-top: 0.25rem;
+  background: var(--ao-border);
+  border-radius: 3px;
+}
+
+.ao-pres-conv i + i {
+  width: 55%;
+}
+
+.ao-pres-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 0.28rem;
+  background: var(--ao-success);
+  border-radius: 50%;
+}
+
+/* The stanza is the lines this beat is about, not the whole document: a reader
+   looking for the field a beat names should not have to find it in a manifest
+   they were not asked to read. The full one is the strip's third panel. Its
+   height is reserved so a shorter stanza cannot move the rail under the eye. */
+.ao-pres-stanza {
+  padding: 0.45rem 0.7rem;
+  min-height: 4.1rem;
+  overflow-x: auto;
+  background: var(--ao-code-bg);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  color: var(--ao-text);
+  font-family: var(--ao-font-mono);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
+.ao-pres-stanza > code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre;
+}
+
+.ao-pres-rail {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 0.65rem;
+  padding: 0.6rem 0.75rem 0.5rem;
+  background: var(--ao-surface-alt);
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+}
+
+.ao-pres-play {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  margin-top: 0.1rem;
+  padding: 0;
+  appearance: none;
+  background: var(--ao-surface-alt);
+  border: 1px solid var(--ao-border);
+  border-radius: 50%;
+  color: var(--ao-text);
+  font-size: 0.66rem;
+  cursor: pointer;
+}
+
+.ao-pres-play:hover {
+  border-color: var(--ao-brand);
+  color: var(--ao-brand-strong);
+}
+
+.ao-pres-play:focus-visible {
+  outline: 2px solid var(--ao-accent);
+  outline-offset: 2px;
+}
+
+.ao-pres-caption {
+  min-width: 0;
+}
+
+.ao-pres-count {
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-mono);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+/* RESERVED HEIGHT. A caption that grows from one line to two moves the page
+   under the reader on every advance, so the beats are written short AND the
+   height is held — a translation must not be able to reintroduce the jump. */
+.ao-pres-text {
+  display: block;
+  min-height: 1.35rem;
+  font-family: var(--ao-font-display);
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.32;
+  text-wrap: balance;
+}
+
+.ao-pres-dots {
+  display: flex;
+  gap: 0.26rem;
+  margin-top: 0.5rem;
+}
+
+/* The current beat is a SIZE as well as a colour, so it is identifiable
+   without relying on colour alone. */
+.ao-pres-dots button {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  appearance: none;
+  background: var(--ao-border-strong);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.25s ease, transform 0.25s ease;
+}
+
+.ao-pres-dots button[aria-current="true"] {
+  background: var(--ao-brand);
+  transform: scale(1.45);
+}
+
+.ao-pres-dots button:focus-visible {
+  outline: 2px solid var(--ao-accent);
+  outline-offset: 3px;
+}
+
+.ao-pres-progress {
+  grid-column: 1 / -1;
+  height: 2px;
+  background: var(--ao-border);
+  border-radius: 2px;
+}
+
+.ao-pres-progress > i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--ao-brand);
+  border-radius: 2px;
+}
+
 /* --- tables --------------------------------------------------------------- */
 /* A table is a TABLE, so its cells divide the column. It used to be
    `display: block` for the scroll frame — which makes a table shrink to its
@@ -1350,115 +1770,195 @@ a:hover {
 }
 
 /* --- landing page --------------------------------------------------------- */
+/* The hero is the NAME and nothing else. The sentence under it, the claim chips
+   and every section are the page's own content, so the layout places one
+   heading and stops — the stat tiles and the content split that positioned them
+   are gone, and with them the last thing the layout owned that a reader reads. */
 .ao-hero {
-  margin-bottom: 1.75rem;
+  margin-bottom: 0.9rem;
 }
 
 .ao-hero h1 {
   margin-bottom: 0.5rem;
 }
 
-/* The eyebrow pills the diagram used to carry, in real text. Same pairing the
-   drawing used: one solid, one outlined. */
-.ao-eyebrows {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0 0 0.9rem;
-}
-
-.ao-pill {
-  display: inline-block;
-  padding: 0.25rem 0.8rem;
-  border: 1px solid var(--ao-brand);
-  border-radius: 999px;
-  color: var(--ao-brand-strong);
-  font-family: var(--ao-font-display);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-
-.ao-pill--solid {
-  background: var(--ao-brand);
-  border-color: var(--ao-brand);
-  color: var(--ao-surface);
-}
-
-.ao-lede {
-  font-size: 1.12rem;
+.ao-hero + p {
+  margin-top: 0;
+  font-size: 1.05rem;
   color: var(--ao-text-subtle);
 }
 
-/* --- stat tiles ----------------------------------------------------------
-   A KPI row, not four hero figures: the values stay well under hero size, and
-   they wear INK rather than the brand colour — identity is carried by the rule
-   beside them, so the number never has to be read as a swatch. Proportional
-   figures (no tabular-nums): these are standalone values, not a column that
-   has to align. The words live in the page's front matter; only the markup is
-   the layout's. */
-.ao-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-  gap: 1rem;
-  margin: 0 0 2.5rem;
+/* --- claim chips ----------------------------------------------------------
+   `{: .ao-claims}` on an ordinary list, one item per claim. They sit UNDER the
+   sentence, not above the name: a reader meets what the thing is before they
+   meet what it says about itself.
+
+   Quieter than the chip set below them on purpose. These are the page's claim,
+   and shouting them at pill weight would put more ink on two phrases than on
+   the name they belong to. */
+.ao-content ul.ao-claims {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.1rem 0 1.15rem;
   padding: 0;
   list-style: none;
 }
 
-.ao-stat {
-  padding: 0.9rem 1.1rem;
-  background: var(--ao-surface);
-  border: 1px solid var(--ao-border);
-  border-left: 3px solid var(--ao-brand);
-  border-radius: var(--ao-radius);
-}
-
-.ao-stat-head {
-  display: flex;
+.ao-content ul.ao-claims > li {
+  display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.2rem 0.55rem;
+  background: var(--ao-surface-alt);
+  border: 1px solid var(--ao-border);
+  border-radius: 999px;
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 
-.ao-stat-icon {
-  flex: 0 0 auto;
-  width: 1.4rem;
-  height: 1.4rem;
-  color: var(--ao-brand);
+.ao-content ul.ao-claims > li img {
+  width: 13px;
+  height: 13px;
+  margin: 0;
 }
 
-.ao-stat-value {
-  display: block;
-  font-family: var(--ao-font-text);
-  font-size: 2.1rem;
-  font-weight: 700;
-  line-height: 1.1;
-  color: var(--ao-text);
+/* --- areas of use ---------------------------------------------------------
+   `{: .ao-areas}` on an ordinary markdown table. TWO COLUMNS, read against each
+   other: a reader scanning only the left column gets all six areas in one pass,
+   which a grid of tiles cannot offer because its rows are not rows.
+
+   The mark is the PAGE's image, in the cell beside the name it belongs to, so
+   the theme names no vendor file. A row without one is a row whose subject has
+   no mark, not a row that is missing something. */
+.ao-content table.ao-areas th:first-child,
+.ao-content table.ao-areas td:first-child {
+  width: 1%;
+  white-space: nowrap;
 }
 
-.ao-stat-label {
-  display: block;
-  margin-top: 0.1rem;
+.ao-content table.ao-areas td:first-child {
   font-family: var(--ao-font-display);
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--ao-text);
 }
 
-.ao-stat-note {
-  margin: 0.3rem 0 0;
-  font-size: 0.9rem;
-  line-height: 1.5;
+.ao-content table.ao-areas td:first-child img {
+  width: 17px;
+  height: 17px;
+  margin-right: 0.15rem;
+  vertical-align: -3px;
+}
+
+.ao-content table.ao-areas td:last-child {
   color: var(--ao-text-subtle);
 }
 
-.ao-stat-kicker {
-  margin: -1.5rem 0 2.5rem;
+/* Below the measure the left column's names would be squeezed to two words a
+   line by the sentences beside them, so the two columns become two lines. */
+@media (max-width: 34rem) {
+  .ao-content table.ao-areas,
+  .ao-content table.ao-areas tbody,
+  .ao-content table.ao-areas tr,
+  .ao-content table.ao-areas td {
+    display: block;
+    width: auto;
+  }
+
+  .ao-content table.ao-areas thead {
+    display: none;
+  }
+
+  .ao-content table.ao-areas td {
+    border-bottom: 0;
+  }
+
+  .ao-content table.ao-areas tr {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--ao-border);
+  }
+}
+
+/* --- the console strip ----------------------------------------------------
+   `{: .ao-console-strip}` on a blockquote. It is NOT a seventh area of use: the
+   six above are domains, and this is where all six are watched and answered. A
+   row inside that table would state that it is a peer of them, so it gets the
+   full width beneath instead.
+
+   The mark FLOATS rather than taking a grid column. A blockquote's children are
+   flat — a paragraph, a paragraph, a list — with no wrapper to put the words in,
+   and a grid then has to be told how many rows they occupy. Adding a sentence
+   would silently drop one into the mark's column, which is what a float cannot
+   get wrong. */
+.ao-content blockquote.ao-console-strip {
+  margin: 1.25rem 0 2rem;
+  padding: 1.15rem 1.2rem;
+  overflow: hidden;
+  background: var(--ao-surface-alt);
+  border: 1px solid var(--ao-border);
+  border-left: 3px solid var(--ao-brand);
+  border-radius: var(--ao-radius);
+  color: inherit;
+  font-style: normal;
+}
+
+.ao-content blockquote.ao-console-strip > p:first-child {
+  float: left;
+  width: 3.5rem;
+  margin: 0.15rem 1.15rem 0.6rem 0;
+}
+
+.ao-content blockquote.ao-console-strip > p:first-child img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.ao-content blockquote.ao-console-strip > p {
+  margin: 0;
+  color: var(--ao-text-subtle);
+  font-size: 0.92rem;
+}
+
+.ao-content blockquote.ao-console-strip > p:nth-child(2) {
+  margin-bottom: 0.35rem;
+  color: var(--ao-text);
   font-family: var(--ao-font-display);
-  font-size: 1.05rem;
+  font-size: 1.12rem;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.ao-content blockquote.ao-console-strip > p:nth-child(2) strong {
   font-weight: 700;
-  color: var(--ao-brand-strong);
+}
+
+.ao-content blockquote.ao-console-strip ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ao-content blockquote.ao-console-strip li {
+  margin: 0;
+  padding: 0.16rem 0.5rem;
+  background: var(--ao-surface);
+  border: 1px solid var(--ao-border);
+  border-radius: 999px;
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ao-content blockquote.ao-console-strip li a {
+  color: inherit;
 }
 
 /* Otherwise the landing page's grouped paths are ordinary markdown lists,
