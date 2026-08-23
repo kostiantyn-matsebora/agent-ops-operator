@@ -298,6 +298,11 @@ spec:
 ```
 <!-- /generated -->
 
+{: .ao-callout}
+> **That chat id is a PLACEHOLDER**, as is every identifier in every example on
+> this site. Substitute your own — an example that works when pasted unchanged
+> would be naming somebody else's surface.
+
 ## Verify
 
 ```sh

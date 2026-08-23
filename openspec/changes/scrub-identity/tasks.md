@@ -100,3 +100,22 @@ most natural way to reintroduce exactly what was removed.
 - [x] 5.3 Note in the adopter documentation that the example identifiers ARE
       examples and what to substitute — the guard stops a real value going in,
       it cannot tell an adopter which of their own values goes there
+
+## 6. Documentation
+
+The change alters no CRD field, no contract and no behaviour, so most of what
+documentation usually owes is genuinely nothing — and that is written down here
+rather than left as a silence somebody has to interpret.
+
+- [x] 6.1 The REFERENCE docs. The bundle page that ships an identifier says the
+      identifiers are placeholders and where the adopter's own values come from.
+      `concepts.md` and `contracts.md` owe nothing — no field, no endpoint and no
+      semantic changed. `CHANGELOG.md` owes nothing either: nothing breaks and
+      there are no upgrade steps, and an entry describing WHICH example value
+      moved would be the leak the whole change exists to close
+- [x] 6.2 The ADOPTER SITE. The guide that shows a surface identifier now says
+      it is a placeholder, in the page's own callout component. The landing
+      page, the Introduction, Getting started and Installation carry no
+      identifier at all, so none of them says anything that stopped being true
+- [x] 6.3 Generated blocks are regenerated and the site lint is silent on every
+      page this change touched
