@@ -28,10 +28,10 @@
 
 - [x] 5.1 Scaffold `signal-cron/` module: contract client, five-field cron parser (table-tested), per-source scheduler with `last-fire` state, `kind: job` signals with `<source>@<tick>` fingerprints, invalid-config status reporting
 - [x] 5.2 Dockerfile + image `agentops-signal-cron:0.1.0`; built + pushed
-- [x] 5.3 LIVE smoke test on gitops: minute-schedule stub source fired on schedule (18:40 tick → `job-58fnj`, stub run succeeded); pod restart did NOT re-fire (cursor via state API); second tick (18:41) landed in the SAME conversation as a recurrence; CR deletion GC'd the workload; smoke CRs cleaned up
+- [x] 5.3 LIVE smoke test on the reference install: minute-schedule stub source fired on schedule (18:40 tick → `job-58fnj`, stub run succeeded); pod restart did NOT re-fire (cursor via state API); second tick (18:41) landed in the SAME conversation as a recurrence; CR deletion GC'd the workload; smoke CRs cleaned up
 
 ## 6. Chart, verification, docs
 
 - [x] 6.1 Chart: `signaladapters` CRD file lands via regen; manager RBAC + `signaladapters`(+status); chart 1.2.0 (appVersion/manager 0.5.0, built + pushed); helm lint/template green
-- [x] 6.2 `go build/vet` all three modules; full envtest suite green; live upgrade on gitops verified: `alertmanager` SignalSource untouched (generation 1), `Served=True(InProcessProvider)`, webhook URL unchanged, telegram adapter unaffected
+- [x] 6.2 `go build/vet` all three modules; full envtest suite green; live upgrade on the reference install verified: `alertmanager` SignalSource untouched (generation 1), `Served=True(InProcessProvider)`, webhook URL unchanged, telegram adapter unaffected
 - [x] 6.3 README (SignalSource/SignalAdapter rows, signal adapter contract section, cron reference) + CLAUDE.md (terminology, modules, map incl. `signal-cron/`, build line)

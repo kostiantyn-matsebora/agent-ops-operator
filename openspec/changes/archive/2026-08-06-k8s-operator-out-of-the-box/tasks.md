@@ -14,5 +14,5 @@
 
 ## 3. Verification, docs, live
 
-- [ ] 3.1 Live on gitops: `helm upgrade` (bundle appears; agentops-claude Secret already present from demo values shape), then a real `POST /task {"profile":"k8s-operator","task":"..."}` small task verifying MCP + read-only rights (a mutation attempt is denied); confirm `enabled=false` removal path with `helm template` only
+- [ ] 3.1 Live on the reference install: `helm upgrade` (bundle appears; agentops-claude Secret already present from demo values shape), then a real `POST /task {"profile":"k8s-operator","task":"..."}` small task verifying MCP + read-only rights (a mutation attempt is denied); confirm `enabled=false` removal path with `helm template` only
 - [ ] 3.2 README (out-of-the-box section replacing/annotating the demo pitch, fullAccess warning, credential prerequisite) + CLAUDE.md (map: `runtime-k8s/`, build line, image list)

@@ -33,4 +33,4 @@ Channel adapters are pluggable at the HTTP-contract level, but *plugging* still 
 - `internal/httpapi/`: token derivation/validation; `credentialEnv` in `/channel/channels`.
 - `channel-telegram/`: multi-credential poll loops (one getUpdates loop per distinct token).
 - `chart/`: `channeladapters.agentops.dev` CRD; telegram Deployment template → `ChannelAdapter` CR; manager RBAC gains deployments + serviceaccounts (create/update/watch, own-namespace).
-- Live install (gitops): `home-ops` Channel gains `credentialsSecretRef: agentops-telegram`; adapter workload ownership moves from helm to the reconciler (upgrade must avoid a double-getUpdates window).
+- Live install (the reference install): `home-ops` Channel gains `credentialsSecretRef: agentops-telegram`; adapter workload ownership moves from helm to the reconciler (upgrade must avoid a double-getUpdates window).

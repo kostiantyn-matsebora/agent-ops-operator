@@ -18,6 +18,6 @@
 
 - [x] 4.1 vm-bundle + samples render `adapter:`; README/CLAUDE.md state the reference semantics; chart 1.12.0 / manager 0.12.0 built + pushed; commit
 
-## 5. Live (gitops)
+## 5. Live (the reference install)
 
 - [x] 5.1 Apply CRDs; capture annotations of `home-ops` and `vm-alerts` (adapter cursor state), delete + recreate with `adapter:` and the saved annotations, re-claim in pipelines; upgrade manager + adapters together; verify Served/Wired, the Telegram offset did not rewind, and an alert still routes

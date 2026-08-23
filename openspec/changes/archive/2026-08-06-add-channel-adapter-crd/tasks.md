@@ -33,5 +33,5 @@
 ## 6. Verification, docs, live migration
 
 - [x] 6.1 `go build/vet` both modules; full envtest suite green
-- [x] 6.2 Live migration on gitops per design: upgrade with adapter disabled (helm removes old Deployment) → add `credentialsSecretRef` to `home-ops` → enable the ChannelAdapter CR → verified single consumer, projection (adapter Ready with no fallback token env), and a stub round-trip (`task-vdxgt`)
+- [x] 6.2 Live migration on the reference install per design: upgrade with adapter disabled (helm removes old Deployment) → add `credentialsSecretRef` to `home-ops` → enable the ChannelAdapter CR → verified single consumer, projection (adapter Ready with no fallback token env), and a stub round-trip (`task-vdxgt`)
 - [x] 6.3 README (ChannelAdapter concept, "publish your own adapter" = image + CR, credential model, chart-1.1 migration) + CLAUDE.md (map, invariants: credentials on Channel, projection, derived tokens)

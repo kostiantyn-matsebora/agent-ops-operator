@@ -22,7 +22,7 @@
 
 - [x] 5.0 `register` carries the whole routing decision (`matchers`, `groupWait`, `groupInterval`, `repeatInterval`, `maxAlerts`, `sendResolved`), unset knobs omitted; chart values + template pass them through; adapter 0.4.0 / chart 1.9.0 built + pushed
 
-## 6. Live (gitops)
+## 6. Live (the reference install)
 
 - [x] 6.1 Deploy: CRDs, helm upgrade with registration enabled (delete `vm-alerts` source first — immutable type change from the 0.9.0 cutover rides along); verify self-registration → VMAlertmanagerConfig exists → alerts flow via adapter; retire the old built-in source and its pipeline claim
 - [x] 6.2 Hand routing to the source: `disableNamespaceMatcher: true` on the VMAlertmanager, source `register` carries the old receiver's matchers/timings, then DELETE the hand-written `claude-runner` receiver + route and add `continue: true` to the preceding `telegram` route (it matches the same alerts and would otherwise terminate matching before the appended source-owned route)

@@ -53,6 +53,16 @@ telegram-bundle:
 That renders the `Channel`, the chat `SignalSource` (same name as the Channel —
 one name for the whole surface), the bot `Secret`, and the **router Deployment**.
 
+> **Every identifier above is a PLACEHOLDER. Substitute your own.** The chat id
+> and the approver ids are the shape, not the values — pasted unchanged they
+> name a group that is not yours.
+
+| Value | Where yours comes from |
+|---|---|
+| `chatId` | the forum supergroup itself. Any bot API method that returns the chat reports it, and a forum id begins `-100` |
+| `approvers` | the numeric user id of each person allowed to approve, not their `@name` |
+| `existingSecret` | a `Secret` you created holding the bot token under `botToken` |
+
 ### The composer offers what you can type
 
 Once the surface is running, Telegram shows its own command control in the

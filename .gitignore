@@ -25,3 +25,7 @@ runtimes/*/[!.]*[!.]
 !*/*/README
 !*/*/LICENSE
 !*/*/[a-z]*/
+
+# Publication-scrub working file. The substitution map is used ONCE and deleted;
+# committing it would republish exactly what the scrub removes.
+.scrub-map.local

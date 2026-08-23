@@ -44,7 +44,7 @@ An eviction is reported from both ends already and per POD from neither:
   `for: 0` as ONE node-level signal rather than one per displaced pod.
 - **API-initiated evictions are drains** — routine, and UNATTENDED wherever a
   reboot manager runs.
-- **The case worth waking for is a pod that does not come back**, which arrives
+- **The case worth acting on is a pod that does not come back**, which arrives
   as `FailedScheduling` with a dwell to confirm it.
 
 **The drop is therefore only defensible while BOTH substitutes survive**, so the

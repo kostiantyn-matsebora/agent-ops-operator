@@ -37,4 +37,4 @@ adapter contract) and fix the name.
 - Manager: both adapter reconcilers, both Served reconcilers, the conversation
   reconciler, `chat/ops`, and the `/channel/*` + `/signal/*` handlers.
 - Adapters: channel-telegram, signal-cron, signal-vmalertmanager (new images).
-- Chart 1.12.0 / manager 0.12.0; live migration on gitops.
+- Chart 1.12.0 / manager 0.12.0; live migration on the reference install.

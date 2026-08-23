@@ -24,5 +24,5 @@
 
 - [x] 4.1 Chart: `pipelines` CRD (regen) + manager RBAC `pipelines`(+status); chart 1.3.0, manager 0.6.0 (build + push); helm lint/template
 - [x] 4.2 `go build/vet` all modules; full envtest suite green
-- [x] 4.3 Live on gitops: upgrade (no Pipeline = behavior unchanged; migrate any active conversation bindings), then apply a Pipeline binding `alertmanager` + `home-ops` and verify a stub-profile signal fans out to the telegram thread via manager `send` ops; clean up test CRs
+- [x] 4.3 Live on the reference install: upgrade (no Pipeline = behavior unchanged; migrate any active conversation bindings), then apply a Pipeline binding `alertmanager` + `home-ops` and verify a stub-profile signal fans out to the telegram thread via manager `send` ops; clean up test CRs
 - [x] 4.4 README (Pipeline concept + example, mirroring semantics, delivery note) + CLAUDE.md (terminology, map, invariants: pipeline-first resolution, no-relay-loop rule); rebase note in the pending `add-web-chat-channel` change (multi-channel transcript/no-echo rule)
