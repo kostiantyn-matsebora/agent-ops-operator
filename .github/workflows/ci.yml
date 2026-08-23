@@ -178,7 +178,18 @@ jobs:
               echo "::error::chart permutation '$name' failed to render"
               failed=1; echo "::endgroup::"; continue
             fi
+            # CRDs are SKIPPED, and only CRDs. kubeconform's strict default
+            # set carries no schema for CustomResourceDefinition, and a missing
+            # schema is an ERROR rather than a skip — so without this the job
+            # fails on eleven objects in every permutation, which is what it did
+            # when the whole matrix was first run by hand.
+            #
+            # Nothing is lost. The CRDs are controller-gen output and the API
+            # server validates them on apply. What this job exists to check is
+            # the CRs rendered AGAINST them, and that still happens — the second
+            # schema-location is those very CRDs.
             if ! kubeconform -strict -summary \
+                 -skip CustomResourceDefinition \
                  -schema-location default \
                  -schema-location "$RUNNER_TEMP/crd-schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
                  "$RUNNER_TEMP/$name.yaml"; then

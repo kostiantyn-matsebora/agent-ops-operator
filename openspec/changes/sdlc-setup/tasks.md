@@ -54,7 +54,13 @@
       and GHA layer cache. Derive the matrix from the Dockerfiles present
 - [ ] 2.8 Open a scratch PR and confirm all jobs run and pass; deliberately
       break one module and one UI test and confirm each failure is attributed to
-      the thing that broke
+      the thing that broke — STILL OWED, because it needs a runner. Every job's
+      COMMANDS were run by hand first (operator incl. 343 envtest cases, eleven
+      submodules, the console UI, seven chart permutations under kubeconform,
+      the docs drift check, thirteen image builds) and that found a real defect:
+      the chart job failed on eleven CRDs in every permutation, since
+      kubeconform treats a missing schema as an error and its strict set has
+      none for CustomResourceDefinition
 
 ## 3. Reusable image publish workflow
 
@@ -82,8 +88,13 @@
       not containment — an image that lost an arch and one that gained an
       undeclared one both fail. This is the check that would have caught the
       amd64-only console before it reached a cluster
-- [ ] 3.7 Prove the assertion fails: build one component for a single arch on
-      purpose and confirm the job rejects it
+- [x] 3.7 Prove the assertion fails: build one component for a single arch on
+      purpose and confirm the job rejects it — done against REAL pushed
+      manifests, both directions: an image that LOST an arch and one that GAINED
+      an undeclared one are each rejected, so the check is equality rather than
+      containment. The immutability preflight was proven in the same pass, on a
+      live tag. Run by hand rather than in the job, because the account's
+      Actions minutes were unavailable
 
 ## 4. Release entry point
 
