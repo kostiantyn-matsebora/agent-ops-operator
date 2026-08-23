@@ -809,7 +809,7 @@ retention:
 #
 # Failure surfaces as a FAILED JOB, never as a signal: the `agentops-` name
 # prefix is what the events adapter's self-exclusion keys on, so a broken volume
-# cannot wake an agent that needs that same volume to run.
+# cannot start a conversation that needs that same volume to run.
 contextProbe:
   enabled: false
   schedule: "23 * * * *"

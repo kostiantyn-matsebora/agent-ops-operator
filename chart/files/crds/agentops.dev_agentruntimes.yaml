@@ -65,6 +65,9 @@ spec:
                4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
             properties:
               args:
+                description: |-
+                  Command / Args override the image's entrypoint. Both empty runs it as
+                  the image declares it.
                 items:
                   type: string
                 type: array
@@ -383,11 +386,17 @@ spec:
                 format: int32
                 type: integer
               image:
+                description: |-
+                  Image implementing the work contract. Derive your own to add tooling:
+                  what an agent may REACH is wiring, so an image never grants it.
                 minLength: 1
                 type: string
               nodeSelector:
                 additionalProperties:
                   type: string
+                description: |-
+                  NodeSelector placing runtime pods, applied with Tolerations and
+                  Affinity below.
                 type: object
               resources:
                 description: Resources default for runtime pods (AgentProfile.resources

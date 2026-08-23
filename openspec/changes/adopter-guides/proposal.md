@@ -16,24 +16,40 @@ add your own agent"*, which is the first thing anyone will want.
 
 ## What Changes
 
-**Seven pages, four tiers, in learning order:**
+**Seven how-to pages, four tiers, in learning order:**
 
 | Tier | Page | Teaches |
 |---|---|---|
-| 1 | Add your own agent | `AgentProfile` with an inline prompt, plus the `Pipeline` that reaches it |
-| 1 | ↳ …from your own repository | `repository`, `.claude/agents/<name>.md`, the deploy key |
-| 2 | Give it capabilities | `MCPToolset`, `MCPConfig`, how `toolsMode` composes against the definition |
-| 3 | Write a signal adapter | `/signal/inbound`, the `SignalAdapter` CR, self-exclusion |
-| 3 | Write a channel adapter | `/channel/*`, the ops queue, typed messages |
-| 4 | Write an agent runtime | the work contract, and what a runtime is trusted to enforce |
+| 1 | Add your own pipeline | `Pipeline` — the wiring, built from objects the install ALREADY has |
+| 1 | ↳ Add your own agent | `AgentProfile` — identity only, and the route that reaches it |
+| 1 | ↳ Run your agent from a repository | `repository`, `.claude/agents/<name>.md`, the deploy key |
+| 2 | Give your agent tools | `MCPToolset`, `MCPConfig`, how `toolsMode` composes against the definition |
+| 3 | Wake agents from your own system | `/signal/inbound`, the `SignalAdapter` CR, self-exclusion |
+| 3 | Answer on your own chat surface | `/channel/*`, the ops queue, typed messages |
+| 4 | Run agents on your own backend | the work contract, and what a runtime is trusted to enforce |
 | — | `docs/cr-reference.md` | every field of every kind, generated |
+
+**A TITLE NAMES WHAT THE READER GETS, NEVER THE KIND IT IS BUILT FROM.** "Create
+a Pipeline" is the implementation talking. The kind still appears in the page's
+first sentence and in its `description`, so nothing is lost to search, and the
+URL keeps the technical slug for the same reason.
+
+**THE PIPELINE COMES FIRST, and it creates NOTHING.** It is the only object
+carrying any wiring, and a demo install already ships the profile, sources,
+channels and toolsets it names — so the fundamental lesson costs a reader no new
+resources at all. Teaching the profile first inverts that: it makes an inert
+object whose whole point is a Pipeline the reader has not met.
 
 Reachable from the Introduction's existing guides section — one line each, no
 index page.
 
-**Every page has the same four parts:** what you are doing, a minimal CR to fill
-in, a link to the full generated reference, and the in-repo implementation to
-copy from.
+**Every page has the same five parts**, in this order: what the thing IS,
+"Before you start" (when it applies and when it does not), "The overall shape",
+sections NAMED FOR THE TASK with their code beneath, and "What comes next".
+
+**A guide that opens with instructions has no subject.** A first draft cut the
+concept entirely and read as steps for a thing the reader had not been told
+about — see `design.md` D8.
 
 **Templates are generated from `chart/files/crds/`. Examples are rendered from
 the chart.** Neither is hand-written, and CI fails when either drifts from its

@@ -107,7 +107,7 @@ profile:
   enabled: true
   name: alert-investigator
   # No repository, so no .claude/agents/<name>.md can be resolved — without this
-  # inline role an alert would wake a personality-free agent.
+  # inline role an alert would reach a personality-free agent.
   systemPrompt: |
     You are an on-call engineer triaging a Prometheus alert.
 

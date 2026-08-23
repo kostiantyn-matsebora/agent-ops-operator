@@ -224,7 +224,7 @@ eventsAdapter:
 profile:
   enabled: true
   name: k8s-engineer
-  # Identity only, and identity ONLY: no repository, no capabilities. What this
+  # Behaviour, and behaviour ONLY: no repository, no capabilities. What this
   # agent may do comes from whichever Pipeline originates the conversation —
   # the `pipelines:` component below, or one declared in the parent chart.
   #
@@ -232,7 +232,7 @@ profile:
   # .claude/agents/<name>.md — there is nothing checked out to read. Without the
   # inline role below the agent would be personality-free: a bare session whose
   # only inputs are the allowlist and the task text. That is survivable for a
-  # direct question and bad for an event that wakes it with no instructions.
+  # direct question and bad for an event that opens one with no instructions.
   #
   # Appended to the runtime's own system prompt, never replacing it. Identity,
   # not capability: nothing here widens the allowlist.
@@ -248,7 +248,7 @@ profile:
     ask for the narrowest scope you can (a namespace rather than the cluster)
     and read what comes back rather than fetching everything twice.
 
-    When you are woken by a cluster event, investigate before you act: identify
+    When a cluster event opens this conversation, investigate before you act: identify
     the failing object, read its recent events and logs, and state the likely
     cause. Make a change only when you are confident it is correct and its blast
     radius is bounded, and say plainly what you changed. Prefer the narrowest

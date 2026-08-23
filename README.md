@@ -112,7 +112,9 @@ For alert ingestion, enable the [Prometheus bundle](docs/prometheus-bundle.md).
 | [Getting started](https://kostiantyn-matsebora.github.io/agent-ops-operator/getting-started/) | The read-only demo: install it and ask an agent about your cluster |
 | [The console](https://kostiantyn-matsebora.github.io/agent-ops-operator/console/) | A tour of its six views, and how to decide who may reach it |
 | [Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/) | The real install: what to decide, what to configure, how to wire a route |
+| [Guides](https://kostiantyn-matsebora.github.io/agent-ops-operator/introduction/#follow-the-guides) | Seven, in learning order: the wiring, an agent, its tools, your own ingest, chat surface and backend |
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, and how a route's tools are resolved |
+| [docs/cr-reference.md](docs/cr-reference.md) | Every field of every kind, generated from the CRDs the chart ships |
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
 | [docs/k8s-bundle.md](docs/k8s-bundle.md) | Cluster events, the agent that answers them, Kubernetes MCP tooling |

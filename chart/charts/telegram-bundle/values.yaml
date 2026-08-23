@@ -27,7 +27,7 @@ channelAdapter:
   name: telegram
   image:
     repository: kmatsebora/agentops-channel-telegram
-    tag: 0.20.0
+    tag: 0.23.0
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
@@ -76,6 +76,13 @@ surface:
   # REQUIRED when enabled. Telegram chat id (a forum supergroup, so
   # conversations get topics). Its GENERAL SURFACE originates conversations;
   # its TOPICS continue them.
+  #
+  # THE EXAMPLE ID BELOW IS THE ONE EVERY RENDERED EXAMPLE ON THE SITE USES,
+  # and .github/scripts/docs-generate.py asserts that it still appears here.
+  # It is shaped like a forum supergroup and identifies nothing — an example is
+  # a thing readers copy, so a real id documented here reaches all of them.
+  #
+  #   chatId: "-1001234567890"
   chatId: ""
 
   # REQUIRED when enabled — one of the two forms below. The bot credential is

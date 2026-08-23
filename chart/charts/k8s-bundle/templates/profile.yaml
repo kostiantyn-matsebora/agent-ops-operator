@@ -1,5 +1,5 @@
 {{- /*
-Profile component: WHO the agent is. Identity only — one object.
+Profile component: WHO the agent is and HOW it behaves. One object.
 
 Not what executes it: the AgentRuntime, its ServiceAccount, its credential and
 that SA's RBAC are the parent chart's (`runtime:` and
@@ -18,7 +18,7 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-k8s-bundle
 spec:
-  # Identity only — no repository, and no capabilities. What this agent may DO
+  # Behaviour only — no repository, and no capabilities. What this agent may DO
   # comes from the Pipelines routing it: the bundle's own wiring component when
   # it is on, otherwise whatever the install declared.
   maxTurns: {{ $p.maxTurns }}

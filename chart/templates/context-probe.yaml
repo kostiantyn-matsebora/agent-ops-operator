@@ -21,8 +21,8 @@
 # until the next conversation. This closes that gap to one schedule interval.
 #
 # It reports as STATUS, never as a signal: the name prefix `agentops-` is what
-# signal-k8s-events' self-exclusion keys on, so a failing probe cannot wake an
-# agent to investigate the storage the agent itself needs. A failed Job is
+# signal-k8s-events' self-exclusion keys on, so a failing probe cannot start a
+# conversation about the storage the agent itself needs. A failed Job is
 # visible to kubectl, to the console and to metrics, which is the whole point.
 apiVersion: batch/v1
 kind: CronJob

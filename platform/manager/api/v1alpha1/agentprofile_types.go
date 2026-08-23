@@ -27,6 +27,8 @@ type RepoAuth struct {
 // repo (CLAUDE.md, .claude/agents, skills, any assets). Optional: without a
 // repository the agent runs as a pure advisor over its tools.
 type RepositorySpec struct {
+	// URL of the repository to check out, in any form git understands
+	// (ssh://, git@host:path, https://). Empty means no checkout.
 	// +optional
 	URL string `json:"url,omitempty"`
 	// Branch or ref to check out.
@@ -37,8 +39,8 @@ type RepositorySpec struct {
 	Auth *RepoAuth `json:"auth,omitempty"`
 }
 
-// AgentProfileSpec is an addressable agent IDENTITY: repository + agent role
-// + prompts + credentials + limits. It carries NO capabilities — what an agent
+// AgentProfileSpec is an addressable agent IDENTITY: repository, agent role,
+// prompts, credentials and limits. It carries NO capabilities — what an agent
 // may DO (its tool allowlist and MCP servers) comes exclusively from the
 // Pipeline routing its conversation, so one profile serves routes with
 // genuinely different capabilities without being cloned or edited.
@@ -46,8 +48,9 @@ type AgentProfileSpec struct {
 	// +optional
 	Repository RepositorySpec `json:"repository,omitempty"`
 
-	// Agent is the default agent to adopt: name of `.claude/agents/<agent>.md`
-	// in the repository. May be overridden per task (`/<profile>:<agent>`).
+	// Agent is the agent to adopt: name of `.claude/agents/<agent>.md` in the
+	// repository. A profile names one agent and a Pipeline names one profile,
+	// so the agent comes from the wiring and no message may select another.
 	// +optional
 	Agent string `json:"agent,omitempty"`
 
@@ -55,6 +58,8 @@ type AgentProfileSpec struct {
 	// When empty, the operator's built-in lane templates wrap the agent.
 	// +optional
 	Prompt string `json:"prompt,omitempty"`
+	// ReplyPrompt wraps a follow-up in an existing conversation, where Prompt
+	// wraps the first unit.
 	// +optional
 	ReplyPrompt string `json:"replyPrompt,omitempty"`
 
@@ -85,6 +90,8 @@ type AgentProfileSpec struct {
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
+	// MaxTurns bounds the agent's own turns within ONE work unit. It is a
+	// runaway bound, not a budget: the conversation is unaffected.
 	// +kubebuilder:default=60
 	// +optional
 	MaxTurns int32 `json:"maxTurns,omitempty"`

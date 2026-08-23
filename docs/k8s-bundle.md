@@ -13,7 +13,7 @@ turns on and `enabled: true` does not.
 | Component | Flag | What it renders |
 |---|---|---|
 | Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), RBAC bound to its ServiceAccount (`events get/list/watch` plus read-only `pods`/`replicasets`), and — under `source.create` — a `SignalSource`. **Not the claim on it**: that is the wiring component, or your own `pipelines:` |
-| Profile | `profile.enabled` | Exactly one object: the `k8s-engineer` `AgentProfile` (identity only, with an inline `systemPrompt` role) |
+| Profile | `profile.enabled` | Exactly one object: the `k8s-engineer` `AgentProfile` (behaviour only, with an inline `systemPrompt` role) |
 | MCP tooling | `mcp.enabled` (**on**) | An `MCPConfig` (`k8s-api`, server key `kubernetes`) and an `MCPToolset` (`k8s-observability`), bound by the wiring component or by whichever Pipeline you declare — see below |
 | MCP server | `mcpServers.enabled` (**on**) | The MCP server workload itself: `Deployment` + `Service` (`agentops-mcp-k8s`), **its own `ServiceAccount`**, and that SA's RBAC |
 | Wiring | `pipelines.enabled` (**off**, on under demo) | One `Pipeline` claiming the source above with the profile above and both toolsets — see [The bundle's own wiring](#the-bundles-own-wiring) |
@@ -220,7 +220,7 @@ per pod from neither:
 |---|---|---|
 | kubelet, under node pressure | `NodeHasMemoryPressure` / `NodeHasDiskPressure`, tier 3, `for: 0` | one node-level signal beats one per displaced pod |
 | API-initiated (drain) | nothing, deliberately | a drain is an operator doing what they were told — and unattended wherever a reboot manager runs |
-| pod does not come back | `FailedScheduling`, tier 5, `for: 5m` | this is the half worth waking for, and it is confirmed by a dwell |
+| pod does not come back | `FailedScheduling`, tier 5, `for: 5m` | this is the half worth acting on, and it is confirmed by a dwell |
 
 What the drop costs is the case where pods evict, reschedule cleanly, and the
 node reports no pressure — a cluster working as designed.

@@ -51,15 +51,17 @@ spec:
             type: object
           spec:
             description: |-
-              AgentProfileSpec is an addressable agent IDENTITY: repository + agent role
+              AgentProfileSpec is an addressable agent IDENTITY: repository, agent role,
+              prompts, credentials and limits. It carries NO capabilities — what an agent
               may DO (its tool allowlist and MCP servers) comes exclusively from the
               Pipeline routing its conversation, so one profile serves routes with
               genuinely different capabilities without being cloned or edited.
             properties:
               agent:
                 description: |-
-                  Agent is the default agent to adopt: name of `.claude/agents/<agent>.md`
-                  in the repository. May be overridden per task (`/<profile>:<agent>`).
+                  Agent is the agent to adopt: name of `.claude/agents/<agent>.md` in the
+                  repository. A profile names one agent and a Pipeline names one profile,
+                  so the agent comes from the wiring and no message may select another.
                 type: string
               env:
                 description: |-
@@ -186,6 +188,9 @@ spec:
                 type: array
               maxTurns:
                 default: 60
+                description: |-
+                  MaxTurns bounds the agent's own turns within ONE work unit. It is a
+                  runaway bound, not a budget: the conversation is unaffected.
                 format: int32
                 type: integer
               prompt:
@@ -194,6 +199,9 @@ spec:
                   When empty, the operator's built-in lane templates wrap the agent.
                 type: string
               replyPrompt:
+                description: |-
+                  ReplyPrompt wraps a follow-up in an existing conversation, where Prompt
+                  wraps the first unit.
                 type: string
               repository:
                 description: |-
@@ -233,6 +241,9 @@ spec:
                     description: Branch or ref to check out.
                     type: string
                   url:
+                    description: |-
+                      URL of the repository to check out, in any form git understands
+                      (ssh://, git@host:path, https://). Empty means no checkout.
                     type: string
                 type: object
               resources:

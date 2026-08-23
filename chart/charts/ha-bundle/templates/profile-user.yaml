@@ -1,5 +1,5 @@
 {{- /*
-The house's USER — the agent that USES it: identity only, one object.
+The house's USER — the agent that USES it: behaviour only, one object.
 
 Rendered when there is SOME way to reach the house: the MCP path, or a control
 credential. A profile that can reach nothing is furniture.

@@ -28,7 +28,7 @@ agents act. What separates them is the job and the reach it needs.
 | MCP tooling | `mcp.enabled` (**on**) | An `MCPConfig` (`ha-api`, server key `homeassistant`) and two `MCPToolset`s |
 | Admin MCP | `adminMcp.enabled` (**off**) | A second `MCPConfig` (`ha-admin-api`, server key `homeassistant_admin`) and the `ha-admin` toolset — see [Repairing the house](#repairing-the-house-adminmcp) |
 | Admin MCP server | `adminMcpServer.enabled` (**off**) | That server's workload: `Deployment` + `Service` (`agentops-mcp-ha`) and **its own `ServiceAccount`** |
-| Profiles | `profiles.user.enabled` / `profiles.ops.enabled` (**on**) | Up to two `AgentProfile`s, identity only, each with an inline `systemPrompt` |
+| Profiles | `profiles.user.enabled` / `profiles.ops.enabled` (**on**) | Up to two `AgentProfile`s, behaviour only, each with an inline `systemPrompt` |
 | Wiring | `pipelines.enabled` (**off**) | Up to two `Pipeline`s — see [The bundle's own wiring](#the-bundles-own-wiring) |
 
 **The bundle ships no substrate.** No `AgentRuntime`, no runtime
@@ -208,11 +208,11 @@ error, not a window that silently never fires.
 
 **Self-exclusion is about the loop this adapter can create.** See below.
 
-### Self-exclusion: never wake the agent that caused the log
+### Self-exclusion: never answer a log the agent itself wrote
 
 The loop is short and complete. The ops agent calls a Home Assistant service, the
 call fails, Home Assistant logs the failure, the record becomes a signal, the
-signal wakes the ops agent, which calls the service again.
+signal opens a conversation with the ops agent, which calls the service again.
 
 Three independent mechanisms, and **none of them is configurable**:
 
@@ -376,11 +376,11 @@ set `adminMcpServer.path` to a high-entropy value and the URL follows it.
 
 ## The two profiles (`profiles`)
 
-Two objects, identity only. No repository, no `allowedTools`, no `mcp`. What each
+Two objects, behaviour only. No repository, no `allowedTools`, no `mcp`. What each
 agent may DO comes from the Pipeline routing it.
 
 Because neither has a repository, no `.claude/agents/<name>.md` can resolve, so
-the inline `systemPrompt` is not decoration. Without it a log record would wake a
+the inline `systemPrompt` is not decoration. Without it a log record would reach a
 personality-free agent whose only inputs are an allowlist and a payload.
 
 - **`ha-user`** uses the house and answers questions about it. Its role tells it

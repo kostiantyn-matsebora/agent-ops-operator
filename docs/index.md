@@ -4,10 +4,10 @@ eyebrows:
   - Automation that thinks
   - Kubernetes-native, end to end
 lede: >-
-  A signal wakes it, your prompt tells it what to do, your YAML decides what it
+  A signal starts it, your prompt tells it what to do, your YAML decides what it
   may touch — a crashlooping pod or the hallway lights.
 description: >-
-  agent-ops is a Kubernetes operator for agents you can address: a signal wakes
+  agent-ops is a Kubernetes operator for agents you can address: a signal starts
   one, your wiring decides what it may touch, and it answers in a thread you can
   reply to.
 
@@ -58,7 +58,7 @@ stats:
 
 - **How it works** — Something happens, you declare what to do about it in your own cluster, the operator runs it.
 
-  ![Something happens — an alert fires, a pod crashloops, a schedule comes due, a room gets too warm, someone asks — and each feeds into one Helm install in your own cluster. There you declare it as custom resources: a Pipeline for what wakes it, an AgentProfile for what it should do, an MCPToolset for what it may touch, shown as a real Pipeline manifest naming its signal source, profile, toolset and channel. The operator then runs it: one conversation per incident in its own thread, its own isolated pod, picking up where it stopped.]({{ '/assets/img/agent-ops-landing-light.svg' | relative_url }}){: .ao-diagram}
+  ![Something happens — an alert fires, a pod crashloops, a schedule comes due, a room gets too warm, someone asks — and each feeds into one Helm install in your own cluster. There you declare it as custom resources: a Pipeline for what starts it, an AgentProfile for what it should do, an MCPToolset for what it may touch, shown as a real Pipeline manifest naming its signal source, profile, toolset and channel. The operator then runs it: one conversation per incident in its own thread, its own isolated pod, picking up where it stopped.]({{ '/assets/img/agent-ops-landing-light.svg' | relative_url }}){: .ao-diagram}
 
 - **What you write** — One `Pipeline`. It is the whole route, and it is the only place wiring lives.
 
@@ -69,7 +69,7 @@ stats:
     name: k8s-ops
   spec:
     signalSourceRefs:
-      - name: cluster-events      # what wakes it
+      - name: cluster-events      # what starts it
     profileRef:
       name: k8s-engineer          # what it should do
     toolsets:
@@ -83,7 +83,7 @@ The console is what the recording shows, and it ships enabled. The
 [Console page]({{ '/console/' | relative_url }}) takes each of its six views in
 turn, at full size.
 
-## When it wakes
+## When it runs
 
 - **Investigates** — queries the system, reads state.
 - **Explains** — in a thread you can reply to.
@@ -113,7 +113,8 @@ Documented HTTP contracts, no fork.
 ## Where to start
 
 - **[Introduction]({{ '/introduction/' | relative_url }})** — how the pieces fit
-  together: what wakes an agent, what decides what it may touch, what runs it.
+  together: what starts a conversation, what decides what it may touch, what
+  runs it.
 - **[Getting started]({{ '/getting-started/' | relative_url }})** — a read-only
   demo in fifteen minutes: install it and ask an agent about your cluster.
 - **[The console]({{ '/console/' | relative_url }})** — the six views above at

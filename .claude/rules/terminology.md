@@ -13,6 +13,31 @@
   why this had to be right BEFORE that shipped.
 - **`pipelines` joins the reserved set** a Pipeline cannot be reached by.
 
+### A signal STARTS a conversation. NOTHING IS ASLEEP
+
+**"Wake", "woke" and "waking" are BANNED for what a signal does.** No agent is
+sitting there waiting to be roused: a signal arrives, the manager OPENS a
+Conversation, and only then is a runtime pod provisioned.
+
+The verbs, and they are the ones the invariants already use:
+
+| Instead of | Write |
+|---|---|
+| a signal WAKES an agent | a signal STARTS a conversation, or OPENS one |
+| what WAKES an agent | what STARTS a conversation |
+| the route that WOKE it | the route that STARTED it |
+| a source that wakes nothing | a source no Pipeline claims |
+
+- **"Wake" is correct for a PERSON.** Paging someone at 03:00 really does wake
+  them, so `k8s-bundle`'s "what actually deserves waking someone" stays.
+- **It reads as a lie about the architecture**, which is why it is banned rather
+  than discouraged. It implies a resident agent and a cheap nudge, when what
+  happens is an object being created and a pod being scheduled.
+- **It had spread to the landing page, the Introduction, three bundle pages,
+  four rules files, the chart values and the DRAWN DIAGRAM** before anyone swept
+  it. Fixing the diagram meant editing `agent-ops.drawio` and re-running
+  `docs/diagrams/export.py`, because the word was baked into all four SVGs.
+
 ### Agent runtime, never "worker"
 
 CRD `AgentRuntime`, SA `agentops-runtime`, env `RUNTIME_*`, pkg `runtimepod`,
@@ -22,13 +47,24 @@ pods `agentops-conv-<conversation>`.
 
 | Kind | Is |
 |---|---|
-| `AgentProfile` | **who the agent is** — identity ONLY: repo, role, prompts, env, limits |
+| `AgentProfile` | **who the agent is and HOW IT BEHAVES** — repo, role, prompts, env, limits |
 | `AgentRuntime` | **what executes it** |
 | `Conversation` | **session + serial input queue + one thread PER bound channel** (`spec.channelRefs[]` / `status.threads[]{channel,threadId}`) |
 | `Pipeline` | **the wiring** — see below |
 
 **`AgentProfile` carries NO capabilities.** No `allowedTools`, no `mcp`. What an
 agent MAY DO comes exclusively from the Pipeline routing it.
+
+**BUT "IDENTITY ONLY" IS THE WRONG SHORTHAND FOR THAT, AND IT IS DELETED.** The
+split is BEHAVIOUR against REACH, not identity against everything else.
+
+- **The system prompt is the whole of the agent's judgement** — how it decides,
+  what it must never do, its method. That is not a label, and calling the object
+  that holds it "identity only" reads as thin when it is the substance.
+- **What the profile lacks is REACH**: tools, MCP servers, channels. Say that,
+  because that is the claim which is load-bearing.
+- **Two profiles over one runtime are two different agents.** A phrase implying
+  a profile is a name and a role makes that sound impossible.
 
 **`Conversation.spec.toolsets` / `.mcpConfigs` mirror the originating
 Pipeline's bindings.** MATERIALIZED state like `profileRef` / `channelRefs`,

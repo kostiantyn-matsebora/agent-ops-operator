@@ -18,6 +18,7 @@ path. Plugins are limited to the set Pages enables by default.
 | `getting-started.md` | the read-only DEMO walkthrough, console-first |
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `installation.md` | the REAL install, and the PARENT chart's values |
+| `guides/*.md` | one adoption tier each, in learning order — hand-written prose around GENERATED resource blocks |
 
 - **`console-guide.md` is published at `/console/`.** `console.md` is the
   untouched reference and keeps its own URL.
@@ -37,6 +38,15 @@ path. Plugins are limited to the set Pages enables by default.
 - **Every other `docs/*.md` is a reference page, not a site page.** They carry no
   front matter, so Jekyll copies them verbatim. Do not add front matter, headings
   or navigation entries to them — publishing one is its own change.
+- **`cr-reference.md` is GENERATED and is one of those reference pages.** Every
+  field of every kind, written by `.github/scripts/docs-generate.py` from
+  `chart/files/crds/`. Never edit it, and never give it a nav entry.
+  - **The `yaml` blocks in `guides/` come from the same run** — the resource
+    templates from the CRDs, the worked examples from `helm template`.
+  - **A page declares what it wants in an HTML comment**
+    (`<!-- generated: … -->`) and the generator fills the block beneath it. CI
+    regenerates everything and FAILS on a difference, which is the only thing
+    that stops a committed generated file rotting.
 
 **Adding a page is the markdown file plus ONE line in `_data/nav.yml`**, and the
 page DECLARES its own `permalink`. No permalink style is configured, and the
@@ -213,8 +223,12 @@ awk 'FNR==1{fm=0;b=0;n=0}
       if (t ~ /;/) printf "%s:%d SEMICOLON\n", FILENAME, FNR}
      /^\|/||/^[0-9]+\./||/^[-*] /||/^ /||/^>/{next}
      /^$/{if(n>45)printf "%s:%d LONG PARAGRAPH (%d words)\n",FILENAME,s,n;n=0;next}
-     {if(n==0)s=FNR;n+=NF}' docs/*.md
+     {if(n==0)s=FNR;n+=NF}' $(ls docs/*.md docs/guides/*.md | grep -v cr-reference)
 ```
+
+**`cr-reference.md` is excluded, and it is the only exclusion.** Its prose is
+CRD doc comments, so a semicolon there is a Go source file's and the fix belongs
+in `platform/manager/api/v1alpha1/`, not in a generated page.
 
 **This file is the only place it is written out.** The root `CLAUDE.md` used to
 carry a second copy, and the two drifted — one was fixed and the other was not.
@@ -242,6 +256,17 @@ Three details, each of which cost a round:
 **3. Check what a screenshot cannot show.** Anchors, table shape and horizontal
 overflow are per-page facts a glance at the top of the page misses. Assert them
 in the browser rather than reading for them.
+
+**The browser is already here** — `platform/console/ui/node_modules/playwright-core`,
+with its Chromium in `~/.cache/ms-playwright`. Drive it from a script and assert
+`document.documentElement.scrollWidth > clientWidth` per page, in BOTH
+`colorScheme`s. Nothing needs installing.
+
+- **Serve the build first.** `_config.yml` sets a `baseurl`, so symlink the
+  output to `agent-ops-operator/` and `python3 -m http.server`.
+- **Rebuilding while that server runs serves a HALF-WRITTEN site**, and every
+  asset then 404s. It reads as a broken page rather than a race — stop the
+  server, rebuild, start it again.
 
 ## Authoring rules (binding)
 Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.

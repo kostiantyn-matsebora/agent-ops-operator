@@ -70,11 +70,15 @@ const (
 //  3. reports    POST $CONTROL_URL/work/done {convo,runId,status,sessionId,result}
 //  4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
 type AgentRuntimeSpec struct {
+	// Image implementing the work contract. Derive your own to add tooling:
+	// what an agent may REACH is wiring, so an image never grants it.
 	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
 	// Command/Args override the image entrypoint.
 	// +optional
 	Command []string `json:"command,omitempty"`
+	// Command / Args override the image's entrypoint. Both empty runs it as
+	// the image declares it.
 	// +optional
 	Args []string `json:"args,omitempty"`
 	// Env: extra environment for every worker of this runtime.
@@ -87,6 +91,8 @@ type AgentRuntimeSpec struct {
 	// runtime SA when empty.
 	// +optional
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+	// NodeSelector placing runtime pods, applied with Tolerations and
+	// Affinity below.
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// IdleTTLMinutes before an idle worker exits (respawned on demand).

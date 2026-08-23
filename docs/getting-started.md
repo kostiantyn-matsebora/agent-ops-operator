@@ -170,14 +170,16 @@ exits on the idle TTL.
 
 ## Where to go next
 
+- **[Put an agent to work]({{ '/guides/pipeline/' | relative_url }})**
+  — the wiring, built from what you just installed. Nothing new to create, and
+  the first guide of seven.
 - **[Introduction]({{ '/introduction/' | relative_url }})** — the model behind
-  what you just did.
-- **[Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)**
-  — every CRD, and how tool access resolves.
+  what you just did, and the rest of the guides.
 - **A real lane** —
   [cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md),
   [Prometheus alerts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus-bundle.md),
   [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram-bundle.md),
   [Home Assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/ha-bundle.md).
-- **[Contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md)**
-  — bring your own signal source, runtime or channel.
+- **[Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)**
+  and **[the CR reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md)**
+  — every kind, every field, and how tool access resolves.

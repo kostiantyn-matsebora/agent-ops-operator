@@ -8,11 +8,11 @@ description: >-
 
 next:
   eyebrow: Next
-  title: Every CRD in full
+  title: "Put an agent to work"
   body: >-
-    The kinds you just declared, field by field, and exactly how a route's tool
-    access resolves.
-  url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md
+    The only object that carries any wiring — what starts a conversation, which
+    agent answers, and what it may touch. Built from what you already installed.
+  url: /agent-ops-operator/guides/pipeline/
 ---
 
 This is the real install. For a first look in fifteen minutes, read
