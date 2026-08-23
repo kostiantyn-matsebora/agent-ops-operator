@@ -79,6 +79,36 @@ else is a tag bump.
   the difference stated. It never offers a Pipeline there.
 - `agentops.dev/message`, an optional label on a chat signal carrying the
   transport's handle for the arriving message.
+- **Seven adopter guides**, in learning order rather than by risk. Each one
+  states what its own mistake costs, because risk is not monotonic along
+  that order — a capability binding is pure YAML and can grant more than an
+  adapter's code ever could.
+
+  | Guide | Teaches |
+  |---|---|
+  | [Put an agent to work](guides/pipeline.md) | the wiring, built from what a demo install already has. It creates nothing but the `Pipeline` |
+  | [Add your own agent](guides/agent-profile.md) | an `AgentProfile` of your own |
+  | [Run your agent from a repository](guides/agent-from-a-repository.md) | the checkout, its deploy key and the agent definition |
+  | [Give your agent tools](guides/toolsets.md) | `MCPToolset` and `MCPConfig`, bound from the Pipeline |
+  | [React to signals](guides/signal-adapter.md) | implementing a `SignalAdapter` |
+  | [Talk to agents from your own chat](guides/channel-adapter.md) | implementing a `ChannelAdapter` |
+  | [Run agents on your own backend](guides/agent-runtime.md) | implementing the work contract as an `AgentRuntime` |
+
+  - **The Pipeline guide is FIRST and creates nothing new.** A guide that opens
+    by declaring an identity teaches an inert object whose purpose is a Pipeline
+    the reader has not met.
+  - **Every template and worked example is GENERATED**, never written — the
+    templates from the CRDs the chart ships, the examples from each bundle's own
+    values. An invented example is a second set of values to keep true.
+
+- **[`docs/cr-reference.md`](cr-reference.md)** — every field of every kind,
+  generated from the CRDs. A reference file beside `concepts.md`, not a site
+  page, so the guides can carry the minimal resource and link the rest.
+- **A drift check in CI.** `python3 .github/scripts/docs-generate.py`
+  regenerates the templates, the examples and the reference; CI reruns it with
+  `--check` and FAILS on any difference, naming the file and the command.
+  Committed generated output without that check is correct the day it is
+  written and silently wrong after the next field rename.
 
 ### Changed
 
