@@ -158,3 +158,25 @@ describe('the payload fold', () => {
     expect(fence('see ```go\nx\n```').startsWith('````')).toBe(true)
   })
 })
+
+describe('list markers', () => {
+  // PatternFly's reset sets `list-style: none` on every ul, so an agent's list
+  // rendered as indented paragraphs — correct markup, invisible structure.
+  // The DOM said `<ul>` with four `<li>`; only a screenshot showed the defect.
+  it('gives agent lists a visible marker', () => {
+    const { container } = render(
+      <Blocks blocks={[{ role: 'section', label: 'attention', text: '- one\n- two' }]} />,
+    )
+    const ul = container.querySelector('ul')
+    expect(ul).not.toBeNull()
+    expect(ul!.querySelectorAll('li')).toHaveLength(2)
+    expect(ul!.style.listStyle).toContain('disc')
+  })
+
+  it('numbers an ordered list', () => {
+    const { container } = render(
+      <Blocks blocks={[{ role: 'section', text: '1. first\n2. second' }]} />,
+    )
+    expect(container.querySelector('ol')!.style.listStyle).toContain('decimal')
+  })
+})

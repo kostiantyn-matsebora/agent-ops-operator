@@ -52,7 +52,7 @@
       path, which nothing manager-side can append to.
 - [x] 3.4 Test: flag unset injects nothing; set reaches both prompt lanes; the
       profile's own role text is appended to, never replaced.
-- [ ] 3.5 It is now also the COMPATIBILITY boundary (design D5). Say so in the
+- [x] 3.5 It is now also the COMPATIBILITY boundary (design D5). Say so in the
       field's doc comment: an adapter with no parser is protected by the flag
       being off, not by a wire version.
 
@@ -76,7 +76,7 @@
       templates, and their unread `INVESTIGATE:` / `AGENT-TASK:` / `REPLY:`
       markers are gone — no code reads them and the parser made them a visible
       stray block.
-- [ ] 4.9 Length budget line: it now says ~600 characters, which was the cap.
+- [x] 4.9 Length budget line: it now says ~600 characters, which was the cap.
       Keep the guidance, drop the implication that anything enforces it.
 
 ## 5. Telegram adapter
@@ -119,24 +119,25 @@
 - [x] 6.9 Code blocks wrap rather than scroll sideways, and are height-bounded.
 - [x] 6.10 Signal card: source stated plainly, labels as a table with redundant
       ones dropped, payload carried apart so it can be collapsed.
-- [ ] 6.11 Re-run BOTH `npm run screenshots` and `npm run demo` in
+- [x] 6.11 Re-run BOTH `npm run screenshots` and `npm run demo` in
       `platform/console/ui`, once the parser move is done.
 
 ## 7. Chart and profiles
 
 - [x] 7.1 The flag is exposed on all four chart-shipped profiles, default OFF.
-- [ ] 7.2 Turn it on for `k8s-engineer`, `alert-investigator`, `ha-user`,
-      `ha-operator` once 9.3 passes on each surface those profiles reach.
+- [x] 7.2 SUPERSEDED — the field is REQUIRED, so all four shipped profiles
+      declare `outputFormat: blocks` unconditionally. There is nothing left to
+      turn on, and a render test pins that every one of them declares it.
 - [x] 7.3 Chart render test pins the default OFF and that it renders when set.
 
 
 ## 8. Verification
 
-- [ ] 8.1 Integration test: an answer with a fold reaches a bound thread with
+- [x] 8.1 Integration test: an answer with a fold reaches a bound thread with
       its tags intact and unaltered by the manager.
 - [x] 8.2 A chat signal containing tag-shaped text delivers those characters
       verbatim.
-- [ ] 8.3 Live smoke on a real install, with the flag on, read on BOTH surfaces
+- [x] 8.3 Live smoke on a real install, with the flag on, read on BOTH surfaces
       — including a conversation reopened AFTER a console restart, which is the
       case the whole rework exists for.
 
@@ -148,30 +149,36 @@ several published pages describe a design that was abandoned.
 
 ### Reference docs
 
-- [ ] 9.1 `docs/concepts.md` — the flag, and that it is the compatibility
+- [x] 9.1 `docs/concepts.md` — the flag, and that it is the compatibility
       boundary.
-- [ ] 9.2 `docs/contracts.md` — **REWRITE.** The body is markdown plus the block
+- [x] 9.2 `docs/contracts.md` — **REWRITE.** The body is markdown plus the block
       grammar and the ADAPTER reads both. No `blocks[]`, no contract 3, no
       downgrade table, no `structuredBody`. A `signal` is a card.
-- [ ] 9.3 `docs/console-guide.md` — the fold as something a reader interacts
+- [x] 9.3 `docs/console-guide.md` — the fold as something a reader interacts
       with.
-- [ ] 9.4 `CHANGELOG.md` — **REWRITE.** The published entry currently announces
+- [x] 9.4 `CHANGELOG.md` — **REWRITE.** The published entry currently announces
       contract 3 and `blocks[]`.
-- [ ] 9.5 Check the adopter pages for anything now untrue about agent output.
-- [ ] 9.6 Read every changed page against `docs/CLAUDE.md` by hand, and run the
+- [x] 9.5 Check the adopter pages for anything now untrue about agent output.
+      Nothing was untrue. `getting-started.md` gained a line, because the demo
+      walkthrough is where a reader now SEES the fold.
+      **`config/samples/samples.yaml` was BROKEN** — its AgentProfile omitted
+      the now-required `outputFormat`, so the API refused it. An example that
+      does not apply is worse than no example. Fixed and checked with
+      `kubectl apply --dry-run=server`.
+- [x] 9.6 Read every changed page against `docs/CLAUDE.md` by hand, and run the
       prose lint. There is no lint script in this repo.
-- [ ] 9.7 `.claude/rules/invariants.md` — **REWRITE.** It currently says the
+- [x] 9.7 `.claude/rules/invariants.md` — **REWRITE.** It currently says the
       manager parses. It must say the manager passes agent text through and the
       adapters read the grammar.
-- [ ] 9.8 `.claude/rules/adapters.md` — parsing the body grammar is now part of
+- [x] 9.8 `.claude/rules/adapters.md` — parsing the body grammar is now part of
       what a channel adapter does. It is not mentioned there at all.
 
 ### The ADOPTER SITE
 
-- [ ] 9.9 Build the site and LOOK at every changed page. A squeezed column and a
+- [x] 9.9 Build the site and LOOK at every changed page. A squeezed column and a
       wrapped key are invisible until rendered.
-- [ ] 9.10 `docs/guides/channel-adapter.md` — an adapter author now has to implement
+- [x] 9.10 `docs/guides/channel-adapter.md` — an adapter author now has to implement
       the grammar. This is the page the change most affects.
-- [ ] 9.11 Re-run BOTH `npm run screenshots` and `npm run demo` in
+- [x] 9.11 Re-run BOTH `npm run screenshots` and `npm run demo` in
       `platform/console/ui`, and decide whether the curated fixture should carry
       the grammar so the published screenshot shows a fold at all.

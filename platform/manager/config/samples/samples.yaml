@@ -115,6 +115,10 @@ spec:
       secretRef:
         name: agentops-repo-key
   agent: ha-engineer
+  # REQUIRED, no default: `blocks` appends the operator's shared output-format
+  # specification — the block grammar, the fold, a default section set — and
+  # `none` leaves formatting to this profile's own prompt.
+  outputFormat: blocks
   # Identity only: no allowedTools, no mcp. What this agent MAY DO comes from
   # whichever Pipeline originates the conversation — the addressable one below,
   # or the per-route Pipelines further down.

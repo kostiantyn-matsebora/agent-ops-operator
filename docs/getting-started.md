@@ -130,6 +130,10 @@ console:
 
 The answer lands in the thread. Follow-ups in the same thread keep their context.
 
+**It opens with the conclusion.** A long answer arrives as a title, a few named
+sections, and the detail behind a control you expand — the profile declares
+`outputFormat: blocks`, and every surface renders that shape its own way.
+
 From the outside:
 
 ```sh
