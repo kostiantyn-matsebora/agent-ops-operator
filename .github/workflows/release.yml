@@ -10,6 +10,10 @@ on:
   push:
     tags: ['*-v*']
 
+# THE FLOOR, and the ceiling for `determine`. A CALLED workflow can only
+# DOWNGRADE this token, never upgrade it — so the two publishing jobs raise it
+# on themselves below. Leaving it at `contents: read` here makes every push 403,
+# and the called workflow's own `packages: write` is silently ignored.
 permissions:
   contents: read
 
@@ -70,6 +74,11 @@ jobs:
   image:
     name: image (${{ needs.determine.outputs.component }})
     needs: determine
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     if: needs.determine.outputs.is_image == 'true'
     uses: ./.github/workflows/build-image.yml
     with:
@@ -82,6 +91,9 @@ jobs:
   chart:
     name: chart
     needs: determine
+    permissions:
+      contents: read
+      packages: write
     if: needs.determine.outputs.is_chart == 'true'
     uses: ./.github/workflows/build-chart.yml
     with:
