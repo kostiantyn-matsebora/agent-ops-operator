@@ -169,9 +169,15 @@ git tag chart-v7.0.1    && git push origin chart-v7.0.1
     CONFIGS, not the index.** `build-image.yml` therefore also sets
     `annotations: index:org.opencontainers.image.source=…`. Both halves, because
     only one of them was ever going to be the reason.
-  - **An unlinked package is connected by hand** in package settings, and the
-    next push of a correctly-labelled image does not retroactively fix an
-    existing one.
+  - **A RE-PUSH DOES REPAIR AN UNLINKED PACKAGE**, so connecting one by hand is
+    a fallback rather than the fix. Pushing the same version again, carrying the
+    annotation, linked a package that had been sitting unlinked — no deletion,
+    no new version number.
+    - **Established by testing it on a package NOBODY HAD TOUCHED.** The first
+      attempt proved nothing: that package had already been connected by hand,
+      so it would have shown linked either way.
+    - **Thirteen were repaired this way in one pass**, which is the difference
+      between thirteen clicks and none.
 - **Visibility and the link are ONCE PER PACKAGE, EVER.** Both live on the
   package, not the version, so every later tag inherits them.
 - **A component that skips any of the three looks fine at the layer it was
