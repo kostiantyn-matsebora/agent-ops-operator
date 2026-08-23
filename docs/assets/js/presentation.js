@@ -49,7 +49,7 @@
   // outside the drawing's own box. Nothing may end flush with this boundary.
   var DRAW_W = 668;
   var DRAW_H = 208;
-  var PAD_TOP = 16;
+  var PAD_TOP = 28;
   var PAD_BOTTOM = 4;
   var PAD_RIGHT = 2;
   var STAGE_W = DRAW_W + PAD_RIGHT;
@@ -64,6 +64,7 @@
     { id: 'channel', kind: 'Channel', name: 'telegram' },
     { id: 'profile', kind: 'AgentProfile', name: 'k8s-engineer' },
     { id: 'toolset', kind: 'MCPToolset', name: 'agentops-observe' },
+    { id: 'mcpconfig', kind: 'MCPConfig', name: 'k8s-api' },
   ];
 
   var REACH = [
@@ -81,6 +82,9 @@
     { id: 'w-channel', d: 'M412 30 H496', len: 85 },
     { id: 'w-profile', d: 'M300 58 V78 H244 V96', len: 100 },
     { id: 'w-toolset', d: 'M360 58 V78 H416 V96', len: 100 },
+    // Turns ABOVE the toolset's elbow rather than below it, so the two never
+    // share a horizontal run. A crossing reads as a junction that is not there.
+    { id: 'w-cfg', d: 'M406 58 V68 H578 V96', len: 210 },
     { id: 'w-reach', d: 'M416 142 V150', len: 20 },
     { id: 'w-conv', d: 'M82 58 V132', len: 78 },
   ];
@@ -99,6 +103,7 @@
     { on: ['w-source'], lit: ['source', 'w-source'] },
     { on: ['profile', 'w-profile'], lit: ['profile', 'w-profile'] },
     { on: ['toolset', 'reach', 'w-toolset', 'w-reach'], lit: ['toolset', 'w-toolset'] },
+    { on: ['mcpconfig', 'w-cfg'], lit: ['mcpconfig', 'w-cfg'] },
     { on: ['channel', 'w-channel'], lit: ['channel', 'w-channel'] },
     { on: ['conv', 'w-conv'], lit: ['conv', 'w-conv'] },
     { on: [], lit: [] },

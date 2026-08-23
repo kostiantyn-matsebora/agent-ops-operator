@@ -9,8 +9,9 @@ description: >-
 A Kubernetes operator for agents you can address.
 
 {: .ao-claims}
-- Automation that thinks
+- ![]({{ '/assets/img/claim-thinks.svg' | relative_url }}) Automation that thinks
 - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes-native
+- ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps-ready
 
 {: .ao-tabs #tour}
 - **How it works**
@@ -58,20 +59,28 @@ A Kubernetes operator for agents you can address.
            - name: agentops-observe
      ```
 
-  7. Where you talk to it.
+  7. Which servers those tools come from.
+
+     ```yaml
+       mcpConfigs:
+         refs:
+           - name: k8s-api
+     ```
+
+  8. Where you talk to it.
 
      ```yaml
        channelRefs:
          - name: telegram
      ```
 
-  8. Then it runs. One conversation, its own pod.
+  9. Then it runs. One conversation, its own pod.
 
      ```yaml
      # one Conversation, one pod, strictly serial
      ```
 
-  9. Every part of it is a Kubernetes object.
+  10. Every part of it is a Kubernetes object.
 
      ```text
      $ kubectl get conversations
@@ -97,6 +106,9 @@ A Kubernetes operator for agents you can address.
     toolsets:
       refs:
         - name: agentops-observe  # what it may touch
+    mcpConfigs:
+      refs:
+        - name: k8s-api           # where those tools live
     channelRefs:
       - name: telegram            # where you talk to it
   ```

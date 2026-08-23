@@ -1262,6 +1262,15 @@ a:hover {
   width: 152px;
 }
 
+/* Beside the toolset, not below it: the allowlist and the servers are a PAIR —
+   which tools may be called, and where those tools live — and the reach row
+   under both is what the pair grants. */
+.ao-pres-node[data-node="mcpconfig"] {
+  left: 502px;
+  top: 96px;
+  width: 152px;
+}
+
 /* What the wiring granted, and what it did not. The denied chips are the half
    that makes the granted ones a claim rather than a list. */
 .ao-pres-reach {
@@ -1300,15 +1309,18 @@ a:hover {
   text-decoration: line-through;
 }
 
-/* 456, so the frame CLEARS the Channel node rather than sharing its right edge.
-   At 448 the two borders landed on the same pixel and read as one box cutting
-   into another. The margin now matches the one the Pipeline has on the left. */
+/* The frame CLEARS what it encloses on every side, rather than grazing it.
+   At 448 wide its right border landed on the Channel node's, and at top -6 its
+   LABEL cleared the Pipeline node by 0.8px across that node's whole width —
+   boxes that do not technically intersect and read as though they do. Two
+   borders on one pixel is a rendering accident to the eye, whatever the
+   geometry says. */
 .ao-pres-frame {
   position: absolute;
   left: 212px;
-  top: -6px;
+  top: -16px;
   width: 456px;
-  height: 214px;
+  height: 224px;
   border: 1px dashed var(--ao-border-strong);
   border-radius: 10px;
   opacity: 0;
@@ -1389,7 +1401,7 @@ a:hover {
    height is reserved so a shorter stanza cannot move the rail under the eye. */
 .ao-pres-stanza {
   padding: 0.45rem 0.7rem;
-  min-height: 4.1rem;
+  min-height: 4.5rem;
   overflow-x: auto;
   background: var(--ao-code-bg);
   border: 1px solid var(--ao-border);
