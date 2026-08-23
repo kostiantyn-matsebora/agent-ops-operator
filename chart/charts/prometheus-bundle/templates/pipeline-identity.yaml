@@ -31,18 +31,18 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ $sa }}-{{ .name }}
+  name: {{ $sa }}-{{ .name }}-{{ $.Release.Namespace }}
 rules:
 {{ toYaml .rules | indent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ $sa }}-{{ .name }}
+  name: {{ $sa }}-{{ .name }}-{{ $.Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ $sa }}-{{ .name }}
+  name: {{ $sa }}-{{ .name }}-{{ $.Release.Namespace }}
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}
@@ -53,11 +53,11 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ $sa }}-{{ . }}
+  name: {{ $sa }}-{{ . }}-{{ $.Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ . }}
+  name: {{ . }}-{{ $.Release.Namespace }}
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}

@@ -109,7 +109,9 @@ func TestASecondAccountNeedsNoSecondRuntime(t *testing.T) {
 	// The acting ClusterRole for a named account carries that account's own name.
 	actingRole := false
 	for _, role := range rolesIn(t, out) {
-		if role.Metadata.Name == "agentops-runtime-actor" && len(role.Rules) > 0 {
+		// Cluster-scoped names carry the release namespace, so two installs in
+		// one cluster do not collide over them.
+		if strings.HasPrefix(role.Metadata.Name, "agentops-runtime-actor") && len(role.Rules) > 0 {
 			actingRole = true
 		}
 	}

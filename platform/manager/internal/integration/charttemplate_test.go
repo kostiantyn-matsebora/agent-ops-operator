@@ -1260,10 +1260,11 @@ func helmNotes(t *testing.T, args ...string) string {
 	// cannot address a non-manifest. So this skips without one rather than
 	// failing — the same posture as the missing-helm skip above.
 	//
-	// crds.enabled=false because this chart ships CRDs as gated TEMPLATES, so a
+	// The CRDs are not rendered at all now — they live in the chart's crds/
+	// directory, which `helm template` and `--dry-run` do not touch. This
 	// dry-run install otherwise trips the ownership check against CRDs a real
 	// release already owns. The notes do not depend on them.
-	cmd := exec.Command("helm", append([]string{"install", "notes-test", chartDir(), "--dry-run", "--set", "crds.enabled=false"}, args...)...)
+	cmd := exec.Command("helm", append([]string{"install", "notes-test", chartDir(), "--dry-run"}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "cluster unreachable") {
@@ -1846,7 +1847,6 @@ func TestHaAdminMcpServerHasItsOwnIdentity(t *testing.T) {
 // install, which is exactly where a render test is cheaper.
 func TestEveryShippedProfileDeclaresItsOutputFormat(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "crds.enabled=false",
 		"--set", "k8s-bundle.enabled=true",
 		"--set", "prometheus-bundle.enabled=true",
 		"--set", "ha-bundle.enabled=true",
@@ -1869,7 +1869,6 @@ func TestEveryShippedProfileDeclaresItsOutputFormat(t *testing.T) {
 // An install may decline it per profile, which is what `none` is for.
 func TestOutputFormatCanBeDeclined(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "crds.enabled=false",
 		"--set", "k8s-bundle.enabled=true",
 		"--set", "k8s-bundle.profile.outputFormat=none",
 	)

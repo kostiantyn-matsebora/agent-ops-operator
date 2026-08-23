@@ -41,6 +41,23 @@ the render naming the replacement, rather than being silently ignored.
   separate charts. There is no annotation that orders resources within one
   release.
 
+- **Cluster-scoped RBAC now carries the release namespace.** Every `ClusterRole`
+  and `ClusterRoleBinding` the chart renders is suffixed with it, so two installs
+  in one cluster no longer collide. Previously a second release failed with
+  `ClusterRole "agentops-signal-k8s-events-events" … cannot be imported`, which
+  made a side-by-side demo or a staging namespace impossible.
+
+  ServiceAccount subjects are untouched — those are namespaced already.
+
+- **The console no longer serves the wrong auth mode at startup.** It read its
+  browser token only after the manager's channel listing arrived, and retried
+  that listing on the steady 60-second cadence — so a fresh install prompted for
+  a token for a full minute, even where a proxy authenticates instead.
+
+  The credentials are projected into the pod before the process starts. The
+  console now reads them from its own environment, and retries an unresolved
+  listing every second rather than every minute. Console image **0.38.0**.
+
 ### Changed
 
 - **Helm no longer upgrades the CRDs either**, which is the documented cost of

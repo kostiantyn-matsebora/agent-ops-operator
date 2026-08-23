@@ -54,7 +54,7 @@ func TestMain(m *testing.M) {
 	utilruntime.Must(agentopsv1alpha1.AddToScheme(scheme))
 
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{chartDir("files", "crds")},
+		CRDDirectoryPaths:     []string{chartDir("crds")},
 		ErrorIfCRDPathMissing: true,
 	}
 	cfg, err := testEnv.Start()

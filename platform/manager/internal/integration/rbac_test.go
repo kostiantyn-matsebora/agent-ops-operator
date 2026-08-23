@@ -15,7 +15,7 @@ import (
 // controller-gen spells it — against the manager Role, so a new kind cannot
 // ship without its rule either.
 func TestManagerRBACCoversEveryCRDPlural(t *testing.T) {
-	crdDir := chartDir("files", "crds")
+	crdDir := chartDir("crds")
 	entries, err := os.ReadDir(crdDir)
 	if err != nil {
 		t.Fatal(err)

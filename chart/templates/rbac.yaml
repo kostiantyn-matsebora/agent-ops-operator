@@ -121,7 +121,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ .Values.serviceAccounts.manager }}-nodes
+  name: {{ .Values.serviceAccounts.manager }}-nodes-{{ $.Release.Namespace }}
 rules:
   - apiGroups: [""]
     resources: ["nodes"]
@@ -130,11 +130,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ .Values.serviceAccounts.manager }}-nodes
+  name: {{ .Values.serviceAccounts.manager }}-nodes-{{ $.Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ .Values.serviceAccounts.manager }}-nodes
+  name: {{ .Values.serviceAccounts.manager }}-nodes-{{ $.Release.Namespace }}
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.serviceAccounts.manager }}
