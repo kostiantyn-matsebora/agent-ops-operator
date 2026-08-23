@@ -93,7 +93,8 @@
       "iconify.design", "*.iconify.design",
       "sil.org", "*.sil.org",
       "mozilla.org", "*.mozilla.org",
-      "shields.io", "*.shields.io"
+      "shields.io", "*.shields.io",
+      "contributor-covenant.org", "*.contributor-covenant.org"
     ]
   },
 
@@ -127,10 +128,13 @@
       "_comment: GitHub's OWN placeholder, quoted verbatim where its instructions are.",
       "owner/repo",
       "_comment: UPSTREAM PROJECTS the documentation links. A public project is not a private deployment, and each is declared so the list stays readable as what it is.",
+      "Fission-AI/OpenSpec",
       "homeassistant-ai/ha-mcp",
       "containers/kubernetes-mcp-server",
       "pab1it0/prometheus-mcp-server",
-      "yannh/kubeconform"
+      "yannh/kubeconform",
+      "_comment: NOT a repository \u2014 the forge's OWN abuse-reporting form, which CODE_OF_CONDUCT.md names as the route that does not go through this project. It wears the two-segment shape the repository rule matches.",
+      "contact/report-abuse"
     ]
   },
 
