@@ -36,7 +36,7 @@ THEMES = {
     ),
 }
 
-W, H = 1000, 306
+W, H = 800, 392
 
 ICONS = {
     # 16x16 glyphs, stroked in currentColor. Drawn rather than emoji: an emoji
@@ -93,65 +93,69 @@ def build(t):
              f'<marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" '
              f'markerHeight="6.5" orient="auto-start-reverse">'
              f'<path d="M0 0 10 5 0 10z" fill="{c["brand"]}"/></marker>'
+             f'<marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" '
+             f'markerHeight="6.5" orient="auto-start-reverse">'
+             f'<path d="M0 0 10 5 0 10z" fill="{c["accent"]}"/></marker>'
              '</defs>')
 
-    # ---- band 1: sources -------------------------------------------------
-    o.append(band_label(18, 26, "SOMETHING HAPPENS", c["subtle"]))
-    ys = [40, 96, 152, 208]
+    # ---- column 1: sources ----------------------------------------------
+    o.append(band_label(18, 30, "SOMETHING HAPPENS", c["subtle"]))
+    ys = [44, 100, 156, 212]
     for (ic, label, sub), y in zip(SOURCES, ys):
         o.append(card(16, y, 196, 46, c["chip"], c["chipEdge"]))
         o.append(icon(ic, 30, y + 15, c["subtle"]))
         o.append(text(56, y + 21, label, c["ink"], 13, 600))
         o.append(text(56, y + 36, sub, c["subtle"], 10.5))
         o.append(f'<path d="M212 {y+23} H236" stroke="{c["edge"]}" stroke-width="1.3" fill="none"/>')
-    o.append(f'<path d="M236 63 V231" stroke="{c["edge"]}" stroke-width="1.3" fill="none"/>')
-    o.append(f'<path d="M236 147 H272" stroke="{c["edge"]}" stroke-width="1.6" fill="none" marker-end="url(#a)"/>')
+    o.append(f'<path d="M236 67 V235" stroke="{c["edge"]}" stroke-width="1.3" fill="none"/>')
+    o.append(f'<path d="M236 151 H242" stroke="{c["edge"]}" stroke-width="1.6" fill="none" marker-end="url(#a)"/>')
 
-    # ---- band 2: the Pipeline -------------------------------------------
-    o.append(band_label(282, 26, "YOU DECLARE IT — ONE PIPELINE", c["subtle"]))
-    o.append(card(282, 40, 252, 214, c["brandSoft"], c["brand"], r=12, sw=1.6))
-    o.append(text(300, 68, "Pipeline", c["brandInk"], 15, 700))
-    o.append(text(300, 86, "the only place wiring lives", c["subtle"], 10.5))
+    # ---- column 2: the Pipeline -----------------------------------------
+    o.append(band_label(252, 30, "YOU DECLARE IT — ONE PIPELINE", c["subtle"]))
+    o.append(card(252, 44, 252, 214, c["brandSoft"], c["brand"], r=12, sw=1.6))
+    o.append(text(270, 72, "Pipeline", c["brandInk"], 15, 700))
+    o.append(text(270, 90, "the only place wiring lives", c["subtle"], 10.5))
     rows = [("what starts it", "signalSourceRefs"),
             ("what it should do", "profileRef"),
             ("what it may touch", "toolsets · mcpConfigs"),
             ("where it answers", "channelRefs")]
-    ry = 112
+    ry = 116
     for label, field in rows:
-        o.append(f'<circle cx="304" cy="{ry-4}" r="2.6" fill="{c["brand"]}"/>')
-        o.append(text(316, ry, label, c["ink"], 12, 600))
-        o.append(text(316, ry + 14, field, c["subtle"], 10, weight=400))
+        o.append(f'<circle cx="274" cy="{ry-4}" r="2.6" fill="{c["brand"]}"/>')
+        o.append(text(286, ry, label, c["ink"], 12, 600))
+        o.append(text(286, ry + 14, field, c["subtle"], 10, weight=400))
         ry += 35
-    o.append(f'<path d="M534 147 H580" stroke="{c["brand"]}" stroke-width="2" fill="none" marker-end="url(#ab)"/>')
+    o.append(f'<path d="M504 151 H542" stroke="{c["brand"]}" stroke-width="2" fill="none" marker-end="url(#ab)"/>')
 
-    # ---- band 3: it runs -------------------------------------------------
-    o.append(band_label(590, 26, "THE OPERATOR RUNS IT", c["subtle"]))
-    o.append(card(590, 40, 190, 92, c["accentSoft"], c["accent"], r=12, sw=1.4))
-    o.append(text(608, 68, "Conversation", c["ink"], 14, 700))
-    o.append(text(608, 87, "one per incident,", c["subtle"], 10.5))
-    o.append(text(608, 101, "resumable, its own thread", c["subtle"], 10.5))
-    o.append(card(590, 148, 190, 106, c["chip"], c["accent"], r=12, sw=1.4))
-    o.append(text(608, 176, "its own agent pod", c["ink"], 13, 700))
-    o.append(text(608, 195, "isolated · serial · capped", c["subtle"], 10.5))
-    o.append(text(608, 213, "investigates, explains,", c["subtle"], 10.5))
-    o.append(text(608, 227, "acts ONLY where", c["subtle"], 10.5))
-    o.append(text(608, 241, "your wiring granted it", c["subtle"], 10.5))
-    o.append(f'<path d="M685 132 V148" stroke="{c["accent"]}" stroke-width="1.6" fill="none" marker-end="url(#a)"/>')
+    # ---- column 3: runs, then answers, STACKED --------------------------
+    # Stacked rather than a fourth column: four bands made the drawing wider
+    # than a forge column, and the reply loop reads better as a short hop up
+    # one side than as a long run back across the whole picture.
+    o.append(band_label(548, 30, "THE OPERATOR RUNS IT", c["subtle"]))
+    o.append(card(548, 44, 196, 92, c["accentSoft"], c["accent"], r=12, sw=1.4))
+    o.append(text(566, 72, "Conversation", c["ink"], 14, 700))
+    o.append(text(566, 91, "one per incident, resumable,", c["subtle"], 10.5))
+    o.append(text(566, 105, "its own thread", c["subtle"], 10.5))
 
-    # ---- band 4: channels ------------------------------------------------
-    o.append(band_label(820, 26, "YOU ANSWER", c["subtle"]))
-    o.append(f'<path d="M780 86 H818" stroke="{c["brand"]}" stroke-width="2" fill="none" marker-end="url(#ab)"/>')
-    o.append(card(818, 40, 166, 92, c["brandSoft"], c["brand"], r=12, sw=1.4))
-    o.append(text(836, 68, "your channels", c["ink"], 13, 700))
-    o.append(text(836, 87, "Telegram, the console,", c["subtle"], 10.5))
-    o.append(text(836, 101, "your own adapter", c["subtle"], 10.5))
+    o.append(f'<path d="M646 136 V152" stroke="{c["accent"]}" stroke-width="1.6" fill="none" marker-end="url(#ac)"/>')
+    o.append(card(548, 152, 196, 100, c["chip"], c["accent"], r=12, sw=1.4))
+    o.append(text(566, 180, "its own agent pod", c["ink"], 13, 700))
+    o.append(text(566, 199, "isolated · serial · capped", c["subtle"], 10.5))
+    o.append(text(566, 217, "investigates, explains, acts", c["subtle"], 10.5))
+    o.append(text(566, 231, "ONLY where your wiring", c["subtle"], 10.5))
+    o.append(text(566, 245, "granted it", c["subtle"], 10.5))
+
+    o.append(f'<path d="M646 252 V268" stroke="{c["brand"]}" stroke-width="2" fill="none" marker-end="url(#ab)"/>')
+    o.append(card(548, 268, 196, 88, c["brandSoft"], c["brand"], r=12, sw=1.4))
+    o.append(text(566, 296, "your channels", c["ink"], 13, 700))
+    o.append(text(566, 315, "Telegram, the console,", c["subtle"], 10.5))
+    o.append(text(566, 329, "your own adapter", c["subtle"], 10.5))
+
     # The reply returns to the CONVERSATION, not to the pod: a pod is
     # provisioned per unit of work and may not exist when the reply lands.
-    # Routed round the pod's right edge (x=780) so it crosses nothing.
-    o.append(f'<path d="M901 132 V152 H800 V104 H784" stroke="{c["edge"]}" '
+    o.append(f'<path d="M744 312 H772 V90 H748" stroke="{c["edge"]}" '
              f'stroke-width="1.3" fill="none" stroke-dasharray="4 4" marker-end="url(#a)"/>')
-    o.append(text(986, 176, "you reply, and the SAME", c["subtle"], 10.5, anchor="end"))
-    o.append(text(986, 190, "conversation continues", c["subtle"], 10.5, anchor="end"))
+    o.append(text(548, 378, "you reply, and the SAME conversation continues", c["subtle"], 10.5))
     o.append('</svg>')
     return "\n".join(o)
 
