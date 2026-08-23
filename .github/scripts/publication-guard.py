@@ -85,9 +85,16 @@ RE_REPO = re.compile(
 # A chat, group or thread identifier, found where one LIVES rather than by
 # counting digits: a field whose NAME says so, a transport path that carries
 # one, or the signed form a supergroup id takes.
+# PROSE NAMES THE FIELD IN TWO WORDS, and both halves of that cost a finding.
+#
+# A requirement writes "thread id `\"<value>\"`" where a struct writes
+# `ThreadID: "<value>"` — so the key and `id` are separated by a SPACE, and the
+# value sits inside a code span behind a BACKTICK. The rule matched neither, and
+# read straight past an identifier in the one place a spec states it. Found by a
+# history rewrite, not by the guard.
 RE_CHAT_KEYED = re.compile(
-    r"(?i)\b[a-z_.\-]*(?:" + "|".join(CHAT_KEYS) + r")[a-z_.\-]*id\b"
-    r"[\"'\s:=>,\]}]*(-?\d{6,20})"
+    r"(?i)\b[a-z_.\-]*(?:" + "|".join(CHAT_KEYS) + r")[a-z_.\-]* ?id\b"
+    r"[\"'`*_\s:=>,\]}]*(-?\d{6,20})"
 )
 RE_CHAT_PATH = re.compile(
     r"(?:" + "|".join(re.escape(p) for p in CHAT_PATHS) + r")(-?\d{6,20})"

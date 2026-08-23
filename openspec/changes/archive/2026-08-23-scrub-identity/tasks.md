@@ -75,15 +75,28 @@ most natural way to reintroduce exactly what was removed.
 
 - [x] 4.1 Re-run the guard over the tree. It passes. Only then is the tree ready
       to be the thing history is rewritten toward
-- [ ] 4.2 Archive THIS change first, so the rewrite covers its own artifacts.
+- [x] 4.2 Archive THIS change first, so the rewrite covers its own artifacts.
       They contain no literals, so they pass through unchanged — which is the
-      property `design.md` D3 exists to preserve
-- [ ] 4.3 Rewrite every commit in one pass, substituting in blob content AND in
-      commit messages, driven by the working file from §1
-- [ ] 4.4 Delete the working file
-- [ ] 4.5 Verify: the guard passes over the tree AND over the full message
+      property `design.md` D3 exists to preserve — and they did: the rewrite
+      touched no file of this change
+- [x] 4.3 Rewrite every commit in one pass, substituting in blob content AND in
+      commit messages, driven by the working file from §1 — scoped to `master`
+      alone, so a backup branch at the pre-rewrite tip survives it. The pass was
+      SIMULATED over every line ever added before it was run, and the simulation
+      is what caught a rule whose replacement was a strict PREFIX of another
+      rule's output: applied unanchored it would have eaten its own result in
+      every rewritten commit
+- [x] 4.4 Delete the working file
+- [x] 4.5 Verify: the guard passes over the tree AND over the full message
       range, from the root commit. Record the result as a pass, with per-rule
-      counts of zero — never as a list
+      counts of zero — never as a list. Both pass, total zero. Every module
+      builds, vets and tests green, envtest included
+
+      **The rewrite found one the GUARD could not**, and the rule was widened
+      rather than the finding merely fixed: a spec names a field in PROSE, two
+      words with a space, and states its value inside a code span. The rule
+      wanted one word and a quote, so it read past an identifier in the one
+      place a requirement states it
 - [ ] 4.6 Force-push to the private origin. Every clone re-clones; there is no
       merge that recovers the old history and none should be attempted
 
