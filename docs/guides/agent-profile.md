@@ -86,6 +86,22 @@ spec:
 ```
 <!-- /generated -->
 
+`outputFormat` is **required**, and declares what shape this agent's answers
+take:
+
+| Value | The agent is told |
+|---|---|
+| `blocks` | write a title, sections it names for the job, and `<details>` for the long tail. Every surface then renders that shape its own way — a fold in the console, an expandable quote in Telegram |
+| `none` | nothing. This profile's own prompt owns formatting entirely |
+
+**There is no default, and that is deliberate.** `none` leaves answers
+unformatted unless your prompt says otherwise, and `blocks` would shape them by
+something you never asked for. So you declare it, and a profile without it is
+refused.
+
+**Pick `blocks` unless your prompt already specifies an output shape.** The four
+profiles the chart ships all declare it.
+
 `maxTurns` bounds the agent's turns within **one work unit**. It is a runaway
 bound, not a budget, and the conversation is unaffected.
 

@@ -132,6 +132,13 @@ spec:
 
 `repository` is three fields and no more: `url`, `ref` and `auth`.
 
+`outputFormat` is **required**. `blocks` tells the agent to write a title,
+named sections and a `<details>` fold, which every surface renders its own way.
+`none` appends nothing and leaves formatting to the agent's own definition in
+`.claude/agents/<agent>.md` — which, for a repository-backed agent, is often
+where you want it. See [Add your own
+agent]({{ '/guides/agent-profile/' | relative_url }}).
+
 ## Replace the prompt wrapper, if you must
 
 **The agent never receives your payload raw.** The manager wraps it in a

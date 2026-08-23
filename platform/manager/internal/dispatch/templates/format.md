@@ -70,9 +70,13 @@ cost.
 - **Do not explain what you did.** The tools you called and the things you ruled
   out are `<details>`, always.
 
-**Hard cap: title plus all named sections under ~600 characters.** Past that the
-operator moves the overflow into the fold for you — nothing is lost, but it cuts
-at a line break and you would choose better.
+**Aim for title plus all named sections under ~600 characters.**
+
+**NOTHING ENFORCES THIS. It is yours to hold.** There was a cap that moved your
+overflow into the fold, and it was removed because no length budget can do the
+job safely — it cut a table away from its header and buried a `<fix>` section
+because that one happened to be written last. Whatever you put above the fold is
+what a reader gets, in full.
 
 If you write no tags at all, your whole answer becomes one above-the-fold block.
 That is fine for a one-line answer and wrong for anything longer.

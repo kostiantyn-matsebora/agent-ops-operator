@@ -111,6 +111,12 @@ type AgentProfileSpec struct {
 	// switch that moved the parser too could be configured into a state where
 	// the model emits tags nothing is looking for.
 	//
+	// IT IS ALSO THE COMPATIBILITY BOUNDARY. Nothing on the wire signals the
+	// grammar — adapters parse the body, and no contract version changed — so an
+	// adapter with no parser renders `<title>` as literal characters. What
+	// protects it is a profile declaring `none`. Making the declaration
+	// mandatory is what stops that protection being accidental.
+	//
 	// IT DOES NOT GATE THE OPERATOR'S OWN PROMPT CONTENT. Text stating that the
 	// printed answer IS the deliverable is a fact about the system rather than a
 	// preference, and is injected whatever this says.

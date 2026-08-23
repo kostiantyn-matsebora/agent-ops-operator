@@ -174,8 +174,21 @@ export function Markdown({ children }: { children?: string | null }) {
             </a>
           ),
           p: ({ children }) => <p style={{ margin: '0.4rem 0' }}>{children}</p>,
-          ul: ({ children }) => <ul style={{ margin: '0.4rem 0', paddingLeft: '1.5rem' }}>{children}</ul>,
-          ol: ({ children }) => <ol style={{ margin: '0.4rem 0', paddingLeft: '1.5rem' }}>{children}</ol>,
+          // THE MARKER IS RESTORED EXPLICITLY.
+          //
+          // PatternFly's reset sets `list-style: none` on every ul/ol, which is
+          // right for its own navs and menus and wrong here: an agent's list
+          // then renders as indented paragraphs, indistinguishable from prose
+          // wrapped oddly. The markup was a correct <ul> with <li> children the
+          // whole time — only the marker was missing, which is exactly the
+          // class of defect a screenshot catches and a DOM assertion does not.
+          ul: ({ children }) => (
+            <ul style={{ margin: '0.4rem 0', paddingLeft: '1.5rem', listStyle: 'disc outside' }}>{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol style={{ margin: '0.4rem 0', paddingLeft: '1.5rem', listStyle: 'decimal outside' }}>{children}</ol>
+          ),
+          li: ({ children }) => <li style={{ margin: '0.15rem 0' }}>{children}</li>,
         }}
       >
         {plain(children)}
