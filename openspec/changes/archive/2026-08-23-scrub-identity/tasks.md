@@ -97,8 +97,10 @@ most natural way to reintroduce exactly what was removed.
       words with a space, and states its value inside a code span. The rule
       wanted one word and a quote, so it read past an identifier in the one
       place a requirement states it
-- [ ] 4.6 Force-push to the private origin. Every clone re-clones; there is no
-      merge that recovers the old history and none should be attempted
+- [x] 4.6 Force-push to the private origin. Every clone re-clones; there is no
+      merge that recovers the old history and none should be attempted — the
+      remote carries the rewritten history and the guard passes over it, tree
+      and full message range alike, total zero
 
 ## 5. Keep it true
 
