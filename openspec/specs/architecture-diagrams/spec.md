@@ -106,7 +106,7 @@ The page SHALL NOT contain body prose — labels and one-line subtitles only.
 
 Every numeric claim SHALL be verifiable from the repository, and the check SHALL
 be recorded in the change that introduces it. At time of writing: `11` = files in
-`chart/files/crds/`; `3` pluggable contracts = the channel, signal and work
+`chart/crds/`; `3` pluggable contracts = the channel, signal and work
 contracts in `docs/contracts.md` (the activity contract is telemetry, not a
 seam, so the label names the three); `0` Secrets = the manager grants itself no
 `secrets` verbs in its RBAC; `3` bundles = subcharts under `chart/charts/`.

@@ -152,11 +152,32 @@ the chat SignalSource and the router's credential source.
 
 ### `chart/` (the parent)
 
-Manager Deployment, RBAC and Service, plus CRDs as gated templates.
+Manager Deployment, RBAC and Service, plus the CRDs.
 
-- **`crds.enabled` / `crds.keep`** → `helm.sh/resource-policy: keep`, so
-  uninstall never cascade-deletes CRs.
-- **CRD source of truth is `chart/files/crds/`** — controller-gen output.
+- **CRDs LIVE IN `chart/crds/`, NOT IN `templates/`, AND THAT IS LOAD-BEARING.**
+  Helm applies that directory out-of-band, invalidates discovery and waits for
+  the CRDs to establish BEFORE it builds the rest of the manifest.
+  - **This chart ships CRDs AND INSTANCES OF THEM** — eleven CRDs beside eight
+    Pipelines, Channels, profiles and toolsets. Helm resolves every kind in a
+    manifest before applying any of it, so as templates the CRs could not map
+    and a clean install died on `ensure CRDs are installed first`. It only ever
+    worked because the cluster already had the CRDs from a previous install.
+  - **cert-manager is NOT a counter-example.** It templates its CRDs and ships
+    ZERO instances of them, so it never resolves an unknown kind. Measured:
+    6 CRDs, 0 CRs. Ours is 11 and 8.
+  - **Helm's own guidance names two methods and no third** — this directory, or
+    two separate charts. There is no annotation that orders resources inside one
+    release.
+- **THE COST, and it is real: Helm never UPGRADES them either.** A CRD field
+  change ships with a `kubectl apply -f chart/crds/` line in the release notes.
+  `--dry-run` also does not cover them.
+- **`crds.enabled` / `crds.keep` ARE GONE.** `enabled` is the `--skip-crds`
+  flag, and `keep` is inherent because Helm never deletes what it installed
+  from `crds/`. `templates/crds-guard.yaml` FAILS the render on either key —
+  Helm never reports an unread value, so a silently-ignored `crds.enabled:
+  false` would install them anyway and look successful.
+- **CRD source of truth is `chart/crds/`** — controller-gen output, untemplated
+  by construction now.
 - **`templates/runtime.yaml` is THE SUBSTRATE.** One `AgentRuntime` named
   `default`, plus its credential Secret when `runtime.credentialsSecret.token`
   is set, with `home.pvcRef` WIRED from the parent's own `persistence` and never

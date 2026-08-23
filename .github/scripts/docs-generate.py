@@ -8,7 +8,7 @@ the API server accepts and the operator ignores.
 
 Two sources, and no third:
 
-    templates  <- chart/files/crds/          the fields, their types, their
+    templates  <- chart/crds/          the fields, their types, their
                                              descriptions (the Go doc comments
                                              land here, so a template's comment
                                              cannot disagree with the type)
@@ -49,7 +49,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import docs_diagrams  # noqa: E402  -- beside this file, loaded by path
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-CRD_DIR = REPO / "chart" / "files" / "crds"
+CRD_DIR = REPO / "chart" / "crds"
 DOCS = REPO / "docs"
 CHART = REPO / "chart"
 REFERENCE = DOCS / "cr-reference.md"
@@ -525,7 +525,7 @@ def build_reference(schemas: dict[str, dict]) -> str:
     out.append("# Custom resource reference")
     out.append("")
     out.append(
-        f"**Generated from `chart/files/crds/` by `{COMMAND}`. Do not edit.**"
+        f"**Generated from `chart/crds/` by `{COMMAND}`. Do not edit.**"
     )
     out.append("")
     out.append(

@@ -83,7 +83,7 @@ it publishes — which is also what deleted the one hardcoded name in
 
 | Path | Holds |
 |---|---|
-| `api/v1alpha1/` | CRD types plus generated deepcopy. CRD YAML in `chart/files/crds/` |
+| `api/v1alpha1/` | CRD types plus generated deepcopy. CRD YAML in `chart/crds/` |
 | `cmd/manager/main.go` | wiring: reconciler, httpapi, chat registry/ops/router, env config |
 | `internal/ingest/` | signature grouping, fingerprint cooldown |
 | `internal/runtimepod/` | runtime pod builder (AgentRuntime CR over bootstrap Config) |

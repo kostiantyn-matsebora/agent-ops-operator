@@ -10,7 +10,7 @@ cd platform/manager
 # regen after editing api/v1alpha1/ (deepcopy + CRDs). The chart is four levels
 # up now, which is also why the integration suite names that path once:
 go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 object paths=./api/...
-go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/... output:crd:artifacts:config=../../chart/files/crds
+go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/... output:crd:artifacts:config=../../chart/crds
 # full tests (unit + envtest against a real API server):
 KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19 use 1.31.x --bin-dir ~/.envtest -p path) go test ./...
 ```

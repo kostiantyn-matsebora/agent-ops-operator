@@ -40,7 +40,7 @@ path. Plugins are limited to the set Pages enables by default.
   or navigation entries to them — publishing one is its own change.
 - **`cr-reference.md` is GENERATED and is one of those reference pages.** Every
   field of every kind, written by `.github/scripts/docs-generate.py` from
-  `chart/files/crds/`. Never edit it, and never give it a nav entry.
+  `chart/crds/`. Never edit it, and never give it a nav entry.
   - **The `yaml` blocks in `guides/` come from the same run** — the resource
     templates from the CRDs, the worked examples from `helm template`.
   - **A page declares what it wants in an HTML comment**

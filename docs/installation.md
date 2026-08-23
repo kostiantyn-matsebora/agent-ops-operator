@@ -452,10 +452,18 @@ names what is not covered.
 
 ### Lifecycle
 
-| Key | Default | Consequence |
-|---|---|---|
-| `crds.enabled` | `true` | install and upgrade the CRDs with the release |
-| `crds.keep` | `true` | uninstall deletes neither the CRDs nor your Conversations |
+**The CRDs are not values.** They live in the chart's `crds/` directory, which
+Helm applies before anything else — that is what lets one release install the
+CRDs *and* the Pipelines and Channels that are instances of them.
+
+| Was | Now |
+|---|---|
+| `crds.enabled: false` | `helm install --skip-crds` |
+| `crds.keep: true` | inherent — Helm never deletes CRDs it installed from `crds/` |
+
+**Helm never upgrades them either.** When a release changes a CRD field, its
+entry in [CHANGELOG.md](CHANGELOG.md) says so and gives you the `kubectl apply`
+line. Nothing else in the chart needs that treatment.
 
 ## Wire one route
 
@@ -513,6 +521,8 @@ Read [CHANGELOG.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/b
 first. It is the only place migration steps live, newest first, keyed by chart
 version.
 
-An uninstall removes the workloads. With `crds.keep: true` it leaves the CRDs,
-every Conversation and the session claim — so reinstalling finds your data
-where it was.
+An uninstall removes the workloads and leaves the CRDs, every Conversation and
+the session claim — so reinstalling finds your data where it was. Helm does not
+delete CRDs installed from a chart's `crds/` directory, so that is the behaviour
+whether or not you want it. Removing them is a deliberate `kubectl delete crd`,
+and it cascade-deletes every Conversation with them.

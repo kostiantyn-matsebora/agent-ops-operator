@@ -1,6 +1,6 @@
 # Custom resource reference
 
-**Generated from `chart/files/crds/` by `python3 .github/scripts/docs-generate.py`. Do not edit.**
+**Generated from `chart/crds/` by `python3 .github/scripts/docs-generate.py`. Do not edit.**
 
 Every field of every kind, with the type the API server enforces. What a field MEANS beyond its own sentence is in [concepts.md](concepts.md), and the contracts the adapter and runtime kinds serve are in [contracts.md](contracts.md).
 

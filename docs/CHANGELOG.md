@@ -11,6 +11,57 @@ See [../README.md](../README.md) for the product overview and [./](./) for
 reference material. `CLAUDE.md` in this directory owns the rules this file
 follows.
 
+## [8.0.0] — 2026-08-23
+
+**The chart could not be installed on a cluster that did not already have its
+CRDs**, and it had been that way for the project's whole life. Every install
+until now landed where a previous one had left the CRDs behind, so nothing ever
+surfaced it.
+
+**BREAKING: `crds.enabled` and `crds.keep` are gone.** Setting either now FAILS
+the render naming the replacement, rather than being silently ignored.
+
+| Was | Now |
+|---|---|
+| `crds.enabled: false` | `helm install --skip-crds` |
+| `crds.keep: true` | inherent — Helm never deletes CRDs it installed from `crds/` |
+
+### Fixed
+
+- **The CRDs moved from `templates/` to the chart's `crds/` directory.** Helm
+  applies that directory out-of-band, invalidates discovery and waits for the
+  CRDs to establish BEFORE it builds the rest of the manifest.
+
+  This chart ships eleven CRDs beside eight instances OF them — Pipelines,
+  Channels, profiles, toolsets. Helm resolves every kind in a manifest before
+  applying any of it, so as templates those instances could not map and a clean
+  install aborted with `ensure CRDs are installed first`.
+
+  Helm's own guidance names two methods and no third: this directory, or two
+  separate charts. There is no annotation that orders resources within one
+  release.
+
+### Changed
+
+- **Helm no longer upgrades the CRDs either**, which is the documented cost of
+  the `crds/` directory. When a release changes a CRD field its entry here says
+  so and gives the command:
+
+  ```sh
+  kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+  ```
+
+  This release changes no CRD field, so there is nothing to apply.
+
+### Upgrade
+
+**Nothing to do**, unless you set `crds.enabled` or `crds.keep` yourself — remove
+them, or the render fails naming the replacement.
+
+Your existing CRDs are already in the cluster and Helm adopts them where the
+annotations match. An install onto a cluster with no agentops CRDs now works
+with no flags and no pre-step, which is what this release is for.
+
 ## [7.0.0] — 2026-08-23
 
 **Every image moves registry.** All twelve first-party images the chart renders

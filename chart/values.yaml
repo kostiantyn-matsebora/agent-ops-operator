@@ -987,10 +987,19 @@ housekeeping:
   resources: {}
   nodeSelector: {}
 
-crds:
-  # Install/upgrade the agentops.dev CRDs with this release.
-  enabled: true
-  # Keep CRDs on `helm uninstall` (helm.sh/resource-policy: keep) — protects
-  # every Conversation/AgentProfile/... from cascade deletion. Disable only if
-  # you really want uninstall to wipe all agentops data.
-  keep: true
+# CRDs ARE NOT VALUES ANY MORE. They live in `chart/crds/`, which Helm applies
+# out-of-band BEFORE it builds the rest of the manifest — the only thing that
+# lets one release ship both the CRDs and the Pipelines, Channels and profiles
+# that are instances of them. As templates they could never install onto a
+# cluster that did not already have them: Helm resolves every kind in the
+# manifest before applying any of it, so the CRs failed to map and the whole
+# install aborted with `ensure CRDs are installed first`.
+#
+#   crds.enabled  ->  the `--skip-crds` flag on helm install
+#   crds.keep     ->  inherent. Helm NEVER deletes what it installed from crds/
+#
+# What it costs, and Helm says so plainly: Helm never UPGRADES them either. A
+# CRD field change ships with a `kubectl apply -f` line in the release notes.
+#
+# Setting either key is refused rather than ignored — see templates/crds-guard.yaml.
+crds: {}

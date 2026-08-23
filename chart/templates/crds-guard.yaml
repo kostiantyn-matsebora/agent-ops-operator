@@ -1,0 +1,15 @@
+{{/*
+  A REMOVED VALUE MUST FAIL, NOT BE IGNORED.
+
+  Helm never reports an unread values key, so `crds.enabled: false` on a chart
+  that no longer reads it would install the CRDs anyway and look successful.
+  That is the same failure mode `vm-bundle:` had, and it is caught the same way.
+*/}}
+{{- if kindIs "map" .Values.crds }}
+  {{- if hasKey .Values.crds "enabled" }}
+    {{- fail "crds.enabled is gone: CRDs now live in the chart's crds/ directory, which Helm applies before the manifest. Use `helm install --skip-crds` to skip them." }}
+  {{- end }}
+  {{- if hasKey .Values.crds "keep" }}
+    {{- fail "crds.keep is gone: Helm never deletes CRDs installed from a chart's crds/ directory, so keeping them is inherent." }}
+  {{- end }}
+{{- end }}

@@ -121,7 +121,7 @@ cd platform/manager
 # after editing api/v1alpha1/ — regenerates deepcopy and the CRDs the chart ships
 go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 object paths=./api/...
 go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/... \
-  output:crd:artifacts:config=../../chart/files/crds
+  output:crd:artifacts:config=../../chart/crds
 
 # unit tests plus the envtest integration suite against a real API server
 KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19 \

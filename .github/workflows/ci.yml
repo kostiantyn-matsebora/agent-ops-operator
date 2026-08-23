@@ -143,7 +143,7 @@ jobs:
           curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
             | tar -xz -C /usr/local/bin kubeconform
       - name: Convert this repo's CRDs into validation schemas
-        run: python3 .github/scripts/crd-schemas.py chart/files/crds "$RUNNER_TEMP/crd-schemas"
+        run: python3 .github/scripts/crd-schemas.py chart/crds "$RUNNER_TEMP/crd-schemas"
       - run: helm lint chart
       # EACH PERMUTATION CARRIES THE VALUES ITS SUBJECT REQUIRES. `ha-bundle`
       # and a Telegram surface refuse to render without a credential and an
@@ -237,7 +237,7 @@ jobs:
       # schema fails here rather than in someone's cluster.
       - name: Generated templates validate against the CRDs
         run: |
-          python3 .github/scripts/crd-schemas.py chart/files/crds "$RUNNER_TEMP/crd-schemas"
+          python3 .github/scripts/crd-schemas.py chart/crds "$RUNNER_TEMP/crd-schemas"
           python3 .github/scripts/docs-generate.py --emit-templates "$RUNNER_TEMP/templates.yaml"
           kubeconform -strict -summary \
             -schema-location default \
