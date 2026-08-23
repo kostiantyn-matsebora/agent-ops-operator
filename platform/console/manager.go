@@ -48,6 +48,10 @@ type Op struct {
 // ContractVersion is the outbound message contract this console speaks. The
 // manager refuses the ops long-poll without it — an adapter reading the retired
 // `text` field would render empty transcript entries and look healthy doing it.
+//
+// IT DOES NOT MOVE FOR THE BLOCK GRAMMAR. The body is markdown plus a grammar,
+// and the SPA parses both — see ui/src/api/blocks.ts. Nothing was added to the
+// wire, so there is nothing to version.
 const ContractVersion = "2"
 
 // OpMessage is one SEMANTIC outbound message: the manager composes meaning, each
@@ -113,36 +117,54 @@ func (m *OpMessage) Render() string {
 		}
 		return "💬 **" + who + "**: " + m.Body
 	case "signal":
-		var b strings.Builder
+		// A CARD, NOT A SENTENCE. Every part is its own block, and the two
+		// questions a reader has first — what fired, and where it came from —
+		// are answered before anything else.
+		//
+		// This ran title, attribution, labels and the payload together with
+		// single newlines and no fence. Markdown reflows that into ONE line,
+		// so the source was buried mid-sentence among a dozen chips and the
+		// raw JSON trailed off the end of it.
+		var parts []string
+		shown := map[string]bool{}
 		if m.Title != "" {
-			b.WriteString("📣 **" + m.Title + "**\n")
+			parts = append(parts, "📣 **"+m.Title+"**")
+			for _, w := range strings.Fields(strings.ReplaceAll(m.Title, ":", " ")) {
+				shown[w] = true
+			}
 		}
+
+		// WHERE IT CAME FROM, on its own line and labelled. It is the first
+		// thing asked of any alert and it was previously a scrap of italic text
+		// between the title and a wall of chips.
 		var from []string
 		if m.Source != "" {
-			from = append(from, "source "+m.Source)
+			from = append(from, "**Source** `"+m.Source+"`")
+			shown[m.Source] = true
 		}
 		// Omitted when blank rather than filled in: the pipeline is inferred and
 		// an empty value means "not determinable", not "none".
 		if m.Pipeline != "" {
-			from = append(from, "via "+m.Pipeline)
+			from = append(from, "**Pipeline** `"+m.Pipeline+"`")
+			shown[m.Pipeline] = true
 		}
 		if len(from) > 0 {
-			b.WriteString("_" + strings.Join(from, " · ") + "_\n")
+			parts = append(parts, strings.Join(from, " · "))
 		}
-		if len(m.Labels) > 0 {
-			keys := make([]string, 0, len(m.Labels))
-			for k := range m.Labels {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys) // stable: a card that reshuffles reads as new
-			parts := make([]string, 0, len(keys))
-			for _, k := range keys {
-				parts = append(parts, k+"="+m.Labels[k])
-			}
-			b.WriteString("`" + strings.Join(parts, "  ") + "`\n")
+
+		// LABELS AS A TABLE. A row per label is scannable — a reader looks down
+		// one column for the key they want. Joined into a line they are a run
+		// of `k=v` nobody reads, which is what shipped.
+		if rows := labelRows(m, shown); len(rows) > 0 {
+			parts = append(parts, "| label | value |\n|---|---|\n"+strings.Join(rows, "\n"))
 		}
-		b.WriteString(m.Body)
-		return b.String()
+
+		// The payload is NOT here: it travels separately so the browser can
+		// collapse it. See SignalPayload.
+		if m.InputRef != "" {
+			parts = append(parts, "_full event: `conversationinput/"+m.InputRef+"`_")
+		}
+		return strings.Join(parts, "\n\n")
 	default:
 		return m.Body
 	}
@@ -421,4 +443,68 @@ func (m *Manager) Resolved(ctx context.Context, pipeline string) (*ResolvedCapab
 		return nil, err
 	}
 	return &out, nil
+}
+
+// fence wraps a signal payload in a code block, tagged json when it looks like
+// one so the console highlights it.
+//
+// A payload is a MACHINE DOCUMENT. Unfenced it is reflowed as prose — every
+// newline collapsed, every quote and brace run together with the sentence
+// before it, which is what made an event card unreadable.
+func fence(body string) string {
+	t := strings.TrimSpace(body)
+	lang := ""
+	switch {
+	case strings.HasPrefix(t, "{"), strings.HasPrefix(t, "["):
+		lang = "json"
+	case !strings.Contains(t, "\n"):
+		// A ONE-LINE PAYLOAD IS NOT A DOCUMENT. A posted task is a sentence
+		// somebody wrote, and putting it in a code block renders prose in a
+		// monospaced box that scrolls sideways — the machine-document treatment
+		// applied to something that is not one.
+		return t
+	}
+	// A payload containing its own fence would close ours early. Longer fences
+	// nest, which is the markdown-defined way out.
+	ticks := "```"
+	for strings.Contains(body, ticks) {
+		ticks += "`"
+	}
+	return ticks + lang + "\n" + body + "\n" + ticks
+}
+
+// labelRows renders a signal's labels as table rows, omitting any whose VALUE
+// the card has already stated.
+//
+// Suppressed by VALUE, not by key name: a label is redundant only when what it
+// says is already on the card, which is a fact about this message rather than
+// about the k8s-events vocabulary. An adapter naming its labels differently
+// gets the same treatment for free.
+//
+// Sorted, so a re-derived card does not reshuffle and read as a new one.
+func labelRows(m *OpMessage, shown map[string]bool) []string {
+	keys := make([]string, 0, len(m.Labels))
+	for k := range m.Labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	rows := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v := m.Labels[k]
+		if v == "" || shown[v] {
+			continue
+		}
+		rows = append(rows, "| `"+k+"` | "+v+" |")
+	}
+	return rows
+}
+
+// SignalPayload is the raw event document of a `signal`, for a surface that can
+// put it behind a control. Empty for every other kind — an answer, a relay and
+// a notice are prose to be read, not documents to be opened.
+func (m *OpMessage) SignalPayload() string {
+	if m == nil || m.Kind != "signal" {
+		return ""
+	}
+	return strings.TrimSpace(m.Body)
 }

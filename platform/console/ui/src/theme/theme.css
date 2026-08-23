@@ -44,6 +44,16 @@
   --ao-lane-fill: #ffffff;
   --ao-lane-border: #d5dcdf;
   --ao-code-bg: #f6f8f8;
+
+  /* Syntax tokens. Five roles, not thirty: an agent emits JSON, YAML, shell
+     and the occasional Go, and a palette that distinguishes more than this is
+     decoration. Drawn from the existing hues so highlighted code belongs to
+     the same page as everything else. */
+  --ao-code-keyword: #8250c8;
+  --ao-code-string: #1f7a4d;
+  --ao-code-number: #a8500b;
+  --ao-code-name: #0a615c;
+  --ao-code-comment: #6a7178;
 }
 
 .pf-v6-theme-dark {
@@ -70,6 +80,13 @@
   --ao-lane-fill: #1f2427;
   --ao-lane-border: #363f44;
   --ao-code-bg: #14181b;
+
+  /* Lifted for contrast on the dark ground, same five roles. */
+  --ao-code-keyword: #c3a6f5;
+  --ao-code-string: #7fd7a4;
+  --ao-code-number: #e8b06a;
+  --ao-code-name: #6fd8cd;
+  --ao-code-comment: #8b959c;
 }
 
 /*
@@ -124,4 +141,55 @@ body {
   svg animate {
     display: none;
   }
+}
+
+/*
+ * HIGHLIGHTED CODE.
+ *
+ * rehype-highlight emits highlight.js class names, and this maps the ones that
+ * matter onto the tokens above. NO hljs THEME IS IMPORTED: every stock theme
+ * carries its own background and its own idea of the palette, which is how a
+ * code block ends up as the one element on the page wearing another product's
+ * colours — and it would need a second import to follow the dark toggle.
+ *
+ * Unmapped classes simply inherit, which is the right default: an unstyled
+ * token reads as ordinary code rather than as a mistake.
+ */
+.hljs-keyword,
+.hljs-built_in,
+.hljs-literal,
+.hljs-type,
+.hljs-selector-tag {
+  color: var(--ao-code-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--ao-code-string);
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--ao-code-number);
+}
+
+/* Object keys and identifiers — the left column of any JSON or YAML payload,
+   which is what a reader scans first. */
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-variable {
+  color: var(--ao-code-name);
+}
+
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: var(--ao-code-comment);
+  font-style: italic;
 }

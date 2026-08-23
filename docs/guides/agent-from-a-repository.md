@@ -118,6 +118,7 @@ kind: AgentProfile
 metadata:
   name: my-agent
 spec:
+  outputFormat: blocks   # blocks | none
   repository:
     url: <url>
     ref: main

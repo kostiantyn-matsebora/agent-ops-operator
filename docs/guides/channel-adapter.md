@@ -110,6 +110,30 @@ Prose arrives in a **named markdown subset**, which the agent is instructed to
 write. Escape it for your transport. An adapter that passes it through raw is
 how tags reach a reader as literal characters.
 
+**A body may also carry the BLOCK GRAMMAR**, and you parse it:
+
+| Tag | Is |
+|---|---|
+| `<title>` | at most one, rendered first, a single line |
+| `<details>` | **the fold** — present it collapsed |
+| anything else | a section the AGENT named, above the fold, in written order |
+
+- **Recognized only** when a tag stands alone on its own line, forms a
+  well-formed pair, and sits outside fenced code. Everything else is literal —
+  agent output is full of `<`.
+- **`answer` and `notice` only.** A relay is somebody's typed words, and a
+  `signal` is a card built from its structured fields.
+- **No tags is one block**, which renders as prose does today.
+- **The section vocabulary is OPEN.** Render a label generically — never carry a
+  list of section names.
+
+The manager parses none of this, exactly as it parses none of the markdown. Full
+rules in [the channel adapter
+contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md#the-body-grammar).
+
+**Not implementing it is fine.** `AgentProfile.spec.outputFormat` is required,
+and a profile declaring `none` emits no tags at all.
+
 `ensure-topic` carries a **descriptor** rather than a baked title, because the
 manager cannot know your limits. A Telegram forum topic caps at 128 characters
 and a web chat does not.

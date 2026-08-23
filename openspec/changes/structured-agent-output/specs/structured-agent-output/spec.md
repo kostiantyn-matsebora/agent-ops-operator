@@ -6,18 +6,22 @@ OPEN — each agent's purpose shapes its own — while the fold and the caps are
 CLOSED, so every surface can present any agent's answer without knowing what that
 agent does.
 
-This capability owns the GRAMMAR, the parse and the cap. Who gets the format
-specification injected belongs to `profile-is-identity`, and whether a signal
-body is parsed at all belongs to `signal-adapter-contract` — each stated ONCE, in
-the capability that owns it.
+This capability owns the GRAMMAR and its recognition rules. Who gets the format
+specification injected belongs to `profile-is-identity`. WHERE the grammar is
+read belongs to `adapter-rendered-messages`, which states that a body is markdown
+plus this grammar and that the adapter reads both.
 
 ## ADDED Requirements
 
-### Requirement: Agent output is parsed into blocks
+### Requirement: Agent output carries structure the surface reads
 
-An agent's reported output SHALL be parsed manager-side into an ordered list of
-typed blocks. Parsing SHALL happen EXACTLY ONCE, in the manager, and the result
-SHALL travel on the outbound message. No adapter SHALL parse the grammar.
+An agent's reported output SHALL reach every surface AS THE AGENT WROTE IT. The
+manager SHALL NOT parse it, rewrite it, or shorten it.
+
+Each channel adapter SHALL parse the grammar and render it to what its transport
+has. This is how the contract already treats markdown: it names a subset and
+every adapter renders what it can, and the block grammar is an extension of the
+same body language rather than a second representation beside it.
 
 Parsing SHALL be total: every input yields blocks. Output containing no
 recognized tag SHALL yield a single above-the-fold block holding the whole text,
@@ -28,6 +32,10 @@ Parsing SHALL follow AGENT-REPORTED text rather than the message kind that
 carries it. A run that failed and explained itself is reported as a notice, and
 that explanation SHALL be parsed exactly as an answer is — it is the longest
 thing a failed investigation produces, and so the output the fold serves best.
+
+A body the MANAGER composed — a listing, a refusal, a usage error — is its own
+prose and carries no grammar to find. An adapter parses it anyway and gets one
+block, which is the same result.
 
 #### Scenario: Untagged output still renders
 
@@ -41,11 +49,18 @@ thing a failed investigation produces, and so the output the fold serves best.
 - **THEN** that explanation is parsed into blocks and folded, the same as a
   successful run's answer
 
-#### Scenario: Adapters receive blocks, never grammar
+#### Scenario: A rehydrated transcript renders like a live one
 
-- **WHEN** any agent output is delivered to a bound thread
-- **THEN** the outbound message carries parsed blocks, and no adapter is required
-  to recognize a tag to render the message
+- **WHEN** a viewer rebuilds a conversation from `status.runs[].result` after a
+  restart
+- **THEN** it parses the same characters a live message carried, and the reader
+  sees the same title, sections and fold
+
+#### Scenario: The manager returns the text unchanged
+
+- **WHEN** an agent's output is recorded and delivered
+- **THEN** what the adapter receives is byte-for-byte what the agent printed,
+  and nothing in the manager has inspected the grammar
 
 ### Requirement: Two reserved tags, an open vocabulary
 
@@ -59,8 +74,8 @@ label. Named sections SHALL be rendered ABOVE the fold, in the order the agent
 wrote them. The manager SHALL NOT reorder named sections, because with an open
 vocabulary it cannot know which section is the conclusion.
 
-Adapters SHALL render a named section generically from its label and content.
-An adapter SHALL NOT carry knowledge of any particular agent's section names.
+An adapter SHALL render a named section generically from its label and content,
+and SHALL NOT carry knowledge of any particular agent's section names.
 
 #### Scenario: An agent names its own sections
 
@@ -110,21 +125,34 @@ standalone block tag is prose.
 - **THEN** that region is closed at end of output rather than discarding it, and
   no content is lost
 
-### Requirement: The manager bounds what sits above the fold
+### Requirement: Nothing shortens an agent's output
 
-The manager SHALL cap the total length of above-the-fold content. Content
-exceeding the cap SHALL be DEMOTED into the fold, never dropped.
+No component SHALL impose a length budget on above-the-fold content, and none
+SHALL move content between blocks to satisfy one.
 
-This is the guarantee the prompt alone cannot make: whatever an agent writes, a
-reader who does not expand anything reads a bounded amount.
+WHAT SITS ABOVE THE FOLD IS WHAT THE AGENT PUT THERE. Which part is the summary
+is a judgement about meaning, and the agent already made it by choosing what
+goes inside `<details>`. A length budget is a GUESS at that judgement, and with
+an open section vocabulary there is nothing better to guess with.
 
-#### Scenario: An over-long section is demoted, not truncated
+Brevity is the PROMPT's responsibility. A specification can ask for short
+sections and bulleted facts. It SHALL NOT be enforced by cutting the result up
+afterwards.
 
-- **WHEN** an agent writes far more above-the-fold content than the cap allows
-- **THEN** the overflow appears inside the fold, and expanding it recovers every
-  word the agent wrote
+#### Scenario: A table arrives whole
 
-#### Scenario: Nothing is lost
+- **WHEN** an above-the-fold section holds a markdown table of twelve rows
+- **THEN** every row renders above the fold, under its header, because trimming
+  at a line boundary would leave the remainder as pipes with nothing to head them
 
-- **WHEN** any output is parsed, capped and rendered
-- **THEN** the full text the agent reported remains reachable on the surface
+#### Scenario: The action is never hidden
+
+- **WHEN** an agent writes several sections and the last one is the fix
+- **THEN** it renders above the fold like every other section, because written
+  order is not importance and nothing may infer otherwise
+
+#### Scenario: A verbose agent produces a long message
+
+- **WHEN** an agent writes far more above the fold than a reader wants
+- **THEN** the message is long, and the correction belongs in that agent's
+  prompt — no surface silently rearranges what it said

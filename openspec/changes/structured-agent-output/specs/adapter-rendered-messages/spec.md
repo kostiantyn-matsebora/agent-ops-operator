@@ -6,10 +6,10 @@ A `send` operation SHALL carry a typed message rather than display text. The
 manager SHALL emit exactly these kinds, and SHALL NOT emit transport markup in
 any of them:
 
-- `signal` — `{pipeline, source, title, labels{}, body, blocks[], inputRef}`
-- `answer` — `{body, blocks[], status}`
+- `signal` — `{pipeline, source, title, labels{}, body, inputRef}`
+- `answer` — `{body, status}`
 - `relay` — `{origin, sender, body}`
-- `notice` — `{level, body, blocks[]}`
+- `notice` — `{level, body}`
 
 A message of any kind MAY additionally carry `choices` — a list of offered
 actions, each naming what it does and the addressed text it stands for. Choices
@@ -36,16 +36,19 @@ structured fields SHALL stay typed so an adapter may render them as it chooses.
 No component under `internal/` SHALL compose HTML or any other transport
 dialect.
 
-`blocks[]` is the parsed structure of the body: an ordered list of labelled
-sections plus a folded region. The manager SHALL populate it and SHALL keep
-`body` populated alongside as the flattened equivalent, so a message is never
-carried by `blocks[]` alone.
+A FREE-TEXT BODY IS MARKDOWN IN THE NAMED SUBSET, PLUS THE BLOCK GRAMMAR. Both
+are read by the ADAPTER, which is how this contract has always treated prose:
+the manager names a language and each surface renders what it can.
 
-`blocks[]` SHALL follow AGENT-REPORTED text rather than the message kind carrying
-it. A run that failed and explained itself is reported as a `notice`, and that
-explanation SHALL carry blocks exactly as an `answer` does. A message whose body
-the manager composed itself — a listing, a refusal, a usage error — SHALL carry
-none.
+The manager SHALL NOT parse either one. It carries no parsed representation of a
+body, and a message SHALL NOT gain a field holding one — that would be a second
+copy of text the message already has, and one the manager cannot keep in step
+with a body it does not read.
+
+A `signal` IS DIFFERENT AND IS NOT PROSE. Its structured fields are the message,
+and an adapter renders a CARD from them. The grammar SHALL NOT be applied to a
+signal's body, which is a machine document or a person's typed words. This is
+the one place an adapter needs a second renderer.
 
 #### Scenario: The manager emits no transport markup
 
@@ -94,14 +97,20 @@ none.
 
 - **WHEN** a run fails, reports its own explanation, and that explanation goes
   out as a `notice`
-- **THEN** the notice carries blocks, because the body is the agent's text —
-  while a listing the manager composed carries none
+- **THEN** the adapter parses that body exactly as it parses an `answer`,
+  because the grammar follows the TEXT and not the message kind
 
-#### Scenario: Structure and prose travel together
+#### Scenario: The agent's text arrives unaltered
 
-- **WHEN** an agent answer is parsed into blocks
-- **THEN** the message carries both `blocks[]` and a `body` flattened from them,
-  and an adapter reading only `body` renders a complete message
+- **WHEN** an agent's output contains block tags
+- **THEN** the body the adapter receives is byte-for-byte what the agent printed,
+  and no field beside it holds another version of the same text
+
+#### Scenario: A signal is a card, not prose
+
+- **WHEN** a `signal` message is delivered
+- **THEN** the adapter renders its structured fields as a card, and no part of
+  its body is read as the block grammar
 
 ### Requirement: Presentation limits belong to the adapter
 
@@ -110,11 +119,10 @@ content as an attachment SHALL be the adapter's responsibility. The manager
 SHALL NOT truncate message bodies, SHALL NOT escape for any transport, and SHALL
 NOT declare a maximum message size.
 
-Deciding what sits above the fold is NOT a presentation limit. The manager MAY
-move content from above the fold into it, because which part is the summary is a
-question about MEANING and is answerable without knowing any transport. It
-remains forbidden from removing content: every word an agent reported SHALL
-remain in the message.
+The manager SHALL NOT move content between blocks either. Which part is the
+summary is a judgement the AGENT already made by choosing what goes inside
+`<details>`, and a length budget is a guess at it — one that cuts a markdown
+table from its header. See `structured-agent-output`.
 
 #### Scenario: Oversized body is the adapter's call
 
@@ -134,10 +142,10 @@ remain in the message.
 - **THEN** the message body carries the full payload inline and `inputRef`
   names the `ConversationInput`, so no adapter needs Kubernetes access
 
-#### Scenario: Folding is not truncating
+#### Scenario: A long answer stays long
 
-- **WHEN** the manager demotes over-long content into the fold
-- **THEN** the message still carries every word, and the adapter is still the one
+- **WHEN** an agent writes far more above the fold than a reader wants
+- **THEN** the message carries it unchanged, and the adapter is still the one
   that decides how to split or attach it
 
 ### Requirement: Adapters declare the contract version they speak
@@ -147,11 +155,15 @@ contract version it supports, and SHALL reject an absent or unsupported
 declaration with 400 naming what is expected, rather than delivering operations
 it cannot interpret.
 
-The current version is 3, which adds `blocks[]`. An adapter declaring version 2
-SHALL continue to be served: it receives the message with `body` populated and
-`blocks[]` omitted. Version 2 renders a complete message, so serving it is
-correct rather than degraded — unlike the string-valued version 1, which is
-still refused because it has no field to render at all.
+THE VERSION DOES NOT MOVE FOR THE BLOCK GRAMMAR. No field is added and no field
+changes meaning: a body that was markdown is now markdown plus a grammar, read
+by the same component that already read the markdown.
+
+An adapter that does not implement the grammar renders the tags literally.
+That is prevented by `AgentProfile.spec.sharedOutputFormat`, which is OFF by
+default — no agent emits a tag until an install turns it on, and an install
+turns it on when its adapters understand it. The compatibility boundary is the
+PROFILE, not the wire.
 
 #### Scenario: Outdated adapter fails loudly
 
@@ -165,8 +177,8 @@ still refused because it has no field to render at all.
 - **WHEN** an adapter declares the supported version
 - **THEN** operations are delivered as before
 
-#### Scenario: A version 2 adapter keeps working
+#### Scenario: An adapter that never learns the grammar keeps working
 
-- **WHEN** an adapter that has not been upgraded declares version 2
-- **THEN** it receives messages with a flattened `body` and no `blocks[]`, and
-  posts exactly what it posts today
+- **WHEN** an adapter has no parser for block tags
+- **THEN** it serves profiles that have not opted in and sees the prose it always
+  saw, with no version to negotiate and nothing to refuse

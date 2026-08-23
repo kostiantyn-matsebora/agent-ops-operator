@@ -55,3 +55,30 @@ export function PlainText({ children, multiline, className }: PlainTextProps): R
     </span>
   )
 }
+
+/**
+ * RawText renders a string EXACTLY as it was recorded, tags included.
+ *
+ * PlainText strips anything tag-shaped, which is right for a rendered view and
+ * WRONG for a record. `status.runs[].result` is what the agent printed — the
+ * block grammar is part of that text, and stripping it made the runs view show
+ * a version of the answer nobody ever produced. Silent deletion, in the one
+ * place whose whole purpose is fidelity.
+ *
+ * IT IS STILL SAFE, and by the same mechanism as everything else here: React
+ * escapes a text node. Nothing is handed to the DOM as markup, no
+ * innerHTML is involved, and the app-wide rule is untouched. The stripping in
+ * PlainText was belt-and-braces on top of that — useful where markup would be
+ * noise, harmful where it is the content.
+ */
+export function RawText({ children, className }: PlainTextProps): ReactElement | null {
+  if (!children) return null
+  return (
+    <span
+      className={className}
+      style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'var(--pf-t--global--font--family--mono)' }}
+    >
+      {children}
+    </span>
+  )
+}

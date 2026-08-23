@@ -21,6 +21,14 @@ export default defineConfig({
           // entry point, and naming it here fails the build rather than the
           // import.
           charts: ['@patternfly/react-charts/victory'],
+          // Syntax grammars change only when a language is added, which is
+          // roughly never — while app code changes every release. In the main
+          // chunk they would be re-downloaded on every deploy despite being
+          // byte-identical, because the hash covers the whole chunk.
+          //
+          // Split out, they keep their hash across app changes and stay in the
+          // browser cache, where `immutable` already promised they would.
+          highlight: ['rehype-highlight', 'highlight.js'],
         },
       },
     },

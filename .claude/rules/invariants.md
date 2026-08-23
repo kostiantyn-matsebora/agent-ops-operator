@@ -352,6 +352,33 @@ stays authoritative.
 prose in a named markdown subset) **or a TOPIC DESCRIPTOR, never rendered
 text.** There is no `op.text` and no `op.title`.
 
+**A FREE-TEXT BODY IS MARKDOWN PLUS THE BLOCK GRAMMAR, AND THE ADAPTER READS
+BOTH.** The manager parses neither.
+
+- **It never parsed markdown either**, and that is the precedent: this contract
+  names a body LANGUAGE and each surface renders what it can. A parsed structure
+  on the wire was the inconsistency.
+- **`blocks[]` and contract 3 were BUILT AND REMOVED.** Nothing manager-side
+  consumed them — it parsed, put the result on the wire, and every consumer was
+  a renderer. Re-adding a parsed field is the regression.
+- **The read path is why it could not stay.** Blocks are derivable and so were
+  not persisted, but the only component allowed to derive them ran on the WRITE
+  path — so every console restart flattened all history. With the adapter
+  parsing, a transcript rebuilt from `status.runs[].result` parses the same
+  characters a live message carried.
+- **TWO PARSERS, and that is the accepted cost** — `channels/telegram/blocks.go`
+  and `platform/console/ui/src/api/blocks.ts`. The recognition rules are stated
+  ONCE, in the capability spec, and both are written against them. Change one,
+  change both.
+- **Parse `answer` and `notice` ONLY.** A relay is somebody's typed words, and a
+  signal is not prose at all — its structured fields are the message and the
+  adapter renders a CARD. That is the one place an adapter needs a second
+  renderer.
+- **NOTHING SHORTENS AN AGENT'S OUTPUT.** A length cap here cut a markdown table
+  from its header and buried `<fix>` because it was last in written order.
+  Trimming at a line boundary is not a safe operation on markdown, and no value
+  makes it one — brevity belongs to `format.md`.
+
 - **Escaping, length limits, splitting and topic naming belong to the component
   that knows them.** Telegram caps messages at 4096 and topics at 128, nothing
   else does, and a manager-side fix would be one transport's limits imposed on
@@ -364,9 +391,16 @@ text.** There is no `op.text` and no `op.title`.
 - **`router.go` used to open with "transport-neutral" and then emit Telegram
   HTML.** That is the habit this invariant names.
 - **It binds the AGENT too.** `dispatch/templates/format.md` tells it to write
-  the same markdown subset, because an adapter escapes what it is given — the
-  first version of this change left format.md on HTML and every agent answer
-  reached Telegram with its tags showing.
+  the same markdown subset PLUS the block grammar, because an adapter escapes
+  what it is given — the first version of this change left format.md on HTML and
+  every agent answer reached Telegram with its tags showing.
+  - **The block tags are the ONE exception to "no markup"**, and only
+    standalone on their own line. They are grammar: consumed by the ADAPTER's
+    parser, never displayed. Inline `<b>` is still literal characters.
+  - **`AgentProfile.spec.outputFormat` decides who is TOLD** — REQUIRED,
+    `blocks` or `none`, no default, because both candidates are wrong. It gates
+    the PROMPT and never the PARSE, so an agent emitting tags under `none` is
+    still folded, and one emitting none is still one block.
 
 ### A thread opens with the event that caused it
 
@@ -470,7 +504,7 @@ another runtime pod under a NEW name, forever.
 loop breaker is not one. A nil excluder still applies mechanism 1 on purpose.
 
 **agent-ops' own health is STATUS, not SIGNAL.** The reconciler already holds
-the failure. Routing it back through ingest to wake an agent is the
+the failure. Routing it back through ingest to open a conversation is the
 architectural error, not merely a noisy one.
 
 ### Runtime pods

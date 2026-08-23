@@ -6,8 +6,13 @@ import (
 )
 
 func agentMsg(id, text, at string) Message {
-	return Message{ID: id, Thread: "c1", Kind: MsgAgent, Text: text, At: at}
+	return Message{ID: id, Thread: "c1", Kind: MsgAgent, Text: text, At: at, runID: runIDOf(id)}
 }
+
+// replyOp is the id the manager gives a run's reply — `send:<conv>:<channel>:
+// <runId>`. Tests that used to hand-write "op-1" now use this, because the
+// merge matches a buffered answer to its durable run BY ID.
+func replyOp(runID string) string { return "send:c1:console:" + runID }
 
 // THE REGRESSION. Rehydrating only when the buffer was empty meant that the
 // moment a reader typed a reply, their own message made the buffer non-empty
@@ -23,7 +28,7 @@ func TestReplyingDoesNotEraseHistory(t *testing.T) {
 			At: "2026-08-21T06:10:00Z", Pending: true},
 	}
 
-	got := mergeTranscript("c1", "console", live, runs)
+	got := mergeTranscript("c1", "console", live, runs, ConversationSummary{})
 	if len(got) != 3 {
 		t.Fatalf("got %d messages, want 3 (two answers + the reply): %+v", len(got), got)
 	}
@@ -36,16 +41,23 @@ func TestReplyingDoesNotEraseHistory(t *testing.T) {
 }
 
 // An answer held by BOTH the live buffer and the durable record appears once.
+//
+// MATCHED BY RUN ID, NOT BY TEXT. The buffer holds `body`, which the manager
+// flattens from the blocks it parsed, while the record holds the raw text the
+// agent printed — so the two differ by design and a text match would double
+// every structured answer. It did, on a live install.
 func TestNoDuplicateWhenBufferAlreadyHasTheAnswer(t *testing.T) {
-	runs := []Run{{RunID: "r1", Result: "the answer", FinishedAt: "2026-08-21T06:00:00Z"}}
-	live := []Message{agentMsg("op-1", "the answer", "2026-08-21T06:00:01Z")}
+	runs := []Run{{RunID: "r1", Result: "<title>\nthe answer\n</title>", FinishedAt: "2026-08-21T06:00:00Z"}}
+	// Deliberately DIFFERENT text: the flattened form of the same answer.
+	live := []Message{agentMsg(replyOp("r1"), "**the answer**", "2026-08-21T06:00:01Z")}
 
-	got := mergeTranscript("c1", "console", live, runs)
+	got := mergeTranscript("c1", "console", live, runs, ConversationSummary{})
 	if len(got) != 1 {
 		t.Fatalf("expected one copy, got %d: %+v", len(got), got)
 	}
-	// The LIVE one wins — it is the message the console actually observed.
-	if got[0].ID != "op-1" {
+	// The LIVE one wins — it is the message the console actually observed, and
+	// the only one carrying blocks.
+	if got[0].ID != replyOp("r1") {
 		t.Fatalf("id = %q, want the live message to be kept", got[0].ID)
 	}
 }
@@ -57,12 +69,14 @@ func TestRepeatedIdenticalAnswersBothSurvive(t *testing.T) {
 		{RunID: "r1", Result: "same", FinishedAt: "2026-08-21T06:00:00Z"},
 		{RunID: "r2", Result: "same", FinishedAt: "2026-08-21T06:05:00Z"},
 	}
-	if got := mergeTranscript("c1", "console", nil, runs); len(got) != 2 {
+	if got := mergeTranscript("c1", "console", nil, runs, ConversationSummary{}); len(got) != 2 {
 		t.Fatalf("got %d, want 2 — identical answers are still two answers", len(got))
 	}
-	// One already live: exactly one more should be added.
-	live := []Message{agentMsg("op-1", "same", "2026-08-21T06:00:01Z")}
-	if got := mergeTranscript("c1", "console", live, runs); len(got) != 2 {
+	// One already live: exactly one more should be added. Two runs answering
+	// identically are two IDS, so neither is collapsed — the case the old
+	// text multiset existed for, handled by identity instead.
+	live := []Message{agentMsg(replyOp("r1"), "same", "2026-08-21T06:00:01Z")}
+	if got := mergeTranscript("c1", "console", live, runs, ConversationSummary{}); len(got) != 2 {
 		t.Fatalf("got %d, want 2: %+v", len(got), got)
 	}
 }
@@ -78,7 +92,7 @@ func TestBufferOnlyMessagesSurvive(t *testing.T) {
 	}
 	runs := []Run{{RunID: "r1", Result: "diagnosed", FinishedAt: "2026-08-21T06:02:00Z"}}
 
-	got := mergeTranscript("c1", "console", live, runs)
+	got := mergeTranscript("c1", "console", live, runs, ConversationSummary{})
 	if len(got) != 3 {
 		t.Fatalf("got %d, want 3: %+v", len(got), got)
 	}
@@ -97,7 +111,7 @@ func TestEmptyBufferShowsFullHistory(t *testing.T) {
 		{RunID: "r1", Result: "one", FinishedAt: "2026-08-21T06:00:00Z"},
 		{RunID: "r2", Result: "two", FinishedAt: "2026-08-21T06:05:00Z"},
 	}
-	got := mergeTranscript("c1", "console", nil, runs)
+	got := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
 	if len(got) != 2 || got[0].Text != "one" || got[1].Text != "two" {
 		t.Fatalf("got %+v", got)
 	}
@@ -115,7 +129,7 @@ func TestResultlessRunsContributeNothing(t *testing.T) {
 	got := mergeTranscript("c1", "console", nil, []Run{
 		{RunID: "r1", Status: "failed", Result: ""},
 		{RunID: "r2", Result: "said something", FinishedAt: "2026-08-21T06:00:00Z"},
-	})
+	}, ConversationSummary{})
 	if len(got) != 1 || got[0].Text != "said something" {
 		t.Fatalf("got %+v", got)
 	}
@@ -124,7 +138,7 @@ func TestResultlessRunsContributeNothing(t *testing.T) {
 func TestFallsBackToStartedAt(t *testing.T) {
 	got := mergeTranscript("c1", "console", nil, []Run{
 		{RunID: "r1", Result: "x", StartedAt: "2026-08-21T06:00:00Z"},
-	})
+	}, ConversationSummary{})
 	if got[0].At != "2026-08-21T06:00:00Z" {
 		t.Fatalf("at = %q, want the start time when there is no finish time", got[0].At)
 	}
@@ -133,8 +147,8 @@ func TestFallsBackToStartedAt(t *testing.T) {
 // Ids must be stable, or every poll would look like new messages arriving.
 func TestReconstructedIdsAreStable(t *testing.T) {
 	runs := []Run{{RunID: "r1", Result: "x", FinishedAt: "2026-08-21T06:00:00Z"}}
-	a := mergeTranscript("c1", "console", nil, runs)
-	b := mergeTranscript("c1", "console", nil, runs)
+	a := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
+	b := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
 	if a[0].ID != b[0].ID {
 		t.Fatalf("ids unstable: %q vs %q", a[0].ID, b[0].ID)
 	}
@@ -148,14 +162,14 @@ func TestUnparseableTimestampsKeepTheirPlace(t *testing.T) {
 		{ID: "b", Thread: "c1", Kind: MsgAck, Text: "no timestamp", At: ""},
 		agentMsg("c", "third", "2026-08-21T06:02:00Z"),
 	}
-	got := mergeTranscript("c1", "console", live, nil)
+	got := mergeTranscript("c1", "console", live, nil, ConversationSummary{})
 	if len(got) != 3 || got[1].ID != "b" {
 		t.Fatalf("order disturbed: %+v", got)
 	}
 }
 
 func TestNothingAtAllIsEmpty(t *testing.T) {
-	if len(mergeTranscript("c1", "console", nil, nil)) != 0 {
+	if len(mergeTranscript("c1", "console", nil, nil, ConversationSummary{})) != 0 {
 		t.Fatal("no buffer and no runs means no transcript")
 	}
 }
@@ -171,7 +185,7 @@ func TestConversationReadsQuestionThenAnswer(t *testing.T) {
 			Sender: "operator@example.com", ReceivedAt: "2026-08-21T06:00:00Z",
 		}},
 	}}
-	got := mergeTranscript("c1", "console", nil, runs)
+	got := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
 	if len(got) != 2 {
 		t.Fatalf("got %d, want the question and the answer: %+v", len(got), got)
 	}
@@ -194,7 +208,7 @@ func TestRecordedInputAlreadyLiveIsNotDoubled(t *testing.T) {
 		Inputs: []RecordedInput{{ID: "in-7", Text: "what about the disk?",
 			Surface: "console", ReceivedAt: "2026-08-21T06:10:00Z"}},
 	}}
-	got := mergeTranscript("c1", "console", live, runs)
+	got := mergeTranscript("c1", "console", live, runs, ConversationSummary{})
 	if len(got) != 2 {
 		t.Fatalf("got %d, want one message and one answer: %+v", len(got), got)
 	}
@@ -211,7 +225,7 @@ func TestRecordedRelayKeepsItsRemoteSender(t *testing.T) {
 		Inputs: []RecordedInput{{ID: "in-2", Text: "have a look", Surface: "home-ops",
 			Sender: "operator", ReceivedAt: "2026-08-21T06:00:00Z"}},
 	}}
-	got := mergeTranscript("c1", "console", nil, runs)
+	got := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
 	if got[0].Kind != MsgRelay || got[0].Sender != "home-ops/operator" {
 		t.Fatalf("somebody else's words keep their attribution: %+v", got[0])
 	}
@@ -225,7 +239,7 @@ func TestRecordedEventReadsAsASignal(t *testing.T) {
 		Inputs: []RecordedInput{{ID: "in-3", Text: "disk at 99%",
 			Type: "alert", ReceivedAt: "2026-08-21T06:00:00Z"}},
 	}}
-	got := mergeTranscript("c1", "console", nil, runs)
+	got := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
 	if got[0].Kind != MsgSignal || got[0].Sender != "" {
 		t.Fatalf("an event has no speaker: %+v", got[0])
 	}
@@ -239,8 +253,86 @@ func TestTruncatedRecordSaysSo(t *testing.T) {
 		Inputs: []RecordedInput{{ID: "in-4", Text: "xxxx", Truncated: true,
 			ReceivedAt: "2026-08-21T06:00:00Z"}},
 	}}
-	got := mergeTranscript("c1", "console", nil, runs)
-	if !strings.Contains(got[0].Text, "truncated") {
-		t.Fatalf("a fragment must be presented as one: %q", got[0].Text)
+	// A SIGNAL's fragment is its PAYLOAD, which now travels apart from the card
+	// so the browser can collapse it — so the notice rides with the text it is
+	// about, not with the heading above it.
+	got := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
+	if !strings.Contains(got[0].Payload, "truncated") {
+		t.Fatalf("a fragment must be presented as one: %q", got[0].Payload)
+	}
+
+	// A message somebody TYPED has no payload — its text is the message, and
+	// the notice belongs there.
+	typed := recordedMessage("c1", "console", RecordedInput{
+		ID: "in-5", Text: "half a sentence", Truncated: true, Surface: "telegram"}, ConversationSummary{})
+	if !strings.Contains(typed.Text, "truncated") {
+		t.Fatalf("a truncated relay must say so: %q", typed.Text)
+	}
+}
+
+// A REBUILT SIGNAL IS STILL A CARD.
+//
+// The record keeps only the payload text, so a reopened conversation showed a
+// raw JSON document as prose. What the CR still knows rebuilds the head, and
+// the payload moves to the field the browser folds.
+func TestRecordedSignalIsACard(t *testing.T) {
+	conv := ConversationSummary{Title: "BackOff: jellyfin", Source: "cluster-events", Pipeline: "k8s-ops"}
+	in := RecordedInput{ID: "in-1", Text: "{\n  \"reason\": \"BackOff\"\n}", ReceivedAt: "2026-08-23T06:00:00Z"}
+
+	got := recordedMessage("c1", "console", in, conv)
+	if got.Kind != MsgSignal {
+		t.Fatalf("kind = %q", got.Kind)
+	}
+	if !strings.Contains(got.Text, "**Source** `cluster-events`") {
+		t.Errorf("the source is not on the rebuilt card:\n%s", got.Text)
+	}
+	if !strings.Contains(got.Text, "📣 **BackOff: jellyfin**") {
+		t.Errorf("the title is missing:\n%s", got.Text)
+	}
+	// The payload travels APART, so the browser collapses it instead of
+	// printing a JSON document as prose.
+	if !strings.Contains(got.Payload, "\"reason\": \"BackOff\"") {
+		t.Errorf("payload did not travel separately: %q", got.Payload)
+	}
+	if strings.Contains(got.Text, "reason") {
+		t.Errorf("the payload is still inline in the card:\n%s", got.Text)
+	}
+}
+
+// A conversation with no title and no recorded source must not panic, and must
+// not render an empty card either.
+func TestRecordedSignalDegrades(t *testing.T) {
+	in := RecordedInput{ID: "in-1", Text: "plain event"}
+	got := recordedMessage("c1", "console", in, ConversationSummary{})
+	if got.Text != "" {
+		t.Errorf("nothing is known, so the card is empty: %q", got.Text)
+	}
+	if got.Payload != "plain event" {
+		t.Errorf("the payload must survive: %q", got.Payload)
+	}
+}
+
+// THE REBUILT CARD CARRIES ITS LABELS.
+//
+// They used to live only on the ConversationInput, which is deleted with the
+// queue entry, so a card lost its whole label table the moment the console
+// restarted. They are on the conversation now, beside the source.
+func TestRecordedSignalKeepsItsLabels(t *testing.T) {
+	conv := ConversationSummary{
+		Title: "OOMKilling: radarr", Source: "cluster-events", Pipeline: "k8s-ops",
+		SignalLabels: map[string]string{
+			"namespace": "media-center", "severity": "Warning",
+			"alertname": "OOMKilling",     // already the title
+			"source":    "cluster-events", // already the source line
+		},
+	}
+	got := recordedMessage("c1", "console", RecordedInput{ID: "in-1", Text: "{}"}, conv)
+
+	if !strings.Contains(got.Text, "| `namespace` | media-center |") {
+		t.Errorf("the rebuilt card lost its labels:\n%s", got.Text)
+	}
+	// The SAME suppression the live card applies, so the two do not diverge.
+	if strings.Contains(got.Text, "| `alertname` |") || strings.Contains(got.Text, "| `source` |") {
+		t.Errorf("a redundant label survived on the rebuilt card:\n%s", got.Text)
 	}
 }

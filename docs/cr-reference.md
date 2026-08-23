@@ -10,7 +10,7 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 
 | Kind | You write it | Fields |
 |---|---|---|
-| [AgentProfile](#agentprofile) | yes | 39 |
+| [AgentProfile](#agentprofile) | yes | 40 |
 | [Pipeline](#pipeline) | yes | 14 |
 | [MCPToolset](#mcptoolset) | yes | 1 |
 | [MCPConfig](#mcpconfig) | yes | 5 |
@@ -19,7 +19,7 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | [Channel](#channel) | yes | 4 |
 | [ChannelAdapter](#channeladapter) | yes | 16 |
 | [AgentRuntime](#agentruntime) | yes | 54 |
-| [Conversation](#conversation) | no — the operator does | 31 |
+| [Conversation](#conversation) | no — the operator does | 35 |
 | [ConversationInput](#conversationinput) | no — the operator does | 5 |
 
 ## AgentProfile
@@ -51,6 +51,7 @@ AgentProfileSpec is an addressable agent IDENTITY: repository, agent role, promp
 | `env[].valueFrom.secretKeyRef.name` | `string` |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
 | `env[].valueFrom.secretKeyRef.optional` | `boolean` |  | Specify whether the Secret or its key must be defined |
 | `maxTurns` | `integer` |  | MaxTurns bounds the agent's own turns within ONE work unit. It is a runaway bound, not a budget: the conversation is unaffected. |
+| `outputFormat` | `string` | **yes** | OutputFormat declares this agent's OUTPUT CONTRACT. REQUIRED, and deliberately without a default, because both candidate defaults are wrong: blocks — the operator's shared output-format specification is appended to the prompt: the block grammar, the fold, the markdown subset and a default section set none — NOTHING is appended, and the profile's own prompt owns formatting entirely NO DEFAULT ON PURPOSE. `none` leaves output unformatted unless the author wrote a format into the prompt; `blocks` shapes output by something the author never asked for. Refusing to guess is the honest resolution, so the author declares it and a profile omitting the field is REFUSED. IDENTITY, NEVER CAPABILITY. It shapes how the agent SPEAKS, not what it may call — the allowlist and the MCP servers remain exclusively the originating Pipeline's. IT GATES THE PROMPT, NEVER THE PARSE. Adapters parse whatever they are given, so a profile declaring `none` whose agent emits tags anyway is still rendered as blocks. Decoupling them is what keeps this safe: a switch that moved the parser too could be configured into a state where the model emits tags nothing is looking for. IT DOES NOT GATE THE OPERATOR'S OWN PROMPT CONTENT. Text stating that the printed answer IS the deliverable is a fact about the system rather than a preference, and is injected whatever this says. |
 | `prompt` | `string` |  | Prompt / ReplyPrompt are repo-relative template paths (job-style lanes). When empty, the operator's built-in lane templates wrap the agent. |
 | `replyPrompt` | `string` |  | ReplyPrompt wraps a follow-up in an existing conversation, where Prompt wraps the first unit. |
 | `repository` | `object` |  | RepositorySpec identifies the git repository an agent runs from. The runtime checks it out as its working directory, so the agent has access to the whole repo (CLAUDE.md, .claude/agents, skills, any assets). Optional: without a repository the agent runs as a pure advisor over its tools. |
@@ -415,6 +416,10 @@ ConversationSpec pins a conversation to its chat surfaces and an agent profile, 
 | `pipelineRef.name` | `string` | **yes** | Name of the referenced object. |
 | `profileRef` | `object` | **yes** | ObjectRef references another object by name (same namespace). |
 | `profileRef.name` | `string` | **yes** | Name of the referenced object. |
+| `signal` | `object` |  | Signal is what the ORIGINATING SIGNAL was, for attribution. PROVENANCE, exactly like PipelineRef: written once at creation, read only for display, and nothing is ever resolved through it. It is on the CONVERSATION because a conversation has exactly one originating signal — reuse is scoped to one signature and one pipeline, so every signal that lands here came from the same source with the same grouping labels. IT USED TO LIVE ONLY ON THINGS BUILT TO BE PRUNED. The source was on `spec.inputs[].origin.name`, which `pruneProcessed` empties, and the labels were on the `ConversationInput`, which is DELETED with the queue entry. So a finished conversation kept its answer, kept the question, and could not say what started it — a viewer showed the phase, the profile and the pipeline of an alert and not the source that fired it or a single one of its labels. The same loss `status.runs[].inputs[]` was added to fix, two fields over. Absent on conversations created before this field, and on anything a channel started. Render it as absent rather than guessing. |
+| `signal.labels` | `map[string]string` |  | Labels are the signal's grouping labels, as the adapter sent them. BOUNDED at MaxSignalLabels. A Conversation is long-lived where the ConversationInput that used to hold these was not, and an adapter's label set is its own business — an unbounded map on a durable object is an etcd cost nobody chose. |
+| `signal.sourceRef` | `object` |  | SourceRef is the SignalSource this conversation came from. |
+| `signal.sourceRef.name` | `string` | **yes** | Name of the referenced object. |
 | `signature` | `string` |  | Signature groups same/similar problems into one conversation (e.g. alertgroup/alertname/namespace, job:<name>). |
 | `title` | `string` |  |  |
 | `toolsets` | `object` |  | Toolsets / MCPConfigs are the originating Pipeline's tooling bindings, snapshotted at creation like ChannelRefs and ProfileRef: materialized per-conversation state, NOT wiring — nothing sets them by hand, and re-wiring the pipeline affects only new conversations. Only the refs are snapshotted; the referenced CRs' CONTENT is re-read at every use, so editing a toolset or config reaches running conversations. Every origination has a Pipeline behind it — a signal of any kind through a claimed source, or a chat command naming one — and a conversation whose Pipeline declared no bindings carries none, because nothing else supplies them: profiles carry no capabilities at all. |

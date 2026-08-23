@@ -1,6 +1,32 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkBreaks from 'remark-breaks'
+import rehypeHighlight from 'rehype-highlight'
+import bash from 'highlight.js/lib/languages/bash'
+import go from 'highlight.js/lib/languages/go'
+import ini from 'highlight.js/lib/languages/ini'
+import java from 'highlight.js/lib/languages/java'
+import json from 'highlight.js/lib/languages/json'
+import python from 'highlight.js/lib/languages/python'
+import sql from 'highlight.js/lib/languages/sql'
+import typescript from 'highlight.js/lib/languages/typescript'
+import xml from 'highlight.js/lib/languages/xml'
+import yaml from 'highlight.js/lib/languages/yaml'
 import { plain } from './Text'
+
+// SYNTAX HIGHLIGHTING, LANGUAGE BY LANGUAGE.
+//
+// `rehype-highlight` runs lowlight, which produces an ELEMENT TREE that
+// react-markdown renders as React nodes. That is the whole reason it is used
+// instead of highlight.js directly: hljs returns an HTML STRING, and rendering
+// one would need dangerouslySetInnerHTML — the single thing this app does not
+// do anywhere (Text.tsx, and a test that scans every source file).
+//
+// Grammars are listed EXPLICITLY. The full set is ~200 languages and most of a
+// megabyte, for readers who look at cluster payloads. What an ops agent
+// actually emits decides this list: Kubernetes objects and events, commands,
+// this repo's own sources, queries. Add one when an agent starts producing it.
+const LANGUAGES = { bash, go, ini, java, json, python, sql, typescript, xml, yaml }
 
 /**
  * Agent output, RENDERED.
@@ -26,7 +52,24 @@ export function Markdown({ children }: { children?: string | null }) {
     // scrolls within itself.
     <div style={{ minWidth: 0, maxWidth: '100%', overflowWrap: 'anywhere' }}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        // A SINGLE NEWLINE IS A LINE BREAK, as it is in every chat client.
+        //
+        // Standard markdown collapses one into a space, which turns anything
+        // the agent wrote on consecutive lines into one running paragraph. A
+        // three-line evidence list arrived as a single sentence for exactly
+        // this reason.
+        //
+        // format.md now tells the agent to write real `- ` lists, and this is
+        // the floor under that instruction: a model that writes plain lines,
+        // or a stray `•`, still reads as lines rather than as prose.
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        // `detect: false` — colour a block only when the AGENT tagged it.
+        // Guessing turns a plain log excerpt into a randomly coloured one, and
+        // format.md already tells the agent to tag every fence.
+        //
+        // `subset: false` keeps an unknown tag from being auto-detected into
+        // whichever grammar looks closest.
+        rehypePlugins={[[rehypeHighlight, { languages: LANGUAGES, detect: false, subset: false }]]}
         components={{
           // SIDEWAYS ONLY.
           //
@@ -75,8 +118,30 @@ export function Markdown({ children }: { children?: string | null }) {
           pre: ({ children }) => (
             <pre
               style={{
-                // Sideways only, for the same reason a table is: a long code
-                // block is a long message, and the transcript scrolls already.
+                // Sideways always — and DOWNWARD once it is tall enough to
+                // dominate the thread. A signal payload is thirty lines of
+                // machine document, and unbounded it pushes the message that
+                // explains it off the screen.
+                //
+                // This is the console's answer to what Telegram does with an
+                // expandable quote: bound the height, keep every line reachable.
+                // A short block is under the limit and unaffected, so nothing
+                // that already fitted gains a scrollbar.
+                maxHeight: '22em',
+                overflowY: 'auto',
+                // WRAP, DO NOT SCROLL SIDEWAYS.
+                //
+                // `pre` defaults to `white-space: pre`, so one long line — a
+                // JSON string field, a log message, a prose payload — became a
+                // horizontal scrollbar. Reading a sentence by dragging a bar is
+                // worse than reading it on two lines.
+                //
+                // `pre-wrap` keeps the indentation that makes a payload legible
+                // and breaks only where a line is too long for the column.
+                whiteSpace: 'pre-wrap',
+                overflowWrap: 'anywhere',
+                // Still available for what genuinely cannot break — a single
+                // unspaced token wider than the message.
                 overflowX: 'auto',
                 background: 'var(--ao-surface-alt)',
                 border: '1px solid var(--ao-border)',

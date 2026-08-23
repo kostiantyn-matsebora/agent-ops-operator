@@ -25,6 +25,11 @@ adapter.
    still reading that field would post empty messages and look healthy doing it,
    so the handshake fails at the door rather than downstream.
 
+   **The block grammar did NOT move it.** No field was added and none changed
+   meaning — a body that was markdown is now markdown plus a grammar, read by
+   the component that already read the markdown. See [The body
+   grammar](#the-body-grammar).
+
    **A claimed op also carries `reclaimAfterSeconds`** — how long the manager
    leaves the claim with you before returning the op to the queue. It is
    additive and optional: ignore it and nothing changes. Honour it if you absorb
@@ -340,6 +345,90 @@ transport still holds the text, so a selection needs no state on either side.
 **Never drop `choices`.** They are the reader's only account of what is on
 offer. A transport without controls renders them as a list.
 
+### The body grammar
+
+**A free-text body is markdown in the named subset, PLUS a block grammar.** You
+read both. That is how this contract has always worked for prose: it names a
+language, and each surface renders what it can.
+
+**The manager does not parse either one.** It hands you what the agent printed,
+character for character.
+
+#### The grammar
+
+A tag is recognized only when **all three** hold:
+
+1. it stands alone on its own line, at the start of that line
+2. it forms a well-formed open/close pair
+3. it is not inside a fenced code block
+
+```
+<title>
+Pod is looping
+</title>
+
+<root-cause>
+OOM at 512Mi.
+</root-cause>
+
+<details>
+Everything a reader only wants if they ask.
+</details>
+```
+
+| Tag | Is |
+|---|---|
+| `<title>` | at most one, rendered FIRST wherever it appeared, a single line |
+| `<details>` | **THE FOLD** — present it collapsed, expandable by the reader |
+| anything else | a section the AGENT named, above the fold, in written order |
+
+#### Rules your parser must follow
+
+- **Anything failing the three conditions is LITERAL TEXT.** Agent output is
+  full of `<` — `if x < y`, `Deployment<T>`, shell redirects. None of it is a
+  tag.
+- **Parsing is TOTAL.** No recognized tag yields one block holding the whole
+  text, which renders exactly as prose does today. That is the entire
+  backward-compatibility story.
+- **An unpaired opening tag closes at end of output.** Never discard the region
+  — losing an agent's words to a grammar slip is the worst failure available.
+- **A tag inside an open region is literal.** The model is flat.
+- **The section vocabulary is OPEN.** Every agent names its own sections for its
+  own job — `root-cause`, `changed`, `what-i-checked`. Render a label
+  generically. **An adapter carrying a list of section names is wrong**, and
+  will be wrong again the next time somebody writes a profile.
+- **Only the fold is closed**, which is all you need to know where to collapse.
+- **Never reorder named sections** and never shorten anything. Which part is the
+  summary is the agent's judgement, already made by what it put in `<details>`.
+
+#### Which bodies carry it
+
+| kind | Parse it? |
+|---|---|
+| `answer` | **yes** — agent output by definition |
+| `notice` | **yes** — a failed run that explained itself leaves as one, and that explanation is the longest thing an agent produces. Manager-composed prose parses to one block, same result |
+| `relay` | **no** — somebody's typed words. Parsing them consumes characters a person deliberately wrote |
+| `signal` | **no** — not prose at all, see below |
+
+**A `signal` is a CARD, not a body.** Its structured fields *are* the message:
+title, source, pipeline, labels, payload.
+
+Its payload is a machine document or somebody's typed text, never this grammar.
+
+**That is the one place you need a second renderer.** Keeping the two apart is
+what lets a card show a source and a label table while an answer shows a title
+and a fold.
+
+#### If you do not implement it
+
+You render the tags literally, which is ugly.
+
+That is prevented upstream. `AgentProfile.spec.outputFormat` is **required**,
+and a profile declaring `none` emits no tags at all — so an install serves the
+grammar only to surfaces that understand it.
+
+**The compatibility boundary is the profile, not the wire.**
+
 **`ensure-topic` carries `op.topic`, a descriptor** — `conversation`,
 `pipeline?`, `source?`, `title`, `labels{}`, `kind` — and YOU name the thread
 from it.
@@ -613,6 +702,11 @@ rest: **adapters normalize, the manager groups.**
    ```
 
    `kind` is one of `alert`, `job`, `task`, `chat`. `title` is optional.
+
+   **A signal payload is never parsed as prose.** It reaches every adapter
+   exactly as you sent it, and the adapter renders a CARD from your structured
+   fields. The block grammar applies to AGENT output only — see [The body
+   grammar](#the-body-grammar).
 
    The manager applies the source's `grouping` policy: fingerprint cooldown
    (at-least-once delivery is safe, re-sends collapse), signature from `labels`

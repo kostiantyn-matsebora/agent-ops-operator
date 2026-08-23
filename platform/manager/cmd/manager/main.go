@@ -226,7 +226,7 @@ func main() {
 		// ClusterRole that makes it possible ship together, or enabling it
 		// alone would only produce forbidden loops in the log.
 		DrainAware: envBool("DRAIN_AWARE"),
-		Ops:      ops,
+		Ops:        ops,
 		// The timer closes through the SAME path /close does, which is why the
 		// reconciler holds the router at all.
 		Router: router,
@@ -251,12 +251,12 @@ func main() {
 			// implements a contract rather than being a backend choice. Empty
 			// disables sidecar mode outright, so a chart that has not been
 			// upgraded cannot half-apply it.
-			ContextSyncImage:     env("CONTEXT_SYNC_IMAGE", ""),
+			ContextSyncImage: env("CONTEXT_SYNC_IMAGE", ""),
 			// Empty disables mediation outright, the same way an empty
 			// CONTEXT_SYNC_IMAGE disables the sidecar: a redirect with no proxy
 			// to answer it is a pod that reaches nothing.
-			EgressProxyImage: env("EGRESS_PROXY_IMAGE", ""),
-			EgressInitImage:  env("EGRESS_INIT_IMAGE", ""),
+			EgressProxyImage:     env("EGRESS_PROXY_IMAGE", ""),
+			EgressInitImage:      env("EGRESS_INIT_IMAGE", ""),
 			ContextLiveSizeLimit: env("CONTEXT_LIVE_SIZE_LIMIT", "4Gi"),
 		},
 	}

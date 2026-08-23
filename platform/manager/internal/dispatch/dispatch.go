@@ -25,10 +25,37 @@ var replyTemplate string
 //go:embed templates/format.md
 var formatSpec string
 
-// withFormat appends the mandatory message-format specification to a built-in
-// lane template (repo-provided prompts are expected to carry their own).
-func withFormat(tpl string) string {
-	return tpl + "\n\n---\n\n" + formatSpec
+// appendFormatSpec adds the shared output-format specification to a work unit
+// WHEN THE PROFILE ASKED FOR IT — the block grammar, the fold, the markdown
+// subset and a default section set.
+//
+// ON THE SYSTEM PROMPT, AND IN ONE PLACE, because there are two prompt lanes
+// and only one of them is a string the manager holds. A profile with its own
+// `prompt` file sends the runtime a PATH plus variables, so nothing here can
+// append to it — and the previous shape, which appended to the built-in lane
+// templates only, made "is this agent told how to format" a property of whether
+// a profile happened to set `prompt`. It is now a property of the profile
+// saying so, on both lanes.
+//
+// It is also where the spec belongs: how an agent SPEAKS is identity, which is
+// what SystemPrompt already carries.
+//
+// `none` APPENDS NOTHING, and that is a declaration rather than a default — the
+// field is required, so a profile reaching here has stated its contract.
+//
+// THE DECLARATION GATES THE PROMPT AND NOTHING ELSE. Output is parsed into blocks
+// either way, so a profile that declines this and teaches its own agent the
+// grammar still gets folded output, and one that declines everything gets a
+// single block — exactly today's rendering.
+func appendFormatSpec(unit *WorkUnit, profile *agentopsv1alpha1.AgentProfile) {
+	if profile == nil || profile.Spec.OutputFormat != agentopsv1alpha1.OutputFormatBlocks {
+		return
+	}
+	if unit.SystemPrompt == "" {
+		unit.SystemPrompt = formatSpec
+		return
+	}
+	unit.SystemPrompt += "\n\n---\n\n" + formatSpec
 }
 
 // deliverySection is the delivery wording injected into every prompt. It is a
@@ -209,6 +236,10 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 		MaxTurns:     profile.Spec.MaxTurns,
 		SystemPrompt: profile.Spec.SystemPrompt,
 	}
+	// ONE call, before any lane branches: both prompt lanes get the same
+	// treatment, and a new lane cannot forget it.
+	appendFormatSpec(&unit, profile)
+
 	agentName := profile.Spec.Agent
 	// DEPRECATED DUAL-READ, one release only. Nothing writes InputItem.Agent
 	// any more — the `/<pipeline>:<agent>` form is gone, because a caller
@@ -236,7 +267,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			unit.PromptFile = profile.Spec.Prompt
 			unit.PromptVars = vars
 		} else {
-			unit.PromptText = render(withFormat(taskTemplate), vars)
+			unit.PromptText = render(taskTemplate, vars)
 		}
 		return unit, []string{first.ID}, true, nil
 
@@ -251,7 +282,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			unit.PromptFile = profile.Spec.Prompt
 			unit.PromptVars = vars
 		} else {
-			unit.PromptText = render(withFormat(investigateTemplate), vars)
+			unit.PromptText = render(investigateTemplate, vars)
 		}
 		return unit, []string{first.ID}, true, nil
 
@@ -266,7 +297,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 				return WorkUnit{}, nil, false, err
 			}
 			unit.RunID = runID
-			unit.PromptText = render(withFormat(taskTemplate), map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection})
+			unit.PromptText = render(taskTemplate, map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection})
 			return unit, []string{first.ID}, true, nil
 		}
 		// batch consecutive inputs of the same type into one resume
@@ -303,7 +334,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			unit.PromptFile = profile.Spec.ReplyPrompt
 			unit.PromptVars = vars
 		} else {
-			unit.PromptText = render(withFormat(replyTemplate), vars)
+			unit.PromptText = render(replyTemplate, vars)
 		}
 		return unit, ids, true, nil
 	}

@@ -138,13 +138,20 @@ func (b *refBinding) refs() []string {
 // convView is the console's read of a Conversation.
 type convView struct {
 	Spec struct {
-		ChannelRefs []Ref       `json:"channelRefs,omitempty"`
-		ProfileRef  Ref         `json:"profileRef"`
-		PipelineRef *Ref        `json:"pipelineRef,omitempty"`
-		Title       string      `json:"title,omitempty"`
-		Toolsets    *refBinding `json:"toolsets,omitempty"`
-		MCPConfigs  *refBinding `json:"mcpConfigs,omitempty"`
-		Inputs      []struct {
+		ChannelRefs []Ref `json:"channelRefs,omitempty"`
+		ProfileRef  Ref   `json:"profileRef"`
+		PipelineRef *Ref  `json:"pipelineRef,omitempty"`
+		// Signal is what STARTED the conversation — the source and the labels
+		// the adapter sent. Provenance, and the first question anybody asks of
+		// an alert. Grouped on the CR because they are facts about one thing.
+		Signal *struct {
+			SourceRef *Ref              `json:"sourceRef,omitempty"`
+			Labels    map[string]string `json:"labels,omitempty"`
+		} `json:"signal,omitempty"`
+		Title      string      `json:"title,omitempty"`
+		Toolsets   *refBinding `json:"toolsets,omitempty"`
+		MCPConfigs *refBinding `json:"mcpConfigs,omitempty"`
+		Inputs     []struct {
 			ID   string `json:"id"`
 			Type string `json:"type"`
 		} `json:"inputs,omitempty"`
@@ -186,9 +193,18 @@ type ConversationSummary struct {
 	Title   string `json:"title,omitempty"`
 	Profile string `json:"profile,omitempty"`
 	// Pipeline is "" when attribution is not derivable (see AttributePipeline).
-	Pipeline string    `json:"pipeline,omitempty"`
-	Phase    string    `json:"phase,omitempty"`
-	Inflight *Inflight `json:"inflight,omitempty"`
+	Pipeline string `json:"pipeline,omitempty"`
+	// Source is the SignalSource that opened this conversation, read straight
+	// off the CR. Empty on one a channel started, and on any created before the
+	// manager recorded it — render as absent, never guessed.
+	Source string `json:"source,omitempty"`
+	// SignalLabels are the originating signal's grouping labels, kept on the CR
+	// so a REBUILT card carries them. They used to live only on the
+	// ConversationInput, which is deleted with the queue entry — so a card lost
+	// its label table the moment the console restarted.
+	SignalLabels map[string]string `json:"signalLabels,omitempty"`
+	Phase        string            `json:"phase,omitempty"`
+	Inflight     *Inflight         `json:"inflight,omitempty"`
 	// Runs is populated in the DETAIL view only; list rows carry RunCount
 	// instead, because a result is a whole agent message and thousands of them
 	// do not belong in a listing.
@@ -267,6 +283,7 @@ func summarize(obj *Object, pipelines []*Object, consoleChannel, reader string) 
 	s := ConversationSummary{
 		Name: obj.Metadata.Name, UID: obj.Metadata.UID, Title: v.Spec.Title,
 		Profile: v.Spec.ProfileRef.Name, Pipeline: AttributePipeline(obj, pipelines),
+		Source: signalSource(v), SignalLabels: signalLabels(v),
 		Phase: v.Status.Phase, Inflight: v.Status.Inflight, Runs: v.Status.Runs,
 		Threads: v.Status.Threads, RuntimePod: v.Status.RuntimePod,
 		LastActivity: v.Status.LastActivity, Created: obj.Metadata.CreationTimestamp,
@@ -335,4 +352,21 @@ func UnjoinedPipelines(c *Cache, consoleChannel string) []string {
 		}
 	}
 	return out
+}
+
+// signalSource is the SignalSource that opened a conversation, or "" when it
+// was started by a channel or predates the field.
+func signalSource(v convView) string {
+	if v.Spec.Signal == nil || v.Spec.Signal.SourceRef == nil {
+		return ""
+	}
+	return v.Spec.Signal.SourceRef.Name
+}
+
+// signalLabels are the originating signal's labels, or nil.
+func signalLabels(v convView) map[string]string {
+	if v.Spec.Signal == nil {
+		return nil
+	}
+	return v.Spec.Signal.Labels
 }

@@ -131,8 +131,14 @@ func TestReadyPipelineChangesTheObservedRevision(t *testing.T) {
 	}
 }
 
-// An adapter that knows nothing of the vocabulary keeps working, and the
-// outbound contract version is unchanged — every addition here is optional.
+// An adapter that knows nothing of the vocabulary keeps working — every
+// addition there is optional.
+//
+// THE VERSION STILL HAS NOT MOVED, and structured-agent-output is why that is
+// worth restating: it briefly went to 3 to carry a parsed `blocks[]`, and the
+// field was removed when parsing moved into the adapters. A body that was
+// markdown is now markdown plus a block grammar, read by the component that
+// already read the markdown — nothing was added to the wire.
 func TestVocabularyIsPurelyAdditiveForOlderAdapters(t *testing.T) {
 	mkChannel(t, "old-chan", "telegram")
 	srv := apiServer()
@@ -141,7 +147,8 @@ func TestVocabularyIsPurelyAdditiveForOlderAdapters(t *testing.T) {
 		t.Fatalf("older adapter refused: %d %s", rec.Code, rec.Body.String())
 	}
 	if chat.ContractVersion != "2" {
-		t.Fatalf("contract version moved to %q — nothing here required it", chat.ContractVersion)
+		t.Fatalf("contract version moved to %q — update this guard deliberately, not incidentally",
+			chat.ContractVersion)
 	}
 	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=1&wait=0", nil, "test-adapter-token"); rec.Code != 400 {
 		t.Fatalf("contract handshake weakened: %d", rec.Code)
@@ -213,6 +220,9 @@ func TestPreVocabularyAdapterIsUnaffected(t *testing.T) {
 			if op.Message == nil || op.Message.Kind == "" {
 				t.Fatalf("send op lost its typed message: %+v", op)
 			}
+			if op.Message.Body == "" {
+				t.Fatalf("contract=2 adapter got a message with no body to render: %+v", op.Message)
+			}
 		}
 		// Completing an op is unchanged.
 		if rec := adapterReq(srv, "POST", "/channel/ops/"+op.ID+"/done",
@@ -226,6 +236,6 @@ func TestPreVocabularyAdapterIsUnaffected(t *testing.T) {
 
 	// 5. The contract version did not move. An adapter pinning it keeps working.
 	if chat.ContractVersion != "2" {
-		t.Fatalf("contract version is now %q — nothing in this change required it", chat.ContractVersion)
+		t.Fatalf("contract version is now %q — this test drives %q", chat.ContractVersion, "2")
 	}
 }

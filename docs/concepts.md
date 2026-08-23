@@ -559,6 +559,49 @@ override that recovers the separation.
 An `AgentProfile` is an identity — repository, agent role, prompts, env, limits.
 It declares **no tools and no MCP servers**.
 
+### `outputFormat` — how the agent SPEAKS
+
+The one profile field that shapes output rather than capability. **Required, and
+with no default:**
+
+```yaml
+kind: AgentProfile
+spec:
+  outputFormat: blocks    # or: none
+```
+
+| Value | Means |
+|---|---|
+| `blocks` | the shared output-format specification is appended to the prompt — the block grammar, the fold, the markdown subset, and a default set of sections |
+| `none` | nothing is appended, and the profile's own prompt owns formatting |
+
+**There is no default, because both candidates are wrong.** `none` leaves output
+unformatted unless the author wrote a format into the prompt. `blocks` shapes
+output by something the author never asked for. So the author declares it, and a
+profile omitting the field is refused.
+
+**It grants nothing.** Tools and MCP servers are identical either way — they
+come from the Pipeline and never from here.
+
+**It gates the PROMPT, never the PARSE.** Surfaces parse whatever they are
+given:
+
+| profile | agent emits | reader gets |
+|---|---|---|
+| `blocks` | the grammar | title, sections, a fold |
+| `none` | the grammar anyway | the same — the parse does not ask |
+| either | plain prose | one block, rendered as agent output always has been |
+
+**That decoupling is what makes the field safe.** A switch that moved the parser
+too could be configured into a state where the model emits tags nothing is
+looking for, and the reader would see the tags.
+
+**It does not gate the operator's own prompt content.** Text stating that the
+printed answer is the deliverable is a fact about the system rather than a
+preference, and is injected whatever this says.
+
+See [contracts.md](contracts.md) for the grammar itself.
+
 What an agent may *do* comes from the `Pipeline` routing its conversation, which
 is the only place capabilities live:
 

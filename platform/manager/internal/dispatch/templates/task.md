@@ -20,4 +20,4 @@ You are running headless in a Kubernetes agent runtime pod. Your working directo
 
 {{DELIVERY_INSTRUCTIONS}}
 
-Format the answer per the MESSAGE FORMAT SPECIFICATION below — **Template 3** (Task/agent answer), or **Template 6** when you need clarification. The user continues by replying in this conversation. Then print a one-line summary `AGENT-TASK: {{AGENT_NAME}}: <done|clarify|refused>`.
+Lead with the conclusion, and keep the long tail out of the opening. The user continues by replying in this conversation.

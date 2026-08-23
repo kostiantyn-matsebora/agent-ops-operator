@@ -472,15 +472,15 @@ func TestSyncCommandsRetriesAfterAFailedRun(t *testing.T) {
 // they cannot act on, which is worse than no icon at all.
 func TestIconReferencesResolveOrDisappear(t *testing.T) {
 	for ref, want := range map[string]string{
-		"aops:kubernetes":            "☸",
-		"aops:home":                  "🏠",
-		"aops:observe":               "🔎",
-		"aops:no-such-icon":          "",
-		"mdi:kubernetes":             "",
-		"https://example.com/x.svg":  "",
-		"🚀":                          "🚀",
-		"":                           "",
-		"   ":                        "",
+		"aops:kubernetes":           "☸",
+		"aops:home":                 "🏠",
+		"aops:observe":              "🔎",
+		"aops:no-such-icon":         "",
+		"mdi:kubernetes":            "",
+		"https://example.com/x.svg": "",
+		"🚀":                         "🚀",
+		"":                          "",
+		"   ":                       "",
 	} {
 		if got := emojiFor(ref); got != want {
 			t.Errorf("emojiFor(%q) = %q, want %q", ref, got, want)

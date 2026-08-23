@@ -486,6 +486,16 @@ profiles:
     # configured — a profile with no way to reach the house is furniture.
     enabled: true
     name: ha-user
+    # The agent's OUTPUT CONTRACT. `blocks` appends the operator's shared
+    # output-format specification — the block grammar, the fold, the markdown
+    # subset and a default section set — so a long answer opens with its
+    # conclusion and folds the detail away on every surface. `none` appends
+    # nothing and this profile's own prompt owns formatting.
+    #
+    # REQUIRED on the CR, with no default: both candidate defaults are wrong, so
+    # the author declares it.
+    outputFormat: blocks
+
     # Appended to the runtime's own system prompt, never replacing it. Identity,
     # not capability: nothing here widens the allowlist.
     systemPrompt: |
@@ -533,6 +543,15 @@ profiles:
     # with a token that cannot reconfigure one fails every task it is given.
     enabled: true
     name: ha-operator
+    # The agent's OUTPUT CONTRACT. `blocks` appends the operator's shared
+    # output-format specification — the block grammar, the fold, the markdown
+    # subset and a default section set — so a long answer opens with its
+    # conclusion and folds the detail away on every surface. `none` appends
+    # nothing and this profile's own prompt owns formatting.
+    #
+    # REQUIRED on the CR, with no default: both candidate defaults are wrong, so
+    # the author declares it.
+    outputFormat: blocks
     systemPrompt: |
       You are the administrator of a live Home Assistant installation. You are
       called when something in the house is BROKEN, and you are the agent that

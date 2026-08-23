@@ -234,6 +234,16 @@ profile:
   # only inputs are the allowlist and the task text. That is survivable for a
   # direct question and bad for an event that opens one with no instructions.
   #
+  # The agent's OUTPUT CONTRACT. `blocks` appends the operator's shared
+  # output-format specification — the block grammar, the fold, the markdown
+  # subset and a default section set — so a long answer opens with its
+  # conclusion and folds the detail away on every surface. `none` appends
+  # nothing and this profile's own prompt owns formatting.
+  #
+  # REQUIRED on the CR, with no default: both candidate defaults are wrong, so
+  # the author declares it.
+  outputFormat: blocks
+
   # Appended to the runtime's own system prompt, never replacing it. Identity,
   # not capability: nothing here widens the allowlist.
   systemPrompt: |

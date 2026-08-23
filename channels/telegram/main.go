@@ -399,7 +399,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		//
 		// The controls hang off the LAST chunk, where the reader ends up, and
 		// the reply linkage off the first, which is the one that answers.
-		chunks := splitHTML(renderMessage(a.menu, *op.Message))
+		chunks := renderChunks(a.menu, *op.Message)
 		for i, chunk := range chunks {
 			extras := SendExtras{}
 			if i == 0 {
@@ -472,7 +472,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			return "", err.Error()
 		}
 		if op.Message != nil {
-			for _, chunk := range splitHTML(renderMessage(a.menu, *op.Message)) {
+			for _, chunk := range renderChunks(a.menu, *op.Message) {
 				if err := tg.Send(ctx, sc.cfg.ChatID, &tid, chunk); err != nil {
 					// Close it again even so: a topic left open after a failed
 					// tombstone is worse than a missing tombstone.

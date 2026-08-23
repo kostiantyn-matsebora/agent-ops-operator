@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 )
 
 // Rendering is the ADAPTER'S job, and this file is all of it for Telegram.
@@ -33,11 +34,19 @@ func escape(s string) string {
 }
 
 var (
-	fencedRe = regexp.MustCompile("(?s)```[a-zA-Z0-9_+-]*\n?(.*?)```")
+	// The language is CAPTURED, not discarded: Telegram highlights a fenced
+	// block tagged `<pre><code class="language-X">`, and the tag is the only
+	// thing that turns a wall of JSON into something readable. The charset is
+	// deliberately narrow so the captured value is safe in an attribute without
+	// escaping — anything outside it is not a language name.
+	fencedRe = regexp.MustCompile("(?s)```([a-zA-Z0-9_+#-]*)\n?(.*?)```")
 	boldRe   = regexp.MustCompile(`\*\*([^*]+)\*\*`)
 	italicRe = regexp.MustCompile(`(^|[^*\w])\*([^*\n]+)\*`)
 	codeRe   = regexp.MustCompile("`([^`\n]+)`")
 	linkRe   = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)`)
+	// A markdown list item: `- ` or `* ` at line start, with any indent kept so
+	// a nested list still reads as nested.
+	listRe = regexp.MustCompile(`(?m)^([ \t]*)[-*] `)
 )
 
 // markdownToHTML converts the contract's markdown subset to Telegram HTML.
@@ -65,7 +74,14 @@ func markdownToHTML(md string) string {
 	}
 
 	withoutFences := fencedRe.ReplaceAllStringFunc(md, func(m string) string {
-		return stash("<pre>" + escape(strings.TrimRight(fencedRe.FindStringSubmatch(m)[1], "\n")) + "</pre>")
+		g := fencedRe.FindStringSubmatch(m)
+		lang, body := g[1], escape(strings.TrimRight(g[2], "\n"))
+		if lang == "" {
+			return stash("<pre>" + body + "</pre>")
+		}
+		// An unknown language is not an error: Telegram renders the block
+		// unhighlighted, which is exactly what an untagged fence gets.
+		return stash(`<pre><code class="language-` + strings.ToLower(lang) + `">` + body + "</code></pre>")
 	})
 
 	// TABLES BECOME A MONOSPACED BLOCK. Telegram has no table markup at all, so
@@ -76,6 +92,12 @@ func markdownToHTML(md string) string {
 	// Stashed like a fence, for the same reason: nothing after this should see
 	// the cell text as prose to re-mark-up.
 	withoutFences = renderTables(withoutFences, stash)
+
+	// MARKDOWN LISTS BECOME SPACED BULLETS. Telegram HTML has no list markup, so
+	// the closest thing is a bullet glyph per line — and the agent must write a
+	// real markdown list rather than typing the glyph itself, or a surface that
+	// DOES have lists (the console) renders one running paragraph.
+	withoutFences = bulletList(withoutFences)
 
 	out := escape(withoutFences)
 	out = codeRe.ReplaceAllStringFunc(out, func(m string) string {
@@ -176,6 +198,196 @@ func alignColumns(rows [][]string) string {
 	return b.String()
 }
 
+// ---- blocks ----------------------------------------------------------------
+//
+// The manager parses agent output into blocks and this renders them. NO PARSING
+// HAPPENS HERE, and none should ever be added: the grammar is meaning, which is
+// the manager's half of the contract, and an adapter recognising tags would be
+// the second parser this shape exists to prevent.
+//
+// What arrives is already structured, so the only Telegram-shaped decisions
+// left are the ones this file exists for — which tag, how long, where to split.
+
+// expandableQuotes is whether this Bot API supports `<blockquote expandable>`,
+// added in Bot API 7.2. It LATCHES OFF the first time a send is refused for it.
+//
+// A version probe is not available — getMe reports nothing about the API
+// version, and a self-hosted local Bot API server may be any age — so the only
+// honest test is sending one and reading the refusal. The degraded form is a
+// plain <blockquote> with a visible marker, which is Bot API 7.0, and below
+// that the quote tags themselves would be refused and the same latch applies.
+var expandableQuotes atomic.Bool
+
+func init() { expandableQuotes.Store(true) }
+
+// unsupportedQuote reports whether a send failed BECAUSE of the quote tag, as
+// opposed to any other parse error — which must not silently disable a feature
+// that was working.
+func unsupportedQuote(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "can't parse entities") && !strings.Contains(msg, "unsupported") {
+		return false
+	}
+	// NAMING `blockquote` IS NOT REQUIRED, and assuming it was is what let a
+	// broken message retry in a loop: Telegram refused a `<pre>` nested in a
+	// quote by complaining about the PRE, so the latch never fired. Any parse
+	// refusal on a message we quoted is treated as the quote's fault — the
+	// degraded form is always renderable, so a false positive costs a font and
+	// a false negative costs the message.
+	return strings.Contains(msg, "blockquote") ||
+		strings.Contains(msg, "expandable") ||
+		strings.Contains(msg, "start tag")
+}
+
+// sectionLabel turns an agent's own tag name into something a person reads.
+// GENERIC, and deliberately so: this adapter carries no knowledge of any
+// particular agent's section names, only of how to present a name it is given.
+func sectionLabel(s string) string {
+	s = strings.NewReplacer("-", " ", "_", " ").Replace(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	r := []rune(s)
+	return strings.ToUpper(string(r[0])) + string(r[1:])
+}
+
+// renderBlock is one block as Telegram HTML.
+func renderBlock(b Block) string {
+	switch b.Role {
+	case RoleTitle:
+		if b.Text == "" {
+			return ""
+		}
+		return "<b>" + markdownToHTML(b.Text) + "</b>"
+	case RoleDetails:
+		if b.Text == "" {
+			return ""
+		}
+		return quote(markdownToHTML(b.Text))
+	default:
+		body := markdownToHTML(b.Text)
+		if lbl := sectionLabel(b.Label); lbl != "" {
+			if body == "" {
+				return "<b>" + escape(lbl) + "</b>"
+			}
+			return "<b>" + escape(lbl) + "</b>\n" + body
+		}
+		return body
+	}
+}
+
+// quote wraps the fold in the transport's own collapsed presentation.
+//
+// The marker on the degraded path is not decoration: a plain <blockquote> is
+// NOT collapsed, so without it a reader has no way to tell the fold from the
+// answer and the long tail simply arrives, which is the state this whole change
+// exists to end.
+func quote(inner string) string {
+	if expandableQuotes.Load() {
+		return "<blockquote expandable>" + inner + "</blockquote>"
+	}
+	return "<blockquote><b>Details</b>\n" + inner + "</blockquote>"
+}
+
+// agentBlocks parses a message's body, for the kinds whose body an AGENT wrote.
+//
+// ANSWER AND NOTICE ONLY, and the exclusions are the point:
+//
+//   - a RELAY is somebody's typed words. Parsing those would consume characters
+//     a person deliberately wrote — somebody asking why `<details>` will not
+//     render in their docs must see their own text arrive.
+//   - a SIGNAL is not prose at all. Its structured fields are the message and
+//     renderSignal builds a card from them.
+func agentBlocks(m Message) []Block {
+	switch m.Kind {
+	case MsgAnswer, MsgNotice:
+		return Parse(m.Body)
+	}
+	return nil
+}
+
+// renderBlocks renders a message's blocks in order, returning ONE STRING PER
+// BLOCK so the splitter can prefer block boundaries.
+func renderBlocks(bs []Block) []string {
+	out := make([]string, 0, len(bs))
+	for _, b := range bs {
+		if r := renderBlock(b); r != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// splitBlocks packs rendered blocks into sendable chunks, breaking at BLOCK
+// boundaries wherever it can.
+//
+// THE FIRST CHUNK CARRIES THE ABOVE-FOLD CONTENT. That is what makes a split
+// message still readable: the manager bounds title plus named sections well
+// under one message, so they fit together and a reader who sees only the first
+// message still sees the conclusion.
+//
+// A single block too large for one message is split inside itself — and if it
+// is the fold, each piece is re-wrapped in its own quote, because a chunk
+// boundary inside <blockquote> would send unbalanced tags.
+func splitBlocks(rendered []string) []string {
+	var out []string
+	var cur string
+	flush := func() {
+		if cur != "" {
+			out = append(out, cur)
+			cur = ""
+		}
+	}
+	for _, b := range rendered {
+		if len(b) > telegramMessageLimit {
+			flush()
+			out = append(out, splitOversizeBlock(b)...)
+			continue
+		}
+		switch {
+		case cur == "":
+			cur = b
+		case len(cur)+2+len(b) <= telegramMessageLimit:
+			cur += "\n\n" + b
+		default:
+			flush()
+			cur = b
+		}
+	}
+	flush()
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// splitOversizeBlock splits one block that cannot fit in a single message,
+// preserving the quote wrapper across the pieces when it has one.
+func splitOversizeBlock(b string) []string {
+	const open, openAlt, close = "<blockquote expandable>", "<blockquote>", "</blockquote>"
+	prefix := ""
+	switch {
+	case strings.HasPrefix(b, open) && strings.HasSuffix(b, close):
+		prefix = open
+	case strings.HasPrefix(b, openAlt) && strings.HasSuffix(b, close):
+		prefix = openAlt
+	}
+	if prefix == "" {
+		return splitHTML(b)
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(b, prefix), close)
+	// Room for the wrapper on every piece, or the re-wrapped chunk overflows.
+	pieces := splitHTMLTo(inner, telegramMessageLimit-len(prefix)-len(close))
+	out := make([]string, 0, len(pieces))
+	for _, p := range pieces {
+		out = append(out, prefix+p+close)
+	}
+	return out
+}
+
 // renderMessage turns one semantic message into Telegram HTML.
 //
 // An unknown kind renders its body rather than nothing: a manager that adds a
@@ -193,8 +405,19 @@ func renderMessage(mn *menu, m Message) string {
 		// A relayed message is somebody's OWN words. Never rewritten.
 		return "💬 <b>" + escape(who) + "</b>: " + markdownToHTML(m.Body)
 	case MsgAnswer:
+		if r := renderBlocks(agentBlocks(m)); len(r) > 0 {
+			return strings.Join(r, "\n\n")
+		}
+		// No blocks: a message from a manager that predates them, or output
+		// with nothing to structure. Renders exactly as it always has.
 		return markdownToHTML(m.Body)
 	default:
+		// A NOTICE MAY CARRY THE GRAMMAR — a failed run that explained itself
+		// leaves as one, and that explanation is the longest thing an agent
+		// produces. Manager-composed prose parses to one block, same result.
+		if r := renderBlocks(agentBlocks(m)); len(r) > 0 {
+			return mn.rewriteCommands(strings.Join(r, "\n\n"))
+		}
 		// ONE SPELLING PER SURFACE. The manager names a Pipeline as it is
 		// published; the composer completes the spelling Telegram accepts.
 		// Showing both would be two strings for one thing, so what the manager
@@ -240,7 +463,7 @@ func renderSignal(m Message) string {
 		b.WriteString("\n<code>" + strings.Join(parts, "  ") + "</code>")
 	}
 	if body := strings.TrimSpace(m.Body); body != "" {
-		b.WriteString("\n<pre>" + escape(body) + "</pre>")
+		b.WriteString("\n" + payloadBlock(body))
 	}
 	if m.InputRef != "" {
 		b.WriteString("\n<i>full event: conversationinput/" + escape(m.InputRef) + "</i>")
@@ -287,9 +510,20 @@ func truncateRunes(s string, n int) string {
 // opened and closed on the same line except <pre>, handled by keeping its
 // content intact where it fits.
 func splitHTML(s string) []string {
-	if len(s) <= telegramMessageLimit {
+	return splitHTMLTo(s, telegramMessageLimit)
+}
+
+// splitHTMLTo is splitHTML against a caller-supplied budget, which the block
+// splitter needs because a re-wrapped fold chunk must leave room for its own
+// quote tags.
+func splitHTMLTo(s string, limit int) []string {
+	if limit <= 0 {
 		return []string{s}
 	}
+	if len(s) <= limit {
+		return []string{s}
+	}
+	telegramMessageLimit := limit // shadowed so the body below reads unchanged
 	var out []string
 	rest := s
 	for len(rest) > telegramMessageLimit {
@@ -351,4 +585,96 @@ func documentName(m Message) string {
 		base = "signal"
 	}
 	return base + ".txt"
+}
+
+// renderChunks is the ONE entry point for turning a message into sendable
+// pieces: blocks split at block boundaries, everything else at a paragraph.
+//
+// One function because the two used to be one call to splitHTML, and a second
+// call site that forgot the block path would post an answer as a wall again.
+func renderChunks(mn *menu, m Message) []string {
+	if r := renderBlocks(agentBlocks(m)); len(r) > 0 {
+		if m.Kind == MsgNotice {
+			for i := range r {
+				r[i] = mn.rewriteCommands(r[i])
+			}
+		}
+		if chunks := splitBlocks(r); len(chunks) > 0 {
+			return chunks
+		}
+	}
+	return splitHTML(renderMessage(mn, m))
+}
+
+// degradeQuotes rewrites an already-rendered message for a Bot API with no
+// expandable quote, so the retry after the latch does not need the message
+// composed a second time.
+func degradeQuotes(html string) string {
+	return strings.ReplaceAll(html, "<blockquote expandable>", "<blockquote><b>Details</b>\n")
+}
+
+// bulletList turns markdown list markers into bullets and SEPARATES THE ITEMS
+// WITH A BLANK LINE.
+//
+// Telegram sets messages tight, so consecutive bullet lines run together into a
+// grey block that reads as a paragraph — the thing a list exists to avoid. A
+// blank line between items is the only spacing control the transport offers.
+//
+// Fenced code is already stashed behind placeholders by the time this runs, so
+// a list-looking line inside a code sample is not reachable here.
+func bulletList(md string) string {
+	lines := strings.Split(md, "\n")
+	out := make([]string, 0, len(lines))
+	prevItem := false
+	for _, l := range lines {
+		m := listRe.FindStringSubmatch(l)
+		if m == nil {
+			out = append(out, l)
+			prevItem = false
+			continue
+		}
+		// Between two items only: never before the first, which would open the
+		// list with a gap under whatever introduced it.
+		if prevItem {
+			out = append(out, "")
+		}
+		out = append(out, m[1]+"• "+l[len(m[0]):])
+		prevItem = true
+	}
+	return strings.Join(out, "\n")
+}
+
+// foldPayloadOver is when a signal payload stops being something to read at a
+// glance and becomes something to open. Counted in LINES rather than
+// characters: a payload is a machine document laid out one field per line, and
+// what makes it dominate a thread is its height.
+const foldPayloadOver = 6
+
+// payloadBlock renders a signal's payload, FOLDED once it is tall enough.
+//
+// An event card exists to say what happened. The payload is the evidence behind
+// it, and unfolded it is the tallest thing in the thread — the same argument
+// `<details>` makes for an agent's answer, one message kind over.
+//
+// SHORT PAYLOADS STAY OPEN. A three-line event behind a control costs a tap to
+// read something that would have fitted, and a thread of collapsed stubs tells
+// a reader nothing.
+func payloadBlock(body string) string {
+	if strings.Count(body, "\n") < foldPayloadOver {
+		// Short enough to read at a glance: monospaced, and open.
+		return "<pre>" + escape(body) + "</pre>"
+	}
+	// TALL PAYLOADS FOLD, AND LOSE THE MONOSPACE TO DO IT.
+	//
+	// `<pre>` INSIDE `<blockquote>` IS REJECTED by the Bot API — it answers
+	// `can't parse entities: Can't find end tag corresponding to start tag
+	// "pre"`, and the whole message fails. That shipped, and it retried in a
+	// loop because the quote latch only recognises refusals naming
+	// `blockquote`.
+	//
+	// So the fold wins over the font. A thirty-line event document collapsed
+	// into one line a reader can open is worth more than proportional-vs-
+	// monospaced, and the alternative is the tallest thing in the thread staying
+	// open forever.
+	return quote(escape(body))
 }

@@ -222,7 +222,7 @@ func TestAlertReachesEveryChannel(t *testing.T) {
 
 	rec := postSignal(t, srv.Handler(), testMasterToken, "src-allchan", []map[string]any{{
 		"fingerprint": "allchan-1", "labels": map[string]string{"alertname": "NobodyReadsMe"},
-		"payload":     "disk at 99%",
+		"payload": "disk at 99%",
 	}})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())

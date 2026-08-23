@@ -138,7 +138,7 @@ func classifyStuckPod(pod *corev1.Pod) startFailure {
 		}
 	}
 	return startFailure{
-		Reason:  ReasonNotStarted,
+		Reason: ReasonNotStarted,
 		Message: "runtime pod did not reach Running before its start deadline" +
 			waitingSuffix(pod) + mediationSuffix(pod),
 		Storage: false,
@@ -171,9 +171,9 @@ func condEvidence(lead string, c *corev1.PodCondition) string {
 
 // imagePullReasons are the waiting reasons that mean the image, not the volume.
 var imagePullReasons = map[string]bool{
-	"ImagePullBackOff":         true,
-	"ErrImagePull":             true,
-	"InvalidImageName":         true,
+	"ImagePullBackOff":    true,
+	"ErrImagePull":        true,
+	"InvalidImageName":    true,
 	"ImageInspectError":   true,
 	"RegistryUnavailable": true,
 	// CreateContainerConfigError is deliberately absent: it means a referenced

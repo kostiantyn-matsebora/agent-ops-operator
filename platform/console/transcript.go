@@ -80,6 +80,28 @@ type Message struct {
 	// only account of what is on offer.
 	Choices []OpChoice `json:"choices,omitempty"`
 
+	// Payload is a SIGNAL's raw event document, carried apart from Text so the
+	// browser can put it behind a disclosure control.
+	//
+	// It is the tallest thing in an event card and the least often read — the
+	// same argument `<details>` makes for an agent's answer, one message kind
+	// over, and what the Telegram adapter does with an expandable quote. Left
+	// inside Text it is a wall of JSON between the card and the reply box.
+	Payload string `json:"payload,omitempty"`
+
+	// runID is the RUN this bubble reports, when it reports one. Internal
+	// correlation only, exactly like recordID — and the same lesson: a bubble
+	// and the durable run behind it are ONE message wearing two ids, so the
+	// merge matches them by ID.
+	//
+	// IT USED TO MATCH ON TEXT, and structured output broke that instantly. The
+	// manager now sends `body` FLATTENED from the blocks it parsed, so the
+	// buffer holds the flattened form while `status.runs[].result` holds the raw
+	// text the agent printed. They no longer compare equal, dedup failed, and
+	// every agent answer rendered TWICE in the transcript — once as text, once
+	// as blocks.
+	runID string
+
 	// recordID is the conversation input this bubble stands for, when it stands
 	// for one. Internal correlation only — never rendered, never sent to the
 	// browser — and it is what lets a read MERGE the buffer with the durable
@@ -157,7 +179,8 @@ func (t *Transcripts) AppendOp(opID, thread string, m *OpMessage, ownChannel str
 		}
 	}
 	msg := Message{ID: opID, Thread: thread, Kind: kind, Sender: sender, Text: text,
-		At: nowRFC3339(), Choices: m.Choices, recordID: record}
+		At: nowRFC3339(), Choices: m.Choices, Payload: m.SignalPayload(),
+		recordID: record, runID: runIDOf(opID)}
 	t.append(msg, kind == MsgAck || kind == MsgRelay)
 	return true
 }
@@ -199,6 +222,17 @@ func (t *Transcripts) confirmLocal(thread, sender, record string) (*Message, boo
 // The correlation between the buffer and the record is an ID, not a string
 // comparison — which is the difference between a merge that is right and one
 // that is usually right.
+// runIDOf reads the run out of a reply op id (`send:<conv>:<channel>:<runId>`),
+// which is what lets the merge tell a buffered answer from the durable record
+// of the SAME run without comparing a single character of either.
+func runIDOf(opID string) string {
+	parts := strings.Split(opID, ":")
+	if len(parts) != 4 || parts[0] != "send" {
+		return ""
+	}
+	return parts[3]
+}
+
 func inputIDOf(opID string) string {
 	parts := strings.Split(opID, ":")
 	if len(parts) != 4 || parts[0] != "input" {
