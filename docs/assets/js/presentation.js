@@ -35,16 +35,26 @@
 
   // The stage is authored at this size and SCALED to the width it is given.
   //
-  // THE HEIGHT CARRIES 4px OF SLACK PAST THE DRAWING. The install frame is the
-  // lowest element and its bottom border sat at exactly the drawing's own
-  // height, so in a box clipped by `overflow: hidden` that 1px line landed on
-  // the clip edge itself — surviving at one device pixel ratio and being eaten
-  // at the next, which is a defect that only ever appears on somebody else's
-  // screen. Nothing may end flush with this boundary.
-  var STAGE_W = 660;
-  var DRAWING_H = 208;
-  var STAGE_H = DRAWING_H + 4;
-  var HOLD = 6600;
+  // THE DRAWING IS INSET FROM THE CLIP EDGE ON EVERY SIDE IT REACHES.
+  //
+  // The install frame is the outermost element, and it was flush with the
+  // drawing's own bounds on three of them — so in a box clipped by
+  // `overflow: hidden` its 1px border landed on the clip edge itself. At the
+  // TOP that took the frame's border and its whole label with it, which is why
+  // "your cluster · one Helm install" had never once been seen. At the bottom
+  // and the right it survived at one device pixel ratio and was eaten at the
+  // next, which is a defect that only ever appears on somebody else's screen.
+  //
+  // The top slack is the biggest because the frame's label sits ABOVE the frame,
+  // outside the drawing's own box. Nothing may end flush with this boundary.
+  var DRAW_W = 668;
+  var DRAW_H = 208;
+  var PAD_TOP = 16;
+  var PAD_BOTTOM = 4;
+  var PAD_RIGHT = 2;
+  var STAGE_W = DRAW_W + PAD_RIGHT;
+  var STAGE_H = PAD_TOP + DRAW_H + PAD_BOTTOM;
+  var HOLD = 5200;
 
   // The drawing: five declared objects, the conversation they open, the reach
   // the wiring granted, and the install that frames them.
@@ -119,7 +129,7 @@
 
     var wire = svg('svg', stage);
     wire.setAttribute('class', 'ao-pres-wire');
-    wire.setAttribute('viewBox', '0 0 ' + STAGE_W + ' ' + DRAWING_H);
+    wire.setAttribute('viewBox', '0 0 660 ' + DRAW_H);
     wire.setAttribute('aria-hidden', 'true');
     WIRES.forEach(function (w) {
       var track = svg('path', wire);
@@ -203,6 +213,22 @@
     var play = el('button', 'ao-pres-play', rail);
     play.type = 'button';
 
+    // DRAWN, NOT TYPED. `\u25b6` and `\u258c\u258c` are font glyphs, and a font
+    // centres them on its own baseline and side bearings rather than in the
+    // circle they sit in — which is why they looked knocked off-centre. A path
+    // is positioned by its own coordinates and cannot drift with the typeface.
+    //
+    // The triangle's box runs 4.5 to 9.5 against a centre of 6, so it sits a
+    // whisker right of true centre: a triangle's mass is at its left, and
+    // centring the BOX makes it look left. The bars need no such correction.
+    var PLAY_D = 'M4.5 2.6 L9.6 6 L4.5 9.4 Z';
+    var PAUSE_D = 'M3.9 2.8 h1.7 v6.4 h-1.7 Z M6.9 2.8 h1.7 v6.4 h-1.7 Z';
+    var glyph = svg('svg', play);
+    glyph.setAttribute('viewBox', '0 0 12 12');
+    glyph.setAttribute('aria-hidden', 'true');
+    var glyphPath = svg('path', glyph);
+    glyphPath.setAttribute('fill', 'currentColor');
+
     var caption = el('div', 'ao-pres-caption', rail);
     var count = el('span', 'ao-pres-count', caption);
     var text = el('span', 'ao-pres-text', caption);
@@ -279,7 +305,7 @@
       started = Date.now();
       timer = setTimeout(advance, HOLD);
       raf = requestAnimationFrame(tick);
-      play.textContent = '▌▌';
+      glyphPath.setAttribute('d', PAUSE_D);
       play.setAttribute('aria-label', 'Pause the presentation');
     }
 
@@ -288,7 +314,7 @@
       cancelAnimationFrame(raf);
       timer = null;
       bar.style.width = '0%';
-      play.textContent = '▶';
+      glyphPath.setAttribute('d', PLAY_D);
       play.setAttribute('aria-label', 'Play the presentation');
     }
 
@@ -301,7 +327,9 @@
     // half of that pair is a presentation with a scrollbar inside it.
     function fit() {
       var k = Math.min(1, viewport.clientWidth / STAGE_W);
-      stage.style.transform = 'scale(' + k + ')';
+      // Scale THEN drop, so the top slack scales with everything else: a
+      // constant offset would over-pad the drawing at every narrow width.
+      stage.style.transform = 'translate(0, ' + (PAD_TOP * k) + 'px) scale(' + k + ')';
       viewport.style.height = Math.ceil(STAGE_H * k) + 'px';
     }
     if (window.ResizeObserver) new ResizeObserver(fit).observe(viewport);

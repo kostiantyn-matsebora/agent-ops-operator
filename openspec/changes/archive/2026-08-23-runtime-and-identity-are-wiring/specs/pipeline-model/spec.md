@@ -130,6 +130,8 @@ toolset and mcpConfig refs) without creating any workload.
 - **THEN** the Pipeline reports `Ready=False` naming it, because the manager
   already reads that kind and the ref is a reference like any other
 
+## ADDED Requirements
+
 ### Requirement: Runtime selection is wiring, never identity
 
 An `AgentProfile` SHALL NOT select the runtime. `spec.runtimeRef` on a profile

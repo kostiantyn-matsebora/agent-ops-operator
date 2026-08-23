@@ -1138,12 +1138,12 @@ a:hover {
   overflow: hidden;
 }
 
-/* 212, not 208: the drawing is 208 and the last 4px are SLACK, so the install
-   frame's bottom border never lands on the clipped edge of the viewport. */
+/* The DRAWING's own box. The slack that keeps the install frame off the clip
+   edge is applied by the script, which owns the transform. */
 .ao-pres-stage {
   position: relative;
-  width: 660px;
-  height: 212px;
+  width: 668px;
+  height: 208px;
   transform-origin: top left;
 }
 
@@ -1300,11 +1300,14 @@ a:hover {
   text-decoration: line-through;
 }
 
+/* 456, so the frame CLEARS the Channel node rather than sharing its right edge.
+   At 448 the two borders landed on the same pixel and read as one box cutting
+   into another. The margin now matches the one the Pipeline has on the left. */
 .ao-pres-frame {
   position: absolute;
   left: 212px;
   top: -6px;
-  width: 448px;
+  width: 456px;
   height: 214px;
   border: 1px dashed var(--ao-border-strong);
   border-radius: 10px;
@@ -1414,7 +1417,7 @@ a:hover {
 .ao-pres-rail {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  align-items: start;
+  align-items: center;
   gap: 0.65rem;
   padding: 0.6rem 0.75rem 0.5rem;
   background: var(--ao-surface-alt);
@@ -1427,15 +1430,19 @@ a:hover {
   place-items: center;
   width: 1.9rem;
   height: 1.9rem;
-  margin-top: 0.1rem;
   padding: 0;
   appearance: none;
   background: var(--ao-surface-alt);
   border: 1px solid var(--ao-border);
   border-radius: 50%;
   color: var(--ao-text);
-  font-size: 0.66rem;
   cursor: pointer;
+}
+
+.ao-pres-play > svg {
+  display: block;
+  width: 0.72rem;
+  height: 0.72rem;
 }
 
 .ao-pres-play:hover {
@@ -1448,11 +1455,20 @@ a:hover {
   outline-offset: 2px;
 }
 
+/* THE COUNTER AND THE BEAT SHARE ONE LINE, and the RESERVED HEIGHT moves here
+   with them. A caption that grows from one line to two moves the page under the
+   reader on every advance — the beats are written short so it does not, and the
+   height is held so a translation cannot reintroduce the jump. */
 .ao-pres-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
   min-width: 0;
+  min-height: 1.35rem;
 }
 
 .ao-pres-count {
+  flex: none;
   color: var(--ao-text-subtle);
   font-family: var(--ao-font-mono);
   font-size: 0.64rem;
@@ -1460,12 +1476,8 @@ a:hover {
   letter-spacing: 0.08em;
 }
 
-/* RESERVED HEIGHT. A caption that grows from one line to two moves the page
-   under the reader on every advance, so the beats are written short AND the
-   height is held — a translation must not be able to reintroduce the jump. */
 .ao-pres-text {
-  display: block;
-  min-height: 1.35rem;
+  min-width: 0;
   font-family: var(--ao-font-display);
   font-size: 0.92rem;
   font-weight: 500;
@@ -1476,7 +1488,27 @@ a:hover {
 .ao-pres-dots {
   display: flex;
   gap: 0.26rem;
-  margin-top: 0.5rem;
+}
+
+/* Below the measure the beat no longer fits on the counter's line, and a
+   caption that is one line on some beats and two on others moves the page under
+   the reader — the exact jump the reserved height exists to prevent.
+
+   So the dots drop to their own row, giving the caption the rail's full width,
+   and the reservation grows to the two lines the longest beat then takes. The
+   counter stays on the beat's line, which is what was asked for. */
+@media (max-width: 44rem) {
+  .ao-pres-rail {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .ao-pres-caption {
+    min-height: 2.7rem;
+  }
+
+  .ao-pres-dots {
+    grid-column: 2;
+  }
 }
 
 /* The current beat is a SIZE as well as a colour, so it is identifiable
