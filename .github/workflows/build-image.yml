@@ -99,6 +99,15 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # ON THE INDEX, not only on each platform's image config. `labels:`
+          # above reaches the per-architecture configs; a multi-arch push is an
+          # INDEX, and that is what GHCR reads to link a package to its
+          # repository. The Dockerfiles carry the LABEL too — this is the same
+          # fact stated where a manifest list can see it.
+          annotations: |
+            index:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            index:org.opencontainers.image.version=${{ inputs.version }}
+            index:org.opencontainers.image.revision=${{ github.sha }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=${{ inputs.component }}

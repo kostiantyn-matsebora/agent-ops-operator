@@ -28,6 +28,7 @@ COPY *.go ./
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -o /out/egress-proxy .
 
 FROM debian:bookworm-slim
+LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/agent-ops-operator
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends iptables && \
     rm -rf /var/lib/apt/lists/*

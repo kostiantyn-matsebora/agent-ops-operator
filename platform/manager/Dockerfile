@@ -16,6 +16,7 @@ COPY internal/ internal/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -o /out/manager ./cmd/manager
 
 FROM gcr.io/distroless/static:nonroot
+LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/agent-ops-operator
 COPY --from=build /out/manager /manager
 USER 65532:65532
 ENTRYPOINT ["/manager"]

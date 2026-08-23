@@ -92,7 +92,8 @@
       "googleapis.com", "*.googleapis.com", "gstatic.com", "*.gstatic.com",
       "iconify.design", "*.iconify.design",
       "sil.org", "*.sil.org",
-      "mozilla.org", "*.mozilla.org"
+      "mozilla.org", "*.mozilla.org",
+      "shields.io", "*.shields.io"
     ]
   },
 

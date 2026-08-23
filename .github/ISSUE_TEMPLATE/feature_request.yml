@@ -1,0 +1,84 @@
+name: Feature request
+description: Something you are trying to do that this cannot do yet.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **The first field asks what you are trying to do, before the second
+        asks what you want built.** That order is deliberate: the thing you
+        want is often not the cheapest answer to the thing you need, and
+        several fields in this API exist because the second question was asked
+        first and the answer was wrong.
+
+        If you are unsure whether it fits at all,
+        [Discussions](https://github.com/kostiantyn-matsebora/agent-ops-operator/discussions)
+        is the cheaper place to start.
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: >-
+        The situation, not the solution. What is in front of you, what you want
+        to happen, and what happens instead today.
+      placeholder: >-
+        "When a certificate is about to expire I want an agent to open a
+        conversation and tell me which workloads break — today I find out when
+        something fails."
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What do you do about it now?
+      description: >-
+        The workaround, or the reason there is not one. This is what says how
+        much the gap actually costs.
+    validations:
+      required: false
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like built?
+      description: >-
+        Now the solution, if you have one in mind. A new field, a new adapter,
+        a change to how something resolves — and roughly where you think it
+        belongs.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part does it touch?
+      description: Best guess is fine.
+      multiple: true
+      options:
+        - The CRDs and what they mean
+        - The manager
+        - A signal adapter (ingest)
+        - A channel adapter (chat surfaces)
+        - The agent runtime
+        - The console
+        - The Helm chart
+        - The documentation
+        - Not sure
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: >-
+            I read the model this project already has — a Pipeline is the
+            wiring, capabilities and identity come from it, and the manager
+            reads no Secrets — and this does not contradict it, or it does and
+            I said why that is the point.
+          required: true
+        - label: I would be willing to help build it.
+          required: false

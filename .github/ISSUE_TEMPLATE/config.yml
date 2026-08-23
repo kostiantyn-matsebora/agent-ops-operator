@@ -1,0 +1,30 @@
+# Blank issues are disabled on purpose: an issue that fits no template arrives
+# without the three things every diagnosis here starts from, and nobody
+# retrofits them afterwards. The contact links below are the routes for
+# everything the two templates do not cover.
+#
+# THERE IS NO SECURITY TEMPLATE. A public form for a confidential report is the
+# disclosure it exists to prevent — the route is the private advisory link.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/kostiantyn-matsebora/agent-ops-operator/security/advisories/new
+    about: >-
+      Never in a public issue. This opens a private advisory visible only to
+      you and the maintainer. See SECURITY.md for what to include and what to
+      expect.
+  - name: Ask a question, or float an idea
+    url: https://github.com/kostiantyn-matsebora/agent-ops-operator/discussions
+    about: >-
+      "Does this fit?", "how would I wire X?", "is this the intended
+      behaviour?" — Discussions, not issues.
+  - name: Read the documentation first
+    url: https://kostiantyn-matsebora.github.io/agent-ops-operator/
+    about: >-
+      Getting started, installation, the console tour and the guides. Most
+      "how do I" questions are answered there.
+  - name: Report conduct
+    url: https://github.com/kostiantyn-matsebora
+    about: >-
+      Code of conduct reports go to the maintainer privately, through GitHub.
+      See CODE_OF_CONDUCT.md.

@@ -1,0 +1,103 @@
+name: Bug report
+description: Something installed, and then behaved in a way the documentation does not describe.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Three fields below are required because every diagnosis in this
+        repository has started from them**: the chart version, the image tags,
+        and the condition on the object. An issue without them is a round trip
+        before anyone can even reproduce it.
+
+        A security problem does **not** go here — see
+        [SECURITY.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected instead
+      description: >-
+        The behaviour, and the sentence in the documentation it contradicts if
+        there is one.
+    validations:
+      required: true
+
+  - type: input
+    id: chart-version
+    attributes:
+      label: Chart version
+      description: "`helm list -n <namespace>` — the CHART column, e.g. agent-ops-operator-6.0.0"
+      placeholder: agent-ops-operator-6.0.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: image-tags
+    attributes:
+      label: Image tags on the affected pods
+      description: >-
+        The chart version does not pin them once anything is overridden.
+        `kubectl -n <namespace> get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'`
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: conditions
+    attributes:
+      label: The condition on the object
+      description: >-
+        The status of whatever is not working — the Conversation, the Pipeline,
+        the Channel, the SignalSource. `kubectl -n <namespace> get <kind> <name> -o yaml`,
+        or at minimum its `status.conditions`. This is where the operator says
+        why, and it is the field most often left out.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: wiring
+    attributes:
+      label: The wiring behind it
+      description: >-
+        The `Pipeline` involved, with any credential values removed. Almost
+        every routing question is answered by which sources it claims, which
+        channels it delivers to, and what it grants.
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Manager logs
+      description: >-
+        `kubectl -n <namespace> logs deploy/agentops-manager --tail=200`.
+        Scrub anything that names your deployment.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Cluster
+      description: >-
+        Kubernetes version and distribution, and anything unusual about it —
+        a CNI that replaces kube-proxy, a storage class with quirks, an
+        admission controller. Several of the known gotchas here are exactly
+        that kind of interaction.
+      placeholder: "k8s 1.31, k3s, Cilium in strict kube-proxy-replacement mode, NFS-backed home volume"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I checked that this is not already described in the documentation or an existing issue.
+          required: true
+        - label: I removed hostnames, addresses, chat identifiers and anything else naming my deployment.
+          required: true

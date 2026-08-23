@@ -7,6 +7,7 @@
 # architectures against the declaration in .github/components.sh. The command above
 # builds locally; it does not publish.
 FROM node:22-bookworm-slim
+LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/agent-ops-operator
 
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
