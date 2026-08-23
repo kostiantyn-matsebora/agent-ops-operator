@@ -5,64 +5,64 @@ exists so that the switch is safe, and §7 is the gate that says so.
 
 ## 1. Licence
 
-- [ ] 1.1 Add `LICENSE` — Apache-2.0, verbatim, with the copyright line filled
+- [x] 1.1 Add `LICENSE` — Apache-2.0, verbatim, with the copyright line filled
       in. Verbatim matters: a modified licence text is a licence nobody's legal
       review recognises
-- [ ] 1.2 Replace "License TBD" in the README's status section with the licence,
+- [x] 1.2 Replace "License TBD" in the README's status section with the licence,
       and correct the roadmap line, which still promises a chart that shipped
 
 ## 2. Community health files
 
-- [ ] 2.1 `SECURITY.md`: which versions are supported, the private advisory
+- [x] 2.1 `SECURITY.md`: which versions are supported, the private advisory
       route, and an acknowledgement target a single maintainer can keep. A
       policy promising more than one person can deliver is broken in public
-- [ ] 2.2 `CODE_OF_CONDUCT.md`: Contributor Covenant by reference, with the
+- [x] 2.2 `CODE_OF_CONDUCT.md`: Contributor Covenant by reference, with the
       reporting route and who enforces it. By reference, not copied — a
       vendored copy silently forks from its upstream
-- [ ] 2.3 `CONTRIBUTING.md`: how a change is proposed HERE. The openspec
+- [x] 2.3 `CONTRIBUTING.md`: how a change is proposed HERE. The openspec
       workflow, the commit convention, the build and test commands, and the fact
       that documentation is part of a change rather than a follow-up. A
       contributor cannot infer any of it
-- [ ] 2.4 Cross-link the three from the README's index, one line each
+- [x] 2.4 Cross-link the three from the README's index, one line each
 
 ## 3. Issue and pull request templates
 
-- [ ] 3.1 `.github/ISSUE_TEMPLATE/config.yml`: blank issues disabled, and a
+- [x] 3.1 `.github/ISSUE_TEMPLATE/config.yml`: blank issues disabled, and a
       contact link routing security reports to private advisories
-- [ ] 3.2 A bug report template that asks for the chart version, the image tags,
+- [x] 3.2 A bug report template that asks for the chart version, the image tags,
       and the condition on the object — the three things every diagnosis in this
       repository has started from
-- [ ] 3.3 A feature request template that asks what the reader is trying to do
+- [x] 3.3 A feature request template that asks what the reader is trying to do
       before what they want built
-- [ ] 3.4 NO security template — see `design.md` D5. The route is the contact
+- [x] 3.4 NO security template — see `design.md` D5. The route is the contact
       link, because a public form for a confidential report is the disclosure it
       exists to prevent
-- [ ] 3.5 `PULL_REQUEST_TEMPLATE.md`: what changed, what it affects, and whether
+- [x] 3.5 `PULL_REQUEST_TEMPLATE.md`: what changed, what it affects, and whether
       the documentation the change made untrue was updated in the same commit
 
 ## 4. The two-minute README
 
-- [ ] 4.1 Settle the open question in `design.md`: whether the CRD kind table
+- [x] 4.1 Settle the open question in `design.md`: whether the CRD kind table
       stays. Decide it against the two-minute promise, not by preference
-- [ ] 4.2 Rewrite to the four questions: what this is, whether it is real, how
+- [x] 4.2 Rewrite to the four questions: what this is, whether it is real, how
       to try it, where to go next. The site owns everything else
-- [ ] 4.3 The install command resolves a PUBLISHED artifact. This task cannot
+- [x] 4.3 The install command resolves a PUBLISHED artifact. This task cannot
       complete before `sdlc-setup` publishes the chart — see `design.md` D3
 - [ ] 4.4 Every link resolves. Run them, including the site links, which fail
       until §6 enables Pages
-- [ ] 4.5 `wc -l README.md` is within budget, and nothing that moved out was
+- [x] 4.5 `wc -l README.md` is within budget, and nothing that moved out was
       dropped rather than linked
 
 ## 5. Hygiene
 
-- [ ] 5.1 Remove the committed build artifact from the tree. The git OBJECT
+- [x] 5.1 Remove the committed build artifact from the tree. The git OBJECT
       survives until history is rewritten — do not add a second rewrite for it;
       `scrub-identity` is already doing one, and this file being absent from the
       tree beforehand is what lets that pass drop it
-- [ ] 5.2 Correct the ignore list against the CURRENT tree. It names modules by
+- [x] 5.2 Correct the ignore list against the CURRENT tree. It names modules by
       their pre-restructure paths, which is why the artifact was committable —
       derive the entries from the component layout rather than listing them
-- [ ] 5.3 Add `.gitattributes` normalising line endings to LF. Endings flipped
+- [x] 5.3 Add `.gitattributes` normalising line endings to LF. Endings flipped
       under editing twice in one week here, and a public repository adds
       contributors on platforms where the default differs
 - [ ] 5.4 Confirm the packed repository size after §5.1 and the rewrite, so the
