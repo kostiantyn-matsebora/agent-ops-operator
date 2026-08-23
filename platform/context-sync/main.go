@@ -22,7 +22,7 @@ import (
 const (
 	envListen     = "LISTEN_ADDR"           // where the runtime's CONTROL_URL points
 	envUpstream   = "CONTROL_URL_UPSTREAM"  // the real manager
-	envLive       = "CONTEXT_LIVE_DIR"      // pod-local home the agent writes to
+	envLive       = "CONTEXT_LIVE_DIR"      // pod-local tree the agent writes to
 	envStore      = "CONTEXT_STORE_DIR"     // this conversation's dir on the volume
 	envPaths      = "CONTEXT_SYNC_PATHS"    // newline-separated include globs
 	envExclude    = "CONTEXT_SYNC_EXCLUDE"  // newline-separated exclude globs

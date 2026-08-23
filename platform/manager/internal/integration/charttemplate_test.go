@@ -1171,27 +1171,28 @@ func runtimeDoc(t *testing.T, out string) string {
 	return ""
 }
 
-// The storage defaults, and the asymmetry between them: sessions persist out of
-// the box because losing them silently costs conversational history, while a
-// checkout is re-cloned because a stale shared one is worse than no cache.
-func TestPersistenceDefaultsHomeOnWorkspaceOff(t *testing.T) {
+// The storage defaults, and the asymmetry between them: the accumulated context
+// persists out of the box because losing it silently costs conversational
+// history, while a checkout is re-cloned because a stale shared one is worse
+// than no cache.
+func TestPersistenceDefaultsContextOnWorkspaceOff(t *testing.T) {
 	out := helmTemplate(t)
 
-	if !strings.Contains(out, "\n  name: agentops-home\n") {
-		t.Error("the home claim must render by default (persistence.enabled: true)")
+	if !strings.Contains(out, "\n  name: agentops-context\n") {
+		t.Error("the context claim must render by default (persistence.context.enabled: true)")
 	}
 	if strings.Contains(out, "agentops-workspace") {
 		t.Error("workspace persistence must be OFF by default — a stale shared checkout is worse than a re-clone")
 	}
 	rt := runtimeDoc(t, out)
-	if !strings.Contains(rt, "home:\n    pvcRef:\n      name: agentops-home") {
-		t.Errorf("home.pvcRef must be wired from the chart's own persistence block:\n%s", rt)
+	if !strings.Contains(rt, "context:\n    pvcRef:\n      name: agentops-context") {
+		t.Errorf("context.pvcRef must be wired from the chart's own persistence block:\n%s", rt)
 	}
 	if strings.Contains(rt, "workspace:") {
 		t.Error("no workspace claim means the AgentRuntime declares no workspace volume")
 	}
-	if !strings.Contains(out, "name: HOME_PVC") {
-		t.Error("the manager's HOME_PVC bootstrap default must follow the claim")
+	if !strings.Contains(out, "name: CONTEXT_PVC") {
+		t.Error("the manager's CONTEXT_PVC bootstrap default must follow the claim")
 	}
 	if strings.Contains(out, "name: WORKSPACE_PVC") {
 		t.Error("WORKSPACE_PVC must not be set when no workspace claim exists")
@@ -1201,21 +1202,128 @@ func TestPersistenceDefaultsHomeOnWorkspaceOff(t *testing.T) {
 // The opt-out is the whole mitigation for a cluster with no RWX provisioner —
 // it must remove the claim AND the reference, or runtime pods still wait on it.
 func TestPersistenceOptOutRemovesEverything(t *testing.T) {
-	out := helmTemplate(t, "--set", "persistence.enabled=false")
+	out := helmTemplate(t, "--set", "persistence.context.enabled=false")
 
-	if strings.Contains(out, "agentops-home") {
-		t.Error("persistence.enabled=false must render no home claim and no reference to one")
+	if strings.Contains(out, "agentops-context") {
+		t.Error("persistence.context.enabled=false must render no context claim and no reference to one")
 	}
-	if strings.Contains(out, "name: HOME_PVC") {
-		t.Error("persistence.enabled=false must not set HOME_PVC")
+	if strings.Contains(out, "name: CONTEXT_PVC") {
+		t.Error("persistence.context.enabled=false must not set CONTEXT_PVC")
 	}
-	if rt := runtimeDoc(t, out); strings.Contains(rt, "home:") {
-		t.Errorf("the AgentRuntime must declare no home volume:\n%s", rt)
+	if rt := runtimeDoc(t, out); strings.Contains(rt, "context:") {
+		t.Errorf("the AgentRuntime must declare no context volume:\n%s", rt)
 	}
 }
 
+// THE THREE STORAGE-CLASS STATES, on BOTH volumes.
+//
+// The `-` case is the one that was previously inexpressible: an ABSENT
+// storageClassName is filled in by admission from the cluster's default class,
+// which provisions a second volume and leaves the operator's pre-created one
+// untouched. An explicit empty string is what declines that, and nothing
+// rendered one.
+func TestStorageClassConventionOnBothVolumes(t *testing.T) {
+	for _, vol := range []struct{ key, claim string }{
+		{"context", "agentops-context"},
+		{"workspace", "agentops-workspace"},
+	} {
+		t.Run(vol.key, func(t *testing.T) {
+			on := []string{"--set", "persistence." + vol.key + ".enabled=true"}
+
+			// undefined/empty: no field at all, the default provisioner.
+			doc := claimDoc(t, helmTemplate(t, on...), vol.claim)
+			if strings.Contains(doc, "storageClassName") {
+				t.Errorf("an empty class must omit the field entirely:\n%s", doc)
+			}
+
+			// a name: that class.
+			doc = claimDoc(t, helmTemplate(t, append(append([]string{}, on...),
+				"--set", "persistence."+vol.key+".storageClassName=fast-rwx")...), vol.claim)
+			if !strings.Contains(doc, `storageClassName: "fast-rwx"`) {
+				t.Errorf("a named class must render:\n%s", doc)
+			}
+
+			// "-": an EXPLICIT empty string, never an omitted field.
+			doc = claimDoc(t, helmTemplate(t, append(append([]string{}, on...),
+				"--set", "persistence."+vol.key+`.storageClassName=-`)...), vol.claim)
+			if !strings.Contains(doc, `storageClassName: ""`) {
+				t.Errorf(`"-" must render an EXPLICIT empty storage class, or admission injects the default class and provisions a second volume:`+"\n%s", doc)
+			}
+		})
+	}
+}
+
+// The previously-broken combination: a pre-created volume named on a claim
+// whose storage class was left at the shipped default. It bound nothing,
+// because there was no spelling of "no storage class" at all.
+func TestPreCreatedVolumeIsBindableOnBothVolumes(t *testing.T) {
+	for _, vol := range []struct{ key, claim string }{
+		{"context", "agentops-context"},
+		{"workspace", "agentops-workspace"},
+	} {
+		t.Run("byName/"+vol.key, func(t *testing.T) {
+			doc := claimDoc(t, helmTemplate(t,
+				"--set", "persistence."+vol.key+".enabled=true",
+				"--set", "persistence."+vol.key+".volumeName=pv-"+vol.key,
+				"--set", "persistence."+vol.key+`.storageClassName=-`), vol.claim)
+
+			if !strings.Contains(doc, "volumeName: pv-"+vol.key) {
+				t.Errorf("the claim must name the pre-created volume:\n%s", doc)
+			}
+			if !strings.Contains(doc, `storageClassName: ""`) {
+				t.Errorf("the working form must be expressible: name a volume AND decline provisioning:\n%s", doc)
+			}
+		})
+
+		t.Run("byLabel/"+vol.key, func(t *testing.T) {
+			doc := claimDoc(t, helmTemplate(t,
+				"--set", "persistence."+vol.key+".enabled=true",
+				"--set", `persistence.`+vol.key+`.selector.matchLabels.agentops\.dev/volume=`+vol.key,
+				"--set", "persistence."+vol.key+`.storageClassName=-`), vol.claim)
+
+			if !strings.Contains(doc, "selector:") || !strings.Contains(doc, "agentops.dev/volume: "+vol.key) {
+				t.Errorf("the claim must carry the selector, for the fleet case naming one volume cannot serve:\n%s", doc)
+			}
+		})
+	}
+
+	// A pre-created volume is by definition not the release's to create.
+	out := helmTemplate(t,
+		"--set", "persistence.context.volumeName=pv-context",
+		"--set", `persistence.context.storageClassName=-`)
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: PersistentVolume\n") {
+			t.Fatalf("the chart must render NO PersistentVolume:\n%s", doc)
+		}
+	}
+}
+
+// The values block moved wholesale. Helm never reports an unread values key, so
+// a flat `persistence.enabled: false` written for a cluster with no RWX
+// provisioner would be silently ignored and provision the claim it declined.
+func TestRetiredPersistenceKeysFailTheRender(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "persistence.enabled=false")
+
+	if !strings.Contains(msg, "persistence.enabled") || !strings.Contains(msg, "persistence.context") {
+		t.Errorf("the failure must name the retired key and where it moved to:\n%s", msg)
+	}
+}
+
+// claimDoc returns the PersistentVolumeClaim document named `name`.
+func claimDoc(t *testing.T, out, name string) string {
+	t.Helper()
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: PersistentVolumeClaim") &&
+			strings.Contains(doc, "\n  name: "+name+"\n") {
+			return doc
+		}
+	}
+	t.Fatalf("no PersistentVolumeClaim named %q rendered", name)
+	return ""
+}
+
 // Enabling workspace persistence takes ONE value: the claim name is never
-// restated by the operator, exactly as home.pvcRef already works.
+// restated by the operator, exactly as context.pvcRef already works.
 func TestWorkspacePersistenceIsWiredFromOneValue(t *testing.T) {
 	out := helmTemplate(t, "--set", "persistence.workspace.enabled=true")
 
@@ -1226,7 +1334,7 @@ func TestWorkspacePersistenceIsWiredFromOneValue(t *testing.T) {
 	for _, doc := range splitDocs(out) {
 		if strings.Contains(doc, "name: agentops-workspace") && strings.Contains(doc, "kind: PersistentVolumeClaim") {
 			if !strings.Contains(doc, "helm.sh/resource-policy: keep") {
-				t.Error("the workspace claim must carry the keep policy, like the home claim")
+				t.Error("the workspace claim must carry the keep policy, like the context claim")
 			}
 		}
 	}
@@ -1280,14 +1388,14 @@ func helmNotes(t *testing.T, args ...string) string {
 // elsewhere, then fails to attach, far from the setting that caused it. That is
 // a note, not a render failure: on a single-node cluster pinning is pointless.
 func TestSingleAttachWithoutPinningIsCalledOut(t *testing.T) {
-	out := helmNotes(t, "--set", "persistence.accessModes={ReadWriteOnce}")
+	out := helmNotes(t, "--set", "persistence.context.accessModes={ReadWriteOnce}")
 	if !strings.Contains(out, "attached by ONE node") {
 		t.Fatal("an unpinned single-attach claim must be called out in the notes")
 	}
 
 	// Pinned: the operator has said where runtime pods go, so there is nothing
 	// to warn about.
-	pinned := helmNotes(t, "--set", "persistence.accessModes={ReadWriteOnce}",
+	pinned := helmNotes(t, "--set", "persistence.context.accessModes={ReadWriteOnce}",
 		"--set", `runtime.nodeSelector.kubernetes\.io/hostname=node-1`)
 	if strings.Contains(pinned, "attached by ONE node") {
 		t.Fatal("pinning runtime pods resolves it — the warning must go")
@@ -1372,9 +1480,9 @@ func TestWiringNotesReadTheActualClaims(t *testing.T) {
 // An install that cannot carry context says so plainly, rather than letting
 // every follow-up discover it.
 func TestEphemeralInstallSaysConversationsCannotContinue(t *testing.T) {
-	out := helmNotes(t, "--set", "persistence.enabled=false")
+	out := helmNotes(t, "--set", "persistence.context.enabled=false")
 	if !strings.Contains(out, "CANNOT BE CONTINUED") {
-		t.Fatal("an install with no durable home must say conversations cannot be continued")
+		t.Fatal("an install with no durable context volume must say conversations cannot be continued")
 	}
 	// ...and it names the way to have it without distributed storage.
 	if !strings.Contains(out, "single-node") {

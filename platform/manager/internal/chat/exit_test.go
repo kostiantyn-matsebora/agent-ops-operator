@@ -171,12 +171,12 @@ func TestExitReplyStatesWhatHappensToTheContext(t *testing.T) {
 	profile.Name, profile.Namespace = "p1", testNS
 
 	for _, tc := range []struct {
-		name    string
-		homePVC string
-		want    string
-		absent  string
+		name       string
+		contextPVC string
+		want       string
+		absent     string
 	}{
-		{"continuity survives", "agentops-home", "picks up where this left off", "starts fresh"},
+		{"continuity survives", "agentops-context", "picks up where this left off", "starts fresh"},
 		{"continuity does not survive", "", "starts fresh", "picks up where this left off"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -184,8 +184,8 @@ func TestExitReplyStatesWhatHappensToTheContext(t *testing.T) {
 			conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "p1"}
 			r, q, _ := closeFixture(t, nsChannel("c1", "slack"), profile, conv, runtimePod("conv-1"))
 			// No AgentRuntime CR: the bootstrap fallback, whose continuity turns on
-			// whether this deployment provides a home volume at all.
-			r.Runtime = runtimepod.Config{HomePVC: tc.homePVC}
+			// whether this deployment provides a context volume at all.
+			r.Runtime = runtimepod.Config{ContextPVC: tc.contextPVC}
 
 			exit(t, r, "c1")
 

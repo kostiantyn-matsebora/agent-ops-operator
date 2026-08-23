@@ -23,23 +23,26 @@ which profiles have no Pipeline granting them anything:
     kubectl -n {{ .Release.Namespace }} get pipeline -o jsonpath="{range .items[?(@.spec.profileRef.name=='$n')]}{.metadata.name} {end}" | grep -q . \
       || echo "no Pipeline grants capabilities to profile/$n"
   done
-{{- if .Values.persistence.enabled }}
+{{- if .Values.persistence.context.enabled }}
 
-Agent sessions persist by default (chart 5.1.0): claim {{ .Values.persistence.existingClaim | default .Values.persistence.name }} backs
+A conversation's accumulated context persists by default: claim {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }} backs
 /data/home, so conversational history survives a runtime pod restart.
 
 If runtime pods never start, check the claim FIRST — a Pending PVC produces no
 error anywhere else, just conversations that queue forever:
-  kubectl -n {{ .Release.Namespace }} get pvc {{ .Values.persistence.existingClaim | default .Values.persistence.name }}
+  kubectl -n {{ .Release.Namespace }} get pvc {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }}
 Pending with "no persistent volumes available" or "storageclass not found"
-means this cluster has no default StorageClass or no {{ join "/" .Values.persistence.accessModes }} provisioner.
-Either name one (persistence.storageClassName) or turn storage off:
-  helm upgrade ... --set persistence.enabled=false
+means this cluster has no default StorageClass or no {{ join "/" .Values.persistence.context.accessModes }} provisioner.
+Either name one (persistence.context.storageClassName) or turn storage off:
+  helm upgrade ... --set persistence.context.enabled=false
+A claim naming a PRE-CREATED volume that stays Pending is a different fault with
+the same symptom: it also needs persistence.context.storageClassName="-", or the
+cluster's default class is injected and a second volume is provisioned instead.
 See below for what turning it off costs.
 {{- end }}
-{{- if and .Values.persistence.enabled (not (has "ReadWriteMany" .Values.persistence.accessModes)) (not .Values.runtime.nodeSelector) }}
+{{- if and .Values.persistence.context.enabled (not (has "ReadWriteMany" .Values.persistence.context.accessModes)) (not .Values.runtime.nodeSelector) }}
 
-HEADS UP — this claim can be attached by ONE node ({{ join "/" .Values.persistence.accessModes }}), but runtime pods
+HEADS UP — this claim can be attached by ONE node ({{ join "/" .Values.persistence.context.accessModes }}), but runtime pods
 are not pinned. It works until a second conversation schedules on another node,
 then that pod fails to attach the volume (Multi-Attach) — at the moment of
 concurrency, far from the storage setting that caused it.
@@ -49,10 +52,10 @@ Pin them:
 (unnecessary on a single-node cluster, which is why this is a note and not a
 render failure.)
 {{- end }}
-{{- if not .Values.persistence.enabled }}
+{{- if not .Values.persistence.context.enabled }}
 
 CONVERSATIONS CANNOT BE CONTINUED in this install. The runtime keeps a
-conversation's context on its home volume, and this release provides none, so
+conversation's context on its context volume, and this release provides none, so
 the context goes when the pod exits — which is every {{ .Values.runtimeIdleTtlMinutes }} minute(s) of idle
 time, i.e. between almost any two messages.
 
@@ -60,10 +63,13 @@ Nothing is broken: each message is answered on its own, and conversations say so
 rather than failing. But a reply will not remember the message before it. To
 change that you need durable storage for /data/home, and it does NOT have to be
 distributed:
-  - shared:      persistence.enabled=true with a ReadWriteMany class
-  - single-node: persistence.enabled=true, persistence.accessModes={ReadWriteOnce},
+  - shared:      persistence.context.enabled=true with a ReadWriteMany class
+  - single-node: persistence.context.enabled=true,
+                 persistence.context.accessModes={ReadWriteOnce},
                  and runtime.nodeSelector pinning runtime pods to one node
-                 (a `local` PersistentVolume works here too — no dynamic
+                 (a `local` PersistentVolume works here too — name it with
+                 persistence.context.volumeName and set
+                 persistence.context.storageClassName="-", no dynamic
                  provisioner required)
 {{- end }}
 {{- if and .Values.runtime.enabled (not .Values.runtime.credentialsSecret.token) }}

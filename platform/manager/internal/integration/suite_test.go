@@ -116,7 +116,7 @@ func apiServer() *httpapi.Server {
 // or blocks fails a test about something else, which is where it should fail.
 func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 	acts := activity.New(512)
-	rt := runtimepod.Config{HomePVC: "test-home"}
+	rt := runtimepod.Config{ContextPVC: "test-context"}
 	ops := &chat.OpQueue{Client: k8sClient, Namespace: ns, Registry: chat.NewRegistry(), Activity: acts}
 	return &httpapi.Server{
 		Client: k8sClient, Reader: k8sClient, Namespace: ns,

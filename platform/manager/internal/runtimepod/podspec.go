@@ -38,11 +38,13 @@ type Config struct {
 	ServiceAccount string
 	ControlURL     string
 	IdleTTLMinutes int
-	// HomePVC (RWX) for durable agent session state; emptyDir when empty.
-	HomePVC string
+	// ContextPVC (RWX) holds a conversation's durable accumulated context;
+	// emptyDir when empty. The MOUNT PATH is the reference runtime's $HOME —
+	// the volume is named for what it holds, the path for what the image needs.
+	ContextPVC string
 	// WorkspacePVC (RWX) backs the repository checkout, one subdirectory per
-	// conversation; emptyDir when empty. Separate from HomePVC because the two
-	// are enabled independently — sessions by default, checkouts on request.
+	// conversation; emptyDir when empty. Separate from ContextPVC because the
+	// two are enabled independently — context by default, checkouts on request.
 	WorkspacePVC string
 	NodeSelector map[string]string
 	// Command/Args override the image entrypoint (e.g. a stub worker script).
@@ -67,7 +69,7 @@ type Config struct {
 	EgressInitImage string
 	// ContextLiveSizeLimit bounds the pod-local live context.
 	//
-	// In sidecar mode the WHOLE home is ephemeral — caches and tool state
+	// In sidecar mode the WHOLE context tree is ephemeral — caches and tool state
 	// included, which is the point — so this has to be generous enough for
 	// them. Unbounded would let one runaway agent fill a node's disk; too small
 	// evicts the pod mid-run. Empty leaves it unbounded, which is Kubernetes'
@@ -94,9 +96,9 @@ func FromRuntime(rt *agentopsv1alpha1.AgentRuntimeSpec, fallback Config) Config 
 	if rt.IdleTTLMinutes > 0 {
 		cfg.IdleTTLMinutes = int(rt.IdleTTLMinutes)
 	}
-	cfg.HomePVC = ""
-	if rt.Home != nil && rt.Home.PVCRef != nil {
-		cfg.HomePVC = rt.Home.PVCRef.Name
+	cfg.ContextPVC = ""
+	if v := rt.ContextVolume(); v != nil && v.PVCRef != nil {
+		cfg.ContextPVC = v.PVCRef.Name
 	}
 	cfg.WorkspacePVC = ""
 	if rt.Workspace != nil && rt.Workspace.PVCRef != nil {
@@ -118,7 +120,7 @@ type Resolved struct {
 	ContextStorage agentopsv1alpha1.ContextStorage
 	// ContextSync is the runtime's declaration of what to keep durable when the
 	// live context lives on pod-local storage. Nil means today's behaviour: the
-	// home volume mounted directly, no sidecar.
+	// context volume mounted directly, no sidecar.
 	ContextSync *agentopsv1alpha1.ContextSync
 	// EgressMediation is the runtime's declaration that the agent's egress is
 	// redirected through an enforcing proxy. Nil means today's pod: the agent
@@ -190,7 +192,7 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 	// status, so reporting it on that CR's readiness would mean inventing a
 	// reconciler to hold one condition; the CRD schema already rejects the
 	// structural errors at admission, and this catches what a schema cannot
-	// express — a path that escapes the runtime's home.
+	// express — a path that escapes the runtime's home directory.
 	if err := rt.Spec.ContextSync.Validate(); err != nil {
 		return Resolved{}, fmt.Errorf("runtime %q: %w", name, err)
 	}
@@ -234,7 +236,7 @@ func deprecatedProfileRuntime(ctx context.Context, r client.Reader, namespace st
 // ContinuityPossible reports whether a conversation on this backend can carry
 // context between runs at all.
 //
-// A runtime keeping context on its home volume, in a deployment that provides
+// A runtime keeping context on its context volume, in a deployment that provides
 // none, can never continue anything: the pod exits on its idle timeout — a
 // minute by default — and takes the context with it. Saying so BEFORE promising
 // continuity is what separates a configuration the operator chose from a loss,
@@ -247,7 +249,7 @@ func (r Resolved) ContinuityPossible() bool {
 		return true // stored somewhere the operator does not provide
 	default:
 		// `volume`, and the empty bootstrap case which is the reference runtime
-		return r.Config.HomePVC != ""
+		return r.Config.ContextPVC != ""
 	}
 }
 
@@ -314,8 +316,10 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 	}
 	mounts := []corev1.VolumeMount{workspaceMount}
 
-	// home: durable session state (RWX PVC), pod-local under contextSync, or
-	// ephemeral when no claim is configured at all.
+	// context: the accumulated context (RWX PVC), pod-local under contextSync,
+	// or ephemeral when no claim is configured at all. It is mounted at
+	// /data/home because that is the reference runtime's $HOME, and that path
+	// does not move — claude-code keys its stored context off it.
 	switch {
 	case sidecar:
 		// The agent gets EPHEMERAL storage and no access to the durable volume
@@ -323,23 +327,23 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 		// can no longer stop a run that is already going, and an agent can no
 		// longer read another conversation's context or write to the volume,
 		// because it holds no mount of it.
-		volumes = append(volumes, corev1.Volume{Name: "home",
+		volumes = append(volumes, corev1.Volume{Name: "context",
 			VolumeSource: corev1.VolumeSource{EmptyDir: emptyDirWithLimit(cfg.ContextLiveSizeLimit)}})
 		// The durable claim, per conversation. The subPath applies ONLY here:
 		// changing the layout for every install would be a migration, and this
 		// way an install that has not opted in keeps its context exactly where
 		// it already is.
-		volumes = append(volumes, corev1.Volume{Name: "context", VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.HomePVC},
+		volumes = append(volumes, corev1.Volume{Name: "context-store", VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.ContextPVC},
 		}})
-	case cfg.HomePVC != "":
-		volumes = append(volumes, corev1.Volume{Name: "home", VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.HomePVC},
+	case cfg.ContextPVC != "":
+		volumes = append(volumes, corev1.Volume{Name: "context", VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.ContextPVC},
 		}})
 	default:
-		volumes = append(volumes, corev1.Volume{Name: "home", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
+		volumes = append(volumes, corev1.Volume{Name: "context", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 	}
-	mounts = append(mounts, corev1.VolumeMount{Name: "home", MountPath: "/data/home"})
+	mounts = append(mounts, corev1.VolumeMount{Name: "context", MountPath: "/data/home"})
 
 	// repository auth
 	if a := profile.Spec.Repository.Auth; a != nil {

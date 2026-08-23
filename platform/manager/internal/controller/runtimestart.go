@@ -14,7 +14,7 @@ import (
 // Reaping handled Succeeded and Failed; Pending was counted as active —
 // correctly, since a stuck pod must not invent capacity — but nothing bounded
 // how long it could sit there. On 2026-08-20 a corrupt filesystem on the shared
-// home volume left five pods in ContainerCreating for fifteen hours. They held
+// context volume left five pods in ContainerCreating for fifteen hours. They held
 // every slot, starved six conversations behind them, and the install reported
 // NOTHING: no condition, no event, no log line. The only condition present said
 // DeliveryPending=False / AllDelivered, which reads as healthy.

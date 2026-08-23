@@ -18,7 +18,7 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | [SignalAdapter](#signaladapter) | yes | 18 |
 | [Channel](#channel) | yes | 4 |
 | [ChannelAdapter](#channeladapter) | yes | 16 |
-| [AgentRuntime](#agentruntime) | yes | 54 |
+| [AgentRuntime](#agentruntime) | yes | 58 |
 | [Conversation](#conversation) | no — the operator does | 38 |
 | [ConversationInput](#conversationinput) | no — the operator does | 5 |
 
@@ -319,8 +319,12 @@ AgentRuntimeSpec defines HOW agents execute: the runtime image implementing the 
 |---|---|---|---|
 | `args` | `[]string` |  | Command / Args override the image's entrypoint. Both empty runs it as the image declares it. |
 | `command` | `[]string` |  | Command/Args override the image entrypoint. |
-| `contextStorage` | `string` |  | ContextStorage declares where this runtime keeps a conversation's context, so the manager can tell whether continuity is possible here BEFORE promising it. A runtime keeping context on its home volume, in a deployment that provides none, can never continue anything — and saying that up front is what stops every follow-up failing for a reason the operator already chose. |
-| `contextSync` | `object` |  | ContextSync moves the LIVE context off the durable volume and keeps a snapshot on it instead. ABSENT means today's behaviour, unchanged: the home volume is mounted directly and there is no sidecar. |
+| `context` | `object` |  | Context volume for a conversation's durable accumulated context. |
+| `context.emptyDir` | `boolean` |  | EmptyDir (default when no pvcRef): the accumulated context dies with the pod. |
+| `context.pvcRef` | `object` |  | PVCRef mounts an existing (usually RWX) PVC at the runtime's context path. |
+| `context.pvcRef.name` | `string` | **yes** | Name of the referenced object. |
+| `contextStorage` | `string` |  | ContextStorage declares where this runtime keeps a conversation's context, so the manager can tell whether continuity is possible here BEFORE promising it. A runtime keeping context on its context volume, in a deployment that provides none, can never continue anything — and saying that up front is what stops every follow-up failing for a reason the operator already chose. |
+| `contextSync` | `object` |  | ContextSync moves the LIVE context off the durable volume and keeps a snapshot on it instead. ABSENT means today's behaviour, unchanged: the context volume is mounted directly and there is no sidecar. |
 | `contextSync.exclude` | `[]string` |  | Exclude drops churn from INSIDE the included paths — lock files, temp files, anything rewritten constantly without being context. Without it the change detector reports a change on nearly every cycle and the skip-when-unchanged rule buys nothing. |
 | `contextSync.interval` | `string` |  | Interval is how often the context is checkpointed while a pod is alive, as a Go duration ("2m"). "0" disables the timer and leaves only work-boundary checkpoints, which is the right setting for a low-churn backend. The interval bounds what a SIGKILL can lose: a crash, an OOM or a node reboot takes everything written since the last checkpoint, and no design removes that — only shortens it. |
 | `contextSync.paths` | `[]string` | **yes** | Paths are INCLUDE globs, relative to the runtime's HOME, naming what is worth persisting. For the reference runtime that is ".claude/projects/-data-workspace/**". An include list rather than an exclude list, deliberately: caches, tool state and telemetry are then excluded BY CONSTRUCTION, instead of by a list that has to chase every file a vendor decides to add. It is also the difference between copying a few megabytes of transcripts and copying a package cache over NFS every two minutes. |
@@ -353,7 +357,7 @@ AgentRuntimeSpec defines HOW agents execute: the runtime image implementing the 
 | `env[].valueFrom.secretKeyRef.key` | `string` | **yes** | The key of the secret to select from. Must be a valid secret key. |
 | `env[].valueFrom.secretKeyRef.name` | `string` |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
 | `env[].valueFrom.secretKeyRef.optional` | `boolean` |  | Specify whether the Secret or its key must be defined |
-| `home` | `object` |  | Home volume for durable agent session state. |
+| `home` | `object` |  | Home is the former name of Context. Deprecated: use Context. Honoured for ONE release so that a runtime installed before the rename keeps mounting the volume it already has — a rename that merely moved the field would strand every one of them at the moment of upgrade. Read ONLY through AgentRuntime.ContextVolume(). |
 | `home.emptyDir` | `boolean` |  | EmptyDir (default when no pvcRef): session state dies with the pod. |
 | `home.pvcRef` | `object` |  | PVCRef mounts an existing (usually RWX) PVC at /data/home. |
 | `home.pvcRef.name` | `string` | **yes** | Name of the referenced object. |

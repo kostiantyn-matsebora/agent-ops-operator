@@ -2,7 +2,7 @@
 
 ### THE PARENT CHART OWNS THE SUBSTRATE — BUNDLES CONTRIBUTE DOMAIN
 
-How agents execute — image, LLM credential, idle TTL, node placement, home
+How agents execute — image, LLM credential, idle TTL, node placement, context
 volume, and the DEFAULT identity whose RBAC is the agent's power — is
 release-wide and lives in `chart/values.yaml` (`runtime:` +
 `global.agentops.runtime.*`).
@@ -13,7 +13,7 @@ level on the route rather than by cloning an `AgentRuntime` — see `wiring.md`.
 What stays release-wide is the DEFAULT both fall back to, and the ownership
 below.
 
-- **No subchart renders an `AgentRuntime`, a model credential or a home
+- **No subchart renders an `AgentRuntime`, a model credential or a context
   volume.** That is THE SUBSTRATE and it stays the parent's, exclusively.
 - **A BUNDLE DOES RENDER THE ACCOUNTS ITS OWN ROUTES NEED**, scoped to what
   those routes do, and names each on its own Pipeline. The bundle is the only

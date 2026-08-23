@@ -1,28 +1,40 @@
 {{- /*
-Runtime storage: the home claim (session files, on by default) and the
-workspace claim (repository checkouts, off by default). Both carry
-`helm.sh/resource-policy: keep`, so an uninstall never destroys agent state.
+Runtime storage: the CONTEXT claim (a conversation's accumulated context, on by
+default) and the WORKSPACE claim (repository checkouts, off by default). Both
+carry `helm.sh/resource-policy: keep`, so an uninstall never destroys agent
+state.
+
+Both offer the same three ways to run against storage this chart did not create
+— an existing claim, a PersistentVolume by name, a PersistentVolume by label —
+and the chart renders NO PersistentVolume in any of them. A pre-created volume
+is by definition not the release's to create, and a release that created one
+would own the lifecycle of storage holding agent context it did not put there.
 */ -}}
-{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+{{- include "agentops.retiredPersistenceKeysGuard" . }}
+{{- include "agentops.contextClaimRenameGuard" (dict "root" .) }}
+{{- $ctx := .Values.persistence.context }}
+{{- if and $ctx.enabled (not $ctx.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Values.persistence.name }}
+  name: {{ $ctx.name }}
   namespace: {{ .Release.Namespace }}
   annotations:
-    # never delete agent session history on uninstall
+    # never delete a conversation's accumulated context on uninstall
     helm.sh/resource-policy: keep
 spec:
   accessModes:
-{{ toYaml .Values.persistence.accessModes | indent 4 }}
+{{ toYaml $ctx.accessModes | indent 4 }}
   resources:
     requests:
-      storage: {{ .Values.persistence.size }}
-  {{- if .Values.persistence.storageClassName }}
-  storageClassName: {{ .Values.persistence.storageClassName }}
+      storage: {{ $ctx.size }}
+  {{- include "agentops.storageClassName" $ctx }}
+  {{- if $ctx.volumeName }}
+  volumeName: {{ $ctx.volumeName }}
   {{- end }}
-  {{- if .Values.persistence.volumeName }}
-  volumeName: {{ .Values.persistence.volumeName }}
+  {{- with $ctx.selector }}
+  selector:
+{{ toYaml . | indent 4 }}
   {{- end }}
 {{- end }}
 {{- $ws := .Values.persistence.workspace }}
@@ -42,10 +54,12 @@ spec:
   resources:
     requests:
       storage: {{ $ws.size }}
-  {{- if $ws.storageClassName }}
-  storageClassName: {{ $ws.storageClassName }}
-  {{- end }}
+  {{- include "agentops.storageClassName" $ws }}
   {{- if $ws.volumeName }}
   volumeName: {{ $ws.volumeName }}
+  {{- end }}
+  {{- with $ws.selector }}
+  selector:
+{{ toYaml . | indent 4 }}
   {{- end }}
 {{- end }}

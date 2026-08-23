@@ -171,7 +171,7 @@ function runClaude(unit) {
 //
 // A RESUME whose session no longer exists is retried ONCE without --resume.
 // Sessions live in $HOME/.claude/projects/-data-workspace/, so they vanish
-// whenever /data/home does not outlive the pod — an install without a home PVC,
+// whenever /data/home does not outlive the pod — an install without a context PVC,
 // an eviction, a node move. Losing the thread's context is a real cost; failing
 // the reply outright is a worse one, and it fails with an EMPTY result because
 // claude never reaches its result event, so the person who typed sees "failed"

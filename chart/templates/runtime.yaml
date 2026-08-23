@@ -13,12 +13,15 @@ bindings in runtime-rbac.yaml.
 {{- if .Values.runtime.enabled }}
 {{- $rt := .Values.runtime }}
 {{- $p := .Values.persistence }}
-{{- $pvc := $rt.homePvcRef }}
+{{- $ctx := $p.context }}
+{{- /* homePvcRef is the retired spelling, honoured for ONE release so a values
+file written before the rename keeps naming the claim it already points at. */ -}}
+{{- $pvc := $rt.contextPvcRef | default $rt.homePvcRef }}
 {{- if not $pvc }}
-{{- if $p.existingClaim }}
-{{- $pvc = $p.existingClaim }}
-{{- else if $p.enabled }}
-{{- $pvc = $p.name }}
+{{- if $ctx.existingClaim }}
+{{- $pvc = $ctx.existingClaim }}
+{{- else if $ctx.enabled }}
+{{- $pvc = $ctx.name }}
 {{- end }}
 {{- end }}
 {{- $ws := $p.workspace }}
@@ -71,9 +74,9 @@ spec:
 {{ toYaml . | indent 4 }}
   {{- end }}
   {{- with $pvc }}
-  # wired from the chart's own `persistence` block unless runtime.homePvcRef
-  # names a claim the chart did not create
-  home:
+  # wired from the chart's own `persistence.context` block unless
+  # runtime.contextPvcRef names a claim the chart did not create
+  context:
     pvcRef:
       name: {{ . }}
   {{- end }}
@@ -86,7 +89,7 @@ spec:
   {{- end }}
   {{- with $rt.contextSync.paths }}
   # CONTEXT SYNC: declared by the RUNTIME, because only it knows where its
-  # backend keeps context. Absent means the home volume is mounted directly and
+  # backend keeps context. Absent means the context volume is mounted directly and
   # no sidecar is built — today's behaviour, so an existing install upgrades
   # with no migration.
   contextSync:

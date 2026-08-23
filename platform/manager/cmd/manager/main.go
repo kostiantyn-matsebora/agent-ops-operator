@@ -97,6 +97,25 @@ func maxActiveConversations() (n int, deprecated bool) {
 	return 5, false
 }
 
+// contextPVC is the bootstrap default claim holding a conversation's
+// accumulated context, reporting whether the deprecated HOME_PVC spelling
+// supplied it.
+//
+// The manager and the chart upgrade at DIFFERENT MOMENTS, so the retired name
+// is honoured for one release. A bootstrap default that vanished for even one
+// reconcile would provision runtime pods with no context volume, and every
+// conversation in the install would answer without its context while every
+// signal reported success.
+func contextPVC() (name string, deprecated bool) {
+	if v := os.Getenv("CONTEXT_PVC"); v != "" {
+		return v, false
+	}
+	if v := os.Getenv("HOME_PVC"); v != "" {
+		return v, true
+	}
+	return "", false
+}
+
 // commandFromEnv parses RUNTIME_COMMAND_JSON (e.g. ["sh","-c","..."]) — used to
 // run a stub worker during shadow verification.
 func commandFromEnv() []string {
@@ -195,6 +214,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	contextClaim, deprecatedContextPVC := contextPVC()
+	if deprecatedContextPVC {
+		setupLog.Info("HOME_PVC is deprecated and is removed after one release — "+
+			"set CONTEXT_PVC (chart: persistence.context) instead", "claim", contextClaim)
+	}
 	maxActive, deprecatedCap := maxActiveConversations()
 	if deprecatedCap {
 		setupLog.Info("MAX_RUNTIMES is deprecated and is removed after one release — "+
@@ -242,7 +266,7 @@ func main() {
 			ServiceAccount: env("RUNTIME_SA", "agentops-runtime"),
 			ControlURL:     env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080"),
 			IdleTTLMinutes: envInt("RUNTIME_IDLE_TTL_M", 1),
-			HomePVC:        os.Getenv("HOME_PVC"),
+			ContextPVC:     contextClaim,
 			WorkspacePVC:   os.Getenv("WORKSPACE_PVC"),
 			NodeSelector:   map[string]string{"node-role/app": "true"},
 			Command:        commandFromEnv(),

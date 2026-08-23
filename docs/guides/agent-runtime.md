@@ -191,7 +191,7 @@ follow-up keeps its context:
 
 | Value | Your runtime keeps context |
 |---|---|
-| `volume` | on the configured home volume |
+| `volume` | on the configured context volume |
 | `external` | somewhere the manager does not manage |
 | `none` | nowhere — every unit starts fresh |
 

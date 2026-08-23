@@ -60,7 +60,7 @@ func TestCheckpointHappensBeforeCompletionReachesTheManager(t *testing.T) {
 }
 
 // Restore must complete before the runtime is given anything to do. Handing out
-// work first lets the agent start against an empty home and write a fresh
+// work first lets the agent start against an empty context tree and write a fresh
 // context over the one it was meant to continue.
 func TestRestoreHappensBeforeTheFirstWorkUnit(t *testing.T) {
 	up := &upstreamRecorder{body: "unit"}

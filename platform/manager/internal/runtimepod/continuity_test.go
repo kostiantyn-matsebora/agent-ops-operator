@@ -16,12 +16,12 @@ func TestContinuityNeedsAVolumeWhenTheRuntimeKeepsContextThere(t *testing.T) {
 	onVolume := Resolved{ContextStorage: agentopsv1alpha1.ContextOnVolume}
 
 	if onVolume.ContinuityPossible() {
-		t.Fatal("no home volume means the pod's context dies with it — continuity must not be promised")
+		t.Fatal("no context volume means the pod's context dies with it — continuity must not be promised")
 	}
 
-	onVolume.Config.HomePVC = "agentops-home"
+	onVolume.Config.ContextPVC = "agentops-context"
 	if !onVolume.ContinuityPossible() {
-		t.Fatal("with a home volume the context outlives the pod")
+		t.Fatal("with a context volume the context outlives the pod")
 	}
 }
 
@@ -32,13 +32,13 @@ func TestExternalContextNeedsNoVolume(t *testing.T) {
 	// Requiring a volume here would deny continuity to a runtime that never
 	// needed one.
 	if !external.ContinuityPossible() {
-		t.Fatal("external context storage does not depend on a home volume")
+		t.Fatal("external context storage does not depend on a context volume")
 	}
 }
 
 func TestARuntimeThatCannotContinueNeverPromisesTo(t *testing.T) {
 	none := Resolved{ContextStorage: agentopsv1alpha1.ContextNone}
-	none.Config.HomePVC = "agentops-home"
+	none.Config.ContextPVC = "agentops-context"
 
 	// A volume cannot grant continuity to a backend that has no notion of it.
 	if none.ContinuityPossible() {
@@ -54,7 +54,7 @@ func TestUnsetDeclarationIsTreatedAsVolume(t *testing.T) {
 	if bootstrap.ContinuityPossible() {
 		t.Fatal("an unset declaration with no volume must not promise continuity")
 	}
-	bootstrap.Config.HomePVC = "agentops-home"
+	bootstrap.Config.ContextPVC = "agentops-context"
 	if !bootstrap.ContinuityPossible() {
 		t.Fatal("an unset declaration with a volume behaves like the reference runtime")
 	}

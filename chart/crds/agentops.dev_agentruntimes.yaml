@@ -76,12 +76,33 @@ spec:
                 items:
                   type: string
                 type: array
+              context:
+                description: Context volume for a conversation's durable accumulated
+                  context.
+                properties:
+                  emptyDir:
+                    description: |-
+                      EmptyDir (default when no pvcRef): the accumulated context dies with the
+                      pod.
+                    type: boolean
+                  pvcRef:
+                    description: PVCRef mounts an existing (usually RWX) PVC at the
+                      runtime's context path.
+                    properties:
+                      name:
+                        description: Name of the referenced object.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                type: object
               contextStorage:
                 default: volume
                 description: |-
                   ContextStorage declares where this runtime keeps a conversation's context,
                   so the manager can tell whether continuity is possible here BEFORE
-                  promising it. A runtime keeping context on its home volume, in a
+                  promising it. A runtime keeping context on its context volume, in a
                   deployment that provides none, can never continue anything — and saying
                   that up front is what stops every follow-up failing for a reason the
                   operator already chose.
@@ -94,7 +115,7 @@ spec:
                 description: |-
                   ContextSync moves the LIVE context off the durable volume and keeps a
                   snapshot on it instead. ABSENT means today's behaviour, unchanged: the
-                  home volume is mounted directly and there is no sidecar.
+                  context volume is mounted directly and there is no sidecar.
                 properties:
                   exclude:
                     description: |-
@@ -363,7 +384,13 @@ spec:
                   type: object
                 type: array
               home:
-                description: Home volume for durable agent session state.
+                description: |-
+                  Home is the former name of Context.
+
+                  Deprecated: use Context. Honoured for ONE release so that a runtime
+                  installed before the rename keeps mounting the volume it already has —
+                  a rename that merely moved the field would strand every one of them at
+                  the moment of upgrade. Read ONLY through AgentRuntime.ContextVolume().
                 properties:
                   emptyDir:
                     description: 'EmptyDir (default when no pvcRef): session state

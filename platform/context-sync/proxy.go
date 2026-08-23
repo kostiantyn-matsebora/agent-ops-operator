@@ -33,8 +33,8 @@ import (
 type Hooks struct {
 	// BeforeFirstWork runs before the runtime is given its FIRST unit, and its
 	// error fails that request. Restoring after handing out work would let the
-	// agent start against an empty home and write a fresh context over the one
-	// it was supposed to continue.
+	// agent start against an empty context tree and write a fresh context over
+	// the one it was supposed to continue.
 	BeforeFirstWork func() error
 	// WorkHandedOut marks a run as inflight, so a checkpoint taken now knows to
 	// label itself best-effort rather than quiesced.
@@ -89,7 +89,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case isWorkRequest(r):
 		if err := p.ensureRestored(); err != nil {
-			// Failing the request is right: handing out work against a home
+			// Failing the request is right: handing out work against a volume
 			// that was supposed to hold a context, and does not, produces a run
 			// that silently starts fresh.
 			http.Error(w, "context-sync: restore failed: "+err.Error(), http.StatusServiceUnavailable)

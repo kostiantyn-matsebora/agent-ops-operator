@@ -44,7 +44,7 @@ func TestCheckpointAndRestoreRoundTrip(t *testing.T) {
 		}
 	}
 	// The metadata file is ours, not the agent's — it must not appear in the
-	// restored home.
+	// restored context tree.
 	if _, err := os.Stat(filepath.Join(restored, metaFile)); err == nil {
 		t.Fatal("the store's own metadata leaked into the restored context")
 	}

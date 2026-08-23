@@ -13,7 +13,7 @@ import (
 func medCfg() Config {
 	return Config{
 		Image: "runtime:1", ServiceAccount: "sa", ControlURL: "http://manager:8080",
-		HomePVC: "agentops-home", EgressProxyImage: "egress-proxy:1",
+		ContextPVC: "agentops-context", EgressProxyImage: "egress-proxy:1",
 	}
 }
 

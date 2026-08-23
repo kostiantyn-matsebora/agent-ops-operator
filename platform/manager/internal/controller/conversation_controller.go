@@ -1251,7 +1251,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 	// end of that road, for one conversation that has exhausted its retries.
 	degraded := r.contextLost(conv)
 	if degraded {
-		resolved.Config.HomePVC = ""
+		resolved.Config.ContextPVC = ""
 		resolved.ContextSync = nil
 		logger.Info("starting a runtime pod WITHOUT its context volume; the conversation has lost its memory",
 			"conversation", conv.Name, "failures", conv.Status.RuntimeStartFailures)

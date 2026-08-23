@@ -214,8 +214,9 @@ Content never moves into `_includes/` or `_data/` to get a look.
 ## Tables
 
 - **Code never wraps in a table.** `table-layout: auto` will break
-  `persistence.storageClassName` across lines to save pixels, inventing a key
-  that does not exist. The stylesheet forbids it, so the column widens instead.
+  `persistence.context.storageClassName` across lines to save pixels, inventing
+  a key that does not exist. The stylesheet forbids it, so the column widens
+  instead.
 - **Watch the last column.** Two long code values in a three-column table crush
   the description to two words a line. When that happens the table is the wrong
   shape — use two columns, or a values snippet.

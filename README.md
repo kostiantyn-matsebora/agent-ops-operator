@@ -129,7 +129,7 @@ Eleven, one line each. [Every field, in full](docs/concepts.md).
 | Kind | What it defines |
 |---|---|
 | [`AgentProfile`](docs/concepts.md#agentprofile) | Who the agent is — repo, role file, credentials, limits. Carries no capabilities and selects no runtime. |
-| [`AgentRuntime`](docs/concepts.md#agentruntime) | What executes it — image, idle TTL, home volume, service account. |
+| [`AgentRuntime`](docs/concepts.md#agentruntime) | What executes it — image, idle TTL, context volume, service account. |
 | [`Conversation`](docs/concepts.md#conversation) | One incident or task: chat topic + agent session + a serial queue of inputs. |
 | [`ConversationInput`](docs/concepts.md#conversationinput) | Out-of-line payloads, so Conversation objects stay small in etcd. |
 | [`Channel`](docs/concepts.md#channel) | A chat surface: where output goes. Type-agnostic metadata plus opaque config. |

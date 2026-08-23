@@ -1,10 +1,116 @@
-# Changelog archive — chart 5.0.0 to 5.18.0
+# Changelog archive — chart 5.0.0 to 5.20.0
 
-Migration guides for chart versions **5.0.0 through 5.18.0**, newest first, in
+Migration guides for chart versions **5.0.0 through 5.20.0**, newest first, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
 Moved here from [CHANGELOG.md](../CHANGELOG.md), which holds the ten most recent
 versions.
+
+## [5.20.0] — 2026-08-15
+
+On 2026-08-13 a 44-alert burst was rate-limited by Telegram. Every forum topic
+was created, and 22 of them stayed **completely empty** for four and a half
+hours, while the answers sat in `status.runs[].result` and the operator reported
+itself healthy.
+
+### Fixed
+
+The cause was one line of asymmetry. The manager's completed-operation window
+recorded operations that were **attempted**, and `enqueue` suppresses any stable
+id in that window — which is every derivable op.
+
+A failed send therefore disabled its own recovery. Reconciliation re-derived it,
+dedup dropped it, nothing posted, and no restart helped.
+
+- **The window now records what SUCCEEDED.** A failed derivable op releases its
+  dedup entry and reconciliation re-derives it. `delete-conversation` is the one
+  exemption, because its Conversation is disappearing.
+- **Telegram paces itself** — 30 sends/second per bot, 20/minute per chat — and
+  honours `retry_after` exactly, retrying in-process instead of reporting a
+  failure.
+
+### Added
+
+- **`DeliveryPending`** condition on a Conversation, naming the channels a
+  recorded run has not reached. It clears when they all have.
+
+  ```sh
+  kubectl get conv -o json | jq -r '.items[] | select(.status.conditions[]?
+    | select(.type=="DeliveryPending" and .status=="True")) | .metadata.name'
+  ```
+- **`/channel/ops` advertises `reclaimAfterSeconds`**, so an adapter absorbing
+  backpressure can bound its waiting inside the claim window. Additive and
+  optional — every existing adapter ignores it.
+
+### Upgrade
+
+`helm upgrade` with the new image tags. No CRD change, no values change. Rolling
+back is reverting them.
+
+**Roll during a quiet window.** This re-posts what the incident lost, including
+cards to topics that did receive their answer. Those were never posted, so it is
+correct, but it will look like a flood.
+
+Expect a burst to take **minutes** to appear in full. Every topic in a forum
+shares one `chat_id`, so ~144 calls against 20/minute is over seven minutes. That
+is Telegram's limit. The alternative is the old behaviour, which lost the
+messages.
+
+## [5.19.0] — 2026-08-15
+
+### Added
+
+Where the console can tell readers apart, unread is now **per person**. Your
+badge is yours, and a colleague clearing theirs does not clear yours.
+
+`status.threads[]` gains `readers[]`. `spec` gains `originReader`.
+
+- **No identity is stored.** The console hashes the signed-in identity with a
+  salt projected as a channel credential, and sends only that opaque key. The
+  manager stores it verbatim and cannot reverse it. A conversation records that N
+  people read it and when, never who.
+- **The salt is generated for you** on install, and on the first upgrade that
+  finds the console Secret without one. It adopts the existing `uiToken` rather
+  than reissuing it, so nobody is signed out. Pin it with
+  `console.auth.readerSalt` if you prefer.
+- **Starting a conversation now marks it read for you**, and only you. Before
+  this, a conversation you had just typed came back unread before any answer
+  could exist.
+- **`readers[]` is bounded at 50 per binding**, oldest watermark evicted first.
+  An evicted reader falls back to the channel-wide mark, the same as a teammate
+  who joined today.
+
+Unchanged, so no adapter needs work:
+
+- `readAt` stays as the channel-wide mark for transports with no reader identity.
+- `POST /channel/read` gains an **optional** `reader` field. `channel-telegram`
+  and every other adapter are untouched and fully conformant.
+- **A shared UI token is one reader**, because there is one credential and no
+  person behind it. With no salt projected, likewise. Both are exactly the 5.18.0
+  behaviour, reached without a special case.
+
+**Rotating the salt orphans every stored key** and resets everyone to the
+channel-wide mark.
+
+### Upgrade
+
+**The CRDs must be re-applied again.** Same pruning trap as 5.18.0, same fix.
+
+```sh
+kubectl apply -f chart/files/crds/          # or helm upgrade with crds.enabled
+```
+
+If any CRD on your cluster was ever applied by hand with `kubectl apply -f`, that
+left a `kubectl-client-side-apply` field manager owning `.spec.versions`, and
+helm's server-side apply refuses it. It rolls the WORKLOADS while silently
+leaving the schema behind.
+
+Add `--force-conflicts` (helmfile: `--args "--force-conflicts"`), which only
+moves ownership. Diagnose with:
+
+```sh
+kubectl get crd conversations.agentops.dev --show-managed-fields -o json
+```
 
 ## [5.18.0] — 2026-08-15
 

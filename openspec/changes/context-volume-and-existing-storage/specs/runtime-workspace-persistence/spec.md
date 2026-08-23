@@ -161,6 +161,14 @@ silently emptied install is not.
 The migration SHALL move no data. Naming the existing claim SHALL be sufficient
 to keep it, and the existing claim SHALL survive leaving the rendered manifest.
 
+The VALUES that configure the volume move with it, and a values file supplying
+the retired ones SHALL FAIL the render naming where each went. Helm reports no
+unread values key, so the alternative is silence — and the quiet case is the
+costly one: an operator with no ReadWriteMany provisioner who declined the
+volume gets it provisioned anyway, sitting `Pending`, with no runtime pod ever
+scheduling behind it. This check SHALL NOT depend on reading the cluster, so
+unlike the claim guard it also protects a GitOps install.
+
 #### Scenario: An old runtime keeps running
 - **WHEN** an `AgentRuntime` declaring only the retired field is reconciled after the upgrade
 - **THEN** its volume is mounted as before and its conversations keep their context
@@ -172,6 +180,10 @@ to keep it, and the existing claim SHALL survive leaving the rendered manifest.
 #### Scenario: An upgrade cannot silently move the volume
 - **WHEN** an install holding a claim under the retired name is upgraded without stating which claim its context lives on
 - **THEN** the render fails naming the value to set, and no new claim is created
+
+#### Scenario: A retired values key is refused, not ignored
+- **WHEN** a values file supplies one of the keys that moved
+- **THEN** the render fails naming that key and where it moved to, whether or not the renderer can see a cluster
 
 #### Scenario: Keeping the existing volume is one value
 - **WHEN** the operator names their existing claim

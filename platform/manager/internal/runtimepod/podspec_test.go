@@ -97,38 +97,57 @@ func TestConcurrentConversationsGetDistinctSubPaths(t *testing.T) {
 	}
 }
 
-// Home and workspace are independent: enabling one must not enable the other.
-func TestHomeAndWorkspaceAreIndependent(t *testing.T) {
-	pod := build("conv-a", Config{Image: "img", HomePVC: "agentops-home"})
+// Context and workspace are independent: enabling one must not enable the
+// other.
+func TestContextAndWorkspaceAreIndependent(t *testing.T) {
+	pod := build("conv-a", Config{Image: "img", ContextPVC: "agentops-context"})
 
-	if h := volume(pod, "home"); h == nil || h.PersistentVolumeClaim == nil {
-		t.Fatalf("home should be a claim, got %+v", h)
+	if h := volume(pod, "context"); h == nil || h.PersistentVolumeClaim == nil {
+		t.Fatalf("context should be a claim, got %+v", h)
 	}
 	if w := volume(pod, "workspace"); w == nil || w.EmptyDir == nil {
 		t.Fatalf("workspace should stay ephemeral, got %+v", w)
 	}
-	if m := mount(pod, "home"); m == nil || m.MountPath != "/data/home" || m.SubPath != "" {
-		t.Fatalf("home mount = %+v, want /data/home with no subPath", m)
+	// The PATH does not move with the name. It is the reference runtime's
+	// $HOME, and claude-code keys its stored context off it.
+	if m := mount(pod, "context"); m == nil || m.MountPath != "/data/home" || m.SubPath != "" {
+		t.Fatalf("context mount = %+v, want /data/home with no subPath", m)
 	}
 }
 
 func TestFromRuntimeResolvesBothVolumes(t *testing.T) {
 	spec := &agentopsv1alpha1.AgentRuntimeSpec{
 		Image:     "img",
-		Home:      &agentopsv1alpha1.HomeVolume{PVCRef: &agentopsv1alpha1.ObjectRef{Name: "home-claim"}},
+		Context:   &agentopsv1alpha1.ContextVolume{PVCRef: &agentopsv1alpha1.ObjectRef{Name: "context-claim"}},
 		Workspace: &agentopsv1alpha1.WorkspaceVolume{PVCRef: &agentopsv1alpha1.ObjectRef{Name: "ws-claim"}},
 	}
 	// A runtime declaring volumes must OVERRIDE the bootstrap defaults, not
 	// inherit them alongside.
-	cfg := FromRuntime(spec, Config{HomePVC: "bootstrap-home", WorkspacePVC: "bootstrap-ws"})
+	cfg := FromRuntime(spec, Config{ContextPVC: "bootstrap-context", WorkspacePVC: "bootstrap-ws"})
 
-	if cfg.HomePVC != "home-claim" || cfg.WorkspacePVC != "ws-claim" {
-		t.Fatalf("home=%q workspace=%q, want home-claim/ws-claim", cfg.HomePVC, cfg.WorkspacePVC)
+	if cfg.ContextPVC != "context-claim" || cfg.WorkspacePVC != "ws-claim" {
+		t.Fatalf("context=%q workspace=%q, want context-claim/ws-claim", cfg.ContextPVC, cfg.WorkspacePVC)
 	}
 	bare := FromRuntime(&agentopsv1alpha1.AgentRuntimeSpec{Image: "img"},
-		Config{HomePVC: "bootstrap-home", WorkspacePVC: "bootstrap-ws"})
-	if bare.HomePVC != "" || bare.WorkspacePVC != "" {
-		t.Fatalf("a runtime declaring no volumes must clear both, got home=%q workspace=%q",
-			bare.HomePVC, bare.WorkspacePVC)
+		Config{ContextPVC: "bootstrap-context", WorkspacePVC: "bootstrap-ws"})
+	if bare.ContextPVC != "" || bare.WorkspacePVC != "" {
+		t.Fatalf("a runtime declaring no volumes must clear both, got context=%q workspace=%q",
+			bare.ContextPVC, bare.WorkspacePVC)
+	}
+}
+
+// A runtime installed BEFORE the rename declares only the retired field, and
+// the pod builder is where that has to keep working: the alternative is an
+// upgrade that mounts an empty volume and reports success.
+func TestFromRuntimeHonoursTheRetiredHomeField(t *testing.T) {
+	spec := &agentopsv1alpha1.AgentRuntimeSpec{
+		Image: "img",
+		Home:  &agentopsv1alpha1.HomeVolume{PVCRef: &agentopsv1alpha1.ObjectRef{Name: "agentops-home"}},
+	}
+
+	cfg := FromRuntime(spec, Config{})
+
+	if cfg.ContextPVC != "agentops-home" {
+		t.Fatalf("ContextPVC = %q, want the claim the retired field named", cfg.ContextPVC)
 	}
 }

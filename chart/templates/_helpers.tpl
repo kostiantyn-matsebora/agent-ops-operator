@@ -283,3 +283,92 @@ silent guard there is correct.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{- /*
+THE STORAGE CLASS CONVENTION, implemented once for both claims.
+
+| Value | Renders |
+|---|---|
+| undefined or empty | no field — the cluster's default provisioner |
+| `-` | `storageClassName: ""` — no class, bind to a pre-created volume |
+| a name | that class |
+
+The `-` case is the whole reason this helper exists. Binding a claim to a
+pre-created PersistentVolume requires an EXPLICIT empty storage class: an ABSENT
+field is filled in by the admission plugin from the cluster's default
+StorageClass, which then provisions a second volume and leaves the operator's
+untouched. Before this there was no spelling of "no storage class" at all.
+
+`-` is the magic string prometheus-community, Bitnami and most charts already
+use, taken deliberately rather than invented: an operator arriving from any of
+them already knows it. It is ADDITIVE — empty keeps meaning "default
+provisioner", exactly as this chart's own shipped `storageClassName: ""` always
+has, so no existing install changes behaviour.
+
+Call with the volume's values block; emits nothing at all when there is no
+class to state.
+*/ -}}
+{{- define "agentops.storageClassName" -}}
+{{- $sc := .storageClassName | default "" -}}
+{{- if eq $sc "-" }}
+  storageClassName: ""
+{{- else if $sc }}
+  storageClassName: {{ $sc | quote }}
+{{- end -}}
+{{- end -}}
+
+{{- /*
+THE CONTEXT CLAIM RENAME GUARD.
+
+`agentops-home` became `agentops-context` with the volume's name, and NOTHING
+COPIES A VOLUME. An upgrade that adopted the new default unremarked would
+provision a second, empty claim and every conversation in the install would
+answer without its context while every signal reported success — which is worse
+than a failed upgrade in the one way that matters: a failed upgrade is
+recoverable.
+
+So the render is REFUSED, naming the one values line that fixes it. Same
+technique as `agentops.generatedSecretGuard`, against the same class of problem.
+
+THE LIMITATION, NAMED: `lookup` returns empty on any renderer without a cluster
+— `helm template`, CI, a GitOps controller — so an Argo install upgrades
+straight past this. `docs/CHANGELOG.md` is written as if it is the only warning
+that arrives, because for those installs it is.
+*/ -}}
+{{- define "agentops.contextClaimRenameGuard" -}}
+{{- $root := .root -}}
+{{- $ctx := $root.Values.persistence.context -}}
+{{- $resolved := $ctx.existingClaim | default $ctx.name -}}
+{{- if and (not $root.Release.IsInstall) $ctx.enabled (ne $resolved "agentops-home") -}}
+{{- if lookup "v1" "PersistentVolumeClaim" $root.Release.Namespace "agentops-home" -}}
+{{- if not (lookup "v1" "PersistentVolumeClaim" $root.Release.Namespace $resolved) -}}
+{{- fail (printf "PersistentVolumeClaim \"agentops-home\" exists in namespace %q and this chart version no longer renders it: the context volume was renamed, and its default claim is now %q. Nothing copies a volume, so upgrading as-is would provision a second, EMPTY claim and every conversation in this install would answer without its accumulated context while every signal reported success. Keep the volume you have — this moves no data and is one line:\n\n  persistence:\n    context:\n      existingClaim: agentops-home\n\nOr, deliberately, rebind the PersistentVolume under the new claim name using persistence.context.volumeName together with storageClassName: \"-\"." $root.Release.Namespace $resolved) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /*
+THE RETIRED PERSISTENCE KEYS GUARD.
+
+The `persistence` block moved wholesale under `persistence.context`. A values
+file still supplying the flat keys would be SILENTLY IGNORED — and the worst
+case is the quiet one: `persistence.enabled: false`, written by an operator
+whose cluster has no RWX provisioner, becomes a provisioned claim that sits
+Pending and no runtime pod ever schedules behind.
+
+This one needs no cluster, so unlike the rename guard it fires under
+`helm template`, in CI and under a GitOps controller too.
+*/ -}}
+{{- define "agentops.retiredPersistenceKeysGuard" -}}
+{{- $p := .Values.persistence -}}
+{{- $retired := list -}}
+{{- range $k := list "enabled" "name" "size" "storageClassName" "accessModes" "volumeName" "existingClaim" -}}
+{{- if hasKey $p $k -}}
+{{- $retired = append $retired (printf "persistence.%s" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if $retired -}}
+{{- fail (printf "These values moved under persistence.context and are no longer read: %s. Rewrite them there — for example persistence.enabled becomes persistence.context.enabled. If this install already holds an agentops-home claim, set persistence.context.existingClaim: agentops-home as well, which keeps the volume you have and copies nothing." (join ", " $retired)) -}}
+{{- end -}}
+{{- end -}}

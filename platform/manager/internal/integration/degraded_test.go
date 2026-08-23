@@ -57,7 +57,7 @@ func podOf(t *testing.T, conv string) *corev1.Pod {
 func TestExhaustedRetriesStartWithoutTheVolume(t *testing.T) {
 	r := reconcilerWithCap(nil, 100)
 	r.RuntimeStartDeadline = time.Hour
-	r.Runtime.HomePVC = "agentops-home"
+	r.Runtime.ContextPVC = "agentops-context"
 
 	mkProfile(t, "p-degraded")
 	mkChanConv(t, "degraded-1", "p-degraded")
@@ -68,7 +68,7 @@ func TestExhaustedRetriesStartWithoutTheVolume(t *testing.T) {
 
 	pod := podOf(t, "degraded-1")
 	for _, v := range pod.Spec.Volumes {
-		if v.Name == "home" && v.PersistentVolumeClaim != nil {
+		if v.Name == "context" && v.PersistentVolumeClaim != nil {
 			t.Fatal("after exhausting retries the pod must start WITHOUT the unattachable claim")
 		}
 	}
@@ -98,7 +98,7 @@ func TestExhaustedRetriesStartWithoutTheVolume(t *testing.T) {
 func TestFewFailuresKeepTheVolume(t *testing.T) {
 	r := reconcilerWithCap(nil, 100)
 	r.RuntimeStartDeadline = time.Hour
-	r.Runtime.HomePVC = "agentops-home"
+	r.Runtime.ContextPVC = "agentops-context"
 
 	mkProfile(t, "p-patient")
 	mkChanConv(t, "patient-1", "p-patient")
@@ -110,7 +110,7 @@ func TestFewFailuresKeepTheVolume(t *testing.T) {
 	pod := podOf(t, "patient-1")
 	found := false
 	for _, v := range pod.Spec.Volumes {
-		if v.Name == "home" && v.PersistentVolumeClaim != nil {
+		if v.Name == "context" && v.PersistentVolumeClaim != nil {
 			found = true
 		}
 	}
@@ -130,7 +130,7 @@ func TestFewFailuresKeepTheVolume(t *testing.T) {
 func TestNonStorageFailuresNeverStripTheVolume(t *testing.T) {
 	r := reconcilerWithCap(nil, 100)
 	r.RuntimeStartDeadline = time.Hour
-	r.Runtime.HomePVC = "agentops-home"
+	r.Runtime.ContextPVC = "agentops-context"
 
 	mkProfile(t, "p-sched")
 	mkChanConv(t, "sched-1", "p-sched")
@@ -158,7 +158,7 @@ func TestNonStorageFailuresNeverStripTheVolume(t *testing.T) {
 	pod := podOf(t, "sched-1")
 	found := false
 	for _, v := range pod.Spec.Volumes {
-		if v.Name == "home" && v.PersistentVolumeClaim != nil {
+		if v.Name == "context" && v.PersistentVolumeClaim != nil {
 			found = true
 		}
 	}

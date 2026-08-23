@@ -37,12 +37,20 @@ Two optional volumes, shaped alike (`pvcRef` / `emptyDir`) and defaulted apart:
 
 | volume | mounts at | chart default | absent means |
 |---|---|---|---|
-| `spec.home` | `/data/home` | **on** (`persistence.enabled`) | agent session files die with the pod, so a resume finds nothing and answers without prior context |
+| `spec.context` | `/data/home` | **on** (`persistence.context.enabled`) | a conversation's accumulated context dies with the pod, so a resume finds nothing and answers without it |
 | `spec.workspace` | `/data/workspace` | **off** (`persistence.workspace.enabled`) | the repository checkout is re-cloned per pod |
+
+**The volume is named for what it HOLDS.** It holds the context
+`runtimeContextId` is a handle into and `contextStorage` promises continuity on.
+That it is mounted at `/data/home` is a property of one runtime image — that
+PATH does not move, because claude-code keys its stored context off it.
+
+**`spec.home` is the retired name**, dual-read for one release. A runtime
+declaring it keeps working, and `spec.context` wins where both are present.
 
 **The asymmetry is the point.**
 
-- Losing session files silently costs conversational history.
+- Losing accumulated context silently costs conversational history.
 - Losing a checkout costs a re-clone — cheap, and always correct. A stale shared
   checkout is neither.
 
@@ -490,7 +498,7 @@ runtime:
   idleTtlMinutes: ""            # empty = follow runtimeIdleTtlMinutes
   nodeSelector: {}
   resources: {}
-  homePvcRef: ""                # only for a claim this chart did not create
+  contextPvcRef: ""             # only for a claim this chart did not create
   credentialsSecret:
     name: agentops-claude
     key: oauthToken
@@ -510,9 +518,10 @@ global:
   the Pipeline instead — see [Execution is wiring too](#execution-is-wiring-too).
 - **The account named here is the FLOOR**, bound to nothing. `rbacMode` renders
   a separate, named account for a route to opt into.
-- **`home.pvcRef` is wired, not copied.** With `persistence.enabled` (or
-  `persistence.existingClaim`) the rendered `AgentRuntime` takes the chart's own
-  claim. `runtime.homePvcRef` exists only for a claim the chart did not create.
+- **`context.pvcRef` is wired, not copied.** With `persistence.context.enabled`
+  (or `persistence.context.existingClaim`) the rendered `AgentRuntime` takes the
+  chart's own claim. `runtime.contextPvcRef` exists only for a claim the chart
+  did not create.
 - **Idle TTL has one default.** Empty `runtime.idleTtlMinutes` follows the
   release's `runtimeIdleTtlMinutes`, so there is one number unless you
   deliberately want a second.
@@ -888,7 +897,7 @@ its routes touches the Kubernetes API — and `telegram-bundle` renders none,
 because it ships no Pipeline.
 
 **The substrate stays the parent's.** No bundle renders an `AgentRuntime`, a
-model credential, a home volume or the floor account.
+model credential, a context volume or the floor account.
 
 ### Naming an account does not create one
 
@@ -1039,7 +1048,7 @@ Abandoning a run is `/close`'s job, and `/close` does it safely by ending the
 conversation so nothing re-dispatches.
 
 **The reply states what the release cost.** Where the runtime can carry context
-across a pod loss — `contextStorage` against the configured home volume — it
+across a pod loss — `contextStorage` against the configured context volume — it
 says the conversation keeps its memory.
 
 Where it cannot, it warns that the next message starts fresh. That is the same
@@ -1125,8 +1134,8 @@ payload is not copied into the conversation object.
   well as what the agent answered), adapter cursors, delivery markers and
   suppression windows. Recovered by reading. Survives any restart and any
   rescheduling.
-- **A PersistentVolume** — state that genuinely *is* a filesystem: the runtime's
-  agent session files, and optionally its repository checkout.
+- **A PersistentVolume** — state that genuinely *is* a filesystem: a
+  conversation's accumulated context, and optionally its repository checkout.
 - **Deliberately lossy** — bounded telemetry whose loss costs history, never
   correctness. It is documented as lossy and it reports its gaps.
 
@@ -1141,7 +1150,7 @@ a second source of truth beside the CRs.
 | Manager — ingest cooldown | fingerprint suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
 | Manager — admission | active/pending counts | live pod list + `Conversation` phase | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history. Clients are told to resync rather than handed silence |
-| Runtime pod | agent session files, repo checkout | PVC when enabled, else ephemeral | with `persistence.enabled` off, conversational context. With it on, nothing |
+| Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | with `persistence.context.enabled` off, conversational context. With it on, nothing |
 | Channel / signal adapters | transport cursors | annotations on `Channel` / `SignalSource` | nothing |
 | Console | transcript buffer, config cache, activity index | rebuilt by list→watch and cursor replay. The transcript is a CACHE of `status.runs[]` | nothing authoritative. Acks and notices only |
 | Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
@@ -1232,7 +1241,7 @@ would become permanent.
 `AgentRuntime.spec.contextStorage` declares where a runtime keeps context —
 `volume`, `external`, or `none`.
 
-- **A runtime keeping it on a home volume the deployment does not provide can
+- **A runtime keeping it on a context volume the deployment does not provide can
   never continue anything.** Such conversations are single-run **by
   declaration**: they answer each message fresh and say so, rather than failing
   every follow-up for a configuration the operator chose.
@@ -1248,8 +1257,9 @@ would become permanent.
 | **Shared** | RWX claim, runtime pods anywhere | Longhorn, EBS-backed RWX, NFS |
 | **Single-node** | RWO claim — or a node-affine `local` PersistentVolume — plus `runtime.nodeSelector` pinning runtime pods to that node | clusters with no distributed provisioner |
 
-**A `local` PV is the answer when there is no dynamic provisioner at all.**
-Create the PV and claim, set `persistence.existingClaim`, and pin the selector.
+**A `local` PV is the answer when there is no dynamic provisioner at all**, and
+the chart binds one for you — see [Storage the chart did not
+create](#storage-the-chart-did-not-create) below.
 
 **Note the trap.** An RWO claim with runtime pods *unpinned* works until a
 second conversation schedules elsewhere, then fails to attach, far from the
@@ -1258,6 +1268,46 @@ setting that caused it.
 **The runtime pod is deliberately not given a host filesystem path for this.**
 It executes agent code, and reaching the node's filesystem should not follow
 from wanting durable context.
+
+#### Storage the chart did not create
+
+Either volume — context or workspace — can run against storage provisioned
+outside the release, by values alone. **Three forms, all three on BOTH volumes:**
+
+| Form | You supply | The chart |
+|---|---|---|
+| existing claim | `existingClaim` | renders no claim, references yours |
+| volume by name | `volumeName` | renders a claim bound to it |
+| volume by label | `selector` | renders a claim carrying that selector |
+
+**Binding to a pre-created `PersistentVolume` needs the storage class turned
+off**, and that is what `-` says:
+
+| `storageClassName` | Renders |
+|---|---|
+| undefined or empty | no field — the cluster's default provisioner |
+| `-` | `storageClassName: ""` — no class, bind to a pre-created volume |
+| a name | that class |
+
+**An absent field is not the same as an empty one.** The admission plugin fills
+an absent `storageClassName` in from the cluster's default StorageClass, which
+provisions a second volume and leaves yours untouched. Only an explicit empty
+string declines that.
+
+```yaml
+persistence:
+  context:
+    volumeName: agentops-context-pv
+    storageClassName: "-"
+```
+
+**The chart renders no `PersistentVolume`.** A pre-created volume is by
+definition not the release's to create, and a release that created one would own
+the lifecycle of storage holding agent context it did not put there.
+
+**The resolved claim name follows to every consumer** — the `AgentRuntime`, the
+manager's bootstrap default, the reclaiming job and the mount probe. There is
+nothing to restate.
 
 #### Keeping the live context off the durable volume
 
@@ -1301,7 +1351,7 @@ context, and a wrong guess persists nothing while looking configured.
 **`paths` is an *include* list.** Caches and tool state are then excluded by
 construction, rather than by a list that has to chase every file a vendor adds.
 
-**Absent means today's behaviour** — the home volume mounted directly and no
+**Absent means today's behaviour** — the context volume mounted directly and no
 sidecar. An install upgrades unchanged until it opts in.
 
 **Opting in strands existing context.** Without the sidecar, context sits at the

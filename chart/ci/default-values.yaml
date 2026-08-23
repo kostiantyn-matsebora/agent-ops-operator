@@ -1,15 +1,17 @@
 # Values for TEST INSTALLS (the conventional `chart/ci/` location helm
 # chart-testing picks up automatically).
 #
-# The one thing this file exists to say: storage is off. `persistence.enabled`
-# defaults to true and requests a ReadWriteMany claim, which is right for a real
-# install and wrong for a throwaway cluster — with no default StorageClass or no
-# RWX provisioner the claim sits Pending and no runtime pod ever schedules, so
-# the install "succeeds" and then does nothing.
+# The one thing this file exists to say: storage is off.
+# `persistence.context.enabled` defaults to true and requests a ReadWriteMany
+# claim, which is right for a real install and wrong for a throwaway cluster —
+# with no default StorageClass or no RWX provisioner the claim sits Pending and
+# no runtime pod ever schedules, so the install "succeeds" and then does
+# nothing.
 #
-# A test install loses nothing by it: sessions are ephemeral, which is exactly
+# A test install loses nothing by it: context is ephemeral, which is exactly
 # what a test wants.
 persistence:
-  enabled: false
+  context:
+    enabled: false
   workspace:
     enabled: false

@@ -39,7 +39,7 @@ account. Object names: <sa>-<entry-name>.
 BUNDLES RENDER THEIR OWN ROUTES' ACCOUNTS. A bundle knows what its routes do and
 this chart does not, so `k8s-bundle` renders an account per route and `ha-bundle`
 renders accounts with no Kubernetes RBAC at all. The parent keeps the SUBSTRATE
-exclusively — runtime, credential, home volume, and this floor.
+exclusively — runtime, credential, context volume, and this floor.
 */ -}}
 {{- $ns := .Release.Namespace }}
 {{- $floor := include "agentops.runtimeServiceAccount" . }}

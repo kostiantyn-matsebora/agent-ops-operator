@@ -1,11 +1,11 @@
 {{- if .Values.contextProbe.enabled }}
-{{- $p := .Values.persistence }}
+{{- $p := .Values.persistence.context }}
 {{- $pvc := .Values.contextProbe.claimName }}
 {{- if and (not $pvc) $p.enabled }}
 {{- $pvc = $p.existingClaim | default $p.name }}
 {{- end }}
 {{- if not $pvc }}
-{{- fail "contextProbe.enabled needs a claim: enable persistence, or set contextProbe.claimName" }}
+{{- fail "contextProbe.enabled needs a claim: enable persistence.context, or set contextProbe.claimName" }}
 {{- end }}
 ---
 # THE CONTEXT MOUNT PROBE.

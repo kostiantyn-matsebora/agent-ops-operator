@@ -113,7 +113,7 @@ use.
 - **`pipelines.<route>.serviceAccountName`** names your own instead, and this
   bundle then renders none.
 - **The SUBSTRATE stays the parent's.** No `AgentRuntime`, no credential, no
-  home volume, no floor account.
+  context volume, no floor account.
 
 The CR is named `k8s-operate` rather than `k8s-admin` because `k8s-admin` is
 already the `MCPToolset` it binds, and "bind `k8s-admin` on `k8s-admin`" is a

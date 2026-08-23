@@ -2,7 +2,7 @@
 // pod-local storage and a durable snapshot on the context volume.
 //
 // WHY A SIDECAR AT ALL. On 2026-08-20 a node reboot corrupted the ext4
-// filesystem on the shared home volume. The live context WAS that volume, so
+// filesystem on the shared context volume. The live context WAS that volume, so
 // one damaged filesystem took every conversation's context with it and blocked
 // every runtime pod from starting. Moving the live copy to pod-local storage
 // makes the durable volume a SNAPSHOT: a run already going keeps working when

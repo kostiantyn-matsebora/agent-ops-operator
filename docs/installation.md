@@ -149,12 +149,57 @@ helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 
 ### Storage
 
+Two volumes, shaped alike. The CONTEXT volume holds a conversation's
+accumulated context and is **on**. The WORKSPACE volume holds repository
+checkouts and is **off** — a re-clone is cheap and always correct, a stale
+shared checkout is neither.
+
 | Key | Default | Consequence |
 |---|---|---|
-| `persistence.enabled` | `true` | off means conversations never keep context |
-| `persistence.accessModes` | `[ReadWriteMany]` | `ReadWriteOnce` pins every agent pod to one node |
-| `persistence.size` | `5Gi` | session files for every conversation |
-| `persistence.storageClassName` | `""` | empty uses the cluster default |
+| `persistence.context.enabled` | `true` | off means conversations never keep context |
+| `persistence.context.accessModes` | `[ReadWriteMany]` | `ReadWriteOnce` pins every agent pod to one node |
+| `persistence.context.size` | `5Gi` | the accumulated context of every conversation |
+| `persistence.context.storageClassName` | `""` | empty uses the cluster default — see below |
+| `persistence.workspace.enabled` | `false` | on keeps uncommitted agent work across a pod restart |
+
+**Upgrading from a release before chart 9.0.0?** This block moved: it was flat
+`persistence.*`, and the claim was `agentops-home`. Supplying a retired key now
+fails the render naming where it went, and
+[`CHANGELOG.md`](CHANGELOG.md) has the one line that keeps the volume you have.
+
+#### Pointing a volume at storage the chart did not create
+
+**Both volumes accept all three forms**, and the resolved claim name follows to
+every consumer — the `AgentRuntime`, the manager's bootstrap default, the
+reclaiming job and the mount probe. Nothing is restated.
+
+| Form | Key | The chart |
+|---|---|---|
+| a claim you already made | `existingClaim` | renders no claim, references yours |
+| a `PersistentVolume` by name | `volumeName` | renders a claim bound to it |
+| a `PersistentVolume` by label | `selector` | renders a claim carrying that selector |
+
+**Naming a volume is not enough on its own.** A claim binds to a pre-created
+volume only when it declines a storage class, and an ABSENT `storageClassName`
+is filled in by the cluster's default — which provisions a second volume and
+leaves yours untouched. `-` is how you decline:
+
+| `storageClassName` | Renders |
+|---|---|
+| undefined or empty | no field — the cluster's default provisioner |
+| `-` | `storageClassName: ""` — no class, bind to a pre-created volume |
+| a name | that class |
+
+```yaml
+persistence:
+  context:
+    volumeName: agentops-context-pv
+    storageClassName: "-"
+```
+
+**The chart never renders a `PersistentVolume`.** Create it yourself — a
+node-affine `local` PV is the usual answer on a cluster with no dynamic
+provisioner.
 
 **Surviving a damaged volume.** A shared volume's filesystem can be corrupted by
 a node reboot, and the storage layer will still call it healthy — it replicates

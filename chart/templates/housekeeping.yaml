@@ -1,12 +1,12 @@
 {{- if .Values.housekeeping.enabled }}
 {{- $h := .Values.housekeeping }}
 {{- $p := .Values.persistence }}
-{{- $homeClaim := $p.existingClaim | default $p.name }}
+{{- $ctxClaim := $p.context.existingClaim | default $p.context.name }}
 {{- $wsClaim := $p.workspace.existingClaim | default $p.workspace.name }}
 {{- /* A claim is mounted only when the persistence block that owns it is on:
 there is nothing to reclaim from a volume this release does not have. */ -}}
 {{- $mountWs := and $h.workspaces $p.workspace.enabled }}
-{{- $mountHome := and $h.sessions $p.enabled }}
+{{- $mountContext := and $h.sessions $p.context.enabled }}
 {{- if eq $h.serviceAccountName (include "agentops.runtimeServiceAccount" .) }}
 {{- fail "housekeeping.serviceAccountName must differ from global.agentops.runtime.serviceAccountName — this workload mounts the claim ROOTS, which is exactly the reach subPath isolation denies runtime pods; sharing the identity would hand every agent the ability to read and delete every other conversation's tree" }}
 {{- end }}
@@ -95,13 +95,13 @@ spec:
                 - name: WORKSPACE_ROOT
                   value: /reclaim/workspace
                 {{- end }}
-                {{- if $mountHome }}
+                {{- if $mountContext }}
                 # claude-code keys transcripts by session id under the shared
                 # projects directory; /data/home is mounted with no subPath.
                 - name: SESSIONS_ROOT
                   value: /reclaim/home/.claude/projects/-data-workspace
                 {{- end }}
-              {{- if or $mountWs $mountHome }}
+              {{- if or $mountWs $mountContext }}
               volumeMounts:
                 {{- if $mountWs }}
                 # The claim ROOT, with no subPath — that is the whole reason
@@ -109,7 +109,7 @@ spec:
                 - name: workspace
                   mountPath: /reclaim/workspace
                 {{- end }}
-                {{- if $mountHome }}
+                {{- if $mountContext }}
                 - name: home
                   mountPath: /reclaim/home
                 {{- end }}
@@ -118,17 +118,17 @@ spec:
               resources:
 {{ toYaml . | indent 16 }}
               {{- end }}
-          {{- if or $mountWs $mountHome }}
+          {{- if or $mountWs $mountContext }}
           volumes:
             {{- if $mountWs }}
             - name: workspace
               persistentVolumeClaim:
                 claimName: {{ $wsClaim }}
             {{- end }}
-            {{- if $mountHome }}
+            {{- if $mountContext }}
             - name: home
               persistentVolumeClaim:
-                claimName: {{ $homeClaim }}
+                claimName: {{ $ctxClaim }}
             {{- end }}
           {{- end }}
 {{- end }}

@@ -31,12 +31,13 @@ fifteen minutes, most of it the install.
 - A cluster you can `kubectl` into, and Helm.
 - A model credential — a Claude subscription token or an Anthropic API key.
 
-**Storage.** Sessions live on a `ReadWriteMany` claim.
+**Storage.** A conversation's accumulated context lives on a `ReadWriteMany`
+claim.
 
 | Your cluster | What to do |
 |---|---|
 | Has an RWX provisioner | Nothing. |
-| Has none | Add `--set persistence.enabled=false` below. Without it the claim sits `Pending` and no pod ever starts. |
+| Has none | Add `--set persistence.context.enabled=false` below. Without it the claim sits `Pending` and no pod ever starts. |
 
 **The trade: with persistence off, conversations do not remember.** Every run
 starts fresh. The operator tells you that up front rather than failing a
@@ -172,7 +173,8 @@ exits on the idle TTL.
 | Cause | Where it shows |
 |---|---|
 | Bad or missing credential | the run fails — `status.runs[].status: failed`, non-zero exit code, reason in `kubectl logs` |
-| No RWX storage class | the `agentops-home` PVC sits `Pending`. The conversation exists but never gets a pod |
+| No RWX storage class | the `agentops-context` PVC sits `Pending`. The conversation exists but never gets a pod |
+| A pre-created volume that will not bind | the `agentops-context` PVC sits `Pending` too, and it looks identical. Different cause: a claim naming a volume also needs `persistence.context.storageClassName: "-"`, or the cluster's default class is injected and a second volume is provisioned instead. `kubectl get pvc agentops-context -o yaml` shows which — an empty `storageClassName` means you declined the class, a filled-in one means you did not |
 | Nothing claims the source | the source's `Wired` condition is `False` with a reason. The console reports its composer unavailable, and signals are dropped |
 | At capacity | phase `Pending`, no pod, no thread. Five run at once by default |
 

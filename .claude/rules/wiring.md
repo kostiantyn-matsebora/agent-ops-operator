@@ -175,7 +175,7 @@ SYMMETRY TEST**, and the history is kept because the argument is seductive:
   that knows what its routes do. `k8s-bundle` renders one per route,
   `ha-bundle` two with NO Kubernetes RBAC (neither route touches that API),
   `telegram-bundle` none because it ships no Pipeline. The SUBSTRATE stays the
-  parent's — runtime, credential, home volume, floor account.
+  parent's — runtime, credential, context volume, floor account.
   - **"No subchart renders a runtime SA" is REVERSED, not weakened.** That rule
     guarded against a bundle rendering the substrate, including an account
     sized for everything. An account sized DOWN to one route is the opposite.

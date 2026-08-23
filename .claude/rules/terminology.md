@@ -137,7 +137,7 @@ have stranded every in-flight handle on upgrade.
 
 **Continuity is PROMISED ONLY WHERE POSSIBLE** —
 `AgentRuntime.spec.contextStorage` (`volume` | `external` | `none`) against the
-configured home volume.
+configured context volume.
 
 | Case | Behaviour |
 |---|---|
@@ -148,6 +148,38 @@ configured home volume.
 runtime, then a manager-side breaker that HOLDS work. Failing fast on every
 report would destroy every active conversation's context in one storage
 incident.
+
+### The CONTEXT volume, never "the home volume"
+
+**CRD `AgentRuntime.spec.context`, chart `persistence.context`, claim
+`agentops-context`, bootstrap env `CONTEXT_PVC`, chart value
+`runtime.contextPvcRef`, pod volume `context`.**
+
+The volume holds a conversation's ACCUMULATED CONTEXT — the thing
+`runtimeContextId` is a handle into and `contextStorage` promises continuity on.
+`home` named the filesystem path it happens to be mounted at, which is the same
+mistake `session` and `worker` are banned for one heading up.
+
+**`/data/home` AND `HOME=/data/home` ARE THE DELIBERATE EXCEPTION, AND THEY DO
+NOT MOVE.** The path really IS the process home directory:
+`runtimes/claude/Dockerfile` sets it, `runtime.js` resolves
+`${HOME}/.claude/projects` off it, and claude-code keys stored context by that
+path. Renaming it would break continuity for every existing conversation to win
+a word.
+
+- **The split is the point.** The PATH stays honest about being `$HOME`, the API
+  stops pretending the volume is ABOUT being `$HOME`.
+- **`spec.home` and `HOME_PVC` are DUAL-READ for one release** — the accessor
+  `AgentRuntimeSpec.ContextVolume()` and `contextPVC()` in `cmd/manager/main.go`
+  are the only two read points, exactly as `Conversation.ContextID()` is.
+- **THE CLAIM RENAME IS GUARDED, NOT TRUSTED.** Nothing copies a volume, so an
+  upgrade that adopted `agentops-context` unremarked would leave every
+  conversation answering without its context while every signal reported
+  success. `agentops.contextClaimRenameGuard` FAILS the render — and, because
+  `lookup` is blind without a cluster, `docs/CHANGELOG.md` is the only warning a
+  GitOps install gets.
+- **The ordinary English word is untouched** — `state-durability`'s "one
+  declared home", every Home Assistant mention, and a home DIRECTORY.
 
 ### `context-sync`
 

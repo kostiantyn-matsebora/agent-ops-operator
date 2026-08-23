@@ -1,6 +1,6 @@
 // A runtime pod that never STARTS used to hold its capacity slot forever.
 //
-// On 2026-08-20 a corrupt filesystem on the shared home volume left five pods
+// On 2026-08-20 a corrupt filesystem on the shared context volume left five pods
 // in ContainerCreating for fifteen hours. They held every slot, six more
 // conversations starved behind them, and nothing anywhere said why: the only
 // condition on the stuck conversations read DeliveryPending=False /

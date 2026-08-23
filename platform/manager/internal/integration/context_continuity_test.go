@@ -130,7 +130,7 @@ func TestAnOlderRuntimeStillReportingTheRetiredNameIsHonoured(t *testing.T) {
 
 // Continuity is promised only where it is possible. Without it, a conversation
 // is single-run BY DECLARATION and answers fresh — it does not fail, because an
-// install with no durable home volume is a configuration the operator chose.
+// install with no durable context volume is a configuration the operator chose.
 func TestNoHandleIsIssuedWhereContextCannotBeCarried(t *testing.T) {
 	mkProfile(t, "prof-ctx-ephemeral")
 	conv := contextConv(t, "ctx-ephemeral", "prof-ctx-ephemeral")
@@ -138,14 +138,14 @@ func TestNoHandleIsIssuedWhereContextCannotBeCarried(t *testing.T) {
 	srv := apiServer()
 	reportRun(t, srv, conv.Name, "r-1", "ctx-established")
 
-	// Same server, but a deployment that provides no home volume: the reference
+	// Same server, but a deployment that provides no context volume: the reference
 	// runtime keeps context there, so continuity is impossible here.
 	ephemeral := apiServer()
 	ephemeral.Runtime = runtimepod.Config{}
 
 	possible := runtimepod.Resolved{Config: ephemeral.Runtime}.ContinuityPossible()
 	if possible {
-		t.Fatal("a deployment with no home volume must not promise continuity")
+		t.Fatal("a deployment with no context volume must not promise continuity")
 	}
 	// The handle is still RECORDED — it is the runtime's, and a later deployment
 	// with storage could use it. What changes is that it is not handed back.

@@ -14,7 +14,7 @@ import (
 func syncCfg() Config {
 	return Config{
 		Image: "runtime:1", ServiceAccount: "sa", ControlURL: "http://manager:8080",
-		HomePVC: "agentops-home", ContextSyncImage: "context-sync:1",
+		ContextPVC: "agentops-context", ContextSyncImage: "context-sync:1",
 		ContextLiveSizeLimit: "4Gi",
 	}
 }
@@ -59,10 +59,10 @@ func TestNoContextSyncBuildsTodaysPod(t *testing.T) {
 	if len(pod.Spec.InitContainers) != 0 {
 		t.Fatal("no sidecar may be added when the runtime declares no contextSync")
 	}
-	if v := volume(pod, "home"); v == nil || v.PersistentVolumeClaim == nil {
+	if v := volume(pod, "context"); v == nil || v.PersistentVolumeClaim == nil {
 		t.Fatal("home must still be the durable claim, mounted directly")
 	}
-	if volume(pod, "context") != nil {
+	if volume(pod, "context-store") != nil {
 		t.Fatal("no separate context volume in the unconfigured shape")
 	}
 	w := container(pod, "worker")
@@ -79,14 +79,14 @@ func TestNoContextSyncBuildsTodaysPod(t *testing.T) {
 func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 	pod := buildResolved("c1", Resolved{Config: syncCfg(), ContextSync: syncSpec()})
 
-	home := volume(pod, "home")
-	if home == nil || home.EmptyDir == nil {
+	ctx := volume(pod, "context")
+	if ctx == nil || ctx.EmptyDir == nil {
 		t.Fatal("the agent's home must be pod-local in sidecar mode")
 	}
-	if home.EmptyDir.SizeLimit == nil || home.EmptyDir.SizeLimit.String() != "4Gi" {
-		t.Fatalf("the live context must be bounded; got %v", home.EmptyDir.SizeLimit)
+	if ctx.EmptyDir.SizeLimit == nil || ctx.EmptyDir.SizeLimit.String() != "4Gi" {
+		t.Fatalf("the live context must be bounded; got %v", ctx.EmptyDir.SizeLimit)
 	}
-	ctxVol := volume(pod, "context")
+	ctxVol := volume(pod, "context-store")
 	if ctxVol == nil || ctxVol.PersistentVolumeClaim == nil {
 		t.Fatal("the durable claim must be present as its own volume")
 	}
@@ -94,7 +94,7 @@ func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 	// THE isolation property: the agent container must not mount the claim.
 	w := container(pod, "worker")
 	for _, m := range w.VolumeMounts {
-		if m.Name == "context" {
+		if m.Name == "context-store" {
 			t.Fatal("the agent container must NOT mount the durable volume")
 		}
 	}
@@ -105,7 +105,7 @@ func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 	}
 	var store *corev1.VolumeMount
 	for i := range sc.VolumeMounts {
-		if sc.VolumeMounts[i].Name == "context" {
+		if sc.VolumeMounts[i].Name == "context-store" {
 			store = &sc.VolumeMounts[i]
 		}
 	}
@@ -190,9 +190,9 @@ func TestContextSyncWithoutAnImageFallsBackSafely(t *testing.T) {
 	if len(pod.Spec.InitContainers) != 0 {
 		t.Fatal("no image means no sidecar")
 	}
-	home := volume(pod, "home")
-	if home == nil || home.PersistentVolumeClaim == nil {
-		t.Fatal("without a sidecar the home claim must stay mounted directly, or context is lost")
+	ctx := volume(pod, "context")
+	if ctx == nil || ctx.PersistentVolumeClaim == nil {
+		t.Fatal("without a sidecar the context claim must stay mounted directly, or context is lost")
 	}
 }
 
@@ -224,17 +224,17 @@ func TestClearingContextSyncRestoresTheDirectMount(t *testing.T) {
 	// The operator clears `paths`, so the runtime declares nothing.
 	off := buildResolved("c1", Resolved{Config: cfg})
 
-	home := volume(off, "home")
-	if home == nil || home.PersistentVolumeClaim == nil {
+	ctx := volume(off, "context")
+	if ctx == nil || ctx.PersistentVolumeClaim == nil {
 		t.Fatal("rollback must restore the durable claim as the agent's home")
 	}
-	if home.PersistentVolumeClaim.ClaimName != cfg.HomePVC {
-		t.Fatalf("claim = %q, want %q", home.PersistentVolumeClaim.ClaimName, cfg.HomePVC)
+	if ctx.PersistentVolumeClaim.ClaimName != cfg.ContextPVC {
+		t.Fatalf("claim = %q, want %q", ctx.PersistentVolumeClaim.ClaimName, cfg.ContextPVC)
 	}
 	if len(off.Spec.InitContainers) != 0 {
 		t.Fatal("rollback must remove the sidecar")
 	}
-	if volume(off, "context") != nil {
+	if volume(off, "context-store") != nil {
 		t.Fatal("rollback must remove the separate context volume")
 	}
 	w := container(off, "worker")

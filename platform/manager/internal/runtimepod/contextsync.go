@@ -112,7 +112,7 @@ func retainOrDefault(sync *agentopsv1alpha1.ContextSync) int32 {
 // copying a shared tree back would each erase the other's writes.
 func contextSyncMounts(conv *agentopsv1alpha1.Conversation) []corev1.VolumeMount {
 	return []corev1.VolumeMount{
-		{Name: "home", MountPath: "/data/home"},
-		{Name: "context", MountPath: contextStoreMount, SubPath: conv.Name},
+		{Name: "context", MountPath: "/data/home"},
+		{Name: "context-store", MountPath: contextStoreMount, SubPath: conv.Name},
 	}
 }

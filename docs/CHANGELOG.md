@@ -11,6 +11,146 @@ See [../README.md](../README.md) for the product overview and [./](./) for
 reference material. `CLAUDE.md` in this directory owns the rules this file
 follows.
 
+## [9.0.0] — 2026-08-24
+
+**The home volume is renamed to the CONTEXT volume, and its claim is renamed
+with it.** The volume holds a conversation's accumulated context. It was named
+after the filesystem path it happens to be mounted at.
+
+**READ THIS BEFORE UPGRADING A GITOPS INSTALL.** The chart carries a guard that
+refuses this upgrade where it can see the old claim — but that guard reads the
+CLUSTER, and Argo CD, Flux, `helm template` and CI all render without one. For
+those installs this entry is the only warning that arrives.
+
+**If your install has an `agentops-home` claim, set this and nothing else:**
+
+```yaml
+persistence:
+  context:
+    existingClaim: agentops-home
+```
+
+**It moves no data and copies nothing.** The chart then renders no claim of its
+own, and `helm.sh/resource-policy: keep` on the live object means Helm leaves it
+alone. Skip it and the release provisions a second, EMPTY claim — every
+conversation in the install answers without its accumulated context, while every
+signal reports success.
+
+**The mount path does NOT move.** `/data/home` and `HOME=/data/home` are
+unchanged. The reference runtime keys its stored context off that path, so
+moving it would break continuity for every existing conversation to win a word.
+
+### Changed
+
+- **BREAKING: the `persistence` block moved under `persistence.context`.** The
+  workspace block is unchanged in shape and in place.
+
+  | Was | Now |
+  |---|---|
+  | `persistence.enabled` | `persistence.context.enabled` |
+  | `persistence.name` (`agentops-home`) | `persistence.context.name` (`agentops-context`) |
+  | `persistence.size` | `persistence.context.size` |
+  | `persistence.storageClassName` | `persistence.context.storageClassName` |
+  | `persistence.accessModes` | `persistence.context.accessModes` |
+  | `persistence.volumeName` | `persistence.context.volumeName` |
+  | `persistence.existingClaim` | `persistence.context.existingClaim` |
+
+  **Supplying any retired key FAILS the render**, naming where it moved. Helm
+  never reports an unread values key, so a silently-ignored
+  `persistence.enabled: false` would provision the claim an operator with no
+  ReadWriteMany provisioner had explicitly declined. This guard needs no
+  cluster, so it fires under `helm template`, in CI and under a GitOps
+  controller.
+
+- **BREAKING: `AgentRuntime.spec.home` becomes `spec.context`.** Same shape,
+  same `pvcRef` / `emptyDir`. The retired field is **dual-read for one release**
+  — a runtime declaring only `spec.home` keeps working, and `spec.context` wins
+  where both are present.
+
+  This release changes a CRD field, and Helm does not upgrade CRDs:
+
+  ```sh
+  kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+  ```
+
+  ```powershell
+  kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+  ```
+
+- **`runtime.homePvcRef` becomes `runtime.contextPvcRef`**, and the retired
+  spelling is honoured for one release.
+
+- **`HOME_PVC` becomes `CONTEXT_PVC`** on the manager. Also dual-read for one
+  release, because the manager and the chart upgrade at different moments and a
+  bootstrap default that vanished for even one reconcile would build runtime
+  pods with no context volume. Manager image **0.54.0**.
+
+### Added
+
+- **Either volume can now bind to a PersistentVolume the chart did not create.**
+  Three forms, and all three work on BOTH the context and the workspace volume:
+
+  | Form | You supply | The chart |
+  |---|---|---|
+  | existing claim | `existingClaim` | renders no claim, references yours |
+  | volume by name | `volumeName` | renders a claim bound to it |
+  | volume by label | `selector` | renders a claim carrying that selector |
+
+  `selector` is new. `existingClaim` and `volumeName` already existed — but
+  `volumeName` alone never actually bound anything, which is the fix below.
+
+- **`storageClassName: "-"` disables dynamic provisioning**, following the
+  convention prometheus-community, Bitnami and most charts already use:
+
+  | Value | Renders |
+  |---|---|
+  | undefined or empty | no field — the cluster's default provisioner |
+  | `-` | `storageClassName: ""` — no class, bind to a pre-created volume |
+  | a name | that class |
+
+  **Purely additive.** Empty keeps the meaning it has always had here, so no
+  existing install changes behaviour.
+
+### Fixed
+
+- **A claim naming a pre-created volume is now actually bound to it.** Binding
+  to a static `PersistentVolume` requires an EXPLICIT empty storage class. The
+  template emitted `storageClassName` only when non-empty and the shipped
+  default was `""`, so the field was omitted, the admission plugin filled it in
+  from the cluster's default StorageClass, and the claim was dynamically
+  provisioned against a volume you had already made. There was no spelling of
+  "no storage class" at all. `-` is that spelling.
+
+  **The chart still renders no `PersistentVolume`.** A pre-created volume is by
+  definition not the release's to create.
+
+### Upgrade
+
+1. **Apply the CRDs** (command above). Helm does not upgrade them.
+2. **If this install has an `agentops-home` claim**, set
+   `persistence.context.existingClaim: agentops-home`. Check first:
+
+   ```sh
+   kubectl -n agent-ops get pvc agentops-home
+   ```
+
+   ```powershell
+   kubectl -n agent-ops get pvc agentops-home
+   ```
+
+3. **Rewrite any flat `persistence.*` values** under `persistence.context`, per
+   the table above. The render fails naming them if you miss one.
+4. **Rename `runtime.homePvcRef`** to `runtime.contextPvcRef` if you set it. The
+   old spelling still works for this release.
+5. **`helm upgrade`.**
+
+**Rollback is a chart downgrade, and it is clean at every step**, because no
+data has moved.
+
+**Optional, later and deliberate:** rebind the PersistentVolume under the tidy
+claim name, using `persistence.context.volumeName` with
+`persistence.context.storageClassName: "-"`.
+
 ## [8.0.0] — 2026-08-23
 
 **The chart could not be installed on a cluster that did not already have its
@@ -1021,115 +1161,9 @@ get/list/watch, read-only. Every other permission it holds is namespaced. It
 shrinks the corruption window without closing it, because the storage provider
 picks where a shared volume is served independently of where runtime pods run.
 
-## [5.20.0] — 2026-08-15
-
-On 2026-08-13 a 44-alert burst was rate-limited by Telegram. Every forum topic
-was created, and 22 of them stayed **completely empty** for four and a half
-hours, while the answers sat in `status.runs[].result` and the operator reported
-itself healthy.
-
-### Fixed
-
-The cause was one line of asymmetry. The manager's completed-operation window
-recorded operations that were **attempted**, and `enqueue` suppresses any stable
-id in that window — which is every derivable op.
-
-A failed send therefore disabled its own recovery. Reconciliation re-derived it,
-dedup dropped it, nothing posted, and no restart helped.
-
-- **The window now records what SUCCEEDED.** A failed derivable op releases its
-  dedup entry and reconciliation re-derives it. `delete-conversation` is the one
-  exemption, because its Conversation is disappearing.
-- **Telegram paces itself** — 30 sends/second per bot, 20/minute per chat — and
-  honours `retry_after` exactly, retrying in-process instead of reporting a
-  failure.
-
-### Added
-
-- **`DeliveryPending`** condition on a Conversation, naming the channels a
-  recorded run has not reached. It clears when they all have.
-
-  ```sh
-  kubectl get conv -o json | jq -r '.items[] | select(.status.conditions[]?
-    | select(.type=="DeliveryPending" and .status=="True")) | .metadata.name'
-  ```
-- **`/channel/ops` advertises `reclaimAfterSeconds`**, so an adapter absorbing
-  backpressure can bound its waiting inside the claim window. Additive and
-  optional — every existing adapter ignores it.
-
-### Upgrade
-
-`helm upgrade` with the new image tags. No CRD change, no values change. Rolling
-back is reverting them.
-
-**Roll during a quiet window.** This re-posts what the incident lost, including
-cards to topics that did receive their answer. Those were never posted, so it is
-correct, but it will look like a flood.
-
-Expect a burst to take **minutes** to appear in full. Every topic in a forum
-shares one `chat_id`, so ~144 calls against 20/minute is over seven minutes. That
-is Telegram's limit. The alternative is the old behaviour, which lost the
-messages.
-
-## [5.19.0] — 2026-08-15
-
-### Added
-
-Where the console can tell readers apart, unread is now **per person**. Your
-badge is yours, and a colleague clearing theirs does not clear yours.
-
-`status.threads[]` gains `readers[]`. `spec` gains `originReader`.
-
-- **No identity is stored.** The console hashes the signed-in identity with a
-  salt projected as a channel credential, and sends only that opaque key. The
-  manager stores it verbatim and cannot reverse it. A conversation records that N
-  people read it and when, never who.
-- **The salt is generated for you** on install, and on the first upgrade that
-  finds the console Secret without one. It adopts the existing `uiToken` rather
-  than reissuing it, so nobody is signed out. Pin it with
-  `console.auth.readerSalt` if you prefer.
-- **Starting a conversation now marks it read for you**, and only you. Before
-  this, a conversation you had just typed came back unread before any answer
-  could exist.
-- **`readers[]` is bounded at 50 per binding**, oldest watermark evicted first.
-  An evicted reader falls back to the channel-wide mark, the same as a teammate
-  who joined today.
-
-Unchanged, so no adapter needs work:
-
-- `readAt` stays as the channel-wide mark for transports with no reader identity.
-- `POST /channel/read` gains an **optional** `reader` field. `channel-telegram`
-  and every other adapter are untouched and fully conformant.
-- **A shared UI token is one reader**, because there is one credential and no
-  person behind it. With no salt projected, likewise. Both are exactly the 5.18.0
-  behaviour, reached without a special case.
-
-**Rotating the salt orphans every stored key** and resets everyone to the
-channel-wide mark.
-
-### Upgrade
-
-**The CRDs must be re-applied again.** Same pruning trap as 5.18.0, same fix.
-
-```sh
-kubectl apply -f chart/files/crds/          # or helm upgrade with crds.enabled
-```
-
-If any CRD on your cluster was ever applied by hand with `kubectl apply -f`, that
-left a `kubectl-client-side-apply` field manager owning `.spec.versions`, and
-helm's server-side apply refuses it. It rolls the WORKLOADS while silently
-leaving the schema behind.
-
-Add `--force-conflicts` (helmfile: `--args "--force-conflicts"`), which only
-moves ownership. Diagnose with:
-
-```sh
-kubectl get crd conversations.agentops.dev --show-managed-fields -o json
-```
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
-| [CHANGELOG-5.0-5.18.md](changelog/CHANGELOG-5.0-5.18.md) | chart 5.0.0 through 5.18.0 |
+| [CHANGELOG-5.0-5.20.md](changelog/CHANGELOG-5.0-5.20.md) | chart 5.0.0 through 5.20.0 |
 | [CHANGELOG-1.0-4.0.md](changelog/CHANGELOG-1.0-4.0.md) | chart 1.0 through 4.0.0 |

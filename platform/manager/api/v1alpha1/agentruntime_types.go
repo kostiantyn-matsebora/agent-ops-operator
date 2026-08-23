@@ -7,7 +7,24 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// HomeVolume selects durable agent state storage for runtime pods.
+// ContextVolume selects durable storage for a conversation's accumulated
+// context. It is named for what it HOLDS, not for where it happens to be
+// mounted: the reference runtime mounts it at /data/home because that image's
+// $HOME is where claude-code writes its context, and that path does not move.
+type ContextVolume struct {
+	// PVCRef mounts an existing (usually RWX) PVC at the runtime's context path.
+	// +optional
+	PVCRef *ObjectRef `json:"pvcRef,omitempty"`
+	// EmptyDir (default when no pvcRef): the accumulated context dies with the
+	// pod.
+	// +optional
+	EmptyDir bool `json:"emptyDir,omitempty"`
+}
+
+// HomeVolume is the former name of ContextVolume.
+//
+// Deprecated: use ContextVolume. Dual-read for ONE release — see
+// AgentRuntime.Context, which is the only place the retired field is read.
 type HomeVolume struct {
 	// PVCRef mounts an existing (usually RWX) PVC at /data/home.
 	// +optional
@@ -18,7 +35,7 @@ type HomeVolume struct {
 }
 
 // WorkspaceVolume selects storage for the repository checkout at
-// /data/workspace. Shaped identically to HomeVolume, and deliberately a
+// /data/workspace. Shaped identically to ContextVolume, and deliberately a
 // SEPARATE claim: the two hold different kinds of state and are enabled
 // independently (sessions by default, checkouts on request).
 //
@@ -47,9 +64,9 @@ type WorkspaceVolume struct {
 type ContextStorage string
 
 const (
-	// ContextOnVolume: context lives on the runtime's home volume, so continuity
-	// requires that volume to outlive the pod. claude-code's session files are
-	// this case.
+	// ContextOnVolume: context lives on the runtime's context volume, so
+	// continuity requires that volume to outlive the pod. claude-code's session
+	// files are this case.
 	ContextOnVolume ContextStorage = "volume"
 	// ContextExternal: context lives somewhere the operator does not provide — a
 	// vendor API, a database. Continuity does not depend on any volume here.
@@ -99,7 +116,15 @@ type AgentRuntimeSpec struct {
 	// +kubebuilder:default=10
 	// +optional
 	IdleTTLMinutes int32 `json:"idleTtlMinutes,omitempty"`
-	// Home volume for durable agent session state.
+	// Context volume for a conversation's durable accumulated context.
+	// +optional
+	Context *ContextVolume `json:"context,omitempty"`
+	// Home is the former name of Context.
+	//
+	// Deprecated: use Context. Honoured for ONE release so that a runtime
+	// installed before the rename keeps mounting the volume it already has —
+	// a rename that merely moved the field would strand every one of them at
+	// the moment of upgrade. Read ONLY through AgentRuntime.ContextVolume().
 	// +optional
 	Home *HomeVolume `json:"home,omitempty"`
 	// Workspace volume for the repository checkout. Absent = ephemeral, which
@@ -109,7 +134,7 @@ type AgentRuntimeSpec struct {
 	Workspace *WorkspaceVolume `json:"workspace,omitempty"`
 	// ContextStorage declares where this runtime keeps a conversation's context,
 	// so the manager can tell whether continuity is possible here BEFORE
-	// promising it. A runtime keeping context on its home volume, in a
+	// promising it. A runtime keeping context on its context volume, in a
 	// deployment that provides none, can never continue anything — and saying
 	// that up front is what stops every follow-up failing for a reason the
 	// operator already chose.
@@ -118,7 +143,7 @@ type AgentRuntimeSpec struct {
 	ContextStorage ContextStorage `json:"contextStorage,omitempty"`
 	// ContextSync moves the LIVE context off the durable volume and keeps a
 	// snapshot on it instead. ABSENT means today's behaviour, unchanged: the
-	// home volume is mounted directly and there is no sidecar.
+	// context volume is mounted directly and there is no sidecar.
 	// +optional
 	ContextSync *ContextSync `json:"contextSync,omitempty"`
 	// EgressMediation interposes a proxy in the runtime pod that the agent's
@@ -264,6 +289,25 @@ type AgentRuntime struct {
 
 	Spec   AgentRuntimeSpec   `json:"spec,omitempty"`
 	Status AgentRuntimeStatus `json:"status,omitempty"`
+}
+
+// ContextVolume returns this runtime's context volume declaration, or nil.
+//
+// It is THE ONE PLACE the retired spec.home is read. The rename is dual-read
+// for one release exactly as Conversation.ContextID() is: a runtime installed
+// before it keeps mounting the volume it already has, and the current field
+// wins wherever both are present.
+func (s *AgentRuntimeSpec) ContextVolume() *ContextVolume {
+	if s == nil {
+		return nil
+	}
+	if s.Context != nil {
+		return s.Context
+	}
+	if s.Home == nil {
+		return nil
+	}
+	return &ContextVolume{PVCRef: s.Home.PVCRef, EmptyDir: s.Home.EmptyDir}
 }
 
 // +kubebuilder:object:root=true

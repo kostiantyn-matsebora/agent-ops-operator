@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.53.0
+  tag: 0.54.0
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -190,7 +190,7 @@ runtime:
     # The sidecar image. Release-wide, like the manager's own: it implements a
     # contract rather than being a backend choice.
     image: ghcr.io/kostiantyn-matsebora/agentops-context-sync:0.2.1
-    # Bounds the pod-local live context. In this mode the WHOLE home is
+    # Bounds the pod-local live context. In this mode the WHOLE context tree is
     # ephemeral — caches and tool state included — so it must be generous.
     # Empty leaves it unbounded, which is Kubernetes' own default.
     liveSizeLimit: 4Gi
@@ -224,9 +224,15 @@ runtime:
     # reaches unmediated, so this is a hole in the boundary by construction —
     # not a tuning knob.
     excludePorts: []
-  # Agent session persistence is wired from the `persistence` block below
+  # The context volume is wired from the `persistence.context` block below
   # automatically (its claim, or existingClaim). Set this only to point at a
   # claim this chart did not create.
+  contextPvcRef: ""
+  # homePvcRef is the former name of contextPvcRef.
+  #
+  # Deprecated: honoured for ONE release when contextPvcRef is unset, so that a
+  # values file written before the rename keeps pointing the runtime at the
+  # claim it already names.
   homePvcRef: ""
   # Same, for the repository checkout, from `persistence.workspace`.
   workspacePvcRef: ""
@@ -767,40 +773,72 @@ console:
 telegram-bundle:
   enabled: false
 
-# Runtime storage. ON by default: agent session files (/data/home) go on a
-# claim, so conversational history survives a runtime pod restart.
+# Runtime storage: the CONTEXT volume (a conversation's accumulated context, on
+# by default) and the WORKSPACE volume (repository checkouts, off by default).
 #
-# Turning it OFF is a supported choice, not a downgrade to avoid — a cluster
-# with no default StorageClass, or no ReadWriteMany provisioner, needs it:
+# BOTH offer the same three ways to run against storage this chart did not
+# create — `existingClaim` for a claim you already made, `volumeName` for a
+# PersistentVolume by name, `selector` for one by label. A capability on one
+# volume and not the other would be two spellings of one fact.
 #
-#   --set persistence.enabled=false
+# RENAMED in this release: the whole block moved under `persistence.context`,
+# and the claim is `agentops-context` rather than `agentops-home`. The volume is
+# named for what it HOLDS. That it is mounted at /data/home is a property of one
+# runtime image — that PATH does not move, because claude-code keys its stored
+# context off it.
 #
-# What that costs: sessions live in emptyDir and die with each runtime pod, so a
-# reply after an idle period resumes a session whose files are gone and answers
-# without prior context. The symptom is an agent apologising for lost history.
-#
-# ReadWriteMany matters once more than one runtime pod runs concurrently (the
-# default cap is 5). With ReadWriteOnce every runtime pod must land on one node.
+#   UPGRADING an install that already has an `agentops-home` claim:
+#     persistence.context.existingClaim: agentops-home
+#   Nothing is copied and nothing moves. The chart then renders no claim of its
+#   own, and `helm.sh/resource-policy: keep` on the live object means Helm
+#   leaves it alone.
 persistence:
-  enabled: true
-  # Create a PVC with this name (AgentRuntime CRs reference it via home.pvcRef;
-  # it is also exported as the manager's HOME_PVC bootstrap default).
-  name: agentops-home
-  size: 5Gi
-  # "" = cluster default StorageClass
-  storageClassName: ""
-  accessModes:
-    - ReadWriteMany
-  # Bind to a pre-provisioned PV instead of dynamic provisioning.
-  volumeName: ""
-  # Use an existing PVC instead of creating one (overrides everything above).
-  existingClaim: ""
+  # The accumulated context (mounted at /data/home). ON by default, so
+  # conversational history survives a runtime pod restart.
+  #
+  # Turning it OFF is a supported choice, not a downgrade to avoid — a cluster
+  # with no default StorageClass, or no ReadWriteMany provisioner, needs it:
+  #
+  #   --set persistence.context.enabled=false
+  #
+  # What that costs: context lives in emptyDir and dies with each runtime pod,
+  # so a reply after an idle period resumes a context whose files are gone and
+  # answers without it. The symptom is an agent apologising for lost history.
+  #
+  # ReadWriteMany matters once more than one runtime pod runs concurrently (the
+  # default cap is 5). With ReadWriteOnce every runtime pod must land on one
+  # node.
+  context:
+    enabled: true
+    # Create a PVC with this name (AgentRuntime CRs reference it via
+    # context.pvcRef; it is also exported as the manager's CONTEXT_PVC
+    # bootstrap default).
+    name: agentops-context
+    size: 5Gi
+    ## If defined, storageClassName: <storageClass>
+    ## If set to "-", storageClassName: "", which disables dynamic provisioning
+    ## If undefined (the default) or set to null, no storageClassName spec is set,
+    ##   choosing the default provisioner.
+    storageClassName: ""
+    accessModes:
+      - ReadWriteMany
+    # Bind to a pre-created PV by NAME. Pair it with storageClassName: "-", or
+    # the cluster's default StorageClass is injected by admission and a second
+    # volume is provisioned against the one you already made.
+    volumeName: ""
+    # Or match a pre-created PV by LABEL — the shape a fleet of them takes,
+    # where naming one per release defeats the point.
+    # selector:
+    #   matchLabels:
+    #     agentops.dev/volume: context
+    # Use an existing PVC instead of creating one (overrides everything above).
+    existingClaim: ""
 
   # The repository checkout (/data/workspace), OFF by default — and the
-  # asymmetry with the home volume above is deliberate. Losing session files
-  # silently costs conversational history; losing a checkout costs a re-clone,
-  # which is cheap and always correct, whereas a stale shared checkout is
-  # neither.
+  # asymmetry with the context volume above is deliberate. Losing accumulated
+  # context silently costs conversational history; losing a checkout costs a
+  # re-clone, which is cheap and always correct, whereas a stale shared checkout
+  # is neither.
   #
   # Turn it on to keep uncommitted agent work across a runtime pod restart
   # mid-conversation and to skip the re-clone. Each conversation gets its own
@@ -823,10 +861,22 @@ persistence:
     enabled: false
     name: agentops-workspace
     size: 10Gi
+    ## If defined, storageClassName: <storageClass>
+    ## If set to "-", storageClassName: "", which disables dynamic provisioning
+    ## If undefined (the default) or set to null, no storageClassName spec is set,
+    ##   choosing the default provisioner.
     storageClassName: ""
     accessModes:
       - ReadWriteMany
+    # Bind to a pre-created PV by NAME. Pair it with storageClassName: "-", or
+    # the cluster's default StorageClass is injected by admission and a second
+    # volume is provisioned against the one you already made.
     volumeName: ""
+    # Or match a pre-created PV by LABEL — the shape a fleet of them takes,
+    # where naming one per release defeats the point.
+    # selector:
+    #   matchLabels:
+    #     agentops.dev/volume: workspace
     existingClaim: ""
 
 # Extra env for the manager (e.g. RUNTIME_IMAGE bootstrap fallback).

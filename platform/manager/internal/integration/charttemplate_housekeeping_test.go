@@ -75,19 +75,19 @@ func TestHousekeepingRefusesTheRuntimeIdentity(t *testing.T) {
 // is nothing to reclaim from a volume this release does not have, and an empty
 // volumeMounts key is not valid output.
 func TestHousekeepingMountsOnlyTheClaimsThatExist(t *testing.T) {
-	// home only (workspace persistence is off by default)
-	homeOnly := cronJobDoc(t, helmTemplate(t, "--set", "housekeeping.enabled=true"))
-	if !strings.Contains(homeOnly, "claimName: agentops-home") {
-		t.Error("the home claim must be mounted when persistence is on")
+	// context only (workspace persistence is off by default)
+	contextOnly := cronJobDoc(t, helmTemplate(t, "--set", "housekeeping.enabled=true"))
+	if !strings.Contains(contextOnly, "claimName: agentops-context") {
+		t.Error("the context claim must be mounted when persistence is on")
 	}
-	if strings.Contains(homeOnly, "agentops-workspace") || strings.Contains(homeOnly, "WORKSPACE_ROOT") {
+	if strings.Contains(contextOnly, "agentops-workspace") || strings.Contains(contextOnly, "WORKSPACE_ROOT") {
 		t.Error("the workspace claim must not be mounted when workspace persistence is off")
 	}
 
 	// both
 	both := cronJobDoc(t, helmTemplate(t,
 		"--set", "housekeeping.enabled=true", "--set", "persistence.workspace.enabled=true"))
-	for _, needle := range []string{"claimName: agentops-home", "claimName: agentops-workspace",
+	for _, needle := range []string{"claimName: agentops-context", "claimName: agentops-workspace",
 		"WORKSPACE_ROOT", "SESSIONS_ROOT"} {
 		if !strings.Contains(both, needle) {
 			t.Errorf("with both claims on, the job needs %q", needle)
@@ -96,7 +96,7 @@ func TestHousekeepingMountsOnlyTheClaimsThatExist(t *testing.T) {
 
 	// neither: no dangling volumeMounts/volumes keys
 	neither := cronJobDoc(t, helmTemplate(t,
-		"--set", "housekeeping.enabled=true", "--set", "persistence.enabled=false"))
+		"--set", "housekeeping.enabled=true", "--set", "persistence.context.enabled=false"))
 	for _, needle := range []string{"volumeMounts:", "volumes:"} {
 		if strings.Contains(neither, needle) {
 			t.Errorf("with no claims mounted, %q must not render at all:\n%s", needle, neither)
