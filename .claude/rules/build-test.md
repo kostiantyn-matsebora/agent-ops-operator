@@ -150,6 +150,21 @@ git tag chart-v7.0.1    && git push origin chart-v7.0.1
   cannot change that. Flipping it is a manual step, once per package, and the
   chart's image-existence gate is what catches a forgotten one — it resolves
   every first-party reference ANONYMOUSLY at chart-release time.
+- **THERE IS NO API FOR VISIBILITY.** The Packages REST API lists, gets, deletes
+  and restores; it does not set visibility, and neither does GraphQL. The UI is
+  the only path, deliberately — it is the action that makes something
+  world-readable.
+- **PUBLISHING BY HAND COSTS A SECOND MANUAL STEP PER PACKAGE: the repository
+  LINK.** `org.opencontainers.image.source` is the documented mechanism and this
+  repo sets it on every push, but a push from a WORKSTATION still lands
+  unlinked — the link needs the repository context an Actions push carries.
+  Connect it in package settings.
+  - **So a hand-published component is TWO clicks, an Actions-published one is
+    ONE.** That is the strongest practical argument for getting Actions running,
+    and it was paid in full once: thirteen images published from a laptop
+    because the account's Actions minutes were unavailable.
+  - **Both are ONCE PER PACKAGE, EVER.** Visibility and the link live on the
+    package, not the version, so every later tag inherits them.
 - **A component that skips any of the three looks fine at the layer it was
   skipped in.** That is why they are listed together rather than in three
   places.
