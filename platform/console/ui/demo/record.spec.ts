@@ -2,6 +2,7 @@ import { test, type Page } from '@playwright/test'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { execFile } from 'node:child_process'
 import { link, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { promisify } from 'node:util'
 import type { AddressInfo } from 'node:net'
@@ -70,7 +71,27 @@ const MAX_POSTER_BYTES = 400 * 1024
 const FFMPEG_IMAGE = process.env.AGENTOPS_FFMPEG_IMAGE ??
   'mwader/static-ffmpeg@sha256:a8090df5f5608daef387e1b2e93b98aaacb4d92153ad904e7d715c725724fca4'
 
-const OUT = join(process.cwd(), '..', '..', 'docs', 'assets', 'video')
+// THREE LEVELS UP — see the same note in screenshots/capture.spec.ts. The
+// restructure added the `platform/` level and this path was not moved with it.
+const OUT = join(process.cwd(), '..', '..', '..', 'docs', 'assets', 'video')
+
+// THE OUTPUT PATH IS ASSERTED, NOT ASSUMED.
+//
+// This wrote to a junk directory for a full day and reported SUCCESS every
+// time, because a relative path that no longer resolves still names somewhere
+// writable. The published assets simply stopped updating and nothing said so.
+//
+// THERE IS EXACTLY ONE `docs/` IN THIS REPOSITORY, at the root. If the resolved
+// path is not an existing directory under it, the run FAILS rather than
+// creating a second one.
+if (!existsSync(OUT)) {
+  throw new Error(
+    `output directory does not exist: ${OUT}\n` +
+      `There is one docs/ tree in this repo, at the root. A missing path here means ` +
+      `this file moved and its relative path did not — do NOT let it create the directory.`,
+  )
+}
+
 // BESIDE THE RECORDER, never under /tmp: a VM-backed daemon (Rancher Desktop)
 // does not mount /tmp, so a bind mount there is an empty directory the
 // container writes nothing into and says nothing about.
