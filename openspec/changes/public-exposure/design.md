@@ -129,9 +129,45 @@ impossible or expensive afterwards:
 | Images are public and the chart installs by OCI | `sdlc-setup` | the README's one command must work on the day it is readable |
 | Licence, community files and templates exist | here | an issue filed before there is a template is a template nobody will retrofit |
 
-**Pages is enabled BEFORE the flip**, not after: it is what makes the README's
-links resolve, and a first visitor who hits a 404 does not come back for the
-fix.
+**Pages was to be enabled BEFORE the flip**, not after: it is what makes the
+README's links resolve, and a first visitor who hits a 404 does not come back
+for the fix.
+
+### D4a. THAT ORDERING IS IMPOSSIBLE ON THIS PLAN, and the gate absorbs it
+
+Both remaining §6 items were REFUSED against the private repository, and the
+refusals are the plan's, not a permission mistake:
+
+| Item | What the API answers while private |
+|---|---|
+| Pages (6.3) | 422 — "your current plan does not support GitHub Pages for this repository" |
+| Branch protection (6.5) | 403 — "upgrade to GitHub Pro or make this repository public" |
+
+**GitHub Pages is unavailable for a PRIVATE repository on the Free plan**, so
+the one condition D4 wanted settled beforehand cannot be. The choice is
+therefore between paying for Pro and accepting a WINDOW, and the window is
+minutes rather than never:
+
+1. 7.6 flips the repository.
+2. Pages and branch protection are applied AT ONCE, as the next action.
+3. Only then is the README's index followed, which is 7.6's own verification.
+
+- **The 404 risk is not eliminated, it is BOUNDED.** D4's reasoning survives —
+  a first visitor meeting a 404 really does not come back — so the mitigation
+  is that nothing announces the repository until step 3 has passed.
+- **Do not read this as "settings come after publication".** Description,
+  topics, homepage and the feature toggles were all applied while private, and
+  they are what a stranger meets first. Only the two the plan refuses moved.
+- **The branch-protection SHAPE was decided before it could be applied**, so
+  the move costs no thinking later: deletion blocked; the six stable CI jobs
+  required (`operator`, `modules`, `console-ui`, `chart`, `docs`,
+  `publication` — `images` is a matrix and its name is not stable enough to
+  require); **admins exempt**, because direct commits to `master` are how this
+  project actually works and a policy that blocks them is the one bypassed on
+  the first hotfix; no required reviews, since a solo maintainer cannot
+  self-approve and the branch would simply freeze.
+- **Force pushes stay ALLOWED until the flip**, then are blocked. Blocking them
+  earlier would have prevented the history rewrite that §5 needed.
 
 ## D5. Security reporting is a contact link, never an issue type
 

@@ -70,16 +70,24 @@ exists so that the switch is safe, and §7 is the gate that says so.
 
 ## 6. Repository settings and the site
 
-- [ ] 6.1 Description and topics: what it is, and the words someone searching
+- [x] 6.1 Description and topics: what it is, and the words someone searching
       for this would use — the ecosystem, the runtime, the surfaces
-- [ ] 6.2 Homepage set to the documentation site
+- [x] 6.2 Homepage set to the documentation site
 - [ ] 6.3 Enable Pages from `master` `/docs`, and verify the site builds and
-      every navigation entry resolves. BEFORE the flip: a first visitor who
-      meets a 404 does not return for the fix
-- [ ] 6.4 Discussions on, Issues on, Wiki off, Projects off. An unmaintained
+      every navigation entry resolves. **CANNOT PRECEDE THE FLIP ON THIS PLAN** —
+      the API refuses with "your current plan does not support GitHub Pages for
+      this repository", because Pages is unavailable for a PRIVATE repository on
+      Free. See `design.md` D4a: this runs IMMEDIATELY AFTER 7.6, not before
+- [x] 6.4 Discussions on, Issues on, Wiki off, Projects off. An unmaintained
       surface reads as abandonment
 - [ ] 6.5 Branch protection on `master` matching how the project actually works,
-      rather than a policy that will be bypassed on the first hotfix
+      rather than a policy that will be bypassed on the first hotfix. **ALSO
+      PLAN-BLOCKED WHILE PRIVATE** (HTTP 403, "upgrade to GitHub Pro or make this
+      repository public"), so it runs immediately after 7.6 too. The shape is
+      SETTLED and is in `design.md` D4a — deletion blocked, the six CI jobs
+      required, admins exempt so direct commits to `master` keep working, no
+      required reviews because a solo maintainer cannot self-approve, and force
+      pushes left ALLOWED until the flip is done
 
 ## 7. The gate
 
