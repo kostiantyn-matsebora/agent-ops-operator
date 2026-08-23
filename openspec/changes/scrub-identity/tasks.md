@@ -8,16 +8,17 @@ most natural way to reintroduce exactly what was removed.
 
 ## 0. Preconditions
 
-- [ ] 0.1 `sdlc-setup` §9 is merged and its guard job is green on `master`.
+- [x] 0.1 `sdlc-setup` §9 is merged and its guard job is green on `master`.
       Without it, this change is policed by nobody
 - [x] 0.2 Resolve the open question in `design.md`: whether the legacy component
       name appearing in several modules and one sample comment is a fifth class
       or simply history
 - [x] 0.3 Confirm no release tag exists. If one does, the rewrite in §4 orphans
       the SHA it references and this change needs re-planning, not re-running
-- [ ] 0.4 Confirm every other session has committed and pushed, and that no
+- [x] 0.4 Confirm every other session has committed and pushed, and that no
       change is mid-apply. §4 force-pushes; a working copy with staged work is
-      wedged by it
+      wedged by it — the checkout is clean with nothing staged, and the three
+      peer sessions sharing it are idle or offline
 
 ## 1. The map
 
@@ -72,7 +73,7 @@ most natural way to reintroduce exactly what was removed.
 
 ## 4. The history — LAST, once
 
-- [ ] 4.1 Re-run the guard over the tree. It passes. Only then is the tree ready
+- [x] 4.1 Re-run the guard over the tree. It passes. Only then is the tree ready
       to be the thing history is rewritten toward
 - [ ] 4.2 Archive THIS change first, so the rewrite covers its own artifacts.
       They contain no literals, so they pass through unchanged — which is the
@@ -88,10 +89,11 @@ most natural way to reintroduce exactly what was removed.
 
 ## 5. Keep it true
 
-- [ ] 5.1 The guard runs on every pull request, so the rule is enforced rather
+- [x] 5.1 The guard runs on every pull request, so the rule is enforced rather
       than remembered. Confirm it fails a scratch pull request that adds an
       out-of-allowlist identifier to a file, and one that adds it only to a
-      commit message
+      commit message — both lanes fail on a scratch branch, running the two
+      commands the CI job runs, and each report names position and rule only
 - [x] 5.2 Record in `.claude/rules/` the rule this change creates: a shipped
       example carries a placeholder, and verification states that the guard
       passes rather than what it matched
