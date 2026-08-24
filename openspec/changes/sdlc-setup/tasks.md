@@ -54,13 +54,35 @@
       and GHA layer cache. Derive the matrix from the Dockerfiles present
 - [ ] 2.8 Open a scratch PR and confirm all jobs run and pass; deliberately
       break one module and one UI test and confirm each failure is attributed to
-      the thing that broke — STILL OWED, because it needs a runner. Every job's
-      COMMANDS were run by hand first (operator incl. 343 envtest cases, eleven
-      submodules, the console UI, seven chart permutations under kubeconform,
-      the docs drift check, thirteen image builds) and that found a real defect:
-      the chart job failed on eleven CRDs in every permutation, since
-      kubeconform treats a missing schema as an error and its strict set has
-      none for CustomResourceDefinition
+      the thing that broke.
+      **A RUNNER EXISTS NOW** — a self-hosted one, because GitHub-hosted minutes
+      are unavailable while the repository is private. It MUST be removed before
+      the repository goes public: on a public repository a fork's pull request
+      can run arbitrary code on it.
+      **RUNNING THE JOBS' COMMANDS BY HAND WAS NOT THE SAME THING, AND THAT IS
+      THE FINDING.** Every command was run locally first — the operator
+      including its envtest cases, every submodule, the console UI, the chart
+      permutations under kubeconform, the docs drift check, every image build —
+      and all of it passed. CI on a CLEAN TREE then failed, four separate times,
+      on defects a developer machine cannot see:
+      - the console does not COMPILE from a fresh clone. Its Go code embeds the
+        built UI, which is build output and gitignored, so the embed pattern
+        matches nothing. It passes for anyone who has ever run the UI build
+      - the console's tests fail on the Node version CI pins and pass on the one
+        installed locally. `App` imports every page and seven pages imported
+        three shared components back out of it; loading a page first enters that
+        cycle from the other side and the component is undefined. One Node
+        version resolves the cycle in the working order, the other does not
+      - a tool was installed into a system directory, which assumes the job runs
+        as root. True of GitHub-hosted runners, false of most others
+      - the site job could never pass, because it carried a step that prepares a
+        DEPLOYMENT and fails without one
+      Each is one line to fix and none was findable without a clean machine.
+      That is the argument for this task, not an excuse for its being open.
+      An earlier by-hand pass did find one real defect — the chart job failed on
+      eleven CRDs in every permutation, since kubeconform treats a missing schema
+      as an error and its strict set has none for CustomResourceDefinition —
+      which is why running the commands was worth doing, and not enough
 
 ## 3. Reusable image publish workflow
 

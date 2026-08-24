@@ -84,12 +84,34 @@ the permutation exercises the templates rather than the guard.
 - **THEN** its permutation supplies one and the templates are exercised, rather
   than the permutation passing on the guard's error being expected
 
-### Requirement: Every pull request builds all container images without publishing
+### Requirement: Every pull request builds the container images it could have broken
 
-CI SHALL build EVERY image in the repository from its Dockerfile on every pull
-request with publishing disabled, using layer caching to keep feedback fast.
-The image set SHALL be derived from the Dockerfiles that exist rather than
-enumerated in prose.
+CI SHALL build images from their Dockerfiles on every pull request with
+publishing disabled, using layer caching to keep feedback fast. The image set
+SHALL be derived from the Dockerfiles that exist rather than enumerated in
+prose.
+
+**IT SHALL BUILD WHAT CHANGED, NOT EVERYTHING.** A component SHALL be built when
+a file inside its own directory moved. Thirteen image builds and twelve module
+builds on a documentation-only commit is cost with no signal, and the wait it
+adds is paid by every contributor on every push.
+
+**THE FILTER SHALL BE DERIVED, LIKE THE MATRIX.** A list of paths maintained
+beside the component list is a second thing to keep in step, and the one that
+falls behind is the one nobody notices — which is the same argument that made
+the matrix derived in the first place.
+
+**THREE KINDS OF FILE SHALL REBUILD EVERYTHING**, and they are the ones that
+touch no component directory while invalidating every component: the shared
+Dockerfile that is many components' recipe, the script that decides what
+components exist at all, and the workflow that decides how any of them is
+tested.
+
+**WHERE THE COMPARISON BASE CANNOT BE ESTABLISHED, EVERYTHING SHALL BUILD.** A
+branch's first push has nothing to compare against, and a shallow checkout makes
+the comparison fail. Both SHALL build the world rather than build nothing: a
+filter that silently matches nothing is a CI that silently tests nothing, and it
+reports success while doing so.
 
 #### Scenario: A Dockerfile breaks
 
@@ -102,10 +124,90 @@ enumerated in prose.
 - **THEN** it is built by the same job without the image set being edited by
   hand
 
+#### Scenario: One component changes
+
+- **WHEN** a pull request touches a single component's directory
+- **THEN** that component is built and every other component is skipped
+
+#### Scenario: Only documentation changes
+
+- **WHEN** a pull request touches no component directory
+- **THEN** no module or image job runs at all
+
+#### Scenario: The shared recipe changes
+
+- **WHEN** a pull request touches the shared Dockerfile, the component-discovery
+  script, or the CI workflow itself
+- **THEN** every component is built, because the change touches all of them
+  without touching any of their directories
+
+#### Scenario: There is nothing to compare against
+
+- **WHEN** the base commit cannot be resolved, as on a branch's first push
+- **THEN** everything is built rather than nothing
+
 #### Scenario: No artifact escapes from a pull request
 
 - **WHEN** CI runs for a pull request
 - **THEN** no image or chart is pushed to any registry
+
+### Requirement: One always-present check gates the pull request
+
+CI SHALL expose exactly ONE check that runs on every pull request regardless of
+which files changed, and that check SHALL pass only when every check relevant to
+that pull request passed or was skipped for having nothing to do.
+
+**THIS IS WHAT MAKES FILTERING COMPATIBLE WITH BRANCH PROTECTION.** A protection
+rule names a check by NAME, and a job skipped for untouched paths never reports
+that name — so a rule requiring a skippable check blocks the pull request
+forever, waiting for a status that will not arrive. Without this, a repository
+must choose between building only what changed and requiring checks at all.
+
+**IT SHALL READ THE RESULTS EXPLICITLY** rather than relying on a helper that
+treats a skipped dependency inconsistently while reading as though it checked
+one. A SKIPPED job passed by having nothing to do; a CANCELLED one did not pass.
+Stating that difference is what makes the gate's verdict reviewable.
+
+#### Scenario: A filtered pull request still reports the required check
+
+- **WHEN** a pull request touches only documentation, so the module and image
+  jobs are skipped
+- **THEN** the gate still runs and passes, and branch protection is satisfied
+
+#### Scenario: A relevant check fails
+
+- **WHEN** any job the pull request actually ran fails
+- **THEN** the gate fails and names the job that failed
+
+#### Scenario: A cancelled job is not a pass
+
+- **WHEN** a job is cancelled rather than skipped
+- **THEN** the gate fails, because nothing established that it would have passed
+
+### Requirement: The published site builds on every pull request
+
+CI SHALL build the documentation site on every pull request, with the same build
+the hosting platform performs.
+
+**THE PLATFORM BUILDS IT AFTER MERGE, WHICH IS TOO LATE.** A site built natively
+from a branch folder is built only once the change has landed, so a broken
+configuration file, an unclosed template tag or a missing include is discovered
+on the published site rather than on the pull request that caused it — by a
+reader, not by the author.
+
+Checking the GENERATED CONTENT of the documentation is a different requirement
+and SHALL NOT be conflated with this one: examples matching their sources says
+nothing about whether the site assembles.
+
+#### Scenario: The site fails to build
+
+- **WHEN** a pull request breaks the site's configuration or a template
+- **THEN** the site job fails on that pull request, before the site is published
+
+#### Scenario: Building is not publishing
+
+- **WHEN** the site job runs for a pull request
+- **THEN** it builds the site and publishes nothing
 
 ### Requirement: CI refuses content that identifies a person or a private deployment
 
