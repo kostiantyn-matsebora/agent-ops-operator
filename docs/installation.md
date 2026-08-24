@@ -80,13 +80,13 @@ before the first install, not after.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 13.0.0 -n agent-ops
+     --version 13.0.1 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 13.0.0 -n agent-ops
+     --version 13.0.1 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public

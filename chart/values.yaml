@@ -459,7 +459,7 @@ global:
         retain: 3
         # The sidecar image. RELEASE-WIDE rather than per runtime: it implements
         # a contract, and the manager reads it once as bootstrap configuration.
-        image: ghcr.io/kostiantyn-matsebora/agentops-context-sync:0.2.1
+        image: ghcr.io/kostiantyn-matsebora/agentops-context-sync:0.2.2
         # Bounds the pod-local live context. In this mode the WHOLE context tree
         # is ephemeral — caches and tool state included — so it must be
         # generous. Empty leaves it unbounded, which is Kubernetes' own default.
@@ -488,7 +488,7 @@ global:
         enabled: true
         # The proxy image. Release-wide like the sidecar above: a contract, not
         # a backend choice.
-        image: ghcr.io/kostiantyn-matsebora/agentops-egress-proxy:0.2.2
+        image: ghcr.io/kostiantyn-matsebora/agentops-egress-proxy:0.2.3
         # The image that installs the redirect. Empty uses the proxy image,
         # which ships both. Point it elsewhere only to keep the privileged image
         # minimal.
@@ -729,7 +729,7 @@ console:
     # The corner: a graph inside an inactive tab measured a 0x0 host, fitted to
     # it, and clamped to minimum zoom for good. The fit now waits for a host
     # with a size, so it works in a tab, a drawer, or wherever one lands next.
-    tag: 0.38.0
+    tag: 0.38.1
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -1135,7 +1135,7 @@ housekeeping:
   schedule: "17 3 * * *"
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-housekeeping
-    tag: 0.2.1
+    tag: 0.2.2
   # Reports what it would remove and removes nothing. Take it off only after a
   # run has named no directory belonging to a conversation you are keeping.
   dryRun: true

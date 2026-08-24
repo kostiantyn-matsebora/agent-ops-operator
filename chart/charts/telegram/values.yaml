@@ -35,7 +35,7 @@ channelAdapter:
     # message over 4096 characters was split inside it, so Telegram refused the
     # whole message and the op retried forever. Cards larger than ~4KB never
     # arrived on 0.24.1.
-    tag: 0.24.2
+    tag: 0.24.3
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
@@ -48,7 +48,7 @@ signalAdapter:
   name: telegram
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-telegram
-    tag: 0.6.1
+    tag: 0.6.2
   # Port the router pushes general-surface updates to.
   port: 8080
   resources: {}
@@ -61,7 +61,7 @@ signalAdapter:
 router:
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-gateway-telegram
-    tag: 0.5.1
+    tag: 0.5.2
   # Extra env passthrough (appended after SIGNAL_TARGET, CHANNEL_TARGET and the
   # projected bot token).
   env: []
