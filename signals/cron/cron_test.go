@@ -53,3 +53,11 @@ func TestCronNext(t *testing.T) {
 		}
 	}
 }
+
+// DELIBERATE FAILURE, for sdlc-setup task 2.8. A failing TEST, not a broken
+// package: the point is to prove the module job attributes a failure to
+// signals/cron while the image build — which only compiles — stays green.
+// Removed in the next commit on this branch.
+func TestDeliberateBreakForCI(t *testing.T) {
+	t.Fatal("deliberate failure: proving CI attributes a module failure to signals/cron")
+}

@@ -335,6 +335,32 @@ a:hover {
   display: block;
 }
 
+/* The repository link, beside the theme control. It borrows that control's
+   metrics rather than inventing a second button size — one row of chrome, one
+   shape. It carries no border of its own: the theme switcher's border groups
+   three buttons that act together, and this is one link. */
+.ao-repo-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 1.75rem;
+  border-radius: 4px;
+  color: var(--ao-text-subtle);
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.ao-repo-link:hover {
+  color: var(--ao-text);
+  background: var(--ao-surface-alt);
+}
+
+.ao-repo-link svg {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+}
+
 /* --- shell: masthead over sidebar over content, not a centred column ------ */
 .ao-shell {
   display: grid;
