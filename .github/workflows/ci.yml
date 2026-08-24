@@ -32,7 +32,7 @@ env:
 jobs:
   # WHAT EXISTS, asked once and answered for every matrix below.
   discover:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     outputs:
       modules: ${{ steps.list.outputs.modules }}
       images: ${{ steps.list.outputs.images }}
@@ -98,7 +98,7 @@ jobs:
   # envtest schedules nothing, so this proves the API-server half and nothing
   # about the kubelet — which is what the e2e-testing change is for.
   operator:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ${{ env.ENVTEST_MODULE }}
@@ -136,7 +136,7 @@ jobs:
   modules:
     needs: discover
     if: needs.discover.outputs.modules != '[]'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -180,7 +180,7 @@ jobs:
   # Screenshots are deliberately out: they need a browser, and they are
   # regenerated when the UI changes, not on every pull request.
   console-ui:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: platform/console/ui
@@ -199,7 +199,7 @@ jobs:
   # every meaningful permutation and validating the result proves they produce
   # objects a cluster would accept.
   chart:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
@@ -296,7 +296,7 @@ jobs:
   # It needs helm because the worked examples ARE chart output: the same render
   # the job above validates, with its custom resources lifted into the pages.
   docs:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
@@ -340,7 +340,7 @@ jobs:
   images:
     needs: discover
     if: needs.discover.outputs.images != '[]'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -366,7 +366,7 @@ jobs:
   # This runs the same Jekyll build Pages runs, and only that — link checking and
   # prose linting are separate questions and are not smuggled in here.
   site:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # NO `configure-pages` STEP. That action exists to prepare a DEPLOYMENT —
@@ -391,7 +391,7 @@ jobs:
   # them to the audience it exists to protect the tree from. `--show` prints
   # matches locally, where the fixing happens.
   publication:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -423,7 +423,7 @@ jobs:
   # Two guards, opposite shapes, each following from its subject. Neither is a
   # template for the other.
   retired-vocabulary:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -452,7 +452,7 @@ jobs:
     name: ci-green
     if: always()
     needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed
         env:
