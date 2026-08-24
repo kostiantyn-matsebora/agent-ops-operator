@@ -558,3 +558,8 @@ describe('after first paint, no event puts a page back into loading', () => {
     })
   }
 })
+
+// DELIBERATE FAILURE, for sdlc-setup task 2.8. Removed in the next commit.
+it('deliberate failure: proving CI attributes a UI test failure to console-ui', () => {
+  expect(1).toBe(2)
+})
