@@ -21,7 +21,7 @@ biting.** While this very proposal was being written, a concurrent session
 cleaned the tree and **deleted the whole change directory** — four unstaged
 artifacts, gone, with no branch and no stash to recover them from. Nothing
 warned either session. That is the same defect as the diverged branch wearing
-different clothes: two workers, one working copy.
+different clothes: two sessions, one working copy.
 
 **A worktree per change removes the cause rather than working around it.** Each
 session gets its own HEAD and its own files, so branching becomes safe for the
@@ -58,12 +58,13 @@ gates this project already asserts get somewhere to report.
      `-v "$PWD":"$PWD"`, so a worktree at any other path is **invisible inside
      it** — every `go build` in a worktree fails to find the tree. The mount
      moves to the worktrees' parent directory.
-  2. **The GitOps deploy.** The repository that deploys this chart names it by a
-     literal relative path, so verifying a branch against a live cluster would
-     sync **`master`'s** chart while reporting success — the change would look
-     simply not to work. The path becomes a defaulted value overridable per
-     worktree. That edit belongs to the deploying repository and is therefore a
-     **precondition of this change, not part of it**.
+  2. **The GitOps deploy.** The repository that deploys this chart names the
+     PUBLISHED one, so verifying a branch against a live cluster syncs the
+     released chart and reports success — the change looks simply not to work,
+     and nothing says the tree was never read. The reference becomes a defaulted
+     value overridable per worktree. That edit belongs to the deploying
+     repository and is therefore a **precondition of this change, not part of
+     it**.
 
 ### Tracking: one GitHub issue per change, and it is a POINTER
 

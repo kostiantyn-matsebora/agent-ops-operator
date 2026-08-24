@@ -11,6 +11,21 @@ and which is idle on a docs tweak.
 - **Work with no change behind it says what it is**, in the same two-word shape:
   `review chart-values`, `debug telegram-409`, `docs installation`.
 
+### THE NAME AND THE WORKTREE ARE ONE FACT
+
+**A session named `<phase> <change>` OWNS that change's worktree**, at
+`../agent-ops-worktrees/<change>/` on branch `change/<change>`. The two halves
+answer the same question — which piece of work is this window doing — and they
+were split only because the second half did not exist yet.
+
+- **The row and the directory agree**, so `git worktree list` and the session
+  picker are two views of one list.
+- **A session with no change behind it works the MAIN checkout**, which is what
+  the `review chart-values` shape names.
+- **This is what made naming worth doing.** While every session shared one
+  checkout, a name was a label on a window; now it says which files the window
+  can touch. See `.claude/rules/worktree-delivery.md`.
+
 ### THE DISPLAY NAME IS THE ONLY HANDLE. SET IT AT LAUNCH
 
 ```sh

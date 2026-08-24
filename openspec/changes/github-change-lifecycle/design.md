@@ -17,7 +17,7 @@ recorded with how it was checked:
 | `.claude/hooks/require-docs-task.sh` is a local `PreToolUse` hook that FAILS OPEN | the pattern to copy, and the reason its decision must also exist in CI |
 | `openspec/config.yaml` `rules:` are injected when an artifact is WRITTEN | the second enforcement surface, reaching the model when a context file may already be compacted away |
 | `build-test.md` starts `agentops-go` with `-v "$PWD":"$PWD"` | a worktree elsewhere is invisible inside the build container |
-| The deploying repository names this chart by a literal relative path | verifying a branch would deploy `master`'s chart and report success |
+| The deploying repository names the PUBLISHED chart | verifying a branch deploys the RELEASED chart and reports success — it never reads the tree at all |
 
 **Two of those fixes are not in this repository**, and both fail silently — which
 is why they are tasks with verification by USE rather than notes.
@@ -264,8 +264,9 @@ is where one gets done differently and nobody notices which.
 ## Migration Plan
 
 1. **Preconditions, outside this repository's diff**: the deploying repository's
-   chart path is templated, and the build container's mount moves to the
-   worktrees' parent. Both verified by use.
+   chart reference is templated, and the build container mounts the worktrees'
+   root beside the repository. Both verified by use, never by reading the
+   command back.
 2. **Labels and the secret** exist before anything references them.
 3. **The flow lands** — commands, hook, workflows, checks — and is exercised end
    to end on ONE change first. This change is that change.
