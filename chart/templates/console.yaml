@@ -9,7 +9,7 @@ shipped connectivity would make the console installable only by this chart.
 The one thing the chart MUST supply is RBAC: the operator grants adapters no
 Kubernetes permissions, ever. spec.kubernetesAccess mounts the pod's SA token —
 identity, nothing more — and the read-only Role below is what turns that
-identity into "may list agentops CRs". Same posture as the prometheus-bundle adapter's
+identity into "may list agentops CRs". Same posture as the prometheus adapter's
 registration rights.
 
 TWO IDENTITIES, ONE POD. The console is a Channel adapter (carry conversations,

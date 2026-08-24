@@ -1,0 +1,185 @@
+{{- /*
+mcpServers sub-component: the MCP server WORKLOAD, decoupled from the CRs in
+mcp.yaml (which point at it, or at an endpoint you already run).
+
+Everything here exists for one reason: the server authenticates to the API as
+its OWN ServiceAccount. That SA's RBAC is what MCP tools can reach — reviewable
+on its own, revocable on its own, and unrelated to the runtime SA the agent pod
+runs under. Two identities is the whole point; a chart that reused the runtime
+SA here would collapse them back into one.
+
+The Deployment/Service name is fixed (agentops-mcp-k8s) because mcp.yaml
+defaults an empty MCPConfig URL onto this Service.
+*/ -}}
+{{- if and (include "kubernetes.active" .) .Values.mcpServers.enabled }}
+{{- $s := .Values.mcpServers }}
+{{- $name := include "kubernetes.mcpServerName" . }}
+{{- $sa := include "kubernetes.mcpServerServiceAccount" . }}
+{{- $readOnly := include "kubernetes.mcpServerReadOnly" . }}
+{{- $rbacMode := include "kubernetes.mcpServerRbacMode" . }}
+{{- if eq $sa (include "agentops.runtimeServiceAccount" .) }}
+{{- fail "kubernetes: mcpServers.serviceAccountName must differ from global.agentops.runtime.serviceAccountName — the MCP server's separate identity is the reason this component exists; sharing the runtime SA collapses the two walls into one" }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+    spec:
+      serviceAccountName: {{ $sa }}
+      # The token IS the credential — this server holds no kubeconfig and reads
+      # the cluster as this SA. Left at the default (true) on purpose.
+      containers:
+        - name: mcp
+          image: {{ printf "%s:%s" $s.image.repository (toString $s.image.tag) | quote }}
+          args:
+            # --port puts the server in HTTP mode: streamable HTTP on /mcp and
+            # SSE on /sse, both from this one port.
+            - --port={{ $s.port }}
+            {{- if $readOnly }}
+            # Filters at REGISTRATION, not at listing: a mutating tool is never
+            # added to the server, so it cannot be called by a client that
+            # already knows its name.
+            - --read-only
+            {{- end }}
+            {{- with $s.toolsets }}
+            - --toolsets={{ join "," . }}
+            {{- end }}
+          {{- with $s.env }}
+          env:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $s.port }}
+          # PROBED FROM INSIDE THE POD, over loopback.
+          #
+          # An httpGet probe is issued by the KUBELET, from the node — and a
+          # node is not a pod, so no NetworkPolicy peer can name it. Some CNIs
+          # exempt host traffic and some do not. Cilium's default CIDR match
+          # mode does NOT match node addresses, so even an explicit ipBlock of
+          # the node network does not authorise the probe.
+          #
+          # This server probes the SAME port it serves MCP on, so the port
+          # cannot simply be left open the way a dedicated health port can. The
+          # result, the first time this shipped, was a server that crash-looped
+          # because of the policy protecting it.
+          #
+          # An exec probe never leaves the pod's network namespace, so it is
+          # subject to no policy on any CNI — and it still proves what matters,
+          # that the HTTP server answers.
+          readinessProbe:
+            exec:
+              command: ["curl", "-sfo", "/dev/null", "http://127.0.0.1:{{ $s.port }}/healthz"]
+          livenessProbe:
+            exec:
+              command: ["curl", "-sfo", "/dev/null", "http://127.0.0.1:{{ $s.port }}/healthz"]
+          {{- with $s.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - name: http
+      port: {{ $s.port }}
+      targetPort: http
+{{- if $s.rbac.create }}
+{{- /*
+The server's own grants — the first of the two walls, bound to the SERVER's SA
+and derived from global.agentops.runtime.rbacMode unless set. Revoking these
+removes the agent's MCP reach without touching any runtime account.
+
+IT BINDS NO BUILT-IN ROLE. `view` used to be bound here under `readonly`, and
+`view` is cluster-wide: it reads every namespace including this release's own,
+where the manager, the adapters and every Conversation object live. So a
+"read-only" MCP server could read the conversations it was serving.
+
+Every rule now comes from the shared helpers the parent uses, split the same
+way — cluster-scoped reads in a ClusterRole, everything namespaced in Roles
+bound only where global.agentops.runtime.namespaces says.
+*/ -}}
+{{- if eq $rbacMode "readonly" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $sa }}-{{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+rules:
+{{ include "agentops.runtimeReadRules" . | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-{{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $sa }}-{{ $.Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+{{- else if eq $rbacMode "full" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $sa }}-{{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+rules:
+{{ include "agentops.runtimeReadRules" . | indent 2 }}
+{{ include "agentops.runtimeWriteRules" . | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-{{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $sa }}-{{ $.Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- fail (printf "kubernetes: mcpServers.rbac.mode must be \"readonly\" or \"full\" (null derives it from global.agentops.runtime.rbacMode), got %q" $rbacMode) }}
+{{- end }}
+{{- end }}
+{{- end }}

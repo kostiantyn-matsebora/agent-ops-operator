@@ -62,7 +62,7 @@ follow-up later.
    ```
 
 2. **Install the chart.** The flag brings up
-   [the k8s bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md),
+   [the Kubernetes bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/kubernetes.md),
    wired to the console. The token is just to sign in — pick a real one outside
    a laptop.
 
@@ -99,7 +99,20 @@ Four objects matter here:
 | `SignalSource/console` | where your questions enter |
 | `AgentProfile/k8s-engineer` | who the agent is. Behaviour only, no tools and no runtime |
 | `Pipeline/k8s-observe` | the wiring: those sources, that profile, a read-only toolset |
-| `AgentRuntime/default` | the image it runs in, and the credential it uses |
+| `AgentRuntime/default` | the image it runs in, and the credential it uses. It comes from the `claude` bundle, which is on by default |
+
+**THE AGENT HAS NO KUBERNETES PERMISSIONS OF ITS OWN.** The route runs as an
+account bound to nothing, and demo mode does not change that.
+
+It reads your cluster through the bundle's **MCP server**, which carries its own
+ServiceAccount and its own read-only grant. Two identities, each reviewable
+alone — and the reason a one-flag demo is not a one-flag privilege grant.
+
+{: .ao-callout}
+> **If you turn off the `claude` bundle without declaring a replacement, the
+> render FAILS**, naming the missing `default` runtime and the routes that
+> resolve to it. That is deliberate: the alternative is an install whose
+> conversations sit in `Pending` forever with the reason in the manager's log.
 
 ## Ask it something
 
@@ -186,10 +199,10 @@ exits on the idle TTL.
 - **[Introduction]({{ '/introduction/' | relative_url }})** — the model behind
   what you just did, and the rest of the guides.
 - **A real lane** —
-  [cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md),
-  [Prometheus alerts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus-bundle.md),
-  [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram-bundle.md),
-  [Home Assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/ha-bundle.md).
+  [cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/kubernetes.md),
+  [Prometheus alerts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus.md),
+  [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram.md),
+  [Home Assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/home-assistant.md).
 - **[Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)**
   and **[the CR reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md)**
   — every kind, every field, and how tool access resolves.

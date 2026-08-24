@@ -9,7 +9,7 @@ metadata:
 spec:
   servers:
     # Server KEY is what tool names are qualified with: a toolset grants
-    # mcp__prometheus__* to reach this one. prometheus-bundle fixes this key.
+    # mcp__prometheus__* to reach this one. prometheus fixes this key.
     prometheus:
       type: http
       url: http://agentops-mcp-prometheus.agent-ops.svc:8080/mcp
@@ -28,8 +28,8 @@ spec:
   tools:
     - "mcp__prometheus__*"
 ---
-# The cluster itself as MCP tools — the k8s-bundle chart renders this pair
-# (`k8s-bundle.mcp`), shown here for hand-rolled installs. The server key
+# The cluster itself as MCP tools — the kubernetes chart renders this pair
+# (`kubernetes.mcp`), shown here for hand-rolled installs. The server key
 # `kubernetes` IS the mcp__kubernetes__* namespace the toolset below grants:
 # rename one without the other and the agent silently loses its tools.
 #
@@ -243,7 +243,7 @@ spec:
     cooldownHours: 0
 ---
 # NOTE: gateway-telegram has NO CR. It produces no signals, so it is not an
-# adapter: the telegram-bundle chart owns its Deployment and injects
+# adapter: the telegram chart owns its Deployment and injects
 # SIGNAL_TARGET, CHANNEL_TARGET and the bot token as env. Modelling it as a
 # SignalAdapter used to require a signal-free SignalSource purely to carry the
 # credential, which then had to be claimed to keep it off Wired=False.
@@ -314,7 +314,7 @@ spec:
       - input
 ---
 # Alertmanager webhook source — spec.adapter names the serving SignalAdapter
-# CR (the prometheus-bundle subchart renders one named alertmanager; its reconciler
+# CR (the prometheus subchart renders one named alertmanager; its reconciler
 # owns the workload AND the webhook Service). The sender posts the standard
 # Alertmanager webhook format to
 #   http://agentops-signal-alertmanager.<ns>.svc:8080/webhook/alerts
@@ -380,7 +380,7 @@ spec:
     refs:
       - name: prometheus-observability
 ---
-# Cluster Events as a signal lane. The k8s-bundle subchart renders this trio
+# Cluster Events as a signal lane. The kubernetes subchart renders this trio
 # (adapter + source + pipeline) for you; shown here for a hand-rolled setup.
 # The adapter watches core v1 Events with its OWN ServiceAccount token —
 # kubernetesAccess mounts it, and the operator grants nothing, so the events

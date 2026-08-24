@@ -43,24 +43,37 @@ spec:
             # produce forbidden loops in the log.
             - name: DRAIN_AWARE
               value: {{ .Values.rbac.drainAware | quote }}
-            {{- if .Values.runtime.contextSync.paths }}
+            {{- /* THE SIDECAR AND PROXY IMAGES ARE RELEASE-WIDE, not per runtime:
+            they implement a contract the manager builds pods against, and the
+            manager reads them once as bootstrap configuration. What is PER
+            RUNTIME is whether either applies at all, which is why these are
+            gated on ANY declared runtime asking for them. */ -}}
+            {{- $rts := fromYamlArray (include "agentops.declaredRuntimes" .) }}
+            {{- $defaults := dig "agentops" "runtimeDefaults" dict (.Values.global | default dict) }}
+            {{- $anySync := false }}
+            {{- $anyEgress := false }}
+            {{- range $rt := $rts }}
+            {{- if (($rt.contextSync | default dict).paths) }}{{ $anySync = true }}{{ end }}
+            {{- if (($rt.egressMediation | default dict).enabled) }}{{ $anyEgress = true }}{{ end }}
+            {{- end }}
+            {{- if $anySync }}
             # Only set when a runtime actually declares paths: an empty image
             # disables sidecar mode outright, so the mode can never be
             # half-applied — which would give the agent an empty ephemeral context
             # and no sidecar to restore into it.
             - name: CONTEXT_SYNC_IMAGE
-              value: {{ .Values.runtime.contextSync.image | quote }}
+              value: {{ (($defaults.contextSync | default dict).image) | quote }}
             - name: CONTEXT_LIVE_SIZE_LIMIT
-              value: {{ .Values.runtime.contextSync.liveSizeLimit | quote }}
+              value: {{ (($defaults.contextSync | default dict).liveSizeLimit) | quote }}
             {{- end }}
-            {{- if .Values.runtime.egressMediation.enabled }}
-            # Only set when mediation is enabled: an empty image disables it
-            # outright, so the redirect can never be installed without a proxy
-            # to answer it — which would leave the agent unable to reach
-            # anything at all.
+            {{- if $anyEgress }}
+            # Only set when mediation is enabled somewhere: an empty image
+            # disables it outright, so the redirect can never be installed
+            # without a proxy to answer it — which would leave the agent unable
+            # to reach anything at all.
             - name: EGRESS_PROXY_IMAGE
-              value: {{ .Values.runtime.egressMediation.image | quote }}
-            {{- with .Values.runtime.egressMediation.initImage }}
+              value: {{ (($defaults.egressMediation | default dict).image) | quote }}
+            {{- with (($defaults.egressMediation | default dict).initImage) }}
             - name: EGRESS_INIT_IMAGE
               value: {{ . | quote }}
             {{- end }}
@@ -83,10 +96,17 @@ spec:
             - name: MAX_RUNTIMES
               value: {{ .Values.maxRuntimes | quote }}
             {{- end }}
+            # The manager's own fallback, for a runtime CR that states none.
+            # Read from the defaults block so the release really has ONE number
+            # — a second top-level key was one a bundle-shipped runtime could
+            # not inherit.
             - name: RUNTIME_IDLE_TTL_M
-              value: {{ .Values.runtimeIdleTtlMinutes | quote }}
+              value: {{ dig "agentops" "runtimeDefaults" "idleTtlMinutes" 10 (.Values.global | default dict) | quote }}
+            # THE FLOOR — what a runtime pod runs as when neither its
+            # Conversation nor its AgentRuntime names an account. It holds
+            # nothing, in every configuration.
             - name: RUNTIME_SA
-              value: {{ include "agentops.runtimeServiceAccount" . | quote }}
+              value: {{ include "agentops.floorServiceAccount" . | quote }}
             - name: ADAPTER_TOKEN
               valueFrom:
                 secretKeyRef:

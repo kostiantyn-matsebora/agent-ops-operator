@@ -1,0 +1,10 @@
+apiVersion: v2
+name: kubernetes
+description: >-
+  Kubernetes agent bundle for the agent-ops operator: the cluster Events signal
+  source (adapter + RBAC + source), the k8s-engineer AgentProfile, the MCP
+  tooling that lets it reach the cluster, and — off unless asked for, or under
+  demo mode — the Pipeline claiming that source. The execution substrate is the
+  parent chart's. Demo mode is exactly this bundle with its defaults.
+type: application
+version: 0.3.0

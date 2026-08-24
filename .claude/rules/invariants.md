@@ -1,37 +1,73 @@
 ## Invariants (do not break)
 
-### THE PARENT CHART OWNS THE SUBSTRATE — BUNDLES CONTRIBUTE DOMAIN
+### THE PARENT CHART OWNS THE DEFAULTS AND THE FLOOR — A BUNDLE MAY SHIP A RUNTIME
 
-How agents execute — image, LLM credential, idle TTL, node placement, context
-volume, and the DEFAULT identity whose RBAC is the agent's power — is
-release-wide and lives in `chart/values.yaml` (`runtime:` +
-`global.agentops.runtime.*`).
+**TWO VALUES BLOCKS, AND THE RULE SEPARATING THEM:**
+
+| Block | Holds |
+|---|---|
+| `global.agentops.runtimeDefaults` | what EVERY runtime inherits — a COMPLETE, working configuration |
+| `runtimes:` | the runtimes that EXIST, each stating only what DIFFERS |
 
 **RELEASE-WIDE BY DEFAULT, PER-ROUTE BY CHOICE.** A `Pipeline` may name its own
 `runtimeRef`, `serviceAccountName` AND `persistence`, so an install expresses a
 second trust level — or a second volume — on the route rather than by cloning an
-`AgentRuntime` — see `wiring.md`. What stays release-wide is the DEFAULT all
-three fall back to, and the ownership below.
+`AgentRuntime` — see `wiring.md`.
 
+- **"NO SUBCHART RENDERS AN `AgentRuntime`" IS REVERSED.** The reference runtime
+  IS a bundle (`chart/charts/claude/`), on by default, so an install using
+  another vendor stops carrying it. A vendor is DOMAIN, not substrate.
+  - **THE TWO FAILURES THAT MADE IT AN INVARIANT ARE ANSWERED, NOT FORGOTTEN:**
+    1. **A chat-only install could execute nothing**, because the runtime lived
+       in a bundle and no bundle was on. `agentops.defaultRuntimeGuard` now
+       FAILS the render when nothing answers to `default` while a route resolves
+       to it. A failed render is recoverable; conversations stuck in `Pending`
+       with the reason in no one's view are not.
+    2. **Two runtime ServiceAccounts existed and one was granted everything.**
+       That was a release-wide MODE binding a shared account. Accounts are
+       per-route now, the floor is bound to nothing, and no mode exists.
+  - **THE GUARD READS NO CLUSTER**, so it protects a GitOps render exactly as it
+    protects an interactive one — unlike the claim-rename guard, whose `lookup`
+    is blind without one.
+- **WHAT STAYS EXCLUSIVELY THE PARENT'S IS THE DEFAULTS AND THE FLOOR.** Defaults
+  differing per bundle would be one fact in as many places as there are vendors,
+  and a floor a bundle could render would make "a route naming nothing holds
+  nothing" a claim no single file checks.
+- **THE DEFAULTS ARE SUFFICIENT.** `runtimes: []` plus a credential is a working
+  install. The credential is the ONE value with no defensible default.
+  - **`resources` IS WRITTEN OUT**, not `{}` — the numbers were compiled into
+    `podspec.go` where no operator could read or tune them, and the first sign
+    of one being wrong is an evicted conversation. The Go constants stay as the
+    fallback for a deployment with no `AgentRuntime` at all.
+  - **`idleTtlMinutes` LIVES THERE TOO**, and the top-level `runtimeIdleTtlMinutes`
+    is GONE. A bundle-shipped runtime cannot read a parent-scope value, so it
+    rendered an EMPTY field and the CRD's structural default of 10 silently
+    replaced the release's setting.
 - **THE VOLUME IS NOT ON THE RUNTIME AT ALL.** `AgentRuntime.spec.home`,
   `spec.context` and `spec.workspace` are DELETED with no alias. The runtime
   keeps `spec.contextStorage` — BACKEND SHAPE, not PLACEMENT. The chart's claims
   reach a conversation as the manager's BOOTSTRAP DEFAULT (`CONTEXT_PVC` /
   `WORKSPACE_PVC`), never through the CR.
-- **No subchart renders an `AgentRuntime`, a model credential or a context
-  volume.** That is THE SUBSTRATE and it stays the parent's, exclusively.
 - **A BUNDLE DOES RENDER THE ACCOUNTS ITS OWN ROUTES NEED**, scoped to what
   those routes do, and names each on its own Pipeline. The bundle is the only
-  scope that knows. "No subchart renders a runtime ServiceAccount" is REVERSED —
-  it guarded against a bundle rendering an account sized for EVERYTHING, and an
-  account sized DOWN to one route is the opposite.
+  scope that knows.
 - **"Exactly one runtime ServiceAccount per release" is DEAD.** A release has
-  the floor, whatever `rbacMode` renders, each bundle's route accounts, and
-  whatever the operator declares.
-- **SILENCE MEANS NO POWER.** The account a Pipeline naming none runs as — the
-  FLOOR — is bound to nothing, in any mode. `rbacMode` renders a separate NAMED
-  account a route opts into. It shipped inverted once, and three of four routes
-  held pod-delete because nobody typed a field.
+  the floor, each bundle's route accounts, and whatever the operator declares.
+- **SILENCE MEANS NO POWER, AND THERE IS NO PRESET POSTURE.**
+  `global.agentops.runtime.rbacMode` is DELETED with no alias. The account a
+  route naming none inherits is bound to nothing, and nothing can be bound to
+  it.
+  - **THE DEFAULT IDENTITY IS A REFERENCE THIS CHART DOES NOT CREATE.** Naming
+    is not creating, the posture adapters already have — and creating it would
+    collide on Helm's ownership check for an account the operator already owns.
+  - **THE FLOOR IS RENDERED WHATEVER THE DEFAULT IS**, which is what keeps it
+    NAMEABLE to take ONE route back to nothing on an install whose inherited
+    default carries rights.
+  - **More than nothing is `rbac.runtime.serviceAccounts`** — a DECLARED account
+    with its own posture, named on the routes that need it. A named posture
+    nobody declared is a grant nobody reviewed.
+  - It shipped inverted once, and three of four routes held pod-delete because
+    nobody typed a field.
 - **NO BINDING USES A BUILT-IN ROLE** — not `cluster-admin`, not `view`.
 - **GRANTS ARE CLUSTER-WIDE, and `agentops.dev` is NEVER granted.** That
   omission is what protects Conversations, not scope. Namespaced Roles were
@@ -41,12 +77,16 @@ three fall back to, and the ownership below.
   The kubelet resolves a Secret when it builds a pod, so pod execution and
   Secret access are ONE capability. An agent has a shell, so a binding is what
   it actually has and `--allowedTools` does not constrain it.
-- **Both substrate keys are under `global.`** because a subchart can read no
-  other parent scope and k8s-bundle's MCP server derives from them. Restating
-  them in a subchart recreates the two-spellings-of-one-fact problem chart 4.0
-  removed.
-- **Putting the runtime in a bundle is what made a chat-only install unable to
-  execute anything**, and made TWO runtime SAs exist, one granted everything.
+- **EGRESS MEDIATION DEFAULTS ON.** The wall for an uncooperative agent must not
+  be something an operator discovers. It costs a privileged `NET_ADMIN` init
+  container, which a `restricted` Pod Security namespace REFUSES at POD
+  ADMISSION rather than at render — so NOTES.txt names it and a runtime may
+  decline it.
+- **THE DEFAULTS ARE UNDER `global.` BY FORCING, NOT TIDINESS.** A subchart reads
+  no parent scope but that one, and TWO things need them from in there:
+  `allowPodExecution` is read by `agentops.runtimeWriteRules`, a PARENT helper
+  the `kubernetes` bundle CALLS — where only `.Values.global` resolves — and a
+  bundle-shipped runtime has no other scope to inherit from. See `chart.md`.
 
 ### THE OPERATOR MAY CREATE STORAGE AND MUST NEVER DESTROY IT
 

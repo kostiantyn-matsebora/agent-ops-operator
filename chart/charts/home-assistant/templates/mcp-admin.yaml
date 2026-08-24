@@ -1,0 +1,43 @@
+{{- /* The ADMIN MCP path: the CRs only. The workload, when the bundle deploys
+one, is mcp-admin-server.yaml.
+
+Server key FIXED at `homeassistant_admin`, and deliberately NOT the same key as
+the control path's `homeassistant`: they are two different servers with two
+different tool vocabularies, and one key for both would make an allowlist entry
+mean whichever server happened to be bound. */ -}}
+{{- if and (include "home-assistant.active" .) (include "home-assistant.adminMcpEnabled" .) }}
+{{- $a := .Values.adminMcp }}
+{{- if not (has $a.transport (list "http" "sse")) }}
+{{- fail (printf "home-assistant: adminMcp.transport must be \"http\" or \"sse\", got %q" $a.transport) }}
+{{- end }}
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: {{ $a.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-home-assistant
+spec:
+  servers:
+    homeassistant_admin:
+      type: {{ $a.transport }}
+      url: {{ include "home-assistant.adminMcpURL" . | quote }}
+      {{- with $a.headers }}
+      headers:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: {{ $a.toolset.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-home-assistant
+spec:
+  # ENUMERATED from the server's real tool list. A wildcard here would grant
+  # restarting Home Assistant, deleting registry objects and installing HACS
+  # packages in one line.
+  tools:
+{{ toYaml $a.toolset.tools | indent 4 }}
+{{- end }}

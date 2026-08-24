@@ -5,17 +5,6 @@ Enforcement of a conversation's bound tool access at a point the agent does not 
 
 ## Requirements
 
-### Requirement: Egress mediation is opt-in per AgentRuntime and absent by default
-An `AgentRuntime` SHALL declare egress mediation explicitly. When it is not declared, the runtime pod SHALL be exactly the pod built today — no proxy, no interception, no additional containers, and no change to the agent's environment. Enabling it SHALL NOT require any change to a runtime IMAGE, so an adopter's derived image keeps working unchanged.
-
-#### Scenario: An install that does not ask for it is unchanged
-- **WHEN** an `AgentRuntime` with no mediation stanza dispatches a conversation
-- **THEN** the runtime pod carries the same containers, environment and security context it carries today
-
-#### Scenario: Enabling it needs no image change
-- **WHEN** mediation is enabled on an `AgentRuntime` whose `spec.image` is a derived, adopter-built image
-- **THEN** conversations on that runtime are mediated without rebuilding that image
-
 ### Requirement: The agent's egress cannot bypass the proxy
 When mediation is enabled, ALL TCP egress from the agent container SHALL be delivered to the proxy regardless of the destination the agent chooses. Bypass SHALL NOT be possible by addressing a service directly, by rewriting the compiled MCP configuration, or by any destination the agent selects. Traffic originating from the proxy itself SHALL NOT be re-intercepted.
 
@@ -85,3 +74,40 @@ If the proxy is not ready or has failed, the agent's mediated traffic SHALL fail
 #### Scenario: Proxy failure is visible
 - **WHEN** the proxy fails during a run
 - **THEN** the failure surfaces on the conversation rather than as silently reduced tooling
+
+### Requirement: Egress mediation is on by default and declinable per runtime
+Egress mediation SHALL be ENABLED BY DEFAULT. The wall that constrains an
+uncooperative agent SHALL NOT be something an operator has to discover.
+
+`--allowedTools` configures a COOPERATING agent. One with a shell can open a
+socket to a bound MCP server and call anything that server registers, so the
+allowlist is a configuration rather than a boundary. Shipping the boundary off by
+default left every install with the weaker of the two until someone read far
+enough to find it.
+
+IT SHALL REMAIN DECLARABLE PER RUNTIME, and a runtime SHALL be able to decline
+it — a vendor reaching no MCP server has nothing to mediate, and a proxy there is
+cost without a boundary.
+
+**THE COST SHALL BE NAMED WHERE THE DEFAULT IS MET.** Mediation adds a privileged
+init container requiring `NET_ADMIN`, which a namespace under `restricted` Pod
+Security admission REFUSES — so the install fails at POD ADMISSION rather than at
+render, far from the setting responsible. The post-install notes SHALL state
+that, and SHALL name the value that turns it off.
+
+#### Scenario: A fresh install is mediated
+- **WHEN** the chart is installed with no egress values supplied
+- **THEN** runtime pods carry the proxy and the redirect, and the tool access their wiring granted is enforced where the agent does not control it
+
+#### Scenario: A runtime that needs no proxy declines it
+- **WHEN** a runtime declares mediation disabled
+- **THEN** its pods carry the same containers, environment and security context an unmediated pod carries, with nothing added
+
+#### Scenario: Enabling it needs no image change
+- **WHEN** mediation applies to a runtime whose image is a derived, adopter-built one
+- **THEN** its conversations are mediated without rebuilding that image
+
+#### Scenario: The admission cost is stated, not discovered
+- **WHEN** the chart is installed
+- **THEN** the notes state that mediation adds a privileged init container which a `restricted` Pod Security namespace refuses, and name the value that disables it
+

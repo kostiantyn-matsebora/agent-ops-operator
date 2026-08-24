@@ -21,9 +21,28 @@ When its MCP component is active, `k8s-bundle` SHALL render an `MCPConfig` CR (d
 - **THEN** rendering fails naming the required value
 
 ### Requirement: Reads and mutations are separate toolsets
-The bundle SHALL render its tool grants as TWO `MCPToolset` CRs split by risk, mirroring the built-in `observe`/`shell`/`edit` split: a read set (default `k8s-observability`) and a mutating set (default `k8s-admin`). Tool patterns SHALL be ENUMERATED rather than a `mcp__kubernetes__*` wildcard, because a wildcard spans both halves and would defeat the split it is meant to express.
+The mutating toolset SHALL render on its OWN setting, and SHALL NOT appear as a
+consequence of a release-wide permission mode.
 
-The read set SHALL render whenever the component is active. The mutating set SHALL render only when a server that actually REGISTERS mutating tools exists — following the deployed server's mode by default, with an explicit values override for operators pointing at a server this chart did not deploy. Granting tool names that resolve to nothing is how an allowlist rots into fiction.
+It was derived: widening one value rendered the mutating toolset, dropped the MCP
+server's read-only flag and widened that server's RBAC together. Moving as a
+group was deliberate — both walls sit on one path, and fixing one leaves the hole
+one indirection along — but the value driving it named none of the three, so what
+an install actually granted could not be read off its values.
+
+They SHALL still be able to move together, stated as such. What is refused is a
+setting whose NAME describes none of what it changes.
+
+The split itself is unchanged: reads and mutations stay separate toolsets, each
+enumerated and never wildcarded, so a route binds one without the other.
+
+#### Scenario: Mutations are asked for, not inherited
+- **WHEN** an install wants the mutating toolset
+- **THEN** it enables that toolset, and no release-wide permission value renders it instead
+
+#### Scenario: The walls can still move together
+- **WHEN** an install wants an acting agent
+- **THEN** it can state the mutating toolset and the writable server together, and each remains visible in its own values
 
 #### Scenario: Read-only server grants no mutating tools
 - **WHEN** the bundle deploys the MCP server in read-only mode
@@ -42,7 +61,7 @@ The bundle SHALL deploy the Kubernetes MCP server itself, **on by default** alon
 
 The agent's reach through MCP is therefore the intersection of that ServiceAccount's permissions and the tools its allowlist grants: two independent walls, each reviewable alone, unlike the kubectl path where the runtime ServiceAccount's RBAC is the only one. The SECOND wall SHALL be qualified wherever it is claimed: the allowlist is applied by the CLI running beside the agent, so it binds a COOPERATING agent only. An agent able to execute commands can reach this server directly and call anything it registers, leaving the server's ServiceAccount as the sole remaining wall. Where that matters, the wall is restored by enforcing the toolset outside the agent's control, and the bundle's risk-split toolsets SHALL NOT be documented as bounding a shell-capable agent unless such enforcement is in place.
 
-The server's read-only mode and its ServiceAccount's RBAC SHALL default to **deriving from the release's single runtime RBAC mode** (`global.agentops.runtime.rbacMode`) rather than being set independently: `full` SHALL yield a write-capable server under a `full` ServiceAccount, and every other mode — including `none` and unset — SHALL yield a read-only server under a `readonly` ServiceAccount. An explicitly set value SHALL win over the derivation.
+The server's read-only mode and its ServiceAccount's RBAC SHALL default to following **ONE STATED SETTING OF THE BUNDLE'S OWN** — whether agents on this lane may CHANGE the cluster — rather than a release-wide permission value: stated true SHALL yield a write-capable server under an acting ServiceAccount, and false SHALL yield a read-only server under a read-only one. An explicitly set value SHALL win, in both directions, and neither SHALL be derived from the other.
 
 The derivation exists because the two settings are bound by an invariant operators previously maintained by hand: a read-only MCP server under a `full` agent pushes every write back onto kubectl, which is the single-wall path this component exists to replace. Read-only mode SHALL still be understood as the FIRST wall — an unregistered tool is uncallable, not merely unlisted — and the toolset split SHALL remain the second, so mutations require a Pipeline to bind the mutating toolset deliberately no matter what the server serves.
 
@@ -53,7 +72,7 @@ Derivation SHALL NOT be presented as equivalent to independence: the documentati
 - **THEN** the server pod runs under its own ServiceAccount, and revoking that ServiceAccount's permissions removes the agent's MCP reach without touching the runtime ServiceAccount
 
 #### Scenario: Sharing the runtime identity is refused
-- **WHEN** the server's ServiceAccount is set equal to `global.agentops.runtime.serviceAccountName`
+- **WHEN** the server's ServiceAccount is set equal to the release's default runtime account
 - **THEN** the render fails, because collapsing the two identities removes the only thing this component adds over kubectl
 
 #### Scenario: Deployed server supplies the default endpoint
@@ -61,7 +80,7 @@ Derivation SHALL NOT be presented as equivalent to independence: the documentati
 - **THEN** the rendered `MCPConfig` points at the deployed Service instead of failing the render
 
 #### Scenario: One knob configures both identities coherently
-- **WHEN** `global.agentops.runtime.rbacMode=full` is set and no MCP value is set
+- **WHEN** the bundle states that agents on its lane may change the cluster, and no MCP value is set
 - **THEN** the server renders in write mode under a `full` ServiceAccount and the mutating toolset renders, so no install has to restate `full` a second and third time
 
 #### Scenario: Read-only stays the default posture
@@ -69,7 +88,7 @@ Derivation SHALL NOT be presented as equivalent to independence: the documentati
 - **THEN** the MCP CRs and the server workload render, the server runs `--read-only` under a readonly ServiceAccount, no mutating toolset exists, and the render succeeds
 
 #### Scenario: The separation is recoverable
-- **WHEN** `rbacMode=full` and `mcpServers.readOnly=true` is set explicitly
+- **WHEN** the bundle states mutations are allowed and `mcpServers.readOnly=true` is set explicitly
 - **THEN** the agent keeps write power through its own identity while the MCP path serves reads only, and no mutating toolset renders
 
 #### Scenario: The endpoint guard still bites
@@ -108,7 +127,7 @@ An operator who needs a CLI SHALL be able to derive a runtime image and point `A
 - **THEN** the documentation gives a derived-image recipe and states that the CLI authenticates as the runtime ServiceAccount, collapsing the two walls to one
 
 ### Requirement: Disabling the MCP component leaves an agent that cannot see the cluster
-Because no other path remains, rendering the bundle with the MCP component disabled SHALL produce a Kubernetes agent with no cluster access at all, whatever `global.agentops.runtime.rbacMode` grants. The install SHALL report this in its post-install notes rather than leaving it to be discovered by asking a question and receiving an apology.
+Because no other path remains, rendering the bundle with the MCP component disabled SHALL produce a Kubernetes agent with no cluster access at all, whatever account its route names. The install SHALL report this in its post-install notes rather than leaving it to be discovered by asking a question and receiving an apology.
 
 The render SHALL NOT fail on that combination: pointing `mcp.url` at a separately operated MCP server is legitimate, and so is disabling the component deliberately during a migration.
 
@@ -117,7 +136,7 @@ The render SHALL NOT fail on that combination: pointing `mcp.url` at a separatel
 - **THEN** the render succeeds and the post-install notes state that the agent cannot see the cluster, naming how to enable the component, how to point at an external server, and the derived-image alternative
 
 #### Scenario: Broad grants nothing can exercise are called out
-- **WHEN** that same install also sets the runtime RBAC mode to full
+- **WHEN** that same install also names an acting account on the route
 - **THEN** the notes additionally state that the mode grants cluster-admin to an identity nothing can exercise
 
 #### Scenario: A working install is not nagged

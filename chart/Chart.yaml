@@ -12,31 +12,40 @@ type: application
 sources:
   - https://github.com/kostiantyn-matsebora/agent-ops-operator
 home: https://kostiantyn-matsebora.github.io/agent-ops-operator/
-version: 9.0.0
+version: 10.0.0
 appVersion: "0.54.0"
 dependencies:
-  # embedded subchart (chart/charts/prometheus-bundle); templates are
-  # additionally self-gated on prometheus-bundle.enabled
-  - name: prometheus-bundle
+  # embedded subchart (chart/charts/prometheus); templates are
+  # additionally self-gated on prometheus.enabled
+  - name: prometheus
     version: 0.2.0
     repository: ""
-    condition: prometheus-bundle.enabled
-  # embedded subchart (chart/charts/k8s-bundle). NO condition: the bundle turns
+    condition: prometheus.enabled
+  # embedded subchart (chart/charts/kubernetes). NO condition: the bundle turns
   # on via `enabled` OR `global.demo.enabled`, and a Helm condition evaluates
   # only the first existing path — it could never express the OR. Every template
   # self-gates instead.
-  - name: k8s-bundle
+  - name: kubernetes
     version: 0.3.0
     repository: ""
-  # embedded subchart (chart/charts/telegram-bundle); templates are
-  # additionally self-gated on telegram-bundle.enabled
-  - name: telegram-bundle
+  # embedded subchart (chart/charts/telegram); templates are
+  # additionally self-gated on telegram.enabled
+  - name: telegram
     version: 0.4.0
     repository: ""
-    condition: telegram-bundle.enabled
-  # embedded subchart (chart/charts/ha-bundle); templates are additionally
-  # self-gated on ha-bundle.enabled
-  - name: ha-bundle
+    condition: telegram.enabled
+  # embedded subchart (chart/charts/home-assistant); templates are additionally
+  # self-gated on home-assistant.enabled
+  - name: home-assistant
     version: 0.1.0
     repository: ""
-    condition: ha-bundle.enabled
+    condition: home-assistant.enabled
+  # embedded subchart (chart/charts/claude) — the REFERENCE RUNTIME, and the one
+  # bundle that is ON by default: it is what a fresh install executes on.
+  # Disabling it with no replacement FAILS the render through
+  # `agentops.defaultRuntimeGuard`, rather than leaving conversations Pending
+  # forever with the reason in nobody's view.
+  - name: claude
+    version: 0.1.0
+    repository: ""
+    condition: claude.enabled

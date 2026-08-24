@@ -1,0 +1,537 @@
+# Kubernetes agent bundle: cluster Events → conversations, the agent that
+# answers them, its Kubernetes tooling, and the route that connects the three.
+# Four independently toggleable components. The WHOLE bundle is off by default
+# and is turned on either directly (`enabled: true`) or by demo mode
+# (`global.demo.enabled: true`) — demo mode means exactly "this bundle with its
+# defaults", nothing more.
+# Override under the `kubernetes:` key of the parent chart's values.
+#
+# The bundle ships NO SUBSTRATE: no runtime defaults, no floor ServiceAccount,
+# no LLM credential, no context volume. Those are release-wide facts and live in
+# the parent chart's `global.agentops.runtimeDefaults` and `runtimes:`. Bundles
+# contribute domain — sources, profiles, tooling, channels — plus ONE identity
+# per route they ship, and reference what the parent provides.
+enabled: false
+
+# MAY AGENTS ON THIS LANE CHANGE THE CLUSTER?
+#
+# ONE STATED SETTING, and the name says what all four things it moves are about:
+#
+#   1. the MCP server drops --read-only, so mutating tools are REGISTERED
+#   2. that server's ServiceAccount gets the acting grant instead of the reads
+#   3. the `k8s-admin` mutating toolset renders
+#   4. the ACTING route (`k8s-operate`) ships instead of the observing one
+#
+# THEY MOVE TOGETHER ON PURPOSE. Both walls sit on ONE path — an agent reaches
+# the cluster THROUGH this server — so fixing one and leaving the other moves
+# the hole one indirection along rather than closing it.
+#
+# WHAT THIS REPLACED was the same grouping driven by a RELEASE-WIDE permission
+# mode whose name mentioned none of the four, so an install could not read off
+# its own values what it had granted. This setting is the bundle's own and says
+# what it does.
+#
+# EACH OF THE FOUR IS STILL INDIVIDUALLY OVERRIDABLE below, absolutely and in
+# both directions, and none of them derives from another — setting the toolset
+# does not move the server's flag, and setting the server's flag does not render
+# the toolset.
+#
+# The agent's own ServiceAccount is NOT one of the four. This bundle's routes
+# carry accounts with no Kubernetes RBAC at all: the grant lives on the server.
+allowMutations: false
+
+# The cluster Events ingest lane: adapter implementation, the RBAC its
+# ServiceAccount needs, and the source. NOT the wiring — that is the
+# `pipelines:` component at the bottom of this file (off unless you or demo mode
+# ask for it), or the parent chart's own `pipelines:`.
+eventsAdapter:
+  enabled: true
+  # SignalAdapter CR name — also the ROUTING KEY: SignalSources select this
+  # implementation with spec.adapter: <name>.
+  name: k8s-events
+  image:
+    repository: ghcr.io/kostiantyn-matsebora/agentops-signal-k8s-events
+    # multi-arch from 0.1.1: adapter pods carry no node constraints, so on a
+    # mixed-arch cluster an amd64-only adapter image is a coin flip.
+    # 0.2.x adds self-exclusion, workload enrichment, the rules engine and the
+    # dwell window — it REQUIRES the pods/replicasets grant below, and reports
+    # Ready=False naming the permission when it is missing.
+    # 0.3.0 adds the time axis (route.timeIntervals / route.muteTimeIntervals);
+    # an earlier image ignores those keys, which looks like a window that never
+    # fires.
+    tag: 0.4.1
+  resources: {}
+  # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
+  # The OPERATOR never grants adapters anything — this is the chart binding
+  # permissions to a deterministic name, out of band.
+  rbac:
+    create: true
+    # false = a namespaced Role instead, limiting the adapter to events in the
+    # release namespace.
+    clusterWide: true
+  # The cluster Events source. It is INERT until a Pipeline claims it — wiring
+  # is pipeline-only, so either turn the `pipelines:` component below on (demo
+  # mode does) or declare the claim under the parent chart's `pipelines:`.
+  # Unclaimed, the source drops every event with Wired=False.
+  source:
+    create: true
+    # SignalSource CR name — name it in a pipeline's signalSources.
+    name: cluster-events
+    # Event `type` values to act on. Normal events are the cluster's background
+    # hum; watching them would bury real problems and burn LLM credits.
+    severities:
+      - Warning
+    # Namespaces to watch; empty = every namespace the RBAC above allows.
+    namespaces: []
+    # Optional exact-match reason filters. Superseded by `rules` below, kept
+    # because sources written against the previous config must keep working:
+    # they translate into leading drop rules.
+    includeReasons: []
+    excludeReasons: []
+
+    # The suppression policy. Ordered, FIRST MATCH WINS.
+    #
+    # Two halves, spelled after the systems they come from. `rules` is the
+    # PROMETHEUS half — what counts as a problem and how long it must hold
+    # (`for`). `route` is the ALERTMANAGER half — inhibition. Dwell is
+    # deliberately not called `group_wait`: Alertmanager's group_wait batches a
+    # group before its first notification and is NOT `for:`, which does not
+    # exist in Alertmanager at all.
+    #
+    # `for` holds a matched event, then RE-CHECKS the involved object before
+    # emitting: gone (the terminating pod of a rollout) or recovered (the new
+    # pod became Ready) means drop; still unhealthy means emit once, with the
+    # whole burst's evidence attached.
+    #
+    # Two properties make this set safe to trust, and both are pinned by test:
+    #   * the LAST rule is a catch-all with a dwell, never a drop — so a reason
+    #     nobody anticipated (a third-party controller, a future Kubernetes
+    #     release) is verified and reported rather than discarded;
+    #   * every reason in the drop list has its underlying problem reported by
+    #     some OTHER rule that is not dropped.
+    # The asymmetry is deliberate: a wrong entry in tier 1 costs a missed
+    # incident, a wrong entry in the catch-all costs one surplus conversation.
+    rules:
+      # 1 ── never actionable on their own ─────────────────────────────────
+      # ProbeWarning: the probe SUCCEEDED and printed something.
+      # SandboxChanged / FailedPreStopHook / FailedKillPod: pod infra churn and
+      #   teardown noise; anything that matters shows up as another reason on
+      #   the same object.
+      # Preempting / NodeNotSchedulable: the scheduler and a cordoning operator
+      #   doing exactly what they were told.
+      # FailedToUpdateEndpoint* / ExternalProvisioning: controllers retrying on
+      #   their own loop.
+      # ContainerGCFailed / ImageGCFailed: node housekeeping — safe to drop
+      #   ONLY because NodeHasDiskPressure below is tier 3 at for: 0.
+      # Evicted: reported from BOTH ends already, and per POD from neither.
+      #   A kubelet eviction is caused by node pressure, which tier 3 reports at
+      #   for: 0 as ONE node-level signal instead of one per displaced pod. An
+      #   API-initiated eviction is a drain — an operator doing what they were
+      #   told, exactly like NodeNotSchedulable above, and drains are routine and
+      #   UNATTENDED wherever a reboot manager runs. What actually deserves
+      #   waking someone is an evicted pod that does not come back, and that
+      #   arrives as FailedScheduling in tier 5 with a dwell to confirm it.
+      #   Dropping it costs the case where pods evict, reschedule cleanly, and
+      #   the node reports no pressure — which is a cluster working as designed.
+      - matchers:
+          - reason=~"ProbeWarning|SandboxChanged|Preempting|NodeNotSchedulable|ExternalProvisioning|FailedToUpdateEndpoint.*|FailedPreStopHook|FailedKillPod|ContainerGCFailed|ImageGCFailed|Evicted"
+        action: drop
+
+      # 2 ── PAST TENSE: these already happened ────────────────────────────
+      # A dwell would find the healthy REPLACEMENT and erase a real incident:
+      # OOMKilling fires, the container restarts, and three minutes later the
+      # pod is Ready. Never give these a dwell.
+      - matchers:
+          - reason=~"OOMKilling|SystemOOM|BackoffLimitExceeded|DeadlineExceeded|VolumeFailedDelete"
+        for: "0"
+
+      # 3 ── node-level: one event, many workloads affected ────────────────
+      - matchers:
+          - reason=~"NodeNotReady|NodeHasDiskPressure|NodeHasMemoryPressure|NodeHasPIDPressure"
+        for: "0"
+
+      # 4 ── flappy by nature: long dwell, but escalate on breadth ─────────
+      # Unhealthy is the noisiest reason in any cluster — every rollout, every
+      # slow start. A probe still failing at 10m is real. escalateAfterObjects
+      # SHORTENS the dwell (to a quarter of it, floored at 1m) when THREE pods
+      # of one workload go unready — it does NOT skip the wait. Firing on
+      # breadth alone reports every ordinary rollout, because a rollout also
+      # makes every replica unready at once; only duration separates the two.
+      - matchers:
+          - reason=~"Unhealthy|FailedGetResourceMetric|FailedComputeMetricsReplicas"
+        for: 10m
+        escalateAfterObjects: 3
+
+      # 5 ── real, but they resolve on their own timescale ─────────────────
+      # FailedScheduling: a cluster autoscaler needs 1–3 minutes to provision.
+      #   With no autoscaler, lower this to ~2m.
+      # BackOff: a container that crashes twice and stabilises is not an
+      #   incident; one still in CrashLoopBackOff at 5m is.
+      # Volume reasons: RWO disks genuinely take minutes to detach from the old
+      #   node during a rollout — a classic false positive.
+      - matchers:
+          - reason=~"FailedScheduling|BackOff|FailedMount|FailedAttachVolume|FailedMapVolume|FailedBinding|ProvisioningFailed|SyncLoadBalancerFailed|FailedRescale"
+        for: 5m
+
+      # 6 ── catch-all: everything unknown is KEPT, verified, reported ─────
+      # Includes Failed, FailedCreate, FailedCreatePodSandBox, and every reason
+      # a third-party operator invents. MUST stay last and MUST stay a dwell.
+      - matchers: []
+        for: 3m
+
+    # The Alertmanager half: inhibition and the TIME axis. Empty by default —
+    # both halves below are opt-in, and both are shown as worked examples.
+    #
+    #   route:
+    #     # Inhibition — suppress the CONSEQUENCES of a cause that is already
+    #     # reported. The canonical use: a draining node makes its pods noisy.
+    #     inhibitRules:
+    #       - sourceMatchers: ['reason="NodeNotReady"']
+    #         targetMatchers: ['reason=~"Unhealthy|FailedScheduling"']
+    #         equal: [node]
+    #
+    #     # Time intervals — the one axis the other three cannot express.
+    #     # `for:` verifies a condition still holds, and during a scheduled
+    #     # outage it genuinely does; inhibition needs a CAUSE event, and a
+    #     # router losing power produces no in-cluster object; matchers select
+    #     # on labels, and there is no label for the time of day.
+    #     timeIntervals:
+    #       - name: nightly-restart
+    #         # Start INCLUSIVE, end EXCLUSIVE. A window spanning midnight is
+    #         # two entries, exactly as in Alertmanager.
+    #         times:
+    #           - startTime: "04:00"
+    #             endTime: "04:20"
+    #         # NAME YOUR ZONE. "Four in the morning" is a LOCAL fact: the
+    #         # default (UTC) drifts by an hour at each daylight-saving
+    #         # transition, so the window stops covering the outage it was
+    #         # written for — on a date nobody chose, at an hour nobody is
+    #         # watching. With a location the offset moves and the window does
+    #         # not. The IANA database is embedded in the adapter image, so any
+    #         # zone name works without adding tzdata to the pod.
+    #         location: Europe/Kyiv
+    #         # Optional narrowing: weekdays, daysOfMonth (negative counts back
+    #         # from the end of the month), months, years — Alertmanager's forms.
+    #         # weekdays: ["monday:friday"]
+    #
+    #     # Which intervals actually mute, and what they mute.
+    #     muteTimeIntervals:
+    #       - name: nightly-restart
+    #         # STRONGLY RECOMMENDED. With no matchers the source goes deaf for
+    #         # the whole window. A restarting router produces connectivity
+    #         # reasons; it does not produce OOMKilling, and an OOMKill at 04:05
+    #         # is exactly as real as one at noon. Narrowing means the safe
+    #         # configuration does not depend on the window staying short.
+    #         matchers:
+    #           - reason=~"NodeNotReady|Unhealthy|FailedMount|FailedScheduling"
+    #
+    # Muting is evaluated at EMIT — after the dwell above, before the emit cap —
+    # so a problem that OUTLIVES the window is still reported once it closes,
+    # and a muted burst never spends the emit budget. While a window is active
+    # the source says so on its Ready condition, and names the interval: a muted
+    # lane and an idle lane look identical from outside, and only one of them
+    # means the cluster is healthy.
+    route: {}
+    # SignalSource grouping policy (manager-side; defaults apply when empty).
+    #
+    # Group by WORKLOAD, not by object. `name` here used to be a POD name —
+    # unique per replica and regenerated on every rollout — so conversation
+    # count scaled with pods × rollouts and the manager's 7-day window reuse
+    # could never fire, because the signature never repeated. `workload` is the
+    # owning controller (Deployment/api), resolved through owner references, so
+    # every replica shares one conversation and it survives rollouts.
+    grouping:
+      signatureLabels:
+        - namespace
+        - workload
+
+# The agent that answers. IDENTITY ONLY — one AgentProfile and nothing else.
+# What executes it is the parent chart's `runtime:` block; what it may do in the
+# cluster is `global.agentops.runtime.rbacMode` plus the Pipeline routing it.
+profile:
+  enabled: true
+  name: k8s-engineer
+  # Behaviour, and behaviour ONLY: no repository, no capabilities. What this
+  # agent may do comes from whichever Pipeline originates the conversation —
+  # the `pipelines:` component below, or one declared in the parent chart.
+  #
+  # This profile has NO repository, so `agent` can name no
+  # .claude/agents/<name>.md — there is nothing checked out to read. Without the
+  # inline role below the agent would be personality-free: a bare session whose
+  # only inputs are the allowlist and the task text. That is survivable for a
+  # direct question and bad for an event that opens one with no instructions.
+  #
+  # The agent's OUTPUT CONTRACT. `blocks` appends the operator's shared
+  # output-format specification — the block grammar, the fold, the markdown
+  # subset and a default section set — so a long answer opens with its
+  # conclusion and folds the detail away on every surface. `none` appends
+  # nothing and this profile's own prompt owns formatting.
+  #
+  # REQUIRED on the CR, with no default: both candidate defaults are wrong, so
+  # the author declares it.
+  outputFormat: blocks
+
+  # Appended to the runtime's own system prompt, never replacing it. Identity,
+  # not capability: nothing here widens the allowlist.
+  systemPrompt: |
+    You are a Kubernetes site reliability engineer operating a live cluster.
+
+    The mcp__kubernetes__* tools are how you reach the cluster. The runtime
+    image ships no Kubernetes CLI, so there is no shell fallback: if a tool for
+    something is not in your allowlist, you cannot do it — say so plainly
+    instead of trying to improvise one.
+
+    Those tools return kubectl-shaped tables and cannot filter server-side, so
+    ask for the narrowest scope you can (a namespace rather than the cluster)
+    and read what comes back rather than fetching everything twice.
+
+    When a cluster event opens this conversation, investigate before you act: identify
+    the failing object, read its recent events and logs, and state the likely
+    cause. Make a change only when you are confident it is correct and its blast
+    radius is bounded, and say plainly what you changed. Prefer the narrowest
+    action that fixes the problem.
+
+    Never delete or mutate anything in kube-system, and never touch a resource
+    you were not asked about and did not diagnose. If a fix is risky, ambiguous,
+    or would affect the control plane, describe what you would do and stop.
+
+    Answer briefly. Lead with the finding, then the evidence.
+  maxTurns: 40
+  # Names an AgentRuntime other than the parent's `default` — a higher-trust or
+  # different-vendor runtime you applied yourself. Empty emits no runtimeRef and
+  # falls back to `default`, which the parent renders whenever runtime.enabled.
+  runtimeRef: ""
+
+# Structured Kubernetes access as MCP tools — the same two halves
+# prometheus ships for metrics: an MCPConfig (the server) and an MCPToolset (the
+# permission to call it). The `pipelines:` component below binds both when it
+# renders; any other route must name them itself, because a server without the
+# toolset gives an agent tools it may not call.
+#
+# REQUIRED for cluster access, not an optimisation. Runtime image 0.5.0 dropped
+# kubectl, so with this component off the agent cannot see the cluster at all,
+# whatever `global.agentops.runtime.rbacMode` grants.
+#
+# ON by default, together with `mcpServers` below: an MCPConfig needs an
+# endpoint, and the server component supplies one, so the two flip as a pair.
+# That pairing is the whole reason this used to default off — a Kubernetes
+# bundle whose Kubernetes tooling is off is an install that looks complete and
+# cannot see the cluster through the path this project prefers. The endpoint
+# guard stays, and still fails loudly for the one combination that is genuinely
+# broken: `mcp.enabled` with no server workload and no `url`.
+mcp:
+  enabled: true
+  # MCPConfig CR name (what Pipelines put in mcpConfigs.refs).
+  name: k8s-api
+  # The MCP server endpoint. REQUIRED when enabled — unless mcpServers below
+  # deploys the workload, in which case an empty url defaults onto that Service.
+  url: ""
+  # Transport the MCPConfig declares: http (streamable HTTP, path /mcp) or sse
+  # (legacy, path /sse). The deployed server serves both; set sse only when
+  # pointing at someone else's server that speaks nothing else.
+  transport: http
+  # Optional header entries, passthrough — valueFrom secret refs supported
+  # (resolved in the runtime pod; the manager reads no Secrets), e.g.:
+  #   - name: Authorization
+  #     valueFrom: {secretKeyRef: {name: k8s-mcp-auth, key: bearerHeader}}
+  headers: []
+  # TWO toolsets, split by risk — the same shape as global.builtinToolsets
+  # (observe / shell / edit). Reads and mutations are separate CRs so granting
+  # writes is a per-route decision: a Pipeline can bind reads alone and get an
+  # agent that explains but cannot touch anything.
+  #
+  # The server key in the rendered MCPConfig is FIXED at `kubernetes` and has no
+  # values path: that key IS the mcp__kubernetes__* namespace named in every
+  # allowlist, so a values rename would silently strip an agent's tools.
+  #
+  # Tools are ENUMERATED, not `mcp__kubernetes__*`. A wildcard spans both halves
+  # and would defeat the split — it is precisely the thing this replaces.
+  toolsets:
+    # Reads. Rendered whenever the MCP component is on.
+    observe:
+      name: k8s-observability
+      tools:
+        - "mcp__kubernetes__events_list"
+        - "mcp__kubernetes__namespaces_list"
+        - "mcp__kubernetes__projects_list"
+        - "mcp__kubernetes__nodes_log"
+        - "mcp__kubernetes__nodes_stats_summary"
+        - "mcp__kubernetes__nodes_top"
+        - "mcp__kubernetes__pods_list"
+        - "mcp__kubernetes__pods_list_in_namespace"
+        - "mcp__kubernetes__pods_get"
+        - "mcp__kubernetes__pods_log"
+        - "mcp__kubernetes__pods_top"
+        - "mcp__kubernetes__resources_list"
+        - "mcp__kubernetes__resources_get"
+        - "mcp__kubernetes__configuration_view"
+    # Mutations. Only meaningful against a server that REGISTERS them — with
+    # mcpServers.readOnly: true the tools below do not exist, and granting a
+    # name that resolves to nothing is how allowlists rot.
+    admin:
+      # null = follow the deployed server (on when mcpServers deploys one in
+      # write mode, which by default means global.agentops.runtime.rbacMode is
+      # `full`). true/false forces it — use true when mcp.url points at your own
+      # server that you know serves writes.
+      enabled: null
+      name: k8s-admin
+      tools:
+        - "mcp__kubernetes__resources_create_or_update"
+        - "mcp__kubernetes__resources_delete"
+        - "mcp__kubernetes__resources_scale"
+        - "mcp__kubernetes__pods_delete"
+        - "mcp__kubernetes__pods_exec"
+        - "mcp__kubernetes__pods_run"
+
+# The MCP server WORKLOAD itself — a separate sub-component (sibling of `mcp`,
+# which renders only the CRs): run containers/kubernetes-mcp-server in-cluster
+# when you don't already have one. On by default, with `mcp` — set this to false
+# (and `mcp.url` to your own endpoint, or `mcp.enabled: false`) if you already
+# run one or want no server at all.
+#
+# The point of this component is the SECOND IDENTITY. The server pod
+# authenticates to the API as its OWN ServiceAccount, not the runtime's, so the
+# agent's MCP reach is (what this SA may do) ∩ (what mcp.toolset.tools grants) —
+# two walls, each reviewable alone. Since runtime image 0.5.0 there is no
+# one-wall path left beside it: the image ships no cluster CLI, so this server
+# is how an agent reaches Kubernetes, and turning it off leaves one that cannot.
+mcpServers:
+  enabled: true
+  image:
+    # Talks to the API directly (no kubectl in the image) and resolves
+    # in-cluster config from the pod SA, which is what makes the second
+    # identity real rather than a mounted kubeconfig.
+    repository: ghcr.io/containers/kubernetes-mcp-server
+    tag: v0.0.66
+  port: 8080
+  # --read-only: the server does not REGISTER any tool lacking a read-only
+  # annotation, so mutating tools are uncallable, not merely unlisted — the
+  # first of the two walls, with the toolsets above as the second.
+  #
+  # null = DERIVE from global.agentops.runtime.rbacMode: read-only for every
+  # mode but `full`. The two are bound by an invariant that used to be
+  # maintained by hand in every install's values — an operator who grants the
+  # agent `full` and leaves the server read-only has asked for a write-capable
+  # agent and given it no way to write.
+  #
+  # An explicit value still wins, and that is the override worth knowing:
+  # `readOnly: true` under `rbacMode: full` makes this a strictly observing
+  # agent — the runtime SA's grants stay broad but nothing can exercise them.
+  # Deriving is a default, not a merge — but it does mean widening the agent to
+  # `full` widens this server too unless you say so.
+  #
+  # With the server in write mode the six mutating tools register and the
+  # k8s-admin toolset renders, which routes must then bind deliberately.
+  readOnly: null
+  # Upstream's default is [core, config, helm]. Helm is dropped: an
+  # observability lane has no reason to carry a Helm client, and one less
+  # toolset is one less thing riding on the read-only filter being right.
+  toolsets:
+    - core
+    - config
+  # Distinct from global.agentops.runtime.serviceAccountName ON PURPOSE — see
+  # above. Setting them equal FAILS the render.
+  serviceAccountName: agentops-mcp-k8s
+  rbac:
+    create: true
+    # Same vocabulary as global.agentops.runtime.rbacMode, granted to the
+    # SERVER's SA:
+    # readonly — "view" plus node/namespace/metrics reads.
+    # full     — cluster-admin. Pointless with a read-only server and dangerous
+    #            without it; there is no good reason to set this by hand.
+    # null     — DERIVE: `full` when the agent's mode is `full`, readonly for
+    #            everything else, `none` included. `none` mapping to a readonly
+    #            server is deliberate — an agent that reads the cluster through
+    #            MCP and can do nothing at all through its own identity is the
+    #            useful shape two identities exist to offer.
+    # NOTE: nodes_log / nodes_stats_summary read through nodes/proxy, which
+    # readonly does NOT grant (it is a large privilege). Those two tools are
+    # registered and fail with a readable Forbidden; widen deliberately.
+    mode: null
+  # Extra env passthrough (the flags above are passed as args, not env).
+  env: []
+  resources: {}
+
+# The bundle's OWN wiring — the one component that spends money and touches the
+# cluster by itself. It renders a Pipeline claiming the source above with the
+# profile above, so an install that turns this bundle on answers events instead
+# of dropping them at Wired=False.
+#
+# OFF unless you ask, with ONE exception: demo mode turns it on, because a demo
+# whose whole promise is "one flag, a working install" cannot end with a
+# hand-written CR. Everywhere else the parent chart's `pipelines:` stays the
+# normal place an install declares routes — a bundle enabled for its adapter and
+# profile must never silently acquire a second route beside the one you wrote.
+#
+# `null` = that rule (off; on under demo mode). An explicit boolean is absolute
+# in BOTH directions, and `false` is the documented opt-out for a demo install
+# that wants the parts without the route.
+#
+# The bundle may ship this at all only because it owns the whole lane: it renders
+# the source, the profile and both toolsets, so the only object it does not
+# render is a channel — and that is values-supplied and omitted when unset. A
+# bundle whose route spanned other components could not, and telegram
+# still ships none.
+pipelines:
+  enabled: null
+  # TWO routes, differing in exactly one binding — the mutating toolset. At most
+  # one renders by default.
+  #
+  # `enabled: null` on each DERIVES from global.agentops.runtime.rbacMode, the
+  # same value mcpServers.readOnly, the server SA's RBAC mode and the k8s-admin
+  # toolset already follow: `full` renders the acting route, every other mode —
+  # readonly, none and unset — renders the observing one. One posture, four
+  # consistent effects, rather than a knob to keep in sync by hand.
+  #
+  # An explicit boolean wins in both directions, and BOTH may be true at once:
+  # that is allowed, not blocked, because signal sources are shareable. Know
+  # what it costs — two Ready Pipelines claiming one source open TWO
+  # conversations per admitted event, under two profiles' worth of capability,
+  # and both agents act. Two bills, two blast radii, one event.
+  observe:
+    enabled: null
+    # Reads the cluster, changes nothing.
+    name: k8s-observe
+    # Display only — how the route is recognised in a command menu or the
+    # console. `aops:` is the built-in set every surface ships, so it needs no
+    # network and works air-gapped. `mdi:<name>` or a URL also work, where the
+    # surface can fetch one.
+    icon: aops:observe
+    # Optional per-route overrides of the two at the bottom of this stanza.
+    runtimeRef: ""
+    serviceAccountName: ""
+  admin:
+    enabled: null
+    # Named k8s-operate, not k8s-admin: k8s-admin is already the MCPToolset this
+    # route binds, and "bind k8s-admin on k8s-admin" is a sentence nobody should
+    # have to parse.
+    name: k8s-operate
+    icon: aops:operate
+    # Optional per-route overrides of the two at the bottom of this stanza.
+    runtimeRef: ""
+    serviceAccountName: ""
+  # Channels to deliver to, BY NAME — the one class of object this bundle does
+  # not render, so it is values-supplied and the key is omitted entirely when
+  # this list is empty. Empty is a working configuration, not a degraded one:
+  # with no thread to wait for, the conversation dispatches immediately and the
+  # answer is read from status.runs[].result. Name one (say the console's
+  # channel) to have it delivered somewhere a person is looking.
+  channels: []
+  # WHAT EXECUTES these routes, and UNDER WHOSE IDENTITY. Both OPTIONAL and
+  # UNSET, and an install that leaves them so behaves exactly as one that could
+  # not set them: `runtimeRef` resolves the AgentRuntime named `default` and the
+  # identity falls to that runtime's own account.
+  #
+  # THIS BUNDLE RENDERS NEITHER OBJECT. The AgentRuntime, the runtime
+  # ServiceAccount and the credential are the PARENT's — a subchart sees only
+  # itself, and one that rendered an identity would create a second all-powerful
+  # account nobody asked for. Naming here is a reference: render the account
+  # through the parent's `rbac.runtime.serviceAccounts`, or grant it yourself.
+  #
+  #
+  # The per-route keys above override these, which is how one route gets more
+  # power than another on the SAME runtime image. That is what replaced cloning
+  # an AgentRuntime whose only difference was the account it named.
+  runtimeRef: ""
+  serviceAccountName: ""
+

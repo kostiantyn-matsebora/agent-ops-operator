@@ -1,0 +1,11 @@
+apiVersion: v2
+name: prometheus
+description: >-
+  Prometheus/Alertmanager bundle for the agent-ops operator: the Alertmanager
+  webhook signal source (adapter + optional default source, with
+  VictoriaMetrics-only sender self-registration), a Prometheus query MCP
+  configuration with its deployable server, an alert-investigator profile, and
+  the bundle's own opt-in wiring. VictoriaMetrics is a supported backend, not
+  the subject.
+type: application
+version: 0.2.0

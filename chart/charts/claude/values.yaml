@@ -1,0 +1,45 @@
+# The reference agent runtime, as a bundle.
+#
+# ON BY DEFAULT, unlike every other bundle here, and that is the point rather
+# than an inconsistency: this is what a fresh install executes on. Turn it off
+# and declare your own runtime under the parent's `runtimes:`, or every route
+# must name a `runtimeRef` of its own — the parent's default-runtime guard FAILS
+# the render otherwise, naming the routes that needed it.
+#
+# WHY A BUNDLE AT ALL. `AgentRuntime` used to be the parent chart's alone, which
+# meant a second vendor was a hand-written CR and an install using one still
+# carried this one's image reference and credential shape. A vendor is domain,
+# not substrate.
+#
+# WHAT IT DOES NOT SHIP, because that IS the substrate and stays the parent's:
+# the runtime DEFAULTS every runtime inherits, the FLOOR ServiceAccount, and the
+# context volume. This bundle declares one runtime and inherits the rest.
+enabled: true
+
+# The AgentRuntime CR name. `default` is what a Pipeline declaring no
+# `runtimeRef` resolves to, so renaming it means every route needs one — and the
+# parent's guard will say so rather than letting conversations queue forever.
+name: default
+
+# EVERYTHING ELSE IS INHERITED FROM `global.agentops.runtimeDefaults`, and the
+# keys below override it for THIS runtime only. Leave them empty and this
+# bundle renders exactly what the release-wide defaults describe — which is the
+# whole reason those defaults are stated in full rather than left as the fields
+# nothing else claimed.
+#
+# The parent's defaults already pin the reference image, so the ordinary install
+# sets nothing here at all. Override it to pin a DERIVED image of your own:
+# what an agent may REACH is wiring, so adding tooling to an image never grants
+# it anything — see docs/concepts.md#runtime-images-are-generic.
+#
+#   claude:
+#     image: registry.example.com/my-agentops-runtime:1.4.0
+#     idleTtlMinutes: 10
+#     nodeSelector:
+#       kubernetes.io/arch: amd64
+#     egressMediation:
+#       enabled: false
+#     credentialsSecret:
+#       name: my-claude-secret
+#
+# Any key `global.agentops.runtimeDefaults` accepts is accepted here.

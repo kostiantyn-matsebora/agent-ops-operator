@@ -99,7 +99,7 @@ bundling an MCP server in it. It also removes a version pin that could skew agai
 whatever cluster the image happened to run near.
 
 Practically: an agent reaches Kubernetes through the MCP tools its Pipeline
-binds (the [k8s bundle](k8s-bundle.md) ships them). `Bash` no longer implies
+binds (the [k8s bundle](kubernetes.md) ships them). `Bash` no longer implies
 cluster access. Binding `agentops-shell` is still useful for the workspace, it
 just stops being a second door to the API.
 
@@ -284,7 +284,7 @@ silently rewrite grouping.
 
 **Suppression is the adapter's job, and is distinct from grouping.** It decides
 whether a signal is emitted at all — see
-[k8s-bundle](k8s-bundle.md#event-suppression-eventsadaptersourcerules).
+[kubernetes](kubernetes.md#event-suppression-eventsadaptersourcerules).
 
 ### SignalAdapter
 
@@ -478,94 +478,133 @@ before the upgrade still reaches the agent it was parsed with.
 
 The chart ships the built-in vocabulary as three risk-split toolsets.
 
-## The substrate: `runtime:` and `global.agentops.runtime.*`
+## The substrate: the runtime DEFAULTS and the FLOOR
 
 **The parent chart contributes the substrate, bundles contribute domain.**
 
-How agents execute here — image, LLM credential, idle TTL, node placement, home
-volume, and the identity whose RBAC is the agent's power — is a release-wide
+What every runtime inherits — image, credential shape, idle TTL, node placement,
+resources, egress posture, and the identity a route inherits — is a release-wide
 fact.
 
-It is the same whether a conversation started from a VictoriaMetrics alert, a
-cluster Event or a person typing on Telegram.
+It is the same whether a conversation started from a Prometheus alert, a cluster
+Event or a person typing on Telegram.
 
-A bundle contributes signal sources, profiles, tooling and channels, and
-references what the parent provides. **No subchart renders an `AgentRuntime`, a
-runtime ServiceAccount or a credential Secret.**
+**A BUNDLE MAY SHIP A RUNTIME.** The reference one does: `claude` is a subchart,
+on by default, and an install using another vendor turns it off. What no bundle
+renders is the DEFAULTS or the FLOOR — defaults differing per bundle would be
+one fact in as many places as there are vendors, and a floor a bundle could
+render would make "a route naming nothing holds nothing" a claim no single file
+checks.
 
-That is why a chart with no bundle enabled — or with only `telegram-bundle` — is
-still a working install.
+### Two blocks, and the rule separating them
 
-It was not, for two chart majors: the runtime lived in `k8s-bundle`, so a
-chat-only install rendered nothing that could execute a conversation, and a
-bundle install ended up with two runtime ServiceAccounts, one of them granted
-everything.
+| Block | Holds |
+|---|---|
+| `global.agentops.runtimeDefaults` | what EVERY runtime inherits — a COMPLETE, working configuration |
+| `runtimes:` | the runtimes that EXIST, each stating only what DIFFERS |
 
 ```yaml
-runtime:
-  enabled: true                 # false = you manage AgentRuntime CRs yourself
-  name: default                 # the name a Pipeline with no runtimeRef resolves
-  image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
-  idleTtlMinutes: ""            # empty = follow runtimeIdleTtlMinutes
-  nodeSelector: {}
-  resources: {}
-  credentialsSecret:
-    name: agentops-claude
-    key: oauthToken
-    envName: CLAUDE_CODE_OAUTH_TOKEN
-    token: ""                   # supplied = the chart CREATES the Secret
-
 global:
   agentops:
-    runtime:
-      serviceAccountName: agentops-runtime   # the FLOOR, bound to nothing
-      rbacMode: ""              # none | readonly | full
+    runtimeDefaults:
+      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
+      contextStorage: volume      # does this backend use a disk at all
+      idleTtlMinutes: 1
+      nodeSelector: {}
+      resources:                  # WRITTEN OUT, not {}
+        requests: {cpu: 100m, memory: 256Mi}
+        limits:   {cpu: "1",  memory: 1536Mi}
+      serviceAccountName: agentops-runtime    # the FLOOR, bound to nothing
+      allowPodExecution: false
+      egressMediation:
+        enabled: true             # ON by default
+      credentialsSecret:
+        name: agentops-claude
+        key: oauthToken
+        envName: CLAUDE_CODE_OAUTH_TOKEN
+        token: ""                 # supplied = the chart CREATES the Secret
+
+runtimes: []                      # the `claude` bundle ships the one named `default`
 ```
 
-- **One runtime, named `default`.** A second VENDOR is a hand-written CR a
-  Pipeline points at with `runtimeRef`.
+**THE DEFAULTS ARE SUFFICIENT.** A runtime declaring nothing but a name renders
+and works. The model credential is the only value with no defensible default,
+and therefore the only thing an install must supply.
+
+- **`resources` is stated, not empty.** The numbers existed either way, compiled
+  into the operator where no operator could read or tune them. The first sign of
+  one being wrong is an evicted conversation.
+- **`default` is the name a Pipeline declaring no `runtimeRef` resolves to.**
+  Nothing guarantees one exists — a runtime may come from a bundle you turned
+  off — so **the render FAILS** when nothing answers to it while a route still
+  needs it, naming both. The check reads no cluster, so a GitOps render is
+  protected too.
+- **A second VENDOR is an entry in `runtimes:`**, stating only its difference.
 - **A second TRUST LEVEL is not a second runtime.** Name a different account on
   the Pipeline instead — see [Execution is wiring too](#execution-is-wiring-too).
-- **The account named here is the FLOOR**, bound to nothing. `rbacMode` renders
-  a separate, named account for a route to opt into.
-- **The rendered `AgentRuntime` carries NO volume**, and there is no
-  runtime-side claim name to set. The release-wide claims reach a conversation
-  as the manager's bootstrap default. A route that wants its own says so on its
-  `Pipeline` — see [Persistence is wiring too](#persistence-is-wiring-too).
-- **Idle TTL has one default.** Empty `runtime.idleTtlMinutes` follows the
-  release's `runtimeIdleTtlMinutes`, so there is one number unless you
-  deliberately want a second.
-  - The chart writes the value out rather than omitting the field.
-    `AgentRuntime.spec.idleTtlMinutes` carries a CRD default of `10`, so an
-    omitted field is stored as `10` and the manager prefers any non-zero spec
-    value over its own setting.
-  - Omitting it looks right in the manifest and is wrong in the stored object.
+- **The rendered `AgentRuntime` carries NO volume.** The release-wide claims
+  reach a conversation as the manager's bootstrap default. A route that wants
+  its own says so on its `Pipeline` — see
+  [Persistence is wiring too](#persistence-is-wiring-too).
+- **`idleTtlMinutes` is written out, never omitted.**
+  `AgentRuntime.spec.idleTtlMinutes` carries a CRD default of `10`, so an
+  omitted field is stored as `10` and the manager prefers any non-zero spec
+  value over its own setting. Omitting it looks right in the manifest and is
+  wrong in the stored object.
 - **The credential is release-managed or yours.** With `token` set the chart
   creates the Secret. Empty, the `AgentRuntime` references it by name and the
   post-install notes say so — the kubelet resolves that reference, so an
   unsatisfied one shows up as `CreateContainerConfigError` on the runtime pod
   and nowhere else.
-- **Why `global.`.** A subchart can read no parent scope but `global.`, and
-  `k8s-bundle`'s MCP server derives its own identity guard and posture from both
-  keys. Restating them in the subchart would make an operator maintain agreement
-  between two keys describing one fact.
 
-### `rbacMode` — the agent's in-cluster power
+**Why `global.`, and it is a forcing rather than tidiness.** A subchart reads no
+parent scope but this one, and two things need these values from in there:
 
-**The mode renders a NAMED account and binds a posture to it.** A route opts in
-by naming it. Nothing binds to the floor.
+1. **`allowPodExecution` is read by a PARENT helper the `kubernetes` bundle
+   CALLS** to build its MCP server's RBAC. Named templates are global in Helm,
+   but inside a call made from a subchart only `.Values.global` resolves. Move
+   that read and the MCP server's write rules silently lose their gate — which
+   is the other half of the same wall.
+2. **A bundle-shipped runtime has no other scope to inherit from.**
 
-| mode | renders | bound to |
-|---|---|---|
-| `none` | nothing | — |
-| `readonly` | `agentops-runtime-readonly` | cluster-scoped reads, plus namespaced reads in the namespaces you list |
-| `full` | `agentops-runtime-acting` | the same, plus the workload writes an agent fixes things with |
-| `""` (default) | `readonly` when `global.demo.enabled`, otherwise `none` | |
+### Permissions are OPT-IN, and the default is nothing
 
-**`full` used to be `cluster-admin`, and `readonly` used to bind the built-in
-`view`.** Neither does now — every grant is a role this chart writes out, so an
-operator can read it without resolving an aggregated or built-in role. Both are
-breaking, see [CHANGELOG](CHANGELOG.md).
+**THERE IS NO PRESET POSTURE.** The account a `Pipeline` naming no
+`serviceAccountName` inherits holds NO Kubernetes permissions, and the chart
+refuses to bind anything to it. No setting widens that.
+
+An install wanting more DECLARES an account and NAMES it on the routes that need
+it:
+
+```yaml
+rbac:
+  runtime:
+    serviceAccounts:
+      - name: agentops-runtime-acting
+        rbacMode: full        # none | readonly | full, per account
+        clusterRoles: []      # your own rules, created and bound
+        bindClusterRoles: []  # existing ClusterRoles to bind
+        namespaced: []        # Roles in other namespaces
+
+pipelines:
+  - name: k8s-ops
+    serviceAccountName: agentops-runtime-acting
+```
+
+| posture | grants |
+|---|---|
+| `none` (default) | the account is created and bound to nothing |
+| `readonly` | this chart's own ENUMERATED reads — what `view` grants plus the node/namespace/metrics reads it omits |
+| `full` | those, plus the workload writes an agent fixes things with, themselves gated by `allowPodExecution` |
+
+**A named posture nobody declared is a grant nobody reviewed.** A release-wide
+permission MODE used to render an account from one value, and its name described
+a state the runtime was in — which is what it once meant, and the reading that
+caused the incident it was reverted for. It is deleted, with no alias.
+
+**NO BINDING USES A BUILT-IN ROLE** — not `cluster-admin` under `full`, not
+`view` under `readonly`. Every grant is a role this chart writes out, so an
+operator can read it without resolving an aggregated role.
 
 **No role this chart renders carries any verb on `secrets`**, or a wildcard that
 would reach one, or `escalate` / `bind` on RBAC.
@@ -574,6 +613,23 @@ An agent has a shell. `--allowedTools` configures a **cooperating** agent, while
 a ServiceAccount binding is what an uncooperative one actually has. The manager
 holds no `secrets` verbs either — the component running untrusted model output
 must not out-rank the one orchestrating it.
+
+### Two accounts, and the second is the useful half
+
+`serviceAccountName` in the defaults names the account every unnamed route
+INHERITS, and it is a **REFERENCE this chart does not create**. Naming is not
+creating, which is the posture adapters already have — and it is what makes
+reusing an account you already own possible at all, since creating it would
+collide on Helm's ownership check.
+
+| Account | Created by | Is |
+|---|---|---|
+| `agentops-runtime` | ALWAYS, the chart | bound to nothing |
+| whatever `serviceAccountName` names | **you** | the default a Pipeline inherits |
+
+**The floor is rendered whatever the default is**, and that is the useful half.
+On an install whose inherited default carries rights, naming `agentops-runtime`
+on ONE Pipeline is the only way to take that route back to nothing.
 
 ### The grant is cluster-wide, and why that is safe
 
@@ -596,8 +652,9 @@ What an agent gains in the operator's namespace is pod names and specs
 compiled MCP ConfigMaps.
 
 {: .ao-callout}
-> **Under `full` it can also restart or delete those pods** — the manager and
-> the adapters included. An agent can disrupt its own supervisor.
+> **On a route naming a `full` account it can also restart or delete those
+> pods** — the manager and the adapters included. An agent can disrupt its own
+> supervisor.
 
 **Namespaced Roles were tried and reverted.** RBAC cannot express "everywhere
 except", so bounding an agent meant an allow-list: one binding per namespace per
@@ -613,8 +670,13 @@ than the exposure it bought.
 > mounting one — or exec into a pod that already has one — reads the value
 > having never asked the API server. `secrets: get` is never evaluated.
 
-`global.agentops.runtime.allowPodExecution` is **off by default**, and it is
-what makes the no-Secrets rule true rather than merely written down.
+`global.agentops.runtimeDefaults.allowPodExecution` is **off by default**, and
+it is what makes the no-Secrets rule true rather than merely written down.
+
+**BOTH WALLS MOVE TOGETHER.** It gates the acting rules bound to an account you
+declare AND the `kubernetes` bundle's MCP server role, through one shared
+helper — because an agent reaches the cluster THROUGH that server, so fixing one
+wall leaves the hole one indirection along.
 
 | | Off | On |
 |---|---|---|
@@ -654,12 +716,12 @@ along with how to add a grant they omit.
 the mode — targeted grants on top of a canned posture, named
 `<runtime-sa>-<entry>`.
 
-**The mode is also the source `k8s-bundle`'s MCP server derives from.** `full`
+**The mode is also the source `kubernetes`'s MCP server derives from.** `full`
 yields a write-capable server under a `full` ServiceAccount, everything else a
 read-only server under a `readonly` one.
 
 Widening the agent therefore widens the MCP path unless you say otherwise — see
-[k8s-bundle](k8s-bundle.md#kubernetes-as-mcp-tools-mcp--mcpservers) for the
+[kubernetes](kubernetes.md#kubernetes-as-mcp-tools-mcp--mcpservers) for the
 override that recovers the separation.
 
 ## Capabilities are wiring
@@ -897,13 +959,13 @@ second trust level meant a second runtime CR identical but for one field.
 | Account | Rendered by |
 |---|---|
 | the floor | the parent chart, always, bound to nothing |
-| `agentops-runtime-acting` / `-readonly` | the parent, from `rbacMode` |
+| any account you DECLARE | the parent, from `rbac.runtime.serviceAccounts` |
 | one per bundle route | that bundle — it is the only scope that knows what its routes do |
-| anything else | you, or `rbac.runtime.serviceAccounts` |
+| anything else | you, outside this chart — naming one is a reference, never a creation |
 
-**A bundle renders the accounts its own routes need.** `k8s-bundle` renders one
-per route, `ha-bundle` renders two with no Kubernetes RBAC at all — neither of
-its routes touches the Kubernetes API — and `telegram-bundle` renders none,
+**A bundle renders the accounts its own routes need.** `kubernetes` renders one
+per route, `home-assistant` renders two with no Kubernetes RBAC at all — neither of
+its routes touches the Kubernetes API — and `telegram` renders none,
 because it ships no Pipeline.
 
 **The substrate stays the parent's.** No bundle renders an `AgentRuntime`, a
@@ -1117,9 +1179,9 @@ Two bounds keep this honest:
   conversation and reports the batch dropped for capacity — chat senders are
   told on the surface they typed on, alert and job origins are logged. Window
   reuse is unaffected: the bound gates new objects, not new inputs.
-- **`runtimeIdleTtlMinutes`** (`RUNTIME_IDLE_TTL_M`) defaults to **1**, so a
-  finished conversation returns its slot within a minute instead of holding it
-  for ten. `AgentRuntime.spec.idleTTLMinutes` still overrides it per runtime.
+- **`global.agentops.runtimeDefaults.idleTtlMinutes`** (`RUNTIME_IDLE_TTL_M`)
+  defaults to **1**, so a finished conversation returns its slot within a minute
+  instead of holding it for ten. A `runtimes:` entry overrides it per runtime.
   - The trade is latency, not memory. The context lives on the context volume and
     resumes with its context.
   - An idle pod may also be evicted early to admit waiting work. That deletes
@@ -1377,7 +1439,7 @@ would become permanent.
 | topology | how | for |
 |---|---|---|
 | **Shared** | RWX claim, runtime pods anywhere | Longhorn, EBS-backed RWX, NFS |
-| **Single-node** | RWO claim — or a node-affine `local` PersistentVolume — plus `runtime.nodeSelector` pinning runtime pods to that node | clusters with no distributed provisioner |
+| **Single-node** | RWO claim — or a node-affine `local` PersistentVolume — plus `global.agentops.runtimeDefaults.nodeSelector` pinning runtime pods to that node | clusters with no distributed provisioner |
 
 **A `local` PV is the answer when there is no dynamic provisioner at all**, and
 the chart binds one for you — see [Storage the chart did not

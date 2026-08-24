@@ -16,31 +16,33 @@ Wiring is behind a flag that defaults off, and no turnkey mode turns it on.
 ## Requirements
 
 ### Requirement: The HA bundle ships as a self-gated subchart, off by default
-A Helm subchart at `chart/charts/ha-bundle/` SHALL package the Home Assistant
-agent experience. Every template SHALL gate on the bundle being active, with
-`ha-bundle.enabled` defaulting to `false`, so a default install renders nothing
-from it.
+The bundle SHALL be named for the system it integrates — `home-assistant` — and
+SHALL NOT carry a `-bundle` suffix, matching `kubernetes`, `prometheus` and
+`telegram`.
 
-The bundle SHALL NOT render the agent execution SUBSTRATE. The `AgentRuntime`,
-the LLM credential Secret, the context volume and the release-wide floor identity
-belong to the parent chart; the bundle references them and renders none of them.
+The abbreviation `ha` SHALL NOT be the key: it collides in reading with the
+`ha-ops` and `ha-control` PIPELINE names the bundle itself ships, and it is
+ambiguous with high availability.
 
-It SHALL render the ServiceAccount each of its own ROUTES executes under, unless
-the install names one, and SHALL bind those accounts NO Kubernetes RBAC —
-neither lane touches the Kubernetes API, so identity is all a route account buys
-here: a distinct subject per lane, and a later grant that lands on one of them
-rather than on every agent in the install.
+It SHALL remain self-gated and off by default. **The retired key SHALL FAIL the
+render**, naming the replacement, because Helm reports no unread values key and
+the quiet outcome is a bundle that simply does not render.
 
-The bundle SHALL create no Secret. Every credential SHALL be referenced by name
-and reach a pod through `valueFrom`/`envFrom`, never read by the manager.
+#### Scenario: The bundle is named for the house
+- **WHEN** an install enables the Home Assistant bundle
+- **THEN** it does so under a key naming Home Assistant, with no suffix
+
+#### Scenario: The retired key is refused
+- **WHEN** a values file supplies the retired suffixed key
+- **THEN** the render fails naming that key and its replacement
 
 #### Scenario: Default install renders nothing
 - **WHEN** the chart renders with default values
-- **THEN** no ha-bundle object appears, while the parent's `AgentRuntime` still renders because it is not the bundle's
+- **THEN** no object from this bundle appears, while a runtime answering to the default name still renders because it is not the bundle's
 
 #### Scenario: No substrate, no secrets
 - **WHEN** the bundle is enabled with every component on
-- **THEN** the output contains no `AgentRuntime`, no context volume and no `Secret` of any kind, while each route it ships carries its own ServiceAccount bound to nothing
+- **THEN** the output contains no `AgentRuntime`, no runtime defaults, no floor account and no `Secret` of any kind, while each route it ships carries its own ServiceAccount bound to nothing
 
 ### Requirement: Components gate independently and partial installs stay valid
 The ingest lane, the MCP configuration, the toolsets, each profile and the

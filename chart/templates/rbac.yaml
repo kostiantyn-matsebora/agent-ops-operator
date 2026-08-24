@@ -1,8 +1,5 @@
 {{- if .Values.serviceAccounts.runtime }}
-{{- fail "serviceAccounts.runtime moved to global.agentops.runtime.serviceAccountName in chart 4.0 (a subchart can read no other parent scope) — move the value and leave this key empty" }}
-{{- end }}
-{{- if index .Values "vm-bundle" }}
-{{- fail "the `vm-bundle:` values key was renamed to `prometheus-bundle:` in chart 5.13.0 — the bundle is named for the Alertmanager payload format and the Prometheus query API it speaks, not for one backend. Helm never reports an unread values key, so without this guard the upgrade would succeed and render nothing at all. Restate every value under `prometheus-bundle:` (the logs component is GONE and the metrics server key is now `prometheus` — see docs/CHANGELOG.md for both), then upgrade again" }}
+{{- fail "serviceAccounts.runtime moved to global.agentops.runtimeDefaults.serviceAccountName (a subchart can read no other parent scope) — move the value and leave this key empty. Note that it is now a REFERENCE this chart does not create: the chart renders only its own floor account, `agentops-runtime`" }}
 {{- end }}
 apiVersion: v1
 kind: ServiceAccount
@@ -10,37 +7,33 @@ metadata:
   name: {{ .Values.serviceAccounts.manager }}
   namespace: {{ .Release.Namespace }}
 ---
-# THE FLOOR runtime identity — what a Pipeline naming no `serviceAccountName`
-# runs as, and it holds NO RBAC IN ANY MODE.
+# THE FLOOR runtime identity, and the ONE runtime account this chart creates.
 #
-# NOTHING BINDS TO THIS ACCOUNT, EVER. `runtime-rbac.yaml` renders the mode's
-# grants against a separate, named account. That separation is the point: a
-# route that says nothing about its identity gets no cluster power, rather than
-# inheriting whatever the release granted. Silence meaning maximum is the defect
-# this replaced.
+# NOTHING BINDS TO IT, EVER — `runtime-rbac.yaml` refuses to. That is what makes
+# a route saying nothing about its identity powerless rather than an inheritor
+# of whatever the release granted. Silence meaning maximum is the defect this
+# replaced.
 #
-# Rendered even with runtime.enabled=false: the manager defaults every runtime
-# pod onto it, whoever wrote the AgentRuntime.
+# RENDERED UNCONDITIONALLY, EVEN WHERE THE DEFAULT NAMES SOMETHING ELSE, and
+# that is the useful half rather than a leftover. On an install whose inherited
+# default (global.agentops.runtimeDefaults.serviceAccountName) is an account of
+# the operator's carrying rights, naming `agentops-runtime` on ONE Pipeline is
+# the only way to take that route back to nothing.
+#
+# THE ACCOUNT THE DEFAULT POINTS AT IS NEVER CREATED HERE. Naming is not
+# creating — the posture adapters already have — and it is also what makes
+# reusing an account you already own possible at all: creating it would collide
+# on Helm's ownership check. Declare it under `rbac.runtime.serviceAccounts`, or
+# bring one this chart never sees; a name nothing backs fails at pod admission,
+# saying which account.
+#
+# Rendered whether or not any runtime is declared: the manager defaults every
+# runtime pod onto it, whoever wrote the AgentRuntime.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ include "agentops.runtimeServiceAccount" . }}
+  name: {{ include "agentops.floorServiceAccount" . }}
   namespace: {{ .Release.Namespace }}
-{{- with (include "agentops.runtimeModeServiceAccount" .) }}
----
-# THE MODE'S ACCOUNT. `global.agentops.runtime.rbacMode` renders this and binds
-# its posture to it — never to the floor above, because a route that names
-# nothing must hold nothing. A route opts in by naming this on its Pipeline:
-#
-#   pipelines:
-#     - name: k8s-ops
-#       serviceAccountName: {{ . }}
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ . }}
-  namespace: {{ $.Release.Namespace }}
-{{- end }}
 {{- range $i, $extra := (.Values.rbac.runtime.serviceAccounts | default list) }}
 {{- if $extra.create | default true }}
 ---

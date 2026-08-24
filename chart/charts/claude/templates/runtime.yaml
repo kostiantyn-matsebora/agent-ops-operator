@@ -1,0 +1,15 @@
+{{- /*
+This bundle's ONE runtime, rendered through the PARENT's shared renderer so its
+CR cannot drift from a runtime the install declares itself.
+
+`agentops.renderRuntime` lays this bundle's own values over
+`global.agentops.runtimeDefaults` — the only parent scope a subchart can read,
+which is exactly why those defaults live there.
+
+IT RENDERS NO SUBSTRATE. No floor ServiceAccount, no runtime defaults, no
+context volume: a bundle contributes domain, and a vendor's runtime is domain.
+*/ -}}
+{{- if .Values.enabled }}
+{{- $entry := omit .Values "enabled" "global" }}
+{{- include "agentops.renderRuntime" (dict "root" $ "entry" $entry) }}
+{{- end }}

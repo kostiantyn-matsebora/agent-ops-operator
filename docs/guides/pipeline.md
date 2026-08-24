@@ -77,16 +77,17 @@ fields, and omitting both is the ordinary case.
 | Field | Selects | Omit it and |
 |---|---|---|
 | `runtimeRef` | the `AgentRuntime` | the one named `default` runs it |
-| `serviceAccountName` | the identity that runtime executes under | **it can do nothing in the cluster** |
+| `serviceAccountName` | the identity that runtime executes under | it inherits the release's default, which ships as an account bound to NOTHING |
 
 **This is the same decision as `toolsets`.** One says which tools may be called.
 The other says with whose credentials. Both are here so that ONE object states
 what an agent may do.
 
 {: .ao-callout}
-> **Silence means no power.** A route that names no account runs as an identity
-> bound to nothing. It reaches only what its toolsets and MCP servers give it.
-> Cluster power is something you opt into, by name.
+> **Silence means no power.** A route that names no account inherits the
+> release's default, which ships as the FLOOR — bound to nothing, and nothing
+> can be bound to it. It reaches only what its toolsets and MCP servers give it.
+> **Cluster power is an account you declare and then name here.**
 
 ```yaml
 spec:
@@ -103,10 +104,34 @@ spec:
 that is what the field is for. The difference is the credentials, not the
 engine.
 
-**Naming an account does not create one.** The chart renders the ones
-`rbacMode` produces, each bundle renders the accounts its own routes need, and
-`rbac.runtime.serviceAccounts` is where you declare your own. A name nothing
+**Cluster power is an account you DECLARE.** There is no preset posture — a
+named posture nobody declared is a grant nobody reviewed.
+
+```yaml
+# values.yaml
+rbac:
+  runtime:
+    serviceAccounts:
+      - name: agentops-runtime-acting
+        rbacMode: full        # none | readonly | full, PER ACCOUNT
+```
+
+**Naming an account does not create one.** Each bundle renders the accounts its
+own routes need, `rbac.runtime.serviceAccounts` is where you declare yours, and
+an account this chart never sees is a perfectly good reference. A name nothing
 backs fails when the pod is created, saying which account.
+
+**THE FLOOR IS HOW YOU RESTRICT ONE ROUTE.** On an install whose inherited
+default is an account of yours that carries rights, naming `agentops-runtime`
+here takes that one route back to nothing:
+
+```yaml
+spec:
+  serviceAccountName: agentops-runtime   # the floor. Holds nothing, always
+```
+
+The chart renders the floor whatever else you configure, which is what keeps it
+available for exactly this.
 
 **Re-wiring never moves a conversation already running.** The conversation
 records what it was created with, so changing this field affects only
@@ -280,18 +305,18 @@ nothing, while making every unaddressed message on that surface ambiguous.
 
 ## Compare against a working route
 
-This is what the chart's `k8s-bundle` renders:
+This is what the chart's `kubernetes` renders:
 
 <!-- generated: example preset=tier1 kind=Pipeline name=k8s-observe -->
 ```yaml
-# Source: agent-ops-operator/charts/k8s-bundle/templates/pipelines.yaml
+# Source: agent-ops-operator/charts/kubernetes/templates/pipelines.yaml
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
 metadata:
   name: k8s-observe
   namespace: agent-ops
   labels:
-    app.kubernetes.io/name: agentops-k8s-bundle
+    app.kubernetes.io/name: agentops-kubernetes
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.

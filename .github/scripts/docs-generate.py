@@ -74,9 +74,9 @@ NAMESPACE = "agent-ops"
 #                carrying an example token teaches someone to ship it. Exempt
 #                from the chart check by KEY, never by value.
 DOCUMENTED_PLACEHOLDERS = {
-    "https://ha.example.org",           # ha-bundle/values.yaml, homeAssistant.endpoint
+    "https://ha.example.org",           # home-assistant/values.yaml, homeAssistant.endpoint
     "http://metrics.example:8428",      # RFC 2606 reserved domain
-    "-1001234567890",                   # telegram-bundle/values.yaml, surface.chatId
+    "-1001234567890",                   # telegram/values.yaml, surface.chatId
 }
 CREDENTIAL_PLACEHOLDERS = {
     "placeholder-token",
@@ -113,23 +113,23 @@ PRESETS = {
     "tier1": {
         "sets": {
             "global.demo.enabled": "true",
-            "k8s-bundle.enabled": "true",
+            "kubernetes.enabled": "true",
         },
     },
     "tier2": {
         "sets": {
-            "ha-bundle.enabled": "true",
-            "ha-bundle.pipelines.enabled": "true",
-            "ha-bundle.homeAssistant.endpoint": "https://ha.example.org",
-            "ha-bundle.homeAssistant.credentials.operatorToken": "placeholder-token",
+            "home-assistant.enabled": "true",
+            "home-assistant.pipelines.enabled": "true",
+            "home-assistant.homeAssistant.endpoint": "https://ha.example.org",
+            "home-assistant.homeAssistant.credentials.operatorToken": "placeholder-token",
         },
     },
     "tier3": {
         "sets": {
-            "telegram-bundle.enabled": "true",
-            "telegram-bundle.surface.enabled": "true",
-            "telegram-bundle.surface.chatId": "-1001234567890",
-            "telegram-bundle.surface.credentials.botToken": "placeholder:token",
+            "telegram.enabled": "true",
+            "telegram.surface.enabled": "true",
+            "telegram.surface.chatId": "-1001234567890",
+            "telegram.surface.credentials.botToken": "placeholder:token",
         },
     },
     "tier4": {"sets": {}},

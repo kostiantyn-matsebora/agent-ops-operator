@@ -162,6 +162,20 @@ SYMMETRY TEST**, and the history is kept because the argument is seductive:
 |---|---|
 | runtime | `conversation.spec.runtimeRef` → `profile.spec.runtimeRef` (DEPRECATED) → `AgentRuntime/default` → bootstrap |
 | identity | `conversation.spec.serviceAccountName` → `runtime.spec.serviceAccountName` → THE FLOOR |
+
+**THE IDENTITY CHAIN HAS NO MODE IN IT, AND NEVER DID HAVE ONE LEGITIMATELY.**
+`global.agentops.runtime.rbacMode` is DELETED with no alias: it rendered a NAMED
+account that granted nothing until a route typed its name, so it sat beside this
+chain rather than in it while reading as though it were part of it.
+
+- **The runtime's own account defaults to the FLOOR**, so an install that says
+  nothing grants nothing.
+- **Pointing `global.agentops.runtimeDefaults.serviceAccountName` at an account
+  of your own moves the whole default**, and the chart still renders the floor —
+  which is what keeps it NAMEABLE on one Pipeline to take that route back to
+  nothing.
+- **More than nothing is `rbac.runtime.serviceAccounts`** — a DECLARED account
+  with its own posture. There is no preset.
 | storage | `conversation.spec.contextClaimName` / `.workspaceClaimName` → the chart's release default (bootstrap `CONTEXT_PVC` / `WORKSPACE_PVC`) → EPHEMERAL |
 
 - **THE RUNTIME IS IN NO PART OF THE STORAGE CHAIN**, and that is the whole of
@@ -180,9 +194,9 @@ SYMMETRY TEST**, and the history is kept because the argument is seductive:
   does not check it — that would be an API read the manager holds no RBAC for,
   granted to produce a warning. The pod fails at admission naming the account.
 - **A BUNDLE RENDERS THE ACCOUNTS ITS OWN ROUTES NEED.** It is the only scope
-  that knows what its routes do. `k8s-bundle` renders one per route,
-  `ha-bundle` two with NO Kubernetes RBAC (neither route touches that API),
-  `telegram-bundle` none because it ships no Pipeline. The SUBSTRATE stays the
+  that knows what its routes do. `kubernetes` renders one per route,
+  `home-assistant` two with NO Kubernetes RBAC (neither route touches that API),
+  `telegram` none because it ships no Pipeline. The SUBSTRATE stays the
   parent's — runtime, credential, context volume, floor account.
   - **"No subchart renders a runtime SA" is REVERSED, not weakened.** That rule
     guarded against a bundle rendering the substrate, including an account
@@ -224,7 +238,7 @@ require, and fixed the same way. Whoever is trusted to grant an agent tools and
 a cluster identity is more qualified to say where its context lives, not less.
 
 **NO BINDING USES A BUILT-IN ROLE.** Not `cluster-admin` under `full`, not
-`view` under `readonly`. Every grant is a role the chart writes out
+`view` under `readonly` — the two postures a DECLARED account may state. Every grant is a role the chart writes out
 (`agentops.runtimeReadRules` / `runtimeWriteRules`
 in `chart/templates/_helpers.tpl`), so an operator can read it without resolving
 an aggregated role.
@@ -256,7 +270,7 @@ unreadable everywhere. Nor is `secrets`, nor `clusterroles`.
   COOPERATING agent; a ServiceAccount binding is what an uncooperative one with
   a shell actually has. Same argument `platform/egress-proxy/` makes for
   network reach.
-- **BOTH WALLS MOVE TOGETHER.** k8s-bundle's MCP server is the other wall on the
+- **BOTH WALLS MOVE TOGETHER.** kubernetes's MCP server is the other wall on the
   same path — an agent reaches the cluster THROUGH it — so it carries the same
   split from the same values. Fixing one leaves the hole one indirection along.
 - **The manager keeps the stricter rule already**, holding no `secrets` verbs at

@@ -3,13 +3,13 @@ Wiring — where an INSTALL declares its routes, and the only scope that can
 declare one spanning bundles.
 
 A Pipeline names a profile, signal sources and channels that routinely come from
-DIFFERENT bundles: the cluster Events source from k8s-bundle, the chat surface
-from telegram-bundle, the alert source from prometheus-bundle, all answered by
+DIFFERENT bundles: the cluster Events source from kubernetes, the chat surface
+from telegram, the alert source from prometheus, all answered by
 one agent. A subchart sees only its own half, so a bundle that shipped such a
 route could only ever wire itself.
 
 A bundle that owns its WHOLE lane may ship its own, behind a default-off flag —
-k8s-bundle and prometheus-bundle both do. telegram-bundle ships none, because a
+kubernetes and prometheus both do. telegram ships none, because a
 chat route always spans bundles. Sources are shareable, so a bundle's route and
 one declared here may claim the same source; NOTES.txt reports the fan-out.
 */ -}}

@@ -5,135 +5,6 @@
 Who owns the agent execution substrate in the Helm chart: the parent chart contributes the runtime, the floor identity a route naming none runs as, the LLM credential and the context volume, while bundles contribute domain — signal sources, profiles, tooling and channels — and reference what the parent provides.
 ## Requirements
 
-### Requirement: The main chart owns the default agent runtime
-
-The parent chart SHALL render the default `AgentRuntime` from a top-level
-`runtime:` component, enabled by default. The component SHALL own everything
-describing how agents execute — image, LLM credential reference, idle TTL,
-`nodeSelector`, resources, and the context volume — and SHALL render the runtime
-named `runtime.name` (default `default`), which is the name a PIPELINE with no
-`runtimeRef` falls back to.
-
-**NO SUBCHART SHALL RENDER THE SUBSTRATE** — an `AgentRuntime`, a runtime
-credential Secret, a context volume, or the FLOOR ServiceAccount. Bundles
-contribute domain and reference what the parent provides.
-
-**A BUNDLE SHALL RENDER THE ServiceAccounts ITS OWN ROUTES NEED**, which is the
-reverse of the rule this requirement used to state, and is set out in its own
-requirement below. The earlier blanket ban was protecting against a bundle
-rendering an account sized for EVERYTHING. An account sized DOWN to one route is
-the opposite, and only the bundle knows what its routes do.
-
-A bundle MAY name a different runtime through its own Pipeline's `runtimeRef`,
-but SHALL NOT create one.
-
-`runtime.enabled: false` SHALL render nothing from the component, for installs
-that manage `AgentRuntime` CRs themselves.
-
-#### Scenario: A default install can execute a conversation
-- **WHEN** the chart is installed with default values and no bundle enabled
-- **THEN** an `AgentRuntime` named `default` renders, so any Pipeline reaching the manager resolves a runtime — and no bundle objects render
-
-#### Scenario: A bundle install renders exactly one runtime
-- **WHEN** the chart is installed with any combination of bundles enabled
-- **THEN** exactly one `AgentRuntime` renders, from the parent. The number of ServiceAccounts is NOT one: the parent renders the floor and whatever `rbacMode` produces, and each bundle renders one per route it ships
-
-#### Scenario: Chat-only install works
-- **WHEN** only `telegram-bundle.enabled=true` is set
-- **THEN** the install renders a runtime and can execute conversations started from chat, without enabling a Kubernetes bundle for its substrate — and `telegram-bundle` renders no ServiceAccount, because it ships no Pipeline
-
-#### Scenario: Bring your own runtime
-- **WHEN** `runtime.enabled=false`
-- **THEN** no `AgentRuntime`, credential Secret, or runtime object renders from the component, and Pipelines resolve whichever runtimes the operator applied
-
-### Requirement: The floor identity can do NOTHING, and a release has many
-
-`global.agentops.runtime.serviceAccountName` (default `agentops-runtime`) SHALL
-name a MINIMUM-PRIVILEGE ServiceAccount the chart always renders: the identity a
-conversation runs under when neither its Pipeline nor its runtime names another.
-
-**THAT ACCOUNT SHALL CARRY NO RBAC AT ALL.** No ClusterRole, no Role, no
-binding, in any mode. An agent whose route names no account SHALL be able to do
-NOTHING in the cluster — it reaches only what its bound toolsets and MCP servers
-give it, which are declared on the same object that could have named an account.
-
-**SILENCE SHALL MEAN NO POWER, NEVER MAXIMUM POWER.** A route that inherits the
-most powerful identity in the release by not typing a field is the defect this
-requirement exists to forbid, and it is what shipped first: three of four routes
-in the reference install held pod-delete and node-patch because nobody named an
-account, two of them routes that reach no Kubernetes API at all.
-
-`global.agentops.runtime.rbacMode` SHALL NOT bind anything to the floor account.
-It declares that an ACTING account exists and what it may do, and a route opts
-into that account by NAME.
-
-"EXACTLY ONE RUNTIME SERVICEACCOUNT PER RELEASE" NO LONGER HOLDS AT ALL. A
-release SHALL have as many as its routes need:
-
-| Account | Rendered by | Bound to |
-|---|---|---|
-| the floor | the parent, always | nothing, ever |
-| a bundle's route accounts | that bundle | what that bundle's own routes do |
-| an operator's accounts | the parent, from values | what the operator declares |
-
-`runtime-rbac.yaml` SHALL render mode-driven bindings for more than one account.
-
-A Pipeline MAY name an account the chart did not create. That is an external
-grant, the same posture adapters already have, and neither the render nor a
-reconciler SHALL refuse it.
-
-#### Scenario: One knob, one binding set
-
-- **WHEN** `global.agentops.runtime.rbacMode=full` is set
-- **THEN** the acting account and its enumerated ClusterRole render together,
-  and no other value need be set for the install to be internally consistent.
-  It NO LONGER renders a `cluster-admin` binding, and it binds nothing to the
-  floor account
-
-#### Scenario: No second runtime identity
-
-- **WHEN** any bundle is enabled
-- **THEN** no bundle renders the SUBSTRATE — no `AgentRuntime`, no credential,
-  no context volume, no floor account. A bundle DOES render an identity for each
-  route it ships, which is the reverse of the earlier rule and is stated in
-  its own requirement below
-
-#### Scenario: A route that names nothing can do nothing
-- **WHEN** a Pipeline declares no `serviceAccountName`
-- **THEN** its conversations run under the floor account, which is denied every verb on every resource — including while `rbacMode` is `full`
-
-#### Scenario: The mode never widens the floor
-- **WHEN** `global.agentops.runtime.rbacMode=full` is set
-- **THEN** the acting ClusterRole renders and is bound to a NAMED acting account, and NO binding of any kind names the floor account
-
-#### Scenario: Targeted grants compose with the mode
-- **WHEN** `rbacMode=readonly` and `rbac.runtime.clusterRoles` names an extra role
-- **THEN** both the read-only objects and the extra ClusterRole/binding render against the acting account, and neither reaches the floor
-
-#### Scenario: A second trust level needs no second runtime
-
-- **WHEN** an install wants an observing route and an acting route on one
-  runtime image
-- **THEN** it renders a second ServiceAccount with its own RBAC and names it on
-  the acting Pipeline — and does NOT clone the `AgentRuntime`
-
-### Requirement: Unset RBAC mode grants nothing except in demo mode
-`global.agentops.runtime.rbacMode` SHALL default to empty. Empty SHALL resolve to `readonly` when `global.demo.enabled` is true, and to `none` otherwise, so the chart keeps its "grants NOTHING unless configured" posture for ordinary installs while demo mode stays a one-flag working install. `full` SHALL never be selected by any default or inferred path.
-
-The resolution SHALL be computed in one place and be readable by subcharts, so the parent's bindings and any subchart deriving from the mode always agree.
-
-#### Scenario: Upgrade does not widen an existing install
-- **WHEN** a release that never set an RBAC value upgrades to this chart without demo mode
-- **THEN** the runtime SA holds no bindings, exactly as before
-
-#### Scenario: Demo mode stays one flag
-- **WHEN** the chart is installed with `global.demo.enabled=true` and nothing else
-- **THEN** the runtime SA holds the read-only bindings and the demo agent can inspect the cluster
-
-#### Scenario: Full is never implicit
-- **WHEN** any combination of defaults, demo mode, and bundle enablement is rendered without an explicit `full`
-- **THEN** no `cluster-admin` binding renders
-
 ### Requirement: A bundle renders the identities its own routes need
 
 A bundle that ships `Pipeline`s SHALL also render the ServiceAccounts and RBAC
@@ -210,7 +81,7 @@ is never evaluated and no rule refusing it applies. Demonstrated against the
 shipped role on a live cluster: pod created, pod log read, secret value
 returned, with all seven `secrets` verbs denied throughout.
 
-**`global.agentops.runtime.allowPodExecution` SHALL therefore exist, SHALL
+**`global.agentops.runtimeDefaults.allowPodExecution` SHALL therefore exist, SHALL
 default to FALSE, and is what makes this requirement TRUE rather than merely
 written down.**
 
@@ -228,7 +99,7 @@ capability as reading a Secret.
 
 #### Scenario: The full mode grants no cluster-admin
 
-- **WHEN** `global.agentops.runtime.rbacMode` is `full`
+- **WHEN** an account declared under `rbac.runtime.serviceAccounts` states `rbacMode: full`
 - **THEN** no `ClusterRoleBinding` to `cluster-admin` renders, and the acting
   role is an enumerated one the chart defines
 
@@ -317,11 +188,11 @@ the other moves the hole rather than closing it.
 - **THEN** it is denied
 
 #### Scenario: The grant is a handful of objects
-- **WHEN** the release renders with `rbacMode: full` and every bundle enabled
+- **WHEN** the release renders with a declared `full` account and every bundle enabled
 - **THEN** the agent grant is a small fixed number of `ClusterRole`s and bindings, not one per namespace
 
 ### Requirement: The credential is wired, and neither volume is the runtime's
-When `runtime.credentialsSecret.token` is supplied the component SHALL create that Secret, so the credential is release-managed; when it is empty the `AgentRuntime` SHALL reference the named Secret without creating it, and the post-install notes SHALL warn that the reference is unsatisfied. The credential SHALL reach the runtime as env via `valueFrom` — the manager SHALL read no Secrets.
+When a runtime's `credentialsSecret.token` is supplied the component SHALL create that Secret, so the credential is release-managed; when it is empty the `AgentRuntime` SHALL reference the named Secret without creating it, and the post-install notes SHALL warn that the reference is unsatisfied. The credential SHALL reach the runtime as env via `valueFrom` — the manager SHALL read no Secrets.
 
 The rendered `AgentRuntime` SHALL declare NO volume. Persistence is wiring: the CONTEXT and WORKSPACE volumes are declared on the `Pipeline`, and the release-wide claims the parent provisions reach a conversation that binds neither through the manager's bootstrap configuration. No operator SHALL have to copy a claim name between values blocks, for either volume, and no route SHALL need a runtime of its own to keep its state somewhere else.
 
@@ -329,14 +200,14 @@ Where either block points at storage the chart did not create — an existing cl
 
 Context persistence SHALL be enabled by default and workspace persistence SHALL be disabled by default. The asymmetry is deliberate: losing an agent's accumulated context silently costs conversational history, whereas losing a checkout costs a re-clone.
 
-`runtime.idleTtlMinutes` SHALL default to empty and SHALL then follow the release's `runtimeIdleTtlMinutes`, so there is one number unless an operator deliberately wants two. The chart SHALL WRITE the resolved value into the rendered CR rather than omitting the field: `AgentRuntime.spec.idleTtlMinutes` carries a CRD default, so an omitted field is not unset — the API server stores the CRD default and the manager prefers any non-zero spec value over its own configured TTL, which makes an omitted field render a correct-looking manifest and a wrong stored object.
+`global.agentops.runtimeDefaults.idleTtlMinutes` SHALL carry the release's ONE number, and a `runtimes:` entry SHALL override it per runtime. It SHALL live in the DEFAULTS rather than at parent scope, because a bundle-shipped runtime can read no parent scope but `global.` — a top-level key rendered an EMPTY field and the CRD's structural default silently replaced the release's setting. The chart SHALL WRITE the resolved value into the rendered CR rather than omitting the field: `AgentRuntime.spec.idleTtlMinutes` carries a CRD default, so an omitted field is not unset — the API server stores the CRD default and the manager prefers any non-zero spec value over its own configured TTL, which makes an omitted field render a correct-looking manifest and a wrong stored object.
 
 #### Scenario: Credential comes back with the release
-- **WHEN** `runtime.credentialsSecret.token` is set from a secret store
+- **WHEN** a runtime's `credentialsSecret.token` is set from a secret store
 - **THEN** the Secret renders with the release and the runtime references it by name only
 
 #### Scenario: Unsatisfied reference is announced, not silent
-- **WHEN** `runtime.enabled=true` and no token is supplied
+- **WHEN** a runtime renders and no token is supplied
 - **THEN** the install succeeds and the notes state that runtime pods will reach `CreateContainerConfigError` until the named Secret exists, because the kubelet resolves the reference and nothing else reports it
 
 #### Scenario: Persistence needs no second declaration
@@ -360,5 +231,96 @@ Context persistence SHALL be enabled by default and workspace persistence SHALL 
 - **THEN** the manager's bootstrap default, the reclaiming job and the mount probe all resolve to that same claim with no further values set
 
 #### Scenario: Idle TTL has one default
-- **WHEN** `runtime.idleTtlMinutes` is left empty
-- **THEN** the rendered `AgentRuntime` carries the release's `runtimeIdleTtlMinutes`, and runtime pods use that number rather than the CRD's default
+- **WHEN** a runtime states no `idleTtlMinutes` of its own
+- **THEN** the rendered `AgentRuntime` carries the number from the runtime defaults, and runtime pods use it rather than the CRD's default
+
+### Requirement: The main chart owns the runtime DEFAULTS, and a bundle may ship a runtime
+The parent chart SHALL own the runtime DEFAULTS — a complete configuration every
+runtime inherits — and the FLOOR ServiceAccount. It SHALL NOT be the only thing
+that may render an `AgentRuntime`.
+
+A BUNDLE SHALL be able to ship a runtime, declaring it in its own values and
+rendering its own CR, exactly as a bundle already ships pipelines, sources and
+profiles. A vendor arriving as a bundle SHALL NOT require a hand-written CR.
+
+**THIS REVERSES A RULE THAT WAS AN INVARIANT, AND THE TWO FAILURES BEHIND IT ARE
+ANSWERED RATHER THAN FORGOTTEN:**
+
+1. **A chat-only install could execute nothing**, because the runtime lived in a
+   bundle and no bundle was on. That is now caught: the render FAILS when no
+   runtime answers to the default name while a Pipeline resolves to it — see
+   `runtime-declaration`. A failed render is recoverable; conversations stuck in
+   `Pending` with the reason in no one's view are not.
+2. **Two runtime ServiceAccounts existed and one was granted everything.** That
+   was a consequence of a release-wide MODE binding a shared account. Accounts
+   are per-route now, the floor is bound to nothing, and no mode exists to widen
+   anything.
+
+What stays exclusively the parent's is the DEFAULTS and the FLOOR. A bundle
+SHALL NOT render either: defaults differing per bundle would be one fact in as
+many places as there are vendors, and a floor account a bundle could render
+would make "a route naming nothing holds nothing" a claim no single file checks.
+
+#### Scenario: A bundle-free install still executes
+- **WHEN** an install enables no bundle at all and supplies the model credential
+- **THEN** a runtime answering to the default name is rendered and conversations execute
+
+#### Scenario: A bundle ships its vendor
+- **WHEN** a bundle that ships a runtime is enabled
+- **THEN** its `AgentRuntime` renders from the bundle's own values and inherits the release-wide defaults
+
+#### Scenario: Removing the last runtime is refused, not discovered later
+- **WHEN** an install disables the only bundle shipping a runtime while a Pipeline resolves to the default name
+- **THEN** the render fails naming what is missing
+
+#### Scenario: No bundle renders the defaults or the floor
+- **WHEN** any combination of bundles is enabled
+- **THEN** the runtime defaults and the floor ServiceAccount come from the parent alone
+
+### Requirement: The floor holds nothing, and there is no preset posture
+The account a `Pipeline` naming no `serviceAccountName` runs as SHALL hold no
+Kubernetes permissions, and the chart SHALL refuse to bind anything to it.
+SILENCE SHALL MEAN NO POWER, with no setting able to change it.
+
+It shipped inverted once: a release-wide mode bound its posture to the account
+every unnamed route inherited, and three of four routes in the reference install
+held pod-delete and node-patch because nobody typed a field — two of them routes
+that reach no Kubernetes API at all.
+
+**THERE SHALL BE NO PRESET POSTURE.** An install wanting more than nothing SHALL
+declare an account and name it on the routes that need it, or use one a bundle
+renders for its own routes. A named posture is a grant nobody reviewed; a
+declared account is one somebody wrote down.
+
+**THE DEFAULT ACCOUNT IS A REFERENCE, NOT A CREATION.** Where an install names
+the account a Pipeline inherits, the chart SHALL reference it and SHALL NOT
+create it — the posture adapters already have, where naming is not creating.
+
+The chart SHALL always render its own floor account regardless. That is what
+keeps it NAMEABLE as a way to restrict one route to nothing, on an install whose
+inherited default is an account of the operator's that carries rights.
+
+#### Scenario: A route that names nothing can do nothing
+- **WHEN** a Pipeline declares no `serviceAccountName`
+- **THEN** its conversations run under an account denied every verb on every resource, whatever else the install configures
+
+#### Scenario: Naming the default does not create it
+- **WHEN** an install points the inherited default at an account it already owns
+- **THEN** the chart references that account and creates only its own floor
+
+#### Scenario: The floor stays available to restrict a route
+- **WHEN** the inherited default is an account carrying rights
+- **THEN** a Pipeline may name the chart's floor account and hold nothing instead
+
+#### Scenario: No preset can widen an upgrade
+- **WHEN** an existing install upgrades without declaring an account
+- **THEN** nothing it runs gains a permission it did not already have
+
+#### Scenario: A second trust level needs no second runtime
+- **WHEN** an install wants an observing route and an acting route on one runtime image
+- **THEN** it declares a second ServiceAccount with its own RBAC and names it on the acting Pipeline, and does NOT clone the `AgentRuntime`
+
+#### Scenario: No bundle renders the floor
+- **WHEN** any bundle is enabled
+- **THEN** no bundle renders the floor account, though a bundle DOES render an identity for each route it ships and may render a runtime of its own
+

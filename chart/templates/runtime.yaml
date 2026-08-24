@@ -1,116 +1,26 @@
 {{- /*
 The runtime component: HOW agents execute here.
 
-One AgentRuntime, named `default` — the name a profile with no runtimeRef falls
-back to — so an install with no bundle at all, or with only a chat bundle, can
-still execute a conversation. Bundles contribute domain and reference this; none
-of them renders a runtime, an SA or a credential.
+A LIST, not one CR. `runtimes:` names the runtimes this install declares, each
+stating only what DIFFERS from `global.agentops.runtimeDefaults`; the shared
+renderer lives in `_helpers.tpl` so that a BUNDLE shipping a vendor's runtime
+emits exactly the same shape.
 
-The SA itself is created in rbac.yaml (unconditionally, because the manager
-defaults every runtime pod onto it whoever wrote the AgentRuntime), and its
-bindings in runtime-rbac.yaml.
+`default` is the name a Pipeline declaring no `runtimeRef` resolves to. Nothing
+here guarantees one exists — a runtime may come from a bundle an operator turns
+off — so `agentops.defaultRuntimeGuard` fails the render when nothing answers to
+that name while a route still needs it.
 
-IT RENDERS NO VOLUME. Persistence is WIRING and lives on the Pipeline; the
-release-wide claims reach conversations through the manager's bootstrap
-configuration, not through this CR.
+The FLOOR ServiceAccount is created in rbac.yaml, unconditionally and bound to
+nothing. The account a runtime NAMES is a reference this chart never creates.
+
+THESE CRs DECLARE NO VOLUME. Persistence is WIRING and lives on the Pipeline;
+the release-wide claims reach conversations through the manager's bootstrap
+configuration, not through any CR here.
 */ -}}
-{{- if .Values.runtime.enabled }}
-{{- $rt := .Values.runtime }}
+{{- include "agentops.retiredRuntimeKeysGuard" . }}
 {{- include "agentops.retiredRuntimeVolumeKeysGuard" . }}
-{{- if $rt.credentialsSecret.token }}
-# Created because runtime.credentialsSecret.token was supplied, so the agent's
-# credential is provisioned with the release instead of being a prerequisite
-# someone has to remember. The AgentRuntime below references it by NAME only —
-# the manager reads no Secrets, the kubelet resolves it.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ $rt.credentialsSecret.name }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-runtime
-type: Opaque
-stringData:
-  {{ $rt.credentialsSecret.key }}: {{ $rt.credentialsSecret.token | quote }}
----
-{{- end }}
-apiVersion: agentops.dev/v1alpha1
-kind: AgentRuntime
-metadata:
-  name: {{ $rt.name }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-runtime
-spec:
-  image: {{ $rt.image | quote }}
-  # the agent's security identity — its RBAC IS its power
-  serviceAccountName: {{ include "agentops.runtimeServiceAccount" . }}
-  # Empty runtime.idleTtlMinutes follows the release's runtimeIdleTtlMinutes, so
-  # there is ONE number unless an operator deliberately wants two. It is written
-  # OUT rather than omitted on purpose: the CRD carries a structural default of
-  # 10, so an omitted field is not "unset" — the API server stores 10 and the
-  # manager, which prefers any non-zero spec value over RUNTIME_IDLE_TTL_M,
-  # would silently ignore the release's setting. Omitting it looked correct in
-  # the rendered manifest and was wrong in the stored object.
-  idleTtlMinutes: {{ $rt.idleTtlMinutes | default .Values.runtimeIdleTtlMinutes }}
-  {{- with $rt.nodeSelector }}
-  nodeSelector:
-{{ toYaml . | indent 4 }}
-  {{- end }}
-  # THIS CR DECLARES NO VOLUME, and that is the shape rather than an omission.
-  # A runtime is an ENGINE — an image and its pod-level defaults. WHERE a
-  # route's conversations keep their state is the ROUTE's decision, declared on
-  # `Pipeline.spec.persistence` beside the tools it grants and the identity it
-  # executes under; a route binding neither takes the release-wide claims, which
-  # reach the manager as its bootstrap configuration (deployment.yaml's
-  # CONTEXT_PVC / WORKSPACE_PVC). Nothing restates a claim name.
-  #
-  # It is what lets TWO routes on THIS ONE runtime keep their conversations on
-  # different volumes without cloning it — the same thing cloning a runtime used
-  # to be needed for when a second trust level was wanted.
-  {{- with $rt.contextSync.paths }}
-  # CONTEXT SYNC: declared by the RUNTIME, because only it knows where its
-  # backend keeps context. Absent means the context volume is mounted directly and
-  # no sidecar is built — today's behaviour, so an existing install upgrades
-  # with no migration.
-  contextSync:
-    paths:
-{{ toYaml . | indent 6 }}
-    {{- with $rt.contextSync.exclude }}
-    exclude:
-{{ toYaml . | indent 6 }}
-    {{- end }}
-    interval: {{ $rt.contextSync.interval | quote }}
-    retain: {{ $rt.contextSync.retain }}
-  {{- end }}
-  {{- if $rt.egressMediation.enabled }}
-  # EGRESS MEDIATION: declared by the RUNTIME, because enabling it changes what
-  # the pod may do at startup — it adds a privileged init container, which a
-  # namespace under `restricted` Pod Security admission will refuse. Absent
-  # means today's pod exactly.
-  egressMediation:
-    # ALWAYS rendered, never an empty mapping: an empty stanza is null to the
-    # API server, and null means ABSENT — which would read as "mediation off"
-    # on an install that just asked for it, silently.
-    port: {{ $rt.egressMediation.port | default 15001 }}
-    {{- with $rt.egressMediation.excludePorts }}
-    # Every port here is reachable by the agent UNMEDIATED.
-    excludePorts:
-{{ toYaml . | indent 6 }}
-    {{- end }}
-    {{- with $rt.egressMediation.resources }}
-    resources:
-{{ toYaml . | indent 6 }}
-    {{- end }}
-  {{- end }}
-  {{- with $rt.resources }}
-  resources:
-{{ toYaml . | indent 4 }}
-  {{- end }}
-  env:
-    - name: {{ $rt.credentialsSecret.envName }}
-      valueFrom:
-        secretKeyRef:
-          name: {{ $rt.credentialsSecret.name }}
-          key: {{ $rt.credentialsSecret.key }}
+{{- include "agentops.defaultRuntimeGuard" . }}
+{{- range $entry := (.Values.runtimes | default list) }}
+{{- include "agentops.renderRuntime" (dict "root" $ "entry" $entry) }}
 {{- end }}

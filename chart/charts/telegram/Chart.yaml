@@ -1,0 +1,9 @@
+apiVersion: v2
+name: telegram
+description: >-
+  Telegram bundle for the agent-ops operator: the three-component ingest stack
+  (router as the single getUpdates consumer, signal adapter for origination,
+  channel adapter for continuation and delivery) and — when the chat surface is
+  configured — the Channel, the chat SignalSource, and the Pipeline claiming it.
+type: application
+version: 0.4.0

@@ -40,7 +40,7 @@ the same symptom: it also needs persistence.context.storageClassName="-", or the
 cluster's default class is injected and a second volume is provisioned instead.
 See below for what turning it off costs.
 {{- end }}
-{{- if and .Values.persistence.context.enabled (not (has "ReadWriteMany" .Values.persistence.context.accessModes)) (not .Values.runtime.nodeSelector) }}
+{{- if and .Values.persistence.context.enabled (not (has "ReadWriteMany" .Values.persistence.context.accessModes)) (not (dig "agentops" "runtimeDefaults" "nodeSelector" dict (.Values.global | default dict))) }}
 
 HEADS UP — this claim can be attached by ONE node ({{ join "/" .Values.persistence.context.accessModes }}), but runtime pods
 are not pinned. It works until a second conversation schedules on another node,
@@ -48,7 +48,7 @@ then that pod fails to attach the volume (Multi-Attach) — at the moment of
 concurrency, far from the storage setting that caused it.
 
 Pin them:
-  --set runtime.nodeSelector.kubernetes\.io/hostname=<node>
+  --set global.agentops.runtimeDefaults.nodeSelector.kubernetes\.io/hostname=<node>
 (unnecessary on a single-node cluster, which is why this is a note and not a
 render failure.)
 {{- end }}
@@ -56,7 +56,7 @@ render failure.)
 
 CONVERSATIONS CANNOT BE CONTINUED in this install. The runtime keeps a
 conversation's context on its context volume, and this release provides none, so
-the context goes when the pod exits — which is every {{ .Values.runtimeIdleTtlMinutes }} minute(s) of idle
+the context goes when the pod exits — which is every {{ dig "agentops" "runtimeDefaults" "idleTtlMinutes" 10 (.Values.global | default dict) }} minute(s) of idle
 time, i.e. between almost any two messages.
 
 Nothing is broken: each message is answered on its own, and conversations say so
@@ -66,25 +66,49 @@ distributed:
   - shared:      persistence.context.enabled=true with a ReadWriteMany class
   - single-node: persistence.context.enabled=true,
                  persistence.context.accessModes={ReadWriteOnce},
-                 and runtime.nodeSelector pinning runtime pods to one node
+                 and global.agentops.runtimeDefaults.nodeSelector pinning runtime pods
+                 to one node
                  (a `local` PersistentVolume works here too — name it with
                  persistence.context.volumeName and set
                  persistence.context.storageClassName="-", no dynamic
                  provisioner required)
 {{- end }}
-{{- if and .Values.runtime.enabled (not .Values.runtime.credentialsSecret.token) }}
-{{- $cs := .Values.runtime.credentialsSecret }}
+{{- $rts := fromYamlArray (include "agentops.declaredRuntimes" .) }}
+{{- range $rt := $rts }}
+{{- $cs := $rt.credentialsSecret | default dict }}
+{{- if and $cs.name (not $cs.token) }}
 
-ACTION NEEDED — the agent has no credential yet. AgentRuntime {{ .Values.runtime.name }} references
+ACTION NEEDED — the agent has no credential yet. AgentRuntime {{ $rt.name }} references
 Secret {{ $cs.name }} (key {{ $cs.key }}), which this release does not create.
 Without it runtime pods reach CreateContainerConfigError and conversations
 queue forever — the kubelet resolves the reference, so nothing reports it as a
 config error. Either create it:
 
-  kubectl -n {{ .Release.Namespace }} create secret generic {{ $cs.name }} \
+  kubectl -n {{ $.Release.Namespace }} create secret generic {{ $cs.name }} \
     --from-literal={{ $cs.key }}="$(claude setup-token)"
 
-...or set runtime.credentialsSecret.token and let the release manage it.
+...or set global.agentops.runtimeDefaults.credentialsSecret.token and let the
+release manage it.
+{{- end }}
+{{- end }}
+{{- $anyEgress := false }}
+{{- range $rt := $rts }}{{ if (($rt.egressMediation | default dict).enabled) }}{{ $anyEgress = true }}{{ end }}{{ end }}
+{{- if $anyEgress }}
+
+EGRESS MEDIATION IS ON, and it is on by DEFAULT — the wall that constrains an
+agent that does not cooperate should not be something you have to discover.
+Runtime pods carry a proxy the agent's traffic cannot route around, plus a
+PRIVILEGED init container (NET_ADMIN) that installs the redirect and exits.
+
+THE COST LANDS LATE AND FAR FROM THIS SETTING. A namespace under `restricted`
+Pod Security admission REFUSES that init container, so the failure appears at
+POD ADMISSION — when a conversation starts, not when you install. This chart
+cannot see your namespace's Pod Security level, so it says this rather than
+guessing.
+
+If that is your namespace, decline it:
+  --set global.agentops.runtimeDefaults.egressMediation.enabled=false
+...or on one runtime, with `egressMediation.enabled: false` on its entry.
 {{- end }}
 {{- if .Values.console.enabled }}
 {{- $c := .Values.console }}
@@ -128,8 +152,9 @@ THIS CONSOLE AUTHENTICATES NOBODY. You declared {{ $auth.externalAuthenticator }
 authenticator, and the console now serves any request that reaches it: every
 agentops CR in this namespace, conversation payloads included, plus the ability
 to instruct any agent it is joined to.
-{{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
-That agent can act on your cluster in this install (global.agentops.runtime.rbacMode=full).
+{{- if include "agentops.anyActingAccount" . }}
+An agent on a route naming one of this install's acting accounts can act on your
+cluster.
 {{- end }}
 
 So {{ $auth.externalAuthenticator }} must be the ONLY route to it. A port-forward, a pod in this
@@ -186,7 +211,7 @@ Pipelines:
     -p '[{"op":"add","path":"/spec/channelRefs/-","value":{"name":"{{ $ch }}"}}]'
 Existing conversations keep their current bindings; new ones get a console thread.
 {{- end }}
-{{- $pb := index .Values "prometheus-bundle" }}
+{{- $pb := index .Values "prometheus" }}
 {{- if and $pb $pb.enabled }}
 {{- /* Subchart context so the bundle's own helpers decide what this reports —
 the report cannot then drift from what actually rendered. */ -}}
@@ -234,21 +259,21 @@ Prometheus bundle — add this receiver to your Alertmanager configuration:
 
 (Service owned by the SignalAdapter reconciler — no chart-side connectivity.
 On VictoriaMetrics you can skip this entirely with
-prometheus-bundle.alertmanager.registration.enabled=true.)
+prometheus.alertmanager.registration.enabled=true.)
 {{- end }}
 {{- end }}
 {{- if and $pb.profile.enabled (not $pb.mcp.enabled) }}
 
 ACTION NEEDED — the {{ $pb.profile.name }} agent cannot query metrics. The
 mcp__prometheus__* tools are its only evidence source and
-prometheus-bundle.mcp.enabled is false, so it will answer alerts by guessing.
+prometheus.mcp.enabled is false, so it will answer alerts by guessing.
 Either:
-  --set prometheus-bundle.mcp.enabled=true --set prometheus-bundle.mcpServers.enabled=true \
-    --set prometheus-bundle.mcpServers.backend=<your prometheus/vmsingle URL>
+  --set prometheus.mcp.enabled=true --set prometheus.mcpServers.enabled=true \
+    --set prometheus.mcpServers.backend=<your prometheus/vmsingle URL>
 or point it at an MCP server you already run:
-  --set prometheus-bundle.mcp.enabled=true --set prometheus-bundle.mcp.url=<your endpoint>
+  --set prometheus.mcp.enabled=true --set prometheus.mcp.url=<your endpoint>
 {{- end }}
-{{- if and (include "prometheus-bundle.wiringActive" $pbCtx) $pb.profile.enabled }}
+{{- if and (include "prometheus.wiringActive" $pbCtx) $pb.profile.enabled }}
 
 Prometheus bundle — this release WIRED it, so it answers on its own:
   Pipeline {{ $pb.pipelines.name }}{{ if $pwired }} claims SignalSource {{ $psrc }}{{ end }} — reads metrics, changes nothing
@@ -257,11 +282,11 @@ Prometheus bundle — this release WIRED it, so it answers on its own:
 Every admitted alert now opens a conversation and spends LLM credits.
 {{- end }}
 Decline it without giving up the rest of the bundle:
-  --set prometheus-bundle.pipelines.enabled=false
+  --set prometheus.pipelines.enabled=false
 {{- if not $pb.pipelines.channels }}
 No channel is bound, so answers are not posted anywhere — read them with:
   kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
-Bind one with prometheus-bundle.pipelines.channels={<channel>}.
+Bind one with prometheus.pipelines.channels={<channel>}.
 {{- end }}
 {{- if and $pwired $pAlsoClaim }}
 
@@ -271,19 +296,19 @@ That is allowed — signal sources are shareable — and it means each admitted
 alert opens a conversation PER claiming Pipeline, under each one's own profile
 and capabilities. Two conversations, two bills.
 If you meant only your own route:
-  --set prometheus-bundle.pipelines.enabled=false
+  --set prometheus.pipelines.enabled=false
 {{- end }}
 {{- else if and $pwired (not $pAlsoClaim) }}
 
 ONE STEP LEFT — nothing answers alerts yet. SignalSource {{ $psrc }} drops every
 alert (Wired=False) until a Pipeline claims it. Either let the bundle wire
 itself:
-  --set prometheus-bundle.pipelines.enabled=true
+  --set prometheus.pipelines.enabled=true
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
-{{- $tb := index .Values "telegram-bundle" }}
+{{- $tb := index .Values "telegram" }}
 {{- if and $tb $tb.enabled }}
 
 Telegram bundle — gateway-telegram is now the ONLY getUpdates consumer for this
@@ -327,27 +352,27 @@ Then check:  kubectl -n {{ .Release.Namespace }} get signalsource {{ $src }} -o 
 
 The two adapters are installed (the router comes with the surface, since
 without a bot token there is nothing to poll) and nothing is wired. Set
-telegram-bundle.surface.enabled=true (with surface.chatId and a credential) to
+telegram.surface.enabled=true (with surface.chatId and a credential) to
 have the bundle create the Channel and chat SignalSource, or apply your own.
 {{- end }}
 {{- end }}
-{{- $kb := index .Values "k8s-bundle" }}
+{{- $kb := index .Values "kubernetes" }}
 {{- if and $kb (or $kb.enabled .Values.global.demo.enabled) }}
 {{- $mcpOn := $kb.mcp.enabled }}
 {{- if and $kb.profile.enabled (not $mcpOn) }}
 
 ACTION NEEDED — the k8s-engineer agent cannot see the cluster. Runtime image
 0.5.0 dropped kubectl, so the mcp__kubernetes__* tools are the only path to the
-Kubernetes API, and k8s-bundle.mcp.enabled is false. The agent will install,
+Kubernetes API, and kubernetes.mcp.enabled is false. The agent will install,
 start, and answer cluster questions by apologising. Either:
-  --set k8s-bundle.mcp.enabled=true                    (ships the server too)
+  --set kubernetes.mcp.enabled=true                    (ships the server too)
 or point it at an MCP server you already run:
-  --set k8s-bundle.mcp.url=<your endpoint> --set k8s-bundle.mcpServers.enabled=false
-or, if you meant to keep a CLI, build a derived runtime image and set
-runtime.image — see docs/concepts.md#runtime-images-are-generic.
-{{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
-Note also that global.agentops.runtime.rbacMode=full currently grants acting
-RBAC to an identity nothing can exercise.
+  --set kubernetes.mcp.url=<your endpoint> --set kubernetes.mcpServers.enabled=false
+or, if you meant to keep a CLI, build a derived runtime image and declare a
+runtime naming it — see docs/concepts.md#runtime-images-are-generic.
+{{- if include "agentops.anyActingAccount" . }}
+Note also that this install declares an acting account, and with no MCP path an
+agent has nothing to exercise it with.
 {{- end }}
 {{- end }}
 {{- /* The bundle's own wiring, re-derived through its OWN helpers so this
@@ -364,13 +389,13 @@ only case that should tell anyone something is missing. */ -}}
 {{- range .Values.pipelines }}
 {{- if has $src (.signalSources | default list) }}{{ $alsoClaim = append $alsoClaim .name }}{{ end }}
 {{- end }}
-{{- if and (include "k8s-bundle.wiringActive" $kbCtx) $kb.profile.enabled }}
+{{- if and (include "kubernetes.wiringActive" $kbCtx) $kb.profile.enabled }}
 
 Kubernetes bundle — this release WIRED it, so it answers on its own:
-{{- if include "k8s-bundle.observePipelineEnabled" $kbCtx }}
+{{- if include "kubernetes.observePipelineEnabled" $kbCtx }}
   Pipeline {{ $kb.pipelines.observe.name }}{{ if $wired }} claims SignalSource {{ $src }}{{ end }} — reads the cluster, changes nothing.
 {{- end }}
-{{- if include "k8s-bundle.adminPipelineEnabled" $kbCtx }}
+{{- if include "kubernetes.adminPipelineEnabled" $kbCtx }}
   Pipeline {{ $kb.pipelines.admin.name }}{{ if $wired }} claims SignalSource {{ $src }}{{ end }} — CAN MUTATE the cluster
   (it binds {{ $kb.mcp.toolsets.admin.name }}, the six mutating MCP tools).
 {{- end }}
@@ -378,11 +403,11 @@ Kubernetes bundle — this release WIRED it, so it answers on its own:
 Every admitted Warning event now opens a conversation and spends LLM credits.
 {{- end }}
 Decline it without giving up the rest of the bundle:
-  --set k8s-bundle.pipelines.enabled=false
+  --set kubernetes.pipelines.enabled=false
 {{- if not $kb.pipelines.channels }}
 No channel is bound, so answers are not posted anywhere — read them with:
   kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
-Bind one with k8s-bundle.pipelines.channels={<channel>}.
+Bind one with kubernetes.pipelines.channels={<channel>}.
 {{- end }}
 {{- if and $wired $alsoClaim }}
 
@@ -392,19 +417,19 @@ That is allowed — signal sources are shareable — and it means each admitted
 event opens a conversation PER claiming Pipeline, under each one's own profile
 and capabilities. Two conversations, two bills, and both agents act.
 If you meant only your own route:
-  --set k8s-bundle.pipelines.enabled=false
+  --set kubernetes.pipelines.enabled=false
 {{- end }}
 {{- else if and $wired (not $alsoClaim) }}
 
 ONE STEP LEFT — nothing answers cluster events yet. SignalSource {{ $src }} drops
 every event (Wired=False) until a Pipeline claims it. Either let the bundle wire
 itself:
-  --set k8s-bundle.pipelines.enabled=true
+  --set kubernetes.pipelines.enabled=true
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
-{{- $hb := index .Values "ha-bundle" }}
+{{- $hb := index .Values "home-assistant" }}
 {{- if and $hb $hb.enabled }}
 {{- $hbCtx := dict "Values" (merge (dict "global" .Values.global) $hb) "Release" .Release "Chart" .Chart }}
 {{- $hsrc := $hb.logsAdapter.source.name }}
@@ -419,9 +444,9 @@ turns lights on, and what {{ $hb.profiles.ops.name }} adds is the configuration 
 No operator credential, so profile {{ $hb.profiles.ops.name }} and the {{ $hb.pipelines.ops.name }} route do not
 exist: this house can be used and questioned, never repaired. The INGEST lane
 needs that credential too — Home Assistant's event subscription is admin-only.
-Add one with ha-bundle.homeAssistant.credentials.operatorToken (or .operatorSecret).
+Add one with home-assistant.homeAssistant.credentials.operatorToken (or .operatorSecret).
 {{- end }}
-{{- if and (include "ha-bundle.wiringActive" $hbCtx) (include "ha-bundle.userProfileEnabled" $hbCtx) }}
+{{- if and (include "home-assistant.wiringActive" $hbCtx) (include "home-assistant.userProfileEnabled" $hbCtx) }}
 
 This release WIRED the bundle, so it answers on its own:
   Pipeline {{ $hb.pipelines.control.name }} — profile {{ $hb.profiles.user.name }}, uses the house through Assist intents
@@ -435,31 +460,31 @@ the one you want:
   /{{ $hb.pipelines.ops.name }} <what is broken>          — fix it
 {{- end }}
 Decline the routes without giving up the rest of the bundle:
-  --set ha-bundle.pipelines.enabled=false
+  --set home-assistant.pipelines.enabled=false
 {{- if not $hb.pipelines.chatSources }}
 No chat source is claimed, so neither agent is offered on a surface — they are
 still reachable by name. Claim one with
-ha-bundle.pipelines.chatSources={<source>}; sources are many-to-many, so naming
+home-assistant.pipelines.chatSources={<source>}; sources are many-to-many, so naming
 one another route already claims is fine and simply offers both agents there.
 {{- end }}
 {{- if not $hb.pipelines.channels }}
 No channel is bound, so answers are not posted anywhere — read them with:
   kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
-Bind one with ha-bundle.pipelines.channels={<channel>}.
+Bind one with home-assistant.pipelines.channels={<channel>}.
 {{- end }}
 {{- else if $hwired }}
 
 ONE STEP LEFT — nothing answers the house yet. SignalSource {{ $hsrc }} drops every
 record (Wired=False) until a Pipeline claims it. Either let the bundle wire
 itself:
-  --set ha-bundle.pipelines.enabled=true
+  --set home-assistant.pipelines.enabled=true
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
 
 {{- $np := (.Values.global.agentops).networkPolicy | default dict }}
-{{- $mcpDeployed := or (and (index .Values "k8s-bundle") (index .Values "k8s-bundle" "enabled")) (and (index .Values "ha-bundle") (index .Values "ha-bundle" "enabled")) }}
+{{- $mcpDeployed := or (and (index .Values "kubernetes") (index .Values "kubernetes" "enabled")) (and (index .Values "home-assistant") (index .Values "home-assistant" "enabled")) }}
 {{- if $np.enabled }}
 
 ────────────────────────────────────────────────────────────────────────────
@@ -485,9 +510,10 @@ WHAT IS STILL OPEN IF IT IS NOT ENFORCED:
     a queued work unit or post a forged agent answer
 {{- if $mcpDeployed }}
   - the MCP servers, which authenticate nobody
-{{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
-    and one of which can ACT on your cluster in this install (rbacMode=full),
-    so reaching it is that grant, with no credential
+{{- if eq (include "kubernetes.allowMutations" (dict "Values" (index .Values "kubernetes") "Release" .Release "Chart" .Chart)) "true" }}
+    and one of which can ACT on your cluster in this install
+    (kubernetes.allowMutations=true), so reaching it is that grant, with no
+    credential
 {{- end }}
 {{- end }}
 {{- if and .Values.console .Values.console.enabled }}
@@ -510,9 +536,10 @@ NOTHING RESTRICTS WHO MAY REACH THIS RELEASE'S COMPONENTS.
 
 Any pod in the cluster can reach them, and several authenticate nobody:
   - the MCP servers accept any caller
-{{- if eq (include "agentops.runtimeRbacMode" .) "full" }}
-    and the Kubernetes one can ACT on your cluster (rbacMode=full), so reaching
-    it IS that grant, with no credential
+{{- if eq (include "kubernetes.allowMutations" (dict "Values" (index .Values "kubernetes") "Release" .Release "Chart" .Chart)) "true" }}
+    and the Kubernetes one can ACT on your cluster
+    (kubernetes.allowMutations=true), so reaching it IS that grant, with no
+    credential
 {{- end }}
   - the manager's work contract requires no credential
 
@@ -523,9 +550,11 @@ Read the note it prints before trusting it — enforcement depends on your CNI.
 {{- end }}
 {{- end }}
 
-{{- $rbacMode := include "agentops.runtimeRbacMode" . }}
+{{- $granting := include "agentops.grantingAccounts" . | trim }}
 {{- $podExec := eq (include "agentops.runtimePodExecutionAllowed" .) "true" }}
-{{- if ne $rbacMode "none" }}
+{{- $floor := include "agentops.floorServiceAccount" . }}
+{{- $default := include "agentops.runtimeServiceAccount" . }}
+{{- if $granting }}
 
 ────────────────────────────────────────────────────────────────────────────
 WHAT YOUR AGENTS CAN REACH IN THIS CLUSTER
@@ -534,10 +563,20 @@ An agent has a shell. An allowlist configures a COOPERATING one — a
 ServiceAccount binding is what an uncooperative one actually has. So what
 follows is the grant, not the intention.
 
-  a route naming no account       {{ include "agentops.runtimeServiceAccount" . }}
-                                  -> no RBAC at all, in any mode
-  rbacMode={{ $rbacMode }} renders           {{ include "agentops.runtimeModeServiceAccount" . }}
-                                  -> a route must NAME it to get it
+  a route naming no account       {{ $default }}
+{{- if eq $default $floor }}
+                                  -> the FLOOR: no RBAC at all, ever
+{{- else }}
+                                  -> this install points the inherited default
+                                     at its own account. Name {{ $floor }}
+                                     on a Pipeline to take that route to nothing
+{{- end }}
+
+  accounts this install declares, which a route must NAME to get:
+{{- range $line := (splitList "\n" $granting) }}
+{{- $parts := splitList " " $line }}
+                                  {{ index $parts 0 }} ({{ index $parts 1 }})
+{{- end }}
 
 THE GRANT IS CLUSTER-WIDE. It reaches every namespace, INCLUDING this one
 ({{ .Release.Namespace }}), where the manager, the adapters and the MCP servers run.
@@ -549,14 +588,15 @@ What that does NOT expose, and this is what makes it defensible:
   - no component here logs message content, so readable pod logs carry no
     conversation text
 
-What it DOES mean: an agent can see this release's pods, Services and ConfigMaps
-{{- if eq $rbacMode "full" }}, and can DELETE OR RESTART them — the manager and the
+What it DOES mean: an agent on such a route can see this release's pods,
+Services and ConfigMaps
+{{- if include "agentops.anyActingAccount" . }}, and can DELETE OR RESTART them — the manager and the
 adapters included. An agent can disrupt its own supervisor
 {{- end }}.
 {{- if $podExec }}
 
 ⚠  AND SECRETS ARE READABLE, because you set
-   global.agentops.runtime.allowPodExecution=true.
+   global.agentops.runtimeDefaults.allowPodExecution=true.
 
    THE KUBELET RESOLVES A SECRET WHEN IT BUILDS A POD. An agent that may create
    a pod mounting one — or exec into a pod that already has one — reads the
@@ -572,12 +612,12 @@ adapters included. An agent can disrupt its own supervisor
    log line or a chat message is enough to ask it to.
 
    TURN IT OFF unless you accept that:
-     --set global.agentops.runtime.allowPodExecution=false
+     --set global.agentops.runtimeDefaults.allowPodExecution=false
 {{- else }}
 
-Pod execution is OFF (global.agentops.runtime.allowPodExecution=false), so the
-no-Secrets rule HOLDS: an agent cannot create a pod, edit a workload's pod
-template, or exec into a container, and those are the ways a Secret is read
+Pod execution is OFF (global.agentops.runtimeDefaults.allowPodExecution=false),
+so the no-Secrets rule HOLDS: an agent cannot create a pod, edit a workload's
+pod template, or exec into a container, and those are the ways a Secret is read
 without asking for one.
 
 Your agents can still scale, restart, evict, cordon, delete workloads, and edit
@@ -586,4 +626,44 @@ ConfigMaps, Services and Ingresses. What they cannot do is run new code.
 Turning it on grants the `k8s-admin` tools `pods_run` and `pods_exec` — and,
 unavoidably, read access to every Secret in the cluster.
 {{- end }}
+{{- else if ne $default $floor }}
+
+────────────────────────────────────────────────────────────────────────────
+THE INHERITED DEFAULT IDENTITY IS NOT THE FLOOR
+
+Every route naming no `serviceAccountName` runs as {{ $default }}, which this
+chart references and does NOT create — whatever it is bound to is yours, and
+this release cannot report it. Check it:
+
+  kubectl get clusterrolebinding,rolebinding -A -o json | \
+    grep -c '"name": "{{ $default }}"'
+
+To take ONE route back to nothing, name the floor on it:
+
+  pipelines:
+    - name: <route>
+      serviceAccountName: {{ $floor }}
+{{- else }}
+
+────────────────────────────────────────────────────────────────────────────
+YOUR AGENTS HAVE NO KUBERNETES PERMISSIONS
+
+Every route runs as {{ $floor }}, which is bound to nothing and which this chart
+refuses to bind anything to. That is the default and no setting widens it.
+
+An agent still reaches whatever its Pipeline's toolsets and MCP servers give it
+— the Kubernetes bundle's MCP server carries its OWN account and its own grant,
+which is how a demo install reads the cluster with no runtime permissions at all.
+
+To give ONE route more, declare the account and name it:
+
+  rbac:
+    runtime:
+      serviceAccounts:
+        - name: agentops-runtime-acting
+          rbacMode: full        # or readonly
+
+  pipelines:
+    - name: <route>
+      serviceAccountName: agentops-runtime-acting
 {{- end }}

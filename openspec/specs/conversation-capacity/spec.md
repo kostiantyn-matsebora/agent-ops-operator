@@ -127,7 +127,12 @@ origins SHALL be logged and counted.
 
 ### Requirement: Idle runtime pods release capacity within a minute by default
 The manager-wide runtime idle TTL (`RUNTIME_IDLE_TTL_M`, chart
-`runtimeIdleTtlMinutes`) SHALL default to **1 minute**.
+`global.agentops.runtimeDefaults.idleTtlMinutes`) SHALL default to **1 minute**.
+
+It SHALL live in the runtime DEFAULTS rather than at parent scope, because a
+bundle-shipped runtime can read no parent scope but `global.` — a top-level key
+rendered an EMPTY field, and the CRD's structural default of 10 silently
+replaced the release's setting.
 `AgentRuntime.spec.idleTTLMinutes` SHALL continue to override it per runtime. An
 idle runtime pod whose conversation has nothing inflight and nothing queued MAY
 still be evicted before its TTL to admit waiting work; eviction SHALL delete only

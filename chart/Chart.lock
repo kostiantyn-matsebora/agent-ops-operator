@@ -1,15 +1,18 @@
 dependencies:
-- name: prometheus-bundle
+- name: prometheus
   repository: ""
   version: 0.2.0
-- name: k8s-bundle
+- name: kubernetes
   repository: ""
   version: 0.3.0
-- name: telegram-bundle
+- name: telegram
   repository: ""
   version: 0.4.0
-- name: ha-bundle
+- name: home-assistant
   repository: ""
   version: 0.1.0
-digest: sha256:ee453e8dfae8b3c8ae27f6991b5dfcfcf232069d7966bed478c3d089aca303d5
-generated: "2026-08-21T20:57:35.45630709+03:00"
+- name: claude
+  repository: ""
+  version: 0.1.0
+digest: sha256:efa7982cb9265b39231761263bc18eb05198f4ea33c669f05671160b50687740
+generated: "2026-08-24T14:09:42.444576417+03:00"

@@ -109,11 +109,11 @@ be recorded in the change that introduces it. At time of writing: `11` = files i
 `chart/crds/`; `3` pluggable contracts = the channel, signal and work
 contracts in `docs/contracts.md` (the activity contract is telemetry, not a
 seam, so the label names the three); `0` Secrets = the manager grants itself no
-`secrets` verbs in its RBAC; `3` bundles = subcharts under `chart/charts/`.
+`secrets` verbs in its RBAC; subcharts under `chart/charts/`.
 
 The **Acts** rung SHALL be visually marked as conditional — it is granted by
 wiring, and the shipped defaults do not grant it (`k8s-observability` on,
-`k8s-admin` off, `rbacMode` defaulting to `readonly`). A hero implying
+`k8s-admin` off, and the route's own account bound to nothing). A hero implying
 autonomous remediation by default would be the one overclaim this diagram must
 not make.
 

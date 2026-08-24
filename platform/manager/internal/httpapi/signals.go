@@ -229,7 +229,7 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 			//                  more news about the same thing, so the default
 			//                  alert labels (alertgroup/alertname/namespace)
 			//                  fold it into the open conversation and resume the
-			//                  session. prometheus-bundle ships `grouping: {}` and
+			//                  session. the prometheus bundle ships `grouping: {}` and
 			//                  depends on this; signal-cron fires a DISTINCT
 			//                  fingerprint per tick and depends on the empty
 			//                  signature collapsing them into one conversation.

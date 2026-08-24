@@ -1,0 +1,52 @@
+{{- /* MCPConfig (the server) + MCPToolsets (permission to call it).
+
+There is no server workload here: Home Assistant serves its own MCP endpoint
+through the built-in MCP Server integration, so the endpoint IS the house.
+
+The server key is FIXED at `homeassistant` and has no values path: that key IS
+the mcp__homeassistant__* namespace named in every allowlist, so a rename would
+silently strip an agent's tools. */ -}}
+{{- if and (include "home-assistant.active" .) (include "home-assistant.mcpEnabled" .) }}
+{{- $mcp := .Values.mcp }}
+{{- if not (has $mcp.transport (list "http" "sse")) }}
+{{- fail (printf "home-assistant: mcp.transport must be \"http\" or \"sse\", got %q" $mcp.transport) }}
+{{- end }}
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: {{ $mcp.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-home-assistant
+spec:
+  servers:
+    homeassistant:
+      type: {{ $mcp.transport }}
+      url: {{ include "home-assistant.mcpURL" . | quote }}
+      headers:
+{{ include "home-assistant.mcpHeaders" . | indent 8 }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: {{ $mcp.toolsets.observe.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-home-assistant
+spec:
+  tools:
+{{ toYaml $mcp.toolsets.observe.tools | indent 4 }}
+{{- if include "home-assistant.mcpActionsEnabled" . }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: {{ $mcp.toolsets.actions.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-home-assistant
+spec:
+  tools:
+{{ toYaml $mcp.toolsets.actions.tools | indent 4 }}
+{{- end }}
+{{- end }}

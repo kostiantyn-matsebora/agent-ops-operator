@@ -1,38 +1,41 @@
 {{- /*
 The substrate facts, resolved ONCE and readable from every subchart.
 
-Both helpers read `.Values.global` and nothing else, deliberately: a subchart is
-rendered with its own context, so a helper reaching for a top-level parent value
-would resolve to the subchart's values instead of failing — silently disagreeing
-with the parent about the agent's identity or its power. `global.` is the only
-scope both contexts share, which is why the canonical keys live there.
+Every helper here reads `.Values.global` and nothing else, deliberately: a
+subchart is rendered with its own context, so a helper reaching for a top-level
+parent value would resolve to the subchart's values instead of failing —
+silently disagreeing with the parent about the agent's identity or its power.
+`global.` is the only scope both contexts share, which is why the canonical keys
+live there.
+
+NAMED TEMPLATES ARE GLOBAL IN HELM, AND THAT IS THE PART NOBODY REMEMBERS. The
+`kubernetes` bundle CALLS `agentops.runtimeWriteRules` to build its MCP server's
+RBAC, and inside that call only the SUBCHART's `.Values.global` resolves. So the
+values these helpers read have to live under `global.` even when the parent is
+the only thing that writes them.
 */ -}}
 
-{{- /* The ServiceAccount every runtime pod runs as. Exactly one per release —
-its RBAC IS the agent's power, whichever bundle originated the conversation. */ -}}
+{{- /* THE FLOOR — the ServiceAccount a runtime pod runs as when neither its
+Pipeline nor its AgentRuntime names one, and the account this chart ALWAYS
+renders and NEVER binds anything to.
+
+It is a CONSTANT rather than a value, because it is the one account whose
+meaning is "holds nothing". A configurable floor is a floor somebody can point
+at an account that holds something. */ -}}
+{{- define "agentops.floorServiceAccount" -}}
+agentops-runtime
+{{- end -}}
+
+{{- /* THE DEFAULT IDENTITY a runtime declares, and therefore what a Pipeline
+naming no `serviceAccountName` inherits.
+
+IT IS A REFERENCE THIS CHART DOES NOT CREATE — naming is not creating, the
+posture adapters already have. Its default is the floor above, so an install
+that says nothing grants nothing; point it at an account of your own and the
+floor is still rendered, which is what keeps `agentops-runtime` available for
+naming on one Pipeline to take that route back to nothing. */ -}}
 {{- define "agentops.runtimeServiceAccount" -}}
-{{- dig "agentops" "runtime" "serviceAccountName" "" (.Values.global | default dict) | default "agentops-runtime" -}}
-{{- end -}}
-
-{{- /* The EFFECTIVE RBAC mode: never empty, always one of none|readonly|full.
-
-Empty means readonly under demo mode and none otherwise. Defaulting it to
-readonly outright would silently bind cluster `view` to the runtime SA of every
-existing install on upgrade; defaulting it to none would break the demo promise
-that one flag yields a working, cluster-reading agent. `full` is never inferred.
-
-The parent's bindings and k8s-bundle's MCP derivation both call this, so they
-cannot drift apart. */ -}}
-{{- define "agentops.runtimeRbacMode" -}}
-{{- $g := .Values.global | default dict -}}
-{{- $mode := dig "agentops" "runtime" "rbacMode" "" $g -}}
-{{- if not $mode -}}
-{{- ternary "readonly" "none" (dig "demo" "enabled" false $g | toString | eq "true") -}}
-{{- else if has $mode (list "none" "readonly" "full") -}}
-{{- $mode -}}
-{{- else -}}
-{{- fail (printf "global.agentops.runtime.rbacMode must be \"none\", \"readonly\" or \"full\" (empty = readonly under demo, else none), got %q" $mode) -}}
-{{- end -}}
+{{- dig "agentops" "runtimeDefaults" "serviceAccountName" "" (.Values.global | default dict) | default (include "agentops.floorServiceAccount" .) -}}
 {{- end -}}
 
 {{- /* MAY AN ACTING AGENT CAUSE A POD TO EXIST, OR ENTER ONE?
@@ -58,30 +61,302 @@ WHAT AN AGENT KEEPS WITH THIS OFF, which is still a real operator: it reads
 everything it is scoped to, scales workloads, deletes and evicts pods, cordons
 nodes, deletes workloads, and creates or edits ConfigMaps, Services, Ingresses,
 NetworkPolicies, PDBs, HPAs and PVCs. What it loses is the ability to RUN NEW
-CODE — which is the same thing as the ability to read a Secret. */ -}}
+CODE — which is the same thing as the ability to read a Secret.
+
+READ FROM `global.agentops.runtimeDefaults`, AND THE READ DOES NOT MOVE. The
+`kubernetes` bundle's MCP server role is built by a helper below that calls
+this one from SUBCHART context, where only `.Values.global` resolves. Both walls
+sit on one path — an agent reaches the cluster THROUGH that server — so they
+move together or the hole opens one indirection along. */ -}}
 {{- define "agentops.runtimePodExecutionAllowed" -}}
-{{- $g := .Values.global | default dict -}}
-{{- dig "agentops" "runtime" "allowPodExecution" false $g | toString -}}
+{{- dig "agentops" "runtimeDefaults" "allowPodExecution" false (.Values.global | default dict) | toString -}}
 {{- end -}}
 
-{{- /* THE ACCOUNT A MODE RENDERS, named for the posture it holds.
+{{- /* DOES ANY ACCOUNT THIS RELEASE RENDERS LET AN AGENT ACT ON THE CLUSTER?
+Returns "true" or "".
 
-`global.agentops.runtime.serviceAccountName` is the FLOOR — it holds no RBAC in
-any mode, and it is what a Pipeline naming nothing runs as. So a mode cannot
-bind to it: that would make SILENCE MEAN MAXIMUM, which is the defect this
-whole change exists to remove, one level up from `cluster-admin`.
+Used only by NOTES.txt, to say what an install actually granted. It reads the
+DECLARED accounts, because that is the only source of runtime permissions now —
+there is no mode, and the floor is bound to nothing in every configuration. */ -}}
+{{- define "agentops.anyActingAccount" -}}
+{{- range $a := (dig "runtime" "serviceAccounts" list (.Values.rbac | default dict)) -}}
+{{- if eq ($a.rbacMode | default "none") "full" }}true{{ end -}}
+{{- end -}}
+{{- end -}}
 
-A mode therefore renders its OWN account and a route opts in BY NAME. The name
-states the posture, so `serviceAccountName: agentops-runtime-acting` on a
-Pipeline is readable without resolving anything.
+{{- /* EVERY DECLARED ACCOUNT THAT GRANTS ANYTHING, as "name mode" lines. */ -}}
+{{- define "agentops.grantingAccounts" -}}
+{{- range $a := (dig "runtime" "serviceAccounts" list (.Values.rbac | default dict)) -}}
+{{- if ne ($a.rbacMode | default "none") "none" }}
+{{ $a.name }} {{ $a.rbacMode }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 
-Empty for mode `none`: there is no posture to name. */ -}}
-{{- define "agentops.runtimeModeServiceAccount" -}}
-{{- $mode := include "agentops.runtimeRbacMode" . -}}
-{{- if eq $mode "none" -}}
+{{- /* ONE RUNTIME, RESOLVED — a declared entry laid over the release-wide
+defaults, so an entry states only what DIFFERS.
+
+Call with `(dict "root" $ "entry" <the entry>)`; returns YAML for `fromYaml`.
+
+IT MERGES TWO LEVELS BY HAND RATHER THAN CALLING `mergeOverwrite`, and that is
+not style. mergo skips ZERO values in the source, so a runtime declaring
+`egressMediation: {enabled: false}` would silently keep the default `true` —
+the one override the egress requirement exists to guarantee. `hasKey` semantics
+are the only ones that let a runtime say `false`. */ -}}
+{{- define "agentops.mergedRuntime" -}}
+{{- $defaults := dig "agentops" "runtimeDefaults" dict (.root.Values.global | default dict) -}}
+{{- $entry := .entry | default dict -}}
+{{- $out := dict -}}
+{{- range $k, $v := $defaults -}}
+{{- $_ := set $out $k $v -}}
+{{- end -}}
+{{- range $k, $v := $entry -}}
+{{- $dv := index $defaults $k -}}
+{{- if and (kindIs "map" $v) (kindIs "map" $dv) -}}
+{{- $sub := dict -}}
+{{- range $sk, $sv := $dv -}}{{- $_ := set $sub $sk $sv -}}{{- end -}}
+{{- range $sk, $sv := $v -}}{{- $_ := set $sub $sk $sv -}}{{- end -}}
+{{- $_ := set $out $k $sub -}}
 {{- else -}}
-{{- printf "%s-%s" (include "agentops.runtimeServiceAccount" .) (ternary "acting" "readonly" (eq $mode "full")) -}}
+{{- $_ := set $out $k $v -}}
 {{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{- /* EVERY RUNTIME THIS RELEASE DECLARES, resolved, as a YAML list.
+
+Two things need the whole release's answer rather than the parent's own list:
+the manager's bootstrap env (context-sync and egress images are set only when
+SOME runtime asks for them) and `agentops.defaultRuntimeGuard`.
+
+A BUNDLE MAY SHIP A RUNTIME, so this cannot read `.Values.runtimes` alone. The
+parent can see a subchart's values as `.Values.<subchart>`, which is the one
+direction Helm allows, and each runtime-shipping bundle gets a line below.
+Adding a vendor bundle means adding that line — there is no way to discover it,
+and a bundle whose runtime this list missed would render a CR the guard could
+not see. */ -}}
+{{- define "agentops.declaredRuntimes" -}}
+{{- $root := . -}}
+{{- $out := list -}}
+{{- range $e := ($root.Values.runtimes | default list) -}}
+{{- $out = append $out (fromYaml (include "agentops.mergedRuntime" (dict "root" $root "entry" $e))) -}}
+{{- end -}}
+{{- /* The runtime-shipping bundles. One line each, and there is no way to
+discover them: a bundle whose runtime this list missed would render a CR the
+default-runtime guard could not see, and the manager's bootstrap env would miss
+the sidecar and proxy images that runtime asked for. */ -}}
+{{- range $key := list "claude" -}}
+{{- $bv := index $root.Values $key -}}
+{{- if and $bv $bv.enabled -}}
+{{- $out = append $out (fromYaml (include "agentops.mergedRuntime" (dict "root" $root "entry" (omit $bv "enabled" "global")))) -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{- /* THE DEFAULT-RUNTIME GUARD.
+
+`default` is the name a Pipeline declaring no `runtimeRef` resolves to. WHERE
+NOTHING ANSWERS TO IT AND A ROUTE STILL RESOLVES TO IT, THE RENDER FAILS,
+naming the missing runtime and the routes that needed it.
+
+THIS REPLACES THE RULE THAT THE PARENT ALWAYS RENDERS `default`. That rule was
+what guaranteed a bundle-free install could execute, and it cannot survive the
+runtime shipping in a bundle an operator may turn off. Failing is the honest
+replacement: the alternative is conversations reaching `Pending` forever with
+the reason in the manager's log and nowhere an operator looks.
+
+IT READS NO CLUSTER, so it protects a GitOps render exactly as it protects an
+interactive one — unlike the claim-rename guard, whose `lookup` is blind
+without one.
+
+Routes naming their own runtime need no default, so the check is conditional on
+something actually resolving to that name. */ -}}
+{{- define "agentops.defaultRuntimeGuard" -}}
+{{- $root := . -}}
+{{- $declared := fromYamlArray (include "agentops.declaredRuntimes" .) -}}
+{{- $names := list -}}
+{{- range $rt := $declared -}}
+{{- $names = append $names ($rt.name | default "") -}}
+{{- end -}}
+{{- if not (has "default" $names) -}}
+{{- $needing := list -}}
+{{- range $p := (.Values.pipelines | default list) -}}
+{{- if not $p.runtimeRef -}}
+{{- $needing = append $needing (printf "pipelines[%s]" ($p.name | default "<unnamed>")) -}}
+{{- end -}}
+{{- end -}}
+{{- /* BUNDLE-SHIPPED ROUTES RESOLVE TO `default` TOO, and they are the case
+this guard exists for: demo mode ships one, and an install that turns off the
+runtime bundle would otherwise get a working-looking render whose conversations
+never execute.
+
+A bundle helper needs a SUBCHART context, which is the dict below — the
+parent's globals plus that bundle's values. Same technique NOTES.txt uses to
+report the wiring, and for the same reason: re-deriving through the bundle's own
+helper is what stops this drifting from what actually rendered.
+
+A route is counted only where it ACTUALLY RENDERS — re-derived through the same
+helper the bundle uses — and where BOTH its bundle-level `pipelines.runtimeRef`
+and its own are empty. An install that names a runtime on every route is not
+failed for a default it does not use, and a route that does not render is not
+named in a failure about routes. */ -}}
+{{- /* `gated` marks a bundle whose Chart.yaml `condition:` is `<key>.enabled`.
+Helm does not PARSE a disabled subchart's templates, so its named helpers do not
+exist and calling one is a render error rather than a false answer. The
+Kubernetes bundle carries no condition — it turns on by `enabled` OR demo mode,
+which a Helm condition cannot express — so its helpers are always loaded. */ -}}
+{{- range $b := list
+      (dict "key" "kubernetes" "helper" "kubernetes.wiringActive" "gated" false "routes" (dict "observe" "kubernetes.observePipelineEnabled" "admin" "kubernetes.adminPipelineEnabled"))
+      (dict "key" "home-assistant" "helper" "home-assistant.wiringActive" "gated" true "routes" (dict "control" "home-assistant.userProfileEnabled" "ops" "home-assistant.opsProfileEnabled"))
+      (dict "key" "prometheus" "helper" "prometheus.wiringActive" "gated" true "routes" dict) -}}
+{{- $bv := index $root.Values $b.key -}}
+{{- if and $bv (or (not $b.gated) $bv.enabled) -}}
+{{- $ctx := dict "Values" (merge (deepCopy $bv) (dict "global" $root.Values.global)) "Release" $root.Release "Chart" $root.Chart -}}
+{{- if include $b.helper $ctx -}}
+{{- $bundleRef := dig "pipelines" "runtimeRef" "" $bv -}}
+{{- if not $bundleRef -}}
+{{- if $b.routes -}}
+{{- range $r, $rh := $b.routes -}}
+{{- if and (include $rh $ctx) (not (dig "pipelines" $r "runtimeRef" "" $bv)) -}}
+{{- $needing = append $needing (printf "%s.pipelines.%s" $b.key $r) -}}
+{{- end -}}
+{{- end -}}
+{{- else -}}
+{{- $needing = append $needing (printf "%s.pipelines" $b.key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $needing -}}
+{{- fail (printf "No AgentRuntime named \"default\" is declared in this release, and %d route(s) resolve to it: %s. A Pipeline naming no runtimeRef falls back to the runtime named `default`, so these routes would create conversations that never execute — Pending forever, with the reason in the manager's log and nowhere you look. Declare one under the top-level `runtimes:` (an entry naming only `name: default` inherits every value from global.agentops.runtimeDefaults), re-enable the bundle that shipped it, or give each route above its own `runtimeRef`. Declared runtimes: %s" (len $needing) (join ", " $needing) (ternary "(none)" (join ", " $names) (eq (len $names) 0))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* ONE RUNTIME'S OBJECTS — its credential Secret, where a token was supplied,
+and its AgentRuntime CR.
+
+SHARED, because a bundle may ship a runtime and two renderers would be two
+places for the CR's shape to drift. Call with `(dict "root" $ "entry" <entry>)`.
+
+IT RENDERS NO VOLUME. Persistence is WIRING and lives on the Pipeline; the
+release-wide claims reach conversations through the manager's bootstrap
+configuration, not through this CR. */ -}}
+{{- define "agentops.renderRuntime" -}}
+{{- $root := .root -}}
+{{- $rt := fromYaml (include "agentops.mergedRuntime" .) -}}
+{{- $name := $rt.name | required "every entry in `runtimes:` needs a name — it is what a Pipeline's spec.runtimeRef refers to, and `default` is the one a route naming none resolves to" -}}
+{{- $cred := $rt.credentialsSecret | default dict -}}
+{{- if $cred.token }}
+---
+# Created because this runtime supplied a credential token, so the agent's
+# credential is provisioned with the release instead of being a prerequisite
+# someone has to remember. The AgentRuntime below references it by NAME only —
+# the manager reads no Secrets, the kubelet resolves it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $cred.name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-runtime
+type: Opaque
+stringData:
+  {{ $cred.key }}: {{ $cred.token | quote }}
+{{- end }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-runtime
+spec:
+  image: {{ $rt.image | required (printf "runtime %q declares no image, and global.agentops.runtimeDefaults.image is empty — a runtime with no image is a CR the API server refuses" $name) | quote }}
+  # The agent's security identity — its RBAC IS its power. A REFERENCE: this
+  # chart renders only its own floor account, never the one named here.
+  serviceAccountName: {{ $rt.serviceAccountName | default (include "agentops.floorServiceAccount" $root) }}
+  # BACKEND SHAPE, never placement — whether this runtime's backend keeps
+  # context on a disk at all, which is what lets the manager say up front
+  # whether continuity is possible rather than failing a follow-up for a volume
+  # this runtime never needed.
+  contextStorage: {{ $rt.contextStorage | default "volume" }}
+  # WRITTEN OUT, never omitted: the CRD carries a structural default of 10, so
+  # an omitted field is not "unset" — the API server stores 10 and the manager,
+  # which prefers any non-zero spec value over its own bootstrap default, would
+  # silently ignore what the release configured. Omitting it looked correct in
+  # the rendered manifest and was wrong in the stored object.
+  idleTtlMinutes: {{ $rt.idleTtlMinutes | default 10 }}
+  {{- with $rt.nodeSelector }}
+  nodeSelector:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  # THIS CR DECLARES NO VOLUME, and that is the shape rather than an omission.
+  # A runtime is an ENGINE — an image and its pod-level defaults. WHERE a
+  # route's conversations keep their state is the ROUTE's decision, declared on
+  # `Pipeline.spec.persistence` beside the tools it grants and the identity it
+  # executes under; a route binding neither takes the release-wide claims, which
+  # reach the manager as its bootstrap configuration (deployment.yaml's
+  # CONTEXT_PVC / WORKSPACE_PVC). Nothing restates a claim name.
+  {{- with (($rt.contextSync | default dict).paths) }}
+  # CONTEXT SYNC: declared by the RUNTIME, because only it knows where its
+  # backend keeps context. Absent means the context volume is mounted directly and
+  # no sidecar is built — today's behaviour, so an existing install upgrades
+  # with no migration.
+  contextSync:
+    paths:
+{{ toYaml . | indent 6 }}
+    {{- with $rt.contextSync.exclude }}
+    exclude:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+    interval: {{ $rt.contextSync.interval | quote }}
+    retain: {{ $rt.contextSync.retain }}
+  {{- end }}
+  {{- if (($rt.egressMediation | default dict).enabled) }}
+  # EGRESS MEDIATION: declared by the RUNTIME, because enabling it changes what
+  # the pod may do at startup — it adds a privileged init container, which a
+  # namespace under `restricted` Pod Security admission will refuse. ON by
+  # default; a runtime declares `egressMediation.enabled: false` to decline it,
+  # and then its pods carry nothing extra at all.
+  egressMediation:
+    # ALWAYS rendered, never an empty mapping: an empty stanza is null to the
+    # API server, and null means ABSENT — which would read as "mediation off"
+    # on an install that just asked for it, silently.
+    port: {{ $rt.egressMediation.port | default 15001 }}
+    {{- with $rt.egressMediation.excludePorts }}
+    # Every port here is reachable by the agent UNMEDIATED.
+    excludePorts:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+    {{- with $rt.egressMediation.resources }}
+    resources:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+  {{- end }}
+  {{- with $rt.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  {{- with $rt.env }}
+  env:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  {{- if $cred.name }}
+  {{- if $rt.env }}
+  {{- fail (printf "runtime %q sets both `env` and `credentialsSecret`; state the credential as one more `env` entry instead" $name) }}
+  {{- end }}
+  env:
+    - name: {{ $cred.envName }}
+      valueFrom:
+        secretKeyRef:
+          name: {{ $cred.name }}
+          key: {{ $cred.key }}
+  {{- end }}
 {{- end -}}
 
 {{- /* THE ACTING GRANT — cluster-scoped, in two lists.
@@ -133,7 +408,7 @@ than either wall alone: the agent reports a Forbidden for something it was told
 it could do, and the operator debugs the wrong layer. That shipped once — four
 of k8s-admin's six tools 403'd on a live cluster.
 
-Shared with k8s-bundle's MCP server, exactly as agentops.runtimeRbacMode is, so
+Shared with kubernetes's MCP server, exactly as agentops.runtimeRbacMode is, so
 the two walls cannot drift into disagreeing about what `full` means. */ -}}
 {{- define "agentops.runtimeReadRules" -}}
 - apiGroups: [""]
@@ -361,25 +636,83 @@ This one needs no cluster, so unlike the rename guard it fires under
 `helm template`, in CI and under a GitOps controller too.
 */ -}}
 {{/*
-agentops.retiredRuntimeVolumeKeysGuard — the runtime no longer names a volume,
-and a values file that still does gets told rather than ignored.
+agentops.retiredRuntimeKeysGuard — every values key this restructure deleted,
+failing the render and NAMING its replacement.
 
-SAME CLASS AS THE BLOCK GUARD BELOW, AND FOR THE SAME REASON: Helm reports no
-unread values key, so the alternative is silence. The quiet case here is the
-expensive one — an operator who deliberately pointed the runtime at a claim the
-chart did not create keeps every signal of success while the release-wide claim
-is used instead, and every conversation on that install answers out of the wrong
-volume.
+HELM REPORTS NO UNREAD VALUES KEY, so the alternative is silence, and the quiet
+outcomes here are the expensive ones:
+
+  * `runtime.image` left in a values file renders the DEFAULT image while every
+    signal reports success.
+  * `global.agentops.runtime.rbacMode: full` left behind grants nothing at all
+    now, so an install that believed it had an acting agent has an inert one.
+  * `kubernetes.enabled: true` left behind renders NOTHING, indistinguishable
+    from an operator who meant to leave the bundle off.
 
 It needs NO CLUSTER, so unlike the claim-rename guard it also protects a GitOps
-install.
+install and a CI render.
+*/}}
+{{- define "agentops.retiredRuntimeKeysGuard" -}}
+{{- $v := .Values -}}
+{{- $g := dig "agentops" dict (.Values.global | default dict) -}}
+{{- $bad := list -}}
+{{- if hasKey $v "runtimeIdleTtlMinutes" -}}
+{{- $bad = append $bad "runtimeIdleTtlMinutes -> global.agentops.runtimeDefaults.idleTtlMinutes. It moved for the same reason `resources` did: a bundle-shipped runtime cannot read a parent-scope value, so it rendered an EMPTY field and the CRD's structural default of 10 silently replaced the release's setting" -}}
+{{- end -}}
+{{- if hasKey $v "runtime" -}}
+{{- $bad = append $bad "runtime.* -> the block SPLIT IN TWO: what every runtime inherits is global.agentops.runtimeDefaults, and the runtimes that EXIST are the top-level `runtimes:` list, each stating only what differs. `runtime.enabled: false` becomes `runtimes: []`" -}}
+{{- end -}}
+{{- if hasKey $g "runtime" -}}
+{{- $r := index $g "runtime" -}}
+{{- if hasKey $r "rbacMode" -}}
+{{- $bad = append $bad "global.agentops.runtime.rbacMode -> DELETED, with no replacement and no alias. There is no preset posture any more: the default is NO permissions, and an install wanting more declares an account under rbac.runtime.serviceAccounts (the same `rbacMode` vocabulary, per account) and NAMES it on the routes that need it. `rbacMode: full` becomes `rbac.runtime.serviceAccounts: [{name: agentops-runtime-acting, rbacMode: full}]` plus `serviceAccountName: agentops-runtime-acting` on those Pipelines" -}}
+{{- end -}}
+{{- if hasKey $r "serviceAccountName" -}}
+{{- $bad = append $bad "global.agentops.runtime.serviceAccountName -> global.agentops.runtimeDefaults.serviceAccountName. It is now a REFERENCE this chart does not create, and its default is the floor account the chart always renders" -}}
+{{- end -}}
+{{- if hasKey $r "allowPodExecution" -}}
+{{- $bad = append $bad "global.agentops.runtime.allowPodExecution -> global.agentops.runtimeDefaults.allowPodExecution" -}}
+{{- end -}}
+{{- end -}}
+{{- $rr := dig "runtime" dict (.Values.rbac | default dict) -}}
+{{- range $k := list "clusterRoles" "bindClusterRoles" "namespaced" -}}
+{{- if hasKey $rr $k -}}
+{{- $bad = append $bad (printf "rbac.runtime.%s -> moved ONTO an account. These added to the account `rbacMode` rendered, and that account is gone; declare the account under rbac.runtime.serviceAccounts and put `%s` on the entry" $k $k) -}}
+{{- end -}}
+{{- end -}}
+{{- range $pair := list (list "k8s-bundle" "kubernetes") (list "ha-bundle" "home-assistant") (list "prometheus-bundle" "prometheus") (list "telegram-bundle" "telegram") (list "vm-bundle" "prometheus") -}}
+{{- if hasKey $v (index $pair 0) -}}
+{{- $bad = append $bad (printf "`%s:` -> `%s:`. Every subchart is now named for the SYSTEM it integrates, with no suffix. Restate every value under the new key" (index $pair 0) (index $pair 1)) -}}
+{{- end -}}
+{{- end -}}
+{{- if $bad -}}
+{{- fail (printf "These values keys are RETIRED and are no longer read:\n\n  - %s\n\nSee docs/CHANGELOG.md. Helm never reports an unread values key, which is why this fails the render rather than letting the install succeed while doing something else." (join "\n  - " $bad)) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+agentops.retiredRuntimeVolumeKeysGuard — kept as its own guard because the
+message it carries is about the VOLUME concept moving to the Pipeline, which is
+a different migration from the values restructure above.
+
+An AgentRuntime declares no volume at all, and an operator who deliberately
+pointed one at a claim the chart did not create would otherwise keep every
+signal of success while the release-wide claim was used instead — every
+conversation on that install answering out of the wrong volume.
 */}}
 {{- define "agentops.retiredRuntimeVolumeKeysGuard" -}}
-{{- $rt := .Values.runtime -}}
+{{- $root := . -}}
 {{- $retired := list -}}
+{{- range $i, $rt := (.Values.runtimes | default list) -}}
 {{- range $k := list "contextPvcRef" "homePvcRef" "workspacePvcRef" -}}
 {{- if hasKey $rt $k -}}
-{{- $retired = append $retired (printf "runtime.%s" $k) -}}
+{{- $retired = append $retired (printf "runtimes[%d].%s" $i $k) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $k := list "contextPvcRef" "homePvcRef" "workspacePvcRef" -}}
+{{- if hasKey (dig "agentops" "runtimeDefaults" dict ($root.Values.global | default dict)) $k -}}
+{{- $retired = append $retired (printf "global.agentops.runtimeDefaults.%s" $k) -}}
 {{- end -}}
 {{- end -}}
 {{- if $retired -}}

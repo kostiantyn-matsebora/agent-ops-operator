@@ -3,21 +3,31 @@ What an agent may actually do, bound to a runtime ServiceAccount — because tha
 SA's permissions ARE the agent's powers, whichever bundle originated the
 conversation. Hence the parent chart, not a domain bundle.
 
-THE FLOOR ACCOUNT IS NEVER BOUND TO ANYTHING.
-`global.agentops.runtime.serviceAccountName` is what a Pipeline naming no
-`serviceAccountName` runs as, and it holds NO RBAC in any mode. A route that
-names nothing can do NOTHING in the cluster.
+THE FLOOR ACCOUNT IS NEVER BOUND TO ANYTHING. `agentops-runtime` is what a
+runtime naming no `serviceAccountName` runs as, and therefore what a Pipeline
+naming none inherits by default. It holds NO RBAC, and this file refuses to
+bind anything to it. A route that names nothing can do NOTHING in the cluster.
 
-That is the correction this file carries. It first shipped with the mode bound
-to that account, so a route inherited the release's maximum by not typing a
-field — three of four routes in the reference install held pod-delete and
-node-patch that way, two of them routes that reach no Kubernetes API at all.
+That is the correction this file carries. It first shipped with a release-wide
+MODE bound to that account, so a route inherited the release's maximum by not
+typing a field — three of four routes in the reference install held pod-delete
+and node-patch that way, two of them routes that reach no Kubernetes API at all.
 
-So a MODE renders its own account, named for the posture
-(`agentops.runtimeModeServiceAccount`), and a route opts in BY NAME:
+THERE IS NO MODE ANY MORE, and that is the second correction. The mode rendered
+an extra, named account carrying a preset posture, and the account granted
+nothing until a Pipeline named it — so the setting described a state the runtime
+was in, which is the reading it caused the incident for. ACCOUNTS ARE DECLARED
+NOW: `rbac.runtime.serviceAccounts` is the only source here, and every entry is
+a grant somebody wrote down rather than a name a default selected.
+
+    rbac:
+      runtime:
+        serviceAccounts:
+          - name: agentops-runtime-acting
+            rbacMode: full
 
     pipelines:
-      - name: k8s-ops
+      - name: k8s-operate
         serviceAccountName: agentops-runtime-acting
 
 THE GRANTS ARE CLUSTER-SCOPED. Namespaced Roles were tried and reverted: RBAC
@@ -28,46 +38,21 @@ redeployed. See `agentops.runtimeReadRules` for why the exposure that bought is
 smaller than it looks: `agentops.dev` and `secrets` are never granted, so
 Conversations and credentials are unreachable wherever an agent looks.
 
-Two sources of accounts, and they compose:
-  * the MODE (global.agentops.runtime.rbacMode) — <floor>-readonly or
-    <floor>-acting. Empty resolves to readonly under demo mode and none
-    otherwise, so the chart still grants NOTHING unless configured.
-  * rbac.runtime.serviceAccounts — additional accounts with their own posture.
-`rbac.runtime.{clusterRoles,bindClusterRoles,namespaced}` add to the MODE's
-account. Object names: <sa>-<entry-name>.
-
 BUNDLES RENDER THEIR OWN ROUTES' ACCOUNTS. A bundle knows what its routes do and
-this chart does not, so `k8s-bundle` renders an account per route and `ha-bundle`
-renders accounts with no Kubernetes RBAC at all. The parent keeps the SUBSTRATE
-exclusively — runtime, credential, context volume, and this floor.
+this chart does not, so `kubernetes` renders an account per route and
+`home-assistant` renders accounts with no Kubernetes RBAC at all. What stays
+exclusively the parent's is the runtime DEFAULTS and this FLOOR.
 */ -}}
 {{- $ns := .Release.Namespace }}
-{{- $floor := include "agentops.runtimeServiceAccount" . }}
+{{- $floor := include "agentops.floorServiceAccount" . }}
 {{- $rt := .Values.rbac.runtime }}
-{{- $modeSA := include "agentops.runtimeModeServiceAccount" . }}
 {{- $accounts := list }}
-{{- /* The mode's account, when the mode grants anything at all. The floor is
-absent from this list ON PURPOSE — it renders in rbac.yaml and is bound here by
-nothing. */ -}}
-{{- if $modeSA }}
-{{- $accounts = append $accounts (dict
-      "name" $modeSA
-      "mode" (include "agentops.runtimeRbacMode" .)
-      "clusterRoles" ($rt.clusterRoles | default list)
-      "bindClusterRoles" ($rt.bindClusterRoles | default list)
-      "namespaced" ($rt.namespaced | default list)) }}
-{{- else if or $rt.clusterRoles $rt.bindClusterRoles $rt.namespaced }}
-{{- fail "rbac.runtime.{clusterRoles,bindClusterRoles,namespaced} add to the account global.agentops.runtime.rbacMode renders, and that mode is `none` — so there is no account to add them to. The floor account is never bound to anything, deliberately: a Pipeline naming no serviceAccountName must have no cluster power. Set a mode, or declare an account under rbac.runtime.serviceAccounts and name it on the Pipelines that need it" }}
-{{- end }}
 {{- range $i, $extra := ($rt.serviceAccounts | default list) }}
 {{- if not $extra.name }}
 {{- fail (printf "rbac.runtime.serviceAccounts[%d]: every entry needs a name — it is what a Pipeline's spec.serviceAccountName refers to" $i) }}
 {{- end }}
 {{- if eq $extra.name $floor }}
-{{- fail (printf "rbac.runtime.serviceAccounts[%d]: %q is the FLOOR account (global.agentops.runtime.serviceAccountName), which holds no RBAC in any mode — that is what makes a Pipeline naming no serviceAccountName powerless. Binding to it would make silence mean maximum power again. Use a different name and name it on the Pipelines that need it" $i $extra.name) }}
-{{- end }}
-{{- if eq $extra.name $modeSA }}
-{{- fail (printf "rbac.runtime.serviceAccounts[%d]: %q is already rendered by global.agentops.runtime.rbacMode. Two entries for one account render two competing binding sets under one name — configure it through rbacMode and rbac.runtime instead" $i $extra.name) }}
+{{- fail (printf "rbac.runtime.serviceAccounts[%d]: %q is the FLOOR account, which holds no RBAC in any configuration — that is what makes a Pipeline naming no serviceAccountName powerless, and what keeps the floor available to NAME on one route to take it back to nothing. Binding to it would make silence mean power again. Use a different name and name it on the Pipelines that need it" $i $extra.name) }}
 {{- end }}
 {{- $mode := $extra.rbacMode | default "none" }}
 {{- if not (has $mode (list "none" "readonly" "full")) }}
@@ -86,7 +71,7 @@ nothing. */ -}}
 ---
 # ONE ROLE PER ACCOUNT, cluster-scoped. `readonly` gets the reads, `full` gets
 # the reads plus the writes — and the writes are themselves gated by
-# global.agentops.runtime.allowPodExecution, which is what keeps Secrets
+# global.agentops.runtimeDefaults.allowPodExecution, which is what keeps Secrets
 # genuinely out of reach rather than merely unnamed in these rules.
 #
 # The built-in `view` ClusterRole used to be bound here under `readonly`, and

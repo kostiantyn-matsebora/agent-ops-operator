@@ -1,0 +1,8 @@
+apiVersion: v2
+name: claude
+description: >-
+  The reference agent runtime — claude-code implementing the operator's work
+  contract — shipped as a bundle so an install using another vendor stops
+  carrying it.
+type: application
+version: 0.1.0

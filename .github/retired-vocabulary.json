@@ -18,13 +18,23 @@
     "`| persistence.enabled | persistence.context.enabled |` states what to write",
     "instead, which is the whole test — and a wide table cannot carry 'removed' on",
     "every row without becoming unreadable. The window is one line either side, so",
-    "a header word does not reach row four."
+    "a header word does not reach row four.",
+    "",
+    "`skip` names files inside `scan` that are NOT checked. There is exactly one, and it",
+    "is the CHANGELOG: its job is to record what each version removed, so it accumulates",
+    "every name this guard exists to catch. An entry for a RELEASED version must also not",
+    "be edited to satisfy a guard added afterwards — somebody may be following it. The",
+    "archives under docs/changelog/ were never scanned for the same reason: `docs/*.md`",
+    "does not recurse."
   ],
   "scan": [
     "openspec/specs/**/*.md",
     "docs/*.md",
     "docs/guides/*.md",
     "README.md"
+  ],
+  "skip": [
+    "docs/CHANGELOG.md"
   ],
   "terms": [
     {
@@ -456,6 +466,168 @@
         "history",
         "/data/context",
         "gone"
+      ]
+    },
+    {
+      "id": "runtime-rbac-mode",
+      "pattern": "rbacMode|rbac[ -]?mode",
+      "says": "there is no release-wide permission mode; declare an account under rbac.runtime.serviceAccounts and NAME it on the routes that need it",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned",
+        "replaced",
+        "is now",
+        "gone",
+        "renamed",
+        "became",
+        "deleted",
+        "->",
+        "→",
+        "serviceAccounts",
+        "per account",
+        "declared account"
+      ]
+    },
+    {
+      "id": "runtime-mode-accounts",
+      "pattern": "agentops-runtime-(readonly|acting)\\b",
+      "says": "an account a route names is one the install DECLARES under rbac.runtime.serviceAccounts; nothing renders a posture-named account on its own",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned",
+        "replaced",
+        "is now",
+        "gone",
+        "renamed",
+        "became",
+        "deleted",
+        "->",
+        "→",
+        "serviceAccounts",
+        "declare",
+        "declared"
+      ]
+    },
+    {
+      "id": "parent-runtime-block",
+      "pattern": "(?<![\\w.])runtime\\.(image|enabled|name|idleTtlMinutes|nodeSelector|resources|contextSync|egressMediation|credentialsSecret)\\b",
+      "says": "the runtime block split in two: global.agentops.runtimeDefaults for what every runtime inherits, and the top-level `runtimes:` list for the runtimes that exist",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned",
+        "replaced",
+        "is now",
+        "gone",
+        "renamed",
+        "became",
+        "deleted",
+        "->",
+        "→",
+        "runtimeDefaults",
+        "runtimes:"
+      ]
+    },
+    {
+      "id": "global-runtime-keys",
+      "pattern": "global\\.agentops\\.runtime\\.",
+      "says": "global.agentops.runtimeDefaults.* — the block was renamed when it became a complete runtime configuration",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned",
+        "replaced",
+        "is now",
+        "gone",
+        "renamed",
+        "became",
+        "deleted",
+        "->",
+        "→",
+        "runtimeDefaults"
+      ]
+    },
+    {
+      "id": "rbac-runtime-mode-grants",
+      "pattern": "rbac\\.runtime\\.(clusterRoles|bindClusterRoles|namespaced)\\b",
+      "says": "those moved ONTO an account: declare it under rbac.runtime.serviceAccounts and put clusterRoles / bindClusterRoles / namespaced on the entry",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned",
+        "replaced",
+        "is now",
+        "gone",
+        "renamed",
+        "became",
+        "deleted",
+        "->",
+        "→",
+        "serviceAccounts"
+      ]
+    },
+    {
+      "id": "release-idle-ttl-key",
+      "pattern": "(?<![\\w.])runtimeIdleTtlMinutes\\b",
+      "says": "global.agentops.runtimeDefaults.idleTtlMinutes — a bundle-shipped runtime cannot read a parent-scope value",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned",
+        "replaced",
+        "is now",
+        "gone",
+        "renamed",
+        "became",
+        "deleted",
+        "->",
+        "→",
+        "runtimeDefaults"
+      ]
+    },
+    {
+      "id": "bundle-suffixed-keys",
+      "pattern": "(?<![\\w-])(k8s|ha|telegram|prometheus)-bundle(?=[.:/])",
+      "says": "every subchart is named for the SYSTEM it integrates, with no suffix — the VALUES KEY and the chart directory are `kubernetes`, `home-assistant`, `telegram`, `prometheus`. (The openspec CAPABILITY names are unchanged, which is why this matches only a key, a path or a values line.)",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned",
+        "replaced",
+        "is now",
+        "gone",
+        "renamed",
+        "became",
+        "deleted",
+        "->",
+        "→",
+        "kubernetes",
+        "home-assistant",
+        "prometheus",
+        "telegram"
       ]
     }
   ]

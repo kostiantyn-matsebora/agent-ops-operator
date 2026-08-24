@@ -546,12 +546,12 @@ Four things fall out of that:
 
 **It requires a claim** — which a bundle that ships a route now makes for you.
 
-Where the k8s bundle renders its route, that route claims the console source and
+Where the Kubernetes bundle renders its route, that route claims the console source and
 binds the console as a channel, so a turnkey install can start a conversation in
 the console with no wiring step.
 
 The names come from `global.agentops.console`, and the render fails if they
-disagree with the console's own (see [the k8s bundle](k8s-bundle.md)).
+disagree with the console's own (see [the Kubernetes bundle](kubernetes.md)).
 
 Nothing else claims it for you. Wiring names a profile, sources and channels
 from different bundles, so only the installer sees all of it.
@@ -610,7 +610,7 @@ wherever a client cannot present a menu.
 ## Trust boundary
 
 Requirements the console meets make it a control plane, not a viewer: it can
-instruct an agent that, in a `rbacMode: full` install, may delete pods, scale
+instruct an agent that, on a route naming an acting account, may delete pods, scale
 workloads and cordon nodes.
 
 - **The token is the boundary**, generated per install. Whoever holds it can read

@@ -7,8 +7,8 @@
 there is nothing to reclaim from a volume this release does not have. */ -}}
 {{- $mountWs := and $h.workspaces $p.workspace.enabled }}
 {{- $mountContext := and $h.sessions $p.context.enabled }}
-{{- if eq $h.serviceAccountName (include "agentops.runtimeServiceAccount" .) }}
-{{- fail "housekeeping.serviceAccountName must differ from global.agentops.runtime.serviceAccountName — this workload mounts the claim ROOTS, which is exactly the reach subPath isolation denies runtime pods; sharing the identity would hand every agent the ability to read and delete every other conversation's tree" }}
+{{- if or (eq $h.serviceAccountName (include "agentops.floorServiceAccount" .)) (eq $h.serviceAccountName (include "agentops.runtimeServiceAccount" .)) }}
+{{- fail "housekeeping.serviceAccountName must differ from the floor account and from global.agentops.runtimeDefaults.serviceAccountName — this workload mounts the claim ROOTS, which is exactly the reach subPath isolation denies runtime pods; sharing the identity would hand every agent the ability to read and delete every other conversation's tree" }}
 {{- end }}
 apiVersion: v1
 kind: ServiceAccount

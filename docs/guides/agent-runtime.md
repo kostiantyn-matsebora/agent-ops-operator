@@ -70,6 +70,25 @@ An agent runtime is three parts:
 3. **A `Pipeline` naming it** through `runtimeRef`. A Pipeline that names none
    falls back to the runtime called `default`.
 
+**A RUNTIME IS ONE OF SEVERAL.** Declare any number under the chart's
+`runtimes:` list, each stating only what DIFFERS from
+`global.agentops.runtimeDefaults` — the image, the resources, the idle TTL, the
+egress posture and the credential shape are all inherited, so a second vendor is
+usually two lines:
+
+```yaml
+runtimes:
+  - name: my-runtime
+    image: registry.example.com/my-agentops-runtime:1.0.0
+```
+
+**`default` is what a route naming no `runtimeRef` resolves to**, and the
+`claude` bundle ships it. Turn that bundle off with no replacement and the
+render FAILS, naming the missing runtime and the routes that needed it — which
+is the honest alternative to conversations queueing forever.
+
+A bundle may ship a runtime of its own the same way.
+
 The manager creates one pod per conversation from part 2, and that pod is your
 image. It gives the pod `CONTROL_URL`, `CONVO_ID`, `POD_NAME` and
 `RUNTIME_IDLE_TTL_M`, and checks the profile's repository out at
@@ -230,6 +249,9 @@ namespace, whatever its RBAC says.** The kubelet does the reading. See
 [installation](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/installation.md).
 
 ## Point a Pipeline at it, and verify
+
+Declaring it through the chart is the ordinary path — the `AgentRuntime` below
+is what that renders, and applying one by hand is the same object.
 
 ```sh
 kubectl -n agent-ops apply -f my-runtime.yaml

@@ -206,13 +206,13 @@ Documented HTTP contracts, no fork.
 
 - [The console]({{ '/console/' | relative_url }})
   — the wiring as a graph, live runs, and the channel it also is.
-- [Cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md)
+- [Cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/kubernetes.md)
   — the events lane, the agent that answers it, and Kubernetes MCP tooling.
-- [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram-bundle.md)
+- [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram.md)
   — the ingest stack and the chat surface.
-- [Prometheus](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus-bundle.md)
+- [Prometheus](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus.md)
   — the Alertmanager alert lane, its metrics tooling and the agent that answers.
-- [Home Assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/ha-bundle.md)
+- [Home Assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/home-assistant.md)
   — the house's log lane, and two agents split by what they may do to it.
 
 ## Keep it current

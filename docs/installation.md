@@ -32,22 +32,21 @@ Three choices are cheap now and expensive later.
 **Storage.** `ReadWriteMany` matters because more than one agent runs at a time.
 With `ReadWriteOnce` every agent pod lands on one node.
 
-**The agent's power.** `global.agentops.runtime.rbacMode` is the agent's reach.
-It ships empty, which resolves to `none`.
+**The agent's power.** **THE DEFAULT IS NOTHING, AND NO SETTING WIDENS IT.**
 
-| Mode | Renders | When |
-|---|---|---|
-| `none` | nothing | **the default** |
-| `readonly` | `agentops-runtime-readonly` | the default under demo mode |
-| `full` | `agentops-runtime-acting` | never a default. Never inferred |
+A route that names no account holds no Kubernetes permissions, and this chart
+refuses to bind anything to that account.
 
-**A mode renders a NAMED account, and a Pipeline opts into it.** Nothing is
-bound to the account a Pipeline naming none runs as — see
-[silence means no power](#silence-means-no-power).
+**More than nothing is an account you DECLARE and NAME on the routes that need
+it** — see [silence means no power](#silence-means-no-power). There is no preset
+posture: a named posture nobody declared is a grant nobody reviewed.
 
-**`full` used to be `cluster-admin`, and `readonly` used to bind the built-in
-`view`.** Both are gone — see [CHANGELOG](CHANGELOG.md) for the version and the
-upgrade step.
+An agent still reaches whatever its toolsets and MCP servers give it. A bundle's
+MCP server carries its OWN account and its own grant, which is how a demo
+install reads the cluster with no runtime permissions at all.
+
+**A release-wide permission MODE used to select an account.** It is gone, with
+no alias — see [CHANGELOG](CHANGELOG.md) for the upgrade step.
 
 **One more decision comes with it:** whether an agent may run a pod
 ([`allowPodExecution`](#allowpodexecution--read-this-before-turning-it-on)).
@@ -119,10 +118,10 @@ substrate they run on comes from this chart.
 
 | Bundle | Set | Its values |
 |---|---|---|
-| Kubernetes events | `k8s-bundle.enabled` | [k8s-bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/k8s-bundle.md) |
-| Prometheus alerts | `prometheus-bundle.enabled` | [prometheus-bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus-bundle.md) |
-| Telegram | `telegram-bundle.enabled` | [telegram-bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram-bundle.md) |
-| Home Assistant | `ha-bundle.enabled` | [ha-bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/ha-bundle.md) |
+| Kubernetes events | `kubernetes.enabled` | [kubernetes](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/kubernetes.md) |
+| Prometheus alerts | `prometheus.enabled` | [prometheus](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus.md) |
+| Telegram | `telegram.enabled` | [telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram.md) |
+| Home Assistant | `home-assistant.enabled` | [home-assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/home-assistant.md) |
 
 All four are off by default. Each bundle's own page owns its values — this page
 does not repeat them.
@@ -145,7 +144,7 @@ helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 |---|---|---|
 | `maxActiveConversations` | `5` | how many agents hold a pod at once. Over-cap work waits in `Pending` with no pod and no thread |
 | `maxQueuedConversations` | `50` | the backlog bound. Past it, new signals are declined and the sender is told |
-| `runtimeIdleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
+| `global.agentops.runtimeDefaults.idleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
 
 ### Storage
 
@@ -279,7 +278,7 @@ Three settings limit what that costs. All are off by default and independent.
 
 | Key | Default | What it does |
 |---|---|---|
-| `runtime.contextSync.paths` | `[]` | moves the live context to pod-local storage, leaving a snapshot on the volume |
+| `global.agentops.runtimeDefaults.contextSync.paths` | `[]` | moves the live context to pod-local storage, leaving a snapshot on the volume |
 | `rbac.drainAware` | `false` | releases idle agent pods from a cordoned node, so the filesystem unmounts before the reboot |
 | `contextProbe.enabled` | `false` | hourly mount probe, so a damaged idle volume is found in an hour rather than at next use |
 
@@ -291,9 +290,11 @@ It needs `paths`, because only the runtime knows where its backend keeps
 context. For the reference runtime:
 
 ```yaml
-runtime:
-  contextSync:
-    paths: [".claude/projects/-data-workspace/**"]
+global:
+  agentops:
+    runtimeDefaults:
+      contextSync:
+        paths: [".claude/projects/-data-workspace/**"]
 ```
 
 `rbac.drainAware` costs the manager its only cluster-scoped permission — reading
@@ -304,12 +305,20 @@ not close it.
 
 | Key | What it does |
 |---|---|
-| `global.agentops.runtime.rbacMode` | the mode above. Empty by default, resolving to `none` |
-| `rbac.runtime.bindClusterRoles` | existing ClusterRoles to bind, additive to the mode. Default `[]` |
-| `rbac.runtime.clusterRoles` | rules to create and bind. Default `[]` |
-| `global.agentops.runtime.serviceAccountName` | the **floor** identity — what a Pipeline naming none runs as. It holds no RBAC. Default `agentops-runtime` |
-| `global.agentops.runtime.allowPodExecution` | may it create or enter a pod. Default `false` |
-| `rbac.runtime.serviceAccounts` | **additional** identities a Pipeline may name. Default `[]` |
+| `rbac.runtime.serviceAccounts` | the identities this install DECLARES, each with its own posture, for a Pipeline to NAME. Default `[]` — the only source of runtime permissions |
+| `global.agentops.runtimeDefaults.serviceAccountName` | the identity every route INHERITS. A REFERENCE this chart does not create. Default `agentops-runtime`, the floor |
+| `global.agentops.runtimeDefaults.allowPodExecution` | may it create or enter a pod. Default `false` |
+
+Each `serviceAccounts` entry takes:
+
+| Field | Default | Is |
+|---|---|---|
+| `name` | — | what a Pipeline's `serviceAccountName` refers to |
+| `create` | `true` | `false` references an account you own |
+| `rbacMode` | `none` | the posture, PER ACCOUNT: `none`, `readonly` or `full` — this chart's own ENUMERATED rules, never a built-in role |
+| `clusterRoles` | `[]` | rules to create and bind |
+| `bindClusterRoles` | `[]` | existing ClusterRoles to bind |
+| `namespaced` | `[]` | Roles in other namespaces |
 
 #### Silence means no power
 
@@ -320,10 +329,11 @@ reaches only what its toolsets and MCP servers give it.
 **Acting power is something a route opts into, by name:**
 
 ```yaml
-global:
-  agentops:
-    runtime:
-      rbacMode: full            # renders agentops-runtime-acting
+rbac:
+  runtime:
+    serviceAccounts:
+      - name: agentops-runtime-acting
+        rbacMode: full          # DECLARED, not selected by a release-wide value
 
 pipelines:
   - name: k8s-observe
@@ -340,9 +350,11 @@ pipelines:
 **This is a deliberate break.** A Pipeline used to inherit whatever the release
 granted, so a route held cluster power by not typing a field.
 
-- **The parent renders the floor and whatever `rbacMode` produces.**
+- **The parent always renders the floor**, bound to nothing, whatever else you
+  configure. That is what keeps it NAMEABLE to take one route back to nothing on
+  an install whose inherited default carries rights.
 - **Each bundle renders the accounts its own routes need**, scoped to what those
-  routes do. `ha-bundle` renders two with no Kubernetes RBAC at all, because
+  routes do. `home-assistant` renders two with no Kubernetes RBAC at all, because
   neither of its routes touches the Kubernetes API.
 - **`rbac.runtime.serviceAccounts`** is where you declare your own.
 - **A name nothing backs fails at pod admission**, saying which account.
@@ -456,20 +468,60 @@ action and says so. Add verbs on evidence, one at a time.
 
 ### The runtime
 
+**TWO BLOCKS, AND THE RULE SEPARATING THEM:**
+
+| Block | Holds |
+|---|---|
+| `global.agentops.runtimeDefaults` | what EVERY runtime inherits |
+| `runtimes:` | the runtimes that EXIST, each stating only what DIFFERS |
+
 ```yaml
-runtime:
-  # the agent backend — swap it to change vendor
-  image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
-  credentialsSecret:
-    # read by the kubelet, never by the operator
-    name: agentops-claude
-  # set it when the runtime image is not multi-arch
-  nodeSelector: {}
+global:
+  agentops:
+    runtimeDefaults:
+      # the agent backend — swap it to change vendor
+      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
+      credentialsSecret:
+        # read by the kubelet, never by the operator
+        name: agentops-claude
+        # supply `token` and the chart CREATES the Secret
+        token: ""
+      # set it when the runtime image is not multi-arch
+      nodeSelector: {}
+
+runtimes: []      # the `claude` bundle ships the one named `default`
 
 image:
   # the manager itself; its tag moves per release
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
 ```
+
+**The defaults are SUFFICIENT.** The model credential is the only value with no
+defensible default, and therefore the only thing you must supply.
+
+**Declaring a second vendor is an entry stating only its difference:**
+
+```yaml
+runtimes:
+  - name: ollama
+    image: registry.example.com/agentops-runtime-ollama:0.1.0
+    contextStorage: external      # keeps context at its own API, needs no disk
+
+pipelines:
+  - name: house-ops
+    runtimeRef: ollama            # the route selects it
+```
+
+**`default` is what a route naming no `runtimeRef` resolves to.** The `claude`
+bundle ships it, on by default. **Turn that bundle off with no replacement and
+the render FAILS**, naming the missing runtime and the routes that needed it —
+rather than leaving conversations in `Pending` forever with the reason in the
+manager's log.
+
+**Why the defaults live under `global.`** — a forcing, not tidiness. A subchart
+reads no parent scope but that one, and a bundle-shipped runtime has nowhere
+else to inherit from. `allowPodExecution` is read from there by a parent helper
+the Kubernetes bundle CALLS, where only `.Values.global` resolves.
 
 A wrong credential fails late and quietly. The pod is created, then sits in
 `CreateContainerConfigError` while conversations queue behind it.
@@ -490,18 +542,18 @@ which owns the trust boundary.
 Nothing restricts which pods may reach this release's components. Several of
 them authenticate nobody.
 
-- The **MCP servers** accept any caller. Under `rbacMode: full` the Kubernetes
-  one holds the acting role above — an agent reaches the cluster through it, so
-  it is the same wall.
+- The **MCP servers** accept any caller. Under `kubernetes.allowMutations: true`
+  the Kubernetes one holds an acting role — an agent reaches the cluster through
+  it, so it is the same wall.
 - The **manager's work contract** takes no credential.
 - The **console's API** answers below its authenticating proxy.
 
-Two switches, both off by default, and they close different things.
+Two switches, and they close different things. One is on by default.
 
 | Key | Default | What it bounds |
 |---|---|---|
 | `global.agentops.networkPolicy.enabled` | `false` | **who may connect** — one policy per component, allowing only the callers your wiring implies |
-| `runtime.egressMediation.enabled` | `false` | **what a connected agent may do** — the bound toolsets, enforced outside the agent |
+| `global.agentops.runtimeDefaults.egressMediation.enabled` | **`true`** | **what a connected agent may do** — the bound toolsets, enforced outside the agent |
 
 **Network policy applies successfully on a cluster that does not enforce it, and
 protects nothing.** There is no error. This chart cannot detect the difference,
@@ -536,15 +588,33 @@ An agent that can run commands reaches a bound MCP server directly and calls
 whatever that server registers. `agentops-shell` is bound on ordinary routes, so
 this is the common case, not an exotic one.
 
-`runtime.egressMediation.enabled` puts a proxy in the runtime pod that the
-agent's traffic cannot route around, and enforces the bound toolsets there.
+`global.agentops.runtimeDefaults.egressMediation.enabled` puts a proxy in the
+runtime pod that the agent's traffic cannot route around, and enforces the bound
+toolsets there.
 
-Know two things before enabling it.
+**IT IS ON BY DEFAULT.** The wall that constrains an agent that does not
+cooperate should not be something you have to discover.
 
-1. It adds a **privileged init container** that installs the redirect and exits
-   before the agent starts. A namespace under `restricted` Pod Security
-   admission refuses it.
+Know two things about the cost.
+
+1. It adds a **privileged init container** (`NET_ADMIN`) that installs the
+   redirect and exits before the agent starts. **A namespace under `restricted`
+   Pod Security admission REFUSES it** — at POD ADMISSION, when a conversation
+   starts, not at render. Turn it off before installing there:
+
+   ```yaml
+   global:
+     agentops:
+       runtimeDefaults:
+         egressMediation:
+           enabled: false
+   ```
+
 2. It adds a container per active conversation.
+
+**A single runtime can decline it** instead, with `egressMediation.enabled:
+false` on its `runtimes:` entry or on the `claude:` bundle — a vendor reaching
+no MCP server has nothing to mediate.
 
 Two things it does not cover, by design:
 

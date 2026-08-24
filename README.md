@@ -129,7 +129,7 @@ Eleven, one line each. [Every field, in full](docs/concepts.md).
 | Kind | What it defines |
 |---|---|
 | [`AgentProfile`](docs/concepts.md#agentprofile) | Who the agent is — repo, role file, credentials, limits. Carries no capabilities and selects no runtime. |
-| [`AgentRuntime`](docs/concepts.md#agentruntime) | What executes it — image, idle TTL, context volume, service account. |
+| [`AgentRuntime`](docs/concepts.md#agentruntime) | What executes it — image, idle TTL, default identity. One per VENDOR, declared by the install or by a bundle. |
 | [`Conversation`](docs/concepts.md#conversation) | One incident or task: chat topic + agent session + a serial queue of inputs. |
 | [`ConversationInput`](docs/concepts.md#conversationinput) | Out-of-line payloads, so Conversation objects stay small in etcd. |
 | [`Channel`](docs/concepts.md#channel) | A chat surface: where output goes. Type-agnostic metadata plus opaque config. |
@@ -177,7 +177,7 @@ in learning order. The reference pages are read here:
 | [docs/cr-reference.md](docs/cr-reference.md) | Every field of every kind, generated from the CRDs the chart ships |
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
-| [k8s](docs/k8s-bundle.md) · [telegram](docs/telegram-bundle.md) · [prometheus](docs/prometheus-bundle.md) · [ha](docs/ha-bundle.md) | The four bundles: what each ships, and the agent that answers its lane |
+| [kubernetes](docs/kubernetes.md) · [telegram](docs/telegram.md) · [prometheus](docs/prometheus.md) · [home-assistant](docs/home-assistant.md) · [claude](docs/claude.md) | The bundles: what each ships, and the agent — or runtime — it brings |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) · [docs/adr/](docs/adr/) | Upgrade guides newest first, and decisions with the alternatives that were built |
 
 ## Contributing

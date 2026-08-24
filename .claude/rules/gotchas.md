@@ -175,12 +175,12 @@ A bundle MAY ship its own only when ALL of:
 
 | Bundle | Qualifies | `enabled` default | Routes |
 |---|---|---|---|
-| `k8s-bundle.pipelines` | yes — it owns its whole lane (source, profile, both toolsets), so channels are the only foreign name | **nullable**, so an explicit `false` can decline the route even under demo mode | one |
-| `prometheus-bundle.pipelines` | yes, on the same grounds | plain `false` — demo mode never enables that bundle, so there is nothing for an explicit `false` to beat | one |
-| `ha-bundle.pipelines` | yes, same plain `false` for the same reason | plain `false` | **two**, because its lane has two privilege levels |
-| `telegram-bundle` | **no — the counter-example.** Its routes genuinely span bundles, because a chat surface is answered by an agent from somewhere else | — | none |
+| `kubernetes.pipelines` | yes — it owns its whole lane (source, profile, both toolsets), so channels are the only foreign name | **nullable**, so an explicit `false` can decline the route even under demo mode | one |
+| `prometheus.pipelines` | yes, on the same grounds | plain `false` — demo mode never enables that bundle, so there is nothing for an explicit `false` to beat | one |
+| `home-assistant.pipelines` | yes, same plain `false` for the same reason | plain `false` | **two**, because its lane has two privilege levels |
+| `telegram` | **no — the counter-example.** Its routes genuinely span bundles, because a chat surface is answered by an agent from somewhere else | — | none |
 
-**`ha-bundle`'s acting route claims the log source and NO chat source**, so
+**`home-assistant`'s acting route claims the log source and NO chat source**, so
 reaching it is `/ha-ops <task>` and never an accident.
 
 - **Name pipelines for their JOB**, not for the channel they answer on.

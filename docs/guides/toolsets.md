@@ -50,7 +50,8 @@ It is **not** what you want when:
 `--allowedTools` configures a **cooperating** agent. For one that does not
 cooperate there is
 [`platform/egress-proxy`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/platform/egress-proxy/),
-an in-pod wall enabled by `runtime.egressMediation.enabled`.
+an in-pod wall enabled by `global.agentops.runtimeDefaults.egressMediation.enabled`,
+which is ON by default.
 
 Review
 [Capabilities are wiring](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md#capabilities-are-wiring)
@@ -164,19 +165,19 @@ there would be one behaviour wearing two names.
 
 ## Split by privilege
 
-The chart's `ha-bundle` splits its own tools in two, and the split is the
+The chart's `home-assistant` splits its own tools in two, and the split is the
 lesson. Observation:
 
 <!-- generated: example preset=tier2 kind=MCPToolset name=ha-observability -->
 ```yaml
-# Source: agent-ops-operator/charts/ha-bundle/templates/mcp.yaml
+# Source: agent-ops-operator/charts/home-assistant/templates/mcp.yaml
 apiVersion: agentops.dev/v1alpha1
 kind: MCPToolset
 metadata:
   name: ha-observability
   namespace: agent-ops
   labels:
-    app.kubernetes.io/name: agentops-ha-bundle
+    app.kubernetes.io/name: agentops-home-assistant
 spec:
   tools:
     - mcp__homeassistant__GetLiveContext
@@ -192,14 +193,14 @@ Action:
 
 <!-- generated: example preset=tier2 kind=MCPToolset name=ha-actions -->
 ```yaml
-# Source: agent-ops-operator/charts/ha-bundle/templates/mcp.yaml
+# Source: agent-ops-operator/charts/home-assistant/templates/mcp.yaml
 apiVersion: agentops.dev/v1alpha1
 kind: MCPToolset
 metadata:
   name: ha-actions
   namespace: agent-ops
   labels:
-    app.kubernetes.io/name: agentops-ha-bundle
+    app.kubernetes.io/name: agentops-home-assistant
 spec:
   tools:
     - mcp__homeassistant__HassTurnOn
@@ -222,14 +223,14 @@ One server serves both:
 
 <!-- generated: example preset=tier2 kind=MCPConfig name=ha-api -->
 ```yaml
-# Source: agent-ops-operator/charts/ha-bundle/templates/mcp.yaml
+# Source: agent-ops-operator/charts/home-assistant/templates/mcp.yaml
 apiVersion: agentops.dev/v1alpha1
 kind: MCPConfig
 metadata:
   name: ha-api
   namespace: agent-ops
   labels:
-    app.kubernetes.io/name: agentops-ha-bundle
+    app.kubernetes.io/name: agentops-home-assistant
 spec:
   servers:
     homeassistant:
@@ -248,14 +249,14 @@ Then two routes at two privilege levels. The one anyone may reach:
 
 <!-- generated: example preset=tier2 kind=Pipeline name=ha-control -->
 ```yaml
-# Source: agent-ops-operator/charts/ha-bundle/templates/pipelines.yaml
+# Source: agent-ops-operator/charts/home-assistant/templates/pipelines.yaml
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
 metadata:
   name: ha-control
   namespace: agent-ops
   labels:
-    app.kubernetes.io/name: agentops-ha-bundle
+    app.kubernetes.io/name: agentops-home-assistant
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.
@@ -286,14 +287,14 @@ And the one that also gets a shell:
 
 <!-- generated: example preset=tier2 kind=Pipeline name=ha-ops -->
 ```yaml
-# Source: agent-ops-operator/charts/ha-bundle/templates/pipelines.yaml
+# Source: agent-ops-operator/charts/home-assistant/templates/pipelines.yaml
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
 metadata:
   name: ha-ops
   namespace: agent-ops
   labels:
-    app.kubernetes.io/name: agentops-ha-bundle
+    app.kubernetes.io/name: agentops-home-assistant
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.

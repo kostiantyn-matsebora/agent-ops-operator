@@ -37,6 +37,74 @@ operator who meant to leave it off.
 - **WHEN** the chart is installed with the bundle enabled and `global.demo.enabled=false`
 - **THEN** the same bundle components render — demo mode is an enablement path, not a distinct feature set — and NO Pipeline renders unless the wiring flag is set
 
+### Requirement: Each component is individually toggleable
+Within an active bundle, `eventsAdapter.enabled`, `profile.enabled`, `mcp.enabled`, and `pipelines.enabled` SHALL independently control their component's objects. The first three SHALL default `true`, and the `mcpServers` sub-component that deploys the MCP server workload SHALL default `true` alongside `mcp`: the two flip together so the config's URL always has an endpoint to default onto, which is the only reason the MCP component was previously off. The endpoint guard SHALL remain and SHALL still fail loudly for `mcp.enabled` with no server workload and no `url`.
+
+`pipelines.enabled` SHALL default `false` — the exception among the four, because a route is the one component of this bundle that spends money and touches the cluster on its own. Demo mode SHALL force it on; nothing else SHALL.
+
+The bundle SHALL expose no runtime-defaults or floor-account component; those are the parent's `global.agentops.runtimeDefaults` and `runtimes:`. It SHALL expose ONE stated setting for whether agents on its lane may CHANGE the cluster, which moves the server's read-only flag, that server's RBAC, the mutating toolset and which route ships — each still individually overridable, and none derived from a release-wide value.
+
+Cross-component references SHALL be values-resolvable so partial enablement works. Wiring the bundle renders SHALL reference only objects the bundle itself renders, plus values-supplied names omitted when unset; a route that would span components the bundle cannot see SHALL be declared by the install, in the parent chart's `pipelines:`.
+
+#### Scenario: Events-only bundle
+- **WHEN** the bundle is enabled with `profile.enabled=false`, `mcp.enabled=false` and wiring off
+- **THEN** only the SignalAdapter, its RBAC, and the SignalSource render, and the install claims that source from its own wiring
+
+#### Scenario: Wiring without a profile
+- **WHEN** wiring is enabled with `profile.enabled=false`
+- **THEN** no Pipeline renders, because a Pipeline with no profile has no agent to run
+
+#### Scenario: Profile-only bundle
+- **WHEN** the bundle is enabled with `eventsAdapter.enabled=false`
+- **THEN** the profile renders and the agent is usable through any Pipeline naming it, executing on the parent's runtime
+
+#### Scenario: A Kubernetes bundle can see Kubernetes by default
+- **WHEN** the bundle is enabled with defaults
+- **THEN** the `MCPConfig`, the read toolset, and the MCP server workload all render, so the install does not look complete while lacking the cluster access path the project prefers
+
+#### Scenario: MCP tooling without the events lane
+- **WHEN** the bundle is enabled with `eventsAdapter.enabled=false`
+- **THEN** the `MCPConfig` and toolsets render for operators to bind from their own Pipelines
+
+### Requirement: The profile component ships the k8s-engineer identity chain
+When active, the `profile` component SHALL render exactly one object: the `k8s-engineer` `AgentProfile` (values-configurable name, `maxTurns`, no repository, and **no capabilities** — no `allowedTools`, no `mcp`). It SHALL render no `AgentRuntime`, no ServiceAccount, and no credential Secret; the profile executes on the parent chart's runtime.
+
+Because the profile has NO repository, no agent definition file can be resolved for it. The component SHALL therefore support an inline role (`systemPrompt`) and ship a sensible default, so the shipped agent is not personality-free: a conversation started by a cluster event would otherwise arrive with no instructions at all.
+
+`profile.runtimeRef` SHALL remain, naming a runtime other than `default` — a different-vendor runtime the install declared. Left empty, the profile emits no `runtimeRef` and falls back to `default`, whose existence the render-time default-runtime guard is what guarantees.
+
+#### Scenario: Profile executes under the release's runtime SA
+- **WHEN** the bundle renders with defaults and a task reaches `k8s-engineer`
+- **THEN** the conversation's runtime pod runs under the account its route names, or the release's default where it names none, and holds exactly what that account was granted
+
+#### Scenario: The profile component renders one object
+- **WHEN** the bundle renders with `profile.enabled=true`
+- **THEN** the component's output is the `AgentProfile` alone, and no `AgentRuntime`, ServiceAccount, or Secret carries a bundle label
+
+#### Scenario: Pointing at a different runtime
+- **WHEN** `profile.runtimeRef` names an existing AgentRuntime
+- **THEN** the `AgentProfile` renders with that `runtimeRef` and the parent's `default` runtime is left unused by this profile
+
+#### Scenario: Fallback needs no wiring
+- **WHEN** `profile.runtimeRef` is empty and a runtime answers to `default`
+- **THEN** the profile emits no `runtimeRef` and resolves the parent's `default` runtime
+
+#### Scenario: The profile stays free of capabilities
+- **WHEN** the bundle renders with the MCP component active
+- **THEN** the `MCPConfig` is referenced by whichever Pipeline routes the conversation — the bundle's own or the install's — and the AgentProfile itself declares no `mcp` block and no tools, so profiles stay reusable across differently-tooled routes
+
+#### Scenario: The demo reaches a Pipeline through the source it claims
+- **WHEN** a `kind: task` signal is posted to a source claimed by the bundle's own wiring or by the install's Pipeline
+- **THEN** the work unit carries that Pipeline's tools and the rendered AgentProfile declares none — the route is the one that claimed the source, and it is reached by posting to the source, never by naming the Pipeline or the profile
+
+#### Scenario: An observe-only agent
+- **WHEN** the claiming Pipeline binds the observation toolset without the shell or mutating ones
+- **THEN** the agent reads the cluster but changes nothing, because the allowlist is the whole grant
+
+#### Scenario: The repo-less agent still has a role
+- **WHEN** the bundle renders with defaults
+- **THEN** the AgentProfile carries an inline role describing the agent's job and how to act on a cluster, which the runtime appends to its system prompt
+
 ## REMOVED Requirements
 
 ### Requirement: The wiring component ships at most one claiming Pipeline, off by default

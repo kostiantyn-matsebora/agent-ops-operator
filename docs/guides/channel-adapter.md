@@ -198,7 +198,7 @@ metadata, so an operator learns what `config` needs without reading the source:
 
 <!-- generated: example preset=tier3 kind=ChannelAdapter name=telegram -->
 ```yaml
-# Source: agent-ops-operator/charts/telegram-bundle/templates/adapters.yaml
+# Source: agent-ops-operator/charts/telegram/templates/adapters.yaml
 # CONTINUATION and delivery. Does NOT poll: gateway-telegram owns the single
 # getUpdates loop and pushes topic updates here.
 apiVersion: agentops.dev/v1alpha1
@@ -207,7 +207,7 @@ metadata:
   name: telegram
   namespace: agent-ops
   labels:
-    app.kubernetes.io/name: agentops-telegram-bundle
+    app.kubernetes.io/name: agentops-telegram
 spec:
   image: "ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.24.1"
   # Receives forwarded topic updates: the reconciler owns Service
@@ -274,7 +274,7 @@ interprets:
 
 <!-- generated: example preset=tier3 kind=Channel name=k8s-ops -->
 ```yaml
-# Source: agent-ops-operator/charts/telegram-bundle/templates/surface.yaml
+# Source: agent-ops-operator/charts/telegram/templates/surface.yaml
 # The Channel CARRIES conversations — it never starts one. No wiring lives
 # here: who answers is declared by whichever Pipeline claims the chat source.
 apiVersion: agentops.dev/v1alpha1
@@ -283,7 +283,7 @@ metadata:
   name: k8s-ops
   namespace: agent-ops
   labels:
-    app.kubernetes.io/name: agentops-telegram-bundle
+    app.kubernetes.io/name: agentops-telegram
 spec:
   # names the ChannelAdapter serving this surface; that adapter's
   # implementation is what defines and validates `config` below

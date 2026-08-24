@@ -72,14 +72,24 @@ def load():
             "pattern": re.compile(t["pattern"], flags),
             "allow": [re.compile(a, re.IGNORECASE) for a in t.get("allow", [])],
         })
-    return cfg["scan"], terms
+    return cfg["scan"], cfg.get("skip", []), terms
 
 
-def files(patterns):
+def files(patterns, skip=()):
+    """Every configured path, minus the ones `skip` names.
+
+    THE CHANGELOG IS SKIPPED, and it is the only file that is. Its job is to
+    record what a version REMOVED, so it accumulates every retired name this
+    guard exists to catch — and an entry for a released version must not be
+    edited to satisfy a guard added afterwards, because somebody may be
+    following it. The archives under `changelog/` were never scanned for the
+    same reason: `docs/*.md` does not recurse.
+    """
+    skipped = {os.path.join(ROOT, s) for s in skip}
     seen = []
     for pat in patterns:
         for path in sorted(glob.glob(os.path.join(ROOT, pat), recursive=True)):
-            if os.path.isfile(path) and path not in seen:
+            if os.path.isfile(path) and path not in seen and path not in skipped:
                 seen.append(path)
     return seen
 
@@ -167,8 +177,8 @@ def main():
     ap.add_argument("--path", nargs="+", help="scan these paths instead of the configured set")
     args = ap.parse_args()
 
-    scan_globs, terms = load()
-    targets = args.path if args.path else files(scan_globs)
+    scan_globs, skip, terms = load()
+    targets = args.path if args.path else files(scan_globs, skip)
 
     counts = Counter()
     reported = []

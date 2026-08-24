@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Chart-render assertions for the prometheus-bundle subchart.
+// Chart-render assertions for the prometheus subchart.
 //
 // The bundle was renamed from vm-bundle, dropped its logs component, gained an
 // alert-investigator profile and its own default-off wiring. None of that was
@@ -18,7 +18,7 @@ import (
 // splitDocs) live in charttemplate_test.go, same package.
 
 func promPipelines(rendered string) map[string]string {
-	return labelledPipelines(rendered, "agentops-prometheus-bundle")
+	return labelledPipelines(rendered, "agentops-prometheus")
 }
 
 func promPipelineNames(rendered string) []string {
@@ -31,7 +31,7 @@ func promPipelineNames(rendered string) []string {
 }
 
 // The bundle consumes an Alertmanager and a metrics endpoint that no demo
-// cluster has, so demo mode must leave it alone. `prometheus-bundle.active` has
+// cluster has, so demo mode must leave it alone. `prometheus.active` has
 // no demo branch precisely so this holds.
 func TestPrometheusBundleIsOffUntilAskedFor(t *testing.T) {
 	for _, tc := range []struct {
@@ -44,7 +44,7 @@ func TestPrometheusBundleIsOffUntilAskedFor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			out := helmTemplate(t, tc.args...)
 			for _, needle := range []string{
-				"agentops-prometheus-bundle", "alert-investigator",
+				"agentops-prometheus", "alert-investigator",
 				"prometheus-api", "prometheus-observability",
 				"agentops-mcp-prometheus", "agentops-signal-alertmanager",
 			} {
@@ -61,29 +61,29 @@ func TestPrometheusBundleIsOffUntilAskedFor(t *testing.T) {
 // message has to name the NEW key, or it sends nobody anywhere.
 func TestRetiredVMBundleKeyFailsTheRender(t *testing.T) {
 	out := helmTemplateErr(t, "--set", "vm-bundle.enabled=true")
-	for _, needle := range []string{"vm-bundle", "prometheus-bundle"} {
+	for _, needle := range []string{"vm-bundle", "prometheus"} {
 		if !strings.Contains(out, needle) {
 			t.Errorf("the guard must name %q:\n%s", needle, out)
 		}
 	}
 }
 
-// The same default-off rule k8s-bundle follows: turning the bundle on for its
+// The same default-off rule kubernetes follows: turning the bundle on for its
 // ingest lane must never silently add a route beside the install's own.
 func TestPrometheusBundleShipsNoWiringUnlessAsked(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
 	}{
-		{"bundle enabled", []string{"--set", "prometheus-bundle.enabled=true"}},
+		{"bundle enabled", []string{"--set", "prometheus.enabled=true"}},
 		{"ingest lane enabled", []string{
-			"--set", "prometheus-bundle.enabled=true",
-			"--set", "prometheus-bundle.alertmanager.defaultSource.enabled=true"}},
+			"--set", "prometheus.enabled=true",
+			"--set", "prometheus.alertmanager.defaultSource.enabled=true"}},
 		// A Pipeline with no profile has no agent to run.
 		{"wiring without a profile", []string{
-			"--set", "prometheus-bundle.enabled=true",
-			"--set", "prometheus-bundle.pipelines.enabled=true",
-			"--set", "prometheus-bundle.profile.enabled=false"}},
+			"--set", "prometheus.enabled=true",
+			"--set", "prometheus.pipelines.enabled=true",
+			"--set", "prometheus.profile.enabled=false"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := promPipelineNames(helmTemplate(t, tc.args...)); len(got) != 0 {
@@ -98,11 +98,11 @@ func TestPrometheusBundleShipsNoWiringUnlessAsked(t *testing.T) {
 // server without the toolset gives an agent tools it may not call.
 func TestPrometheusWiringClaimsItsOwnLane(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "prometheus-bundle.enabled=true",
-		"--set", "prometheus-bundle.alertmanager.defaultSource.enabled=true",
-		"--set", "prometheus-bundle.mcp.enabled=true",
-		"--set", "prometheus-bundle.mcp.url=http://mcp.example/mcp",
-		"--set", "prometheus-bundle.pipelines.enabled=true")
+		"--set", "prometheus.enabled=true",
+		"--set", "prometheus.alertmanager.defaultSource.enabled=true",
+		"--set", "prometheus.mcp.enabled=true",
+		"--set", "prometheus.mcp.url=http://mcp.example/mcp",
+		"--set", "prometheus.pipelines.enabled=true")
 	got := promPipelineNames(out)
 	if len(got) != 1 || got[0] != "alert-triage" {
 		t.Fatalf("wiring must render exactly alert-triage, got %v", got)
@@ -125,9 +125,9 @@ func TestPrometheusWiringClaimsItsOwnLane(t *testing.T) {
 // them. A ref to an object nobody rendered is how a route rots into fiction.
 func TestPrometheusWiringNamesOnlyWhatWasRendered(t *testing.T) {
 	base := []string{
-		"--set", "prometheus-bundle.enabled=true",
-		"--set", "prometheus-bundle.alertmanager.defaultSource.enabled=true",
-		"--set", "prometheus-bundle.pipelines.enabled=true",
+		"--set", "prometheus.enabled=true",
+		"--set", "prometheus.alertmanager.defaultSource.enabled=true",
+		"--set", "prometheus.pipelines.enabled=true",
 	}
 	bare := promPipelines(helmTemplate(t, base...))["alert-triage"]
 	for _, needle := range []string{"prometheus-observability", "prometheus-api", "mcpConfigs"} {
@@ -138,7 +138,7 @@ func TestPrometheusWiringNamesOnlyWhatWasRendered(t *testing.T) {
 	if strings.Contains(bare, "channelRefs") {
 		t.Errorf("an empty channel list must omit the key entirely:\n%s", bare)
 	}
-	named := helmTemplate(t, append(base, "--set", "prometheus-bundle.pipelines.channels={console}")...)
+	named := helmTemplate(t, append(base, "--set", "prometheus.pipelines.channels={console}")...)
 	if doc := promPipelines(named)["alert-triage"]; !strings.Contains(doc, "channelRefs:\n    - name: console") {
 		t.Errorf("a named channel must reach the route:\n%s", doc)
 	}
@@ -148,29 +148,29 @@ func TestPrometheusWiringNamesOnlyWhatWasRendered(t *testing.T) {
 // nowhere, a server with no backend, or a server wearing the agent's identity
 // all render happily and fail later, somewhere that does not name them.
 func TestPrometheusBundleGuards(t *testing.T) {
-	on := []string{"--set", "prometheus-bundle.enabled=true"}
+	on := []string{"--set", "prometheus.enabled=true"}
 	for _, tc := range []struct {
 		name string
 		args []string
 		want string
 	}{
 		{"mcp enabled with no server and no url",
-			[]string{"--set", "prometheus-bundle.mcp.enabled=true"},
+			[]string{"--set", "prometheus.mcp.enabled=true"},
 			"mcp.url is required"},
 		{"server deployed with no backend",
-			[]string{"--set", "prometheus-bundle.mcpServers.enabled=true"},
+			[]string{"--set", "prometheus.mcpServers.enabled=true"},
 			"mcpServers.backend is required"},
 		{"server wearing the runtime identity",
 			[]string{
-				"--set", "prometheus-bundle.mcpServers.enabled=true",
-				"--set", "prometheus-bundle.mcpServers.backend=http://vm:8429",
-				"--set", "prometheus-bundle.mcpServers.serviceAccountName=agentops-runtime"},
+				"--set", "prometheus.mcpServers.enabled=true",
+				"--set", "prometheus.mcpServers.backend=http://vm:8429",
+				"--set", "prometheus.mcpServers.serviceAccountName=agentops-runtime"},
 			"must differ from global.agentops.runtime.serviceAccountName"},
 		{"transport the server cannot speak",
 			[]string{
-				"--set", "prometheus-bundle.mcp.enabled=true",
-				"--set", "prometheus-bundle.mcp.url=http://mcp.example/mcp",
-				"--set", "prometheus-bundle.mcp.transport=grpc"},
+				"--set", "prometheus.mcp.enabled=true",
+				"--set", "prometheus.mcp.url=http://mcp.example/mcp",
+				"--set", "prometheus.mcp.transport=grpc"},
 			"mcp.transport must be"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -195,11 +195,11 @@ func TestMCPServerIsStartedInTheAdvertisedTransport(t *testing.T) {
 	} {
 		t.Run(tc.transport, func(t *testing.T) {
 			out := helmTemplate(t,
-				"--set", "prometheus-bundle.enabled=true",
-				"--set", "prometheus-bundle.mcp.enabled=true",
-				"--set", "prometheus-bundle.mcp.transport="+tc.transport,
-				"--set", "prometheus-bundle.mcpServers.enabled=true",
-				"--set", "prometheus-bundle.mcpServers.backend=http://vm:8429")
+				"--set", "prometheus.enabled=true",
+				"--set", "prometheus.mcp.enabled=true",
+				"--set", "prometheus.mcp.transport="+tc.transport,
+				"--set", "prometheus.mcpServers.enabled=true",
+				"--set", "prometheus.mcpServers.backend=http://vm:8429")
 			// The NAME and its VALUE asserted as one adjacent pair — checking
 			// them separately is how the first version of this test passed on a
 			// value that belonged to a different variable entirely.
@@ -221,15 +221,15 @@ func TestMCPServerIsStartedInTheAdvertisedTransport(t *testing.T) {
 // implementation that does not exist.
 func TestSourceFollowsTheAdapterName(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "prometheus-bundle.enabled=true",
-		"--set", "prometheus-bundle.alertmanager.defaultSource.enabled=true")
+		"--set", "prometheus.enabled=true",
+		"--set", "prometheus.alertmanager.defaultSource.enabled=true")
 	if !strings.Contains(out, "adapter: alertmanager") {
 		t.Error("the default source must name the default adapter")
 	}
 	out = helmTemplate(t,
-		"--set", "prometheus-bundle.enabled=true",
-		"--set", "prometheus-bundle.alertmanager.name=vm-alertmanager",
-		"--set", "prometheus-bundle.alertmanager.defaultSource.enabled=true")
+		"--set", "prometheus.enabled=true",
+		"--set", "prometheus.alertmanager.name=vm-alertmanager",
+		"--set", "prometheus.alertmanager.defaultSource.enabled=true")
 	if !strings.Contains(out, "adapter: vm-alertmanager") {
 		t.Error("an overridden adapter name must reach the source's spec.adapter")
 	}
@@ -242,21 +242,21 @@ func TestSourceFollowsTheAdapterName(t *testing.T) {
 // ingest fault from the sender's side.
 func TestPrometheusBundleNotes(t *testing.T) {
 	on := []string{
-		"--set", "prometheus-bundle.enabled=true",
-		"--set", "prometheus-bundle.alertmanager.defaultSource.enabled=true",
+		"--set", "prometheus.enabled=true",
+		"--set", "prometheus.alertmanager.defaultSource.enabled=true",
 	}
 	// A dry-run install adopts nothing, but helm still refuses cluster-scoped
 	// objects another release owns. Nothing in these notes reads them.
 	noClusterRBAC := []string{
-		"--set", "k8s-bundle.eventsAdapter.rbac.create=false",
-		"--set", "k8s-bundle.mcpServers.rbac.create=false",
+		"--set", "kubernetes.eventsAdapter.rbac.create=false",
+		"--set", "kubernetes.mcpServers.rbac.create=false",
 	}
 	claimsIt := []string{
 		"--set", "pipelines[0].name=my-alerts",
 		"--set", "pipelines[0].profile=alert-investigator",
 		"--set", "pipelines[0].signalSources={alerts}",
 	}
-	wired := []string{"--set", "prometheus-bundle.pipelines.enabled=true"}
+	wired := []string{"--set", "prometheus.pipelines.enabled=true"}
 	for _, tc := range []struct {
 		name          string
 		args          []string
@@ -265,10 +265,10 @@ func TestPrometheusBundleNotes(t *testing.T) {
 		{"receiver stanza for a vanilla sender", nil,
 			[]string{"webhook_configs:", "send_resolved: false", "/webhook/alerts"}, nil},
 		{"a credentialed source prints its auth form",
-			[]string{"--set", "prometheus-bundle.alertmanager.defaultSource.credentialsSecretRef=alert-token"},
+			[]string{"--set", "prometheus.alertmanager.defaultSource.credentialsSecretRef=alert-token"},
 			[]string{"authorization:", "type: Bearer", "alert-token"}, nil},
 		{"registration says it is VictoriaMetrics-only",
-			[]string{"--set", "prometheus-bundle.alertmanager.registration.enabled=true"},
+			[]string{"--set", "prometheus.alertmanager.registration.enabled=true"},
 			[]string{"VICTORIAMETRICS-ONLY", "VMAlertmanagerConfig"},
 			[]string{"webhook_configs:"}},
 		{"nobody claims", nil,

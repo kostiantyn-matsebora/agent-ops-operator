@@ -1,0 +1,62 @@
+{{- $np := (.Values.global.agentops).networkPolicy | default dict }}
+{{- if and .Values.enabled $np.enabled }}
+{{- if .Values.mcpServers.enabled }}
+{{- $s := .Values.mcpServers }}
+{{- $name := include "prometheus.mcpServerName" . }}
+{{/*
+  The metrics MCP server, on the same terms as the other bundles': runtime pods
+  only. It authenticates nobody, so until this exists any pod in the cluster can
+  query the whole metrics backend through it.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-runtime
+      ports:
+        - protocol: TCP
+          port: {{ $s.port }}
+{{- end }}
+{{- with .Values.alertmanager.webhookFrom }}
+---
+{{/*
+  The webhook adapter, restricted to the sender.
+  
+  RENDERED ONLY WHEN THE SENDER IS NAMED. An empty list leaves this adapter
+  unrestricted rather than rendering a policy with no `from`, because a policy
+  that selects the adapter and allows nobody DENIES THE ALERT LANE — silently,
+  and at the moment alerts matter most. Under-restricting is recoverable. A
+  severed alert path is discovered during an incident.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentops-signal-{{ $.Values.alertmanager.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-signal-alertmanager
+spec:
+  podSelector:
+    matchLabels:
+      agentops.dev/signal-adapter: {{ $.Values.alertmanager.name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
+{{- end }}

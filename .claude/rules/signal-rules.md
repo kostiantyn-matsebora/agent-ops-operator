@@ -3,8 +3,8 @@ paths:
   - "signals/**"
   - "platform/manager/internal/ingest/**"
   - "platform/manager/internal/integration/charttemplate_test.go"
-  - "chart/charts/k8s-bundle/**"
-  - "chart/charts/ha-bundle/**"
+  - "chart/charts/kubernetes/**"
+  - "chart/charts/home-assistant/**"
 ---
 
 ## The rule vocabulary the event and log adapters share

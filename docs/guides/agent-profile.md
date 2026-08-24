@@ -163,18 +163,18 @@ so a first reply that can do nothing but talk is the expected result.
 
 ## Compare against a working profile
 
-The chart's `k8s-bundle` ships this one:
+The chart's `kubernetes` ships this one:
 
 <!-- generated: example preset=tier1 kind=AgentProfile name=k8s-engineer -->
 ```yaml
-# Source: agent-ops-operator/charts/k8s-bundle/templates/profile.yaml
+# Source: agent-ops-operator/charts/kubernetes/templates/profile.yaml
 apiVersion: agentops.dev/v1alpha1
 kind: AgentProfile
 metadata:
   name: k8s-engineer
   namespace: agent-ops
   labels:
-    app.kubernetes.io/name: agentops-k8s-bundle
+    app.kubernetes.io/name: agentops-kubernetes
 spec:
   # Behaviour only — no repository, and no capabilities. What this agent may DO
   # comes from the Pipelines routing it: the bundle's own wiring component when

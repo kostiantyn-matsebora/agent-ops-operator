@@ -145,31 +145,31 @@ jobs:
       - name: Convert this repo's CRDs into validation schemas
         run: python3 .github/scripts/crd-schemas.py chart/crds "$RUNNER_TEMP/crd-schemas"
       - run: helm lint chart
-      # EACH PERMUTATION CARRIES THE VALUES ITS SUBJECT REQUIRES. `ha-bundle`
+      # EACH PERMUTATION CARRIES THE VALUES ITS SUBJECT REQUIRES. `home-assistant`
       # and a Telegram surface refuse to render without a credential and an
       # endpoint — a matrix that omitted them would be testing the guards and
       # never reaching the templates.
       - name: Render and validate every permutation
         run: |
           set -euo pipefail
-          HA='--set ha-bundle.enabled=true
-              --set ha-bundle.homeAssistant.endpoint=https://ha.example.org
-              --set ha-bundle.homeAssistant.credentials.operatorToken=ci-token'
-          PROM='--set prometheus-bundle.enabled=true
-                --set prometheus-bundle.metrics.url=http://metrics.example:8428'
-          TG='--set telegram-bundle.enabled=true
-              --set telegram-bundle.surface.enabled=true
-              --set telegram-bundle.surface.chatId=-1001234567890
-              --set telegram-bundle.surface.credentials.botToken=ci:token'
+          HA='--set home-assistant.enabled=true
+              --set home-assistant.homeAssistant.endpoint=https://ha.example.org
+              --set home-assistant.homeAssistant.credentials.operatorToken=ci-token'
+          PROM='--set prometheus.enabled=true
+                --set prometheus.metrics.url=http://metrics.example:8428'
+          TG='--set telegram.enabled=true
+              --set telegram.surface.enabled=true
+              --set telegram.surface.chatId=-1001234567890
+              --set telegram.surface.credentials.botToken=ci:token'
           declare -A PERMUTATIONS=(
             [default]=""
             [demo]="--set global.demo.enabled=true"
-            [k8s-bundle]="--set k8s-bundle.enabled=true"
-            [prometheus-bundle]="$PROM"
-            [ha-bundle]="$HA"
-            [telegram-bundle]="$TG"
+            [kubernetes]="--set kubernetes.enabled=true"
+            [prometheus]="$PROM"
+            [home-assistant]="$HA"
+            [telegram]="$TG"
             [no-console]="--set console.enabled=false"
-            [everything]="--set global.demo.enabled=true --set k8s-bundle.enabled=true $PROM $HA $TG"
+            [everything]="--set global.demo.enabled=true --set kubernetes.enabled=true $PROM $HA $TG"
           )
           failed=0
           for name in "${!PERMUTATIONS[@]}"; do

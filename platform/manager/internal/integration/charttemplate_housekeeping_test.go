@@ -66,7 +66,7 @@ func TestHousekeepingRefusesTheRuntimeIdentity(t *testing.T) {
 	out := helmTemplateErr(t,
 		"--set", "housekeeping.enabled=true",
 		"--set", "housekeeping.serviceAccountName=agentops-runtime")
-	if !strings.Contains(out, "must differ from global.agentops.runtime.serviceAccountName") {
+	if !strings.Contains(out, "must differ from the floor account") {
 		t.Errorf("the guard must fire and say why:\n%s", out)
 	}
 }
@@ -166,17 +166,17 @@ func cronJobDoc(t *testing.T, rendered string) string {
 // conversations is a property of that group.
 func TestTelegramTopicDeletionIsOptInAndPerChannel(t *testing.T) {
 	surface := []string{
-		"--set", "telegram-bundle.enabled=true",
-		"--set", "telegram-bundle.surface.enabled=true",
-		"--set", "telegram-bundle.surface.chatId=-100",
-		"--set", "telegram-bundle.surface.credentials.botToken=x",
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.surface.enabled=true",
+		"--set", "telegram.surface.chatId=-100",
+		"--set", "telegram.surface.credentials.botToken=x",
 	}
 	// default: the key is absent, so the transcript survives
 	if out := helmTemplate(t, surface...); strings.Contains(out, "deleteTopicOnConversationDelete: true") {
 		t.Error("topic deletion must be off by default — upgrading may not destroy a transcript")
 	}
 	// opted in: it reaches the CHANNEL's config
-	on := helmTemplate(t, append(surface, "--set", "telegram-bundle.surface.deleteTopicOnDelete=true")...)
+	on := helmTemplate(t, append(surface, "--set", "telegram.surface.deleteTopicOnDelete=true")...)
 	var channel string
 	for _, doc := range splitDocs(on) {
 		if strings.Contains(doc, "kind: Channel\n") && strings.Contains(doc, "adapter: telegram") {

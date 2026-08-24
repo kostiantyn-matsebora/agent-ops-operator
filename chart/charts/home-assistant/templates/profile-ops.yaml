@@ -1,0 +1,48 @@
+{{- /*
+The house's ADMINISTRATOR — the agent that FIXES it: behaviour only, same shape
+as the user profile.
+
+Its PREREQUISITE is the operator credential. Without one this profile does not
+render at all — an agent asked to repair an integration with a token that cannot
+reconfigure one fails every task it is given, looking installed while it does.
+
+Same rule as the user profile: no allowedTools, no mcp. Capabilities are wiring.
+*/ -}}
+{{- if and (include "home-assistant.active" .) (include "home-assistant.opsProfileEnabled" .) }}
+{{- $p := .Values.profiles.ops }}
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-home-assistant
+spec:
+  maxTurns: {{ $p.maxTurns }}
+  {{- with $p.systemPrompt }}
+  # Inline role: no repository, so no agent definition file exists to read.
+  systemPrompt: |
+{{ . | trim | indent 4 }}
+  {{- end }}
+  # CONNECTIVITY, not capability — and the wider of the two paths this bundle
+  # offers. An OPERATOR token here plus the shell toolset the ops route binds
+  # reaches the whole Home Assistant API for that user. That is not a leak, it
+  # is the mechanism: configuration is what this agent fixes, and no MCP tool
+  # here reaches configuration. Documented rather than hidden — docs/home-assistant.md.
+  env:
+    - name: HA_URL
+      value: {{ include "home-assistant.endpoint" . | quote }}
+    - name: HA_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "home-assistant.operatorSecret" . }}
+          key: token
+  # REQUIRED, and with no default on purpose: `none` leaves output unformatted
+  # unless this profile's prompt says otherwise, and `blocks` shapes it by
+  # something the author never asked for. The author declares it.
+  outputFormat: {{ $p.outputFormat }}
+  {{- with $p.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+{{- end }}

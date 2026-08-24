@@ -1,0 +1,73 @@
+{{- /*
+MCP component: the two halves of Kubernetes tooling, both referencable by name
+from any Pipeline (the bundle's own wiring binds them when it renders — see
+pipelines.yaml).
+
+  MCPConfig  k8s-api            -> the server the agent connects to
+  MCPToolset k8s-observability  -> permission to call mcp__kubernetes__*
+
+Both matter. A config without the toolset gives the agent a server it may not
+call; a toolset without the config names a namespace that does not exist.
+
+The server key is FIXED at `kubernetes` and deliberately has no values path: the
+key IS the mcp__kubernetes__* tool namespace that the toolset above and every
+hand-written allowlist name, so making it configurable would let a values edit
+silently strip an agent's tools instead of failing.
+*/ -}}
+{{- if and (include "kubernetes.active" .) .Values.mcp.enabled }}
+{{- $mcp := .Values.mcp }}
+{{- $url := $mcp.url }}
+{{- if and (not $url) .Values.mcpServers.enabled }}
+{{- $url = printf "http://%s.%s.svc:%v%s" (include "kubernetes.mcpServerName" .) .Release.Namespace .Values.mcpServers.port (include "kubernetes.mcpPath" .) }}
+{{- end }}
+{{- if not $url }}
+{{- fail "kubernetes: mcp.url is required when mcp.enabled=true (or enable the mcpServers component to run the MCP server in-cluster) — an MCPConfig pointing nowhere silently costs agents their tools" }}
+{{- end }}
+{{- if not (has $mcp.transport (list "http" "sse")) }}
+{{- fail (printf "kubernetes: mcp.transport must be \"http\" or \"sse\", got %q" $mcp.transport) }}
+{{- end }}
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: {{ $mcp.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-kubernetes
+spec:
+  servers:
+    kubernetes:
+      type: {{ $mcp.transport }}
+      url: {{ $url | quote }}
+      {{- with $mcp.headers }}
+      headers:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+---
+# Reads. Bound by every route that should be able to look at the cluster.
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: {{ $mcp.toolsets.observe.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-kubernetes
+spec:
+  tools:
+{{ toYaml $mcp.toolsets.observe.tools | indent 4 }}
+{{- if include "kubernetes.mcpAdminEnabled" . }}
+---
+# Mutations — a SEPARATE CR on purpose: binding reads is then a different
+# decision from binding writes, and a route can have the first without the
+# second. Rendered only when a server that registers these tools exists.
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: {{ $mcp.toolsets.admin.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-kubernetes
+spec:
+  tools:
+{{ toYaml $mcp.toolsets.admin.tools | indent 4 }}
+{{- end }}
+{{- end }}

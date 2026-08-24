@@ -7,64 +7,39 @@ The Prometheus/Alertmanager Helm subchart composition at `chart/charts/prometheu
 ## Requirements
 
 ### Requirement: The bundle ships as a self-gated subchart named for the protocol, not a vendor
-A Helm subchart at `chart/charts/prometheus-bundle/` SHALL package the
-Alertmanager alert-handling experience as five components — the Alertmanager
-ingest lane, the Prometheus metrics MCP configuration, its deployable MCP server
-workload, the alert-investigator profile, and the bundle's own wiring. Every
-template SHALL gate on `prometheus-bundle.enabled` (default `false`) alone;
-`global.demo.enabled` SHALL NOT enable this bundle, because its components
-require operator-supplied metrics and Alertmanager endpoints that no demo cluster
-provides.
+The bundle SHALL be named `prometheus`, dropping the `-bundle` suffix, matching
+`kubernetes`, `home-assistant` and `telegram`.
 
-The bundle SHALL be named for the payload format and query language it speaks,
-not for one implementation of them. VictoriaMetrics SHALL be a supported backend
-rather than the subject: the ingest path accepts the standard Alertmanager
-webhook payload from any sender, and the metrics path speaks the Prometheus HTTP
-query API, which VictoriaMetrics serves.
+Naming it for the PROTOCOL rather than a vendor is unchanged, and is why the name
+works: it reads the STANDARD Alertmanager payload, which vanilla Alertmanager and
+VictoriaMetrics both send.
 
-Because the values key is renamed, an install still carrying a `vm-bundle:` key
-SHALL FAIL the render, naming the new key. Helm reports nothing when a values key
-stops being read, so an unguarded rename would present as a bundle that installed
-successfully and rendered nothing.
+It SHALL remain self-gated and off by default, and demo mode SHALL still not
+enable it. **Every retired key SHALL FAIL the render**, naming its replacement.
 
-The bundle SHALL NOT render the agent's execution substrate. The `AgentRuntime`,
-the LLM credential Secret, the context volume and the release-wide floor identity
-are the parent chart's.
-
-It SHALL render the ServiceAccount its OWN route runs as, and only that — a
-bundle is the only scope that knows what its routes do. That account SHALL hold
-no Kubernetes RBAC, because this lane reaches a Prometheus query API through an
-MCP server with an identity of its own and the agent's pod needs no Kubernetes
-permission to investigate an alert. An install naming its own
-`serviceAccountName` on the route SHALL suppress the rendered one.
+#### Scenario: The bundle is named for the protocol, without a suffix
+- **WHEN** an install enables the Prometheus bundle
+- **THEN** it does so under a key naming the protocol, with no suffix
 
 #### Scenario: Default install renders nothing from the bundle
 - **WHEN** the chart is installed with default values
-- **THEN** no SignalAdapter, SignalSource, MCPConfig, MCPToolset, AgentProfile,
-  Pipeline, route ServiceAccount or workload from the bundle is rendered
+- **THEN** no SignalAdapter, SignalSource, MCPConfig, MCPToolset, AgentProfile, Pipeline, route ServiceAccount or workload from the bundle is rendered
 
 #### Scenario: The route's identity is the bundle's, the substrate is not
 - **WHEN** the wiring component renders with no `serviceAccountName` set on it
-- **THEN** a ServiceAccount for that route is rendered with no Kubernetes RBAC
-  bound to it, while the `AgentRuntime`, the model credential and the context volume
-  still come from the parent chart
+- **THEN** a ServiceAccount for that route is rendered with no Kubernetes RBAC bound to it, while the runtime defaults, the floor account and the context volume still come from the parent chart
 
 #### Scenario: Demo mode does not enable this bundle
-- **WHEN** the chart is installed with `global.demo.enabled=true` and default
-  bundle values
-- **THEN** no object from this bundle renders, because it consumes endpoints a
-  demo cluster does not have
+- **WHEN** the chart is installed with `global.demo.enabled=true` and default bundle values
+- **THEN** no object from this bundle renders, because it consumes endpoints a demo cluster does not have
 
 #### Scenario: The retired values key fails the render
-- **WHEN** an install upgrades while still carrying the renamed `vm-bundle:` values key
-- **THEN** the render FAILS naming `prometheus-bundle`, rather than succeeding
-  with a bundle that silently renders nothing
+- **WHEN** an install upgrades while still carrying a retired key for this bundle
+- **THEN** the render FAILS naming the replacement, rather than succeeding with a bundle that silently renders nothing
 
 #### Scenario: A Prometheus install needs no VictoriaMetrics knowledge
 - **WHEN** an operator enables the bundle against Prometheus and Alertmanager
-- **THEN** the ingest lane, the metrics tooling, the profile and the wiring all
-  render and function, and the only VictoriaMetrics-specific value is the
-  self-registration component, which stays off
+- **THEN** the ingest lane, the metrics tooling, the profile and the wiring all render and function, and the only VictoriaMetrics-specific value is the self-registration component, which stays off
 
 ### Requirement: The ingest component packages the adapter with its webhook Service
 When active, the `alertmanager` component SHALL render the `SignalAdapter` CR
@@ -287,8 +262,8 @@ because no turnkey mode enables this bundle at all. The component SHALL render
 only when the profile component renders, since a Pipeline with no profile has no
 agent to run.
 
-Exactly ONE route SHALL be offered. A metrics query server is read-only, so there
-is no second posture to express and no derivation from the release's RBAC mode.
+Exactly ONE route SHALL be offered. A metrics query server is read-only, so
+there is no second posture to express.
 
 The component SHALL render the ServiceAccount that route executes under, unless
 the install names one, and SHALL bind it no Kubernetes RBAC by default.

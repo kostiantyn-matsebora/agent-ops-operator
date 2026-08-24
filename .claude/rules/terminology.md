@@ -29,7 +29,7 @@ The verbs, and they are the ones the invariants already use:
 | a source that wakes nothing | a source no Pipeline claims |
 
 - **"Wake" is correct for a PERSON.** Paging someone at 03:00 really does wake
-  them, so `k8s-bundle`'s "what actually deserves waking someone" stays.
+  them, so `kubernetes`'s "what actually deserves waking someone" stays.
 - **It reads as a lie about the architecture**, which is why it is banned rather
   than discouraged. It implies a resident agent and a cheap nudge, when what
   happens is an object being created and a pod being scheduled.

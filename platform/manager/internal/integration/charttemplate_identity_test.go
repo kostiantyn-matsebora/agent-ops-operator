@@ -25,6 +25,19 @@ type clusterRoleRules struct {
 	} `json:"rules"`
 }
 
+// declaredActing renders the one thing that grants an agent anything now: an
+// account the install DECLARES, with a posture, for a route to name.
+//
+// THERE IS NO MODE. `global.agentops.runtime.rbacMode` rendered a named account
+// from a release-wide value, and every test below used to sweep its four
+// settings. The vocabulary survives PER ACCOUNT, which is what these sweeps
+// exercise instead — a preset posture nobody declared is exactly what was
+// removed.
+var declaredActing = []string{
+	"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
+	"--set", "rbac.runtime.serviceAccounts[0].rbacMode=full",
+}
+
 // rolesIn parses every Role and ClusterRole out of a rendered manifest.
 func rolesIn(t *testing.T, out string) []clusterRoleRules {
 	t.Helper()
@@ -138,12 +151,14 @@ func TestASecondAccountNeedsNoSecondRuntime(t *testing.T) {
 	}
 }
 
-// A second entry for the DEFAULT account would render two competing binding
-// sets under one name. Refuse it, naming the keys that configure the default.
-func TestASecondEntryForTheDefaultAccountIsRefused(t *testing.T) {
+// AN ENTRY FOR THE FLOOR ACCOUNT IS REFUSED. Binding to it would make silence
+// mean power again, which is the one thing this whole model exists to prevent —
+// and it would also take away the floor's other job, being NAMEABLE on a route
+// that must hold nothing.
+func TestAnEntryForTheFloorAccountIsRefused(t *testing.T) {
 	msg := helmTemplateErr(t, "--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime")
-	if !strings.Contains(msg, "global.agentops.runtime.serviceAccountName") {
-		t.Fatalf("the failure must name the key that configures the default: %s", msg)
+	if !strings.Contains(msg, "FLOOR account") {
+		t.Fatalf("the failure must say it is the floor being bound: %s", msg)
 	}
 }
 
@@ -152,10 +167,10 @@ func TestASecondEntryForTheDefaultAccountIsRefused(t *testing.T) {
 // account in its Pipeline values REFERENCES one; it must not invent one.
 func TestNoBundleRendersARuntimeServiceAccount(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "k8s-bundle.enabled=true",
-		"--set", "k8s-bundle.pipelines.enabled=true",
-		"--set", "k8s-bundle.pipelines.admin.serviceAccountName=agentops-runtime-actor",
-		"--set", "prometheus-bundle.enabled=true")
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.pipelines.admin.serviceAccountName=agentops-runtime-actor",
+		"--set", "prometheus.enabled=true")
 
 	for _, doc := range strings.Split(out, "\n---") {
 		if !strings.Contains(doc, "kind: ServiceAccount\n") {
@@ -169,21 +184,21 @@ func TestNoBundleRendersARuntimeServiceAccount(t *testing.T) {
 	}
 }
 
-// 5.5 — `full` is no longer a cluster-admin binding. This is the assertion the
-// whole RBAC half of the change reduces to.
-func TestFullModeBindsNoClusterAdmin(t *testing.T) {
+// `full` is no longer a cluster-admin binding. This is the assertion the whole
+// RBAC half of the change reduces to.
+func TestAFullAccountBindsNoClusterAdmin(t *testing.T) {
 	for _, extra := range [][]string{
 		nil,
-		{"--set", "k8s-bundle.enabled=true"},
+		{"--set", "kubernetes.enabled=true", "--set", "kubernetes.allowMutations=true"},
 	} {
-		args := append([]string{"--set", "global.agentops.runtime.rbacMode=full"}, extra...)
+		args := append(append([]string{}, declaredActing...), extra...)
 		out := helmTemplate(t, args...)
 		for _, doc := range strings.Split(out, "\n---") {
 			if !strings.Contains(doc, "\nkind: ClusterRoleBinding\n") {
 				continue
 			}
 			if strings.Contains(doc, "\n  name: cluster-admin\n") {
-				t.Fatalf("rbacMode=full bound cluster-admin — an agent has a shell, so that is every "+
+				t.Fatalf("a full account bound cluster-admin — an agent has a shell, so that is every "+
 					"Secret in the cluster readable by a model:\n%s", doc)
 			}
 		}
@@ -200,16 +215,14 @@ func TestNoRuntimeRoleCanReachASecret(t *testing.T) {
 	// Every mode, and the bundles that render agent-reachable roles of their
 	// own — the k8s MCP server's account is a wall on the same path, since an
 	// agent reaches the cluster THROUGH it.
-	for _, mode := range []string{"", "none", "readonly", "full"} {
+	for _, mode := range []string{"none", "readonly", "full"} {
 		args := []string{
-			"--set", "k8s-bundle.enabled=true",
-			"--set", "k8s-bundle.pipelines.enabled=true",
-			"--set", "prometheus-bundle.enabled=true",
+			"--set", "kubernetes.enabled=true",
+			"--set", "kubernetes.pipelines.enabled=true",
+			"--set", "kubernetes.allowMutations=true",
+			"--set", "prometheus.enabled=true",
 			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-actor",
-			"--set", "rbac.runtime.serviceAccounts[0].rbacMode=full",
-		}
-		if mode != "" {
-			args = append(args, "--set", "global.agentops.runtime.rbacMode="+mode)
+			"--set", "rbac.runtime.serviceAccounts[0].rbacMode=" + mode,
 		}
 		out := helmTemplate(t, args...)
 
@@ -286,8 +299,7 @@ func isAgentRole(name string) bool {
 // ClusterRole and the namespaced Roles it is split into.
 func actingRoles(t *testing.T, extra ...string) []clusterRoleRules {
 	t.Helper()
-	args := append([]string{"-n", "agent-ops",
-		"--set", "global.agentops.runtime.rbacMode=full"}, extra...)
+	args := append(append([]string{"-n", "agent-ops"}, declaredActing...), extra...)
 	out := helmTemplate(t, args...)
 
 	var acting []clusterRoleRules
@@ -297,7 +309,7 @@ func actingRoles(t *testing.T, extra ...string) []clusterRoleRules {
 		}
 	}
 	if len(acting) == 0 {
-		t.Fatal("rbacMode=full rendered no acting role at all")
+		t.Fatal("a declared account with rbacMode=full rendered no acting role at all")
 	}
 	return acting
 }
@@ -367,7 +379,7 @@ func TestPodExecutionIsGatedAndOffByDefault(t *testing.T) {
 		}
 	}
 
-	on := actingRoles(t, "--set", "global.agentops.runtime.allowPodExecution=true")
+	on := actingRoles(t, "--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
 	for res, verbs := range gated {
 		for _, verb := range verbs {
 			if !anyGrants(on, res, verb) {
@@ -411,14 +423,13 @@ func grants(role *clusterRoleRules, resource, verb string) bool {
 func TestNothingEverBindsToTheFloorAccount(t *testing.T) {
 	const floor = "agentops-runtime"
 
-	for _, mode := range []string{"", "none", "readonly", "full"} {
+	for _, mode := range []string{"none", "readonly", "full"} {
 		args := []string{
-			"--set", "k8s-bundle.enabled=true",
-			"--set", "k8s-bundle.pipelines.enabled=true",
+			"--set", "kubernetes.enabled=true",
+			"--set", "kubernetes.pipelines.enabled=true",
 			"--set", "global.demo.enabled=true",
-		}
-		if mode != "" {
-			args = append(args, "--set", "global.agentops.runtime.rbacMode="+mode)
+			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
+			"--set", "rbac.runtime.serviceAccounts[0].rbacMode=" + mode,
 		}
 		out := helmTemplate(t, args...)
 
@@ -442,16 +453,18 @@ func TestNothingEverBindsToTheFloorAccount(t *testing.T) {
 	}
 }
 
-// ...and the mode still has to MEAN something, or the guard above passes by
-// granting nobody anything.
-func TestTheModeRendersItsOwnNamedAccount(t *testing.T) {
-	full := helmTemplate(t, "--set", "global.agentops.runtime.rbacMode=full")
+// ...and a DECLARED account still has to MEAN something, or the guard above
+// passes by granting nobody anything.
+func TestADeclaredAccountRendersItsOwnNamedRole(t *testing.T) {
+	full := helmTemplate(t, declaredActing...)
 	if !strings.Contains(full, "name: agentops-runtime-acting") {
-		t.Fatal("rbacMode=full must render a NAMED acting account for a route to opt into")
+		t.Fatal("a declared account must render for a route to opt into")
 	}
-	ro := helmTemplate(t, "--set", "global.agentops.runtime.rbacMode=readonly")
+	ro := helmTemplate(t,
+		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-readonly",
+		"--set", "rbac.runtime.serviceAccounts[0].rbacMode=readonly")
 	if !strings.Contains(ro, "name: agentops-runtime-readonly") {
-		t.Fatal("rbacMode=readonly must render a NAMED read-only account")
+		t.Fatal("a declared readonly account must render too")
 	}
 }
 
@@ -459,11 +472,11 @@ func TestTheModeRendersItsOwnNamedAccount(t *testing.T) {
 // The bundle is the only scope that knows what its own routes do.
 func TestABundleRendersItsOwnRoutesIdentity(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "k8s-bundle.enabled=true",
-		"--set", "k8s-bundle.pipelines.enabled=true")
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.pipelines.enabled=true")
 
 	if !strings.Contains(out, "name: agentops-k8s-observe") {
-		t.Fatal("k8s-bundle shipped a route without rendering its ServiceAccount")
+		t.Fatal("kubernetes shipped a route without rendering its ServiceAccount")
 	}
 	doc := pipelineDoc(t, out, "k8s-observe")
 	if !strings.Contains(doc, "serviceAccountName: agentops-k8s-observe") {
@@ -472,22 +485,22 @@ func TestABundleRendersItsOwnRoutesIdentity(t *testing.T) {
 
 	// Route off, account gone: an identity with no route is a subject nobody
 	// can explain.
-	off := helmTemplate(t, "--set", "k8s-bundle.enabled=true",
-		"--set", "k8s-bundle.pipelines.enabled=false")
+	off := helmTemplate(t, "--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.pipelines.enabled=false")
 	if strings.Contains(off, "name: agentops-k8s-observe") {
 		t.Fatal("a bundle rendered a route account with no route to use it")
 	}
 }
 
-// telegram-bundle ships no Pipeline, so it ships no identity. This is the row
+// telegram ships no Pipeline, so it ships no identity. This is the row
 // that keeps "a bundle renders accounts" from becoming "every bundle renders
 // accounts".
 func TestABundleWithNoRouteRendersNoIdentity(t *testing.T) {
-	out := helmTemplate(t, "--set", "telegram-bundle.enabled=true")
+	out := helmTemplate(t, "--set", "telegram.enabled=true")
 	for _, doc := range strings.Split(out, "\n---") {
 		if strings.Contains(doc, "\nkind: ServiceAccount\n") &&
-			strings.Contains(doc, "agentops-telegram-bundle") {
-			t.Fatalf("telegram-bundle ships no Pipeline and must ship no account:\n%s", doc)
+			strings.Contains(doc, "agentops-telegram") {
+			t.Fatalf("telegram ships no Pipeline and must ship no account:\n%s", doc)
 		}
 	}
 }
@@ -505,15 +518,14 @@ func TestNoBindingUsesABuiltInClusterRole(t *testing.T) {
 	builtIn := map[string]bool{
 		"cluster-admin": true, "admin": true, "edit": true, "view": true,
 	}
-	for _, mode := range []string{"", "none", "readonly", "full"} {
+	for _, mode := range []string{"none", "readonly", "full"} {
 		args := []string{"-n", "agent-ops",
-			"--set", "k8s-bundle.enabled=true",
-			"--set", "k8s-bundle.pipelines.enabled=true",
-			"--set", "prometheus-bundle.enabled=true",
-			"--set", "global.agentops.runtime.namespaces={media}"}
-		if mode != "" {
-			args = append(args, "--set", "global.agentops.runtime.rbacMode="+mode)
-		}
+			"--set", "kubernetes.enabled=true",
+			"--set", "kubernetes.pipelines.enabled=true",
+			"--set", "kubernetes.allowMutations=true",
+			"--set", "prometheus.enabled=true",
+			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
+			"--set", "rbac.runtime.serviceAccounts[0].rbacMode=" + mode}
 		out := helmTemplate(t, args...)
 
 		for _, doc := range strings.Split(out, "\n---") {
@@ -553,14 +565,14 @@ func TestNoBindingUsesABuiltInClusterRole(t *testing.T) {
 // cluster and made every new namespace invisible until someone edited values.
 // This test is what that reversal rests on.
 func TestAgentRolesNeverGrantAgentopsCRs(t *testing.T) {
-	for _, mode := range []string{"", "none", "readonly", "full"} {
+	for _, mode := range []string{"none", "readonly", "full"} {
 		args := []string{"-n", "agent-ops",
-			"--set", "k8s-bundle.enabled=true",
-			"--set", "k8s-bundle.pipelines.enabled=true",
-			"--set", "prometheus-bundle.enabled=true"}
-		if mode != "" {
-			args = append(args, "--set", "global.agentops.runtime.rbacMode="+mode)
-		}
+			"--set", "kubernetes.enabled=true",
+			"--set", "kubernetes.pipelines.enabled=true",
+			"--set", "kubernetes.allowMutations=true",
+			"--set", "prometheus.enabled=true",
+			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
+			"--set", "rbac.runtime.serviceAccounts[0].rbacMode=" + mode}
 		out := helmTemplate(t, args...)
 
 		for _, role := range rolesIn(t, out) {
@@ -591,9 +603,9 @@ func TestAgentRolesNeverGrantAgentopsCRs(t *testing.T) {
 // reversal. If this climbs back into the hundreds, per-namespace bindings are
 // back and every new namespace is invisible to the agent again.
 func TestTheGrantIsAHandfulOfObjects(t *testing.T) {
-	out := helmTemplate(t, "-n", "agent-ops",
-		"--set", "k8s-bundle.enabled=true",
-		"--set", "global.agentops.runtime.rbacMode=full")
+	out := helmTemplate(t, append([]string{"-n", "agent-ops",
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.allowMutations=true"}, declaredActing...)...)
 
 	agentRoles := 0
 	for _, role := range rolesIn(t, out) {

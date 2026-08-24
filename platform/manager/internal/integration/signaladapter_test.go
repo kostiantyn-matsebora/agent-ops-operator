@@ -268,7 +268,7 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	if *deploy.Spec.Replicas != 1 || deploy.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
 		t.Fatal("singleton not enforced")
 	}
-	// CHART CONTRACT: the prometheus-bundle subchart's Service selects the pod label
+	// CHART CONTRACT: the prometheus subchart's Service selects the pod label
 	// agentops.dev/signal-adapter=<adapter name>. Renaming this label breaks
 	// deployed webhook Services — keep this assertion in sync with any change.
 	if deploy.Spec.Template.Labels["agentops.dev/signal-adapter"] != "life-sig" {

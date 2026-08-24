@@ -116,7 +116,7 @@ env).
 - **The signature fallback in `signals.go` splits on LANE.** Do not collapse it
   into one rule.
   - **`alert` / `job`** keep `ingest.DefaultSignatureLabels`, which
-    prometheus-bundle and signal-cron depend on.
+    prometheus and signal-cron depend on.
   - **`task` / `chat`** key on the fingerprint.
 
 **`internal/chat/`** — the channel-type-agnostic core:
@@ -176,7 +176,7 @@ contract.
 - **It holds no channel config, persists nothing, needs no RBAC.**
 - **NOT AN ADAPTER.** It emits no signals, so it has no `SignalAdapter` CR and
   no served CR.
-  - **The telegram-bundle chart owns its Deployment**, injecting
+  - **The telegram chart owns its Deployment**, injecting
     `SIGNAL_TARGET` / `CHANNEL_TARGET` / the bot token as env.
   - **It never contacts the manager.**
 - **One Deployment per bot token makes the single-consumer rule structural.** A
@@ -199,7 +199,7 @@ It normalizes general-surface updates and posts `/signal/inbound`:
 contract. Five-field cron parser plus scheduler.
 
 **`signals/alertmanager/`** — webhook-receiving signal adapter. Hosts `/webhook/{source}` for Alertmanager-format posts, and the
-prometheus-bundle subchart ships it.
+prometheus subchart ships it.
 
 - **The pod label `agentops.dev/signal-adapter` is a CHART CONTRACT**, pinned by
   integration test.
@@ -269,7 +269,8 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
   server registers. This is the wall for an agent that does not cooperate.
 - **It terminates no TLS, inspects no non-MCP byte and holds no Kubernetes
   credential.** Other traffic is copied through untouched.
-- **Opt-in via `runtime.egressMediation.enabled`** — see
+- **ON BY DEFAULT via `global.agentops.runtimeDefaults.egressMediation.enabled`,
+  and declinable per runtime** — see
   `docs/adr/0001-bound-component-reach.md`.
 
 **`platform/context-sync/`** — the context sidecar. Semantics in the terminology entry;

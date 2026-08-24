@@ -24,7 +24,7 @@ func TestNetworkPolicyIsOptIn(t *testing.T) {
 func TestEveryWiredFlowIsAllowed(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "global.agentops.networkPolicy.enabled=true",
-		"--set", "k8s-bundle.enabled=true")
+		"--set", "kubernetes.enabled=true")
 
 	policies := splitPolicies(out)
 
@@ -45,7 +45,7 @@ func TestEveryWiredFlowIsAllowed(t *testing.T) {
 	// The adapters' policy is the BUNDLE's, because only it knows their ports.
 	tg := helmTemplate(t,
 		"--set", "global.agentops.networkPolicy.enabled=true",
-		"--set", "telegram-bundle.enabled=true")
+		"--set", "telegram.enabled=true")
 	tgPolicies := splitPolicies(tg)
 	for _, name := range []string{"agentops-telegram-adapters", "agentops-telegram-signal-adapter"} {
 		p, ok := tgPolicies[name]
@@ -114,11 +114,11 @@ func TestConsoleCallerCanBeNamed(t *testing.T) {
 func TestBundleMCPServersAreCoveredByTheSameSwitch(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "global.agentops.networkPolicy.enabled=true",
-		"--set", "ha-bundle.enabled=true",
-		"--set", "ha-bundle.homeAssistant.endpoint=http://ha:8123",
-		"--set", "ha-bundle.homeAssistant.credentials.operatorToken=t",
-		"--set", "ha-bundle.adminMcpServer.enabled=true",
-		"--set", "ha-bundle.adminMcp.enabled=true")
+		"--set", "home-assistant.enabled=true",
+		"--set", "home-assistant.homeAssistant.endpoint=http://ha:8123",
+		"--set", "home-assistant.homeAssistant.credentials.operatorToken=t",
+		"--set", "home-assistant.adminMcpServer.enabled=true",
+		"--set", "home-assistant.adminMcp.enabled=true")
 
 	ha, ok := splitPolicies(out)["agentops-mcp-ha"]
 	if !ok {
@@ -147,14 +147,25 @@ func splitPolicies(out string) map[string]string {
 	return found
 }
 
-// Mediation is off by default and absent from the rendered runtime, so an
-// existing install upgrades to the pod it already had.
-func TestEgressMediationIsOptIn(t *testing.T) {
-	out := helmTemplate(t, "--set", "runtime.credentialsSecret.token=x")
-	if strings.Contains(out, "egressMediation:") && !strings.Contains(out, "description:") {
-		t.Fatal("no mediation stanza may render by default")
+// Mediation is ON by default now — the wall that constrains an uncooperative
+// agent must not be something an operator has to discover — and a runtime can
+// DECLINE it, getting back exactly the pod it had.
+//
+// `false` is a zero value, which is precisely what a naive merge would drop, so
+// the opt-out is the half worth pinning.
+func TestEgressMediationIsOptOut(t *testing.T) {
+	on := helmTemplate(t, "--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
+	if !strings.Contains(on, "egressMediation:") {
+		t.Fatal("mediation must be declared on the default runtime")
 	}
-	if strings.Contains(out, "EGRESS_PROXY_IMAGE") {
+
+	off := helmTemplate(t,
+		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x",
+		"--set", "claude.egressMediation.enabled=false")
+	if strings.Contains(off, "egressMediation:") && !strings.Contains(off, "description:") {
+		t.Fatal("a runtime declining mediation must render no stanza")
+	}
+	if strings.Contains(off, "EGRESS_PROXY_IMAGE") {
 		t.Fatal("the manager must not be told a proxy image when nothing asked for mediation")
 	}
 }
@@ -165,8 +176,7 @@ func TestEgressMediationIsOptIn(t *testing.T) {
 // completely silent, which is why it is pinned.
 func TestEnabledMediationRendersANonEmptyStanza(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "runtime.egressMediation.enabled=true",
-		"--set", "runtime.credentialsSecret.token=x")
+		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
 
 	rt := runtimeDoc(t, out)
 	if !strings.Contains(rt, "egressMediation:") {
@@ -185,9 +195,8 @@ func TestEnabledMediationRendersANonEmptyStanza(t *testing.T) {
 // they believe is WIDER, which breaks their traffic instead.
 func TestExcludedPortsReachTheRuntimeCR(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "runtime.egressMediation.enabled=true",
-		"--set", "runtime.egressMediation.excludePorts={53}",
-		"--set", "runtime.credentialsSecret.token=x")
+		"--set", "global.agentops.runtimeDefaults.egressMediation.excludePorts={53}",
+		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
 
 	if rt := runtimeDoc(t, out); !strings.Contains(rt, "- 53") {
 		t.Fatalf("the excluded port must reach the CR:\n%s", rt)
@@ -209,13 +218,13 @@ func TestPoliciesFollowConfiguredPortsAndNames(t *testing.T) {
 		"--set", "global.agentops.networkPolicy.enabled=true",
 		"--set", "console.name=my-console",
 		"--set", "console.port=9443",
-		"--set", "telegram-bundle.enabled=true",
-		"--set", "telegram-bundle.channelAdapter.name=tg-chan",
-		"--set", "telegram-bundle.channelAdapter.port=9001",
-		"--set", "telegram-bundle.signalAdapter.name=tg-sig",
-		"--set", "telegram-bundle.signalAdapter.port=9002",
-		"--set", "k8s-bundle.enabled=true",
-		"--set", "k8s-bundle.mcpServers.port=9300")
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.channelAdapter.name=tg-chan",
+		"--set", "telegram.channelAdapter.port=9001",
+		"--set", "telegram.signalAdapter.name=tg-sig",
+		"--set", "telegram.signalAdapter.port=9002",
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.mcpServers.port=9300")
 
 	policies := splitPolicies(out)
 
@@ -270,10 +279,10 @@ func TestParentShipsNoGuessedAdapterPolicy(t *testing.T) {
 func TestPrometheusMCPServerIsRestricted(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "global.agentops.networkPolicy.enabled=true",
-		"--set", "prometheus-bundle.enabled=true",
-		"--set", "prometheus-bundle.mcp.enabled=true",
-		"--set", "prometheus-bundle.mcpServers.enabled=true",
-		"--set", "prometheus-bundle.mcpServers.backend=http://vm:8428")
+		"--set", "prometheus.enabled=true",
+		"--set", "prometheus.mcp.enabled=true",
+		"--set", "prometheus.mcpServers.enabled=true",
+		"--set", "prometheus.mcpServers.backend=http://vm:8428")
 
 	p, ok := splitPolicies(out)["agentops-mcp-prometheus"]
 	if !ok {
@@ -292,14 +301,14 @@ func TestPrometheusMCPServerIsRestricted(t *testing.T) {
 func TestWebhookAdapterIsOnlyRestrictedOnceTheSenderIsNamed(t *testing.T) {
 	base := []string{
 		"--set", "global.agentops.networkPolicy.enabled=true",
-		"--set", "prometheus-bundle.enabled=true",
+		"--set", "prometheus.enabled=true",
 	}
 	if _, ok := splitPolicies(helmTemplate(t, base...))["agentops-signal-alertmanager"]; ok {
 		t.Fatal("with no sender named, the adapter must be left reachable rather than cut off")
 	}
 
 	named := helmTemplate(t, append(base, "--set-json",
-		`prometheus-bundle.alertmanager.webhookFrom=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"monitoring"}}}]`)...)
+		`prometheus.alertmanager.webhookFrom=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"monitoring"}}}]`)...)
 	p, ok := splitPolicies(named)["agentops-signal-alertmanager"]
 	if !ok {
 		t.Fatal("naming the sender must restrict the adapter to it")
