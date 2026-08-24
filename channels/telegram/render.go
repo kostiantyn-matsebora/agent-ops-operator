@@ -504,13 +504,46 @@ func truncateRunes(s string, n int) string {
 // splitHTML breaks rendered HTML into sendable chunks under the Bot API limit.
 //
 // Splitting prefers a paragraph break, then a line break, then a hard cut, so a
-// long investigation arrives as readable pieces instead of failing whole. Tags
-// are not balanced across a split — a chunk boundary is chosen at a newline,
-// which in this renderer never falls inside a tag, because every tag we emit is
-// opened and closed on the same line except <pre>, handled by keeping its
-// content intact where it fits.
+// long investigation arrives as readable pieces instead of failing whole.
+//
+// A CHUNK BOUNDARY IS CHOSEN AT A NEWLINE, AND ONE TAG WE EMIT SPANS LINES.
+// Everything else is opened and closed on the same line, and <pre> is kept
+// intact where it fits — but `quote` wraps a whole folded payload, which is
+// tall by definition. A cut inside it sends `<blockquote expandable>` with no
+// end tag, and the Bot API rejects the WHOLE message:
+//
+//	can't parse entities: Can't find end tag corresponding to start tag "blockquote"
+//
+// That reached a live install and RETRIED IN A LOOP, because the quote latch
+// recognises a refusal about an UNSUPPORTED tag and this one is unbalanced.
+//
+// This file already knew the answer on the other path — `splitOversizeBlock`
+// re-wraps each piece of a split fold — but a SIGNAL is not agent output, so it
+// never reaches the block splitter. The comment here used to assert the
+// assumption instead of the splitter honouring it. So the splitter honours it:
+// a cut inside a quote CLOSES it and REOPENS the same tag on the remainder.
 func splitHTML(s string) []string {
 	return splitHTMLTo(s, telegramMessageLimit)
+}
+
+const quoteClose = "</blockquote>"
+
+// openQuote returns the opening tag still unclosed at the end of s, or "".
+//
+// Counting raw occurrences is sound because `escape` turns every `<` in content
+// into `&lt;`, so the only `<blockquote` in a rendered message is one we wrote.
+// Nesting is not a case: nothing here ever puts a quote inside a quote.
+func openQuote(s string) string {
+	opens := strings.Count(s, "<blockquote")
+	if opens <= strings.Count(s, quoteClose) {
+		return ""
+	}
+	if i := strings.LastIndex(s, "<blockquote"); i >= 0 {
+		if j := strings.IndexByte(s[i:], '>'); j >= 0 {
+			return s[i : i+j+1]
+		}
+	}
+	return ""
 }
 
 // splitHTMLTo is splitHTML against a caller-supplied budget, which the block
@@ -523,23 +556,38 @@ func splitHTMLTo(s string, limit int) []string {
 	if len(s) <= limit {
 		return []string{s}
 	}
-	telegramMessageLimit := limit // shadowed so the body below reads unchanged
+	// ROOM FOR THE END TAG IS RESERVED UP FRONT, on every chunk, whenever the
+	// input quotes at all. Adding it after choosing a cut against the full
+	// budget is what would push a chunk past the limit — trading a rejected
+	// message for a different rejected message.
+	budget := limit
+	if strings.Contains(s, "<blockquote") {
+		budget -= len(quoteClose)
+	}
+	if budget <= 0 {
+		return []string{s}
+	}
 	var out []string
 	rest := s
-	for len(rest) > telegramMessageLimit {
-		cut := strings.LastIndex(rest[:telegramMessageLimit], "\n\n")
+	for len(rest) > budget {
+		cut := strings.LastIndex(rest[:budget], "\n\n")
 		if cut <= 0 {
-			cut = strings.LastIndex(rest[:telegramMessageLimit], "\n")
+			cut = strings.LastIndex(rest[:budget], "\n")
 		}
 		if cut <= 0 {
 			// no break to honour: cut on a rune boundary rather than mid-character
-			cut = telegramMessageLimit
+			cut = budget
 			for cut > 0 && !utf8Boundary(rest, cut) {
 				cut--
 			}
 		}
-		out = append(out, strings.TrimRight(rest[:cut], "\n"))
+		chunk := strings.TrimRight(rest[:cut], "\n")
 		rest = strings.TrimLeft(rest[cut:], "\n")
+		if open := openQuote(chunk); open != "" {
+			chunk += quoteClose
+			rest = open + rest
+		}
+		out = append(out, chunk)
 	}
 	if rest != "" {
 		out = append(out, rest)

@@ -557,3 +557,59 @@ func TestSignalPayloadFoldsWhenTall(t *testing.T) {
 		t.Errorf("a short payload must not be folded:\n%s", got)
 	}
 }
+
+// A SIGNAL CARD'S FOLDED PAYLOAD MUST NOT BE CUT IN HALF.
+//
+// This is the failure that reached a live install: the Bot API answered
+// `can't parse entities: Can't find end tag corresponding to start tag
+// "blockquote"` and the op retried in a loop, because the quote latch only
+// recognises refusals about an UNSUPPORTED tag, not an unbalanced one.
+//
+// `payloadBlock` folds a tall payload into `<blockquote expandable>`, which
+// spans many lines — and `splitHTML` chose its cut at a newline on the stated
+// assumption that "every tag we emit is opened and closed on the same line".
+// That assumption was false for exactly this tag, on exactly the path that has
+// no block splitter to rescue it: a signal is not agent output, so it never
+// reaches `splitOversizeBlock`.
+func TestSignalCardSplitsWithBalancedQuoteTags(t *testing.T) {
+	expandableQuotes.Store(true)
+	// Tall enough to fold, long enough to split, under documentThreshold so it
+	// stays a message rather than becoming an upload.
+	payload := strings.Repeat("2026-08-24T11:57:42Z coordinator timeout\n", 150)
+	chunks := renderChunks(newMenu(), Message{
+		Kind:   MsgSignal,
+		Title:  "asusrouter — transient timeout",
+		Source: "ha-logs",
+		Body:   payload,
+	})
+	if len(chunks) < 2 {
+		t.Fatalf("a payload this long must split, got %d chunk(s)", len(chunks))
+	}
+	for i, c := range chunks {
+		if len(c) > telegramMessageLimit {
+			t.Errorf("chunk %d is %d bytes, over the %d limit", i, len(c), telegramMessageLimit)
+		}
+		if got, want := strings.Count(c, "<blockquote"), strings.Count(c, "</blockquote>"); got != want {
+			t.Errorf("chunk %d has %d open and %d close quote tags — Telegram rejects the whole message:\n%.200s",
+				i, got, want, c)
+		}
+	}
+}
+
+// The same cut, one kind over: a relay or an unknown kind goes through
+// splitHTML too, and anything that folds there has the same tag spanning lines.
+func TestSplitHTMLClosesAndReopensAQuoteItCuts(t *testing.T) {
+	body := "<blockquote expandable>" + strings.Repeat("line\n", 2000) + "</blockquote>"
+	chunks := splitHTML(body)
+	if len(chunks) < 2 {
+		t.Fatalf("expected a split, got %d", len(chunks))
+	}
+	for i, c := range chunks {
+		if len(c) > telegramMessageLimit {
+			t.Errorf("chunk %d is %d bytes, over the %d limit", i, len(c), telegramMessageLimit)
+		}
+		if got, want := strings.Count(c, "<blockquote"), strings.Count(c, "</blockquote>"); got != want {
+			t.Errorf("chunk %d has %d open and %d close quote tags", i, got, want)
+		}
+	}
+}
