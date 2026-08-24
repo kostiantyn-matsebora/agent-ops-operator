@@ -30,10 +30,12 @@ USE rather than by reading the command back.
 
 - [x] 2.1 Create the four phase labels under one prefix and verify
       `gh label list` shows them
-- [ ] 2.2 Add the `CLAUDE_CODE_OAUTH_TOKEN` repository secret. **Needs an
-      interactive login, so it cannot be scripted.** Verify by a
-      workflow-dispatch run that authenticates. Record the VERDICT only — never
-      the token, per `.claude/rules/publication.md`
+- [x] 2.2 **No secret, and that is the resolution.** The repository is connected
+      to the Claude GitHub integration, so the action authenticates by exchanging
+      the workflow's OIDC token — `id-token: write` is what the job needs, and
+      nothing is stored. The empty `claude_code_oauth_token` input was REMOVED
+      rather than left blank: a static credential takes precedence over
+      federation, so an input resolving to nothing can silently win
 - [x] 2.3 **NO tracking-issue template, and that is the resolution rather than a
       skip.** The spec requires the body to be GENERATED rather than written by
       hand; a template is an invitation to hand-write it, and would be a second
@@ -123,7 +125,12 @@ USE rather than by reading the command back.
 
 ## 7. The iterative review
 
-- [ ] 7.1 Add `.github/workflows/claude-review.yml` with the `review` job —
+- [ ] 7.1 **BLOCKED ON THE MERGE, not on anything buildable.** The action refuses
+      to run when this workflow file differs from the default branch's copy — a
+      pull request may not rewrite the review that judges it — so its first real
+      run is the NEXT pull request. Found the only way it could be: the job went
+      green in 17s having posted nothing, which is now asserted against (design
+      D12a). Remaining: Add `.github/workflows/claude-review.yml` with the `review` job —
       `anthropics/claude-code-action@v1`, `track_progress: true`,
       `use_sticky_comment: true`, `contents: read` + `pull-requests: write`,
       triggers `[opened, synchronize, ready_for_review]`, drafts skipped, and a

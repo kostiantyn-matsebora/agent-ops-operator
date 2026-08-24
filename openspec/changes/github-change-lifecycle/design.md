@@ -202,14 +202,41 @@ the deterministic half of the same job, which is why the review skips when eithe
 fails: those two mean the diff contains something on its way out, and reviewing
 it wastes a run on content about to be deleted.
 
-### D12 — Authentication is `claude_code_oauth_token`
+### D12 — NO static credential: the repository is connected to the Claude integration
 
-Uses the existing Claude subscription rather than metered API billing. Every push
-to every open pull request triggers a review, so per-token billing on an
-unattended trigger is the shape most likely to produce a surprise.
+The workflow passes neither `anthropic_api_key` nor `claude_code_oauth_token`.
+The repository is connected to the Claude GitHub integration, so the action
+exchanges the workflow's OIDC token for a short-lived credential — which is what
+`id-token: write` is for.
 
-*Accepted cost:* the token expires and must be refreshed as a repository secret,
-a manual step with no automated warning.
+**An EMPTY credential input is not harmless tidiness.** The action's own guidance
+is that a static credential takes PRECEDENCE over federation, so a
+`${{ secrets.… }}` reference that resolves to nothing is a credential input that
+can silently win. The line is removed rather than left blank.
+
+*Accepted cost:* nothing here stores a token, so nothing here can warn that one
+expired. If the integration is disconnected the review fails visibly on the pull
+request, which is the same surface D12's earlier draft relied on.
+
+### D12a — A REVIEW THAT DID NOTHING MUST NOT REPORT GREEN
+
+**The action skips itself, successfully, when this workflow file differs from the
+copy on the default branch** — a deliberate guard against a pull request
+rewriting the review that judges it. It was found the only way it could be: the
+job went green in 17 seconds having posted nothing.
+
+- **The STEP reports success either way**, so `outcome` cannot tell a real run
+  from a self-skip. `execution_file` can: it is set only once Claude has
+  actually run.
+- **On the pull request that introduces or edits this workflow the skip is
+  correct**, and the job stays green with a notice saying the review begins
+  working once merged. That is this change's own pull request, permanently.
+- **Everywhere else it FAILS.** A check that passes while nothing was read is
+  worse than one that fails, and it is precisely the silent-no-review outcome
+  this capability exists to prevent.
+
+**Consequence worth stating: this change's review cannot be proved on this change's
+own pull request.** The first real run is the next pull request after the merge.
 
 ### D13 — Fork pull requests are SKIPPED, explicitly
 
