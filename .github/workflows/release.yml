@@ -109,12 +109,17 @@ jobs:
   # It runs AFTER the artifact, and only when the artifact actually published:
   # an entry announcing a version the registry does not hold is worse than none,
   # because that is exactly the page somebody copies an install command from.
+  #
+  # ONLY THE CHART GETS ONE, AND THE COMPONENTS DELIBERATELY DO NOT.
+  # The chart version is the one an adopter types; an image tag is an
+  # implementation detail the chart references and nobody installs directly.
+  # Fourteen artifact kinds streaming onto one page buries the single number
+  # somebody came there to read. Component tags still exist — they are the
+  # provenance of a published image — they just do not announce themselves.
   github_release:
     name: github release
-    needs: [determine, image, chart]
-    if: |
-      always() && needs.determine.result == 'success' &&
-      (needs.image.result == 'success' || needs.chart.result == 'success')
+    needs: [determine, chart]
+    if: needs.determine.outputs.is_chart == 'true' && needs.chart.result == 'success' 
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -123,43 +128,27 @@ jobs:
       - name: Compose the notes and publish
         env:
           GH_TOKEN: ${{ github.token }}
-          COMPONENT: ${{ needs.determine.outputs.component }}
           VERSION: ${{ needs.determine.outputs.version }}
-          IS_CHART: ${{ needs.determine.outputs.is_chart }}
         run: |
           set -euo pipefail
           owner="${GITHUB_REPOSITORY%%/*}"
           notes=$(mktemp)
-
-          if [ "$IS_CHART" = "true" ]; then
-            title="chart $VERSION"
-            {
-              echo "\`\`\`sh"
-              echo "helm install agent-ops \\"
-              echo "  oci://ghcr.io/$owner/charts/agent-ops-operator \\"
-              echo "  --version $VERSION -n agent-ops --create-namespace"
-              echo "\`\`\`"
-              echo
-              # The CHANGELOG entry for exactly this version, or nothing. An
-              # entry inventing its own summary would drift from the file every
-              # upgrade decision is actually made from.
-              awk -v v="## [$VERSION]" '
-                index($0, v) == 1 { on = 1; next }
-                on && /^## \[/     { exit }
-                on                 { print }
-              ' docs/CHANGELOG.md
-            } > "$notes"
-          else
-            title="$COMPONENT $VERSION"
-            {
-              echo "\`\`\`"
-              echo "ghcr.io/$owner/agentops-$COMPONENT:$VERSION"
-              echo "\`\`\`"
-              echo
-              echo "Published by \`${GITHUB_REF#refs/tags/}\`. Chart releases are tagged"
-              echo "separately — a component version moves independently of the chart's."
-            } > "$notes"
-          fi
+          {
+            echo "\`\`\`sh"
+            echo "helm install agent-ops \\"
+            echo "  oci://ghcr.io/$owner/charts/agent-ops-operator \\"
+            echo "  --version $VERSION -n agent-ops --create-namespace"
+            echo "\`\`\`"
+            echo
+            # The CHANGELOG entry for exactly this version, or nothing. An entry
+            # inventing its own summary drifts from the file every upgrade
+            # decision is actually made from.
+            awk -v v="## [$VERSION]" '
+              index($0, v) == 1 { on = 1; next }
+              on && /^## \[/     { exit }
+              on                 { print }
+            ' docs/CHANGELOG.md
+          } > "$notes"
 
           gh release create "${GITHUB_REF#refs/tags/}" \
-            --title "$title" --notes-file "$notes" --verify-tag
+            --title "chart $VERSION" --notes-file "$notes" --verify-tag
