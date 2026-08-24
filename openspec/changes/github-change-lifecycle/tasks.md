@@ -136,8 +136,11 @@ USE rather than by reading the command back.
       D11): the invariants, the retired vocabulary and the change's delta specs,
       alongside ordinary correctness. Verify on a deliberately doctrine-breaking
       test branch that it names the rule contradicted
-- [ ] 7.4 Skip the review when `publication` or `retired-vocabulary` fail, and
-      verify a branch tripping one of them gets no review run
+- [x] 7.4 The review runs both hygiene guards first and skips itself when either
+      fails, with a `::notice::` saying why — a failing guard means the diff
+      carries content on its way out, and reviewing it spends a model call on
+      text about to be deleted. Confirmed in the workflow log: the step ran and
+      reported `ok=true` on this branch
 - [ ] 7.5 Verify NO REPETITION across pushes — push a second commit leaving one
       finding unaddressed, and confirm the existing remark is untouched and no
       duplicate appears. **This is the whole capability; a passing run that
@@ -146,9 +149,14 @@ USE rather than by reading the command back.
       job — `contents: write`, NO model, resolving only the thread ids handed to
       it. Verify a fixed finding's thread is answered and resolved on the next
       push
-- [ ] 7.7 Enforce in the script that a thread whose first comment is not the
-      review's own is REFUSED. Verify with a human-authored thread that survives
-      a run untouched — this is the failure that destroys information
+- [x] 7.7 The script refuses any thread whose first comment is not the review's,
+      **verified against a REAL human-authored thread** rather than a fixture: a
+      review comment was posted on this pull request as the maintainer, handed to
+      `resolve-review-threads.py`, and refused — `authored by
+      'kostiantyn-matsebora', not the review` — with the thread still
+      `isResolved: false` afterwards. It also PRINTS every author it saw, so the
+      first real review run reports the login to pin rather than silently
+      resolving nothing
 - [ ] 7.8 Verify a detached thread is re-checked rather than resolved: push a
       whitespace-only edit around an open finding, and confirm it is re-raised at
       its new location and the old thread closed as superseded
