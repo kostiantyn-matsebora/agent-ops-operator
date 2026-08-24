@@ -73,14 +73,16 @@ exists so that the switch is safe, and §7 is the gate that says so.
 - [x] 6.1 Description and topics: what it is, and the words someone searching
       for this would use — the ecosystem, the runtime, the surfaces
 - [x] 6.2 Homepage set to the documentation site
-- [ ] 6.3 Enable Pages from `master` `/docs`, and verify the site builds and
+- [x] 6.3 Enable Pages from `master` `/docs`, and verify the site builds and
       every navigation entry resolves. **CANNOT PRECEDE THE FLIP ON THIS PLAN** —
       the API refuses with "your current plan does not support GitHub Pages for
       this repository", because Pages is unavailable for a PRIVATE repository on
-      Free. See `design.md` D4a: this runs IMMEDIATELY AFTER 7.6, not before
+      Free. See `design.md` D4a: this runs IMMEDIATELY AFTER 7.6, not before.
+      **DONE** — source `master` `/docs`, serving at
+      `kostiantyn-matsebora.github.io/agent-ops-operator/`, HTTPS enforced
 - [x] 6.4 Discussions on, Issues on, Wiki off, Projects off. An unmaintained
       surface reads as abandonment
-- [ ] 6.5 Branch protection on `master` matching how the project actually works,
+- [x] 6.5 Branch protection on `master` matching how the project actually works,
       rather than a policy that will be bypassed on the first hotfix. **ALSO
       PLAN-BLOCKED WHILE PRIVATE** (HTTP 403, "upgrade to GitHub Pro or make this
       repository public"), so it runs immediately after 7.6 too. The shape is
@@ -97,19 +99,19 @@ exists so that the switch is safe, and §7 is the gate that says so.
 
 Each line is a condition that becomes impossible or expensive after the flip.
 
-- [ ] 7.1 The publication guard is green on `master` (`sdlc-setup` §9)
-- [ ] 7.2 Identifying content is absent from the tree, the archive AND the
+- [x] 7.1 The publication guard is green on `master` (`sdlc-setup` §9)
+- [x] 7.2 Identifying content is absent from the tree, the archive AND the
       history, and the rewrite has been force-pushed (`scrub-identity`)
-- [ ] 7.3 The published specs are true (`truthful-specs`) — a stranger reading a
+- [x] 7.3 The published specs are true (`truthful-specs`) — a stranger reading a
       contradiction reads it once and remembers it
-- [ ] 7.4 Images are public and the chart installs from the registry by a person
+- [x] 7.4 Images are public and the chart installs from the registry by a person
       who has cloned nothing (`sdlc-setup`), verified anonymously
-- [ ] 7.5 Licence, community files, templates and settings are in place.
+- [x] 7.5 Licence, community files, templates and settings are in place.
       **THE SITE IS NOT PART OF THIS GATE, AND CANNOT BE.** This read "and the
       site is live", which no ordering can satisfy: 6.3 records that Pages is
       refused for a private repository on this plan, so the site cannot exist
       until after 7.6 — the very step this line gates. 6.3 owns it, immediately
       after the flip
-- [ ] 7.6 **Flip the repository to public.** Then verify as a stranger would:
+- [x] 7.6 **Flip the repository to public.** Then verify as a stranger would:
       open it signed out, follow the README's install command, and follow every
       link in its index
