@@ -213,7 +213,7 @@
     },
     {
       "id": "channel-service-name",
-      "pattern": "agentops-channel-",
+      "pattern": "(?<!/)agentops-channel-",
       "says": "the channel-adapter workload and Service are agentops-adapter-<name>",
       "allow": [
         "does not exist",
@@ -221,6 +221,15 @@
         "is gone",
         "never",
         "gone"
+      ],
+      "$comment": [
+        "THE IMAGE IS NOT THE SERVICE, AND THE STRING IS IDENTICAL.",
+        "channels/telegram publishes agentops-channel-telegram — the path IS the",
+        "published name, per .claude/rules/structure.md — so an image reference",
+        "spells the retired Service name exactly. The lookbehind is what tells them",
+        "apart: an image is written under its registry path, a Service name is not.",
+        "Found when archiving sdlc-setup folded a release spec naming that image",
+        "into openspec/specs/, and the guard failed on correct text."
       ]
     },
     {
