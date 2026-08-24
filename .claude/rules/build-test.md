@@ -151,13 +151,33 @@ git tag chart-v7.0.1    && git push origin chart-v7.0.1
   chart to `oci://ghcr.io/kostiantyn-matsebora/charts`. Docker Hub
   (`kmatsebora/*`) is frozen, not deleted.
 
-**PUBLISHING A NEW IMAGE IS THREE THINGS, AND EACH FAILS AT A DIFFERENT LAYER:**
+**PUBLISHING A NEW IMAGE IS FOUR THINGS, AND EACH FAILS AT A DIFFERENT LAYER:**
 
 | Thing | Skipped, it fails | Where |
 |---|---|---|
 | the **tag** `<component>-v<semver>` | nothing publishes | no workflow run at all |
+| the package's **Actions access** for this repo | `denied: permission_denied: write_package` | in the release job, at the push |
 | the **package visibility flip** to public | `ImagePullBackOff` for whoever installs | in a cluster, later |
 | the **platform declaration** in `.github/components.sh` | the post-push equality assert | in the release job |
+
+**ACTIONS ACCESS IS NOT THE REPOSITORY LINK, AND THE ERROR BLAMES THE TOKEN.**
+`LABEL org.opencontainers.image.source` connects a package to a repository for
+DISPLAY. Whether a workflow may WRITE it is a separate list on the package, and
+a package first published by a hand `docker push` starts with that list empty.
+
+- **The failure reads as a credentials problem and is not one.** On 2026-08-24
+  every release failed at the push while the job log said `Packages: write` and
+  `docker/login-action` said `Login Succeeded!`. Authentication was fine;
+  authorization ON THE PACKAGE was not.
+- **CHECK THE JOB LOG'S `GITHUB_TOKEN Permissions` GROUP FIRST.** It states the
+  token's actual scopes, so it settles in one line whether the workflow or the
+  package is at fault — reading the workflow YAML does not.
+- **UI ONLY, once per package, forever:** Package settings → *Manage Actions
+  access* → add the repository with **Write**. The Packages REST API lists,
+  gets, deletes and restores; it manages no access, and neither does GraphQL.
+- **A package FIRST published by the workflow inherits the repository's access**,
+  so this bites only packages that already existed because somebody pushed them
+  by hand. Thirteen did here.
 
 - **A GHCR package is created PRIVATE by its first push**, and `GITHUB_TOKEN`
   cannot change that. Flipping it is a manual step, once per package, and the
