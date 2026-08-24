@@ -108,7 +108,33 @@ Each line is a condition that becomes impossible or expensive after the flip.
 - [x] 7.3 The published specs are true (`truthful-specs`) — a stranger reading a
       contradiction reads it once and remembers it
 - [x] 7.4 Images are public and the chart installs from the registry by a person
-      who has cloned nothing (`sdlc-setup`), verified anonymously
+      who has cloned nothing (`sdlc-setup`), verified anonymously.
+      **TICKED ONCE WITHOUT BEING VERIFIED, AND REOPENED.** The images were
+      public. The CHART was not checked, and checking it found the registry held
+      8.0.0 and nothing since — 9, 10, 11 and 12 were never published, and there
+      were no `chart-v` tags at all. The install command on the adopter site
+      therefore RESOLVED, which is worse than failing: it installed a chart four
+      majors behind, with the values shape from before the release-wide
+      permission mode was deleted and before the vendor bundle carried its own
+      image and credential.
+      **VERIFIED BOTH MODES, AND THE DEMO HALF FAILED FIRST.**
+      DEMO: on a cluster with NO `agentops.dev` CRDs at all — Helm installed the
+      eleven itself — following the Getting started page verbatim with an
+      anonymous registry config. The context claim was REFUSED by `local-path`,
+      which is the only storage class rancher-desktop, k3d, kind and minikube
+      ship: it serves RWO and RWOP alone. The claim sat `Pending`, no runtime
+      pod was ever created, and the question waited forever. Fixed in chart
+      13.0.0 — demo mode asks for `ReadWriteOnce` and the demo keeps its memory
+      rather than trading it away. Re-run: claim BOUND, pod 3/3 with the
+      context-sync sidecar, the page's own question answered, the answer durable
+      in `status.runs[].result`.
+      FULL: the four-bundle install, upgraded to 13.0.1, every pod ready, all
+      four Pipelines `Ready=True`, the RWX context claim untouched — the
+      immutable-accessModes hazard is demo-only, as the CHANGELOG says. Smoked
+      with a live addressed task through a claiming Pipeline.
+      A bare chat signal to a source TWO pipelines claim was refused with the
+      choice list, which is the wiring rule holding in production rather than in
+      a fixture.
 - [x] 7.5 Licence, community files, templates and settings are in place.
       **THE SITE IS NOT PART OF THIS GATE, AND CANNOT BE.** This read "and the
       site is live", which no ordering can satisfy: 6.3 records that Pages is
