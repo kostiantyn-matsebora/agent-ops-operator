@@ -65,6 +65,60 @@ jobs:
           echo "component=$component" >> "$GITHUB_OUTPUT"
           echo "version=$version"     >> "$GITHUB_OUTPUT"
 
+  # A TAG MUST NOT PUBLISH FROM A COMMIT CI NEVER PASSED.
+  #
+  # `chart-v13.0.1` was cut from a commit whose `ci` run was RED. It was
+  # harmless — a generated documentation block had gone stale, no chart content
+  # was involved — but nothing about the release path made it harmless, and the
+  # next one would not announce itself either.
+  #
+  # A tag push runs THIS workflow and nothing else, so the evidence has to be
+  # looked up: the `ci` run for the same SHA, which exists because the commit
+  # reached master before it was tagged.
+  #
+  # IT WAITS RATHER THAN RACING. Pushing a branch and its tag together is the
+  # ordinary thing to do, and CI is then still queued — a gate that failed on
+  # that would teach everyone to push tags twice.
+  ci_is_green:
+    name: ci is green for this commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require a successful ci run for the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=100"
+
+          for attempt in $(seq 1 40); do
+            runs=$(gh api "$api" --jq '.workflow_runs[] | "\(.status) \(.conclusion)"' || true)
+
+            if grep -q '^completed success$' <<<"$runs"; then
+              echo "ci passed for $GITHUB_SHA"
+              exit 0
+            fi
+
+            if [ -z "$runs" ]; then
+              state="no ci run exists for this commit"
+            elif grep -qv '^completed' <<<"$runs"; then
+              state="ci is still running"
+            else
+              state="ci completed and did not pass"
+              break
+            fi
+
+            echo "$state — waiting (${attempt}/40)"
+            sleep 30
+          done
+
+          echo "::error::Refusing to publish ${GITHUB_REF#refs/tags/}: $state."
+          echo "::error::The tagged commit is $GITHUB_SHA."
+          echo "::error::Fix it, or re-run ci for that commit, then move the tag."
+          exit 1
+
   # ONE reusable job for all thirteen images. The component decides the context,
   # the Dockerfile and the platforms; nothing here is per-component.
   #
@@ -73,7 +127,7 @@ jobs:
   # rendered and its REFERENCES asserted — so one file each.
   image:
     name: image (${{ needs.determine.outputs.component }})
-    needs: determine
+    needs: [determine, ci_is_green]
     permissions:
       contents: read
       packages: write
@@ -90,7 +144,7 @@ jobs:
 
   chart:
     name: chart
-    needs: determine
+    needs: [determine, ci_is_green]
     permissions:
       contents: read
       packages: write

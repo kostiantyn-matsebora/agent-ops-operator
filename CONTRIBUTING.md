@@ -223,6 +223,30 @@ The template asks three things, and they are the review:
 3. **Whether the documentation the change made untrue was updated in the same
    commit.** See above; this is not a follow-up.
 
+**CI RUNS WHAT YOUR DIFF TOUCHED, AND `ci-green` IS THE REQUIRED CHECK.** The
+jobs are derived from the tree, not listed: a change under one component builds
+and tests that component alone, and a paragraph in a markdown file runs neither
+the operator's envtest suite nor any image build. Three paths deliberately
+rebuild everything — `.github/docker/`, `.github/components.sh` and
+`.github/workflows/ci.yml` — because each of them can change how anything else
+is built.
+
+**A path-filtered job that did not run reports NO status**, so a required check
+naming one would block every pull request that did not touch it forever.
+`ci-green` exists for that: it is the single check branch protection requires,
+and it fails if any job that DID run failed.
+
+**Releases are the maintainer's, and they are chart-shaped.** A component tag
+(`<component>-v<semver>`) publishes one image and creates no GitHub Release; a
+`chart-v<semver>` tag publishes the chart and announces it, notes composed from
+`docs/CHANGELOG.md`. The chart version is the one an adopter types, so it is the
+only one the Releases page carries.
+
+**A tag publishes only from a commit `ci` passed.** The release workflow looks up
+the run for that same SHA and waits while it is still going, because pushing a
+branch and its tag together is ordinary. It refuses if the run failed, if it
+never existed, or if it never finishes.
+
 Keep a pull request to one concern. A green CI run is necessary and not
 sufficient — a rendered chart is not a running one, and several of the gotchas
 in `.claude/rules/gotchas.md` are things that passed every check and still
