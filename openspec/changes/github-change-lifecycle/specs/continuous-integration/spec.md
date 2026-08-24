@@ -2,15 +2,25 @@
 
 ### Requirement: The openspec artifacts are validated on every pull request
 
-CI SHALL validate every change and every specification under `openspec/` on
-every pull request and every push to the default branch, and SHALL fail when any
-of them is invalid, naming what is invalid.
+CI SHALL validate, on every pull request and every push to the default branch:
+
+1. **every published specification**, always; and
+2. **every change the pull request touches.**
+
+It SHALL fail when any of them is invalid, naming what is invalid.
 
 **`openspec/specs/` is the published answer to "is this behaviour intended", and
-nothing checked that it parses.** A specification is trusted precisely because
-it is not code — no compiler reads it, no test exercises it, and a malformed or
-structurally broken one is indistinguishable from a correct one until somebody
-relies on it. That is the whole argument for validating it mechanically.
+nothing checked that it parses.** A specification is trusted precisely because it
+is not code — no compiler reads it, no test exercises it, and a malformed one is
+indistinguishable from a correct one until somebody relies on it. That is the
+whole argument for validating it mechanically, and unconditionally.
+
+**A CHANGE IN FLIGHT IS JUDGED ONLY BY THE PULL REQUEST THAT TOUCHES IT.** A
+dozen changes are open at any time, and a delta that is incomplete today is
+incomplete correctly — the change is not finished. A check that judged all of
+them would fail every pull request for work it was not about, and would be
+switched off within a day. The scope is what makes the gate survivable, and
+therefore what makes it a gate at all.
 
 The check SHALL report through the always-present gate, so that requiring it
 needs no change to branch protection.
@@ -22,16 +32,16 @@ needs no change to branch protection.
 
 #### Scenario: A published specification is broken
 
-- **WHEN** a pull request leaves a specification under `openspec/specs/`
-  invalid
+- **WHEN** a pull request leaves a specification under `openspec/specs/` invalid
 - **THEN** the check fails, whether or not the pull request is the thing that
   broke it
 
-#### Scenario: A pull request touches no openspec artifact
+#### Scenario: An unrelated change is mid-flight and incomplete
 
-- **WHEN** a pull request changes only code
-- **THEN** the check still runs, because a specification can be invalidated by
-  something other than an edit to it
+- **WHEN** a pull request touches no openspec change, and another change in
+  flight has an incomplete delta
+- **THEN** the check passes, because that change is not what this pull request
+  is about
 
 ### Requirement: A change's documentation task is verified on every pull request
 

@@ -29,7 +29,11 @@ wants an openspec change behind it; say which, or say why not. -->
 - [ ] No.
 - [ ] Yes — and `docs/CHANGELOG.md` carries the upgrade entry, newest first, and the commit subject has `!` before the colon.
 
-**openspec change:** <!-- the directory name under openspec/changes/, or "none — see above" -->
+<!-- THE OPENSPEC CHANGE IS NOT ASKED FOR. It is read from the branch, which is
+named `change/<name>` — anything derivable is derived, and a field repeating the
+branch is a field that can disagree with it. A pull request from a branch with no
+`change/` prefix is work with no openspec change behind it, which the table above
+already covers. -->
 
 ## Documentation
 
@@ -54,3 +58,4 @@ the console, say that you looked at it. -->
 - [ ] `helm lint` / `helm template` for the permutations it affects
 - [ ] `python3 .github/scripts/publication-guard.py` is clean <!-- record the VERDICT, never the text it matched -->
 - [ ] Exercised against a real cluster <!-- say what you saw -->
+- [ ] **Verified against THIS branch's tree**, not master's <!-- the build container and the GitOps deploy both resolve a fixed path by default: a run without the override tests master and reports success -->
