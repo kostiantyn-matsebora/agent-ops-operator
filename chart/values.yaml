@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.56.0
+  tag: 0.57.1
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
