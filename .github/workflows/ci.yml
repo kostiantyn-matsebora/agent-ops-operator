@@ -146,6 +146,24 @@ jobs:
         working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4
+      # THE CONSOLE'S GO BUILD EMBEDS ITS BROWSER BUNDLE — `go:embed all:ui/dist`
+      # — and that bundle is build output, so it is absent from a fresh
+      # checkout. Without this step the module does not COMPILE, in a job about
+      # Go rather than about the bundle, and the error names an embed pattern
+      # rather than a missing build.
+      #
+      # It passes locally for anyone who has ever run the UI build, which is why
+      # it survived until CI ran on a clean tree.
+      - uses: actions/setup-node@v4
+        if: matrix.module == 'platform/console'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/console/ui/package-lock.json
+      - name: Build the console UI, which its Go build embeds
+        if: matrix.module == 'platform/console'
+        working-directory: platform/console/ui
+        run: npm ci && npm run build
       - uses: actions/setup-go@v5
         with:
           go-version-file: ${{ matrix.module }}/go.mod
@@ -340,6 +358,23 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.component }}
 
+  # THE SITE BUILDS. GitHub Pages builds `docs/` natively on merge, which means
+  # nothing checks it BEFORE merge: a bad Liquid tag, a missing include or a
+  # broken `_config.yml` surfaces on the published site rather than on the pull
+  # request that caused it.
+  #
+  # This runs the same Jekyll build Pages runs, and only that — link checking and
+  # prose linting are separate questions and are not smuggled in here.
+  site:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+
   # WHAT MAY BE PUBLISHED. This repository goes public, so no file and no commit
   # message may say who runs the author's cluster, what it is called, or how to
   # reach it.
@@ -413,7 +448,7 @@ jobs:
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, chart, docs, images, publication, retired-vocabulary]
+    needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Every relevant check passed
