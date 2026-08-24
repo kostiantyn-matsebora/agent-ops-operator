@@ -1,0 +1,195 @@
+# THE REVIEW NOBODY ELSE CAN DO.
+#
+# Generic bug-and-security review is available from many tools. A reading
+# against THIS project's recorded doctrine is available from none of them — and
+# several rules in `.claude/rules/` record decisions that were made, reverted and
+# re-made again, a class of regression that compiles, passes every test, renders
+# every chart, and is visible only to a reader who knows what was decided before.
+#
+# The action checks the branch out, so CLAUDE.md and every rule file is simply
+# there.
+#
+# TWO JOBS, AND THE SPLIT IS THE POINT. Resolving a review thread requires
+# `contents: write` — counter-intuitively, since it changes no file — so a single
+# job would hand a step driven by generated output a token that can push here.
+# `review` reads and comments; `reconcile` holds the privilege, runs no model,
+# and refuses any thread the review did not author.
+name: claude-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+# One review per pull request. A burst of pushes produces one review of the
+# latest state rather than several of stale ones — the same pattern ci.yml uses,
+# and it matters more here, where each superseded run costs a model call.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review:
+    # DRAFTS AND FORKS ARE SKIPPED, AND THE TWO ARE DIFFERENT REASONS.
+    #
+    # A draft is not asking yet. A FORK cannot be reviewed at all: its
+    # `GITHUB_TOKEN` is read-only and repository secrets are withheld by design,
+    # so the job would fail on a missing credential — and a red check an outside
+    # contributor cannot turn green reads as "your change is broken" when nothing
+    # about their change is. Skipped is honest; failed is not.
+    if: >-
+      !github.event.pull_request.draft &&
+      !github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # THE TWO HYGIENE GUARDS DECIDE WHETHER THIS DIFF IS WORTH READING.
+      #
+      # `publication` failing means the tree names something that must be
+      # REMOVED; `retired-vocabulary` failing means it asserts a name this
+      # project stopped using. Either way the diff contains content on its way
+      # out, and reviewing it spends a model call on text about to be deleted.
+      # They are seconds of Python, so they are re-run here rather than reached
+      # for across workflows.
+      - id: hygiene
+        name: Is this diff worth reading yet
+        run: |
+          set -uo pipefail
+          ok=true
+          python3 .github/scripts/publication-guard.py        || ok=false
+          python3 .github/scripts/retired-vocabulary-guard.py || ok=false
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          $ok || echo "::notice::review skipped — a hygiene guard failed, so this diff carries content on its way out"
+
+      - if: steps.hygiene.outputs.ok == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          RESOLVE_LIST: ${{ github.workspace }}/.resolve-threads
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # THE PREVIOUS REVIEW REACHES THIS ONE AS CONTEXT. That is what makes
+          # the review iterative, and it is why nothing here keeps a record of
+          # findings: the pull request already holds them.
+          track_progress: true
+          use_sticky_comment: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are reviewing a pull request against the project it belongs to,
+            not against generic best practice. The branch is checked out in the
+            working directory. READ THESE FIRST — they are the review:
+
+              - CLAUDE.md
+              - .claude/rules/invariants.md, terminology.md, wiring.md,
+                gotchas.md, structure.md, documentation.md, authoring.md
+              - the change's own delta specs, if the branch is `change/<name>`:
+                openspec/changes/<name>/specs/**/spec.md
+
+            WHAT TO LOOK FOR, in this order:
+
+            1. **Does the diff contradict a recorded invariant or a retired
+               term?** This is the reading nothing else performs. Several rules
+               here say a thing was decided, reverted, and decided again — if
+               the diff reintroduces one, name the rule and the file it is in.
+            2. **Does the diff match the change's own specs?** A change that
+               implements something other than what it specified is a
+               discrepancy worth raising even when the code is fine.
+            3. **Correctness** — the ordinary reading. Bugs, races, error paths.
+            4. **Documentation** — this project treats it as part of the change,
+               never a follow-up. If the diff makes a document untrue and does
+               not fix it, say which document.
+
+            HOW TO REPORT — and the rules about repetition are the important part:
+
+            - Use `mcp__github_inline_comment__create_inline_comment` (with
+              `confirmed: true`) for a finding about specific lines.
+            - Use `gh pr comment` for the summary. ONE summary.
+            - **A FINDING YOU ALREADY MADE THAT STILL STANDS: SAY NOTHING.** Its
+              comment is already on this pull request and you can see it. Posting
+              it again buries what is new under what is handled, which is the one
+              failure that makes a review worth ignoring.
+            - **A finding that has been FIXED**: reply in its thread saying so,
+              then record the thread for resolution:
+
+                  gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){
+                    repository(owner:$o,name:$r){pullRequest(number:$n){
+                      reviewThreads(first:100){nodes{id isResolved isOutdated path
+                        comments(first:1){nodes{databaseId author{login} body}}}}}}}' \
+                    -f o=${{ github.repository_owner }} -f r=${{ github.event.repository.name }} \
+                    -F n=${{ github.event.pull_request.number }}
+
+                  gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments/<commentId>/replies \
+                    -f body='Fixed in <sha>.'
+
+                  .github/scripts/mark-thread-resolved.sh <threadId>
+
+            - **A finding whose code is GONE**: same, replying that it no longer
+              applies.
+            - **NEVER record a thread you did not author.** A second job checks
+              this and refuses, but do not rely on that: resolving a person's
+              review comment hides their objection and reports it as handled.
+            - **An OUTDATED thread is not a fixed one.** GitHub detaches a
+              comment when its anchor line changes, so a reformat detaches a live
+              finding and a fix elsewhere leaves a dead one attached. Re-check
+              it. If it still holds, raise it again at its current location and
+              record the old thread as superseded.
+            - **A thread a PERSON resolved is settled.** Do not raise it again.
+              Count it in the summary as dismissed, so the gap stays visible
+              rather than reading as though everything raised was dealt with.
+
+            THE SUMMARY says, in a line: how many findings are new, how many
+            carried over, how many you resolved, how many were dismissed. Then
+            the substance. Do not restate carried-over findings in it.
+
+            Post GitHub comments only. Do not return the review as a message.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*),Bash(.github/scripts/mark-thread-resolved.sh:*),Read,Grep,Glob"
+
+      # The list of thread ids is the ONLY thing crossing into the privileged
+      # job. Uploaded even when empty, so `reconcile` can tell "nothing to do"
+      # from "the review never got that far".
+      - if: always() && steps.hygiene.outputs.ok == 'true'
+        run: touch "${{ github.workspace }}/.resolve-threads"
+      - if: always() && steps.hygiene.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolve-threads
+          path: .resolve-threads
+          retention-days: 1
+          if-no-files-found: ignore
+
+  # THE PRIVILEGE LIVES HERE, AND NO MODEL DOES.
+  #
+  # `contents: write` is what `resolveReviewThread` requires. This job runs one
+  # program over a list of ids, and that program re-reads every thread from
+  # GitHub and refuses any the review did not author.
+  reconcile:
+    needs: review
+    if: needs.review.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: resolve-threads
+        continue-on-error: true
+      - name: Resolve the threads the review addressed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .github/scripts/resolve-review-threads.py \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --file .resolve-threads
