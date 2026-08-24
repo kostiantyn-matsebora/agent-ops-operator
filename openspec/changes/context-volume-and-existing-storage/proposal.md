@@ -122,54 +122,74 @@ qualified to say where its context lives, not less.
 
 ### Modified Capabilities
 
-- `runtime-workspace-persistence`: the home volume is renamed to the context
-  volume throughout; the chart gains the ability to bind either claim to a
-  pre-created PersistentVolume rather than only to a pre-created claim.
-- `agent-runtime-ownership`: the wiring requirement names `home.pvcRef` and the
-  `persistence` block; both spellings change, the parent's ownership of the
-  substrate now covers pointing at storage it did not create, and the volume
-  itself stops being the runtime's to declare.
-- `pipeline-model`: the Pipeline gains `spec.persistence`, so a route declares
+- `runtime-workspace-persistence`: the volume is renamed to the CONTEXT volume
+  throughout, its MOUNT PATH moves with the name, the declaration leaves
+  `AgentRuntime`, and the chart gains the ability to bind either claim to a
+  pre-created `PersistentVolume`.
+- `pipeline-model`: the `Pipeline` gains `spec.persistence`, so a route declares
   where its conversations keep state beside what they may reach and whose
-  credentials they run under.
-- `conversation-context-continuity`: `contextStorage` is described against "its
-  home volume"; the sentence becomes coherent once the volume carries the same
-  word as the setting that governs it.
+  credentials they run under — with the claim-or-volume rule, the fallback
+  chain, and the conversation snapshot.
+- `agent-runtime-ownership`: the runtime renders NO volume, the release-wide
+  claims reach a conversation through the bootstrap default rather than through
+  the runtime CR, and the parent's ownership of the substrate now covers
+  pointing at storage it did not create.
+- `conversation-context-continuity`: the runtime declares the SHAPE of its
+  backend's storage and no longer which volume, so the promise is checked
+  against what the conversation actually resolved.
 
 ## Impact
 
 **Code and API**
 
-- `platform/manager/api/v1alpha1` — `AgentRuntime.spec.context`, `spec.home`
-  retained as deprecated and dual-read. Regenerate deepcopy and
-  `chart/files/crds/agentops.dev_agentruntimes.yaml`.
-- `platform/manager/internal/runtimepod/` — `podspec.go`, `contextsync.go`, the
-  volume name, and the `HOME_PVC` bootstrap env.
-- `chart/templates/` — `pvc.yaml`, `runtime.yaml`, `deployment.yaml`,
-  `housekeeping.yaml`, `context-probe.yaml`, `_helpers.tpl`.
-- `chart/values.yaml` — the `persistence` block.
-- `platform/console/` — wherever a claim name or volume label is displayed.
-- Test fixtures pinning `home` in `runtimepod` and the chart render tests.
+- `platform/manager/api/v1alpha1` — `AgentRuntime` LOSES both volume fields (no
+  alias). `Pipeline` gains `spec.persistence`, with `claimName` XOR
+  `volumeName` per binding enforced at the API server. `Conversation` gains the
+  resolved claim names as MATERIALIZED state. Regenerate deepcopy and three
+  CRDs under `chart/crds/`.
+- `platform/manager/internal/` — a resolver (`pipeline -> release default ->
+  ephemeral`), the snapshot written at conversation creation, and a Pipeline
+  reconciler that renders a PVC for a `volumeName` binding.
+- **The manager's RBAC** — `persistentvolumeclaims` get/list/watch/create, and
+  deliberately NOT delete.
+- `platform/manager/internal/runtimepod/` — reads the CONVERSATION's snapshot,
+  the pod volume names, and the mount path.
+- **THE MOUNT PATH** — `/data/home` becomes `/data/context` in `podspec.go`,
+  `contextsync.go`, `platform/context-sync/`, `runtimes/claude/Dockerfile` and
+  `runtime.js`. `/data/workspace` is untouched.
+- `chart/templates/` — `pvc.yaml`, `runtime.yaml` (which now renders NO volume),
+  `deployment.yaml`, `housekeeping.yaml`, `context-probe.yaml`, `_helpers.tpl`,
+  and the `pipelines` template gaining a persistence binding.
+- `chart/values.yaml` — the `persistence` block, and `runtime.homePvcRef`
+  deleted rather than renamed.
+- Test fixtures pinning the old field, the old path and the old claim name.
 
 **Reference docs**
 
-- `docs/concepts.md` — the volume and its field.
+- `docs/CHANGELOG.md` — written FIRST: the runtime field is deleted rather than
+  aliased, and for a GitOps install this is the only warning that arrives.
+- `docs/concepts.md` — persistence as wiring, the resolution table, the mount
+  path, and the three forms of pointing at storage the chart did not create.
 - `docs/cr-reference.md` — GENERATED; re-run `.github/scripts/docs-generate.py`.
-- `docs/guides/agent-runtime.md` — prose is hand-written, its `yaml` blocks are
-  generated from markers.
-- `docs/CHANGELOG.md` — breaking rename plus the upgrade step, newest first.
+- `docs/guides/pipeline.md` gains a route declaring its own storage;
+  `docs/guides/agent-runtime.md` loses the volume.
 - `docs/k8s-bundle.md`, `docs/console.md` — incidental mentions.
 
 **Adopter site**
 
-- `docs/installation.md` — the four `persistence.*` rows in the values table,
-  plus a new decision: pointing at storage the chart did not create.
+- `docs/installation.md` — the renamed keys, plus the new decision at BOTH
+  levels: pointing a volume at storage the chart did not create.
 - `docs/getting-started.md` — the `agentops-home` PVC named in the RWX
-  troubleshooting row.
+  troubleshooting row, plus the failed-static-bind case beside it.
 
 **Context rules**
 
 - `.claude/rules/terminology.md` — the context volume joins the banned-word
-  table beside `session`, `worker` and `wake`.
-- `.claude/rules/invariants.md`, `wiring.md` — "home volume" appears in the
-  substrate-ownership statements.
+  table beside `session`, `worker` and `wake`, and `/data/workspace` is named as
+  the load-bearing path.
+- `.claude/rules/wiring.md` — persistence joins the wiring table beside tools,
+  channels, runtime and identity.
+- `.claude/rules/invariants.md` — the substrate statements, and the manager's
+  new PVC-create power with its no-ownerRef rule.
+- `.github/retired-vocabulary.json` — the terms for every name this retires,
+  which that rule requires to land in the same change.
