@@ -9,8 +9,8 @@ pod-local storage, the durable volume holds a snapshot, and the agent container
 holds **no mount of the durable volume at all** — so a corrupt volume cannot stop
 a run already going, and no agent can read another conversation's context.
 
-It is off. `chart/values.yaml` ships `runtime.contextSync.paths: []`, with the
-correct value for the reference runtime **commented out two lines beneath it**.
+It is off. The reference runtime's values ship `contextSync.paths: []`, with the
+correct value **commented out two lines beneath it**.
 
 The reasoning on record is that only the runtime knows where its backend keeps
 context, and the chart cannot infer it. That is true, and it was applied one
@@ -87,11 +87,14 @@ persistence-disabled install.**
 
 **Chart**
 
-- `chart/values.yaml` — `runtime.contextSync.paths` gains the reference
+- `chart/charts/claude/values.yaml` — `contextSync.paths` gains the reference
   runtime's value as its default, and the comment explaining why it was empty is
   replaced by one explaining what declaring it means.
-- `chart/templates/runtime.yaml` — no change expected: it already renders the
-  stanza from whatever `paths` holds.
+  **THE VENDOR'S BUNDLE, NOT `global.agentops.runtimeDefaults`.** The value is
+  one vendor's filesystem layout, and those defaults are what every runtime
+  inherits — the same rule that put this runtime's image and credential there.
+- The render — no change expected: `agentops.renderRuntime` already renders the
+  stanza from whatever `paths` holds, for the parent and the bundle alike.
 
 **Documentation — the reference docs**
 

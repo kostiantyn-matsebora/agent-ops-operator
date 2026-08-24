@@ -43,6 +43,10 @@ claim.
 starts fresh. The operator tells you that up front rather than failing a
 follow-up later.
 
+Everything else works unchanged — agents run, answer and deliver as normal. The
+context sidecar the chart ships on is simply skipped, because it would have
+nothing to snapshot to.
+
 ## Install
 
 1. **Create the namespace and the model credential.**

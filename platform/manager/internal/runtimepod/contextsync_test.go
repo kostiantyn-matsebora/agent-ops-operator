@@ -11,6 +11,10 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
+// The shared config sets a context claim, which is why the no-claim case went
+// unconstructed until it was a defect: every case here inherited a durable
+// volume. It stays the default — the sidecar's ordinary deployment has one —
+// and a case wanting the absence clears it on its own copy.
 func syncCfg() Config {
 	return Config{
 		Image: "runtime:1", ServiceAccount: "sa", ControlURL: "http://manager:8080",
@@ -195,6 +199,37 @@ func TestSidecarGetsEnoughGraceForAFinalCheckpoint(t *testing.T) {
 	}
 }
 
+// THE FALLBACK SHAPE, asserted by every case that takes it. There is ONE
+// fallback rule with two conditions — no sidecar image, no durable volume — and
+// a case asserting a different shape would be describing an exception rather
+// than the rule.
+//
+// What it does NOT assert is the context volume itself: that follows the
+// ordinary unsynchronised rule, which is the claim where there is one and
+// ephemeral where there is not. Each caller states its own.
+func assertUnsynchronisedPod(t *testing.T, pod *corev1.Pod, controlURL string) {
+	t.Helper()
+
+	if container(pod, "context-sync") != nil {
+		t.Fatal("the fallback must build no synchronising container")
+	}
+	if volume(pod, "context-store") != nil {
+		t.Fatal("the fallback must build no durable store volume")
+	}
+	// The agent talks to the manager itself. Pointing it at 127.0.0.1 with no
+	// sidecar listening there is a pod that starts and then answers nothing.
+	if got := envOf(container(pod, "worker"), "CONTROL_URL"); got != controlURL {
+		t.Fatalf("CONTROL_URL = %q, want the manager at %q", got, controlURL)
+	}
+	if m := mount(pod, "context"); m == nil || m.MountPath != "/data/context" {
+		t.Fatalf("agent context mount = %+v, want /data/context", m)
+	}
+	if pod.Spec.TerminationGracePeriodSeconds != nil {
+		t.Fatal("the extended grace period exists for the final checkpoint; " +
+			"with no sidecar there is none to make")
+	}
+}
+
 // Declaring contextSync without an image configured must not half-apply the
 // mode — that would give the agent an EMPTY ephemeral context and no sidecar to
 // restore into it, silently losing every conversation's context.
@@ -203,9 +238,7 @@ func TestContextSyncWithoutAnImageFallsBackSafely(t *testing.T) {
 	cfg.ContextSyncImage = ""
 	pod := buildResolved("c1", Resolved{Config: cfg, ContextSync: syncSpec()})
 
-	if len(pod.Spec.InitContainers) != 0 {
-		t.Fatal("no image means no sidecar")
-	}
+	assertUnsynchronisedPod(t, pod, cfg.ControlURL)
 	ctx := volume(pod, "context")
 	if ctx == nil || ctx.PersistentVolumeClaim == nil {
 		t.Fatal("without a sidecar the context claim must stay mounted directly, or context is lost")
@@ -310,5 +343,95 @@ func TestTheLiveAndDurableContextPathsDiffer(t *testing.T) {
 	if contextLiveMount == contextStoreMount {
 		t.Fatalf("the live and durable context paths are both %q. The sidecar mounts both, so "+
 			"one value for the two is a pod that cannot be created", contextLiveMount)
+	}
+}
+
+// PERSISTENCE OFF while the runtime declares contextSync. The sidecar has
+// nothing to snapshot TO, and the branch that builds it mounted the durable
+// claim unconditionally — so the claim reference was rendered with an EMPTY
+// name, and the pod refused at admission. The conversation then never started,
+// having been told its context was not promised anyway.
+//
+// The promise and the pod have to agree. ContinuityPossible() already answered
+// "no durable volume, no promise", so a builder that fails instead of falling
+// back makes the manager offer a fresh answer and then produce nothing.
+func TestContextSyncWithoutADurableVolumeFallsBackSafely(t *testing.T) {
+	cfg := syncCfg()
+	cfg.ContextPVC = ""
+	pod := buildResolved("c1", Resolved{Config: cfg, ContextSync: syncSpec()})
+
+	for _, v := range pod.Spec.Volumes {
+		if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == "" {
+			t.Fatalf("volume %q references a persistent claim by an EMPTY name. The API server "+
+				"refuses that pod, so the conversation never starts at all", v.Name)
+		}
+	}
+
+	// The SAME fallback the missing image takes, and then today's ephemeral
+	// pod exactly — not merely a pod that happens to lack the store.
+	assertUnsynchronisedPod(t, pod, cfg.ControlURL)
+	ctx := volume(pod, "context")
+	if ctx == nil || ctx.EmptyDir == nil {
+		t.Fatalf("with no durable volume the context must be ephemeral, got %+v", ctx)
+	}
+}
+
+// THE INVARIANT THE DEFECT BROKE, stated directly: where there is no durable
+// context volume, no pod references a persistent context claim — whatever the
+// runtime declares. ContinuityPossible() reads the same field, so this is what
+// keeps the promise and the pod on one answer.
+//
+// ContextNone is excluded deliberately, and it is the case that makes the
+// stronger reading of this rule false. That backend keeps no context on disk,
+// so continuity is impossible for it even WITH a volume — and the claim it
+// still mounts as $HOME is not a promise, it is where the pod's filesystem
+// lives. The condition that matters here is the absent volume, not the absent
+// promise.
+func TestNoDurableVolumeMeansNoPersistentContextClaim(t *testing.T) {
+	cfg := syncCfg()
+	cfg.ContextPVC = ""
+
+	for _, tc := range []struct {
+		name     string
+		resolved Resolved
+	}{
+		{"declares nothing", Resolved{Config: cfg}},
+		{"declares contextSync", Resolved{Config: cfg, ContextSync: syncSpec()}},
+		{"keeps context on a volume", Resolved{Config: cfg,
+			ContextStorage: agentopsv1alpha1.ContextOnVolume, ContextSync: syncSpec()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.resolved.ContinuityPossible() {
+				t.Fatal("precondition: with no context volume continuity is not possible")
+			}
+			pod := buildResolved("c1", tc.resolved)
+			for _, v := range pod.Spec.Volumes {
+				if v.Name != "context" && v.Name != "context-store" {
+					continue
+				}
+				if v.PersistentVolumeClaim != nil {
+					t.Fatalf("volume %q references claim %q while no context volume is "+
+						"configured; the manager has already told this conversation its "+
+						"context is not promised", v.Name, v.PersistentVolumeClaim.ClaimName)
+				}
+			}
+		})
+	}
+}
+
+// The other half of the same rule, and the case that keeps it honest: a backend
+// keeping NO context on disk is never promised continuity, and still mounts the
+// volume it was given. Reading "continuity impossible" as "must be ephemeral"
+// would take a configured volume away from the one runtime that never asked for
+// continuity in the first place.
+func TestABackendWithNoOnDiskContextKeepsTheVolumeItIsGiven(t *testing.T) {
+	r := Resolved{Config: syncCfg(), ContextStorage: agentopsv1alpha1.ContextNone}
+	if r.ContinuityPossible() {
+		t.Fatal("precondition: a backend keeping no context on disk promises no continuity")
+	}
+	ctx := volume(buildResolved("c1", r), "context")
+	if ctx == nil || ctx.PersistentVolumeClaim == nil {
+		t.Fatalf("the configured volume must still be mounted; it is where the pod's "+
+			"filesystem lives, not a promise about what outlives the pod. got %+v", ctx)
 	}
 }

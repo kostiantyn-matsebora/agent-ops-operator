@@ -282,9 +282,31 @@ allowlist you composed, then the answer.
 2. **Compare against the reference** —
    [`runtimes/claude`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/runtimes/claude/),
    about 200 lines of contract handling.
-3. **Add durable context** — declare `contextSync` and the manager points your
-   `CONTROL_URL` at a sidecar that checkpoints for you. Nothing in your runtime
-   changes.
+3. **Declare where your context lives** — `spec.contextSync.paths` is include
+   globs relative to `$HOME`, and the manager then points your `CONTROL_URL` at
+   a sidecar that checkpoints them for you. Nothing in your runtime changes.
+
+   **Only you can state them.** The `claude` bundle ships the reference
+   runtime's paths, and they describe where *claude-code* files transcripts —
+   they are in that bundle rather than the release-wide runtime defaults for
+   exactly this reason. Yours go with your own image and credential, in your own
+   `runtimes:` entry or bundle. Nothing infers a path: **a runtime declaring
+   none gets the durable volume mounted into the agent container directly and no
+   synchronisation at all**, and an empty list is refused rather than read as
+   "copy everything".
+
+   ```yaml
+   spec:
+     image: ghcr.io/example/my-runtime:1.0.0
+     contextStorage: volume                  # `external` if your backend keeps it
+     contextSync:
+       paths: ["<where your backend writes context>"]
+       exclude: ["**/*.lock"]                # churn inside those paths
+   ```
+
+   It also needs a durable context volume to snapshot to. Without one the pod is
+   the unsynchronised one with ephemeral context, and the conversation is told
+   its context is not promised rather than failing to start.
 4. **Wall off an uncooperative agent** —
    [`platform/egress-proxy`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/platform/egress-proxy/)
    mediates what the pod may reach, for the case an allowlist cannot cover.

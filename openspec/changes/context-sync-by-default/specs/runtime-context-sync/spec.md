@@ -19,8 +19,11 @@ When the declaration is ABSENT, the runtime SHALL behave exactly as it does
 without this capability. When PRESENT, the paths SHALL be validated and reported
 on the runtime's readiness condition.
 
-**A runtime whose context location is known SHALL declare it, and the chart
-shipping that runtime SHALL render the declaration.** Requiring an operator to
+**A runtime whose context location is known SHALL declare it, and the BUNDLE
+shipping that runtime SHALL render the declaration** — beside that runtime's
+image and its model credential, which belong there for the same reason. An
+include list is one vendor's filesystem layout, so the release-wide runtime
+defaults every backend inherits are the wrong place for it. Requiring an operator to
 type a fact the runtime already holds leaves the mechanism inert on the install
 best able to use it, and leaves the durable context volume mounted into every
 agent container until somebody notices. The declaration belonging to the runtime
@@ -40,8 +43,13 @@ rather than being read as a request to copy everything.
 #### Scenario: The shipped runtime is installed with default values
 
 - **WHEN** an install accepts the chart's defaults and a context volume exists
-- **THEN** the reference runtime's context paths are already declared
+- **THEN** the reference runtime's context paths are already declared, in that runtime's own bundle values
 - **AND** synchronisation is active without an operator having set a value
+
+#### Scenario: Another backend inherits no vendor's paths
+
+- **WHEN** an install disables the shipped runtime bundle and declares its own runtime
+- **THEN** it inherits no context paths, because they were never in the release-wide runtime defaults
 
 #### Scenario: A third-party runtime declares nothing
 
@@ -80,6 +88,13 @@ instead of falling back makes the manager promise a fresh answer and then fail
 to provide one. **The two SHALL NOT disagree**, and where they do the reply is a
 message the reader can act on while the run produces nothing.
 
+The condition is the ABSENT VOLUME, not the absent promise. Continuity is also
+impossible for a backend that keeps no context on disk, and such a runtime SHALL
+still mount whatever durable volume it is given — that mount is where the pod's
+filesystem lives, not a promise about what survives the pod. Reading every
+impossible promise as a demand for ephemeral storage would take a configured
+volume away from the one case that never asked for continuity.
+
 The same rule already governs a missing synchronising image, which falls back to
 the unsynchronised pod. A missing durable volume SHALL be treated identically —
 one fallback rule, two conditions, not one condition with an exception.
@@ -97,8 +112,13 @@ one fallback rule, two conditions, not one condition with an exception.
 
 #### Scenario: The promise and the pod agree
 
-- **WHEN** continuity resolution reports that continuity is not possible
+- **WHEN** continuity resolution reports that continuity is not possible because no durable context volume is configured
 - **THEN** the pod that is built for that conversation starts and runs with ephemeral context
+
+#### Scenario: A backend that keeps no context on disk is given a volume
+
+- **WHEN** a runtime declares that it holds no context on disk and a durable context volume is configured
+- **THEN** continuity is still not promised, and the pod still mounts the configured volume
 
 #### Scenario: The synchronising image is missing
 

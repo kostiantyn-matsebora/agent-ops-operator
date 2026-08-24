@@ -227,8 +227,16 @@ SNAPSHOT on the durable volume.**
 **NEVER "manager".** In this codebase that word means the operator, and a second
 thing wearing it would make every sentence about either ambiguous.
 
-- **Opt-in per runtime** via `AgentRuntime.spec.contextSync`. ABSENT means
-  today's pod exactly: home mounted directly, no sidecar, no migration.
+- **Declared per runtime** via `AgentRuntime.spec.contextSync`, and ON by
+  default for the reference runtime — the `claude` BUNDLE ships its paths,
+  beside that runtime's image and credential, because an include list is one
+  vendor's filesystem layout and not a release-wide default.
+- **ABSENT means the unsynchronised pod**: context volume mounted directly, no
+  sidecar. That is what a runtime declaring nothing gets.
+- **SO DOES A MISSING DURABLE VOLUME**, whatever the runtime declares — there is
+  nothing to snapshot to, so the pod is the unsynchronised one with EPHEMERAL
+  context and the conversation is told its context is not promised. One fallback
+  rule, three conditions: no declaration, no sidecar image, no volume.
 - **It learns work boundaries by PROXYING the work contract.** The manager
   points the agent's `CONTROL_URL` at it and it forwards to the real manager,
   which is what lets it checkpoint without any runtime image changing.

@@ -1227,8 +1227,20 @@ func TestPersistenceDefaultsContextOnWorkspaceOff(t *testing.T) {
 func TestPersistenceOptOutRemovesEverything(t *testing.T) {
 	out := helmTemplate(t, "--set", "persistence.context.enabled=false")
 
-	if strings.Contains(out, "agentops-context") {
-		t.Error("persistence.context.enabled=false must render no context claim and no reference to one")
+	// MATCHED AS A CLAIM, NOT AS A SUBSTRING. `agentops-context` is a prefix of
+	// `agentops-context-sync`, the sidecar IMAGE — which the manager's bootstrap
+	// env carries whenever any runtime declares context paths, and the reference
+	// runtime now does by default. A bare Contains here failed on an install
+	// with no claim at all, which is the opposite of what it guards.
+	for _, ref := range []string{
+		"claimName: agentops-context",
+		"name: agentops-context\n",
+		"agentops-context\"",
+	} {
+		if strings.Contains(out, ref) {
+			t.Errorf("persistence.context.enabled=false must render no context claim "+
+				"and no reference to one; found %q", ref)
+		}
 	}
 	if strings.Contains(out, "name: CONTEXT_PVC") {
 		t.Error("persistence.context.enabled=false must not set CONTEXT_PVC")

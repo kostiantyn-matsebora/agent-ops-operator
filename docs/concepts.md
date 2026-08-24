@@ -1443,6 +1443,12 @@ would become permanent.
   every follow-up for a configuration the operator chose.
 - **A context that was promised and then lost is a different thing**, and fails
   the run.
+- **The pod agrees with the promise.** Where there is no context volume, the pod
+  built for such a conversation is the ephemeral one — it starts and answers
+  fresh, which is what it was told it would do.
+- **A backend that keeps no context on disk still mounts the volume it is
+  given.** Continuity is impossible for it either way, and the mount is where
+  the pod's filesystem lives rather than a promise about what outlives the pod.
 
 #### Storage topologies for continuity
 
@@ -1544,20 +1550,45 @@ spec:
 follows, for the same reason. Only the runtime knows where its backend keeps
 context, and a wrong guess persists nothing while looking configured.
 
+**Which is why the VENDOR'S BUNDLE ships the declaration for the runtime it
+ships.** The value above is `runtime-claude`'s, and it is the default in
+`chart/charts/claude/values.yaml` — beside that runtime's image and its model
+credential, which live there for the same reason. So a default install with a
+context volume runs synchronised without anyone setting anything.
+
+**Not the release-wide runtime defaults.** Those are what every runtime
+inherits, and an include list is one vendor's filesystem layout: it describes
+where claude-code files transcripts and means nothing to another backend.
+**Running one means replacing the paths** with its own, in the same section that
+carries its image and credential — a runtime that declares none gets no
+synchronisation, and nothing is inferred on its behalf.
+
 **`paths` is an *include* list.** Caches and tool state are then excluded by
 construction, rather than by a list that has to chase every file a vendor adds.
 
-**Absent means today's behaviour** — the context volume mounted directly and no
-sidecar. An install upgrades unchanged until it opts in.
+**Absent means the unsynchronised pod** — the context volume mounted directly,
+no sidecar. That is what a third-party runtime declaring nothing gets, and what
+clearing `paths` restores.
 
-**Opting in strands existing context.** Without the sidecar, context sits at the
-claim root. With it, each conversation reads its own subdirectory, which starts
-empty.
+**So does an install with no durable context volume**, whatever the runtime
+declares. There is nothing to snapshot to, so the pod is the unsynchronised one
+with *ephemeral* context, and the conversation is told its context is not
+promised rather than failing to start.
+
+That is the same answer continuity resolution already gives — see
+`contextStorage` above. **The two agree by construction:** a pod that failed
+here instead would make the manager promise a fresh answer and then produce
+nothing. A missing sidecar image falls back by the same one rule.
+
+**Synchronisation strands existing context.** Without the sidecar, context sits
+at the claim root. With it, each conversation reads its own subdirectory, which
+starts empty.
 
 Any conversation that already holds a context handle will fail its next run
 rather than answer without memory — the continuity rule working, not a
-defect. Clear each one with the reset verb below, or enable it on a quiet
-install.
+defect. Clear each one with the reset verb below. **On an install upgrading onto
+the default, that is every conversation holding a handle**; `CHANGELOG.md`
+carries the version it lands in.
 
 **Copies are labelled.**
 

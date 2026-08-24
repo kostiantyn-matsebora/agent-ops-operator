@@ -165,6 +165,12 @@ shared checkout is neither.
 otherwise. A route that keeps its state somewhere of its own says so on its own
 `Pipeline` — see [Per-route storage](#per-route-storage) below.
 
+**Turning the context volume off is a supported configuration, and it is
+ephemeral context.** Every conversation answers each message fresh and says so,
+rather than failing follow-ups for a setting you chose. Context synchronisation
+is skipped along with it — there is nothing to snapshot to — so the pod is the
+plain unsynchronised one. Nothing needs disabling to match.
+
 **Nothing restates a claim name.** The resolved claim reaches the manager's
 bootstrap default, the reclaiming job and the mount probe on its own, and the
 rendered `AgentRuntime` carries no volume at all.
@@ -274,28 +280,45 @@ A shared volume's filesystem can be corrupted by a node reboot, and the storage
 layer will still call it healthy — it replicates blocks and cannot see a
 filesystem.
 
-Three settings limit what that costs. All are off by default and independent.
+Three settings limit what that costs, and they are independent.
 
 | Key | Default | What it does |
 |---|---|---|
-| `global.agentops.runtimeDefaults.contextSync.paths` | `[]` | moves the live context to pod-local storage, leaving a snapshot on the volume |
+| `claude.contextSync.paths` | the reference runtime's paths — **on** | moves the live context to pod-local storage, leaving a snapshot on the volume |
 | `rbac.drainAware` | `false` | releases idle agent pods from a cordoned node, so the filesystem unmounts before the reboot |
 | `contextProbe.enabled` | `false` | hourly mount probe, so a damaged idle volume is found in an hour rather than at next use |
 
-`contextSync` is the one that matters most. With it set, the agent container
-gets ephemeral storage and **no mount of the durable volume at all** — so a run
-already going survives the volume failing underneath it.
+`contextSync` is the one that matters most, and it is the one that ships on. The
+agent container gets ephemeral storage and **no mount of the durable volume at
+all** — so a run already going survives the volume failing underneath it.
 
 It needs `paths`, because only the runtime knows where its backend keeps
-context. For the reference runtime:
+context. The bundle that ships the reference runtime states them, beside that
+runtime's image and credential:
 
 ```yaml
-global:
-  agentops:
-    runtimeDefaults:
-      contextSync:
-        paths: [".claude/projects/-data-workspace/**"]
+claude:
+  contextSync:
+    paths: [".claude/projects/-data-workspace/**"]
 ```
+
+**NOT in `global.agentops.runtimeDefaults`.** Those are what every runtime
+inherits, and an include list is one vendor's filesystem layout — running
+another backend means replacing the paths with its own, in the same section that
+carries its image and credential. Clearing them gives that runtime the volume
+mounted directly, exactly as before this existed.
+
+**THE COST, AND IT IS PAID ON EVERY CONVERSATION.** `$HOME` is pod-local in this
+mode, so it is not only transcripts that live there — caches, tool state and
+anything else the agent writes home are node ephemeral storage now, and they die
+with the pod:
+
+| Key | Default | Consequence |
+|---|---|---|
+| `global.agentops.runtimeDefaults.contextSync.liveSizeLimit` | `4Gi` | per conversation, on the node running it. Empty is unbounded, which is Kubernetes' own default |
+
+Budget node ephemeral storage for `maxActiveConversations` × this, and raise it
+before a run that checks out something large evicts itself.
 
 `rbac.drainAware` costs the manager its only cluster-scoped permission — reading
 nodes. It shrinks the window in which a reboot can corrupt the volume. It does

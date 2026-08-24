@@ -4,8 +4,8 @@ See `proposal.md` — Why. The relevant current state, in one place:
 
 | Piece | Today |
 |---|---|
-| `AgentRuntime.spec.contextSync.paths` | rendered from `runtime.contextSync.paths`, which ships `[]` |
-| `chart/templates/runtime.yaml:71` | `{{- with $rt.contextSync.paths }}` — an empty list renders no stanza at all |
+| `AgentRuntime.spec.contextSync.paths` | rendered from the runtime's merged values, which ship `[]` |
+| `agentops.renderRuntime` in `chart/templates/_helpers.tpl` | `{{- with (($rt.contextSync \| default dict).paths) }}` — an empty list renders no stanza at all. ONE helper, called by the parent AND by the `claude` bundle |
 | `contextsync_validate.go:29` | a hand-written empty list is refused |
 | `podspec.go:287` | `sidecar := sync != nil && cfg.ContextSyncImage != ""` |
 | `podspec.go:359` | the `case sidecar:` branch mounts `ClaimName: cfg.ContextPVC`, unconditionally |
@@ -23,8 +23,9 @@ one conjunct, and one chart default is empty.
 - A default install with a context volume runs synchronised, without an operator
   setting a value.
 - A pod is never constructed referencing a persistent claim by an empty name.
-- The pod builder and continuity resolution give the same answer about whether a
-  conversation's context is durable.
+- The pod builder and continuity resolution give the same answer about the
+  DURABLE VOLUME: where there is none, neither promises continuity and neither
+  references a persistent claim.
 
 **Non-Goals:**
 
@@ -50,6 +51,15 @@ claim, control reaches the `default:` arm, which is the ephemeral `EmptyDir` pod
 The fallback therefore needs no new code path — only for the predicate to stop
 being true in a case it cannot serve.
 
+**THE AGREEMENT IS ABOUT THE VOLUME, NOT ABOUT THE PROMISE**, and the stronger
+reading is false. `ContinuityPossible()` also returns false for
+`contextStorage: none` — a backend keeping no context on disk — which is
+impossible to continue whether or not a volume exists. That runtime still mounts
+the claim it is given, because the mount is where the pod's filesystem lives.
+Written as "continuity impossible implies no persistent claim", this invariant
+fails on a case nothing is wrong with; written as "no volume implies no
+persistent claim", it is exactly the property the defect broke.
+
 **Alternative considered: fail loudly at pod construction.** Rejected because the
 operator did not misconfigure anything. An install that runs without persistence
 is asking for ephemeral context, and the project already has a word for that
@@ -71,21 +81,36 @@ without the test, makes the blast radius of a regression the whole install base.
 
 This is an ordering constraint on the tasks, not two changes.
 
-### D3 — The chart declares the paths; the runtime still owns them
+### D3 — The VENDOR'S BUNDLE declares the paths; the runtime still owns them
 
-`runtime.contextSync.paths` gains `.claude/projects/-data-workspace/**` as its
-default value, and `chart/templates/runtime.yaml` is untouched — it already
-renders whatever the value holds.
+`chart/charts/claude/values.yaml` gains
+`contextSync.paths: [".claude/projects/-data-workspace/**"]`, and the render is
+untouched — `agentops.renderRuntime` already renders whatever the merged values
+hold.
+
+**NOT `global.agentops.runtimeDefaults`, AND THAT IS THE WHOLE PLACEMENT.** Those
+defaults are what EVERY runtime inherits, and this value is one vendor's
+filesystem layout: it describes where claude-code files transcripts and means
+nothing to an Ollama or Copilot backend. `agent-runtime-ownership` states the
+rule directly — the vendor's image and model credential already moved to this
+bundle for the same reason, and a path is the same kind of fact.
+
+An install running another backend replaces the image, the credential and the
+paths together, in one section, because all three describe the same vendor.
 
 The declaration still belongs to the runtime in the sense the spec means: the
-value describes where `runtime-claude` keeps context, it ships with the chart
-that ships `runtime-claude`, and an install running a different backend replaces
-both together.
+runtime states it, in the bundle that ships that runtime — not a human typing it
+on the runtime's behalf.
 
 **Alternative considered: default it in the API type or the manager.** Rejected —
 that puts one vendor's filesystem layout inside a component that must stay
 generic, and it is the argument that correctly keeps paths out of the manager
 today.
+
+**Alternative considered: the release-wide defaults.** Rejected on the rule
+above, and it is worth naming because it is where this value was ALMOST put: the
+key is spelled `contextSync` in both places, so the wrong one renders and looks
+correct until a second vendor is installed.
 
 **Alternative considered: have the runtime image report its paths over the work
 contract.** Rejected as disproportionate. The sidecar needs the paths at pod
@@ -142,7 +167,7 @@ conversations are not to be preserved.
 `docs/CHANGELOG.md` carries the entry: what moves, what fails, and the reset verb
 that recovers it. That is the whole of the migration story.
 
-**Rollback:** clearing `runtime.contextSync.paths` restores the direct mount, and
+**Rollback:** clearing `claude.contextSync.paths` restores the direct mount, and
 `TestClearingContextSyncRestoresTheDirectMount` already covers it. Rollback has
 the same consequence in reverse — the layout moves back, and handles written
 under the subPath are not found.

@@ -62,6 +62,35 @@ name: default
 # an older tag keeps that substitution and ignores toolsets.mode.
 image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
 
+# WHERE THIS RUNTIME KEEPS ITS CONTEXT — include globs relative to $HOME, and
+# the declaration that turns context synchronisation ON.
+#
+# A node reboot corrupted the shared context filesystem on 2026-08-20. The live
+# context WAS that volume, so one damaged filesystem took every conversation's
+# context AND stopped every runtime pod from starting. Declared, a sidecar keeps
+# the live context pod-local and the durable volume holds a SNAPSHOT: a run
+# already going survives the volume failing underneath it, and the agent
+# container holds no mount of the volume at all.
+#
+# IT IS HERE, NOT IN `global.agentops.runtimeDefaults`, FOR THE SAME REASON THE
+# IMAGE AND THE CREDENTIAL ARE. This value is claude-code's transcript layout —
+# it means nothing to another backend, and those defaults are what EVERY runtime
+# inherits. The key is spelled `contextSync` in both places, so the wrong one
+# renders and looks correct until a second vendor is installed.
+#
+# RUNNING ANOTHER BACKEND MEANS REPLACING IT with that backend's own paths, in
+# the same section that carries its image and credential. Clearing it disables
+# the mechanism: the context volume is then mounted into the agent container
+# directly, as it was before this existed.
+#
+# It also needs a durable context volume to snapshot to. With
+# `persistence.context` off there is nothing to snapshot to, and the pod falls
+# back to the unsynchronised one — ephemeral context, no sidecar, and the
+# conversation told its context is not promised.
+contextSync:
+  paths:
+    - ".claude/projects/-data-workspace/**"
+
 # ONE secret with the model credential — a `claude setup-token` output or an
 # Anthropic API key. Projected as env via valueFrom; the manager reads no
 # Secrets.

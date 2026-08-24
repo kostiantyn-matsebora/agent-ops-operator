@@ -283,8 +283,16 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 	// durable volume to a separate container. It is opt-in per runtime: a
 	// runtime that declares nothing gets exactly the pod it got before, which
 	// is what lets an existing install upgrade without a migration.
+	//
+	// A DURABLE VOLUME IS THE THIRD CONDITION, on the same footing as the other
+	// two rather than as an exception. There is nothing to snapshot to without
+	// one, and the branch below mounts the claim by name — so an install
+	// running without persistence would build a pod referencing a claim called
+	// "", which is refused at admission. ContinuityPossible() already answers
+	// "no volume, no promise" for exactly that case; failing here instead would
+	// make the manager promise a fresh answer and then fail to provide one.
 	sync := resolved.ContextSync
-	sidecar := sync != nil && cfg.ContextSyncImage != ""
+	sidecar := sync != nil && cfg.ContextSyncImage != "" && cfg.ContextPVC != ""
 
 	// EGRESS MEDIATION redirects the agent's traffic through a proxy that
 	// enforces the conversation's bound tool access. Opt-in per runtime on the

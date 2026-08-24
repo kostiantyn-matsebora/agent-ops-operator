@@ -11,6 +11,94 @@ See [../README.md](../README.md) for the product overview and [./](./) for
 reference material. `CLAUDE.md` in this directory owns the rules this file
 follows.
 
+## [12.0.0] — 2026-08-24
+
+**Context synchronisation is ON by default**, and the mode no longer builds a
+pod it cannot serve.
+
+### Changed
+
+**The reference runtime declares its context paths, so a default install runs
+synchronised.** `chart/charts/claude/values.yaml` ships
+`contextSync.paths: [".claude/projects/-data-workspace/**"]`.
+
+The mechanism existed because a node reboot corrupted the shared context
+filesystem on 2026-08-20, taking every conversation's context AND stopping every
+runtime pod from starting. It shipped inert: the correct value sat commented out
+two lines beneath an empty list, waiting for an operator to type a fact the
+runtime already holds.
+
+**It is in the VENDOR'S BUNDLE, not `global.agentops.runtimeDefaults`** — beside
+that runtime's image and model credential, which moved there in 11.0.0 for the
+same reason. An include list is one vendor's filesystem layout: it describes
+where claude-code files transcripts and means nothing to another backend.
+Running one means replacing the paths with its own, in the same section.
+
+### Fixed
+
+**A runtime declaring `contextSync` on an install with no context volume built a
+pod that could not start.** The sidecar branch mounted the durable claim
+unconditionally, so with persistence off it rendered a `PersistentVolumeClaim`
+reference whose name was the empty string — refused at admission, no pod, and a
+conversation with no phase.
+
+Two things hid it. Every test shared one config that set a claim, so the
+combination was never constructed. And continuity resolution got it RIGHT — it
+reports no promise without a volume — so the manager correctly told the
+conversation it would answer fresh, then failed to provide one.
+
+**The fix is one conjunct**: no durable volume means no sidecar, and the pod is
+exactly today's unsynchronised pod with ephemeral context. One fallback rule,
+three conditions — no declaration, no sidecar image, no volume — rather than one
+rule with an exception.
+
+Rare before, because it needed someone to declare `contextSync` while running
+without persistence. With the default on it would have been every conversation
+of every persistence-disabled install, which is why the fix landed first.
+
+### BREAKING — existing conversations lose their context handles
+
+**Synchronisation relocates the durable layout** from the claim root to a
+per-conversation path. Nothing copies a volume, so a conversation holding a
+context handle looks for it under a path that has nothing in it.
+
+**It FAILS that conversation's next run rather than answering without memory** —
+the continuity rule working, not a defect. The recovery is the reset verb, which
+clears the handle and keeps the conversation, its threads, its inputs and its
+recorded runs:
+
+```
+POST /channel/conversations/{name}/reset-context
+```
+
+**No migration is provided and none is owed.** This project is pre-1.0 and
+unpublished, and the decision on record is that existing conversations are not
+preserved. Enable it on a quiet install, or reset the conversations that fail.
+
+**Rolling back has the same cost in reverse.** Clearing `claude.contextSync.paths`
+restores the direct mount, and handles written under the per-conversation path
+are not found there.
+
+### The cost of the default, stated rather than discovered
+
+**`$HOME` is pod-local on every conversation now.** It is not only transcripts
+that live there — caches, tool state and anything else the agent writes home are
+node ephemeral storage, and they die with the pod.
+`runtimeDefaults.contextSync.liveSizeLimit` bounds it at `4Gi` per conversation.
+Budget node ephemeral storage for `maxActiveConversations` × that.
+
+### Upgrade
+
+1. `helm upgrade`. Nothing to restate — the default arrives with the chart.
+2. Expect conversations holding a context handle to fail their next run; reset
+   each with the verb above.
+3. Turning it back off is `claude.contextSync.paths: []`, with the same
+   relocation cost in reverse.
+
+**Running without a context volume?** Nothing to do. Synchronisation is skipped
+because there is nothing to snapshot to, and conversations answer fresh and say
+so — which is what they already did.
+
 ## [11.0.0] — 2026-08-24
 
 **No account exists unless something is bound to it or something authenticates
