@@ -263,13 +263,6 @@ spec:
   icon: "aops:home"
   profileRef:
     name: ha-user
-  # UNDER WHOSE IDENTITY, overriding the runtime's own. The same decision as the
-  # toolsets below — which tools, and with whose credentials — which is why both
-  # are on this one object.
-  #
-  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
-  # yours to grant. This bundle renders no ServiceAccount.
-  serviceAccountName: agentops-ha-control
   # Declared, not inherited: profiles carry no capabilities and nothing supplies
   # a default, so this stanza IS the agent's allowlist.
   toolsets:
@@ -301,13 +294,6 @@ spec:
   icon: "aops:operate"
   profileRef:
     name: ha-operator
-  # UNDER WHOSE IDENTITY, overriding the runtime's own. The same decision as the
-  # toolsets below — which tools, and with whose credentials — which is why both
-  # are on this one object.
-  #
-  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
-  # yours to grant. This bundle renders no ServiceAccount.
-  serviceAccountName: agentops-ha-ops
   # Wiring is pipeline-only: without a claim a source reports Wired=False and
   # DROPS every signal it admits.
   signalSourceRefs:

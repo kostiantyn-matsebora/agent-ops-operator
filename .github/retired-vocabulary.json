@@ -31,7 +31,10 @@
     "openspec/specs/**/*.md",
     "docs/*.md",
     "docs/guides/*.md",
-    "README.md"
+    "README.md",
+    "chart/values.yaml",
+    "chart/charts/*/values.yaml",
+    "chart/templates/NOTES.txt"
   ],
   "skip": [
     "docs/CHANGELOG.md"
@@ -471,7 +474,7 @@
     {
       "id": "runtime-rbac-mode",
       "pattern": "rbacMode|rbac[ -]?mode",
-      "says": "there is no release-wide permission mode; declare an account under rbac.runtime.serviceAccounts and NAME it on the routes that need it",
+      "says": "an account STATES ITS RULES — clusterRoles, bindClusterRoles or namespaced — or holds nothing. There is no preset posture at ANY level: a mode name is a grant nobody reviewed, and declaring the account rather than defaulting it release-wide does not make the word readable",
       "allow": [
         "removed",
         "retired",
@@ -487,9 +490,11 @@
         "deleted",
         "->",
         "→",
-        "serviceAccounts",
-        "per account",
-        "declared account"
+        "clusterRoles",
+        "preset",
+        "fails the render",
+        "refused",
+        "DELETED"
       ]
     },
     {
@@ -628,6 +633,31 @@
         "home-assistant",
         "prometheus",
         "telegram"
+      ]
+    },
+    {
+      "id": "adapter-kubernetes-access",
+      "pattern": "(?<![\\w.])kubernetesAccess\\b",
+      "says": "an adapter names the ServiceAccount it runs as — `spec.serviceAccountName`, a reference the chart creates — and naming one is what mounts its token. Absent means the release floor, denied every verb",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "pruned",
+        "replaced",
+        "is now",
+        "gone",
+        "renamed",
+        "became",
+        "deleted",
+        "->",
+        "→",
+        "serviceAccountName",
+        "DELETED",
+        "fails the render",
+        "refused"
       ]
     }
   ]

@@ -72,23 +72,36 @@ move together or the hole opens one indirection along. */ -}}
 {{- dig "agentops" "runtimeDefaults" "allowPodExecution" false (.Values.global | default dict) | toString -}}
 {{- end -}}
 
-{{- /* DOES ANY ACCOUNT THIS RELEASE RENDERS LET AN AGENT ACT ON THE CLUSTER?
-Returns "true" or "".
+{{- /* DOES ANY DECLARED ACCOUNT GRANT ANYTHING AT ALL? Returns "true" or "".
 
-Used only by NOTES.txt, to say what an install actually granted. It reads the
-DECLARED accounts, because that is the only source of runtime permissions now —
-there is no mode, and the floor is bound to nothing in every configuration. */ -}}
-{{- define "agentops.anyActingAccount" -}}
+Used only by NOTES.txt. It reads the DECLARED accounts, because that is the only
+source of runtime permissions — the floor is bound to nothing in every
+configuration, and there is no mode at either level.
+
+IT NO LONGER ANSWERS "CAN AN AGENT ACT", AND THAT IS THE HONEST ANSWER RATHER
+THAN A LOST FEATURE. It used to test `rbacMode == "full"`, which the chart could
+read because the chart WROTE those verbs. An account now carries rules the
+OPERATOR wrote, so summarising them would be this template guessing at YAML it
+did not author — and a wrong summary in the one report an operator trusts about
+their own grants is worse than no summary. NOTES.txt names the accounts and the
+roles; `kubectl describe clusterrole` reads them. */ -}}
+{{- define "agentops.anyGrantedAccount" -}}
 {{- range $a := (dig "runtime" "serviceAccounts" list (.Values.rbac | default dict)) -}}
-{{- if eq ($a.rbacMode | default "none") "full" }}true{{ end -}}
+{{- if or $a.clusterRoles $a.bindClusterRoles $a.namespaced }}true{{ end -}}
 {{- end -}}
 {{- end -}}
 
-{{- /* EVERY DECLARED ACCOUNT THAT GRANTS ANYTHING, as "name mode" lines. */ -}}
+{{- /* EVERY DECLARED ACCOUNT THAT GRANTS ANYTHING, as "name what-it-declares"
+lines. The second field lists the KEYS the entry states, never a summary of the
+verbs beneath them. */ -}}
 {{- define "agentops.grantingAccounts" -}}
 {{- range $a := (dig "runtime" "serviceAccounts" list (.Values.rbac | default dict)) -}}
-{{- if ne ($a.rbacMode | default "none") "none" }}
-{{ $a.name }} {{ $a.rbacMode }}
+{{- if or $a.clusterRoles $a.bindClusterRoles $a.namespaced }}
+{{- $what := list -}}
+{{- if $a.clusterRoles }}{{ $what = append $what (printf "%d ClusterRole(s) it renders" (len $a.clusterRoles)) }}{{ end -}}
+{{- if $a.bindClusterRoles }}{{ $what = append $what (printf "%d existing ClusterRole(s)" (len $a.bindClusterRoles)) }}{{ end -}}
+{{- if $a.namespaced }}{{ $what = append $what (printf "%d namespaced Role(s)" (len $a.namespaced)) }}{{ end -}}
+{{ $a.name }}|{{ join ", " $what }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -646,6 +659,8 @@ outcomes here are the expensive ones:
     signal reports success.
   * `global.agentops.runtime.rbacMode: full` left behind grants nothing at all
     now, so an install that believed it had an acting agent has an inert one.
+    The per-account `rbacMode` is the same story and is refused in
+    `runtime-rbac.yaml`, where the entry is read.
   * `kubernetes.enabled: true` left behind renders NOTHING, indistinguishable
     from an operator who meant to leave the bundle off.
 
@@ -665,7 +680,7 @@ install and a CI render.
 {{- if hasKey $g "runtime" -}}
 {{- $r := index $g "runtime" -}}
 {{- if hasKey $r "rbacMode" -}}
-{{- $bad = append $bad "global.agentops.runtime.rbacMode -> DELETED, with no replacement and no alias. There is no preset posture any more: the default is NO permissions, and an install wanting more declares an account under rbac.runtime.serviceAccounts (the same `rbacMode` vocabulary, per account) and NAMES it on the routes that need it. `rbacMode: full` becomes `rbac.runtime.serviceAccounts: [{name: agentops-runtime-acting, rbacMode: full}]` plus `serviceAccountName: agentops-runtime-acting` on those Pipelines" -}}
+{{- $bad = append $bad "global.agentops.runtime.rbacMode -> DELETED, with no replacement and no alias. There is no preset posture at ANY level: the default is NO permissions, and an install wanting more declares an account under rbac.runtime.serviceAccounts STATING ITS RULES (clusterRoles / bindClusterRoles / namespaced) and NAMES it on the routes that need it. There is no per-account `rbacMode` either — that was the same preset one level down. Start from agentops.runtimeReadRules / runtimeWriteRules in chart/templates/_helpers.tpl and paste what you want" -}}
 {{- end -}}
 {{- if hasKey $r "serviceAccountName" -}}
 {{- $bad = append $bad "global.agentops.runtime.serviceAccountName -> global.agentops.runtimeDefaults.serviceAccountName. It is now a REFERENCE this chart does not create, and its default is the floor account the chart always renders" -}}
@@ -674,10 +689,33 @@ install and a CI render.
 {{- $bad = append $bad "global.agentops.runtime.allowPodExecution -> global.agentops.runtimeDefaults.allowPodExecution" -}}
 {{- end -}}
 {{- end -}}
+{{- /* THE VENDOR'S KEYS LEFT IN THE RELEASE-WIDE DEFAULTS. Not silently
+ignored — WORSE: they still merge into EVERY runtime, so one vendor's image
+reference and one vendor's environment variable reach a backend that is not that
+vendor. That is the exact condition extracting the `claude` bundle was meant to
+end, and it looks like a working install right up to the first run. */ -}}
+{{- $rdef := dig "agentops" "runtimeDefaults" dict (.Values.global | default dict) -}}
+{{- if hasKey $rdef "image" -}}
+{{- $bad = append $bad "global.agentops.runtimeDefaults.image -> the bundle or entry that ships that VENDOR. The reference runtime's is `claude.image`; another backend states its own on its `runtimes:` entry. The release-wide defaults carry no image, because an image cannot be stated without naming a vendor and every runtime inherits this block" -}}
+{{- end -}}
+{{- if hasKey $rdef "credentialsSecret" -}}
+{{- $bad = append $bad "global.agentops.runtimeDefaults.credentialsSecret -> the bundle or entry that ships that VENDOR. The reference runtime's is `claude.credentialsSecret` (set `.token` and the Secret is created with the release). A key and an env var name one vendor, and left here they reach every runtime — including one that reads neither" -}}
+{{- end -}}
+{{- /* THE ADAPTER FIELD THAT BECAME AN IDENTITY. Silently dropping a
+`kubernetesAccess: true` would UNMOUNT a token the adapter's own code depends on,
+and that surfaces as an error inside the adapter rather than at the values file
+that caused it. */ -}}
+{{- range $k := list "signalAdapters" "channelAdapters" -}}
+{{- range $e := (index $v $k | default list) -}}
+{{- if hasKey $e "kubernetesAccess" -}}
+{{- $bad = append $bad (printf "%s[].kubernetesAccess -> serviceAccountName. An adapter NAMES the account it runs as, and naming one is what mounts its token — the two were always one decision. The chart that grants an adapter renders that account beside the grant; naming none means the release floor, denied every verb" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $rr := dig "runtime" dict (.Values.rbac | default dict) -}}
 {{- range $k := list "clusterRoles" "bindClusterRoles" "namespaced" -}}
 {{- if hasKey $rr $k -}}
-{{- $bad = append $bad (printf "rbac.runtime.%s -> moved ONTO an account. These added to the account `rbacMode` rendered, and that account is gone; declare the account under rbac.runtime.serviceAccounts and put `%s` on the entry" $k $k) -}}
+{{- $bad = append $bad (printf "rbac.runtime.%s -> moved ONTO an account. These added to the account the deleted release-wide mode rendered, and that account is gone; declare the account under rbac.runtime.serviceAccounts and put `%s` on the entry, where it is now the ONLY way an account is granted anything" $k $k) -}}
 {{- end -}}
 {{- end -}}
 {{- range $pair := list (list "k8s-bundle" "kubernetes") (list "ha-bundle" "home-assistant") (list "prometheus-bundle" "prometheus") (list "telegram-bundle" "telegram") (list "vm-bundle" "prometheus") -}}

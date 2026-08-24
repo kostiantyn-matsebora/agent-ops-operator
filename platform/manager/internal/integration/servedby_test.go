@@ -238,15 +238,18 @@ func TestSwitchingToServedByRemovesTheOldWorkload(t *testing.T) {
 		t.Fatal("switching to servedBy must remove the workload it used to own")
 	}
 
-	// ...but NOT the ServiceAccount. The manager holds no `delete` verb on
-	// serviceaccounts by design, so attempting one wedges the reconciler in a
-	// permanent forbidden loop — which is exactly how this was found on a live
-	// cluster. A leftover SA carries zero RBAC and is GC'd with the adapter CR.
+	// ...and there is no ServiceAccount to leave alone, because the manager
+	// creates none. This assertion used to require the leftover account to
+	// SURVIVE — the manager holds no `delete` verb on serviceaccounts, so
+	// attempting one wedged the reconciler in a forbidden loop, found on a live
+	// cluster. Both halves are moot now: the chart owns adapter identities, so
+	// switching a served-by relationship touches no account at all.
 	var sa corev1.ServiceAccount
 	if err := k8sClient.Get(ctx,
 		types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("sb-switch")},
-		&sa); err != nil {
-		t.Fatalf("the ServiceAccount must be left alone (the manager cannot delete one): %v", err)
+		&sa); err == nil {
+		t.Fatal("the operator created a ServiceAccount for an adapter workload; " +
+			"identities are the chart's, and one the operator makes is one it cannot grant")
 	}
 }
 

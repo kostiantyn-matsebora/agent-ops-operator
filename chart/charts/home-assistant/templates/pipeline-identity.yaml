@@ -29,7 +29,7 @@ suppresses the one rendered here.
 {{- $routes = append $routes $p.ops }}
 {{- end }}
 {{- range $cfg := $routes }}
-{{- if not ($cfg.serviceAccountName | default ($p.serviceAccountName | default "")) }}
+{{- if include "home-assistant.routeAccountRendered" (dict "ctx" $ "cfg" $cfg "p" $p) }}
 {{- $sa := include "home-assistant.routeServiceAccount" (dict "ctx" $ "route" $cfg.name) }}
 ---
 apiVersion: v1

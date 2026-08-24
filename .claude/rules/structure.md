@@ -224,8 +224,8 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
 - **Reads that instance's WebSocket API** over a hand-written RFC 6455 client:
   `system_log_event`, with `system_log/list` for backfill and for the dwell
   re-check's evidence.
-- **NO Kubernetes client at all.** `kubernetesAccess: false`, credential
-  projected per SOURCE.
+- **NO Kubernetes client at all.** It names no ServiceAccount, so it runs as the
+  release floor; credential projected per SOURCE.
 - **Same `rules`/`route` vocabulary as `signal-k8s-events`**, minus the time
   axis.
 - **The fingerprint keys on LOGGER + SOURCE LOCATION** — Home Assistant's own
@@ -239,8 +239,8 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
 
 - **In-cluster API over `net/http`**, no client-go: SA token re-read, list+watch
   per namespace scope, 410 relist.
-- **Needs `kubernetesAccess: true`.** The CHART binds its events RBAC — the
-  operator grants adapters nothing.
+- **Names the account the CHART renders beside its events RBAC** — the operator
+  grants adapters nothing, and creates no account either.
 - **The fingerprint keys on the involved OBJECT + reason**, never the Event
   object. Kubernetes recreates those per recurrence.
 
@@ -289,7 +289,7 @@ what lives HERE is the implementation:
 - **Embedded SPA via `go:embed`** — no npm at runtime.
 - **NO write path to the Kubernetes API exists in the module.** The only write
   anywhere is `POST /channel/inbound`.
-- **Needs `kubernetesAccess: true`** for identity, plus the CHART's read-only
-  Role against SA `agentops-adapter-console`.
+- **Names `agentops-adapter-console`**, which the CHART renders beside the
+  read-only Role it binds to it.
 - **Conversations carry no `pipelineRef`**, so pipeline attribution is INFERRED
   from the materialized bindings and left blank when ambiguous. Never guessed.

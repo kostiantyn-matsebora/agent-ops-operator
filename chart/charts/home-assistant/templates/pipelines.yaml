@@ -73,7 +73,7 @@ everyday agent needs nothing beyond the intents. */ -}}
       "name" $p.control.name
       "icon" ($p.control.icon | default "")
       "runtimeRef" ($p.control.runtimeRef | default $p.runtimeRef | default "")
-      "serviceAccountName" ($p.control.serviceAccountName | default $p.serviceAccountName | default (include "home-assistant.routeServiceAccount" (dict "ctx" $ "route" $p.control.name)))
+      "serviceAccountName" (include "home-assistant.routeAccount" (dict "ctx" $ "cfg" $p.control "p" $p))
       "profile" .Values.profiles.user.name
       "sources" ($p.chatSources | default list)
       "tools" $controlTools
@@ -84,7 +84,7 @@ everyday agent needs nothing beyond the intents. */ -}}
       "name" $p.ops.name
       "icon" ($p.ops.icon | default "")
       "runtimeRef" ($p.ops.runtimeRef | default $p.runtimeRef | default "")
-      "serviceAccountName" ($p.ops.serviceAccountName | default $p.serviceAccountName | default (include "home-assistant.routeServiceAccount" (dict "ctx" $ "route" $p.ops.name)))
+      "serviceAccountName" (include "home-assistant.routeAccount" (dict "ctx" $ "cfg" $p.ops "p" $p))
       "profile" .Values.profiles.ops.name
       "sources" (concat ($p.chatSources | default list) $logSource)
       "tools" $opsTools

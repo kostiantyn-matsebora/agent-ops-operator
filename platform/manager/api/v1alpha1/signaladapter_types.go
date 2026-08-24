@@ -43,13 +43,27 @@ type SignalAdapterSpec struct {
 	// cron).
 	// +optional
 	Port *int32 `json:"port,omitempty"`
-	// KubernetesAccess declares that this implementation talks to the
-	// Kubernetes API (e.g. to register itself with a sender). When true the
-	// reconciler mounts the SA token and injects POD_NAMESPACE — and grants
-	// NOTHING: permissions are bound externally (chart or user) against the
-	// deterministic SA name agentops-signal-<name>.
+	// ServiceAccountName is the identity this adapter's workload runs as, and
+	// its token IS mounted — naming an account whose token is never mounted
+	// would grant nothing, since the pod would never present that identity.
+	//
+	// A REFERENCE, never a creation. No reconciler creates this account, none
+	// validates that it exists, and none binds anything to it: a SignalAdapter
+	// is an ordinary namespaced object, so an operator that could grant one
+	// would make CR-edit rights a privilege escalation. The chart that grants an
+	// adapter its permissions renders the account beside that grant.
+	//
+	// EMPTY MEANS THE RELEASE'S FLOOR ACCOUNT — created always by the chart,
+	// bound to nothing, refused as a binding target. Not the namespace default,
+	// which carries whatever the cluster gave it; and not "no account", because
+	// a pod holding no token cannot be told apart from one whose grant was
+	// forgotten.
+	//
+	// It must never be a runtime identity. What an agent may do is model
+	// output's reach; what an adapter may do is this project's own code's reach,
+	// and the two are opposite grants.
 	// +optional
-	KubernetesAccess *bool `json:"kubernetesAccess,omitempty"`
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 	// Singleton runs the workload as replicas 1 + strategy Recreate so no
 	// rollout ever runs two instances side by side (pollers and schedulers
 	// must not double-fire).

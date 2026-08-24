@@ -181,3 +181,154 @@ hand-written CR. That is the wrong shape for a project whose model is "one
   where a chart edit will meet it.
 - `.github/retired-vocabulary.json` — `rbacMode`, `rbac.runtime.*`, `runtime.*`
   and every `-bundle` subchart key.
+
+---
+
+## REOPENED — what the first pass got wrong
+
+**This change was archived and reopened.** Three things it set out to do were
+left half-done, and each is the same failure: something moved out of the parent
+without its consequences.
+
+### 1. A preset posture survived one level down
+
+The change deleted `global.agentops.runtime.rbacMode` and wrote **"THERE SHALL
+BE NO PRESET POSTURE"** into the spec — then shipped
+`rbac.runtime.serviceAccounts[].rbacMode: readonly|full`. The identical
+mechanism, one level down, so the requirement described half of what was built.
+
+**On the reference install it is a second cluster-write path.** The runtime pod
+mounts its ServiceAccount token and the acting route binds a shell, while the
+runtime image ships no kubectl precisely so cluster reach goes through the MCP
+server and its toolset split. `full` on the runtime identity walks around both
+walls with `curl`.
+
+**Fix:** `rbacMode` DELETED with no alias. A declared account states
+`clusterRoles` / `bindClusterRoles` / `namespaced`, or holds nothing.
+
+### 2. Bundles render accounts for routes that need none
+
+The rule kept was "an account for EVERY route a bundle ships". Rendered against
+the reference install, four accounts are bound to nothing at all —
+`agentops-ha-ops`, `agentops-ha-control`, `agentops-mcp-ha`,
+`agentops-mcp-prometheus` — indistinguishable from the floor, while adding four
+names to every audit of who holds what.
+
+**Fix:** a bundle renders an account only where it also renders or binds RBAC
+for that route. A route needing nothing names nothing and inherits the floor; a
+route that must hold nothing on an install whose inherited default carries
+rights names the floor explicitly, which the spec already keeps nameable.
+
+**The two lanes stay distinct:** a BUNDLE-shipped route needing privileges gets
+the account the bundle creates and binds. An INSTALL'S OWN pipeline declares its
+own account and names it — that lane is unchanged.
+
+### 3. The vendor's bundle does not carry the vendor's configuration
+
+`chart/charts/claude/values.yaml` states the reason it exists: *"an install
+using one still carried this one's image reference and credential shape."* Both
+are still in `global.agentops.runtimeDefaults` — the image tag, and a
+`credentialsSecret` keyed `oauthToken` into `CLAUDE_CODE_OAUTH_TOKEN`.
+
+So an install running another backend inherits Claude's environment variable,
+and an install configuring Claude does it in the vendor-neutral block. The
+parent's values carry no `claude:` key either, so `helm show values` surfaces
+the bundle's section nowhere — a subchart's values are reachable as
+`.Values.claude` whether or not the parent declares them, which is what hid it.
+
+**Fix:** image and credential move to `chart/charts/claude/values.yaml`, and the
+parent gains a documented `claude:` section.
+
+## Impact — the reopened work
+
+**Chart**
+
+- `chart/templates/runtime-rbac.yaml` — `rbacMode` deleted; a retired-key guard
+  FAILS the render naming the explicit keys.
+- `chart/charts/kubernetes/templates/pipeline-identity.yaml` and the
+  `home-assistant` equivalent — render only where a grant is declared.
+- `chart/values.yaml` — `runtimeDefaults.image` and `.credentialsSecret` move
+  out; a `claude:` section arrives.
+- `chart/charts/claude/values.yaml` — gains `image` and `credentialsSecret`.
+
+**Documentation**
+
+- `docs/CHANGELOG.md` — BREAKING three times: a values key deleted, the
+  credential moved, and accounts disappearing from installs that did not name
+  them.
+- `docs/installation.md`, `docs/concepts.md`, `docs/claude.md`,
+  `docs/k8s-bundle.md`, `docs/ha-bundle.md`.
+- `.claude/rules/invariants.md`, `wiring.md`, `chart.md`.
+- `.github/retired-vocabulary.json` — `rbacMode`.
+
+### 4. The manager creates ServiceAccounts, and it is the only thing that does
+
+`.claude/rules/wiring.md:193` says **"NAMING AN SA IS NOT CREATING ONE. No
+reconciler makes one."** That sentence is false in exactly one file:
+`platform/manager/internal/controller/adapterworkload.go:134` creates one per
+adapter workload, unconditionally.
+
+### The creator does not know what the adapter needs
+
+The manager is forbidden from binding RBAC to an adapter — correctly, because a
+`SignalAdapter` is an ordinary namespaced object, and a reconciler that could
+attach permissions to one would make CR-edit rights a privilege escalation. So
+it creates an account it is not allowed to grant anything to.
+
+The result on the reference install: six adapter accounts, of which ONE is bound
+to anything. The other five are indistinguishable from an account denied
+everything, which is what an unnamed pod could have had for free.
+
+### The identity and the grant are in different files
+
+The `kubernetes` bundle writes the events ClusterRole and binds it to
+`agentops-signal-k8s-events` — a name it does not create and cannot see. Reading
+"what can this adapter do" means reading a chart template and a Go reconciler
+and knowing that the name in one is the object in the other.
+
+### A guard cannot see an object that does not exist at render time
+
+`.github/scripts/serviceaccount-guard.py` fails any ServiceAccount the chart
+renders that nothing grants and nothing runs as. It cannot see these, because
+they are created by a controller after the render.
+
+### `kubernetesAccess` is the same decision wearing a second name
+
+It mounts the token and injects `POD_NAMESPACE`, and nothing else. Naming an
+account whose token is never mounted grants nothing — the pod never presents that
+identity — and mounting a token without naming an account mounts `default`'s.
+Two fields, one decision, and the combinations that are not the decision are all
+meaningless.
+
+### And an account nothing authenticates as is a name
+
+Two MCP server accounts mount no token (`automountServiceAccountToken: false`)
+and are bound to nothing. With no token the pod never presents that identity, so
+the account changes nothing about what it can reach — it is the placeholder this
+change deleted from the bundles, in a different file.
+
+**The rule, one line, covering the chart and the manager alike:** an account is
+justified when something is BOUND to it or something AUTHENTICATES as it.
+Otherwise it is a name.
+
+## Impact — the adapter identity work
+
+**API — BREAKING**
+
+- `platform/manager/api/v1alpha1/` — `serviceAccountName` added to both adapter
+  kinds, `kubernetesAccess` removed. CRDs regenerate, so
+  `kubectl apply -f chart/crds/` is an upgrade AND an install step.
+
+**Manager**
+
+- `internal/controller/adapterworkload.go` — stops creating the account, names
+  the resolved one, mounts its token, injects `POD_NAMESPACE` unconditionally.
+
+**Chart**
+
+- Each bundle renders the account it grants, beside the grant, and names it on
+  the CR. Adapters granted nothing name nothing and run as the floor.
+- The two tokenless MCP server accounts are removed.
+- `.github/scripts/serviceaccount-guard.py` — the workload exemption requires the
+  pod to MOUNT the token.
+

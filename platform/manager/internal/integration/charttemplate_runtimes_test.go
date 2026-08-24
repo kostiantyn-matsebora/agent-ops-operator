@@ -18,7 +18,7 @@ import (
 // conversation pod requests are visible in the values rather than compiled into
 // the operator.
 func TestDefaultInstallRendersOneRuntimeNamedDefault(t *testing.T) {
-	out := helmTemplate(t, "--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
+	out := helmTemplate(t, "--set", "claude.credentialsSecret.token=x")
 	if strings.Count(out, "kind: AgentRuntime\n") != 1 {
 		t.Fatalf("a default install must render exactly one AgentRuntime:\n%s", out)
 	}
@@ -33,7 +33,7 @@ func TestDefaultInstallRendersOneRuntimeNamedDefault(t *testing.T) {
 // defaults block is documenting nothing.
 func TestSecondRuntimeInheritsEveryDefault(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x",
+		"--set", "claude.credentialsSecret.token=x",
 		"--set-json", `runtimes=[{"name":"ollama","image":"example.com/ollama:1"}]`)
 	if !strings.Contains(out, "image: \"example.com/ollama:1\"") {
 		t.Fatalf("the declared runtime must carry its own image:\n%s", out)
@@ -49,7 +49,7 @@ func TestSecondRuntimeInheritsEveryDefault(t *testing.T) {
 // Egress mediation is ON by default now: the wall that constrains an
 // uncooperative agent must not be something an operator has to discover.
 func TestEgressMediationIsOnByDefault(t *testing.T) {
-	out := helmTemplate(t, "--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
+	out := helmTemplate(t, "--set", "claude.credentialsSecret.token=x")
 	if !strings.Contains(out, "egressMediation:") {
 		t.Fatal("egress mediation must be declared on the default runtime")
 	}
@@ -62,7 +62,7 @@ func TestEgressMediationIsOnByDefault(t *testing.T) {
 // zero value, which is exactly what a naive mergeOverwrite would drop.
 func TestARuntimeCanDeclineEgressMediation(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x",
+		"--set", "claude.credentialsSecret.token=x",
 		"--set", "claude.egressMediation.enabled=false")
 	if strings.Contains(out, "egressMediation:") {
 		t.Fatalf("a runtime declaring egressMediation.enabled=false must render no stanza:\n%s", out)
@@ -76,7 +76,7 @@ func TestARuntimeCanDeclineEgressMediation(t *testing.T) {
 // is a reference this chart never creates. Naming is not creating.
 func TestNamingTheDefaultAccountDoesNotCreateIt(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x",
+		"--set", "claude.credentialsSecret.token=x",
 		"--set", "global.agentops.runtimeDefaults.serviceAccountName=an-account-i-own")
 	if strings.Contains(out, "name: an-account-i-own\n  namespace:") {
 		t.Fatalf("the chart must reference the named default, never create it:\n%s", out)
@@ -92,7 +92,7 @@ func TestNamingTheDefaultAccountDoesNotCreateIt(t *testing.T) {
 // SILENCE MEANS NO POWER: with nothing declared, no ClusterRoleBinding names
 // any runtime account at all.
 func TestDefaultInstallBindsNothingToAnyRuntimeAccount(t *testing.T) {
-	out := helmTemplate(t, "--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
+	out := helmTemplate(t, "--set", "claude.credentialsSecret.token=x")
 	for _, doc := range strings.Split(out, "\n---\n") {
 		if !strings.Contains(doc, "kind: ClusterRoleBinding") && !strings.Contains(doc, "kind: RoleBinding") {
 			continue
@@ -106,7 +106,7 @@ func TestDefaultInstallBindsNothingToAnyRuntimeAccount(t *testing.T) {
 // ...and the chart refuses outright to be asked to.
 func TestBindingTheFloorAccountIsRefused(t *testing.T) {
 	out := helmTemplateErr(t, "--set-json",
-		`rbac={"runtime":{"serviceAccounts":[{"name":"agentops-runtime","rbacMode":"full"}]}}`)
+		`rbac={"runtime":{"serviceAccounts":[{"name":"agentops-runtime","clusterRoles":[{"name":"x","rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get"]}]}]}]}}`)
 	if !strings.Contains(out, "FLOOR account") {
 		t.Fatalf("binding the floor must be refused naming it:\n%s", out)
 	}
@@ -116,8 +116,8 @@ func TestBindingTheFloorAccountIsRefused(t *testing.T) {
 // anything now.
 func TestDeclaredAccountIsRenderedAndBound(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x",
-		"--set-json", `rbac={"runtime":{"serviceAccounts":[{"name":"agentops-runtime-acting","rbacMode":"full"}]}}`)
+		"--set", "claude.credentialsSecret.token=x",
+		"--set-json", `rbac={"runtime":{"serviceAccounts":[{"name":"agentops-runtime-acting","clusterRoles":[{"name":"x","rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get"]}]}]}]}}`)
 	if !strings.Contains(out, "name: agentops-runtime-acting\n  namespace:") {
 		t.Fatalf("a declared account must be created:\n%s", out)
 	}
@@ -177,6 +177,10 @@ func TestRetiredValuesKeysFailTheRender(t *testing.T) {
 	for _, tc := range []struct{ name, arg, jsonArg string }{
 		{name: "runtime block", arg: "runtime.image=x"},
 		{name: "rbacMode", arg: "global.agentops.runtime.rbacMode=full"},
+		// The mode one level DOWN. Deleting the release-wide key and keeping
+		// this one is what made the "no preset posture" rule describe half of
+		// what shipped.
+		{name: "per-account rbacMode", jsonArg: `rbac={"runtime":{"serviceAccounts":[{"name":"a","rbacMode":"full"}]}}`},
 		{name: "runtime serviceAccountName", arg: "global.agentops.runtime.serviceAccountName=y"},
 		{name: "runtime allowPodExecution", arg: "global.agentops.runtime.allowPodExecution=true"},
 		{name: "rbac.runtime.clusterRoles", jsonArg: "rbac.runtime.clusterRoles=[]"},
@@ -204,7 +208,7 @@ func TestRetiredValuesKeysFailTheRender(t *testing.T) {
 // The Kubernetes bundle's four consequences are a STATED setting of its own now,
 // never a release-wide permission value — and none of them derives from another.
 func TestKubernetesMutationsAreStatedNotDerived(t *testing.T) {
-	base := []string{"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x", "--set", "global.demo.enabled=true"}
+	base := []string{"--set", "claude.credentialsSecret.token=x", "--set", "global.demo.enabled=true"}
 
 	off := helmTemplate(t, base...)
 	if !strings.Contains(off, "--read-only") {
@@ -238,7 +242,7 @@ func TestKubernetesMutationsAreStatedNotDerived(t *testing.T) {
 // one floor account and one runtime, both from the parent's own model.
 func TestNoBundleRendersTheFloorOrTheDefaults(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x",
+		"--set", "claude.credentialsSecret.token=x",
 		"--set", "kubernetes.enabled=true",
 		"--set", "telegram.enabled=true",
 		"--set", "prometheus.enabled=true",

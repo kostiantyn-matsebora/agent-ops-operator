@@ -27,19 +27,61 @@ name: default
 # whole reason those defaults are stated in full rather than left as the fields
 # nothing else claimed.
 #
-# The parent's defaults already pin the reference image, so the ordinary install
-# sets nothing here at all. Override it to pin a DERIVED image of your own:
-# what an agent may REACH is wiring, so adding tooling to an image never grants
-# it anything — see docs/concepts.md#runtime-images-are-generic.
+# WHAT IS HERE RATHER THAN IN THE PARENT'S DEFAULTS: anything that names THIS
+# VENDOR. The image below and the credential beneath it were release-wide once,
+# which meant an install running Ollama still inherited claude-code's image
+# reference and the environment variable `CLAUDE_CODE_OAUTH_TOKEN`. Extracting
+# the CR without them left exactly the problem the extraction was for.
+#
+# Any key `global.agentops.runtimeDefaults` accepts is accepted here, and
+# overrides it for THIS runtime only:
 #
 #   claude:
-#     image: registry.example.com/my-agentops-runtime:1.4.0
 #     idleTtlMinutes: 10
 #     nodeSelector:
 #       kubernetes.io/arch: amd64
 #     egressMediation:
 #       enabled: false
-#     credentialsSecret:
-#       name: my-claude-secret
+
+# The reference runtime image, and the one place its tag is written.
 #
-# Any key `global.agentops.runtimeDefaults` accepts is accepted here.
+# Override it to pin a DERIVED image of your own: what an agent may REACH is
+# wiring, so adding tooling to an image never grants it anything — see
+# docs/concepts.md#runtime-images-are-generic.
+#
+# 0.7.1 ends a run that keeps making a tool call it cannot FORM. Arguments that
+# are not valid JSON are discarded before anything runs, so a run made of them
+# looks busy and then answers from whatever the session already held — five
+# identical unparsable calls in a row now fail the run and say which tool and
+# what was written. RUNTIME_UNPARSED_REPEAT_LIMIT tunes it, 0 disables. A run
+# that recovers instead — by abandoning the tool, which is what recovery usually
+# means — carries one line on its answer saying how many calls never ran,
+# because the answer itself does not mention it.
+# 0.2.0+ composes the allowlist with the agent definition's own `tools:` and
+# passes it verbatim — no substituted `Read` when nothing is declared. Pinning
+# an older tag keeps that substitution and ignores toolsets.mode.
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
+
+# ONE secret with the model credential — a `claude setup-token` output or an
+# Anthropic API key. Projected as env via valueFrom; the manager reads no
+# Secrets.
+#
+# Supply `token` and this bundle CREATES the Secret, release-managed, the same
+# way the telegram bundle handles its bot token — point it at a secret store
+# from your helmfile and the credential is provisioned with the release. Leave
+# it empty to reference a Secret you manage yourself.
+#
+# THIS IS THE ONE VALUE WITH NO DEFENSIBLE DEFAULT, and therefore the one thing
+# an install must supply.
+#
+# Getting it wrong fails QUIETLY and late: the runtime pod is created, then sits
+# in CreateContainerConfigError while conversations queue behind it, because the
+# kubelet — not the manager — resolves the reference.
+#
+# THE KEY AND THE ENV VAR NAME THIS VENDOR, which is why they are here and not
+# in the release-wide defaults. Another backend states its own on its own entry.
+credentialsSecret:
+  name: agentops-claude
+  key: oauthToken
+  envName: CLAUDE_CODE_OAUTH_TOKEN
+  token: ""

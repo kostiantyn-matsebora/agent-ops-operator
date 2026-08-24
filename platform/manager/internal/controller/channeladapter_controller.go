@@ -39,6 +39,10 @@ type ChannelAdapterReconciler struct {
 	// MasterToken derives per-adapter contract tokens; empty disables auth
 	// injection (the adapter surface is then 503 manager-side anyway).
 	MasterToken string
+	// FloorServiceAccount is the release's floor account, from bootstrap
+	// configuration. An adapter naming none runs as it — bound to nothing, and
+	// refused as a binding target by the chart that renders it.
+	FloorServiceAccount string
 }
 
 // Reconcile renders the adapter workload for one ChannelAdapter.
@@ -110,7 +114,7 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		Singleton:   adapter.Spec.Singleton == nil || *adapter.Spec.Singleton,
 		Resources:   adapter.Spec.Resources,
 		// identity only — the operator binds no RBAC to this SA, ever
-		KubernetesAccess: adapter.Spec.KubernetesAccess != nil && *adapter.Spec.KubernetesAccess,
+		ServiceAccount: resolveAdapterServiceAccount(adapter.Spec.ServiceAccountName, r.FloorServiceAccount),
 	})
 	if err != nil {
 		return ctrl.Result{}, err

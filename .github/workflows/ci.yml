@@ -169,6 +169,10 @@ jobs:
             [home-assistant]="$HA"
             [telegram]="$TG"
             [no-console]="--set console.enabled=false"
+            # THE MCP SERVERS RENDER IN NO OTHER PERMUTATION, so nothing here
+            # ever looked at their ServiceAccounts. One of them mounted a token
+            # while holding no grant, and only a live render found it.
+            [mcp-servers]="--set kubernetes.enabled=true --set kubernetes.mcpServers.enabled=true $PROM --set prometheus.mcpServers.enabled=true --set prometheus.mcpServers.backend=http://metrics.example:8428 $HA --set home-assistant.adminMcp.enabled=true --set home-assistant.adminMcpServer.enabled=true"
             [everything]="--set global.demo.enabled=true --set kubernetes.enabled=true $PROM $HA $TG"
           )
           failed=0
@@ -194,6 +198,13 @@ jobs:
                  -schema-location "$RUNNER_TEMP/crd-schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
                  "$RUNNER_TEMP/$name.yaml"; then
               echo "::error::chart permutation '$name' rendered objects that do not validate"
+              failed=1
+            fi
+            # EVERY ServiceAccount IS EXPLAINED — bound, run as by a pod, or the
+            # floor. Four unbound accounts nothing ran as shipped once, and the
+            # only way to notice was to render the chart and read the list.
+            if ! python3 .github/scripts/serviceaccount-guard.py "$RUNNER_TEMP/$name.yaml" "$name"; then
+              echo "::error::chart permutation '$name' rendered a ServiceAccount nothing grants and nothing runs as"
               failed=1
             fi
             echo "::endgroup::"

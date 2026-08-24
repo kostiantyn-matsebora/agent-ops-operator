@@ -136,8 +136,9 @@ The operator credential is a **prerequisite** twice over.
 
 The chart renders the `SignalAdapter` CR. The reconciler owns the workload.
 
-`kubernetesAccess: false` — this adapter's data source is Home Assistant, so it
-holds no Kubernetes client and mounts no ServiceAccount token.
+**It names no ServiceAccount** — its data source is Home Assistant, so it holds
+no Kubernetes client and needs no identity of its own. It runs as the release
+floor: an account bound to nothing, denied every verb.
 
 **What it watches** is the `system_log_event` stream over Home Assistant's
 WebSocket API.

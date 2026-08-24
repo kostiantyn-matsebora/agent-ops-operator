@@ -191,7 +191,9 @@ spec:
   singleton: true
   # identity only — the Role below is what grants anything, and no reconciler
   # creates or binds RBAC
-  kubernetesAccess: true
+  # A REFERENCE to the account this chart renders beside the console's
+  # read-only Role. Naming it is what mounts its token.
+  serviceAccountName: agentops-adapter-{{ $c.name }}
   # A VIEWER, NOT A TRANSPORT. The console renders only what it is sent, so a
   # person typing here does not see their own message unless the manager
   # delivers it — which is why a conversation started from the composer used to
@@ -369,10 +371,20 @@ roleRef:
   kind: Role
   name: {{ $sa }}
 subjects:
-  # the ServiceAccount the ChannelAdapter reconciler creates for this adapter
   - kind: ServiceAccount
     name: {{ $sa }}
     namespace: {{ .Release.Namespace }}
+{{- /* THE CONSOLE'S IDENTITY, BESIDE THE ROLE IT CARRIES. The reconciler creates
+no ServiceAccount — it names this one on the pod and mounts its token. The grant
+above and the account are read together, in one file. */}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-console
 {{- if $c.ingress.enabled }}
 {{- $ing := $c.ingress }}
 {{- /*

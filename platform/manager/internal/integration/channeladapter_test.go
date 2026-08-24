@@ -8,11 +8,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
@@ -24,8 +22,9 @@ const testMasterToken = "test-adapter-token"
 func adapterReconciler() *controller.ChannelAdapterReconciler {
 	return &controller.ChannelAdapterReconciler{
 		Client: k8sClient, Scheme: scheme,
-		ManagerURL:  "http://manager:8080",
-		MasterToken: testMasterToken,
+		ManagerURL:          "http://manager:8080",
+		MasterToken:         testMasterToken,
+		FloorServiceAccount: testFloorServiceAccount,
 	}
 }
 
@@ -84,16 +83,21 @@ func TestChannelAdapterDeployment(t *testing.T) {
 		t.Fatalf("singleton not enforced: replicas=%d strategy=%s", *deploy.Spec.Replicas, deploy.Spec.Strategy.Type)
 	}
 	pod := deploy.Spec.Template.Spec
-	// zero ambient authority
-	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
-		t.Fatal("SA token automount not disabled")
+	// ZERO AMBIENT AUTHORITY IS THE FLOOR NOW, not an unmounted token on an
+	// account the operator invented. The chart renders adapter identities
+	// beside the grants they carry; an adapter naming none runs as the account
+	// nothing is bound to, with its token mounted.
+	if pod.ServiceAccountName != testFloorServiceAccount {
+		t.Fatalf("pod runs as %q, want the floor %q", pod.ServiceAccountName, testFloorServiceAccount)
 	}
-	if pod.ServiceAccountName != controller.AdapterDeploymentName("cad-main") {
-		t.Fatalf("dedicated SA not set: %s", pod.ServiceAccountName)
+	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
+		t.Fatal("the floor's token must be mounted — an identity a pod never presents " +
+			"cannot be told apart from a grant somebody forgot")
 	}
 	var sa corev1.ServiceAccount
-	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: pod.ServiceAccountName}, &sa); err != nil {
-		t.Fatalf("dedicated SA not created: %v", err)
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns,
+		Name: controller.AdapterDeploymentName("cad-main")}, &sa); err == nil {
+		t.Fatal("the operator created a ServiceAccount for the adapter workload")
 	}
 	// contract wiring: MANAGER_URL, CHANNEL_TYPE (= adapter name), derived
 	// (never master) token
@@ -400,29 +404,31 @@ func TestChannelAdapterWithoutPortHasNoService(t *testing.T) {
 			t.Fatal("LISTEN_ADDR injected without spec.port")
 		}
 	}
-	// default posture: no token, so the pod holds no API identity at all
+	// Default posture: the FLOOR, mounted. The pod authenticates as an account
+	// denied every verb, which an audit can read — where an unmounted token is
+	// indistinguishable from a grant somebody forgot.
 	pod := deploy.Spec.Template.Spec
-	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
-		t.Fatal("default posture must keep the SA token unmounted")
+	if pod.ServiceAccountName != testFloorServiceAccount {
+		t.Fatalf("pod runs as %q, want the floor", pod.ServiceAccountName)
+	}
+	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
+		t.Fatal("the floor's token must be mounted")
 	}
 	for _, e := range pod.Containers[0].Env {
-		if e.Name == "POD_NAMESPACE" {
-			t.Fatal("POD_NAMESPACE injected without kubernetesAccess")
+		if e.Name == "POD_NAMESPACE" && e.ValueFrom == nil {
+			t.Fatal("POD_NAMESPACE must come from the downward API")
 		}
 	}
 }
 
-// TestChannelAdapterKubernetesAccess pins the channel-side mirror of
-// TestSignalAdapterKubernetesAccess: the field grants IDENTITY only. What the
-// SA may do is an external grant against agentops-adapter-<name>, so the
-// reconciler must still create and bind nothing.
-func TestChannelAdapterKubernetesAccess(t *testing.T) {
+// The channel-side mirror: the identity is a REFERENCE, its token is mounted,
+// and the operator creates no account.
+func TestChannelAdapterNamesItsIdentityAndCreatesNone(t *testing.T) {
 	ctx := context.Background()
 	a := &agentopsv1alpha1.ChannelAdapter{}
 	a.Name, a.Namespace = "k8s-chan", ns
-	a.Spec.Image = "example/adapter:1"
-	yes := true
-	a.Spec.KubernetesAccess = &yes
+	a.Spec.Image = "example/adapter:test"
+	a.Spec.ServiceAccountName = "agentops-adapter-console"
 	if err := k8sClient.Create(ctx, a); err != nil {
 		t.Fatal(err)
 	}
@@ -433,29 +439,14 @@ func TestChannelAdapterKubernetesAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	pod := deploy.Spec.Template.Spec
+	if pod.ServiceAccountName != "agentops-adapter-console" {
+		t.Fatalf("pod runs as %q, want the account the CR named", pod.ServiceAccountName)
+	}
 	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
-		t.Fatal("kubernetesAccess must mount the SA token")
+		t.Fatal("the named account's token must be mounted")
 	}
-	found := false
-	for _, e := range pod.Containers[0].Env {
-		if e.Name == "POD_NAMESPACE" && e.ValueFrom != nil && e.ValueFrom.FieldRef != nil &&
-			e.ValueFrom.FieldRef.FieldPath == "metadata.namespace" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("POD_NAMESPACE downward-API env missing: %+v", pod.Containers[0].Env)
-	}
-	// identity only: zero operator-created RBAC for the adapter's SA
-	var roles rbacv1.RoleList
-	if err := k8sClient.List(ctx, &roles, client.InNamespace(ns)); err != nil {
-		t.Fatal(err)
-	}
-	var bindings rbacv1.RoleBindingList
-	if err := k8sClient.List(ctx, &bindings, client.InNamespace(ns)); err != nil {
-		t.Fatal(err)
-	}
-	if len(roles.Items) != 0 || len(bindings.Items) != 0 {
-		t.Fatalf("operator created RBAC for an adapter: roles=%d bindings=%d", len(roles.Items), len(bindings.Items))
+	var sa corev1.ServiceAccount
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "agentops-adapter-console"}, &sa); err == nil {
+		t.Fatal("the operator created a ServiceAccount; the chart owns adapter identities")
 	}
 }

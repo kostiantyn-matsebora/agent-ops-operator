@@ -33,8 +33,10 @@ which suppresses the one rendered here.
 {{- range $r := $routes }}
 {{- $cfg := $r.cfg }}
 {{- /* An explicitly named account is the operator's, and this bundle creates
-nothing for it — naming is a reference. */ -}}
-{{- if not ($cfg.serviceAccountName | default ($p.serviceAccountName | default "")) }}
+nothing for it — naming is a reference. A route granted NOTHING renders no
+account either: it inherits the release default, and an account bound to nothing
+is the floor wearing another name. */ -}}
+{{- if include "kubernetes.routeAccountRendered" (dict "ctx" $ "cfg" $cfg "p" $p) }}
 {{- $sa := include "kubernetes.routeServiceAccount" (dict "ctx" $ "route" $cfg.name) }}
 ---
 apiVersion: v1

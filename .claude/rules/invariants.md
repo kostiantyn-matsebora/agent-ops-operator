@@ -64,8 +64,15 @@ second trust level — or a second volume — on the route rather than by clonin
     NAMEABLE to take ONE route back to nothing on an install whose inherited
     default carries rights.
   - **More than nothing is `rbac.runtime.serviceAccounts`** — a DECLARED account
-    with its own posture, named on the routes that need it. A named posture
-    nobody declared is a grant nobody reviewed.
+    STATING ITS RULES, named on the routes that need it.
+  - **THERE IS NO `rbacMode` EITHER, AND THAT TOOK A SECOND PASS.** Deleting the
+    release-wide mode left the identical preset one level down, so the rule
+    described half of what shipped. An account states `clusterRoles` /
+    `bindClusterRoles` / `namespaced`, or holds nothing.
+  - **AN ACCOUNT EXISTS ONLY WHERE SOMETHING IS BOUND TO IT OR SOMETHING
+    AUTHENTICATES AS IT.** A bundle renders a route's account only where it also
+    grants it; a workload that mounts no token names none.
+    `.github/scripts/serviceaccount-guard.py` fails the render otherwise.
   - It shipped inverted once, and three of four routes held pod-delete because
     nobody typed a field.
 - **NO BINDING USES A BUILT-IN ROLE** — not `cluster-admin`, not `view`.
@@ -124,12 +131,19 @@ and the release.
 
 ### The operator grants adapters NO Kubernetes permissions, ever
 
-Dedicated SA, and no RBAC objects created or bound by any reconciler.
+No RBAC objects created or bound by any reconciler — **and no ServiceAccount
+either.** The adapter reconciler was the only thing in this project that created
+one, which meant it created accounts it was forbidden from granting anything to:
+six existed on the reference install and one was bound.
 
-- **Default posture is `automountServiceAccountToken: false`.**
-- **`SignalAdapter.spec.kubernetesAccess` only mounts the token and injects
-  `POD_NAMESPACE`.** What it may DO is granted externally, by chart or user,
-  against SA `agentops-signal-<name>` — so an adapter CR can never escalate.
+- **`spec.serviceAccountName` is a REFERENCE the CHART creates**, in the same
+  file as the grant it carries. Naming one mounts its token.
+- **Absent means the release FLOOR**, token mounted — bound to nothing, denied
+  every verb.
+- **What an adapter may DO is granted externally**, by chart or user, against the
+  account it names — so an adapter CR can never escalate.
+- **`kubernetesAccess` is DELETED.** It asked the same question as naming an
+  account, and the combinations that were not that question were meaningless.
 - **Name-is-key makes one adapter per implementation structural.** There is no
   conflict machinery to maintain.
 

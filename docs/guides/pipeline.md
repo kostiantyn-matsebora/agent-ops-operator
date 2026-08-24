@@ -113,11 +113,16 @@ rbac:
   runtime:
     serviceAccounts:
       - name: agentops-runtime-acting
-        rbacMode: full        # none | readonly | full, PER ACCOUNT
+        clusterRoles:         # rules YOU write; there is no mode to name
+          - name: workloads
+            rules:
+              - apiGroups: ["apps"]
+                resources: ["deployments"]
+                verbs: ["get", "list", "patch"]
 ```
 
-**Naming an account does not create one.** Each bundle renders the accounts its
-own routes need, `rbac.runtime.serviceAccounts` is where you declare yours, and
+**Naming an account does not create one.** A bundle renders an account only
+where it also grants that route something, `rbac.runtime.serviceAccounts` is where you declare yours, and
 an account this chart never sees is a perfectly good reference. A name nothing
 backs fails when the pod is created, saying which account.
 
@@ -323,13 +328,6 @@ spec:
   icon: "aops:observe"
   profileRef:
     name: k8s-engineer
-  # UNDER WHOSE IDENTITY, overriding the runtime's own. The same decision as the
-  # toolsets below — which tools, and with whose credentials — which is why both
-  # are on this one object.
-  #
-  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
-  # yours to grant. This bundle renders no ServiceAccount.
-  serviceAccountName: agentops-k8s-observe
   # Wiring is pipeline-only: without this claim the source reports Wired=False
   # and DROPS every event it admits.
   signalSourceRefs:

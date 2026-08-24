@@ -62,3 +62,171 @@
 
 - [x] 8.8 `.claude/rules/invariants.md` — rewrite the substrate invariant: the parent owns the DEFAULTS and the FLOOR, a bundle may ship a runtime, and the guard is what replaces "the parent always renders default". Keep both original failures named.
 - [x] 8.9 `.claude/rules/wiring.md` — the identity chain loses the mode. `.claude/rules/chart.md` — state the rule separating the two values blocks, INCLUDING that a parent helper called from a subchart sees only `.Values.global`, which is what forces `allowPodExecution` to live there.
+
+## 9. REOPENED — the four things the first pass left half-done
+
+Archived, then reopened. Each item is a consequence that did not travel with the
+thing that moved. See `proposal.md` — REOPENED.
+
+### 9.1 The preset posture that survived one level down
+
+- [x] 9.1.1 Delete `rbacMode` from `chart/templates/runtime-rbac.yaml`. A declared
+  account renders exactly what `clusterRoles` / `bindClusterRoles` / `namespaced`
+  state, and an account stating none is created bound to nothing
+- [x] 9.1.2 Add a retired-key guard FAILING the render, naming the explicit keys.
+  Helm never reports an unread value, so a silently-ignored `full` would quietly
+  REMOVE a grant the install thought it had
+- [x] 9.1.3 Keep `agentops.runtimeReadRules` / `runtimeWriteRules` and document
+  them as a copyable starting point. A rule set somebody pasted and can read is
+  not a preset; a mode name that expands invisibly is
+- [x] 9.1.4 `.github/retired-vocabulary.json` — `rbacMode`, in THIS change.
+  **THE TERM ALREADY EXISTED AND DID NOT CATCH THIS**, which is the finding: its
+  `allow` list carried `serviceAccounts`, `per account` and `declared account`,
+  so a sentence teaching the per-account `rbacMode` read as a RECORD of the
+  release-wide one being removed. Those three are removed
+- [x] 9.1.5 Chart render tests: explicit rules render; an account with none is
+  bound to nothing; `rbacMode` fails the render
+
+### 9.2 Bundle accounts only where the route is granted something
+
+- [x] 9.2.1 `chart/charts/kubernetes/templates/pipeline-identity.yaml` — render a
+  ServiceAccount only where that route declares a grant. A route with none names
+  nothing and inherits the floor
+- [x] 9.2.2 The `home-assistant` equivalent — and `prometheus`, which had the
+  identical template and was not in the original task list
+- [x] 9.2.3 The MCP server accounts: `agentops-mcp-ha` and
+  `agentops-mcp-prometheus` were bound to nothing AND mounted no token, so the
+  identity was never presented to the API server. Both are gone.
+  `agentops-mcp-k8s` stays — it mounts its token and carries the grant
+- [x] 9.2.4 A route that must hold nothing on an install whose inherited default
+  carries rights names the FLOOR explicitly. Verified that path still works
+- [x] 9.2.5 Pinned: `.github/scripts/serviceaccount-guard.py`, run over EVERY
+  permutation in the `chart` CI job. Three explanations, not two — bound,
+  authenticating, or the floor
+- [x] 9.2.6 The install's OWN pipelines lane is untouched: a custom route declares
+  an account and names it. Asserted, or removing the bundle lane looks like
+  removing both
+
+### 9.3 The vendor's configuration follows the vendor's bundle
+
+- [x] 9.3.1 Move `image` and `credentialsSecret` to `chart/charts/claude/values.yaml`
+- [x] 9.3.2 Add a documented `claude:` section to the parent `chart/values.yaml`,
+  so the bundle is discoverable from `helm show values`
+- [x] 9.3.3 Verify what remains in `runtimeDefaults` is vendor-NEUTRAL.
+  **VERIFIED** — `allowPodExecution`, `contextStorage`, `contextSync`,
+  `egressMediation`, `idleTtlMinutes`, `nodeSelector`, `resources`,
+  `serviceAccountName`.
+  - **`contextSync.paths` IS THE NEXT ONE**, neutral today only because it ships
+    empty. `.claude/projects/-data-workspace/**` describes where claude-code
+    files transcripts, so it belongs in the `claude:` bundle. Whatever change
+    turns synchronisation on by default owes that placement
+- [x] 9.3.4 Retired-key guard on the moved keys. Not silently ignored — WORSE:
+  left in the defaults they still merge into EVERY runtime, so another backend
+  inherits `CLAUDE_CODE_OAUTH_TOKEN`
+- [x] 9.3.5 A bundle-free install (`claude.enabled: false`) plus an install's own
+  `runtimes:` entry still renders and executes, inheriting nothing vendor-shaped
+
+### 9.4 Verify against a real install
+
+- [x] 9.4.1 **VERIFIED ON A LIVE INSTALL: 6, and the verdict is clean.** Five
+  carry a binding to rules somebody wrote; the sixth is the floor, bound to
+  nothing. Fourteen before
+- [x] 9.4.2 Pods run under the expected identities — a route naming none on the
+  floor, the granted adapters on their own accounts
+- [x] 9.4.3 The deleted `rbacMode` and the moved credential keys each FAIL the
+  render rather than being ignored
+
+### 9.5 The retired-vocabulary guard does not read the chart
+
+- [x] 9.5.1 `scan` covered `openspec/specs/`, `docs/` and `README.md` and NOTHING
+  under `chart/`. So NOTES.txt taught `rbacMode: full` as the way to grant a
+  route — printed to every operator at install time — and no guard saw it. The
+  text is fixed and the BLIND SPOT is closed
+- [x] 9.5.2 `scan` widened to `chart/values.yaml`, `chart/charts/*/values.yaml`
+  and `chart/templates/NOTES.txt`, and everything it reported is fixed. **31
+  occurrences across 10 rules at the start; the chart is at ZERO.** The remainder
+  are in `openspec/specs/`, which this change's own deltas replace at sync
+- [x] 9.5.3 Decide per rule whether the comment is a RECORD (add the word) or a
+  stale claim (rewrite it).
+  **BOTH KINDS WERE PRESENT, AND THE SPLIT WAS NOT WHAT THE TASK ASSUMED.** The
+  `kubernetes` bundle's values were not records at all — sixteen of them
+  described the DELETED release-wide mode as the live control, three releases
+  after it went. Nobody reads a subchart's values.yaml against a parent change,
+  and no guard was looking at it. The parent's were mostly genuine records
+  needing one word.
+  - **A RECORD WORD MUST SIT WITHIN ONE LINE OF THE MATCH**, and hard-wrapped
+    prose puts it two lines away about as often as one. Three of these passed
+    only after moving the sentence, not after writing it
+
+### 9.6 No account without a grant, everywhere
+
+- [x] 9.6.1 The `home-assistant` and `prometheus` MCP servers render no
+  ServiceAccount — both mount no token
+- [x] 9.6.2 `agentops-mcp-k8s` keeps its account: it mounts its token and carries
+  the cluster grant
+- [x] 9.6.3 The guard refusing an MCP account equal to the runtime's still fires
+  when one is NAMED, and is a no-op when none is rendered.
+  **AND IT WAS DEAD CODE:** it read `global.agentops.runtime.serviceAccountName`,
+  a key that now FAILS the render, so it could never fire on any install that
+  rendered at all. It reads `runtimeDefaults` now
+- [x] 9.6.4 The guard's WORKLOAD exemption now requires the pod to mount the
+  token. It was written to justify keeping those two accounts, which is the wrong
+  direction for a guard
+
+### 9.7 The adapter's identity is a reference, not the manager's to create
+
+- [x] 9.7.1 `serviceAccountName` on both adapter kinds, a REFERENCE the operator
+  never creates, validates or binds
+- [x] 9.7.2 `kubernetesAccess` deleted from both, no alias
+- [x] 9.7.3 Deepcopy and CRDs regenerated. A deleted CRD field makes
+  `kubectl apply -f chart/crds/` an UPGRADE step and an INSTALL step
+- [x] 9.7.4 `adapterworkload.go` creates no ServiceAccount; it resolves the name,
+  falls back to the floor, mounts the token, injects `POD_NAMESPACE`
+  unconditionally
+- [x] 9.7.5 The floor's name reaches the manager as BOOTSTRAP CONFIGURATION.
+  **AND THE FIRST DEPLOY SHIPPED WITHOUT IT.** The reconciler read
+  `FLOOR_SERVICE_ACCOUNT` and the chart never set it, so it resolved EMPTY — and
+  an empty `serviceAccountName` on a pod is not "no account", it is the namespace
+  `default`, WITH its token mounted. Three adapters ran that way. Every render
+  passed, every pod was Running, and the only way to see it was to list the pods'
+  identities. `TestTheManagerIsToldTheFloorAccount` now fails the render that
+  forgets it
+- [x] 9.7.6 Test: reconciling an adapter creates NO ServiceAccount
+- [x] 9.7.7 Test: the pod names the floor when the CR names nothing, and the named
+  account when it does
+- [x] 9.7.8 The chart renders each granted adapter's account BESIDE its grant —
+  `signal-k8s-events`, the console, `signal-alertmanager`
+- [x] 9.7.9 Every other adapter CR names nothing and inherits the floor
+- [x] 9.7.10 A retired-key guard FAILS the render on `kubernetesAccess`
+- [x] 9.7.11 `.github/retired-vocabulary.json` — `kubernetesAccess`
+- [x] 9.7.12 Upgrading ORPHANS the accounts the manager owned rather than deleting
+  them. Nothing is bound to them; named in the changelog
+
+## 10. Documentation — the reopened work
+
+### 10.1 The reference docs
+
+- [x] 10.1.1 `docs/CHANGELOG.md` — the 11.0.0 entry: the deleted `rbacMode`, the
+  moved vendor config, the accounts that disappear, the deleted adapter CRD field
+  with its `kubectl apply -f chart/crds/` step, and the orphaned accounts
+- [x] 10.1.2 `docs/concepts.md` — the account model, one rule for every lane
+- [x] 10.1.3 `docs/installation.md` — the values after the move, and where the
+  credential now goes
+- [x] 10.1.4 `docs/kubernetes.md`, `docs/home-assistant.md` — which routes render
+  an account and which inherit the floor
+- [x] 10.1.5 `python3 .github/scripts/docs-generate.py` re-run; a stale marker
+  naming `kubernetesAccess` FAILED the generator, which is what it is for
+- [x] 10.1.6 `.claude/rules/invariants.md`, `wiring.md`, `adapters.md`,
+  `structure.md` — `wiring.md`'s "No reconciler makes one" stops being nearly true
+- [x] 10.1.7 The adapter contracts lose `kubernetesAccess`
+- [x] 10.1.8 The bundle pages name the account each renders and what it grants
+- [x] 10.1.9 The CHANGELOG entry covers all four changes
+
+### 10.2 The adopter site
+
+- [x] 10.2.1 `docs/getting-started.md` — the credential line, which is the first
+  thing an adopter types
+- [x] 10.2.2 `docs/guides/pipeline.md` — cluster power is an account you declare
+  with rules you wrote, not a mode you name
+- [x] 10.2.3 `docs/guides/signal-adapter.md` — an adapter names its account; the
+  chart creates it; naming none means the floor

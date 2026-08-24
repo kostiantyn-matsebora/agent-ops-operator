@@ -15,7 +15,7 @@ suppresses the one rendered here.
 {{- if and (include "prometheus.wiringActive" .) .Values.profile.enabled }}
 {{- $p := .Values.pipelines }}
 {{- $cfg := $p }}
-{{- if not ($p.serviceAccountName | default "") }}
+{{- if include "prometheus.routeAccountRendered" (dict "ctx" $ "p" $p) }}
 {{- $sa := include "prometheus.routeServiceAccount" (dict "ctx" $ "route" $p.name) }}
 ---
 apiVersion: v1

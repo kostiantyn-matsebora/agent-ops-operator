@@ -8,16 +8,19 @@ endpoint, not the API server — so none is rendered for it. */ -}}
 {{- if not $s.backend }}
 {{- fail "prometheus: mcpServers.backend is required (the Prometheus-API endpoint the MCP server queries, e.g. http://vmsingle-vm.monitoring.svc:8429) — it is never derived, because single-node VictoriaMetrics, VictoriaMetrics cluster mode and Prometheus each serve the query API under a different path" }}
 {{- end }}
-{{- if eq $sa (include "agentops.runtimeServiceAccount" .) }}
-{{- fail "prometheus: mcpServers.serviceAccountName must differ from global.agentops.runtime.serviceAccountName — the MCP server's separate identity is the reason this component exists, and it is where a backend credential would be projected" }}
+{{- /* Naming one is still REFUSED if it is the runtime's. The guard outlives the
+account not being rendered: an install pointing this workload at an account of
+its own must still not point it at the one agents run as. */ -}}
+{{- if and $sa (eq $sa (include "agentops.runtimeServiceAccount" .)) }}
+{{- fail "prometheus: mcpServers.serviceAccountName must differ from global.agentops.runtime.serviceAccountName — sharing one collapses two walls into one" }}
 {{- end }}
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ $sa }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: {{ $name }}
+{{- /* NO ServiceAccount. This server reads a Prometheus query API over HTTP and
+holds no Kubernetes grant, so it mounts no token — and an identity a pod never
+presents to the API server is a name, not a boundary. Rendering one "in case a
+grant is needed" is the placeholder this chart stopped writing.
+
+`kubernetes`'s MCP server keeps its own account because it MOUNTS its token and
+IS bound to a cluster grant. That is the difference, and it is the whole rule. */ -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -36,7 +39,13 @@ spec:
       labels:
         app.kubernetes.io/name: {{ $name }}
     spec:
-      serviceAccountName: {{ $sa }}
+      {{- /* NAMED ONLY IF THE INSTALL NAMES ONE. With no token mounted this pod
+      never authenticates, so the account it runs as changes nothing it can
+      reach — and an account rendered to be named here and nothing else is the
+      placeholder this chart stopped writing. */}}
+      {{- with $sa }}
+      serviceAccountName: {{ . }}
+      {{- end }}
       automountServiceAccountToken: false
       containers:
         - name: mcp

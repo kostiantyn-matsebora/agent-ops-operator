@@ -52,6 +52,8 @@ follow-up later.
 
    kubectl -n agent-ops create secret generic agentops-claude \
      --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+
+   # ...or let the chart create it: --set claude.credentialsSecret.token=<token>
    ```
 
    ```powershell
@@ -59,6 +61,8 @@ follow-up later.
 
    kubectl -n agent-ops create secret generic agentops-claude `
      --from-literal=oauthToken=$(claude setup-token)   # or an Anthropic API key
+
+   # ...or let the chart create it: --set claude.credentialsSecret.token=<token>
    ```
 
 2. **Install the chart.** The flag brings up

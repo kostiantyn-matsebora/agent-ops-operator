@@ -22,7 +22,9 @@ spec:
   # This adapter's DATA SOURCE is the Kubernetes API, so it mounts its own SA
   # token. That grants nothing by itself — the RBAC below does, bound by this
   # chart to the adapter's deterministic SA name.
-  kubernetesAccess: true
+  # THE IDENTITY IS A REFERENCE, and this bundle renders it below beside the
+  # events grant. Naming it is what mounts its token.
+  serviceAccountName: {{ $adapterSA }}
   # Two watchers would post every event twice.
   singleton: true
   {{- with $ea.resources }}
@@ -185,8 +187,22 @@ spec:
                   items:
                     type: string
 {{- if $ea.rbac.create }}
+{{- /* THE ADAPTER'S IDENTITY, RENDERED BESIDE THE GRANT IT CARRIES.
+
+The manager creates no ServiceAccount — it names this one and mounts its token.
+Whoever grants a component is the only one who knows it needs an identity at
+all, and that is this file: the role below and this account are read together
+rather than one here and one in a Go reconciler. */}}
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $adapterSA }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-kubernetes
 {{- if $ea.rbac.clusterWide }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

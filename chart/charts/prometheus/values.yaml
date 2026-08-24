@@ -97,7 +97,11 @@ mcpServers:
   # e.g. http://vmsingle-vm.monitoring.svc:8429 or http://prometheus:9090
   backend: ""
   port: 8080
-  serviceAccountName: agentops-mcp-prometheus
+  # EMPTY, AND NO ACCOUNT IS RENDERED — this server reads a query API over HTTP
+  # and mounts no token, so the identity it runs as reaches nothing. Name one to
+  # run it as an account you created and granted; equal to the runtime's FAILS
+  # the render.
+  serviceAccountName: ""
   # Extra env passthrough, appended after the rendered defaults.
   env: []
   resources: {}

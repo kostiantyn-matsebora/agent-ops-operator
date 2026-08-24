@@ -61,8 +61,8 @@ time, i.e. between almost any two messages.
 
 Nothing is broken: each message is answered on its own, and conversations say so
 rather than failing. But a reply will not remember the message before it. To
-change that you need durable storage for /data/home, and it does NOT have to be
-distributed:
+change that you need durable storage for the context volume, and it does NOT
+have to be distributed:
   - shared:      persistence.context.enabled=true with a ReadWriteMany class
   - single-node: persistence.context.enabled=true,
                  persistence.context.accessModes={ReadWriteOnce},
@@ -152,9 +152,9 @@ THIS CONSOLE AUTHENTICATES NOBODY. You declared {{ $auth.externalAuthenticator }
 authenticator, and the console now serves any request that reaches it: every
 agentops CR in this namespace, conversation payloads included, plus the ability
 to instruct any agent it is joined to.
-{{- if include "agentops.anyActingAccount" . }}
-An agent on a route naming one of this install's acting accounts can act on your
-cluster.
+{{- if include "agentops.anyGrantedAccount" . }}
+An agent on a route naming one of this install's declared accounts holds
+whatever that account was granted.
 {{- end }}
 
 So {{ $auth.externalAuthenticator }} must be the ONLY route to it. A port-forward, a pod in this
@@ -370,8 +370,8 @@ or point it at an MCP server you already run:
   --set kubernetes.mcp.url=<your endpoint> --set kubernetes.mcpServers.enabled=false
 or, if you meant to keep a CLI, build a derived runtime image and declare a
 runtime naming it — see docs/concepts.md#runtime-images-are-generic.
-{{- if include "agentops.anyActingAccount" . }}
-Note also that this install declares an acting account, and with no MCP path an
+{{- if include "agentops.anyGrantedAccount" . }}
+Note also that this install declares a granted account, and with no MCP path an
 agent has nothing to exercise it with.
 {{- end }}
 {{- end }}
@@ -574,25 +574,26 @@ follows is the grant, not the intention.
 
   accounts this install declares, which a route must NAME to get:
 {{- range $line := (splitList "\n" $granting) }}
-{{- $parts := splitList " " $line }}
-                                  {{ index $parts 0 }} ({{ index $parts 1 }})
+{{- $parts := splitList "|" $line }}
+                                  {{ index $parts 0 }}
+                                    grants {{ index $parts 1 }}
 {{- end }}
 
-THE GRANT IS CLUSTER-WIDE. It reaches every namespace, INCLUDING this one
-({{ .Release.Namespace }}), where the manager, the adapters and the MCP servers run.
+READ THE RULES, BECAUSE THIS REPORT CANNOT SUMMARISE THEM. You wrote them, so
+nothing here knows whether they observe or act:
 
-What that does NOT expose, and this is what makes it defensible:
-  - `agentops.dev` is never granted, so Conversations, Pipelines and profiles
-    are unreadable everywhere
-  - `secrets` is never granted either
-  - no component here logs message content, so readable pod logs carry no
-    conversation text
+  kubectl get clusterrole -l app.kubernetes.io/instance={{ .Release.Name }} -o wide
+  kubectl describe clusterrole <name>
 
-What it DOES mean: an agent on such a route can see this release's pods,
-Services and ConfigMaps
-{{- if include "agentops.anyActingAccount" . }}, and can DELETE OR RESTART them — the manager and the
-adapters included. An agent can disrupt its own supervisor
-{{- end }}.
+A ClusterRole IS CLUSTER-WIDE. Whatever these grant reaches every namespace,
+INCLUDING this one ({{ .Release.Namespace }}), where the manager, the adapters and the MCP
+servers run — so a grant on workloads reaches an agent's own supervisor.
+
+Two things this chart never puts in a rule it writes, and worth keeping out of
+yours:
+  - `agentops.dev`, so Conversations, Pipelines and profiles stay unreadable
+    everywhere
+  - `secrets`, which buys less than it looks — see below
 {{- if $podExec }}
 
 ⚠  AND SECRETS ARE READABLE, because you set
@@ -655,15 +656,24 @@ An agent still reaches whatever its Pipeline's toolsets and MCP servers give it
 — the Kubernetes bundle's MCP server carries its OWN account and its own grant,
 which is how a demo install reads the cluster with no runtime permissions at all.
 
-To give ONE route more, declare the account and name it:
+To give ONE route more, declare an account STATING WHAT IT MAY DO, and name it:
 
   rbac:
     runtime:
       serviceAccounts:
         - name: agentops-runtime-acting
-          rbacMode: full        # or readonly
+          clusterRoles:
+            - name: workloads
+              rules:
+                - apiGroups: ["apps"]
+                  resources: ["deployments"]
+                  verbs: ["get", "list", "patch"]
 
   pipelines:
     - name: <route>
-      serviceAccountName: agentops-runtime-acting
+      serviceAccountName: agentops-runtime-workloads
+
+There is no mode to name. A word like `full` is a grant nobody reviewed, and
+agentops.runtimeReadRules / runtimeWriteRules in the chart are the rules to copy
+from and read.
 {{- end }}

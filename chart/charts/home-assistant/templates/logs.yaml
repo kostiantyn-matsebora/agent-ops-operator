@@ -20,7 +20,9 @@ spec:
   image: {{ printf "%s:%s" $la.image.repository (toString $la.image.tag) | quote }}
   # This adapter's DATA SOURCE is Home Assistant, not the cluster. It holds no
   # Kubernetes client and mounts no ServiceAccount token.
-  kubernetesAccess: false
+  # NAMES NO ACCOUNT. It reads the house's WebSocket API and reaches no
+  # Kubernetes API at all, so it inherits the release floor — an identity
+  # denied every verb.
   # Two sessions would post every record twice.
   singleton: true
   {{- with $la.resources }}

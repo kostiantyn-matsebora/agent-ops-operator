@@ -26,6 +26,9 @@ channelAdapter:
   # implementation with spec.adapter: <name>.
   name: telegram
   image:
+    # The IMAGE keeps the component's own name; the Deployment and the Service
+    # are both agentops-adapter-<name>.
+    # A workload named for the image does not exist.
     repository: ghcr.io/kostiantyn-matsebora/agentops-channel-telegram
     # 0.24.2 stops a folded signal payload being cut in half. A payload over six
     # lines is wrapped in `<blockquote expandable>`, which spans lines — and a

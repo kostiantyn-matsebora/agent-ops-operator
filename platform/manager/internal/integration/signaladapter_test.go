@@ -21,11 +21,17 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 )
 
+// testFloorServiceAccount stands in for the release's floor — the account the
+// CHART renders, binds nothing to, and refuses as a binding target. The manager
+// receives the name as bootstrap configuration; it never derives it.
+const testFloorServiceAccount = "agentops-runtime"
+
 func signalAdapterReconciler() *controller.SignalAdapterReconciler {
 	return &controller.SignalAdapterReconciler{
 		Client: k8sClient, Scheme: scheme,
-		ManagerURL:  "http://manager:8080",
-		MasterToken: testMasterToken,
+		ManagerURL:          "http://manager:8080",
+		MasterToken:         testMasterToken,
+		FloorServiceAccount: testFloorServiceAccount,
 	}
 }
 
@@ -274,9 +280,16 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	if deploy.Spec.Template.Labels["agentops.dev/signal-adapter"] != "life-sig" {
 		t.Fatalf("chart-consumed pod label missing/renamed: %+v", deploy.Spec.Template.Labels)
 	}
-	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken ||
-		pod.ServiceAccountName != controller.SignalAdapterDeploymentName("life-sig") {
-		t.Fatal("zero-authority posture missing")
+	// ZERO AUTHORITY IS NOW THE FLOOR, NOT AN UNMOUNTED TOKEN. An adapter
+	// naming no account runs as the account the chart binds nothing to, with
+	// its token mounted — an authenticated identity denied every verb, which a
+	// pod holding no token cannot be told apart from when a grant was simply
+	// forgotten.
+	if pod.ServiceAccountName != testFloorServiceAccount {
+		t.Fatalf("pod runs as %q, want the floor %q", pod.ServiceAccountName, testFloorServiceAccount)
+	}
+	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
+		t.Fatal("the floor's token must be mounted")
 	}
 	env := map[string]string{}
 	for _, e := range pod.Containers[0].Env {
@@ -399,13 +412,15 @@ func TestSignalAdapterServiceOwnership(t *testing.T) {
 	}
 }
 
-func TestSignalAdapterKubernetesAccess(t *testing.T) {
+// THE IDENTITY IS A REFERENCE, AND THE OPERATOR CREATES NOTHING. This
+// reconciler was the only one in the project that created a ServiceAccount, and
+// it created accounts it was forbidden from granting anything to.
+func TestSignalAdapterNamesItsIdentityAndCreatesNone(t *testing.T) {
 	ctx := context.Background()
 	a := &agentopsv1alpha1.SignalAdapter{}
 	a.Name, a.Namespace = "k8s-sig", ns
 	a.Spec.Image = "example/signal-adapter:1"
-	yes := true
-	a.Spec.KubernetesAccess = &yes
+	a.Spec.ServiceAccountName = "agentops-signal-k8s-events"
 	if err := k8sClient.Create(ctx, a); err != nil {
 		t.Fatal(err)
 	}
@@ -416,8 +431,13 @@ func TestSignalAdapterKubernetesAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	pod := deploy.Spec.Template.Spec
+	if pod.ServiceAccountName != "agentops-signal-k8s-events" {
+		t.Fatalf("pod runs as %q, want the account the CR named", pod.ServiceAccountName)
+	}
+	// Naming an account IS mounting its token: an identity the pod never
+	// presents to the API server would be a name rather than a boundary.
 	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
-		t.Fatal("kubernetesAccess must mount the SA token")
+		t.Fatal("the named account's token must be mounted")
 	}
 	found := false
 	for _, e := range pod.Containers[0].Env {
@@ -428,5 +448,40 @@ func TestSignalAdapterKubernetesAccess(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("POD_NAMESPACE downward-API env missing: %+v", pod.Containers[0].Env)
+	}
+
+	// THE INVARIANT. One line reintroduces this, and nothing else would notice:
+	// the account would simply exist, bound to nothing, as six of them did.
+	var sa corev1.ServiceAccount
+	err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "agentops-signal-k8s-events"}, &sa)
+	if err == nil {
+		t.Fatal("the operator created a ServiceAccount. It is forbidden from binding RBAC " +
+			"to one, so an account it creates is one nobody can grant anything to")
+	}
+	err = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("k8s-sig")}, &sa)
+	if err == nil {
+		t.Fatal("the operator created a ServiceAccount named after the workload")
+	}
+}
+
+// Naming none means the FLOOR, not the namespace default and not "no account":
+// a pod holding no token cannot be told apart from one whose grant was
+// forgotten.
+func TestSignalAdapterNamingNoneRunsAsTheFloor(t *testing.T) {
+	ctx := context.Background()
+	a := &agentopsv1alpha1.SignalAdapter{}
+	a.Name, a.Namespace = "floor-sig", ns
+	a.Spec.Image = "example/signal-adapter:1"
+	if err := k8sClient.Create(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSignalAdapter(t, "floor-sig")
+
+	var deploy appsv1.Deployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("floor-sig")}, &deploy); err != nil {
+		t.Fatal(err)
+	}
+	if got := deploy.Spec.Template.Spec.ServiceAccountName; got != testFloorServiceAccount {
+		t.Fatalf("pod runs as %q, want the floor %q", got, testFloorServiceAccount)
 	}
 }

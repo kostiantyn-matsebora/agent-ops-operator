@@ -45,6 +45,10 @@ type SignalAdapterReconciler struct {
 	// MasterToken derives per-adapter contract tokens; empty disables auth
 	// injection (the signal surface is then 503 manager-side anyway).
 	MasterToken string
+	// FloorServiceAccount is the release's floor account, from bootstrap
+	// configuration. An adapter naming none runs as it — bound to nothing, and
+	// refused as a binding target by the chart that renders it.
+	FloorServiceAccount string
 }
 
 // Reconcile renders the adapter workload for one SignalAdapter.
@@ -99,16 +103,16 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		"agentops.dev/signal-adapter": adapter.Name,
 	}
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
-		Owner:            &adapter,
-		Name:             SignalAdapterDeploymentName(adapter.Name),
-		Labels:           labels,
-		SelectorKey:      "agentops.dev/signal-adapter",
-		Image:            adapter.Spec.Image,
-		Env:              env,
-		EnvFrom:          envFrom,
-		Singleton:        adapter.Spec.Singleton == nil || *adapter.Spec.Singleton,
-		Resources:        adapter.Spec.Resources,
-		KubernetesAccess: adapter.Spec.KubernetesAccess != nil && *adapter.Spec.KubernetesAccess,
+		Owner:          &adapter,
+		Name:           SignalAdapterDeploymentName(adapter.Name),
+		Labels:         labels,
+		SelectorKey:    "agentops.dev/signal-adapter",
+		Image:          adapter.Spec.Image,
+		Env:            env,
+		EnvFrom:        envFrom,
+		Singleton:      adapter.Spec.Singleton == nil || *adapter.Spec.Singleton,
+		Resources:      adapter.Spec.Resources,
+		ServiceAccount: resolveAdapterServiceAccount(adapter.Spec.ServiceAccountName, r.FloorServiceAccount),
 	})
 	if err != nil {
 		return ctrl.Result{}, err

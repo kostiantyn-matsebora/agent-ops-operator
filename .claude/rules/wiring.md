@@ -190,7 +190,10 @@ chain rather than in it while reading as though it were part of it.
   cluster power. See `terminology.md` for what the snapshot freezes.
 - **`AgentProfile.spec.runtimeRef` is DEPRECATED**, dual-read for ONE release,
   and sits BELOW the Pipeline so adopting the new model needs no profile edit.
-- **NAMING AN SA IS NOT CREATING ONE.** No reconciler makes one and `Ready`
+- **NAMING AN SA IS NOT CREATING ONE.** No reconciler makes one — TRUE NOW, and
+  it was nearly true for a while: the adapter reconciler created one per
+  workload, which is the one exception this rule lost. Adapters name
+  `spec.serviceAccountName` and the CHART renders it. `Ready`
   does not check it — that would be an API read the manager holds no RBAC for,
   granted to produce a warning. The pod fails at admission naming the account.
 - **A BUNDLE RENDERS THE ACCOUNTS ITS OWN ROUTES NEED.** It is the only scope

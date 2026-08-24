@@ -154,13 +154,13 @@ func splitPolicies(out string) map[string]string {
 // `false` is a zero value, which is precisely what a naive merge would drop, so
 // the opt-out is the half worth pinning.
 func TestEgressMediationIsOptOut(t *testing.T) {
-	on := helmTemplate(t, "--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
+	on := helmTemplate(t, "--set", "claude.credentialsSecret.token=x")
 	if !strings.Contains(on, "egressMediation:") {
 		t.Fatal("mediation must be declared on the default runtime")
 	}
 
 	off := helmTemplate(t,
-		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x",
+		"--set", "claude.credentialsSecret.token=x",
 		"--set", "claude.egressMediation.enabled=false")
 	if strings.Contains(off, "egressMediation:") && !strings.Contains(off, "description:") {
 		t.Fatal("a runtime declining mediation must render no stanza")
@@ -176,7 +176,7 @@ func TestEgressMediationIsOptOut(t *testing.T) {
 // completely silent, which is why it is pinned.
 func TestEnabledMediationRendersANonEmptyStanza(t *testing.T) {
 	out := helmTemplate(t,
-		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
+		"--set", "claude.credentialsSecret.token=x")
 
 	rt := runtimeDoc(t, out)
 	if !strings.Contains(rt, "egressMediation:") {
@@ -196,7 +196,7 @@ func TestEnabledMediationRendersANonEmptyStanza(t *testing.T) {
 func TestExcludedPortsReachTheRuntimeCR(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "global.agentops.runtimeDefaults.egressMediation.excludePorts={53}",
-		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
+		"--set", "claude.credentialsSecret.token=x")
 
 	if rt := runtimeDoc(t, out); !strings.Contains(rt, "- 53") {
 		t.Fatalf("the excluded port must reach the CR:\n%s", rt)

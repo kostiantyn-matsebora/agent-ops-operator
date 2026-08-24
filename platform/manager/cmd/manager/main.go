@@ -165,6 +165,8 @@ func main() {
 		Scheme:      mgr.GetScheme(),
 		ManagerURL:  controlURL,
 		MasterToken: os.Getenv("ADAPTER_TOKEN"),
+		// The identity an adapter naming none runs as. The CHART owns the name.
+		FloorServiceAccount: os.Getenv(controller.FloorServiceAccountEnv),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "channeladapter controller")
 		os.Exit(1)
@@ -184,6 +186,8 @@ func main() {
 		Scheme:      mgr.GetScheme(),
 		ManagerURL:  controlURL,
 		MasterToken: os.Getenv("ADAPTER_TOKEN"),
+		// The identity an adapter naming none runs as. The CHART owns the name.
+		FloorServiceAccount: os.Getenv(controller.FloorServiceAccountEnv),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "signaladapter controller")
 		os.Exit(1)

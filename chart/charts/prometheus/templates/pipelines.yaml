@@ -41,7 +41,7 @@ spec:
   runtimeRef:
     name: {{ . }}
   {{- end }}
-  {{- with ($p.serviceAccountName | default (include "prometheus.routeServiceAccount" (dict "ctx" $ "route" $p.name))) }}
+  {{- with (include "prometheus.routeAccount" (dict "ctx" $ "p" $p)) }}
   # UNDER WHOSE IDENTITY, overriding the runtime's own. The same decision as the
   # toolsets below — which tools, and with whose credentials — which is why both
   # are on this one object.

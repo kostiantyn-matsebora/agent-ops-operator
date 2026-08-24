@@ -581,7 +581,6 @@ rbac:
   runtime:
     serviceAccounts:
       - name: agentops-runtime-acting
-        rbacMode: full        # none | readonly | full, per account
         clusterRoles: []      # your own rules, created and bound
         bindClusterRoles: []  # existing ClusterRoles to bind
         namespaced: []        # Roles in other namespaces
@@ -591,11 +590,24 @@ pipelines:
     serviceAccountName: agentops-runtime-acting
 ```
 
-| posture | grants |
+| the entry states | the account holds |
 |---|---|
-| `none` (default) | the account is created and bound to nothing |
-| `readonly` | this chart's own ENUMERATED reads — what `view` grants plus the node/namespace/metrics reads it omits |
-| `full` | those, plus the workload writes an agent fixes things with, themselves gated by `allowPodExecution` |
+| nothing | nothing — created, bound to nothing, a named subject for an audit |
+| `clusterRoles` | exactly the rules you wrote, in a ClusterRole this chart creates and binds |
+| `bindClusterRoles` | whatever the ClusterRoles you named already grant |
+| `namespaced` | your rules, as Roles in the namespaces you list |
+
+**THERE IS NO MODE, AT EITHER LEVEL.** A release-wide `rbacMode` was deleted
+first, and the per-account one was deleted with it — a mode name is a grant nobody reviewed, and
+declaring the account rather than defaulting it does not make the word readable.
+`agentops.runtimeReadRules` / `runtimeWriteRules` in the chart are what those
+modes expanded to, and are the copyable starting point.
+
+**AN ACCOUNT EXISTS ONLY WHERE SOMETHING IS BOUND TO IT OR SOMETHING
+AUTHENTICATES AS IT.** A bundle renders a route's account only where it also
+grants that route something; a workload that mounts no token names none. Four
+accounts once existed bound to nothing, indistinguishable from the floor while
+adding four names to every audit of who holds what.
 
 **A named posture nobody declared is a grant nobody reviewed.** A release-wide
 permission MODE used to render an account from one value, and its name described

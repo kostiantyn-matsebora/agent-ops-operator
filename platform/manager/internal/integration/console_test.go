@@ -33,7 +33,9 @@ func TestConsoleAdapterReconcilesToAReachableWorkload(t *testing.T) {
 	adapter.Spec.Image = "kmatsebora/agentops-console:0.1.0"
 	yes := true
 	port := int32(8080)
-	adapter.Spec.KubernetesAccess = &yes
+	// The console reads agentops CRs, so it names the account the CHART grants
+	// its read-only Role. Naming it is what mounts the token.
+	adapter.Spec.ServiceAccountName = "agentops-adapter-console"
 	adapter.Spec.Port = &port
 	adapter.Spec.Singleton = &yes
 	if err := k8sClient.Create(ctx, adapter); err != nil {
@@ -59,7 +61,7 @@ func TestConsoleAdapterReconcilesToAReachableWorkload(t *testing.T) {
 	pod := deploy.Spec.Template.Spec
 	// API identity for the watch cache — granted by the chart's Role, never here
 	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
-		t.Fatal("console needs its SA token mounted (kubernetesAccess)")
+		t.Fatal("console needs its SA token mounted — it names the account the chart grants")
 	}
 	env := map[string]string{}
 	hasNamespace := false

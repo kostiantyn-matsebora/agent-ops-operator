@@ -125,15 +125,6 @@ spec:
                 description: Image implementing the adapter contract.
                 minLength: 1
                 type: string
-              kubernetesAccess:
-                description: |-
-                  KubernetesAccess declares that this implementation talks to the
-                  Kubernetes API (e.g. a console rendering agentops CRs). When true the
-                  reconciler mounts the SA token and injects POD_NAMESPACE — and grants
-                  NOTHING: permissions are bound externally (chart or user) against the
-                  deterministic SA name agentops-adapter-<name>. Identical semantics to
-                  SignalAdapter.kubernetesAccess.
-                type: boolean
               port:
                 description: |-
                   Port the image's own HTTP surface listens on (implementations that are
@@ -203,6 +194,13 @@ spec:
                       More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                     type: object
                 type: object
+              serviceAccountName:
+                description: |-
+                  ServiceAccountName is the identity this adapter's workload runs as, with
+                  its token mounted. Identical semantics to
+                  SignalAdapter.serviceAccountName: a REFERENCE the operator never creates,
+                  validates or binds, and empty means the release's floor account.
+                type: string
               singleton:
                 default: true
                 description: |-

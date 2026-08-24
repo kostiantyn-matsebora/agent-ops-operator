@@ -112,6 +112,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.adapterAuth.existingSecret | default .Values.adapterAuth.secretName }}
                   key: token
+            {{- /* THE FLOOR ACCOUNT, by name. An adapter naming none runs as it —
+            bound to nothing, refused as a binding target, token mounted.
+
+            THE CHART OWNS WHAT IT IS CALLED, and the manager must not derive it:
+            two spellings of one name is a pod running as something nobody
+            granted, or as the namespace `default`, which carries whatever the
+            cluster gave it. Found exactly that way on a live install — the
+            manager read this variable, the chart never set it, and three
+            adapters ran as `default` with a token mounted. */}}
+            - name: FLOOR_SERVICE_ACCOUNT
+              value: {{ include "agentops.floorServiceAccount" . | quote }}
             {{- if .Values.persistence.context.enabled }}
             - name: CONTEXT_PVC
               value: {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name | quote }}

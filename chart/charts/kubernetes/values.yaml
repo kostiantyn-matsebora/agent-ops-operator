@@ -246,8 +246,10 @@ eventsAdapter:
         - workload
 
 # The agent that answers. IDENTITY ONLY — one AgentProfile and nothing else.
-# What executes it is the parent chart's `runtime:` block; what it may do in the
-# cluster is `global.agentops.runtime.rbacMode` plus the Pipeline routing it.
+# What executes it is the parent chart's `runtimes:` list and its
+# `global.agentops.runtimeDefaults`; what it may do in the cluster is the MCP
+# server's own grant, intersected with the toolsets the Pipeline routing it
+# binds.
 profile:
   enabled: true
   name: k8s-engineer
@@ -299,7 +301,8 @@ profile:
   maxTurns: 40
   # Names an AgentRuntime other than the parent's `default` — a higher-trust or
   # different-vendor runtime you applied yourself. Empty emits no runtimeRef and
-  # falls back to `default`, which the parent renders whenever runtime.enabled.
+  # falls back to `default`, which the `claude` bundle renders unless you turn
+  # it off and declare your own under the parent's `runtimes:`.
   runtimeRef: ""
 
 # Structured Kubernetes access as MCP tools — the same two halves
@@ -310,7 +313,7 @@ profile:
 #
 # REQUIRED for cluster access, not an optimisation. Runtime image 0.5.0 dropped
 # kubectl, so with this component off the agent cannot see the cluster at all,
-# whatever `global.agentops.runtime.rbacMode` grants.
+# whatever any account it runs under is granted.
 #
 # ON by default, together with `mcpServers` below: an MCPConfig needs an
 # endpoint, and the server component supplies one, so the two flip as a pair.
@@ -370,8 +373,8 @@ mcp:
     # name that resolves to nothing is how allowlists rot.
     admin:
       # null = follow the deployed server (on when mcpServers deploys one in
-      # write mode, which by default means global.agentops.runtime.rbacMode is
-      # `full`). true/false forces it — use true when mcp.url points at your own
+      # write mode, which by default means `allowMutations` is true).
+      # true/false forces it — use true when mcp.url points at your own
       # server that you know serves writes.
       enabled: null
       name: k8s-admin
@@ -408,15 +411,16 @@ mcpServers:
   # annotation, so mutating tools are uncallable, not merely unlisted — the
   # first of the two walls, with the toolsets above as the second.
   #
-  # null = DERIVE from global.agentops.runtime.rbacMode: read-only for every
-  # mode but `full`. The two are bound by an invariant that used to be
+  # null = DERIVE from this bundle's own `allowMutations`: read-only unless it
+  # is true. The two are bound by an invariant that used to be
   # maintained by hand in every install's values — an operator who grants the
   # agent `full` and leaves the server read-only has asked for a write-capable
   # agent and given it no way to write.
   #
   # An explicit value still wins, and that is the override worth knowing:
-  # `readOnly: true` under `rbacMode: full` makes this a strictly observing
-  # agent — the runtime SA's grants stay broad but nothing can exercise them.
+  # `readOnly: true` under `allowMutations: true` makes this a strictly
+  # observing agent — the server's grants stay broad but nothing can exercise
+  # them.
   # Deriving is a default, not a merge — but it does mean widening the agent to
   # `full` widens this server too unless you say so.
   #
@@ -429,13 +433,15 @@ mcpServers:
   toolsets:
     - core
     - config
-  # Distinct from global.agentops.runtime.serviceAccountName ON PURPOSE — see
-  # above. Setting them equal FAILS the render.
+  # Distinct from the runtime identity a route inherits
+  # (global.agentops.runtimeDefaults.serviceAccountName) ON PURPOSE — see above.
+  # Setting them equal FAILS the render.
   serviceAccountName: agentops-mcp-k8s
   rbac:
     create: true
-    # Same vocabulary as global.agentops.runtime.rbacMode, granted to the
-    # SERVER's SA:
+    # The posture granted to the SERVER's SA. This is the one place a mode
+    # vocabulary survives, and deliberately: it selects between two rule sets
+    # this chart WRITES OUT, on an account no agent runs as.
     # readonly — "view" plus node/namespace/metrics reads.
     # full     — cluster-admin. Pointless with a read-only server and dangerous
     #            without it; there is no good reason to set this by hand.
@@ -477,9 +483,9 @@ pipelines:
   # TWO routes, differing in exactly one binding — the mutating toolset. At most
   # one renders by default.
   #
-  # `enabled: null` on each DERIVES from global.agentops.runtime.rbacMode, the
-  # same value mcpServers.readOnly, the server SA's RBAC mode and the k8s-admin
-  # toolset already follow: `full` renders the acting route, every other mode —
+  # `enabled: null` on each DERIVES from this bundle's `allowMutations`, the
+  # same value mcpServers.readOnly, the server SA's RBAC posture and the
+  # k8s-admin toolset already follow: true renders the acting route, false —
   # readonly, none and unset — renders the observing one. One posture, four
   # consistent effects, rather than a knob to keep in sync by hand.
   #

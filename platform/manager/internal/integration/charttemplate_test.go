@@ -72,7 +72,7 @@ func TestConsoleBundleIsCRsAndRBACOnly(t *testing.T) {
 
 	for _, needle := range []string{
 		"kind: ChannelAdapter",
-		"kubernetesAccess: true",
+		"serviceAccountName: agentops-adapter-console",
 		"singleton: true",
 		"port: 8080",
 		// A VIEWER, not a transport: it renders only what it is sent, so the
@@ -740,7 +740,7 @@ func TestParentOwnsExactlyOneRuntime(t *testing.T) {
 // it fails only where a route would have needed one.
 func TestNoRuntimeDeclaredRendersNoRuntimeObjects(t *testing.T) {
 	out := helmTemplate(t, "--set", "claude.enabled=false",
-		"--set", "global.agentops.runtimeDefaults.credentialsSecret.token=x")
+		"--set", "claude.credentialsSecret.token=x")
 	// anchored: the CRD document names the kind too, and it ships regardless
 	if strings.Contains(out, "\nkind: AgentRuntime\n") {
 		t.Error("declaring no runtime must render no AgentRuntime")
@@ -1896,13 +1896,14 @@ func TestHaProfilesCarryNoCapabilities(t *testing.T) {
 	}
 }
 
-// The adapter's data source is the house, not the cluster. Mounting a token here
-// would grant it an identity it has no use for.
-func TestHaAdapterHoldsNoKubernetesAccess(t *testing.T) {
+// The adapter's data source is the house, not the cluster, so it names no
+// account and inherits the floor — an identity denied every verb. Naming one
+// would be claiming a grant it has no use for.
+func TestHaAdapterNamesNoIdentity(t *testing.T) {
 	out := helmTemplate(t, haArgs()...)
 	doc := stripComments(haDoc(t, out, "SignalAdapter", "home-assistant"))
-	if !strings.Contains(doc, "kubernetesAccess: false") {
-		t.Fatalf("the ha adapter must declare kubernetesAccess: false:\n%s", doc)
+	if strings.Contains(doc, "serviceAccountName:") {
+		t.Fatalf("the ha adapter reaches no Kubernetes API and must name no account:\n%s", doc)
 	}
 	if !strings.Contains(doc, "singleton: true") {
 		t.Fatalf("two sessions would post every record twice:\n%s", doc)
@@ -2032,8 +2033,20 @@ func TestHaAdminMcpServerHasItsOwnIdentity(t *testing.T) {
 		"--set", "home-assistant.adminMcp.enabled=true",
 		"--set", "home-assistant.adminMcpServer.enabled=true")...)
 	dep := haDoc(t, out, "Deployment", "agentops-mcp-ha")
-	if !strings.Contains(dep, "serviceAccountName: agentops-mcp-ha") {
-		t.Fatalf("the server must not run as the runtime:\n%s", dep)
+	// IT RENDERS NO ACCOUNT AND NAMES NONE. This server talks to Home Assistant
+	// over HTTP and mounts no token, so the identity it runs as is never
+	// presented to the API server — an account here would be a name, not a
+	// wall. Its two walls are the Home Assistant TOKEN and the bound toolset.
+	if strings.Contains(dep, "serviceAccountName:") {
+		t.Fatalf("a pod that mounts no token gains nothing from naming an account:\n%s", dep)
+	}
+	if !strings.Contains(dep, "automountServiceAccountToken: false") {
+		t.Fatalf("the server must mount no token:\n%s", dep)
+	}
+	for _, doc := range strings.Split(out, "\n---") {
+		if strings.Contains(doc, "\nkind: ServiceAccount\n") && strings.Contains(doc, "agentops-mcp-ha") {
+			t.Fatalf("no account is rendered for a workload that never authenticates:\n%s", doc)
+		}
 	}
 	// Env var NAMES are read off the image, not its documentation — the docs
 	// describe the Home Assistant ADD-ON, a different deployment.
@@ -2049,7 +2062,8 @@ func TestHaAdminMcpServerHasItsOwnIdentity(t *testing.T) {
 	msg := helmTemplateErr(t, haArgs(
 		"--set", "home-assistant.adminMcp.enabled=true",
 		"--set", "home-assistant.adminMcpServer.enabled=true",
-		"--set", "global.agentops.runtime.serviceAccountName=agentops-mcp-ha")...)
+		"--set", "home-assistant.adminMcpServer.serviceAccountName=shared",
+		"--set", "global.agentops.runtimeDefaults.serviceAccountName=shared")...)
 	if !strings.Contains(msg, "must NOT be the runtime") {
 		t.Fatalf("sharing the runtime identity collapses the two walls, got:\n%s", msg)
 	}

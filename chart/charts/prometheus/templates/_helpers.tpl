@@ -41,3 +41,34 @@ true
 {{- define "prometheus.routeServiceAccount" -}}
 {{- printf "agentops-%s" .route -}}
 {{- end -}}
+
+{{- /* THE ACCOUNT THIS BUNDLE'S ROUTE RUNS AS, resolved ONCE. Returns the name,
+or EMPTY where the route inherits the release default.
+
+ONE RESOLVER, TWO READERS — `pipelines.yaml` writes the name onto the CR and
+`pipeline-identity.yaml` decides whether to render the object. Disagreeing means
+a Pipeline naming an account nothing created, which fails at POD ADMISSION: no
+pod, a conversation with no phase, and nothing in the render to look at.
+
+AN ACCOUNT IS RENDERED ONLY WHERE THE ROUTE IS GRANTED SOMETHING. One bound to
+nothing is indistinguishable from the floor every unnamed route already
+inherits. */ -}}
+{{- define "prometheus.routeAccount" -}}
+{{- $p := .p -}}
+{{- if ($p.serviceAccountName | default "") -}}
+{{ $p.serviceAccountName }}
+{{- else -}}
+{{- $rbac := $p.rbac | default dict -}}
+{{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}
+{{ include "prometheus.routeServiceAccount" (dict "ctx" .ctx "route" $p.name) }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "prometheus.routeAccountRendered" -}}
+{{- $p := .p -}}
+{{- if not ($p.serviceAccountName | default "") -}}
+{{- $rbac := $p.rbac | default dict -}}
+{{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}

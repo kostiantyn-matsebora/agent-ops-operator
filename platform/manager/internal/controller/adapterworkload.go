@@ -111,6 +111,29 @@ func projectCredentials(items []credentialItem) ([]corev1.EnvFromSource, []strin
 	return envFrom, collisions
 }
 
+// FloorServiceAccountEnv names the bootstrap variable carrying the release's
+// FLOOR account — the one the chart always renders, binds nothing to, and
+// refuses as a binding target.
+//
+// IT IS CONFIGURATION, NOT A CONSTANT. The chart owns what the floor is called,
+// and a name spelled in two places is the failure `runtimepod.PipelineClaimName`
+// already documents: both sides must agree or a pod runs as something nobody
+// granted, or nothing at all.
+const FloorServiceAccountEnv = "FLOOR_SERVICE_ACCOUNT"
+
+// resolveAdapterServiceAccount picks the identity an adapter workload runs as:
+// the account the CR names, or the release floor where it names none.
+//
+// An EMPTY floor is possible only when the manager was deployed without that
+// bootstrap value — an older chart. The pod then names no account and runs as
+// the namespace default, which is what it did before this field existed.
+func resolveAdapterServiceAccount(declared, floor string) string {
+	if declared != "" {
+		return declared
+	}
+	return floor
+}
+
 // adapterWorkload describes one adapter Deployment to render.
 type adapterWorkload struct {
 	Owner       client.Object // the adapter CR (ownerRef → GC)
@@ -122,27 +145,23 @@ type adapterWorkload struct {
 	EnvFrom     []corev1.EnvFromSource
 	Singleton   bool
 	Resources   *corev1.ResourceRequirements
-	// KubernetesAccess mounts the SA token and injects POD_NAMESPACE. The SA
-	// still carries zero operator-created RBAC — permissions are granted
-	// externally against the deterministic SA name.
-	KubernetesAccess bool
+	// ServiceAccount is the identity this workload runs as, ALREADY RESOLVED —
+	// the CR's `serviceAccountName`, or the release's floor account where it
+	// named none. Its token is mounted: an identity a pod never presents to the
+	// API server would be a name rather than a boundary.
+	//
+	// NOTHING HERE CREATES IT. This reconciler was the only one in the project
+	// that created a ServiceAccount, and the exception cost what an exception
+	// costs — the operator is forbidden from binding RBAC to an adapter, so it
+	// was creating accounts it could never grant anything to. On the reference
+	// install six existed and one was bound. The chart that grants an adapter
+	// renders the account beside the grant.
+	ServiceAccount string
 }
 
-// ensureAdapterWorkload creates/updates the dedicated zero-RBAC SA and the
-// Deployment for an adapter.
+// ensureAdapterWorkload creates/updates the Deployment for an adapter. It
+// creates NO ServiceAccount: `w.ServiceAccount` is a reference the chart owns.
 func ensureAdapterWorkload(ctx context.Context, c client.Client, scheme *runtime.Scheme, w adapterWorkload) (*appsv1.Deployment, error) {
-	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
-		Name: w.Name, Namespace: w.Owner.GetNamespace(),
-	}}
-	if _, err := controllerutil.CreateOrUpdate(ctx, c, sa, func() error {
-		// zero ambient authority: the operator never binds RBAC to this SA;
-		// token automount stays off unless the implementation declares
-		// kubernetesAccess (and even then, permissions come from outside)
-		return controllerutil.SetControllerReference(w.Owner, sa, scheme)
-	}); err != nil {
-		return nil, err
-	}
-
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: w.Name, Namespace: w.Owner.GetNamespace()}}
 	_, err := controllerutil.CreateOrUpdate(ctx, c, deploy, func() error {
 		deploy.Labels = w.Labels
@@ -155,16 +174,17 @@ func ensureAdapterWorkload(ctx context.Context, c client.Client, scheme *runtime
 		} else {
 			deploy.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RollingUpdateDeploymentStrategyType}
 		}
-		automount := w.KubernetesAccess
-		env := w.Env
-		if w.KubernetesAccess {
-			env = append(append([]corev1.EnvVar{}, env...), corev1.EnvVar{
-				Name: "POD_NAMESPACE",
-				ValueFrom: &corev1.EnvVarSource{
-					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
-				},
-			})
-		}
+		// POD_NAMESPACE UNCONDITIONALLY. It is a downward-API field naming the
+		// pod's own namespace — not a permission, and never was one. It used to
+		// ride along with the token mount, which made one decision look like
+		// two.
+		automount := true
+		env := append(append([]corev1.EnvVar{}, w.Env...), corev1.EnvVar{
+			Name: "POD_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
+			},
+		})
 		container := corev1.Container{
 			Name: "adapter", Image: w.Image, Env: env, EnvFrom: w.EnvFrom,
 		}
@@ -174,7 +194,7 @@ func ensureAdapterWorkload(ctx context.Context, c client.Client, scheme *runtime
 		deploy.Spec.Template = corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{Labels: w.Labels},
 			Spec: corev1.PodSpec{
-				ServiceAccountName:           w.Name,
+				ServiceAccountName:           w.ServiceAccount,
 				AutomountServiceAccountToken: &automount,
 				Containers:                   []corev1.Container{container},
 			},

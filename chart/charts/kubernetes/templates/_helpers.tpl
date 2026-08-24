@@ -171,3 +171,44 @@ pipeline-identity.yaml unless the route names its own. */ -}}
 {{- define "kubernetes.routeServiceAccount" -}}
 {{- printf "agentops-%s" .route -}}
 {{- end -}}
+
+{{- /* THE ACCOUNT A ROUTE OF THIS kubernetes RUNS AS, resolved ONCE.
+
+Called with `(dict "ctx" $ "cfg" <route cfg> "p" .Values.pipelines)`. Returns the
+name, or EMPTY where the route inherits the release default.
+
+ONE RESOLVER, TWO READERS — `pipelines.yaml` writes the name onto the CR and
+`pipeline-identity.yaml` decides whether to render the object. If those two ever
+disagreed the failure is a Pipeline naming an account nothing created, which
+fails at POD ADMISSION: no pod, a conversation with no phase, and nothing in the
+render to look at.
+
+AN ACCOUNT IS RENDERED ONLY WHERE THE ROUTE IS GRANTED SOMETHING. An account
+bound to nothing is indistinguishable from the floor every unnamed route already
+inherits, so rendering one adds a name to every audit and buys no boundary.
+Where a route needs nothing, it names nothing. */ -}}
+{{- define "kubernetes.routeAccount" -}}
+{{- $cfg := .cfg -}}
+{{- $p := .p -}}
+{{- $explicit := $cfg.serviceAccountName | default ($p.serviceAccountName | default "") -}}
+{{- if $explicit -}}
+{{ $explicit }}
+{{- else -}}
+{{- $rbac := $cfg.rbac | default dict -}}
+{{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}
+{{ include "kubernetes.routeServiceAccount" (dict "ctx" .ctx "route" $cfg.name) }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* Does THIS bundle render that account? True only where the route declares a
+grant AND named no account of its own — an account the operator names is theirs,
+and naming is not creating. */ -}}
+{{- define "kubernetes.routeAccountRendered" -}}
+{{- $cfg := .cfg -}}
+{{- $p := .p -}}
+{{- if not ($cfg.serviceAccountName | default ($p.serviceAccountName | default "")) -}}
+{{- $rbac := $cfg.rbac | default dict -}}
+{{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}

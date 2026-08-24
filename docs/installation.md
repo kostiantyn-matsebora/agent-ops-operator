@@ -315,10 +315,19 @@ Each `serviceAccounts` entry takes:
 |---|---|---|
 | `name` | — | what a Pipeline's `serviceAccountName` refers to |
 | `create` | `true` | `false` references an account you own |
-| `rbacMode` | `none` | the posture, PER ACCOUNT: `none`, `readonly` or `full` — this chart's own ENUMERATED rules, never a built-in role |
 | `clusterRoles` | `[]` | rules to create and bind |
 | `bindClusterRoles` | `[]` | existing ClusterRoles to bind |
 | `namespaced` | `[]` | Roles in other namespaces |
+
+**An entry stating none of the three is created holding nothing** — a named
+identity for an audit, with no grant.
+
+**`rbacMode` is DELETED, and the render fails on one.** A mode name is a grant
+nobody reviewed: a reviewer reading `full` sees a word, not the verbs. Start from
+`agentops.runtimeReadRules` / `runtimeWriteRules` in
+`chart/templates/_helpers.tpl` and copy what you want — and read what you copy,
+because where the helper emits the write rules they are gated by
+`allowPodExecution` and a hand-written copy is not.
 
 #### Silence means no power
 
@@ -333,7 +342,12 @@ rbac:
   runtime:
     serviceAccounts:
       - name: agentops-runtime-acting
-        rbacMode: full          # DECLARED, not selected by a release-wide value
+        clusterRoles:           # rules you wrote, and a reviewer can read
+          - name: workloads
+            rules:
+              - apiGroups: ["apps"]
+                resources: ["deployments"]
+                verbs: ["get", "list", "patch"]
 
 pipelines:
   - name: k8s-observe

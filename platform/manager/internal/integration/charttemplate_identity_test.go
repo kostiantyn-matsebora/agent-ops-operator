@@ -28,14 +28,20 @@ type clusterRoleRules struct {
 // declaredActing renders the one thing that grants an agent anything now: an
 // account the install DECLARES, with a posture, for a route to name.
 //
-// THERE IS NO MODE. `global.agentops.runtime.rbacMode` rendered a named account
-// from a release-wide value, and every test below used to sweep its four
-// settings. The vocabulary survives PER ACCOUNT, which is what these sweeps
-// exercise instead — a preset posture nobody declared is exactly what was
-// removed.
+// THERE IS NO MODE, AT EITHER LEVEL. The release-wide
+// `global.agentops.runtime.rbacMode` went first, and the per-account one went
+// with it — a reviewer reading `full` sees a word, not the verbs, and being
+// declared rather than defaulted does not make it readable.
+//
+// So a declared account STATES ITS RULES, and these tests exercise that
+// mechanism. What the chart's own read/write rules CONTAIN is pinned separately,
+// against the only thing that still renders them: the kubernetes MCP server —
+// which is where an agent's cluster reach actually goes.
 var declaredActing = []string{
 	"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
-	"--set", "rbac.runtime.serviceAccounts[0].rbacMode=full",
+	"--set-json", `rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"acting","rules":[` +
+		`{"apiGroups":[""],"resources":["pods"],"verbs":["get","list","delete"]},` +
+		`{"apiGroups":["apps"],"resources":["deployments"],"verbs":["get","list","patch"]}]}]`,
 }
 
 // rolesIn parses every Role and ClusterRole out of a rendered manifest.
@@ -111,7 +117,8 @@ func pipelineDoc(t *testing.T, out, name string) string {
 func TestASecondAccountNeedsNoSecondRuntime(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-actor",
-		"--set", "rbac.runtime.serviceAccounts[0].rbacMode=full",
+		"--set-json", `rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"acting","rules":`+
+			`[{"apiGroups":[""],"resources":["pods"],"verbs":["delete"]}]}]`,
 		"--set", "pipelines[0].name=acting-route",
 		"--set", "pipelines[0].profile=some-profile",
 		"--set", "pipelines[0].serviceAccountName=agentops-runtime-actor")
@@ -215,14 +222,18 @@ func TestNoRuntimeRoleCanReachASecret(t *testing.T) {
 	// Every mode, and the bundles that render agent-reachable roles of their
 	// own — the k8s MCP server's account is a wall on the same path, since an
 	// agent reaches the cluster THROUGH it.
-	for _, mode := range []string{"none", "readonly", "full"} {
+	for _, mode := range []string{"granted", "ungranted"} {
 		args := []string{
 			"--set", "kubernetes.enabled=true",
 			"--set", "kubernetes.pipelines.enabled=true",
 			"--set", "kubernetes.allowMutations=true",
 			"--set", "prometheus.enabled=true",
 			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-actor",
-			"--set", "rbac.runtime.serviceAccounts[0].rbacMode=" + mode,
+		}
+		if mode == "granted" {
+			args = append(args, "--set-json",
+				`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
+					`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
 		}
 		out := helmTemplate(t, args...)
 
@@ -297,19 +308,34 @@ func isAgentRole(name string) bool {
 // can do nothing under `full` is a regression nobody would attribute to this.
 // actingRoles returns every role the acting grant renders, across the
 // ClusterRole and the namespaced Roles it is split into.
+// actingRoles renders the roles the CHART writes for an agent-reachable
+// component and returns them.
+//
+// IT TARGETS THE MCP SERVER, and that is the whole change rather than a
+// substitution. These rules used to reach an agent two ways — a declared
+// account carrying `rbacMode: full`, and the MCP server's own account — and
+// `wiring.md`'s "BOTH WALLS MOVE TOGETHER" is why they came from one helper.
+// With the mode deleted, a declared account carries rules the OPERATOR wrote,
+// so the only thing still rendering `agentops.runtimeWriteRules` is the server
+// an agent reaches the cluster THROUGH. That is the wall these assertions are
+// about.
 func actingRoles(t *testing.T, extra ...string) []clusterRoleRules {
 	t.Helper()
-	args := append(append([]string{"-n", "agent-ops"}, declaredActing...), extra...)
+	args := append([]string{"-n", "agent-ops",
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.allowMutations=true",
+	}, extra...)
 	out := helmTemplate(t, args...)
 
 	var acting []clusterRoleRules
 	for _, role := range rolesIn(t, out) {
-		if strings.HasPrefix(role.Metadata.Name, "agentops-runtime-acting") {
+		if strings.HasPrefix(role.Metadata.Name, "agentops-mcp-k8s") {
 			acting = append(acting, role)
 		}
 	}
 	if len(acting) == 0 {
-		t.Fatal("a declared account with rbacMode=full rendered no acting role at all")
+		t.Fatal("the kubernetes MCP server rendered no acting role at all — it is the " +
+			"only remaining wall between an agent and the cluster API")
 	}
 	return acting
 }
@@ -423,13 +449,17 @@ func grants(role *clusterRoleRules, resource, verb string) bool {
 func TestNothingEverBindsToTheFloorAccount(t *testing.T) {
 	const floor = "agentops-runtime"
 
-	for _, mode := range []string{"none", "readonly", "full"} {
+	for _, mode := range []string{"ungranted", "granted"} {
 		args := []string{
 			"--set", "kubernetes.enabled=true",
 			"--set", "kubernetes.pipelines.enabled=true",
 			"--set", "global.demo.enabled=true",
 			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
-			"--set", "rbac.runtime.serviceAccounts[0].rbacMode=" + mode,
+		}
+		if mode == "granted" {
+			args = append(args, "--set-json",
+				`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
+					`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
 		}
 		out := helmTemplate(t, args...)
 
@@ -460,35 +490,54 @@ func TestADeclaredAccountRendersItsOwnNamedRole(t *testing.T) {
 	if !strings.Contains(full, "name: agentops-runtime-acting") {
 		t.Fatal("a declared account must render for a route to opt into")
 	}
+	// An account stating NO rules renders too, holding nothing. Declaring a
+	// named identity with no grant is a useful thing to be able to do — an
+	// audit subject — and it is the only way "more than nothing" stays opt-in.
 	ro := helmTemplate(t,
-		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-readonly",
-		"--set", "rbac.runtime.serviceAccounts[0].rbacMode=readonly")
-	if !strings.Contains(ro, "name: agentops-runtime-readonly") {
-		t.Fatal("a declared readonly account must render too")
+		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-plain")
+	if !strings.Contains(ro, "name: agentops-runtime-plain") {
+		t.Fatal("an account declared without rules must render, bound to nothing")
 	}
 }
 
-// A bundle that ships a Pipeline ships that route's identity and names it.
-// The bundle is the only scope that knows what its own routes do.
-func TestABundleRendersItsOwnRoutesIdentity(t *testing.T) {
+// A BUNDLE RENDERS A ROUTE'S IDENTITY ONLY WHERE IT ALSO GRANTS IT SOMETHING.
+//
+// This test asserted the opposite — an account for EVERY route a bundle ships —
+// and rendering the reference install under that rule produced four accounts
+// bound to nothing, indistinguishable from the floor every unnamed route
+// already inherits while adding four names to every audit.
+//
+// The bundle is still the only scope that knows what its routes do. What
+// follows from `kubernetes`'s routes needing no Kubernetes RBAC — an agent
+// reaches the cluster THROUGH the MCP server, which has its own account — is
+// that it renders NEITHER, not that it renders two empty ones.
+func TestABundleRendersAnIdentityOnlyWhereItGrantsOne(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "kubernetes.enabled=true",
 		"--set", "kubernetes.pipelines.enabled=true")
 
-	if !strings.Contains(out, "name: agentops-k8s-observe") {
-		t.Fatal("kubernetes shipped a route without rendering its ServiceAccount")
+	if strings.Contains(out, "name: agentops-k8s-observe") {
+		t.Fatal("the bundle rendered an account for a route it grants nothing — " +
+			"an account bound to nothing is the floor wearing another name")
 	}
 	doc := pipelineDoc(t, out, "k8s-observe")
-	if !strings.Contains(doc, "serviceAccountName: agentops-k8s-observe") {
-		t.Fatalf("the bundle rendered an account and did not name it on its own route:\n%s", doc)
+	if strings.Contains(doc, "serviceAccountName:") {
+		t.Fatalf("a route granted nothing must name no account and inherit the floor:\n%s", doc)
 	}
 
-	// Route off, account gone: an identity with no route is a subject nobody
-	// can explain.
-	off := helmTemplate(t, "--set", "kubernetes.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=false")
-	if strings.Contains(off, "name: agentops-k8s-observe") {
-		t.Fatal("a bundle rendered a route account with no route to use it")
+	// GRANT IT SOMETHING AND THE ACCOUNT ARRIVES, named on that route. Without
+	// this half the rule above passes by rendering nothing, ever.
+	granted := helmTemplate(t,
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.pipelines.enabled=true",
+		"--set-json", `kubernetes.pipelines.observe.rbac={"clusterRoles":[{"name":"extra",`+
+			`"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get"]}]}]}`)
+	if !strings.Contains(granted, "name: agentops-k8s-observe") {
+		t.Fatal("a route the bundle grants must get its own account")
+	}
+	gdoc := pipelineDoc(t, granted, "k8s-observe")
+	if !strings.Contains(gdoc, "serviceAccountName: agentops-k8s-observe") {
+		t.Fatalf("the bundle rendered an account and did not name it on its own route:\n%s", gdoc)
 	}
 }
 
@@ -518,14 +567,18 @@ func TestNoBindingUsesABuiltInClusterRole(t *testing.T) {
 	builtIn := map[string]bool{
 		"cluster-admin": true, "admin": true, "edit": true, "view": true,
 	}
-	for _, mode := range []string{"none", "readonly", "full"} {
+	for _, mode := range []string{"ungranted", "granted"} {
 		args := []string{"-n", "agent-ops",
 			"--set", "kubernetes.enabled=true",
 			"--set", "kubernetes.pipelines.enabled=true",
 			"--set", "kubernetes.allowMutations=true",
 			"--set", "prometheus.enabled=true",
-			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
-			"--set", "rbac.runtime.serviceAccounts[0].rbacMode=" + mode}
+			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting"}
+		if mode == "granted" {
+			args = append(args, "--set-json",
+				`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
+					`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
+		}
 		out := helmTemplate(t, args...)
 
 		for _, doc := range strings.Split(out, "\n---") {
@@ -565,14 +618,18 @@ func TestNoBindingUsesABuiltInClusterRole(t *testing.T) {
 // cluster and made every new namespace invisible until someone edited values.
 // This test is what that reversal rests on.
 func TestAgentRolesNeverGrantAgentopsCRs(t *testing.T) {
-	for _, mode := range []string{"none", "readonly", "full"} {
+	for _, mode := range []string{"ungranted", "granted"} {
 		args := []string{"-n", "agent-ops",
 			"--set", "kubernetes.enabled=true",
 			"--set", "kubernetes.pipelines.enabled=true",
 			"--set", "kubernetes.allowMutations=true",
 			"--set", "prometheus.enabled=true",
-			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
-			"--set", "rbac.runtime.serviceAccounts[0].rbacMode=" + mode}
+			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting"}
+		if mode == "granted" {
+			args = append(args, "--set-json",
+				`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
+					`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
+		}
 		out := helmTemplate(t, args...)
 
 		for _, role := range rolesIn(t, out) {
@@ -616,5 +673,44 @@ func TestTheGrantIsAHandfulOfObjects(t *testing.T) {
 	if agentRoles > 6 {
 		t.Fatalf("%d agent roles rendered. The namespaced-Role model cost 224 objects on a "+
 			"28-namespace cluster — if this is climbing, that model is back", agentRoles)
+	}
+}
+
+// THE MANAGER IS TOLD THE FLOOR'S NAME, AND A RENDER THAT FORGETS IS SILENT.
+//
+// WRITTEN FROM A LIVE FAILURE. The reconciler read FLOOR_SERVICE_ACCOUNT and
+// the chart never set it, so it resolved EMPTY — and an empty
+// `serviceAccountName` on a pod is not "no account", it is the namespace
+// `default`, which carries whatever that cluster gave it, with its token
+// mounted. Three adapters ran that way. Every render passed, every pod was
+// Running, and the only way to see it was to list the pods' identities.
+func TestTheManagerIsToldTheFloorAccount(t *testing.T) {
+	out := helmTemplate(t)
+
+	floor := ""
+	for _, doc := range strings.Split(out, "\n---") {
+		if !strings.Contains(doc, "kind: Deployment") || !strings.Contains(doc, "agentops-manager") {
+			continue
+		}
+		lines := strings.Split(doc, "\n")
+		for i, l := range lines {
+			if strings.TrimSpace(l) == "- name: FLOOR_SERVICE_ACCOUNT" && i+1 < len(lines) {
+				floor = strings.Trim(strings.TrimSpace(strings.TrimPrefix(
+					strings.TrimSpace(lines[i+1]), "value:")), `"`)
+			}
+		}
+	}
+	if floor == "" {
+		t.Fatal("the manager Deployment carries no FLOOR_SERVICE_ACCOUNT. An adapter " +
+			"naming no account then runs as the namespace `default` with its token " +
+			"mounted — which is strictly more than the floor, not less")
+	}
+	if floor != "agentops-runtime" {
+		t.Fatalf("FLOOR_SERVICE_ACCOUNT = %q, want the account the chart renders and "+
+			"binds nothing to", floor)
+	}
+	// ...and the chart must actually render it, or the name points at nothing.
+	if !strings.Contains(out, "name: "+floor) {
+		t.Fatalf("the floor %q is named but not rendered", floor)
 	}
 }

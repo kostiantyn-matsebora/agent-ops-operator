@@ -368,11 +368,6 @@ func (in *ChannelAdapterSpec) DeepCopyInto(out *ChannelAdapterSpec) {
 		*out = new(int32)
 		**out = **in
 	}
-	if in.KubernetesAccess != nil {
-		in, out := &in.KubernetesAccess, &out.KubernetesAccess
-		*out = new(bool)
-		**out = **in
-	}
 	if in.Singleton != nil {
 		in, out := &in.Singleton, &out.Singleton
 		*out = new(bool)
@@ -1622,11 +1617,6 @@ func (in *SignalAdapterSpec) DeepCopyInto(out *SignalAdapterSpec) {
 	if in.Port != nil {
 		in, out := &in.Port, &out.Port
 		*out = new(int32)
-		**out = **in
-	}
-	if in.KubernetesAccess != nil {
-		in, out := &in.KubernetesAccess, &out.KubernetesAccess
-		*out = new(bool)
 		**out = **in
 	}
 	if in.Singleton != nil {

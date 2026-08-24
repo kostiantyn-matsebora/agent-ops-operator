@@ -167,7 +167,7 @@ architectural error, not merely a noisy one.
 
 ## Declare the SignalAdapter
 
-<!-- generated: template kind=SignalAdapter name=my-signals fields=image,port,kubernetesAccess,configSchema,credentialKeys comments=off -->
+<!-- generated: template kind=SignalAdapter name=my-signals fields=image,port,serviceAccountName,configSchema,credentialKeys comments=off -->
 ```yaml
 apiVersion: agentops.dev/v1alpha1
 kind: SignalAdapter
@@ -176,7 +176,7 @@ metadata:
 spec:
   image: <image>
   port: 8080
-  kubernetesAccess: false
+  serviceAccountName: <serviceAccountName>
   configSchema: {}
   credentialKeys:
   - key: <key>
@@ -192,9 +192,14 @@ filling in. They let an operator learn what your `config` needs without reading
 your source.
 
 {: .ao-callout}
-> **`kubernetesAccess` mounts a token. It grants nothing.** No reconciler
-> creates RBAC, ever. What your adapter may do is an external grant against
-> ServiceAccount `agentops-signal-<name>` — from the chart, or from you.
+> **`serviceAccountName` is a reference, and naming one mounts its token.** No
+> reconciler creates a ServiceAccount and none creates RBAC, ever — a
+> `SignalAdapter` is an ordinary namespaced object, so an operator that could
+> grant one would make CR-edit rights a privilege escalation.
+>
+> The chart that grants your adapter renders the account beside the grant, so
+> both are read from one file. **Name nothing and it runs as the release floor**
+> — an account bound to nothing, denied every verb.
 
 ## Declare a SignalSource, and claim it
 

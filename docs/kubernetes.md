@@ -12,7 +12,7 @@ turns on and `enabled: true` does not.
 
 | Component | Flag | What it renders |
 |---|---|---|
-| Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`, `kubernetesAccess: true`), RBAC bound to its ServiceAccount (`events get/list/watch` plus read-only `pods`/`replicasets`), and — under `source.create` — a `SignalSource`. **Not the claim on it**: that is the wiring component, or your own `pipelines:` |
+| Events lane | `eventsAdapter.enabled` | The `SignalAdapter` (`k8s-events`), the ServiceAccount it names, and RBAC bound to it (`events get/list/watch` plus read-only `pods`/`replicasets`), and — under `source.create` — a `SignalSource`. **Not the claim on it**: that is the wiring component, or your own `pipelines:` |
 | Profile | `profile.enabled` | Exactly one object: the `k8s-engineer` `AgentProfile` (behaviour only, with an inline `systemPrompt` role) |
 | MCP tooling | `mcp.enabled` (**on**) | An `MCPConfig` (`k8s-api`, server key `kubernetes`) and an `MCPToolset` (`k8s-observability`), bound by the wiring component or by whichever Pipeline you declare — see below |
 | MCP server | `mcpServers.enabled` (**on**) | The MCP server workload itself: `Deployment` + `Service` (`agentops-mcp-k8s`), **its own `ServiceAccount`**, and that SA's RBAC |
@@ -41,11 +41,13 @@ Two things worth knowing:
   Either turn the wiring component on (demo mode does) or declare the claim
   under the parent chart's `pipelines:` — the latter is what you want when one
   agent should answer this source *and* a chat surface.
-- **`global.agentops.runtime.rbacMode: full` renders an enumerated acting
-  account.** It is no longer `cluster-admin`, no role it renders can read a
-  Secret, and nothing it renders reaches the operator's own namespace.
-  - **A route must NAME that account to get it.** Naming nothing means no
-    cluster power at all.
+- **This bundle's routes hold NO Kubernetes RBAC, and render no account.** An
+  agent reaches the cluster through the MCP server, which carries its own
+  identity and the actual grant — so a route account bound to nothing would be
+  the floor wearing a second name.
+  - **`allowMutations` moves the SERVER's grant**, which is the wall that
+    matters. It is never `cluster-admin`, no role it renders can read a Secret,
+    and a route naming no account has no cluster power of its own at all.
   - **`allowPodExecution` is the flag that matters.** Off, an agent cannot run a
     pod and therefore cannot read a Secret. On, it can read every Secret in
     every writable namespace, whatever the roles say.

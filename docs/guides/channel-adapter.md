@@ -209,7 +209,7 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-telegram
 spec:
-  image: "ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.24.1"
+  image: "ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.24.2"
   # Receives forwarded topic updates: the reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080

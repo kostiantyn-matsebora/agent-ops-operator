@@ -71,13 +71,28 @@ spec:
   {{- if $reg.enabled }}
   # self-registration talks to the Kubernetes API: mount the SA token. The
   # operator grants nothing — the Role below does.
-  kubernetesAccess: true
+  # A REFERENCE to the account rendered beside its registration grant below.
+  serviceAccountName: agentops-signal-{{ $name }}
   {{- end }}
   {{- with .Values.alertmanager.resources }}
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
 {{- if $reg.enabled }}
+{{- /* THE ADAPTER'S IDENTITY, RENDERED BESIDE THE GRANT IT CARRIES.
+
+The manager creates no ServiceAccount — it names this one and mounts its token.
+Whoever grants a component is the only one who knows it needs an identity at
+all, and that is this file: the role below and this account are read together
+rather than one here and one in a Go reconciler. */}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ printf "agentops-signal-%s" $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-prometheus
 ---
 # Least privilege for self-registration: VMAlertmanagerConfig only, in the
 # namespace the config is written to, bound to the adapter's deterministic SA.

@@ -59,13 +59,13 @@ question was asked in. Values-named channels still win a place beside it. */ -}}
 {{- if include "kubernetes.observePipelineEnabled" . }}
 {{- $routes = append $routes (dict "name" $p.observe.name "icon" ($p.observe.icon | default "")
       "runtimeRef" ($p.observe.runtimeRef | default $p.runtimeRef | default "")
-      "serviceAccountName" ($p.observe.serviceAccountName | default $p.serviceAccountName | default (include "kubernetes.routeServiceAccount" (dict "ctx" $ "route" $p.observe.name)))
+      "serviceAccountName" (include "kubernetes.routeAccount" (dict "ctx" $ "cfg" $p.observe "p" $p))
       "tools" $readTools) }}
 {{- end }}
 {{- if include "kubernetes.adminPipelineEnabled" . }}
 {{- $routes = append $routes (dict "name" $p.admin.name "icon" ($p.admin.icon | default "")
       "runtimeRef" ($p.admin.runtimeRef | default $p.runtimeRef | default "")
-      "serviceAccountName" ($p.admin.serviceAccountName | default $p.serviceAccountName | default (include "kubernetes.routeServiceAccount" (dict "ctx" $ "route" $p.admin.name)))
+      "serviceAccountName" (include "kubernetes.routeAccount" (dict "ctx" $ "cfg" $p.admin "p" $p))
       "tools" (concat $readTools $writeTools)) }}
 {{- end }}
 {{- range $routes }}

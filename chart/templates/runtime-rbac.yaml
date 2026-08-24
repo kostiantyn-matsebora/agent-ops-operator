@@ -13,22 +13,45 @@ MODE bound to that account, so a route inherited the release's maximum by not
 typing a field — three of four routes in the reference install held pod-delete
 and node-patch that way, two of them routes that reach no Kubernetes API at all.
 
-THERE IS NO MODE ANY MORE, and that is the second correction. The mode rendered
-an extra, named account carrying a preset posture, and the account granted
-nothing until a Pipeline named it — so the setting described a state the runtime
-was in, which is the reading it caused the incident for. ACCOUNTS ARE DECLARED
-NOW: `rbac.runtime.serviceAccounts` is the only source here, and every entry is
-a grant somebody wrote down rather than a name a default selected.
+THERE IS NO MODE ANY MORE, AT EITHER LEVEL, and that is the second correction.
+A release-wide mode went first: it rendered an extra, named account carrying a
+preset posture, and the account granted nothing until a Pipeline named it — so
+the setting described a state the runtime was in, which is the reading it caused
+the incident for.
+
+`rbacMode` ON A DECLARED ACCOUNT WENT WITH IT, and it took a second pass to see
+why. It was the identical mechanism one level down: a reviewer reading
+`rbacMode: full` sees a word, not the verbs, and that is the whole objection to
+a preset. Being declared rather than defaulted does not make the word readable.
+
+ACCOUNTS STATE THEIR RULES NOW. `rbac.runtime.serviceAccounts` is the only
+source here, and every entry grants exactly what somebody wrote down:
 
     rbac:
       runtime:
         serviceAccounts:
           - name: agentops-runtime-acting
-            rbacMode: full
+            clusterRoles:
+              - name: workloads
+                rules:
+                  - apiGroups: ["apps"]
+                    resources: ["deployments"]
+                    verbs: ["get", "list", "patch"]
 
     pipelines:
       - name: k8s-operate
         serviceAccountName: agentops-runtime-acting
+
+`agentops.runtimeReadRules` and `agentops.runtimeWriteRules` in `_helpers.tpl`
+stay, and remain the copyable starting point for that `rules:` block — a rule
+set an operator pasted and can read is not a preset. They are also what the
+`kubernetes` bundle's MCP server binds, which is the wall that actually carries
+an agent's cluster reach.
+
+BEFORE COPYING THE WRITE RULES, note what they cost: they are gated by
+`global.agentops.runtimeDefaults.allowPodExecution` where the helper emits them,
+and a hand-written copy carries no such gate. Anything that produces or enters a
+pod reads every Secret the kubelet resolves for it.
 
 THE GRANTS ARE CLUSTER-SCOPED. Namespaced Roles were tried and reverted: RBAC
 cannot say "everywhere except", so bounding an agent meant an allow-list, one
@@ -54,52 +77,21 @@ exclusively the parent's is the runtime DEFAULTS and this FLOOR.
 {{- if eq $extra.name $floor }}
 {{- fail (printf "rbac.runtime.serviceAccounts[%d]: %q is the FLOOR account, which holds no RBAC in any configuration — that is what makes a Pipeline naming no serviceAccountName powerless, and what keeps the floor available to NAME on one route to take it back to nothing. Binding to it would make silence mean power again. Use a different name and name it on the Pipelines that need it" $i $extra.name) }}
 {{- end }}
-{{- $mode := $extra.rbacMode | default "none" }}
-{{- if not (has $mode (list "none" "readonly" "full")) }}
-{{- fail (printf "rbac.runtime.serviceAccounts[%s].rbacMode must be \"none\", \"readonly\" or \"full\", got %q" $extra.name $mode) }}
+{{- /* RETIRED KEY, AND IT FAILS RATHER THAN BEING IGNORED. Helm never reports
+an unread value, so a silently-dropped `rbacMode: full` would REMOVE a grant the
+install believed it had — invisible in exactly the way the release-wide mode was,
+one direction over. */ -}}
+{{- if hasKey $extra "rbacMode" }}
+{{- fail (printf "RETIRED KEY: rbac.runtime.serviceAccounts[%s].rbacMode is DELETED with no alias: a mode name is a grant nobody reviewed, and being declared rather than defaulted does not make it readable. State what this account may do — clusterRoles (rules you write), bindClusterRoles (existing ClusterRoles) or namespaced (Roles in other namespaces) — or leave all three unset and the account is created holding nothing. agentops.runtimeReadRules / runtimeWriteRules in chart/templates/_helpers.tpl are the copyable starting point" $extra.name) }}
 {{- end }}
 {{- $accounts = append $accounts (dict
       "name" $extra.name
-      "mode" $mode
       "clusterRoles" ($extra.clusterRoles | default list)
       "bindClusterRoles" ($extra.bindClusterRoles | default list)
       "namespaced" ($extra.namespaced | default list)) }}
 {{- end }}
 {{- range $acct := $accounts }}
 {{- $sa := $acct.name }}
-{{- if ne $acct.mode "none" }}
----
-# ONE ROLE PER ACCOUNT, cluster-scoped. `readonly` gets the reads, `full` gets
-# the reads plus the writes — and the writes are themselves gated by
-# global.agentops.runtimeDefaults.allowPodExecution, which is what keeps Secrets
-# genuinely out of reach rather than merely unnamed in these rules.
-#
-# The built-in `view` ClusterRole used to be bound here under `readonly`, and
-# `cluster-admin` under `full`. Neither is, now: every grant is a role this
-# chart writes out and an operator can read.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ $sa }}-{{ $.Release.Namespace }}
-rules:
-{{ include "agentops.runtimeReadRules" $ | indent 2 }}
-{{- if eq $acct.mode "full" }}
-{{ include "agentops.runtimeWriteRules" $ | indent 2 }}
-{{- end }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ $sa }}-{{ $.Release.Namespace }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ $sa }}-{{ $.Release.Namespace }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ $sa }}
-    namespace: {{ $ns }}
-{{- end }}
 {{- range $acct.clusterRoles }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

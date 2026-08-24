@@ -4,10 +4,19 @@ Rendered only when the bundle deploys its own — pointing `adminMcp.url` at a
 server you already run (a HACS MCP integration inside Home Assistant, say)
 renders the CRs and nothing here.
 
-It runs under its OWN ServiceAccount, never the runtime's. The agent's reach
-through MCP is then (what this server may do in Home Assistant) ∩ (what the
-toolset grants), which is two walls rather than one — the same reason
-kubernetes's MCP server has an identity of its own.
+THE TWO WALLS HERE ARE NOT KUBERNETES ONES. The agent's reach through MCP is
+(what this server may do in Home Assistant) ∩ (what the toolset grants), and the
+first of those is a Home Assistant TOKEN, not a ServiceAccount.
+
+SO IT RENDERS NO ServiceAccount. It held one, bound to nothing, with its token
+unmounted — an identity the pod never presents to the API server, which makes it
+a name rather than a boundary. It ran as that name for the same reason the
+bundles rendered empty route accounts: "where a grant would go if one were ever
+needed". A grant that is needed one day is a grant somebody writes down that
+day, together with the account it binds to.
+
+`kubernetes`'s MCP server keeps its account, and the difference is the whole
+rule: that one MOUNTS its token and IS bound to a cluster grant.
 */ -}}
 {{- if and (include "home-assistant.active" .) (include "home-assistant.adminMcpServerEnabled" .) }}
 {{- $s := .Values.adminMcpServer }}
@@ -16,22 +25,16 @@ kubernetes's MCP server has an identity of its own.
 {{- if not $secret }}
 {{- fail "home-assistant: the admin MCP server needs a Home Assistant credential — set homeAssistant.credentials.operatorToken (or .operatorSecret, or adminMcpServer.credentialsSecret). Without one it starts, answers, and refuses every repair" }}
 {{- end }}
-{{- $runtimeSA := dig "agentops" "runtime" "serviceAccountName" "" (.Values.global | default dict) }}
-{{- if and $runtimeSA (eq $s.serviceAccountName $runtimeSA) }}
-{{- fail (printf "home-assistant: adminMcpServer.serviceAccountName (%s) must NOT be the runtime's ServiceAccount — the second identity is the point of running this server, and sharing one collapses the two walls into one" $s.serviceAccountName) }}
+{{- /* NAMING ONE IS STILL REFUSED IF IT IS THE RUNTIME'S. The guard survives the
+account not being rendered: an install that points this workload at an account of
+its own must still not point it at the one agents run as. */ -}}
+{{- /* THE DEFAULT RUNTIME IDENTITY, from the block that still exists. This read
+was left on `global.agentops.runtime.serviceAccountName` — a key that now FAILS
+the render — so the guard could never fire on any install that renders at all. */ -}}
+{{- $runtimeSA := dig "agentops" "runtimeDefaults" "serviceAccountName" "" (.Values.global | default dict) }}
+{{- if and $runtimeSA $s.serviceAccountName (eq $s.serviceAccountName $runtimeSA) }}
+{{- fail (printf "home-assistant: adminMcpServer.serviceAccountName (%s) must NOT be the runtime's ServiceAccount — sharing one collapses two walls into one" $s.serviceAccountName) }}
 {{- end }}
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ $s.serviceAccountName }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: agentops-home-assistant
-# It needs NO Kubernetes permissions: it reads an HTTP API, not the API server.
-# The separate identity is where a cluster-side grant would go if one were ever
-# needed, and it stays empty until then.
-automountServiceAccountToken: false
----
 apiVersion: v1
 kind: Service
 metadata:
@@ -68,7 +71,11 @@ spec:
         app.kubernetes.io/name: agentops-home-assistant
         app.kubernetes.io/component: mcp-ha
     spec:
-      serviceAccountName: {{ $s.serviceAccountName }}
+      {{- /* Named only if the install names one — with no token mounted this pod
+      never authenticates, so the account changes nothing it can reach. */}}
+      {{- with $s.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
       automountServiceAccountToken: false
       containers:
         - name: ha-mcp

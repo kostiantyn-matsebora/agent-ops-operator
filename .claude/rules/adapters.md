@@ -69,9 +69,18 @@ the Service, which is named after the WORKLOAD: `agentops-adapter-<name>`.
 **There is no `agentops-channel-<name>`.** Two changes have now written that
 name by mistake.
 
-**`spec.kubernetesAccess` mirrors SignalAdapter's:** mounts the SA token and
-injects `POD_NAMESPACE`, IDENTITY ONLY. Permissions stay an external grant
-against SA `agentops-adapter-<name>`, and no reconciler ever creates RBAC.
+**`spec.serviceAccountName` mirrors SignalAdapter's:** a REFERENCE to the
+identity the workload runs as, and NAMING ONE IS MOUNTING ITS TOKEN — those were
+one decision wearing two names, so `kubernetesAccess` is deleted.
+
+- **No reconciler creates the account and none creates RBAC.** Both are the
+  chart's, rendered in the same file as the grant, so "what can this adapter do"
+  is one object to read.
+- **Absent means the release FLOOR** — bound to nothing, token mounted. Not the
+  namespace `default` (which carries whatever the cluster gave it) and not "no
+  token" (indistinguishable from a grant somebody forgot).
+- **`POD_NAMESPACE` is injected unconditionally.** A downward-API field naming
+  the pod's own namespace is not a permission.
 
 **Credentials are per-surface** on `Channel.credentialsSecretRef`.
 
@@ -95,8 +104,9 @@ Adapters push normalized signals (`fingerprint`, `labels`, `title?`, `payload`,
 - **`SignalAdapter.spec.port` is an implementation property.** When set, the
   reconciler owns the Service `agentops-signal-<name>` and injects
   `LISTEN_ADDR`. Charts ship NO adapter connectivity.
-- **`spec.kubernetesAccess`** mounts the SA token and `POD_NAMESPACE` for
-  implementations that self-register with their SENDER. Push-model senders hold
+- **`spec.serviceAccountName`** names the identity for implementations that
+  self-register with their SENDER, and mounting its token is what naming it
+  means. Push-model senders hold
   the "where to push" binding, so the adapter writes it from
   `SignalSource.spec.config.register`, degrading to instructions in the Ready
   condition when it can't.

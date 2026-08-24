@@ -9,7 +9,7 @@
 #
 # The bundle ships NO SUBSTRATE: no AgentRuntime, no runtime ServiceAccount, no
 # LLM credential, no runtime RBAC. Those are release-wide facts and live in the
-# parent chart's `runtime:` block and `global.agentops.runtime.*`. Bundles
+# parent chart's `runtimes:` list and `global.agentops.runtimeDefaults.*`. Bundles
 # contribute domain — sources, profiles, tooling — and reference what the parent
 # provides.
 #
@@ -457,9 +457,14 @@ adminMcpServer:
   # Which credential the server authenticates to Home Assistant with. Empty =
   # the operator token, which is what makes registry writes possible at all.
   credentialsSecret: ""
-  # Distinct from the runtime's ServiceAccount ON PURPOSE. Setting them equal
-  # FAILS the render.
-  serviceAccountName: agentops-mcp-ha
+  # EMPTY, AND NO ACCOUNT IS RENDERED. This server talks to Home Assistant over
+  # HTTP and mounts no ServiceAccount token, so the identity it runs as is never
+  # presented to the API server — an account here would be a name, not a
+  # boundary. Its two walls are the Home Assistant TOKEN and the bound toolset.
+  #
+  # Name one to run it as an account you created and granted. Setting it to the
+  # runtime's ServiceAccount FAILS the render either way.
+  serviceAccountName: ""
   # Extra env passthrough. The chart already sets HOMEASSISTANT_URL,
   # HOMEASSISTANT_TOKEN, MCP_HOST, MCP_PORT, MCP_SECRET_PATH,
   # HA_MCP_DISABLE_SETTINGS_UI and MCP_DISABLE_UPDATE_CHECK — the last because
