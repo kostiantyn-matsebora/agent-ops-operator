@@ -116,6 +116,16 @@ USE rather than by reading the command back.
 - [x] 6.5 Pin the hook and the guard against SHARED fixtures so they cannot
       diverge, and verify a fixture that one accepts and the other rejects fails
       the test
+- [x] 6.8 **Test every script this change adds, not just the one with fixtures.**
+      Six scripts and a hook were each verified ONCE, by hand, in directories
+      that no longer exist — which proves they worked that afternoon and catches
+      nothing after. `.github/tests/run.sh` now runs **58 assertions** across all
+      of them, with `gh` and `openspec` stubbed so the suite reaches no network
+      and touches no real repository, and it runs in CI.
+      **It found a real defect on its first run:** `mark-thread-resolved.sh`
+      validated thread ids with the `case` glob `[A-Za-z0-9_=-]*`, which matches
+      a first character followed by ANYTHING — it accepted `PRRT_x; rm -rf /`
+      unchanged while reading as validation in review. Anchored, and pinned
 - [x] 6.6 Add a pull-request title check against the commit convention, since
       squash merge makes the title the commit subject (design D3). Verify it
       rejects a title with no `type(scope):` prefix

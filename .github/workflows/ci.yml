@@ -541,8 +541,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: The gate and the check agree
-        run: ./.github/scripts/docs-task-guard-test.sh
+      # EVERY SCRIPT THIS WORKFLOW DEPENDS ON, not only the documentation gate.
+      # They decide things — refusing a commit, refusing to resolve somebody's
+      # review thread, opening an issue — and each was originally verified once
+      # by hand. `gh` and `openspec` are stubbed, so the suite reaches no network
+      # and touches no real repository.
+      - name: The workflow's own scripts
+        run: ./.github/tests/run.sh
       - name: Every change this pull request touches carries a finished documentation task
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
