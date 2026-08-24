@@ -35,14 +35,60 @@ That guard reads the CLUSTER, and Argo CD, Flux, `helm template` and CI all
 render without one. For those installs this entry is the only warning that
 arrives.
 
-### The four things that will break, in the order they bite
+### The five things that will break, in the order they bite
 
+0. **APPLY THE CRDs, WHATEVER YOU ARE DOING** — upgrade, reinstall, or a full
+   wipe. See below: skipping it is the one failure here that reports success.
 1. **An `AgentRuntime` still declaring the retired volume field contributes NO
    volume.** It is DELETED, not aliased.
 2. **`runtime.contextPvcRef`, `runtime.homePvcRef` and
    `runtime.workspacePvcRef` FAIL the render.** They are gone, not renamed.
 3. **The default claim is `agentops-context`.** Nothing copies a volume.
 4. **The mount path is `/data/context`.** `/data/workspace` did NOT move.
+
+### A FRESH INSTALL NEEDS THE CRDs TOO, AND THAT IS THE SURPRISING ONE
+
+**Helm installs a CRD from `crds/` only when it is ABSENT, and never upgrades
+one.** CRDs are CLUSTER-scoped, so they survive everything an install normally
+tears down:
+
+| What you did | CRDs after it |
+|---|---|
+| `helm upgrade` | untouched |
+| `helm uninstall` | untouched |
+| `kubectl delete ns agent-ops` | untouched |
+| deleted the namespace AND reinstalled from scratch | **still the OLD ones** |
+
+**So a clean wipe-and-redeploy lands on stale CRDs, and the API server then
+PRUNES every field this release added** — `Pipeline.spec.persistence` and the
+conversation's claim snapshot — without a warning anywhere.
+
+Every conversation then resolves to EPHEMERAL and answers normally. The install
+looks healthy and quietly keeps nothing.
+
+**It was hit exactly this way** on a redeploy that had deleted the whole
+namespace first, which is precisely the case that feels like it cannot need a
+migration step.
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+```
+
+```powershell
+kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+```
+
+**Check it took**, because the symptom of missing it is silence:
+
+```sh
+kubectl get crd pipelines.agentops.dev -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.persistence.type}'
+```
+
+```powershell
+kubectl get crd pipelines.agentops.dev -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.persistence.type}'
+```
+
+It prints `object`. An empty answer means the old CRD is still in place.
 
 ### Changed
 
@@ -214,7 +260,9 @@ arrives.
 
 ### Upgrade
 
-1. **Apply the CRDs** (command above). Helm does not upgrade them.
+1. **Apply the CRDs** (command above). Helm does not upgrade them — and it does
+   not replace them on a reinstall either, so this step is NOT optional just
+   because you wiped the namespace first.
 2. **Move any `AgentRuntime` volume declaration onto the Pipelines using that
    runtime**, as `contextClaim` / `workspaceClaim`. A runtime still declaring
    the retired field contributes nothing after this upgrade.

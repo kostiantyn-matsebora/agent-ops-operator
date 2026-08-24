@@ -44,6 +44,41 @@ difference.**
   `agentops.generatedSecretGuard` fails the render rather than trusting a
   migration note.
 
+**HELM INSTALLS A CRD FROM `crds/` ONLY WHEN ABSENT, AND NEVER UPGRADES ONE.**
+
+CRDs are CLUSTER-scoped, so they survive everything an install tears down —
+`helm upgrade`, `helm uninstall`, and `kubectl delete ns` alike. **A full
+wipe-and-redeploy therefore lands on the OLD CRDs.**
+
+- **The API server then PRUNES every field the new version added**, silently. No
+  error, no warning, no event. `Pipeline.spec.persistence` and the conversation's
+  claim snapshot vanished exactly this way on a redeploy that had deleted the
+  whole namespace first — every conversation resolved to EPHEMERAL and answered
+  normally.
+- **The reinstall case is the one that catches people**, because deleting the
+  namespace feels like it cannot leave a migration owed.
+- **`kubectl apply -f chart/crds/` is the fix**, and it is a step for INSTALL as
+  much as for upgrade.
+- **Verify rather than assume** — the symptom of skipping it is silence:
+
+  ```sh
+  kubectl get crd pipelines.agentops.dev \
+    -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.persistence.type}'
+  ```
+
+**PUBLISHING IS A GIT TAG ONLY WHILE CI RUNS, AND ON A PRIVATE REPO IT DOES
+NOT.** `build-test.md` says nothing is pushed by hand; that holds for the public
+path and is false here. A tag pushed against a private repo publishes NOTHING
+and reports nothing — the absence looks identical to a build still queued.
+
+- **Check the registry, not the tag**, before believing an image shipped.
+- **The hand build is the ordinary buildx push**, and it MUST stay multi-arch —
+  the cluster is mixed x86/arm64, and a single-arch image fails at SCHEDULE
+  time, possibly weeks later.
+- **Never read a credential to test whether auth works.** `docker-credential-*
+  get` PRINTS THE SECRET. Attempt the push and read the error instead; a leaked
+  token costs a rotation and a re-login everywhere it was used.
+
 **`lookup` returns empty on any renderer without a cluster** — `helm template`,
 CI, a GitOps controller, `--dry-run=client`.
 
