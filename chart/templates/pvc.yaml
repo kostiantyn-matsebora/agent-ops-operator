@@ -24,7 +24,7 @@ metadata:
     helm.sh/resource-policy: keep
 spec:
   accessModes:
-{{ toYaml $ctx.accessModes | indent 4 }}
+{{ include "agentops.accessModes" (dict "volume" $ctx "root" $) | indent 4 }}
   resources:
     requests:
       storage: {{ $ctx.size }}
@@ -50,7 +50,7 @@ metadata:
     helm.sh/resource-policy: keep
 spec:
   accessModes:
-{{ toYaml $ws.accessModes | indent 4 }}
+{{ include "agentops.accessModes" (dict "volume" $ws "root" $) | indent 4 }}
   resources:
     requests:
       storage: {{ $ws.size }}

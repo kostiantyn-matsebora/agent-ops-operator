@@ -31,21 +31,22 @@ fifteen minutes, most of it the install.
 - A cluster you can `kubectl` into, and Helm.
 - A model credential — a Claude subscription token or an Anthropic API key.
 
-**Storage.** A conversation's accumulated context lives on a `ReadWriteMany`
-claim.
+**Storage. Nothing to decide.** A conversation's accumulated context lives on a
+claim the chart creates, and demo mode asks for `ReadWriteOnce` — which is what
+`local-path` provides, the only storage class rancher-desktop, k3d, kind and
+minikube ship.
 
-| Your cluster | What to do |
-|---|---|
-| Has an RWX provisioner | Nothing. |
-| Has none | Add `--set persistence.context.enabled=false` below. Without it the claim sits `Pending` and no pod ever starts. |
+So the demo remembers. Follow-ups in a thread keep their context on a laptop
+cluster exactly as they do on a real one.
 
-**The trade: with persistence off, conversations do not remember.** Every run
-starts fresh. The operator tells you that up front rather than failing a
+**A real install asks for `ReadWriteMany` instead**, because runtime pods land
+wherever the scheduler puts them and every one of them mounts this volume — see
+[Installation]({{ '/installation/' | relative_url }}).
+
+**No storage at all?** `--set persistence.context.enabled=false` runs the demo
+against `emptyDir`. Everything works — agents run, answer and deliver — but
+every run starts fresh, and the operator says so up front rather than failing a
 follow-up later.
-
-Everything else works unchanged — agents run, answer and deliver as normal. The
-context sidecar the chart ships on is simply skipped, because it would have
-nothing to snapshot to.
 
 ## Install
 
@@ -194,7 +195,7 @@ exits on the idle TTL.
 | Cause | Where it shows |
 |---|---|
 | Bad or missing credential | the run fails — `status.runs[].status: failed`, non-zero exit code, reason in `kubectl logs` |
-| No RWX storage class | the `agentops-context` PVC sits `Pending`. The conversation exists but never gets a pod |
+| No storage provisioner at all | the `agentops-context` PVC sits `Pending` with no events. The conversation exists but never gets a pod. Install with `--set persistence.context.enabled=false` |
 | A pre-created volume that will not bind | the `agentops-context` PVC sits `Pending` too, and it looks identical. Different cause: a claim naming a volume must also name the right storage class. `kubectl describe pvc agentops-context` tells the two apart — `VolumeMismatch: storageClassName does not match` means the class is wrong, no event at all means there is no provisioner. For a volume you created by hand use `persistence.context.storageClassName: "-"`. For one RETAINED from an earlier release, name the class the PV already carries — a dynamically provisioned volume keeps it forever |
 | Nothing claims the source | the source's `Wired` condition is `False` with a reason. The console reports its composer unavailable, and signals are dropped |
 | At capacity | phase `Pending`, no pod, no thread. Five run at once by default |

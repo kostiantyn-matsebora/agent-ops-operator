@@ -596,6 +596,52 @@ has, so no existing install changes behaviour.
 Call with the volume's values block; emits nothing at all when there is no
 class to state.
 */ -}}
+{{- /*
+THE ACCESS MODE, AND WHY DEMO MODE ANSWERS IT DIFFERENTLY.
+
+`ReadWriteMany` is right for a real install: runtime pods land wherever the
+scheduler puts them, and every one of them mounts the context volume, so a claim
+only one node can attach pins the whole install to that node.
+
+**IT IS WRONG FOR THE ONE-FLAG DEMO, AND THAT COST AN ADOPTER THE PRODUCT.**
+`local-path` — which rancher-desktop, k3d, kind and minikube all ship as the
+ONLY class — supports RWO and RWOP alone and REFUSES an RWX claim outright:
+
+  failed to provision volume with StorageClass "local-path":
+  NodePath only supports ReadWriteOnce and ReadWriteOncePod (1.22+) access modes
+
+The claim sits `Pending`, no runtime pod is ever created, and the conversation
+waits forever. Getting started documented the workaround
+(`persistence.context.enabled=false`) — which trades the demo's memory away for
+a storage detail the reader has no reason to have read first.
+
+- **It is not about node COUNT.** Any cluster whose only provisioner is RWO-only
+  hits it, and a single-node cluster with an RWX provisioner never does.
+- **RWO is CORRECT under demo rather than merely tolerable.** Kubernetes lets
+  many pods share an RWO volume on ONE node, and the volume's node affinity is
+  what puts them there — so the default cap of five concurrent conversations
+  still holds, on a laptop and on a demo running against a real cluster alike.
+- **PERSISTENCE STAYS ON.** The fix a reader would otherwise apply turns it off,
+  which is the opposite of what a demo should show.
+
+**AN EXPLICIT VALUE ALWAYS WINS**, which is why the shipped default is EMPTY
+rather than a mode: an empty list is the one thing a chart can tell apart from a
+typed one, so "the chart decides" is expressible and an operator who typed
+`ReadWriteMany` under demo mode still gets it.
+
+Call with the volume's values block plus the root.
+*/ -}}
+{{- define "agentops.accessModes" -}}
+{{- $modes := .volume.accessModes | default (list) -}}
+{{- if $modes -}}
+{{ toYaml $modes }}
+{{- else if .root.Values.global.demo.enabled -}}
+- ReadWriteOnce
+{{- else -}}
+- ReadWriteMany
+{{- end -}}
+{{- end -}}
+
 {{- define "agentops.storageClassName" -}}
 {{- $sc := .storageClassName | default "" -}}
 {{- if eq $sc "-" }}

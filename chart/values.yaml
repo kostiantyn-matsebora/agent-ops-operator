@@ -910,9 +910,20 @@ persistence:
   # so a reply after an idle period resumes a context whose files are gone and
   # answers without it. The symptom is an agent apologising for lost history.
   #
-  # ReadWriteMany matters once more than one runtime pod runs concurrently (the
-  # default cap is 5). With ReadWriteOnce every runtime pod must land on one
-  # node.
+  # THE ACCESS MODE IS LEFT EMPTY, AND THE CHART ANSWERS IT.
+  #
+  # ReadWriteMany for an ordinary install — every runtime pod mounts this volume
+  # and the scheduler places them freely, so a claim one node can attach pins the
+  # install to that node.
+  #
+  # ReadWriteOnce under `global.demo.enabled`, because `local-path` REFUSES an
+  # RWX claim and it is the only class rancher-desktop, k3d, kind and minikube
+  # ship. The demo then keeps its memory instead of trading it away. Many pods
+  # may share an RWO volume on ONE node, which is where the volume's affinity
+  # puts them, so the concurrency cap still holds.
+  #
+  # TYPE A VALUE AND IT WINS, in both modes. Empty is the only thing a chart can
+  # tell apart from a deliberate choice, which is why the default is not a mode.
   context:
     enabled: true
     # Create a PVC with this name (AgentRuntime CRs reference it via
@@ -925,8 +936,8 @@ persistence:
     ## If undefined (the default) or set to null, no storageClassName spec is set,
     ##   choosing the default provisioner.
     storageClassName: ""
-    accessModes:
-      - ReadWriteMany
+    # empty: ReadWriteMany, or ReadWriteOnce under demo mode. See above.
+    accessModes: []
     # Bind to a pre-created PV by NAME. Pair it with storageClassName: "-", or
     # the cluster's default StorageClass is injected by admission and a second
     # volume is provisioned against the one you already made.
@@ -971,8 +982,8 @@ persistence:
     ## If undefined (the default) or set to null, no storageClassName spec is set,
     ##   choosing the default provisioner.
     storageClassName: ""
-    accessModes:
-      - ReadWriteMany
+    # empty: ReadWriteMany, or ReadWriteOnce under demo mode. See above.
+    accessModes: []
     # Bind to a pre-created PV by NAME. Pair it with storageClassName: "-", or
     # the cluster's default StorageClass is injected by admission and a second
     # volume is provisioned against the one you already made.

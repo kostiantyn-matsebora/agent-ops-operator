@@ -80,13 +80,13 @@ before the first install, not after.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 12.0.0 -n agent-ops
+     --version 13.0.0 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 12.0.0 -n agent-ops
+     --version 13.0.0 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public
@@ -156,7 +156,7 @@ shared checkout is neither.
 | Key | Default | Consequence |
 |---|---|---|
 | `persistence.context.enabled` | `true` | off means conversations never keep context |
-| `persistence.context.accessModes` | `[ReadWriteMany]` | `ReadWriteOnce` pins every agent pod to one node |
+| `persistence.context.accessModes` | `[]` — the chart decides | empty renders `ReadWriteMany`, or `ReadWriteOnce` under `global.demo.enabled` where `local-path` refuses RWX. Type a value and it wins in both modes. `ReadWriteOnce` pins every agent pod to one node |
 | `persistence.context.size` | `5Gi` | the accumulated context of every conversation |
 | `persistence.context.storageClassName` | `""` | empty uses the cluster default — see below |
 | `persistence.workspace.enabled` | `false` | on keeps uncommitted agent work across a pod restart |

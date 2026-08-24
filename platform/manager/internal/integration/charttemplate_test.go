@@ -2164,3 +2164,34 @@ func TestReadWriteOnceRemainsExpressible(t *testing.T) {
 		t.Errorf("a single-node install must still be able to ask for ReadWriteOnce:\n%s", doc)
 	}
 }
+
+// DEMO MODE ASKS FOR ReadWriteOnce, AND THAT IS WHAT MAKES THE ONE-FLAG DEMO
+// WORK ON THE CLUSTERS IT IS FOR.
+//
+// `local-path` is the only storage class rancher-desktop, k3d, kind and
+// minikube ship, and it refuses an RWX claim outright — so the demo's context
+// claim sat Pending, no runtime pod was created, and the conversation waited
+// forever. The documented workaround turned persistence OFF, buying a working
+// demo by removing the thing being demonstrated.
+//
+// The default is EMPTY rather than a mode because an empty list is the one
+// thing a chart can tell apart from a value somebody typed, which is what keeps
+// an explicit ReadWriteMany working under demo mode too.
+func TestDemoModeAsksForReadWriteOnce(t *testing.T) {
+	demo := claimDoc(t, helmTemplate(t, "--set", "global.demo.enabled=true"), "agentops-context")
+	if !strings.Contains(demo, "- ReadWriteOnce") {
+		t.Errorf("demo mode must render a ReadWriteOnce context claim:\n%s", demo)
+	}
+
+	ordinary := claimDoc(t, helmTemplate(t), "agentops-context")
+	if !strings.Contains(ordinary, "- ReadWriteMany") {
+		t.Errorf("an ordinary install must be unchanged at ReadWriteMany:\n%s", ordinary)
+	}
+
+	typed := claimDoc(t, helmTemplate(t,
+		"--set", "global.demo.enabled=true",
+		"--set", "persistence.context.accessModes={ReadWriteMany}"), "agentops-context")
+	if !strings.Contains(typed, "- ReadWriteMany") {
+		t.Errorf("an explicit mode must win under demo mode:\n%s", typed)
+	}
+}
