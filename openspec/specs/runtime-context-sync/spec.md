@@ -151,19 +151,112 @@ tool state are excluded by construction rather than by a list that must chase
 every file a vendor adds.
 
 When the declaration is ABSENT, the runtime SHALL behave exactly as it does
-without this capability, so that existing installations are unaffected until
-they opt in. When PRESENT, the paths SHALL be validated and reported on the
-runtime's readiness condition.
+without this capability. When PRESENT, the paths SHALL be validated and reported
+on the runtime's readiness condition.
+
+**A runtime whose context location is known SHALL declare it, and the BUNDLE
+shipping that runtime SHALL render the declaration** — beside that runtime's
+image and its model credential, which belong there for the same reason. An
+include list is one vendor's filesystem layout, so the release-wide runtime
+defaults every backend inherits are the wrong place for it. Requiring an operator to
+type a fact the runtime already holds leaves the mechanism inert on the install
+best able to use it, and leaves the durable context volume mounted into every
+agent container until somebody notices. The declaration belonging to the runtime
+means the runtime states it — not that a human states it on the runtime's
+behalf.
+
+A runtime whose context location is NOT known — any backend the project does not
+ship — SHALL still declare its own paths, and SHALL get the unsynchronised pod
+until it does. Nothing infers a path, and an empty include list remains invalid
+rather than being read as a request to copy everything.
 
 #### Scenario: An unconfigured runtime is unchanged
 
 - **WHEN** an AgentRuntime declares no context synchronisation
 - **THEN** it runs exactly as before, with its context volume mounted directly and no synchronising process
 
+#### Scenario: The shipped runtime is installed with default values
+
+- **WHEN** an install accepts the chart's defaults and a context volume exists
+- **THEN** the reference runtime's context paths are already declared, in that runtime's own bundle values
+- **AND** synchronisation is active without an operator having set a value
+
+#### Scenario: Another backend inherits no vendor's paths
+
+- **WHEN** an install disables the shipped runtime bundle and declares its own runtime
+- **THEN** it inherits no context paths, because they were never in the release-wide runtime defaults
+
+#### Scenario: A third-party runtime declares nothing
+
+- **WHEN** a runtime the project does not ship declares no context paths
+- **THEN** it gets the unsynchronised pod, and no path is guessed on its behalf
+
+#### Scenario: An empty include list is written by hand
+
+- **WHEN** an AgentRuntime declares context synchronisation with an empty path list
+- **THEN** it is rejected as a declaration that would persist nothing while appearing configured
+- **AND** it is not interpreted as a request to synchronise the whole context tree
+
 #### Scenario: A misdeclared context is reported
 
 - **WHEN** an AgentRuntime enables context synchronisation with paths that cannot be valid
 - **THEN** the runtime reports the problem on its readiness condition rather than silently persisting nothing
+
+### Requirement: Synchronisation requires a durable volume, and falls back without one
+
+Context synchronisation SHALL be built only where a durable context volume
+exists to snapshot to. Where no durable volume is configured, the runtime pod
+SHALL be exactly the unsynchronised pod: no synchronising process, no durable
+mount, and no promise of continuity.
+
+A pod SHALL NOT be constructed that references a durable context volume by an
+empty name. Doing so fails provisioning outright, which is worse than the
+configuration the operator chose: an install that deliberately runs without
+persistence is asking for ephemeral context, not for a conversation that cannot
+start.
+
+This SHALL agree with how continuity is resolved. Continuity resolution already
+answers that no durable volume means no promise, so a pod builder that fails
+instead of falling back makes the manager promise a fresh answer and then fail
+to provide one. **The two SHALL NOT disagree**, and where they do the reply is a
+message the reader can act on while the run produces nothing.
+
+The condition is the ABSENT VOLUME, not the absent promise. Continuity is also
+impossible for a backend that keeps no context on disk, and such a runtime SHALL
+still mount whatever durable volume it is given — that mount is where the pod's
+filesystem lives, not a promise about what survives the pod. Reading every
+impossible promise as a demand for ephemeral storage would take a configured
+volume away from the one case that never asked for continuity.
+
+The same rule already governs a missing synchronising image, which falls back to
+the unsynchronised pod. A missing durable volume SHALL be treated identically —
+one fallback rule, two conditions, not one condition with an exception.
+
+#### Scenario: Persistence is disabled and a runtime declares synchronisation
+
+- **WHEN** a runtime declares context paths and no durable context volume is configured
+- **THEN** the pod is built with ephemeral context, no synchronising process and no durable mount
+- **AND** the conversation is told its context is not promised, rather than failing to start
+
+#### Scenario: A pod is built without a durable claim
+
+- **WHEN** any runtime pod is constructed while no durable context volume is configured
+- **THEN** no volume in that pod references a persistent claim by an empty name
+
+#### Scenario: The promise and the pod agree
+
+- **WHEN** continuity resolution reports that continuity is not possible because no durable context volume is configured
+- **THEN** the pod that is built for that conversation starts and runs with ephemeral context
+
+#### Scenario: A backend that keeps no context on disk is given a volume
+
+- **WHEN** a runtime declares that it holds no context on disk and a durable context volume is configured
+- **THEN** continuity is still not promised, and the pod still mounts the configured volume
+
+#### Scenario: The synchronising image is missing
+
+- **WHEN** a runtime declares context paths and no synchronising image is configured
+- **THEN** the pod falls back to the unsynchronised pod, by the same rule that governs a missing durable volume
 
 ### Requirement: Context operations survive every ordinary end of a pod
 
