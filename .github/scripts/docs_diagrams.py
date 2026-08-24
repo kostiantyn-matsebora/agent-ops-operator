@@ -170,6 +170,66 @@ DIAGRAMS: dict[str, dict] = {
     },
 }
 
+# The security page's illustrations.
+#
+# They live in their own directory because they are NOT guide diagrams: a guide
+# shows the objects a reader writes, and these show what a control bounds. The
+# `dir` key is what keeps them apart, and every entry above defaults to "guides"
+# rather than restating it.
+#
+# ONE ILLUSTRATION PER CLAIM THAT IS HARD TO READ IN PROSE. The Secrets boundary
+# and the context mount are the two the page cannot state in a sentence anyone
+# believes on first reading — a picture of the path is what makes them land.
+SECURITY_DIAGRAMS: dict[str, dict] = {
+    "connect": {
+        "dir": "security",
+        "alt": "Any pod in the cluster may reach the MCP servers and the work "
+               "contract, because neither authenticates a caller, unless "
+               "network policy segments them.",
+        "cols": [
+            [("any pod", "in the cluster", "plain")],
+            [("NetworkPolicy", "off by default", "yours")],
+            [("MCP servers", "unauthenticated", "subject"),
+             ("work contract", "unauthenticated", "subject")],
+        ],
+        "arrows": ["may reach", "unless segmented"],
+    },
+    "tools": {
+        "dir": "security",
+        "alt": "An agent with a shell bypasses the command-line allowlist, but "
+               "cannot bypass the egress proxy inside its own pod.",
+        "cols": [
+            [("the agent", "and its shell", "subject")],
+            [("the allowlist", "configures the CLI", "plain"),
+             ("egress proxy", "on by default", "yours")],
+            [("an MCP server", "and its tools", "plain")],
+        ],
+        "arrows": ["bypasses", "cannot bypass"],
+    },
+    "secrets": {
+        "dir": "security",
+        "alt": "An agent allowed to create or enter a pod reads a Secret "
+               "through the kubelet, without ever asking the API server for it.",
+        "cols": [
+            [("create a pod", "or exec into one", "subject")],
+            [("the kubelet", "mounts what it names", "plain")],
+            [("the Secret", "never asked the API", "yours")],
+        ],
+        "arrows": ["is allowed to", "hands over"],
+    },
+    "context": {
+        "dir": "security",
+        "alt": "Under context sync the agent container holds no mount of the "
+               "durable volume, and a sidecar snapshots to it instead.",
+        "cols": [
+            [("agent container", "ephemeral, pod-local", "subject")],
+            [("context-sync", "holds the volume", "yours")],
+            [("durable volume", "one path per convo", "plain")],
+        ],
+        "arrows": ["no mount of it", "snapshots to"],
+    },
+}
+
 
 def _ink(kind: str, p: dict[str, str]) -> tuple[str, str, str]:
     """fill, stroke, and the accent bar down the left edge.

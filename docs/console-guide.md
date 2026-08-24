@@ -7,11 +7,11 @@ description: >-
 
 next:
   eyebrow: Next
-  title: Install it for real
+  title: Decide whether to trust it
   body: >-
-    The decisions to make before a real install, the values that matter, how to
-    enable a bundle, and the one route without which nothing answers.
-  url: /agent-ops-operator/installation/
+    An agent runs model output in your cluster. What a default install grants,
+    what each of the three walls bounds, and what is still open.
+  url: /agent-ops-operator/security/
 ---
 
 The console is where you watch agents work, and where you talk to them.

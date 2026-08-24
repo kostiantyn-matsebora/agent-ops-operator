@@ -326,6 +326,9 @@ not close it.
 
 ### The agent's power
 
+What this bounds, and what it does not, is on
+[Security]({{ '/security/' | relative_url }}#cluster-authorization).
+
 | Key | What it does |
 |---|---|
 | `rbac.runtime.serviceAccounts` | the identities this install DECLARES, each with its own posture, for a Pipeline to NAME. Default `[]` — the only source of runtime permissions |
@@ -577,7 +580,8 @@ which owns the trust boundary.
 ### Who may reach what
 
 Nothing restricts which pods may reach this release's components. Several of
-them authenticate nobody.
+them authenticate nobody — the threat, and this control's honest limit, are on
+[Security]({{ '/security/' | relative_url }}#network-segmentation).
 
 - The **MCP servers** accept any caller. Under `kubernetes.allowMutations: true`
   the Kubernetes one holds an acting role — an agent reaches the cluster through
@@ -619,7 +623,9 @@ global:
 ### Enforcing the toolset
 
 A route's toolsets reach the agent as `--allowedTools`, applied by the CLI in
-the runtime pod. That configures a **cooperating** agent.
+the runtime pod. That configures a **cooperating** agent. What that leaves open
+is on
+[Security]({{ '/security/' | relative_url }}#egress-control).
 
 An agent that can run commands reaches a bound MCP server directly and calls
 whatever that server registers. `agentops-shell` is bound on ordinary routes, so

@@ -47,9 +47,35 @@ exported diagrams, the console screenshots and the landing recording).
 
 ### `diagrams/`
 
-**Holds the drawio SOURCE plus `export.py`.**
+**Holds the drawio SOURCE plus THREE generators, and they are not
+interchangeable.**
 
-**Run that, never the exporter by hand.** It writes BOTH theme variants of the
+| Source | Writes | For |
+|---|---|---|
+| `agent-ops.drawio` + `export.py` | `assets/img/agent-ops-{light,dark}.svg` | the page-scale picture the landing page links |
+| `readme-flow.py` | `assets/img/readme-flow-{light,dark}.svg` | the README column |
+| `threat-model.py` | `assets/img/security/threat-model-{light,dark}.svg` | the security page's trust boundaries |
+
+- **The GUIDE diagrams are not here.** They are specs in
+  `.github/scripts/docs_diagrams.py`, rendered by `docs-generate.py`, and CI
+  fails on a stale one. The security page's four smaller illustrations are in
+  that same dict, told apart by a `dir` key — a guide entry states none and
+  lands in `assets/img/guides/`.
+- **`threat-model.py` is NOT run by CI**, exactly as `readme-flow.py` is not.
+  Both are run by hand and their output committed, so editing one and forgetting
+  to run it ships a stale drawing silently.
+- **AUTHOR A DRAWING AT THE FRAME'S WIDTH.** `.ao-diagram` is
+  `min-width: 42rem` inside a column that is 616px at 1280 and 720px above 1440,
+  so a wider canvas is scaled DOWN and its labels go with it. A 980px threat
+  model rendered every label at 0.69 and was unreadable. 760px renders at
+  0.88–0.95.
+  - **A PORTRAIT drawing is the other failure.** The same picture at 672×872 was
+    perfectly readable and filled the whole screen. Landscape, one glance.
+- **A diagram followed by a TABLE needs a sentence between them.** The theme
+  gives the diagram's paragraph `margin: 0`, so a table butts straight against
+  the frame.
+
+**Run the drawio exporter, never the exporter by hand.** It writes BOTH theme variants of the
 one exported page (two SVGs) and repaints the dark one's icon ink, which drawio
 cannot do because the icons are embedded images.
 

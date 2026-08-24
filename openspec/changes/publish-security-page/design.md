@@ -18,12 +18,19 @@ Four constraints are already binding, and they decide most of the design:
 | where two documents cover one subject, the routing rule says which gets what | `documentation-structure` | the security/installation split must be written down |
 | reference pages carry no front matter and are not edited for the site | `docs-site` | the ADR is linked where it lives |
 
-**This page describes the system as it is today.** `contextSync` is opt-in, so
-context isolation is a mode an install can choose. The change
-`context-sync-by-default` will make it the default; when it lands, this page is
-revised by `/opsx:update` rather than being written ahead of it. A page
-describing behaviour that does not exist yet is the failure this project already
-guards against in published specs.
+**This page describes the system as it is today, and "today" has already moved
+once.** `context-sync-by-default` and `least-privilege-runtimes` both landed
+after this change was proposed, and each changed a posture it states: context
+isolation is what a default install RUNS rather than a mode an operator opts
+into, and `rbacMode` is DELETED at every level rather than defaulting off — the
+chart now fails the render on it. These artifacts were revised by `/opsx:update`
+rather than the page being written against the older shape.
+
+**The same is owed to `trivy-image-scanning`**, which is proposed and not
+implemented. The supply-chain lines below describe what ships today; when that
+change lands, this page is revised the same way rather than written ahead of it.
+A page describing behaviour that does not exist yet is the failure this project
+already guards against in published specs.
 
 ## Goals / Non-Goals
 
@@ -119,10 +126,49 @@ the mechanism, not this paragraph.
 ### D7 — Every claim is verified before it is written, and the verification is a task
 
 The page will assert that the manager holds no `secrets` verb, that adapter
-tokens are derived, that runtime pods are non-root, and what images carry. Each
-is checkable in one command, and each is a public claim about a security
-property. The tasks name the check beside the claim rather than trusting this
+tokens are derived, that runtime pods are non-root, that no component logs
+message content, and what images carry. Each is checkable in one command, and
+each is a public claim about a security property. The tasks name the check beside the claim rather than trusting this
 design's own research.
+
+### D8 — The page is a THREAT MODEL, drawn, in a reviewer's own vocabulary
+
+**Added after the first draft was reviewed and rejected.** That draft satisfied
+every requirement above and was still the wrong page: prose paragraphs where a
+table belonged, no picture at all, and three controls called "walls" — a word
+this project invented.
+
+Three things changed, and each is now a requirement rather than a note here:
+
+1. **A threat model opens the page**, because trust boundaries and the flows
+   crossing them are what a reviewer reads first. A numbered register joins the
+   drawing to the prose.
+2. **Standard vocabulary throughout** — defence in depth, network segmentation,
+   egress control, authorization, residual risk. "Wall" made a reader translate
+   before they could evaluate, and "what is not addressed" is a heading for the
+   thing the industry calls residual risk.
+3. **Illustrated at each hard claim**, not once at the top. The Secret reached
+   through the kubelet and the context mount that is absent by design are the
+   two the page cannot state in a sentence anyone believes on first reading.
+
+**The unmitigated crossing is DRAWN.** Flow 6 — conversation content in the
+runtime pod's log — carries no control, and a threat model showing only the
+mitigated crossings is D6's failure in picture form.
+
+**Two compositions were built and rejected, and the numbers are why:**
+
+| Canvas | Rendered | Failed because |
+|---|---|---|
+| 980 × 620 | scaled to **0.686** | `.ao-diagram` is `min-width: 42rem` in a 616px column, so every label shrank out of readability |
+| 672 × 872 | 1:1, readable | portrait — it filled the whole screen, and a threat model is meant to be one glance |
+| **760 × 480** | **0.88–0.95** | shipped |
+
+**A drawing is authored at the frame's width**, and that rule is now in
+`docs/.claude/site.md` rather than only here.
+
+**`threat-model.py` is hand-run**, exactly as `readme-flow.py` is. The four
+smaller illustrations are specs in `docs_diagrams.py` and CI does check those, so
+the two halves fail differently — which is why the routing rule names the script.
 
 ## Risks / Trade-offs
 
@@ -142,9 +188,13 @@ design's own research.
   the spec states it as "no chart value the installation page owns". A values
   table appearing on the page is the observable regression.
 
-- **`contextSync` becoming the default invalidates a section** → Known, dated and
-  handled by `/opsx:update` after `context-sync-by-default` lands. Recorded in
-  Context so the next reader does not treat the section as stale drift.
+- **A change landing underneath the page invalidates a section** → It happened
+  twice before a line of the page was written: `context-sync-by-default` inverted
+  the context section's default and `least-privilege-runtimes` deleted a key the
+  default-posture section named. Handled by `/opsx:update`, recorded in Context,
+  and expected again for `trivy-image-scanning`. The mitigation is the mechanism
+  in D7 — a claim verified as a task fails loudly at the check rather than
+  drifting quietly into a published page.
 
 - **One line on the landing page reads as an afterthought** → It is one line
   because the landing page's section list is a bound the site's own spec holds.

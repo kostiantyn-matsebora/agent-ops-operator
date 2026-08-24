@@ -14,22 +14,33 @@ forge-only.
 Five things are implemented and stated **nowhere a reader will find**: the
 manager holds no `secrets` verbs at all, per-adapter tokens are HMAC-derived
 rather than stored, runtime pods are non-root with per-conversation workspace
-isolation, a conversation's accumulated context can be isolated structurally
-rather than by permission, and every image ships an SBOM and max-mode provenance.
+isolation, a conversation's accumulated context is isolated structurally rather
+than by permission, and every image ships an SBOM and max-mode provenance.
 
 The context one is the sharpest, because it cuts both ways. Under `contextSync`
 the agent container holds the live context on ephemeral pod-local storage and
 holds **no mount of the durable volume at all** — an agent cannot read another
 conversation's context because there is nothing to read from, while a sidecar
-keeps it durable. That mode is opt-in. In the default mode an install with a
-shared context volume mounts the whole volume into every agent container. Neither
+keeps it durable. Since `context-sync-by-default` landed that is what a DEFAULT
+install runs, and it is a real property no adopter can find. Its limit is equally
+unwritten: the mode needs a runtime that declares its context paths, and one that
+declares none — a second vendor's, until its own entry states them — falls back
+to the pod that mounts the whole shared volume into the agent container. Neither
 half of that is written down anywhere an adopter reads.
 
 ## What Changes
 
-- **A new site page, `docs/security.md` at `/security/`**, indexed by threat:
-  what you are trusting, what the default install grants, what each of the three
-  walls bounds, what agent-ops itself holds, and what is **not** addressed.
+- **A new site page, `docs/security.md` at `/security/`**, shaped as a THREAT
+  MODEL: a drawing of the trust boundaries and the flows crossing them, a
+  register keyed to it by number, then defence in depth control by control, the
+  platform's own posture, and the **residual risk**.
+- **It uses a security reviewer's vocabulary**, not names invented here —
+  defence in depth, network segmentation, egress control, authorization,
+  residual risk.
+- **It is illustrated throughout**, not once: the threat model plus a drawing at
+  each claim prose states poorly — the unauthenticated surfaces, the allowlist
+  an agent with a shell walks around, the Secret reached through the kubelet,
+  and the context mount that is absent by design.
 - **It is inserted into the *Start here* reading order** between the Console page
   and Installation — it is an evaluation gate, not an install step. One
   navigation entry, and the what-next cards on both sides adjusted together.
@@ -39,11 +50,12 @@ half of that is written down anywhere an adopter reads.
   what makes covering the same subject not duplication.
 - **Two sections carry content that exists nowhere on the site today** — what
   agent-ops itself holds, and what is not addressed.
-- **Context isolation is stated per mode, and its default is stated first.** The
-  structural isolation `contextSync` gives is described as a mode an install can
-  choose, never as the posture it has; the default mode's shared volume is named
-  in the not-addressed section too, because the reader who skips there is the one
-  most exposed to it.
+- **Context isolation is stated per mode, and the default install's mode is
+  stated first.** The structural isolation `contextSync` gives is what a default
+  install runs and is described as that — with the three conditions the mode
+  needs named, never as unconditional. The unsynchronised pod's shared volume is
+  named in the not-addressed section too, because the reader who skips there is
+  the one most exposed to it.
 - **The supply-chain answer is stated as it actually is**: images carry a
   BuildKit SBOM and `provenance: mode=max`; nothing is signed and the chart is not
   attested. Three lines under what agent-ops holds, two entries in the gap list —
@@ -61,9 +73,11 @@ half of that is written down anywhere an adopter reads.
 
 ### New Capabilities
 - `security-posture-page`: what the site's security page owes a reader — the
-  default-grants-nothing statement, the three walls indexed by threat, what
-  agent-ops itself holds, the load-bearing list of what is not addressed, and the
-  rule that it states no chart value `installation.md` owns.
+  threat model and the register keyed to it, the default-grants-nothing
+  statement, the three defence-in-depth controls each stated as threat, control,
+  cost and residual risk, what agent-ops itself holds, the load-bearing
+  residual-risk section, and the rule that it states no chart value
+  `installation.md` owns.
 
 ### Modified Capabilities
 - `docs-site`: the site's deliverable page set gains `docs/security.md`. The
@@ -78,6 +92,12 @@ half of that is written down anywhere an adopter reads.
 **The adopter site**
 
 - `docs/security.md` — **new**, the page itself.
+- `docs/diagrams/threat-model.py` — **new**, and its two committed SVGs under
+  `docs/assets/img/security/`. A hand-run generator like `readme-flow.py`, since
+  no CI job renders either.
+- `.github/scripts/docs_diagrams.py` and `docs-generate.py` — four more diagram
+  specs, plus a `dir` key so a spec can land outside `assets/img/guides/`. Guide
+  entries state none and are untouched.
 - `docs/_data/nav.yml` — one entry, in *Start here*, between the Console page and
   Installation.
 - `docs/index.md` — one line naming the page. Without it the question is

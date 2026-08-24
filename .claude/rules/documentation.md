@@ -83,6 +83,8 @@ filename — so the routing is explicit:
 | Invariants | `.claude/rules/invariants.md` |
 | Hard-won gotchas | `.claude/rules/gotchas.md` |
 | A name this project STOPPED using — a removed field, a withdrawn rule, a superseded command | `.claude/rules/retired-vocabulary.md`, and a term in `.github/retired-vocabulary.json` in the same change |
+| A THREAT, the posture a default install carries, what a control bounds and what is still open | `docs/security.md` — and if the change moves a trust boundary or a flow across one, re-run `python3 docs/diagrams/threat-model.py`, which CI does NOT do |
+| The chart KEY that sets a control, its default and its YAML | `docs/installation.md` — never the security page, which states no value |
 | What the console is FOR — its views, what each answers, the authentication decision | `docs/console-guide.md` |
 | What the console IS — endpoints, RBAC grant, values reference, internals | `docs/console.md` |
 | A change to the console's UI | re-run BOTH `npm run screenshots` and `npm run demo` in `platform/console/ui` — the site's screenshots and its landing recording are build output, and the change is not done until both match |

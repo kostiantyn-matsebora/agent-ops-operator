@@ -667,9 +667,14 @@ def main() -> int:
 
     # The guide diagrams, both themes, coloured from the stylesheet's own tokens.
     light, dark = docs_diagrams.palette(STYLESHEET)
-    for slug, spec in docs_diagrams.DIAGRAMS.items():
-        produced[DIAGRAM_DIR / f"{slug}-light.svg"] = docs_diagrams.render(spec, light)
-        produced[DIAGRAM_DIR / f"{slug}-dark.svg"] = docs_diagrams.render(spec, dark)
+    for slug, spec in {**docs_diagrams.DIAGRAMS,
+                       **docs_diagrams.SECURITY_DIAGRAMS}.items():
+        # `dir` is the page family the drawing belongs to. Guide diagrams state
+        # none, so their directory is the default rather than repeated sixteen
+        # times.
+        out = DOCS / "assets" / "img" / spec.get("dir", "guides")
+        produced[out / f"{slug}-light.svg"] = docs_diagrams.render(spec, light)
+        produced[out / f"{slug}-dark.svg"] = docs_diagrams.render(spec, dark)
     for path in sorted(DOCS.rglob("*.md")):
         if "_site" in path.parts or path == REFERENCE:
             continue

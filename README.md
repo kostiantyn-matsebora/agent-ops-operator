@@ -178,6 +178,7 @@ in learning order. The reference pages are read here:
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
 | [kubernetes](docs/kubernetes.md) · [telegram](docs/telegram.md) · [prometheus](docs/prometheus.md) · [home-assistant](docs/home-assistant.md) · [claude](docs/claude.md) | The bundles: what each ships, and the agent — or runtime — it brings |
+| [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/) | What a default install grants, what each of the three walls bounds, what is not addressed |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) · [docs/adr/](docs/adr/) | Upgrade guides newest first, and decisions with the alternatives that were built |
 
 ## Contributing

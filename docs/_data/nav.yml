@@ -17,6 +17,8 @@ groups:
         url: /getting-started/
       - title: The console
         url: /console/
+      - title: Security
+        url: /security/
       - title: Installation
         url: /installation/
   - title: Guides

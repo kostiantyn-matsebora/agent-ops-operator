@@ -188,6 +188,8 @@ Documented HTTP contracts, no fork.
   demo in fifteen minutes: install it and ask an agent about your cluster.
 - **[The console]({{ '/console/' | relative_url }})** — the six views at full
   length, and how to decide who may reach them.
+- **[Security]({{ '/security/' | relative_url }})** — an agent runs model output
+  in your cluster: what a default install grants, and what is still open.
 - **[Installation]({{ '/installation/' | relative_url }})** — the real install:
   what to decide first, what to configure, and how to wire your first route.
 - **[The kinds you will declare](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)** —
