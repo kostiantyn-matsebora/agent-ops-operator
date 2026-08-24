@@ -144,3 +144,22 @@ Each line is a condition that becomes impossible or expensive after the flip.
 - [x] 7.6 **Flip the repository to public.** Then verify as a stranger would:
       open it signed out, follow the README's install command, and follow every
       link in its index
+
+## 8. Documentation
+
+- [x] 8.1 **The reference docs.** `docs/CHANGELOG.md` carries 13.0.0 and 13.0.1
+      — the demo access-mode fix this change's own install proof uncovered, with
+      the upgrade hazard stated (a demo claim that already bound cannot be
+      patched, because `accessModes` is immutable) and the fact that no ordinary
+      install is affected. `docs/installation.md` names the published version
+      and states what `persistence.context.accessModes` now defaults to and why
+      an explicit value still wins.
+- [x] 8.2 **The adopter site.** `docs/getting-started.md` no longer opens with a
+      storage decision the reader has no basis to make. Its table used to send
+      anyone without an RWX provisioner to `persistence.context.enabled=false`,
+      which bought a working demo by removing the memory the demo exists to
+      show. It now says there is nothing to decide, because demo mode asks for
+      `ReadWriteOnce` — which is what `local-path` serves, and `local-path` is
+      what rancher-desktop, k3d, kind and minikube ship. The failure table's RWX
+      row is replaced by the one cause that survives: no provisioner at all.
+      Verified by running the page verbatim on a cluster holding no CRDs.

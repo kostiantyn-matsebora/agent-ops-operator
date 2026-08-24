@@ -286,3 +286,23 @@ the build instead of reaching the archive.
       change: verification is recorded as "the guard passes", never as the text
       it matched. Pasting a grep result into a ticked task is the most natural
       way to reintroduce exactly what was removed
+
+## 10. Documentation
+
+- [x] 10.1 **The reference docs.** `CONTRIBUTING.md` states what a contributor
+      meets: CI runs what the diff touched and derives its jobs from the tree,
+      `ci-green` is the single required check because a path-filtered job that
+      did not run reports no status at all, and a release is chart-shaped — a
+      component tag publishes one image and announces nothing, a `chart-v` tag
+      publishes the chart and carries notes composed from `docs/CHANGELOG.md`.
+      It also states the gate added after `chart-v13.0.1` published from a RED
+      commit: a tag publishes only from a commit `ci` passed, waiting while that
+      run is still going rather than racing it.
+      `.claude/rules/build-test.md` carries the maintainer half — publishing is
+      FOUR things, and the one that reads as a credentials problem is the
+      package's Actions access.
+- [x] 10.2 **The adopter site.** Nothing owed, and that is a finding rather than
+      a skip: this change is contributor-facing end to end. What an adopter
+      meets — the install command, the version it names, what the chart grants —
+      is untouched by how the artifacts get built. `docs/installation.md` names
+      13.0.1 and resolves; the README pins no version, so it takes the latest.
