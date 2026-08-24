@@ -31,7 +31,7 @@ maxRuntimes: ""
 # a minute instead of holding it for ten, which is what makes a small
 # maxActiveConversations workable. The trade is latency, not memory: a follow-up
 # a few minutes later pays pod startup again, but the session survives in
-# /data/home and resumes with its context. Raise it for runtimes with expensive
+# /data/context and resumes with its context. Raise it for runtimes with expensive
 # startup, or for a chatty human you want to keep a warm pod for.
 runtimeIdleTtlMinutes: 1
 
@@ -158,7 +158,7 @@ runtime:
   resources: {}
   # CONTEXT SYNC — keep the LIVE context off the durable volume.
   #
-  # A node reboot corrupted the shared home filesystem on 2026-08-20. Because
+  # A node reboot corrupted the shared context filesystem on 2026-08-20. Because
   # the live context WAS that volume, one damaged filesystem took every
   # conversation's context with it AND stopped every runtime pod from starting.
   #
@@ -224,18 +224,19 @@ runtime:
     # reaches unmediated, so this is a hole in the boundary by construction —
     # not a tuning knob.
     excludePorts: []
-  # The context volume is wired from the `persistence.context` block below
-  # automatically (its claim, or existingClaim). Set this only to point at a
-  # claim this chart did not create.
-  contextPvcRef: ""
-  # homePvcRef is the former name of contextPvcRef.
+  # THE RUNTIME NAMES NO VOLUME. `contextPvcRef`, `homePvcRef` and
+  # `workspacePvcRef` are GONE, not renamed: the rendered AgentRuntime declares
+  # no volume at all, because a runtime is an ENGINE and where a route persists
+  # is the route's decision.
   #
-  # Deprecated: honoured for ONE release when contextPvcRef is unset, so that a
-  # values file written before the rename keeps pointing the runtime at the
-  # claim it already names.
-  homePvcRef: ""
-  # Same, for the repository checkout, from `persistence.workspace`.
-  workspacePvcRef: ""
+  #   release-wide  ->  `persistence.context` / `persistence.workspace` below,
+  #                     which reach conversations as the manager's bootstrap
+  #                     default and need nothing restated here
+  #   per route     ->  `pipelines[].persistence` — a route naming its own claim
+  #                     or its own PersistentVolume
+  #
+  # Two routes on ONE runtime can now keep their conversations on different
+  # volumes, which is what those keys made impossible.
   # ONE secret with a Claude credential (claude setup-token output or an
   # Anthropic API key). Projected as env via valueFrom — the manager reads no
   # Secrets.
@@ -507,6 +508,12 @@ global:
 #       mcpConfigs: [k8s-api]
 #       runtimeRef: default           # optional: what EXECUTES this route
 #       serviceAccountName: ""        # optional: UNDER WHOSE IDENTITY
+#       contextClaim: ""              # optional: WHERE ITS STATE LIVES
+#       contextVolume: ""             #   ...a claim, XOR a PersistentVolume
+#       contextSize: 5Gi              #   ...the claim rendered for that volume
+#       workspaceClaim: ""            # the same four, for the checkout
+#       workspaceVolume: ""
+#       workspaceSize: 10Gi
 #
 # One entry can claim every source in the install, which is usually what you
 # want: one route, one set of capabilities, however a conversation started.
@@ -523,9 +530,33 @@ global:
 # `rbac.runtime.serviceAccounts` above. That replaced cloning an AgentRuntime
 # whose only difference was the account it named.
 #
-# The Conversation SNAPSHOTS both at creation, so re-wiring a Pipeline moves
+# PERSISTENCE IS THE SAME DECISION READ A THIRD WAY: which tools may be called,
+# with whose credentials, and WHERE what the agent accumulates is kept. All
+# three are the route's, which is why an AgentRuntime declares no volume at all.
+#
+# Leave the six unset and the route takes the release-wide claims below
+# (`persistence.context` / `.workspace`) with nothing restated — which is what
+# nearly every install wants. Set them for a route that keeps its state
+# somewhere of its own, and note the CLAIM/VOLUME split:
+#
+#   contextClaim: a PVC that ALREADY EXISTS. Nothing is created.
+#   contextVolume: a PersistentVolume. A pod cannot mount one — only a claim on
+#     it — so THE MANAGER renders that claim, named after the route and the
+#     volume, with an explicit empty storage class so it BINDS rather than
+#     provisioning a second volume beside yours.
+#
+# That claim OUTLIVES the Pipeline. It carries no ownerRef and the manager holds
+# no delete verb on claims, so deleting a route never deletes the accumulated
+# context of the conversations it started — the one loss here that reconciling
+# again cannot repair.
+#
+# TWO ROUTES ON ONE RUNTIME CAN NOW KEEP THEIR STATE ON DIFFERENT VOLUMES, which
+# is the thing the retired `runtime.contextPvcRef` made impossible.
+#
+# The Conversation SNAPSHOTS all of it at creation, so re-wiring a Pipeline moves
 # only conversations created afterwards. It never changes the identity an
-# already-running one's next pod executes as.
+# already-running one's next pod executes as, and never moves a conversation that
+# has already written to a volume onto a different one.
 pipelines: []
 
 service:
@@ -783,17 +814,37 @@ telegram-bundle:
 #
 # RENAMED in this release: the whole block moved under `persistence.context`,
 # and the claim is `agentops-context` rather than `agentops-home`. The volume is
-# named for what it HOLDS. That it is mounted at /data/home is a property of one
-# runtime image — that PATH does not move, because claude-code keys its stored
-# context off it.
+# named for what it HOLDS, and the MOUNT PATH is named for it too: /data/context,
+# which $HOME then points at. Nothing inside the volume moved when it did — a
+# claim's contents appear AT the mount path, and the stored transcript directory
+# is named for the WORKING directory. /data/workspace is the load-bearing path,
+# and it did not move.
 #
-#   UPGRADING an install that already has an `agentops-home` claim:
+#   UPGRADING an install that already has an `agentops-home` claim. The
+#   RECOMMENDED path REBINDS the volume under the new name, which moves no data:
+#     1. kubectl patch pv <PV> -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+#     2. kubectl -n <ns> delete pvc agentops-home
+#     3. kubectl patch pv <PV> --type=json -p '[{"op":"remove","path":"/spec/claimRef"}]'
+#     4. persistence:
+#          context:
+#            volumeName: <the PV>
+#            storageClassName: <THE PV'S OWN CLASS>
+#
+#   STEP 4'S SECOND LINE IS THE ONE THAT BITES. A PV that was DYNAMICALLY
+#   PROVISIONED keeps its storageClassName forever, and a claim asking for a
+#   different one is refused — `VolumeMismatch: storageClassName does not match`,
+#   and the claim sits Pending looking exactly like a missing provisioner. Read
+#   the class off the PV (`kubectl get pv <PV> -o jsonpath='{.spec.storageClassName}'`)
+#   and write THAT. `-` is for a STATICALLY created PV that has no class at all,
+#   which is not what an existing agent-ops install has.
+#
+#   Naming the old claim outright still works and is one line, but it keeps the
+#   retired word in every `kubectl get pvc` forever:
 #     persistence.context.existingClaim: agentops-home
-#   Nothing is copied and nothing moves. The chart then renders no claim of its
-#   own, and `helm.sh/resource-policy: keep` on the live object means Helm
-#   leaves it alone.
+#   `helm.sh/resource-policy: keep` on the live object means Helm leaves the old
+#   claim alone either way.
 persistence:
-  # The accumulated context (mounted at /data/home). ON by default, so
+  # The accumulated context (mounted at /data/context). ON by default, so
   # conversational history survives a runtime pod restart.
   #
   # Turning it OFF is a supported choice, not a downgrade to avoid — a cluster

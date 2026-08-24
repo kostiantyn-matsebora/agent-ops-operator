@@ -13,34 +13,112 @@ follows.
 
 ## [9.0.0] — 2026-08-24
 
-**The home volume is renamed to the CONTEXT volume, and its claim is renamed
-with it.** The volume holds a conversation's accumulated context. It was named
-after the filesystem path it happens to be mounted at.
+**Persistence is WIRING. It moves off `AgentRuntime` and onto `Pipeline`**, and
+the volume it names is the CONTEXT volume everywhere — object, field, values
+block, claim and MOUNT PATH.
+
+A runtime is an ENGINE: an image and its pod-level defaults.
+
+WHERE a route's conversations keep their state is a property of the ROUTE. It is
+decided beside the tools it grants, the channels it delivers to, the runtime it
+selects and the identity it executes under — all four already `Pipeline`
+fields.
+
+**Two Pipelines sharing one runtime can now keep their conversations on
+different volumes without cloning that runtime** — which is exactly what
+expressing a second trust level used to require, and was fixed the same way.
 
 **READ THIS BEFORE UPGRADING A GITOPS INSTALL.** The chart carries a guard that
-refuses this upgrade where it can see the old claim — but that guard reads the
-CLUSTER, and Argo CD, Flux, `helm template` and CI all render without one. For
-those installs this entry is the only warning that arrives.
+refuses the upgrade where it can see the old claim.
 
-**If your install has an `agentops-home` claim, set this and nothing else:**
+That guard reads the CLUSTER, and Argo CD, Flux, `helm template` and CI all
+render without one. For those installs this entry is the only warning that
+arrives.
 
-```yaml
-persistence:
-  context:
-    existingClaim: agentops-home
-```
+### The four things that will break, in the order they bite
 
-**It moves no data and copies nothing.** The chart then renders no claim of its
-own, and `helm.sh/resource-policy: keep` on the live object means Helm leaves it
-alone. Skip it and the release provisions a second, EMPTY claim — every
-conversation in the install answers without its accumulated context, while every
-signal reports success.
-
-**The mount path does NOT move.** `/data/home` and `HOME=/data/home` are
-unchanged. The reference runtime keys its stored context off that path, so
-moving it would break continuity for every existing conversation to win a word.
+1. **An `AgentRuntime` still declaring the retired volume field contributes NO
+   volume.** It is DELETED, not aliased.
+2. **`runtime.contextPvcRef`, `runtime.homePvcRef` and
+   `runtime.workspacePvcRef` FAIL the render.** They are gone, not renamed.
+3. **The default claim is `agentops-context`.** Nothing copies a volume.
+4. **The mount path is `/data/context`.** `/data/workspace` did NOT move.
 
 ### Changed
+
+- **BREAKING: `AgentRuntime.spec.home` and `spec.context` are DELETED, and so is
+  `spec.workspace`.** No alias survives, and that is deliberate rather than
+  harsh.
+
+  A one-release dual-read is honest only where a field was renamed IN PLACE —
+  which is what `sessionId` was, and reading this as the same case is the trap.
+  Here the CONCEPT moved to a different CR: there is no replacement on
+  `AgentRuntime` for an alias to resolve to. An alias would point at a field
+  that is not on that object at all.
+
+  **A runtime CR still carrying the retired field therefore contributes no
+  volume after this upgrade.** Being told that plainly is recoverable. A quiet
+  resolution to nothing is not.
+
+  **Move the declaration to the Pipelines using that runtime:**
+
+  ```yaml
+  pipelines:
+    - name: k8s-ops
+      profile: k8s-engineer
+      contextClaim: the-claim-the-runtime-used-to-name
+  ```
+
+  Or leave it out entirely and take the release-wide claim, which is what nearly
+  every install wants.
+
+  **`spec.contextStorage` STAYS on the runtime**, and it is the one storage
+  question only a runtime can answer: whether its BACKEND writes context to a
+  disk at all. A runtime keeping context at a vendor API needs no volume and
+  must not be given one. The split is BACKEND SHAPE against PLACEMENT.
+
+  This release changes three CRDs, and Helm does not upgrade CRDs:
+
+  ```sh
+  kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+  ```
+
+  ```powershell
+  kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+  ```
+
+- **BREAKING: `runtime.contextPvcRef`, `runtime.homePvcRef` and
+  `runtime.workspacePvcRef` are GONE**, and supplying any of them FAILS the
+  render naming both places the declaration moved to. The rendered
+  `AgentRuntime` declares no volume at all.
+
+  Helm never reports an unread values key, so the alternative was silence — and
+  the quiet case is the expensive one: an operator who deliberately pointed the
+  runtime at a claim the chart did not create would keep every signal of success
+  while the release-wide claim was used instead. This guard needs no cluster, so
+  it fires under `helm template`, in CI and under a GitOps controller.
+
+- **BREAKING: the default context claim is `agentops-context`**, renamed with
+  the volume. **Nothing copies a volume**, so upgrading as-is would provision a
+  second, EMPTY claim and every conversation in the install would answer without
+  its accumulated context while every signal reported success.
+
+  **The chart FAILS the render where it can see that outcome** — see *Upgrade*
+  below for the two ways out, and note again that this guard reads the cluster
+  and a GitOps renderer has none.
+
+- **BREAKING: the MOUNT PATH moves to `/data/context`, and `HOME` with it.**
+
+  **Nothing inside the volume moves, and this was measured rather than
+  reasoned.** A claim's contents appear AT the mount path, so the same volume
+  mounted elsewhere shows the same bytes. And the stored transcript directory
+  is named for the WORKING directory (`-data-workspace`), not for `$HOME`. A
+  live volume was mounted read-only at a third path to confirm it.
+
+  **`/data/workspace` does NOT move.** THAT is the load-bearing path — the
+  transcript directory is named for it, so relocating it would strand every
+  stored context. An earlier draft of this change had the two the wrong way
+  round.
 
 - **BREAKING: the `persistence` block moved under `persistence.context`.** The
   workspace block is unchanged in shape and in place.
@@ -55,40 +133,50 @@ moving it would break continuity for every existing conversation to win a word.
   | `persistence.volumeName` | `persistence.context.volumeName` |
   | `persistence.existingClaim` | `persistence.context.existingClaim` |
 
-  **Supplying any retired key FAILS the render**, naming where it moved. Helm
-  never reports an unread values key, so a silently-ignored
-  `persistence.enabled: false` would provision the claim an operator with no
-  ReadWriteMany provisioner had explicitly declined. This guard needs no
-  cluster, so it fires under `helm template`, in CI and under a GitOps
-  controller.
+  **Supplying any retired key FAILS the render**, naming where it moved, and
+  this guard needs no cluster either.
 
-- **BREAKING: `AgentRuntime.spec.home` becomes `spec.context`.** Same shape,
-  same `pvcRef` / `emptyDir`. The retired field is **dual-read for one release**
-  — a runtime declaring only `spec.home` keeps working, and `spec.context` wins
-  where both are present.
-
-  This release changes a CRD field, and Helm does not upgrade CRDs:
-
-  ```sh
-  kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
-  ```
-
-  ```powershell
-  kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
-  ```
-
-- **`runtime.homePvcRef` becomes `runtime.contextPvcRef`**, and the retired
-  spelling is honoured for one release.
-
-- **`HOME_PVC` becomes `CONTEXT_PVC`** on the manager. Also dual-read for one
-  release, because the manager and the chart upgrade at different moments and a
-  bootstrap default that vanished for even one reconcile would build runtime
-  pods with no context volume. Manager image **0.54.0**.
+- **BREAKING: `HOME_PVC` is GONE on the manager.** The bootstrap default is
+  `CONTEXT_PVC`, and it is not dual-read, for the reason the CRD field is not:
+  the concept moved. The chart supplies it, and the chart and the manager ship
+  together in this release. Manager image **0.54.0**.
 
 ### Added
 
-- **Either volume can now bind to a PersistentVolume the chart did not create.**
-  Three forms, and all three work on BOTH the context and the workspace volume:
+- **`Pipeline.spec.persistence`** — `context` and `workspace`, independently.
+  Each binding names EITHER a claim that already exists OR a
+  `PersistentVolume`, and the API server refuses both at once.
+
+  | You set | Who renders the claim | The conversation gets |
+  |---|---|---|
+  | `contextClaim` | nobody — it exists | that claim |
+  | `contextVolume` | **the manager** | the claim it created |
+  | neither | — | the release-wide claim, then ephemeral |
+
+  **A pod can mount only a claim, never a `PersistentVolume`** — so naming a
+  volume requires that something render the claim on it. That is THE ONE PLACE
+  in this system where naming a resource creates it, and it is stated rather
+  than smuggled: the manager gains `persistentvolumeclaims` **get/list/watch/
+  create**, and deliberately **no `delete`, `update` or `patch`**.
+
+  **A claim the manager creates carries NO ownerRef on the Pipeline.** Deleting
+  a Pipeline must never delete the accumulated context of the conversations it
+  started — storage is the one thing here whose loss cannot be repaired by
+  reconciling again. That is guarded twice: the absent ownerRef, and the absent
+  verb.
+
+- **The resolved claim is SNAPSHOTTED into the `Conversation`**
+  (`spec.contextClaimName` / `spec.workspaceClaimName`), exactly as the
+  execution identity is. Editing a Pipeline's persistence moves only
+  conversations created afterwards.
+
+  **This is the sharpest case of that rule on the object.** Without it, an edit
+  changes which volume an INFLIGHT conversation's next pod mounts — work that
+  has already WRITTEN to the old one, coming back to a different disk and
+  reporting success.
+
+- **Either volume can bind to a PersistentVolume the chart did not create.**
+  Three forms, all three on BOTH volumes, at BOTH levels:
 
   | Form | You supply | The chart |
   |---|---|---|
@@ -127,8 +215,14 @@ moving it would break continuity for every existing conversation to win a word.
 ### Upgrade
 
 1. **Apply the CRDs** (command above). Helm does not upgrade them.
-2. **If this install has an `agentops-home` claim**, set
-   `persistence.context.existingClaim: agentops-home`. Check first:
+2. **Move any `AgentRuntime` volume declaration onto the Pipelines using that
+   runtime**, as `contextClaim` / `workspaceClaim`. A runtime still declaring
+   the retired field contributes nothing after this upgrade.
+3. **Delete `runtime.contextPvcRef` / `runtime.homePvcRef` /
+   `runtime.workspacePvcRef`** from your values. The render fails naming them.
+4. **Rewrite any flat `persistence.*` values** under `persistence.context`, per
+   the table above. The render fails naming them too.
+5. **Decide what happens to your existing claim.** Check for it first:
 
    ```sh
    kubectl -n agent-ops get pvc agentops-home
@@ -138,18 +232,49 @@ moving it would break continuity for every existing conversation to win a word.
    kubectl -n agent-ops get pvc agentops-home
    ```
 
-3. **Rewrite any flat `persistence.*` values** under `persistence.context`, per
-   the table above. The render fails naming them if you miss one.
-4. **Rename `runtime.homePvcRef`** to `runtime.contextPvcRef` if you set it. The
-   old spelling still works for this release.
-5. **`helm upgrade`.**
+   **Either keep it under its old name** — one line, moves no data, and the
+   chart then renders no claim of its own:
 
-**Rollback is a chart downgrade, and it is clean at every step**, because no
-data has moved.
+   ```yaml
+   persistence:
+     context:
+       existingClaim: agentops-home
+   ```
 
-**Optional, later and deliberate:** rebind the PersistentVolume under the tidy
-claim name, using `persistence.context.volumeName` with
-`persistence.context.storageClassName: "-"`.
+   **or REBIND the volume under the new name**, which also moves no data and is
+   what actually finishes the migration:
+
+   ```sh
+   PV=$(kubectl -n agent-ops get pvc agentops-home -o jsonpath='{.spec.volumeName}')
+   kubectl get pv "$PV" -o jsonpath='{.spec.storageClassName}'   # note this
+   kubectl patch pv "$PV" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+   kubectl -n agent-ops delete pvc agentops-home
+   kubectl patch pv "$PV" --type=json -p '[{"op":"remove","path":"/spec/claimRef"}]'
+   ```
+
+   ```yaml
+   persistence:
+     context:
+       volumeName: <the PV>
+       storageClassName: <THE PV'S OWN CLASS, from the command above>
+   ```
+
+   **THE STORAGE CLASS LINE IS THE ONE THAT BITES, and `-` is the WRONG answer
+   here.** A PV that was DYNAMICALLY PROVISIONED — which is what an existing
+   agent-ops install has — keeps its `storageClassName` forever, and a claim
+   requesting a different one is refused with `VolumeMismatch: storageClassName
+   does not match`. The claim then sits `Pending`, looking exactly like a
+   missing provisioner. `-` is for a STATICALLY created PV that has no class at
+   all.
+
+   **And a claim's spec is immutable once created**, so a first attempt that got
+   the class wrong cannot be corrected by re-running `helm upgrade` — delete the
+   wrong claim first.
+
+6. **`helm upgrade`.**
+
+**Rollback is a chart downgrade plus restoring the runtime's volume field**, and
+the volume is untouched throughout, which is what makes it recoverable.
 
 ## [8.0.0] — 2026-08-23
 
@@ -1075,10 +1200,10 @@ Then set the endpoint, the credentials and — deliberately — the routes.
 
 ## [5.21.0] — 2026-08-21
 
-On 2026-08-20 a node reboot corrupted the ext4 filesystem on the shared
-`agentops-home` volume. Longhorn reported the volume **healthy** throughout,
-correctly: it replicates blocks, and all three replicas agreed on the corrupt
-ones.
+On 2026-08-20 a node reboot corrupted the ext4 filesystem on the shared context
+volume — its claim was at the time named `agentops-home`, the former spelling.
+Longhorn reported the volume **healthy** throughout, correctly: it replicates
+blocks, and all three replicas agreed on the corrupt ones.
 
 Every runtime pod mounts that volume. Five pods sat in `ContainerCreating` for
 fifteen hours, held every capacity slot, and starved six more conversations. The

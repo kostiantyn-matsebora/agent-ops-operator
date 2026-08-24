@@ -63,3 +63,50 @@ spec:
 {{ toYaml . | indent 4 }}
   {{- end }}
 {{- end }}
+{{- /*
+PER-ROUTE claims, for a Pipeline THIS CHART SHIPS that binds a PersistentVolume
+by name.
+
+The manager renders exactly this claim, under exactly this name, for any
+Pipeline binding a volume — so this is not a second mechanism, it is the same
+one arriving EARLIER. Where the chart ships the route it can render the claim at
+install time rather than at first reconcile, which buys two things: the claim
+appears in `helm get manifest`, and it carries `helm.sh/resource-policy: keep`
+like every other volume here. Creation is idempotent on both sides — the manager
+finds it already there and does nothing.
+
+A route the chart does NOT ship is the manager's alone, which is why that path
+exists at all.
+*/ -}}
+{{- range $p := .Values.pipelines }}
+{{- range $b := list (dict "vol" "context" "volumeName" $p.contextVolume "size" ($p.contextSize | default "5Gi")) (dict "vol" "workspace" "volumeName" $p.workspaceVolume "size" ($p.workspaceSize | default "10Gi")) }}
+{{- if $b.volumeName }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  # The name the MANAGER derives for this binding. Both sides must spell it the
+  # same way or the route gets two claims and mounts the wrong one.
+  name: agentops-{{ $p.name }}-{{ $b.vol }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops
+    agentops.dev/pipeline: {{ $p.name }}
+    agentops.dev/persisted-volume: {{ $b.vol }}
+  annotations:
+    # A route's storage outlives the route, and certainly the release.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ $b.size }}
+  # AN EXPLICIT EMPTY STRING, never an absent field. Absent is filled in by
+  # admission with the cluster's default StorageClass, which provisions a SECOND
+  # volume beside the one that was named and leaves it untouched.
+  storageClassName: ""
+  volumeName: {{ $b.volumeName }}
+{{- end }}
+{{- end }}
+{{- end }}

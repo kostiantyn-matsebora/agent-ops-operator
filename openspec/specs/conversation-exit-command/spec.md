@@ -141,7 +141,7 @@ The reply SHALL distinguish releasing a runtime from ending a conversation, and
 SHALL say what becomes of the context.
 
 Where the conversation's runtime can carry context across a pod loss — decided
-by the runtime's `contextStorage` against the configured home volume, which the
+by the runtime's `contextStorage` against the configured context volume, which the
 manager already computes — the reply SHALL say the conversation keeps its
 context and resumes on the next message.
 

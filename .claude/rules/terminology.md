@@ -48,7 +48,7 @@ pods `agentops-conv-<conversation>`.
 | Kind | Is |
 |---|---|
 | `AgentProfile` | **who the agent is and HOW IT BEHAVES** — repo, role, prompts, env, limits. **NOT what executes it**: `spec.runtimeRef` is DEPRECATED and moved to the Pipeline |
-| `AgentRuntime` | **what executes it** |
+| `AgentRuntime` | **what executes it** — an ENGINE. Image and pod-level defaults, plus `spec.contextStorage`. **It declares NO VOLUME**: persistence is wiring |
 | `Conversation` | **session + serial input queue + one thread PER bound channel** (`spec.channelRefs[]` / `status.threads[]{channel,threadId}`) |
 | `Pipeline` | **the wiring** — see below |
 
@@ -71,13 +71,25 @@ split is BEHAVIOUR against REACH, not identity against everything else.
 - **Two profiles over one runtime are two different agents.** A phrase implying
   a profile is a name and a role makes that sound impossible.
 
+**AND IT DECLARES NO STORAGE EITHER.** `spec.home`, `spec.context` and
+`spec.workspace` are DELETED, with no alias — the concept moved to
+`Pipeline.spec.persistence`, so there is nothing on this object for an alias to
+point at. Two Pipelines sharing one runtime must be able to persist to different
+volumes without cloning it, which is the same failure a second trust level had.
+
 **`Conversation.spec.toolsets` / `.mcpConfigs` / `.runtimeRef` /
-`.serviceAccountName` mirror the originating Pipeline's bindings.** MATERIALIZED
-state like `profileRef` / `channelRefs`, never hand-set.
+`.serviceAccountName` / `.contextClaimName` / `.workspaceClaimName` mirror the
+originating Pipeline's bindings.** MATERIALIZED state like `profileRef` /
+`channelRefs`, never hand-set.
 
 **THE IDENTITY SNAPSHOT IS THE SHARPEST CASE OF THE REFS/CONTENT RULE.** Without
 it, editing a Pipeline changes what account an INFLIGHT conversation's next pod
 runs as — a privilege change applied to work already in progress.
+
+**THE STORAGE SNAPSHOT IS SHARPER STILL**, and it is frozen RESOLVED because
+there is no runtime CONTENT below it to heal from. A re-wiring would point an
+INFLIGHT conversation's next pod at a different disk — work that has ALREADY
+WRITTEN to the old one, coming back to an empty volume and reporting success.
 
 - **The RUNTIME NAME is snapshotted RESOLVED**, so a conversation created while
   its Pipeline named none keeps the one it actually ran on.
@@ -151,33 +163,59 @@ incident.
 
 ### The CONTEXT volume, never "the home volume"
 
-**CRD `AgentRuntime.spec.context`, chart `persistence.context`, claim
-`agentops-context`, bootstrap env `CONTEXT_PVC`, chart value
-`runtime.contextPvcRef`, pod volume `context`.**
+**Chart `persistence.context`, claim `agentops-context`, bootstrap env
+`CONTEXT_PVC`, Pipeline field `spec.persistence.context`, pod volume `context`,
+MOUNT PATH `/data/context`, `HOME=/data/context`.**
 
 The volume holds a conversation's ACCUMULATED CONTEXT — the thing
 `runtimeContextId` is a handle into and `contextStorage` promises continuity on.
-`home` named the filesystem path it happens to be mounted at, which is the same
+`home` named the filesystem path it happened to be mounted at, which is the same
 mistake `session` and `worker` are banned for one heading up.
 
-**`/data/home` AND `HOME=/data/home` ARE THE DELIBERATE EXCEPTION, AND THEY DO
-NOT MOVE.** The path really IS the process home directory:
-`runtimes/claude/Dockerfile` sets it, `runtime.js` resolves
-`${HOME}/.claude/projects` off it, and claude-code keys stored context by that
-path. Renaming it would break continuity for every existing conversation to win
-a word.
+**`/data/workspace` IS THE LOAD-BEARING PATH, AND `/data/home` IS GONE.** This
+page said the opposite, at length, and the wrong version is kept because it is
+persuasive: both paths sit under `/data`, both are mounted from a claim, and
+only one is baked into stored state.
 
-- **The split is the point.** The PATH stays honest about being `$HOME`, the API
-  stops pretending the volume is ABOUT being `$HOME`.
-- **`spec.home` and `HOME_PVC` are DUAL-READ for one release** — the accessor
-  `AgentRuntimeSpec.ContextVolume()` and `contextPVC()` in `cmd/manager/main.go`
-  are the only two read points, exactly as `Conversation.ContextID()` is.
+| Path | Moves? | Because |
+|---|---|---|
+| `/data/workspace` | **NEVER** | the stored transcript directory is NAMED for it — `.claude/projects/-data-workspace/` — so relocating it strands every stored context |
+| `/data/home` → `/data/context` | **it moved** | nothing inside the volume is named for `$HOME`, so nothing inside relocated |
+
+- **MEASURED, NOT REASONED.** A live claim was mounted READ-ONLY at a third path
+  and every stored generation resolved exactly as it does at its own mount: a
+  claim's contents appear AT the mount path, and the only transcript directory
+  in the volume is `-data-workspace`.
+- **The earlier argument — "claude-code keys stored context by `$HOME`" — was
+  simply false.** It keys by the WORKING directory. Anyone re-deriving it from
+  `runtime.js` resolving `${HOME}/.claude/projects` is reading where the tree
+  STARTS, not what the leaf is named for.
+
+**THE VOLUME IS NOT THE RUNTIME'S TO DECLARE. `AgentRuntime.spec.home`,
+`spec.context` AND `spec.workspace` ARE DELETED**, with no alias — see
+`wiring.md`, where persistence now lives. A runtime keeps `spec.contextStorage`
+alone, which is BACKEND SHAPE rather than PLACEMENT.
+
+- **NO DUAL-READ, and `sessionId` is not the precedent.** That was a field
+  renamed IN PLACE, so an alias pointed at something real. Here the CONCEPT
+  moved to a different CR: an alias would resolve to a field that is not on that
+  object at all. `HOME_PVC` is deleted on the same grounds.
 - **THE CLAIM RENAME IS GUARDED, NOT TRUSTED.** Nothing copies a volume, so an
   upgrade that adopted `agentops-context` unremarked would leave every
   conversation answering without its context while every signal reported
   success. `agentops.contextClaimRenameGuard` FAILS the render — and, because
   `lookup` is blind without a cluster, `docs/CHANGELOG.md` is the only warning a
   GitOps install gets.
+- **`agentops.retiredRuntimeVolumeKeysGuard` is its no-cluster half**, failing
+  the render on `runtime.contextPvcRef` / `homePvcRef` / `workspacePvcRef`.
+- **`-` IS THE WRONG STORAGE CLASS FOR THE MIGRATION, and only doing it found
+  that.** A PV that was DYNAMICALLY PROVISIONED — which is what every existing
+  install has — KEEPS its `storageClassName` forever, so a claim requesting `""`
+  is refused with `VolumeMismatch` and sits `Pending`, indistinguishable from a
+  missing provisioner. Name the PV's own class. `-` is for a STATICALLY created
+  volume with no class.
+  - **And a claim's spec is immutable once created**, so a wrong first attempt
+    is not fixed by re-running `helm upgrade`. Delete the claim first.
 - **The ordinary English word is untouched** — `state-durability`'s "one
   declared home", every Home Assistant mention, and a home DIRECTORY.
 

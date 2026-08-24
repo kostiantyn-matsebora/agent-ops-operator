@@ -171,7 +171,7 @@ function runClaude(unit) {
 //
 // A RESUME whose session no longer exists is retried ONCE without --resume.
 // Sessions live in $HOME/.claude/projects/-data-workspace/, so they vanish
-// whenever /data/home does not outlive the pod — an install without a context PVC,
+// whenever /data/context does not outlive the pod — an install without a context PVC,
 // an eviction, a node move. Losing the thread's context is a real cost; failing
 // the reply outright is a worse one, and it fails with an EMPTY result because
 // claude never reaches its result event, so the person who typed sees "failed"
@@ -284,7 +284,7 @@ async function spawnClaude(args, unit, isResume) {
   // say why, and spend no second invocation on an answer that should not exist.
   const reason =
     'the stored context for this conversation could not be reached — no session files under ' +
-    `${SESSIONS_DIR} (is /data/home backed by a volume? without one it dies with the pod)`;
+    `${SESSIONS_DIR} (is /data/context backed by a volume? without one it dies with the pod)`;
   console.log(`[runtime] ${reason} — failing rather than answering without it`);
   return strip({
     status: 'failed',
@@ -348,7 +348,7 @@ async function sessionFileExists(dir, contextId) {
 // SESSIONS_DIR is where this runtime keeps conversation context. It is
 // claude-code's layout, and it is the ONLY component that knows it — the
 // manager stores an opaque handle and assumes nothing about where it points.
-const SESSIONS_DIR = `${process.env.HOME || '/data/home'}/.claude/projects`;
+const SESSIONS_DIR = `${process.env.HOME || '/data/context'}/.claude/projects`;
 
 // contextIdOf reads the handle the manager sent. Prefers the current name and
 // falls back to the retired one for one release, so this image works against a

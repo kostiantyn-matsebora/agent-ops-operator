@@ -96,14 +96,10 @@ func FromRuntime(rt *agentopsv1alpha1.AgentRuntimeSpec, fallback Config) Config 
 	if rt.IdleTTLMinutes > 0 {
 		cfg.IdleTTLMinutes = int(rt.IdleTTLMinutes)
 	}
-	cfg.ContextPVC = ""
-	if v := rt.ContextVolume(); v != nil && v.PVCRef != nil {
-		cfg.ContextPVC = v.PVCRef.Name
-	}
-	cfg.WorkspacePVC = ""
-	if rt.Workspace != nil && rt.Workspace.PVCRef != nil {
-		cfg.WorkspacePVC = rt.Workspace.PVCRef.Name
-	}
+	// THE VOLUMES ARE NOT TOUCHED HERE, and that is the whole of the move: an
+	// AgentRuntime declares neither, so a runtime overlay can no longer change
+	// which claim a conversation mounts. The claims arrive on the CONVERSATION,
+	// applied by ResolveFor above this.
 	cfg.DefaultResources = rt.Resources
 	return cfg
 }
@@ -148,6 +144,14 @@ type Resolved struct {
 //	          (DEPRECATED) -> AgentRuntime/default -> bootstrap
 //	identity: conversation.spec.serviceAccountName -> runtime.spec.serviceAccountName
 //	          -> chart default (which reaches here as the bootstrap config)
+//	storage:  conversation.spec.contextClaimName / .workspaceClaimName
+//	          -> the release default (bootstrap config) -> ephemeral
+//
+// THE RUNTIME IS IN NO PART OF THE STORAGE CHAIN. It declares neither volume,
+// so an overlay cannot move a conversation's claim, and there is nothing to
+// heal from below the snapshot. Empty means ephemeral OR a conversation
+// predating the field, and both resolve to the bootstrap default exactly as
+// they always did.
 //
 // THE PIPELINE IS NOT IN EITHER CHAIN AT THIS POINT, and that is the guarantee
 // rather than an omission: its fields were RESOLVED into the conversation at
@@ -172,16 +176,30 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 	// The conversation's snapshotted identity OVERRIDES the runtime's own, and
 	// survives the runtime being missing entirely: a Pipeline naming an account
 	// meant that account, whichever backend answers.
-	sa := ""
+	//
+	// The CLAIMS are applied on the same terms and for a stronger reason:
+	// nothing else can supply them any more, so a missing runtime must not cost
+	// a conversation the volume it has already written to.
+	sa, ctxClaim, wsClaim := "", "", ""
 	if conv != nil {
 		sa = conv.Spec.ServiceAccountName
+		ctxClaim, wsClaim = conv.Spec.ContextClaimName, conv.Spec.WorkspaceClaimName
+	}
+	applyStorage := func(cfg Config) Config {
+		if ctxClaim != "" {
+			cfg.ContextPVC = ctxClaim
+		}
+		if wsClaim != "" {
+			cfg.WorkspacePVC = wsClaim
+		}
+		return cfg
 	}
 	var rt agentopsv1alpha1.AgentRuntime
 	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &rt); err != nil {
 		if explicit {
 			return Resolved{}, err // a named runtime must exist
 		}
-		cfg := fallback
+		cfg := applyStorage(fallback)
 		if sa != "" {
 			cfg.ServiceAccount = sa
 		}
@@ -196,7 +214,7 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 	if err := rt.Spec.ContextSync.Validate(); err != nil {
 		return Resolved{}, fmt.Errorf("runtime %q: %w", name, err)
 	}
-	cfg := FromRuntime(&rt.Spec, fallback)
+	cfg := applyStorage(FromRuntime(&rt.Spec, fallback))
 	if sa != "" {
 		cfg.ServiceAccount = sa
 	}
@@ -289,7 +307,7 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 		{Name: "REPO_URL", Value: profile.Spec.Repository.URL},
 		{Name: "REPO_REF", Value: profile.Spec.Repository.Ref},
 		{Name: "RUNTIME_IDLE_TTL_M", Value: itoa(cfg.IdleTTLMinutes)},
-		{Name: "HOME", Value: "/data/home"},
+		{Name: "HOME", Value: "/data/context"},
 		{Name: "MCP_CONFIG", Value: "/etc/agentops/mcp.json"},
 		{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
@@ -318,8 +336,12 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 
 	// context: the accumulated context (RWX PVC), pod-local under contextSync,
 	// or ephemeral when no claim is configured at all. It is mounted at
-	// /data/home because that is the reference runtime's $HOME, and that path
-	// does not move — claude-code keys its stored context off it.
+	// /data/context, named for what it HOLDS, and $HOME is pointed at it.
+	//
+	// NOTHING INSIDE THE VOLUME MOVED WITH THE PATH. A claim's contents appear
+	// AT the mount path, and the stored transcript directory is named for the
+	// WORKING directory (`-data-workspace`), not for $HOME. /data/workspace is
+	// the load-bearing path and it does not move.
 	switch {
 	case sidecar:
 		// The agent gets EPHEMERAL storage and no access to the durable volume
@@ -343,7 +365,7 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 	default:
 		volumes = append(volumes, corev1.Volume{Name: "context", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 	}
-	mounts = append(mounts, corev1.VolumeMount{Name: "context", MountPath: "/data/home"})
+	mounts = append(mounts, corev1.VolumeMount{Name: "context", MountPath: "/data/context"})
 
 	// repository auth
 	if a := profile.Spec.Repository.Auth; a != nil {

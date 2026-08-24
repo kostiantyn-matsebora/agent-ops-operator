@@ -97,24 +97,14 @@ func maxActiveConversations() (n int, deprecated bool) {
 	return 5, false
 }
 
-// contextPVC is the bootstrap default claim holding a conversation's
-// accumulated context, reporting whether the deprecated HOME_PVC spelling
-// supplied it.
+// bootstrapContextClaim is the release-wide context claim, the bottom of the
+// persistence chain.
 //
-// The manager and the chart upgrade at DIFFERENT MOMENTS, so the retired name
-// is honoured for one release. A bootstrap default that vanished for even one
-// reconcile would provision runtime pods with no context volume, and every
-// conversation in the install would answer without its context while every
-// signal reported success.
-func contextPVC() (name string, deprecated bool) {
-	if v := os.Getenv("CONTEXT_PVC"); v != "" {
-		return v, false
-	}
-	if v := os.Getenv("HOME_PVC"); v != "" {
-		return v, true
-	}
-	return "", false
-}
+// A one-line function so there is a name to pin a test to, and so the deleted
+// dual-read has a headstone: HOME_PVC is NOT read. Its concept moved to another
+// CR, and an alias resolving to a field that is not on that object would be
+// worse than the failure it hides.
+func bootstrapContextClaim() string { return os.Getenv("CONTEXT_PVC") }
 
 // commandFromEnv parses RUNTIME_COMMAND_JSON (e.g. ["sh","-c","..."]) — used to
 // run a stub worker during shadow verification.
@@ -214,11 +204,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	contextClaim, deprecatedContextPVC := contextPVC()
-	if deprecatedContextPVC {
-		setupLog.Info("HOME_PVC is deprecated and is removed after one release — "+
-			"set CONTEXT_PVC (chart: persistence.context) instead", "claim", contextClaim)
-	}
 	maxActive, deprecatedCap := maxActiveConversations()
 	if deprecatedCap {
 		setupLog.Info("MAX_RUNTIMES is deprecated and is removed after one release — "+
@@ -266,10 +251,19 @@ func main() {
 			ServiceAccount: env("RUNTIME_SA", "agentops-runtime"),
 			ControlURL:     env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080"),
 			IdleTTLMinutes: envInt("RUNTIME_IDLE_TTL_M", 1),
-			ContextPVC:     contextClaim,
-			WorkspacePVC:   os.Getenv("WORKSPACE_PVC"),
-			NodeSelector:   map[string]string{"node-role/app": "true"},
-			Command:        commandFromEnv(),
+			// THE RELEASE-WIDE CLAIMS, and the only place they enter the
+			// manager. They are the bottom of the persistence chain — what a
+			// route binding nothing resolves to — and they arrive here rather
+			// than on an AgentRuntime because a runtime declares no volume.
+			//
+			// HOME_PVC is GONE, not dual-read. The field it aliased moved to
+			// another CR entirely, so there is nothing on this side for an
+			// alias to point at, and the chart and the manager ship together in
+			// this release.
+			ContextPVC:   bootstrapContextClaim(),
+			WorkspacePVC: os.Getenv("WORKSPACE_PVC"),
+			NodeSelector: map[string]string{"node-role/app": "true"},
+			Command:      commandFromEnv(),
 			// The sidecar that keeps context durable when a runtime declares
 			// contextSync. Release-wide, like the manager's own image: it
 			// implements a contract rather than being a backend choice. Empty

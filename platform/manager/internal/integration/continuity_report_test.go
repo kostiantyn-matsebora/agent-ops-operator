@@ -48,7 +48,7 @@ func TestUnavailableContextIsRecordedWithTheRuntimesOwnReason(t *testing.T) {
 	srv := apiServer()
 
 	reportContinuity(t, srv, conv.Name, "r-1", "failed", "ctx-new",
-		"unavailable", "no session files under /data/home/.claude/projects")
+		"unavailable", "no session files under /data/context/.claude/projects")
 
 	cond := continuityCondition(t, conv.Name)
 	if cond == nil || cond.Status != metav1.ConditionFalse {
@@ -56,7 +56,7 @@ func TestUnavailableContextIsRecordedWithTheRuntimesOwnReason(t *testing.T) {
 	}
 	// Verbatim: the manager adds no diagnosis of its own, because it does not
 	// know whether this runtime keeps context on a volume or at a vendor API.
-	if cond.Message != "no session files under /data/home/.claude/projects" {
+	if cond.Message != "no session files under /data/context/.claude/projects" {
 		t.Fatalf("the runtime's reason must be recorded verbatim, got %q", cond.Message)
 	}
 	// The handle it established is still adopted — continuing a partial context

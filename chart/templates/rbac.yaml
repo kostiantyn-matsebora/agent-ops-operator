@@ -90,6 +90,21 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Pipeline reconciler: renders the claim for a persistence binding that names
+  # a PersistentVolume, because a pod can mount only a claim.
+  #
+  # NO `delete`, AND THAT OMISSION IS THE RULE. The operator may bring storage
+  # into being and must never take it away: a claim it created outlives the
+  # Pipeline that asked for it, holding the accumulated context of every
+  # conversation that route started. That is the one thing here whose loss
+  # cannot be repaired by reconciling again — so it is guarded twice, by the
+  # absent ownerRef and by this absent verb.
+  #
+  # No `update` or `patch` either. The claim is rendered once and then belongs
+  # to whoever edits it; a controller that could rewrite it could shrink it.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]

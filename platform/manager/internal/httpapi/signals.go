@@ -640,14 +640,19 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		// ONE helper both origination paths call. Freezing it is what stops a
 		// later Pipeline edit changing the identity an inflight conversation's
 		// next pod runs as.
-		runtimeRef, serviceAccount := runtimepod.SnapshotFor(ctx, s.Reader, s.Namespace, pipeline)
+		snap := runtimepod.SnapshotFor(ctx, s.Reader, s.Namespace, pipeline, s.Runtime)
 		conv.Spec = agentopsv1alpha1.ConversationSpec{
 			ProfileRef:         pipeline.Spec.ProfileRef,
 			ChannelRefs:        append([]agentopsv1alpha1.ObjectRef{}, pipeline.Spec.ChannelRefs...),
 			Toolsets:           pipeline.Spec.Toolsets.DeepCopy(),
 			MCPConfigs:         pipeline.Spec.MCPConfigs.DeepCopy(),
-			RuntimeRef:         runtimeRef,
-			ServiceAccountName: serviceAccount,
+			RuntimeRef:         snap.RuntimeRef,
+			ServiceAccountName: snap.ServiceAccountName,
+			// WHERE this conversation's two volumes are, resolved ONCE. A later
+			// edit to the Pipeline's persistence moves only conversations
+			// created after it.
+			ContextClaimName:   snap.ContextClaimName,
+			WorkspaceClaimName: snap.WorkspaceClaimName,
 			// Provenance, written once here. Everything the conversation RUNS
 			// with is materialized above it; this names where that came from.
 			PipelineRef: &agentopsv1alpha1.ObjectRef{Name: pipeline.Name},

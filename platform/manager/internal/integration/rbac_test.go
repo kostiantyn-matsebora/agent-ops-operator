@@ -81,3 +81,72 @@ func grantedResources(rbac string) map[string]bool {
 	}
 	return out
 }
+
+// THE OPERATOR MAY BRING STORAGE INTO BEING AND MUST NEVER TAKE IT AWAY.
+//
+// A Pipeline binding that names a PersistentVolume makes the manager render the
+// claim on it, because a pod can mount only a claim — the one place in this
+// system where naming a resource creates it. The claim then OUTLIVES the
+// Pipeline that asked for it, holding the accumulated context of every
+// conversation that route started, which is the one thing here whose loss
+// cannot be repaired by reconciling again.
+//
+// That is guarded twice: the created claim carries no ownerRef, and the Role
+// holds no verb that could remove or shrink it. This pins the second half,
+// because the first is invisible from a chart render.
+func TestManagerMayCreateButNeverDestroyAClaim(t *testing.T) {
+	out := helmTemplate(t)
+
+	rule := managerRuleFor(t, out, "persistentvolumeclaims")
+	for _, want := range []string{"get", "list", "watch", "create"} {
+		if !containsVerb(rule, want) {
+			t.Fatalf("the manager needs %q on persistentvolumeclaims to render a bound claim, got %v", want, rule)
+		}
+	}
+	for _, forbidden := range []string{"delete", "deletecollection", "update", "patch"} {
+		if containsVerb(rule, forbidden) {
+			t.Fatalf("the manager holds %q on persistentvolumeclaims. It may create storage and must NEVER "+
+				"remove or rewrite it: a claim it rendered outlives the Pipeline that asked for it and holds "+
+				"the accumulated context of every conversation that route started. Verbs: %v", forbidden, rule)
+		}
+	}
+}
+
+// managerRuleFor finds the manager Role rule granting `resource` in the core
+// group and returns its verbs.
+func managerRuleFor(t *testing.T, rendered, resource string) []string {
+	t.Helper()
+	for _, doc := range strings.Split(rendered, "\n---\n") {
+		if !strings.Contains(doc, "kind: Role\n") || !strings.Contains(doc, "name: agentops-manager") {
+			continue
+		}
+		var role struct {
+			Rules []struct {
+				APIGroups []string `json:"apiGroups"`
+				Resources []string `json:"resources"`
+				Verbs     []string `json:"verbs"`
+			} `json:"rules"`
+		}
+		if err := yaml.Unmarshal([]byte(doc), &role); err != nil {
+			continue
+		}
+		for _, r := range role.Rules {
+			for _, res := range r.Resources {
+				if res == resource {
+					return r.Verbs
+				}
+			}
+		}
+	}
+	t.Fatalf("no manager Role rule grants %q at all — the Pipeline reconciler cannot render a bound claim", resource)
+	return nil
+}
+
+func containsVerb(verbs []string, want string) bool {
+	for _, v := range verbs {
+		if v == want || v == "*" {
+			return true
+		}
+	}
+	return false
+}

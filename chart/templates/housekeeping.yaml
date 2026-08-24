@@ -97,9 +97,9 @@ spec:
                 {{- end }}
                 {{- if $mountContext }}
                 # claude-code keys transcripts by session id under the shared
-                # projects directory; /data/home is mounted with no subPath.
+                # projects directory; /data/context is mounted with no subPath.
                 - name: SESSIONS_ROOT
-                  value: /reclaim/home/.claude/projects/-data-workspace
+                  value: /reclaim/context/.claude/projects/-data-workspace
                 {{- end }}
               {{- if or $mountWs $mountContext }}
               volumeMounts:
@@ -110,8 +110,8 @@ spec:
                   mountPath: /reclaim/workspace
                 {{- end }}
                 {{- if $mountContext }}
-                - name: home
-                  mountPath: /reclaim/home
+                - name: context
+                  mountPath: /reclaim/context
                 {{- end }}
               {{- end }}
               {{- with $h.resources }}
@@ -126,7 +126,7 @@ spec:
                 claimName: {{ $wsClaim }}
             {{- end }}
             {{- if $mountContext }}
-            - name: home
+            - name: context
               persistentVolumeClaim:
                 claimName: {{ $ctxClaim }}
             {{- end }}

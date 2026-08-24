@@ -174,7 +174,7 @@ exits on the idle TTL.
 |---|---|
 | Bad or missing credential | the run fails — `status.runs[].status: failed`, non-zero exit code, reason in `kubectl logs` |
 | No RWX storage class | the `agentops-context` PVC sits `Pending`. The conversation exists but never gets a pod |
-| A pre-created volume that will not bind | the `agentops-context` PVC sits `Pending` too, and it looks identical. Different cause: a claim naming a volume also needs `persistence.context.storageClassName: "-"`, or the cluster's default class is injected and a second volume is provisioned instead. `kubectl get pvc agentops-context -o yaml` shows which — an empty `storageClassName` means you declined the class, a filled-in one means you did not |
+| A pre-created volume that will not bind | the `agentops-context` PVC sits `Pending` too, and it looks identical. Different cause: a claim naming a volume must also name the right storage class. `kubectl describe pvc agentops-context` tells the two apart — `VolumeMismatch: storageClassName does not match` means the class is wrong, no event at all means there is no provisioner. For a volume you created by hand use `persistence.context.storageClassName: "-"`. For one RETAINED from an earlier release, name the class the PV already carries — a dynamically provisioned volume keeps it forever |
 | Nothing claims the source | the source's `Wired` condition is `False` with a reason. The console reports its composer unavailable, and signals are dropped |
 | At capacity | phase `Pending`, no pod, no thread. Five run at once by default |
 

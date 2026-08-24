@@ -9,30 +9,14 @@ of them renders a runtime, an SA or a credential.
 The SA itself is created in rbac.yaml (unconditionally, because the manager
 defaults every runtime pod onto it whoever wrote the AgentRuntime), and its
 bindings in runtime-rbac.yaml.
+
+IT RENDERS NO VOLUME. Persistence is WIRING and lives on the Pipeline; the
+release-wide claims reach conversations through the manager's bootstrap
+configuration, not through this CR.
 */ -}}
 {{- if .Values.runtime.enabled }}
 {{- $rt := .Values.runtime }}
-{{- $p := .Values.persistence }}
-{{- $ctx := $p.context }}
-{{- /* homePvcRef is the retired spelling, honoured for ONE release so a values
-file written before the rename keeps naming the claim it already points at. */ -}}
-{{- $pvc := $rt.contextPvcRef | default $rt.homePvcRef }}
-{{- if not $pvc }}
-{{- if $ctx.existingClaim }}
-{{- $pvc = $ctx.existingClaim }}
-{{- else if $ctx.enabled }}
-{{- $pvc = $ctx.name }}
-{{- end }}
-{{- end }}
-{{- $ws := $p.workspace }}
-{{- $wsPvc := $rt.workspacePvcRef }}
-{{- if not $wsPvc }}
-{{- if $ws.existingClaim }}
-{{- $wsPvc = $ws.existingClaim }}
-{{- else if $ws.enabled }}
-{{- $wsPvc = $ws.name }}
-{{- end }}
-{{- end }}
+{{- include "agentops.retiredRuntimeVolumeKeysGuard" . }}
 {{- if $rt.credentialsSecret.token }}
 # Created because runtime.credentialsSecret.token was supplied, so the agent's
 # credential is provisioned with the release instead of being a prerequisite
@@ -73,20 +57,17 @@ spec:
   nodeSelector:
 {{ toYaml . | indent 4 }}
   {{- end }}
-  {{- with $pvc }}
-  # wired from the chart's own `persistence.context` block unless
-  # runtime.contextPvcRef names a claim the chart did not create
-  context:
-    pvcRef:
-      name: {{ . }}
-  {{- end }}
-  {{- with $wsPvc }}
-  # same wiring, from `persistence.workspace` — a claim name is never restated
-  # by the operator. Absent = ephemeral checkout, which is the default.
-  workspace:
-    pvcRef:
-      name: {{ . }}
-  {{- end }}
+  # THIS CR DECLARES NO VOLUME, and that is the shape rather than an omission.
+  # A runtime is an ENGINE — an image and its pod-level defaults. WHERE a
+  # route's conversations keep their state is the ROUTE's decision, declared on
+  # `Pipeline.spec.persistence` beside the tools it grants and the identity it
+  # executes under; a route binding neither takes the release-wide claims, which
+  # reach the manager as its bootstrap configuration (deployment.yaml's
+  # CONTEXT_PVC / WORKSPACE_PVC). Nothing restates a claim name.
+  #
+  # It is what lets TWO routes on THIS ONE runtime keep their conversations on
+  # different volumes without cloning it — the same thing cloning a runtime used
+  # to be needed for when a second trust level was wanted.
   {{- with $rt.contextSync.paths }}
   # CONTEXT SYNC: declared by the RUNTIME, because only it knows where its
   # backend keeps context. Absent means the context volume is mounted directly and

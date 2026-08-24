@@ -22,7 +22,7 @@ agent experience. Every template SHALL gate on the bundle being active, with
 from it.
 
 The bundle SHALL NOT render the agent execution SUBSTRATE. The `AgentRuntime`,
-the LLM credential Secret, the home volume and the release-wide floor identity
+the LLM credential Secret, the context volume and the release-wide floor identity
 belong to the parent chart; the bundle references them and renders none of them.
 
 It SHALL render the ServiceAccount each of its own ROUTES executes under, unless
@@ -40,7 +40,7 @@ and reach a pod through `valueFrom`/`envFrom`, never read by the manager.
 
 #### Scenario: No substrate, no secrets
 - **WHEN** the bundle is enabled with every component on
-- **THEN** the output contains no `AgentRuntime`, no home volume and no `Secret` of any kind, while each route it ships carries its own ServiceAccount bound to nothing
+- **THEN** the output contains no `AgentRuntime`, no context volume and no `Secret` of any kind, while each route it ships carries its own ServiceAccount bound to nothing
 
 ### Requirement: Components gate independently and partial installs stay valid
 The ingest lane, the MCP configuration, the toolsets, each profile and the

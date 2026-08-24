@@ -7,59 +7,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ContextVolume selects durable storage for a conversation's accumulated
-// context. It is named for what it HOLDS, not for where it happens to be
-// mounted: the reference runtime mounts it at /data/home because that image's
-// $HOME is where claude-code writes its context, and that path does not move.
-type ContextVolume struct {
-	// PVCRef mounts an existing (usually RWX) PVC at the runtime's context path.
-	// +optional
-	PVCRef *ObjectRef `json:"pvcRef,omitempty"`
-	// EmptyDir (default when no pvcRef): the accumulated context dies with the
-	// pod.
-	// +optional
-	EmptyDir bool `json:"emptyDir,omitempty"`
-}
-
-// HomeVolume is the former name of ContextVolume.
-//
-// Deprecated: use ContextVolume. Dual-read for ONE release — see
-// AgentRuntime.Context, which is the only place the retired field is read.
-type HomeVolume struct {
-	// PVCRef mounts an existing (usually RWX) PVC at /data/home.
-	// +optional
-	PVCRef *ObjectRef `json:"pvcRef,omitempty"`
-	// EmptyDir (default when no pvcRef): session state dies with the pod.
-	// +optional
-	EmptyDir bool `json:"emptyDir,omitempty"`
-}
-
-// WorkspaceVolume selects storage for the repository checkout at
-// /data/workspace. Shaped identically to ContextVolume, and deliberately a
-// SEPARATE claim: the two hold different kinds of state and are enabled
-// independently (sessions by default, checkouts on request).
-//
-// Each conversation gets its own subdirectory within the claim, so concurrent
-// runtime pods never share a working tree. The mount path does not move —
-// claude-code keys sessions by cwd.
-type WorkspaceVolume struct {
-	// PVCRef mounts an existing (RWX when conversations run concurrently) PVC,
-	// one subdirectory per conversation, at /data/workspace.
-	// +optional
-	PVCRef *ObjectRef `json:"pvcRef,omitempty"`
-	// EmptyDir (default when no pvcRef): the checkout dies with the pod, which
-	// costs a re-clone and nothing else.
-	// +optional
-	EmptyDir bool `json:"emptyDir,omitempty"`
-}
-
-// ContextStorage declares WHERE a runtime keeps a conversation's accumulated
-// context, which is what decides whether continuity is possible in a given
-// deployment.
+// ContextStorage declares the SHAPE of a runtime's context storage — whether
+// its backend writes context to a disk at all — which is what decides whether
+// continuity is possible in a given deployment.
 //
 // The RUNTIME declares it rather than the chart inferring it: the chart would
 // have to know which images need a volume, and a runtime that keeps context at a
 // vendor API needs none and must not be told otherwise.
+//
+// IT DOES NOT DECLARE WHICH VOLUME. That is the ROUTE's, on
+// Pipeline.spec.persistence, resolved and snapshotted at conversation creation.
+// The split is BACKEND SHAPE against PLACEMENT: a runtime answers only whether
+// a disk is involved, because that is the one half only it can know.
 // +kubebuilder:validation:Enum=volume;external;none
 type ContextStorage string
 
@@ -86,6 +45,17 @@ const (
 //     the checked-out repository), streaming progress to STDOUT (pod logs)
 //  3. reports    POST $CONTROL_URL/work/done {convo,runId,status,runtimeContextId,result}
 //  4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
+//
+// IT DECLARES NO VOLUME. A runtime is an ENGINE — an image and its pod-level
+// defaults — and WHERE a route's conversations keep their state is a property
+// of the ROUTE, decided beside the tools it grants, the channels it delivers
+// to, the runtime it selects and the identity it executes under. All of those
+// are Pipeline fields, and so is persistence: Pipeline.spec.persistence.
+//
+// The same argument moved `serviceAccountName` here and then off again. Two
+// Pipelines sharing one runtime must be able to keep their conversations on
+// different volumes without cloning it, which is exactly what expressing a
+// second trust level used to require.
 type AgentRuntimeSpec struct {
 	// Image implementing the work contract. Derive your own to add tooling:
 	// what an agent may REACH is wiring, so an image never grants it.
@@ -116,28 +86,16 @@ type AgentRuntimeSpec struct {
 	// +kubebuilder:default=10
 	// +optional
 	IdleTTLMinutes int32 `json:"idleTtlMinutes,omitempty"`
-	// Context volume for a conversation's durable accumulated context.
-	// +optional
-	Context *ContextVolume `json:"context,omitempty"`
-	// Home is the former name of Context.
+	// ContextStorage declares whether this runtime's backend keeps a
+	// conversation's context on a disk at all, so the manager can tell whether
+	// continuity is possible here BEFORE promising it. A runtime keeping
+	// context on a context volume, in a deployment whose route and release both
+	// supply none, can never continue anything — and saying that up front is
+	// what stops every follow-up failing for a reason the operator already
+	// chose.
 	//
-	// Deprecated: use Context. Honoured for ONE release so that a runtime
-	// installed before the rename keeps mounting the volume it already has —
-	// a rename that merely moved the field would strand every one of them at
-	// the moment of upgrade. Read ONLY through AgentRuntime.ContextVolume().
-	// +optional
-	Home *HomeVolume `json:"home,omitempty"`
-	// Workspace volume for the repository checkout. Absent = ephemeral, which
-	// is always correct — persisting it preserves uncommitted work across a pod
-	// restart and skips the re-clone.
-	// +optional
-	Workspace *WorkspaceVolume `json:"workspace,omitempty"`
-	// ContextStorage declares where this runtime keeps a conversation's context,
-	// so the manager can tell whether continuity is possible here BEFORE
-	// promising it. A runtime keeping context on its context volume, in a
-	// deployment that provides none, can never continue anything — and saying
-	// that up front is what stops every follow-up failing for a reason the
-	// operator already chose.
+	// WHICH volume is not asked here and cannot be answered here — see
+	// Pipeline.spec.persistence.
 	// +kubebuilder:default=volume
 	// +optional
 	ContextStorage ContextStorage `json:"contextStorage,omitempty"`
@@ -289,25 +247,6 @@ type AgentRuntime struct {
 
 	Spec   AgentRuntimeSpec   `json:"spec,omitempty"`
 	Status AgentRuntimeStatus `json:"status,omitempty"`
-}
-
-// ContextVolume returns this runtime's context volume declaration, or nil.
-//
-// It is THE ONE PLACE the retired spec.home is read. The rename is dual-read
-// for one release exactly as Conversation.ContextID() is: a runtime installed
-// before it keeps mounting the volume it already has, and the current field
-// wins wherever both are present.
-func (s *AgentRuntimeSpec) ContextVolume() *ContextVolume {
-	if s == nil {
-		return nil
-	}
-	if s.Context != nil {
-		return s.Context
-	}
-	if s.Home == nil {
-		return nil
-	}
-	return &ContextVolume{PVCRef: s.Home.PVCRef, EmptyDir: s.Home.EmptyDir}
 }
 
 // +kubebuilder:object:root=true

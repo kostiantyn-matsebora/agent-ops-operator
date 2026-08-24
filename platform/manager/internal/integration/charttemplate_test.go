@@ -1184,15 +1184,20 @@ func TestPersistenceDefaultsContextOnWorkspaceOff(t *testing.T) {
 	if strings.Contains(out, "agentops-workspace") {
 		t.Error("workspace persistence must be OFF by default — a stale shared checkout is worse than a re-clone")
 	}
+	// THE RUNTIME DECLARES NEITHER VOLUME, and the release-wide claim reaches
+	// conversations through the manager's bootstrap default instead. That is
+	// what lets two routes on this one runtime persist to two volumes.
 	rt := runtimeDoc(t, out)
-	if !strings.Contains(rt, "context:\n    pvcRef:\n      name: agentops-context") {
-		t.Errorf("context.pvcRef must be wired from the chart's own persistence block:\n%s", rt)
-	}
-	if strings.Contains(rt, "workspace:") {
-		t.Error("no workspace claim means the AgentRuntime declares no workspace volume")
+	for _, key := range []string{"pvcRef", "\n  context:", "\n  workspace:"} {
+		if strings.Contains(rt, key) {
+			t.Errorf("the rendered AgentRuntime carries %q. Persistence is WIRING and it moved to the "+
+				"Pipeline; a runtime declaring a volume is what made two routes on one runtime "+
+				"impossible:\n%s", key, rt)
+		}
 	}
 	if !strings.Contains(out, "name: CONTEXT_PVC") {
-		t.Error("the manager's CONTEXT_PVC bootstrap default must follow the claim")
+		t.Error("the manager's CONTEXT_PVC bootstrap default must follow the claim — it is the only " +
+			"path the release-wide volume now takes to a conversation")
 	}
 	if strings.Contains(out, "name: WORKSPACE_PVC") {
 		t.Error("WORKSPACE_PVC must not be set when no workspace claim exists")
@@ -1210,8 +1215,8 @@ func TestPersistenceOptOutRemovesEverything(t *testing.T) {
 	if strings.Contains(out, "name: CONTEXT_PVC") {
 		t.Error("persistence.context.enabled=false must not set CONTEXT_PVC")
 	}
-	if rt := runtimeDoc(t, out); strings.Contains(rt, "context:") {
-		t.Errorf("the AgentRuntime must declare no context volume:\n%s", rt)
+	if rt := runtimeDoc(t, out); strings.Contains(rt, "pvcRef") {
+		t.Errorf("the AgentRuntime must declare no volume at all:\n%s", rt)
 	}
 }
 
@@ -1309,6 +1314,89 @@ func TestRetiredPersistenceKeysFailTheRender(t *testing.T) {
 	}
 }
 
+// The runtime keys are GONE, not renamed, so a values file that still points
+// the runtime at a claim must be told rather than ignored.
+//
+// The quiet case is the expensive one: an operator who deliberately named a
+// claim the chart did not create keeps every signal of success while the
+// release-wide claim is used instead, and every conversation on that install
+// answers out of the wrong volume.
+func TestRetiredRuntimeVolumeKeysFailTheRender(t *testing.T) {
+	for _, key := range []string{"contextPvcRef", "homePvcRef", "workspacePvcRef"} {
+		t.Run(key, func(t *testing.T) {
+			msg := helmTemplateErr(t, "--set", "runtime."+key+"=byo-claim")
+
+			if !strings.Contains(msg, "runtime."+key) {
+				t.Errorf("the failure must NAME the retired key:\n%s", msg)
+			}
+			if !strings.Contains(msg, "persistence.context") || !strings.Contains(msg, "pipelines[].persistence") {
+				t.Errorf("the failure must name BOTH places the declaration moved to — release-wide "+
+					"and per route:\n%s", msg)
+			}
+		})
+	}
+}
+
+// A route the chart ships can bind a pre-created volume, and the chart renders
+// the claim for it — under the SAME derived name the manager would use, since
+// both must spell it identically or the route gets two claims and mounts the
+// wrong one.
+func TestAChartShippedRouteCanBindItsOwnVolume(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "pipelines[0].name=k8s-ops",
+		"--set", "pipelines[0].profile=k8s-engineer",
+		"--set", "pipelines[0].contextVolume=pv-ops-context")
+
+	var pipeline string
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: Pipeline") && strings.Contains(doc, "\n  name: k8s-ops\n") {
+			pipeline = doc
+		}
+	}
+	if !strings.Contains(pipeline, "persistence:") || !strings.Contains(pipeline, "volumeName: pv-ops-context") {
+		t.Fatalf("the route must carry its own binding:\n%s", pipeline)
+	}
+
+	doc := claimDoc(t, out, "agentops-k8s-ops-context")
+	if !strings.Contains(doc, "volumeName: pv-ops-context") {
+		t.Errorf("the claim must name the pre-created volume:\n%s", doc)
+	}
+	if !strings.Contains(doc, `storageClassName: ""`) {
+		t.Errorf("the claim must decline dynamic provisioning with an EXPLICIT empty class, or "+
+			"admission provisions a second volume beside the operator's:\n%s", doc)
+	}
+	// A route's storage outlives the route, and certainly the release.
+	if !strings.Contains(doc, "helm.sh/resource-policy: keep") {
+		t.Errorf("the per-route claim must carry the keep policy:\n%s", doc)
+	}
+	// A pre-created volume is by definition not the release's to create — the
+	// per-route path is no exception to that.
+	for _, d := range splitDocs(out) {
+		if strings.Contains(d, "kind: PersistentVolume\n") {
+			t.Fatalf("the chart must render NO PersistentVolume:\n%s", d)
+		}
+	}
+}
+
+// A route naming a claim that already exists creates nothing, at either level.
+func TestAChartShippedRouteNamingAClaimRendersNoClaim(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "pipelines[0].name=ha-ops",
+		"--set", "pipelines[0].profile=ha-engineer",
+		"--set", "pipelines[0].contextClaim=team-ha-context")
+
+	if strings.Contains(out, "name: agentops-ha-ops-context") {
+		t.Error("naming an EXISTING claim must render nothing — that is what naming it means")
+	}
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: Pipeline") && strings.Contains(doc, "\n  name: ha-ops\n") {
+			if !strings.Contains(doc, "claimName: team-ha-context") {
+				t.Errorf("the route must carry the claim it named:\n%s", doc)
+			}
+		}
+	}
+}
+
 // claimDoc returns the PersistentVolumeClaim document named `name`.
 func claimDoc(t *testing.T, out, name string) string {
 	t.Helper()
@@ -1338,9 +1426,8 @@ func TestWorkspacePersistenceIsWiredFromOneValue(t *testing.T) {
 			}
 		}
 	}
-	rt := runtimeDoc(t, out)
-	if !strings.Contains(rt, "workspace:\n    pvcRef:\n      name: agentops-workspace") {
-		t.Errorf("workspace.pvcRef must be wired from the chart's own values:\n%s", rt)
+	if rt := runtimeDoc(t, out); strings.Contains(rt, "pvcRef") {
+		t.Errorf("the AgentRuntime declares no volume, for the workspace as for the context:\n%s", rt)
 	}
 	if !strings.Contains(out, "name: WORKSPACE_PVC") {
 		t.Error("the manager's WORKSPACE_PVC bootstrap default must follow the claim")
@@ -1352,8 +1439,10 @@ func TestWorkspacePersistenceIsWiredFromOneValue(t *testing.T) {
 	if strings.Contains(out, "kind: PersistentVolumeClaim\nmetadata:\n  name: agentops-workspace") {
 		t.Error("an existingClaim must provision nothing")
 	}
-	if !strings.Contains(runtimeDoc(t, out), "name: byo-checkouts") {
-		t.Error("the AgentRuntime must reference the existing claim")
+	// The existing claim reaches conversations the one way any release-wide
+	// claim does now: the manager's bootstrap default.
+	if !strings.Contains(out, "value: \"byo-checkouts\"") {
+		t.Error("WORKSPACE_PVC must carry the existing claim")
 	}
 }
 

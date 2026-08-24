@@ -60,7 +60,7 @@ func TestNoContextSyncBuildsTodaysPod(t *testing.T) {
 		t.Fatal("no sidecar may be added when the runtime declares no contextSync")
 	}
 	if v := volume(pod, "context"); v == nil || v.PersistentVolumeClaim == nil {
-		t.Fatal("home must still be the durable claim, mounted directly")
+		t.Fatal("the context volume must still be the durable claim, mounted directly")
 	}
 	if volume(pod, "context-store") != nil {
 		t.Fatal("no separate context volume in the unconfigured shape")
@@ -81,7 +81,7 @@ func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 
 	ctx := volume(pod, "context")
 	if ctx == nil || ctx.EmptyDir == nil {
-		t.Fatal("the agent's home must be pod-local in sidecar mode")
+		t.Fatal("the agent's live context must be pod-local in sidecar mode")
 	}
 	if ctx.EmptyDir.SizeLimit == nil || ctx.EmptyDir.SizeLimit.String() != "4Gi" {
 		t.Fatalf("the live context must be bounded; got %v", ctx.EmptyDir.SizeLimit)
@@ -97,6 +97,22 @@ func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 		if m.Name == "context-store" {
 			t.Fatal("the agent container must NOT mount the durable volume")
 		}
+	}
+	// The LIVE context is at the same path in both modes, and it is the path
+	// the volume is named for. The sidecar's own live mount has to agree with
+	// the agent's, or it checkpoints an empty tree and reports success.
+	if m := mount(pod, "context"); m == nil || m.MountPath != "/data/context" {
+		t.Fatalf("agent live context mount = %+v, want /data/context", m)
+	}
+	agentHome := ""
+	for _, e := range w.Env {
+		if e.Name == "HOME" {
+			agentHome = e.Value
+		}
+	}
+	if agentHome != "/data/context" {
+		t.Fatalf("HOME = %q, want /data/context — the agent and the sidecar must agree on the "+
+			"live path, or the sidecar checkpoints an empty tree and reports success", agentHome)
 	}
 
 	sc := container(pod, "context-sync")
@@ -180,7 +196,7 @@ func TestSidecarGetsEnoughGraceForAFinalCheckpoint(t *testing.T) {
 }
 
 // Declaring contextSync without an image configured must not half-apply the
-// mode — that would give the agent an EMPTY ephemeral home and no sidecar to
+// mode — that would give the agent an EMPTY ephemeral context and no sidecar to
 // restore into it, silently losing every conversation's context.
 func TestContextSyncWithoutAnImageFallsBackSafely(t *testing.T) {
 	cfg := syncCfg()
@@ -226,7 +242,7 @@ func TestClearingContextSyncRestoresTheDirectMount(t *testing.T) {
 
 	ctx := volume(off, "context")
 	if ctx == nil || ctx.PersistentVolumeClaim == nil {
-		t.Fatal("rollback must restore the durable claim as the agent's home")
+		t.Fatal("rollback must restore the durable claim as the agent's context volume")
 	}
 	if ctx.PersistentVolumeClaim.ClaimName != cfg.ContextPVC {
 		t.Fatalf("claim = %q, want %q", ctx.PersistentVolumeClaim.ClaimName, cfg.ContextPVC)

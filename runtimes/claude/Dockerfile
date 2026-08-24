@@ -24,6 +24,6 @@ RUN apt-get update -qq && \
 # and point AgentRuntime.spec.image at it; see README.
 COPY runtime.js tools.js spin.js /srv/
 
-ENV HOME=/data/home
+ENV HOME=/data/context
 USER node
 CMD ["node", "/srv/runtime.js"]

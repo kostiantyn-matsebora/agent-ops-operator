@@ -123,14 +123,15 @@ A Pipeline is reached two ways and no others:
 - **Consequence: runtimes are generic** — one `AgentRuntime` per VENDOR. Trust
   level is no longer part of that product; see below.
 
-#### EXECUTION AND IDENTITY ARE WIRING TOO
+#### EXECUTION, IDENTITY AND STORAGE ARE WIRING TOO
 
-Two more optional fields, and they complete the object:
+Three more optional fields, and they complete the object:
 
 | Field | Selects | Absent |
 |---|---|---|
 | `spec.runtimeRef` | the `AgentRuntime` | the one named `default` |
 | `spec.serviceAccountName` | the identity it executes under, OVERRIDING the runtime's | the FLOOR account, bound to NOTHING |
+| `spec.persistence` | WHERE its conversations keep state — `context` and `workspace`, independently | the chart's RELEASE-WIDE claim, then EPHEMERAL |
 
 **SILENCE MEANS NO POWER.** A route that names no account can do nothing in the
 cluster. It shipped the other way once — the mode bound to the account every
@@ -161,6 +162,13 @@ SYMMETRY TEST**, and the history is kept because the argument is seductive:
 |---|---|
 | runtime | `conversation.spec.runtimeRef` → `profile.spec.runtimeRef` (DEPRECATED) → `AgentRuntime/default` → bootstrap |
 | identity | `conversation.spec.serviceAccountName` → `runtime.spec.serviceAccountName` → THE FLOOR |
+| storage | `conversation.spec.contextClaimName` / `.workspaceClaimName` → the chart's release default (bootstrap `CONTEXT_PVC` / `WORKSPACE_PVC`) → EPHEMERAL |
+
+- **THE RUNTIME IS IN NO PART OF THE STORAGE CHAIN**, and that is the whole of
+  the move rather than an omission. `AgentRuntime.spec.home`, `spec.context` and
+  `spec.workspace` are DELETED with no alias — see `terminology.md`. It keeps
+  `spec.contextStorage`, which is BACKEND SHAPE (does this backend use a disk at
+  all) rather than PLACEMENT.
 
 - **THE PIPELINE IS IN NEITHER CHAIN.** Its fields are RESOLVED INTO the
   conversation at creation, and nothing reads a Pipeline at dispatch time —
@@ -179,6 +187,41 @@ SYMMETRY TEST**, and the history is kept because the argument is seductive:
   - **"No subchart renders a runtime SA" is REVERSED, not weakened.** That rule
     guarded against a bundle rendering the substrate, including an account
     sized for everything. An account sized DOWN to one route is the opposite.
+
+#### PERSISTENCE: A BINDING NAMES A CLAIM OR A VOLUME, AND THAT DECIDES WHO CREATES WHAT
+
+`claimName` names a PVC that EXISTS. `volumeName` names a `PersistentVolume` —
+and **a pod cannot mount one**, only a claim on it. So supporting a PV at all
+means something renders the claim, and which thing follows from where the
+binding was declared:
+
+| Declared on | Renders the claim |
+|---|---|
+| a Pipeline | the MANAGER |
+| the chart | the CHART, and a chart-shipped Pipeline's too, under the SAME derived name |
+
+- **The two are mutually exclusive, enforced by CEL at the API server**, not by
+  a reconciler reporting it after the object is stored. They are two answers to
+  "who creates this", not a preference.
+- **The derived name is `agentops-<pipeline>-<volume>`**, spelled identically in
+  `runtimepod.PipelineClaimName` and in `pvc.yaml`. Both sides must agree or a
+  route gets two claims and mounts the wrong one.
+- **THIS IS THE ONE PLACE `NAMING IS NOT CREATING` DOES NOT HOLD**, and it is
+  stated rather than smuggled. Elsewhere a name is a reference and nothing is
+  provisioned from it.
+- **THE CREATED CLAIM CARRIES NO OWNERREF ON THE PIPELINE, and the manager holds
+  no `delete` verb.** Deleting a Pipeline must NEVER delete the accumulated
+  context of the conversations it started — storage is the one thing here whose
+  loss cannot be repaired by reconciling again. Guarded twice, deliberately.
+- **The rendered claim's storage class is an EXPLICIT empty string**, never an
+  absent field: absent is filled in by admission with the cluster's default
+  class, which provisions a SECOND volume beside the one that was named.
+
+**WHY IT IS HERE AND NOT ON THE RUNTIME.** A runtime is an ENGINE. Two Pipelines
+sharing one must be able to keep their conversations on different volumes
+without cloning it — exactly what expressing a second trust level used to
+require, and fixed the same way. Whoever is trusted to grant an agent tools and
+a cluster identity is more qualified to say where its context lives, not less.
 
 **NO BINDING USES A BUILT-IN ROLE.** Not `cluster-admin` under `full`, not
 `view` under `readonly`. Every grant is a role the chart writes out

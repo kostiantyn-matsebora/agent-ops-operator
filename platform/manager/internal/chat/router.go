@@ -575,9 +575,12 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		conv.Spec.MCPConfigs = origin.Spec.MCPConfigs.DeepCopy()
 		// Same helper the signal lane calls, over the same Pipeline. An
 		// addressed command grants the pipeline's wiring, and the execution
-		// identity is part of that wiring, not half of it.
-		conv.Spec.RuntimeRef, conv.Spec.ServiceAccountName =
-			runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin)
+		// identity and the storage are part of that wiring, not half of it.
+		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin, r.Runtime)
+		conv.Spec.RuntimeRef = snap.RuntimeRef
+		conv.Spec.ServiceAccountName = snap.ServiceAccountName
+		conv.Spec.ContextClaimName = snap.ContextClaimName
+		conv.Spec.WorkspaceClaimName = snap.WorkspaceClaimName
 		// Provenance, written once at creation like the bindings above it and
 		// read for the same reasons they are not: attribution and reuse
 		// scoping, never to resolve wiring. An addressed command is the one

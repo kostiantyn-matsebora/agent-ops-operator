@@ -716,10 +716,10 @@ function RunTimeline({ detail }: { detail: NonNullable<ReturnType<typeof useConv
                             title="failed before producing any output"
                           >
                             The agent process exited non-zero without a result. The common cause is
-                            a session that could no longer be resumed — sessions live in the runtime
-                            pod's <code>/data/home</code>, so they vanish when it is not backed by a
-                            persistent volume. Check the runtime pod logs, and{' '}
-                            <code>persistence.enabled</code> in the chart.
+                            accumulated context that could no longer be resumed — it lives in the
+                            runtime pod's <code>/data/context</code>, so it vanishes when that is not
+                            backed by a persistent volume. Check the runtime pod logs, and{' '}
+                            <code>persistence.context.enabled</code> in the chart.
                           </Alert>
                         ) : (
                           <small>—</small>

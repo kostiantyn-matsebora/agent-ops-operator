@@ -108,46 +108,24 @@ func TestContextAndWorkspaceAreIndependent(t *testing.T) {
 	if w := volume(pod, "workspace"); w == nil || w.EmptyDir == nil {
 		t.Fatalf("workspace should stay ephemeral, got %+v", w)
 	}
-	// The PATH does not move with the name. It is the reference runtime's
-	// $HOME, and claude-code keys its stored context off it.
-	if m := mount(pod, "context"); m == nil || m.MountPath != "/data/home" || m.SubPath != "" {
-		t.Fatalf("context mount = %+v, want /data/home with no subPath", m)
+	// The PATH moves with the name. Nothing inside the volume relocates: a
+	// claim's contents appear AT the mount path, and the stored transcript
+	// directory is named for the WORKING directory, not for $HOME.
+	if m := mount(pod, "context"); m == nil || m.MountPath != "/data/context" || m.SubPath != "" {
+		t.Fatalf("context mount = %+v, want /data/context with no subPath", m)
 	}
 }
 
-func TestFromRuntimeResolvesBothVolumes(t *testing.T) {
-	spec := &agentopsv1alpha1.AgentRuntimeSpec{
-		Image:     "img",
-		Context:   &agentopsv1alpha1.ContextVolume{PVCRef: &agentopsv1alpha1.ObjectRef{Name: "context-claim"}},
-		Workspace: &agentopsv1alpha1.WorkspaceVolume{PVCRef: &agentopsv1alpha1.ObjectRef{Name: "ws-claim"}},
-	}
-	// A runtime declaring volumes must OVERRIDE the bootstrap defaults, not
-	// inherit them alongside.
-	cfg := FromRuntime(spec, Config{ContextPVC: "bootstrap-context", WorkspacePVC: "bootstrap-ws"})
+// A runtime OVERLAY leaves both claims exactly as the conversation resolved
+// them. This is the whole of the move: an AgentRuntime declares neither volume,
+// so there is nothing of a runtime's for FromRuntime to apply.
+func TestFromRuntimeLeavesBothVolumesAlone(t *testing.T) {
+	spec := &agentopsv1alpha1.AgentRuntimeSpec{Image: "img"}
 
-	if cfg.ContextPVC != "context-claim" || cfg.WorkspacePVC != "ws-claim" {
-		t.Fatalf("context=%q workspace=%q, want context-claim/ws-claim", cfg.ContextPVC, cfg.WorkspacePVC)
-	}
-	bare := FromRuntime(&agentopsv1alpha1.AgentRuntimeSpec{Image: "img"},
-		Config{ContextPVC: "bootstrap-context", WorkspacePVC: "bootstrap-ws"})
-	if bare.ContextPVC != "" || bare.WorkspacePVC != "" {
-		t.Fatalf("a runtime declaring no volumes must clear both, got context=%q workspace=%q",
-			bare.ContextPVC, bare.WorkspacePVC)
-	}
-}
+	cfg := FromRuntime(spec, Config{ContextPVC: "resolved-context", WorkspacePVC: "resolved-ws"})
 
-// A runtime installed BEFORE the rename declares only the retired field, and
-// the pod builder is where that has to keep working: the alternative is an
-// upgrade that mounts an empty volume and reports success.
-func TestFromRuntimeHonoursTheRetiredHomeField(t *testing.T) {
-	spec := &agentopsv1alpha1.AgentRuntimeSpec{
-		Image: "img",
-		Home:  &agentopsv1alpha1.HomeVolume{PVCRef: &agentopsv1alpha1.ObjectRef{Name: "agentops-home"}},
-	}
-
-	cfg := FromRuntime(spec, Config{})
-
-	if cfg.ContextPVC != "agentops-home" {
-		t.Fatalf("ContextPVC = %q, want the claim the retired field named", cfg.ContextPVC)
+	if cfg.ContextPVC != "resolved-context" || cfg.WorkspacePVC != "resolved-ws" {
+		t.Fatalf("context=%q workspace=%q, want the resolved claims untouched",
+			cfg.ContextPVC, cfg.WorkspacePVC)
 	}
 }

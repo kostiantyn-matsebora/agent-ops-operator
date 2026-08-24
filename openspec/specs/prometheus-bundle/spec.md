@@ -28,7 +28,7 @@ stops being read, so an unguarded rename would present as a bundle that installe
 successfully and rendered nothing.
 
 The bundle SHALL NOT render the agent's execution substrate. The `AgentRuntime`,
-the LLM credential Secret, the home volume and the release-wide floor identity
+the LLM credential Secret, the context volume and the release-wide floor identity
 are the parent chart's.
 
 It SHALL render the ServiceAccount its OWN route runs as, and only that — a
@@ -46,7 +46,7 @@ permission to investigate an alert. An install naming its own
 #### Scenario: The route's identity is the bundle's, the substrate is not
 - **WHEN** the wiring component renders with no `serviceAccountName` set on it
 - **THEN** a ServiceAccount for that route is rendered with no Kubernetes RBAC
-  bound to it, while the `AgentRuntime`, the model credential and the home volume
+  bound to it, while the `AgentRuntime`, the model credential and the context volume
   still come from the parent chart
 
 #### Scenario: Demo mode does not enable this bundle

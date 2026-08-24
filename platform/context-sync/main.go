@@ -50,7 +50,7 @@ type config struct {
 func loadConfig() (config, error) {
 	var c config
 	c.listen = envOr(envListen, ":8099")
-	c.live = envOr(envLive, "/data/home")
+	c.live = envOr(envLive, "/data/context")
 	c.store = os.Getenv(envStore)
 	c.paths = lines(os.Getenv(envPaths))
 	c.exclude = lines(os.Getenv(envExclude))

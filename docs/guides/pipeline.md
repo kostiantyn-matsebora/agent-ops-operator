@@ -50,7 +50,7 @@ first.
 
 ## The overall shape
 
-A Pipeline is five sets of references and one composition rule:
+A Pipeline is six sets of references and one composition rule:
 
 1. **`profileRef`** — who answers. The only **required** field.
 2. **`signalSourceRefs`** — the sources it listens on. Omit it and the Pipeline
@@ -61,6 +61,7 @@ A Pipeline is five sets of references and one composition rule:
    composes them against the agent's own definition.
 5. **`runtimeRef` and `serviceAccountName`** — what executes it, and under whose
    identity. Both optional.
+6. **`persistence`** — where its conversations keep their state. Optional.
 
 Nothing else carries wiring. A `SignalSource` has no profile and no channel. A
 `Channel` has no default profile. That concentration is the point.
@@ -112,6 +113,55 @@ records what it was created with, so changing this field affects only
 conversations started afterwards. Correcting the `AgentRuntime` itself still
 reaches the ones running.
 
+## Where its conversations keep their state
+
+**A route can declare its own storage**, beside the tools it grants and the
+account it runs as. Omit it and the route takes the release-wide volumes the
+chart configures, which is what nearly every route wants.
+
+**An `AgentRuntime` declares no volume at all.** A runtime is an ENGINE, and
+where a route persists is the route's decision — the same argument that put
+`serviceAccountName` here.
+
+```yaml
+spec:
+  profileRef:
+    name: ha-engineer
+  persistence:
+    context:
+      claimName: ha-ops-context
+```
+
+Each volume takes EITHER a claim or a `PersistentVolume`, never both:
+
+| Field | Means |
+|---|---|
+| `claimName` | a `PersistentVolumeClaim` that already exists. Nothing is created |
+| `volumeName` | a `PersistentVolume`. **The manager renders the claim on it**, as `agentops-<route>-<volume>` |
+
+**A pod can mount only a claim, never a `PersistentVolume`** — which is why
+naming a volume is the one place in agent-ops where naming a resource creates
+it.
+
+**The API server refuses both fields at once.** They decide who creates the
+claim, so both is two answers rather than a preference.
+
+{: .ao-callout}
+> **The claim outlives the route.** It carries no ownerRef on the Pipeline and
+> the manager holds no `delete` verb on claims, so deleting this route never
+> deletes the accumulated context of the conversations it started. Removing the
+> claim is yours to do deliberately.
+
+**`workspace` takes the same two fields**, for the repository checkout.
+
+**Two routes on ONE runtime can persist to different volumes.** Before this,
+that needed a second `AgentRuntime` identical but for one field — the same
+failure a second trust level used to have.
+
+**Re-wiring never moves a conversation already running here either**, and the
+reason is sharper: that conversation has already WRITTEN to the volume it was
+created against.
+
 ## See what you have to wire
 
 ```sh
@@ -131,7 +181,7 @@ That is enough to build a route with no new objects at all.
 
 ## Write the Pipeline
 
-<!-- generated: template kind=Pipeline name=my-route fields=signalSourceRefs,channelRefs,toolsets,toolsets.mode,mcpConfigs,runtimeRef,serviceAccountName comments=off -->
+<!-- generated: template kind=Pipeline name=my-route fields=signalSourceRefs,channelRefs,toolsets,toolsets.mode,mcpConfigs,runtimeRef,serviceAccountName,persistence.context.claimName comments=off -->
 ```yaml
 apiVersion: agentops.dev/v1alpha1
 kind: Pipeline
@@ -154,6 +204,9 @@ spec:
   runtimeRef:
     name: <name>
   serviceAccountName: <serviceAccountName>
+  persistence:
+    context:
+      claimName: <claimName>
 ```
 <!-- /generated -->
 

@@ -10,9 +10,9 @@ avoids.
 The volume SHALL be named for what it holds. It holds a conversation's
 accumulated context — the thing `runtimeContextId` is a handle into and
 `contextStorage` promises continuity on — and SHALL therefore be called the
-CONTEXT volume everywhere it is named, never the home volume. That it happens to
-be the runtime process's `$HOME` is a property of one runtime image, not what
-the volume is for.
+CONTEXT volume everywhere it is named. The retired name said where it was
+mounted, not what it holds. That it happens to be the runtime process's `$HOME`
+is a property of one runtime image, not what the volume is for.
 
 The MOUNT PATH SHALL move with the name, to `/data/context`. An earlier reading
 held it load-bearing because the reference runtime resolves `${HOME}/.claude/`
@@ -32,9 +32,9 @@ agent does not remember. A warning that scrolls past in a chat surface is not a
 record, and the runtime pod that emitted it has usually exited by the time the
 question is asked.
 
-#### Scenario: Fresh install persists sessions
+#### Scenario: Fresh install persists context
 - **WHEN** the chart is installed with no persistence values supplied
-- **THEN** a claim is provisioned and the rendered `AgentRuntime` carries a context volume reference naming it
+- **THEN** a claim is provisioned and it reaches every conversation whose route binds none, with no runtime-side and no pipeline-side value set
 
 #### Scenario: Cluster without a suitable provisioner
 - **WHEN** an operator disables context persistence
@@ -72,25 +72,25 @@ working directory, and relocating it breaks resume.
 
 ### Requirement: Workspace persistence is opt-in and provisioned by the chart
 The chart SHALL expose a workspace persistence block that is disabled by
-default and, when enabled, provisions a claim and wires it into the rendered
-`AgentRuntime` without the operator restating the claim name. The default SHALL
-be off: a fresh checkout is cheap and always correct, whereas a stale shared
-checkout is neither.
+default and, when enabled, provisions a claim that reaches every conversation
+whose route binds none, without the operator restating the claim name anywhere.
+The default SHALL be off: a fresh checkout is cheap and always correct, whereas
+a stale shared checkout is neither.
 
 The chart SHALL support pointing at an existing claim instead of provisioning
 one.
 
 #### Scenario: Disabled by default
 - **WHEN** the chart is installed with no workspace values supplied
-- **THEN** no workspace claim is rendered and the `AgentRuntime` declares no workspace volume
+- **THEN** no workspace claim is rendered and conversations use ephemeral storage for the checkout
 
 #### Scenario: Enabling needs one value, not two
 - **WHEN** an operator enables workspace persistence
-- **THEN** the claim is provisioned and the rendered `AgentRuntime` references it with no runtime-side claim name set
+- **THEN** the claim is provisioned and reaches conversations with no runtime-side and no pipeline-side claim name set
 
 #### Scenario: Existing claim is honored
 - **WHEN** an operator names an existing claim for the workspace
-- **THEN** the chart provisions nothing and the `AgentRuntime` references the named claim
+- **THEN** the chart provisions nothing and that claim is what conversations resolve to
 
 ## ADDED Requirements
 

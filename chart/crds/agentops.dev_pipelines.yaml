@@ -126,6 +126,127 @@ spec:
                 required:
                 - refs
                 type: object
+              persistence:
+                description: "Persistence declares WHERE this route's conversations
+                  keep their state —\nthe CONTEXT volume and the WORKSPACE volume,
+                  independently.\n\nIt sits here for the reason `runtimeRef` and `serviceAccountName`
+                  do: a\nruntime is an engine, and where a route persists is the route's
+                  decision.\nAn AgentRuntime declares neither volume, so two Pipelines
+                  sharing one\nruntime keep their conversations on different volumes
+                  without cloning it.\n\nPRECEDENCE, and no other order:\n\n\tpipeline.spec.persistence.<volume>
+                  -> the chart's release default -> ephemeral\n\nThe CONVERSATION
+                  snapshots the RESOLVED claim at creation, so editing\nthis field
+                  re-wires only conversations created afterwards. Nothing reads\na
+                  Pipeline at pod-build time."
+                properties:
+                  context:
+                    description: |-
+                      Context: a conversation's accumulated context, the thing
+                      `runtimeContextId` is a handle into. Absent takes the release default.
+                    properties:
+                      accessModes:
+                        description: |-
+                          AccessModes for that claim. Empty is ReadWriteMany, which is what
+                          concurrent conversations on one volume need.
+                        items:
+                          type: string
+                        type: array
+                      claimName:
+                        description: |-
+                          ClaimName is a PersistentVolumeClaim that ALREADY EXISTS. Nothing is
+                          created; conversations this route originates mount it.
+                        maxLength: 253
+                        type: string
+                      size:
+                        description: |-
+                          Size requested by the claim the manager renders for VolumeName. Ignored
+                          with ClaimName, where nothing is rendered. Empty requests 5Gi — a claim
+                          binding to a pre-created volume gets that volume's capacity whatever it
+                          asks for, so this is a floor rather than a size.
+                        type: string
+                      storageClassName:
+                        description: |-
+                          StorageClassName on that claim. EMPTY RENDERS AN EXPLICIT EMPTY STRING,
+                          which is the only value that binds to a pre-created volume — and it is
+                          the default here rather than in the chart because this field only ever
+                          accompanies VolumeName, where anything else is a mistake. An absent field
+                          is filled in by admission with the cluster's default StorageClass, which
+                          provisions a second volume beside the one that was named.
+
+                          Set it only for a class whose volumes are pre-created and selected by
+                          name, which some CSI drivers require.
+                        maxLength: 253
+                        type: string
+                      volumeName:
+                        description: |-
+                          VolumeName is a PersistentVolume the manager renders a claim on, bound to
+                          that volume by name with an EXPLICIT empty storage class — which is what
+                          disables dynamic provisioning. An absent storage class is filled in by
+                          the cluster's default StorageClass, which provisions a second volume and
+                          leaves the operator's untouched.
+                        maxLength: 253
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'claimName and volumeName are mutually exclusive: name
+                        a claim that already exists, or a PersistentVolume for the
+                        manager to render a claim on'
+                      rule: '!(has(self.claimName) && has(self.volumeName))'
+                  workspace:
+                    description: |-
+                      Workspace: the repository checkout, one subdirectory per conversation.
+                      Absent takes the release default, which is ephemeral unless the install
+                      turned workspace persistence on.
+                    properties:
+                      accessModes:
+                        description: |-
+                          AccessModes for that claim. Empty is ReadWriteMany, which is what
+                          concurrent conversations on one volume need.
+                        items:
+                          type: string
+                        type: array
+                      claimName:
+                        description: |-
+                          ClaimName is a PersistentVolumeClaim that ALREADY EXISTS. Nothing is
+                          created; conversations this route originates mount it.
+                        maxLength: 253
+                        type: string
+                      size:
+                        description: |-
+                          Size requested by the claim the manager renders for VolumeName. Ignored
+                          with ClaimName, where nothing is rendered. Empty requests 5Gi — a claim
+                          binding to a pre-created volume gets that volume's capacity whatever it
+                          asks for, so this is a floor rather than a size.
+                        type: string
+                      storageClassName:
+                        description: |-
+                          StorageClassName on that claim. EMPTY RENDERS AN EXPLICIT EMPTY STRING,
+                          which is the only value that binds to a pre-created volume — and it is
+                          the default here rather than in the chart because this field only ever
+                          accompanies VolumeName, where anything else is a mistake. An absent field
+                          is filled in by admission with the cluster's default StorageClass, which
+                          provisions a second volume beside the one that was named.
+
+                          Set it only for a class whose volumes are pre-created and selected by
+                          name, which some CSI drivers require.
+                        maxLength: 253
+                        type: string
+                      volumeName:
+                        description: |-
+                          VolumeName is a PersistentVolume the manager renders a claim on, bound to
+                          that volume by name with an EXPLICIT empty storage class — which is what
+                          disables dynamic provisioning. An absent storage class is filled in by
+                          the cluster's default StorageClass, which provisions a second volume and
+                          leaves the operator's untouched.
+                        maxLength: 253
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'claimName and volumeName are mutually exclusive: name
+                        a claim that already exists, or a PersistentVolume for the
+                        manager to render a claim on'
+                      rule: '!(has(self.claimName) && has(self.volumeName))'
+                type: object
               profileRef:
                 description: |-
                   ProfileRef: the agent answering the conversations this pipeline

@@ -33,20 +33,31 @@ idle TTL, storage volumes, service account (the agent's RBAC).
 - **The chart renders the `default` one for you**
   ([below](#the-substrate-runtime-and-globalagentopsruntime)).
 
-Two optional volumes, shaped alike (`pvcRef` / `emptyDir`) and defaulted apart:
+**AN `AgentRuntime` DECLARES NO VOLUME.** Persistence is WIRING and it lives on
+the `Pipeline` — see
+[Persistence is wiring too](#persistence-is-wiring-too). The runtime keeps
+`spec.contextStorage` alone, which is the one storage question only it can
+answer: whether its BACKEND writes context to a disk at all.
 
-| volume | mounts at | chart default | absent means |
+The two volumes, and where each is mounted:
+
+| volume | mounts at | release default | absent means |
 |---|---|---|---|
-| `spec.context` | `/data/home` | **on** (`persistence.context.enabled`) | a conversation's accumulated context dies with the pod, so a resume finds nothing and answers without it |
-| `spec.workspace` | `/data/workspace` | **off** (`persistence.workspace.enabled`) | the repository checkout is re-cloned per pod |
+| context | `/data/context` | **on** (`persistence.context.enabled`) | a conversation's accumulated context dies with the pod, so a resume finds nothing and answers without it |
+| workspace | `/data/workspace` | **off** (`persistence.workspace.enabled`) | the repository checkout is re-cloned per pod |
 
-**The volume is named for what it HOLDS.** It holds the context
-`runtimeContextId` is a handle into and `contextStorage` promises continuity on.
-That it is mounted at `/data/home` is a property of one runtime image — that
-PATH does not move, because claude-code keys its stored context off it.
+**The volume is named for what it HOLDS**, and so is the path it mounts at. It
+holds the context `runtimeContextId` is a handle into and `contextStorage`
+promises continuity on. `$HOME` points at it because that is where the reference
+image's backend writes.
 
-**`spec.home` is the retired name**, dual-read for one release. A runtime
-declaring it keeps working, and `spec.context` wins where both are present.
+**`/data/workspace` is the load-bearing path and it does NOT move.** The stored
+transcript directory is named for the WORKING directory — `-data-workspace` — so
+relocating THAT would strand every stored context.
+
+The context path was once believed load-bearing for the same reason, and is not.
+A claim's contents appear AT the mount path, so the same volume mounted
+elsewhere shows the same bytes.
 
 **The asymmetry is the point.**
 
@@ -498,7 +509,6 @@ runtime:
   idleTtlMinutes: ""            # empty = follow runtimeIdleTtlMinutes
   nodeSelector: {}
   resources: {}
-  contextPvcRef: ""             # only for a claim this chart did not create
   credentialsSecret:
     name: agentops-claude
     key: oauthToken
@@ -518,10 +528,10 @@ global:
   the Pipeline instead — see [Execution is wiring too](#execution-is-wiring-too).
 - **The account named here is the FLOOR**, bound to nothing. `rbacMode` renders
   a separate, named account for a route to opt into.
-- **`context.pvcRef` is wired, not copied.** With `persistence.context.enabled`
-  (or `persistence.context.existingClaim`) the rendered `AgentRuntime` takes the
-  chart's own claim. `runtime.contextPvcRef` exists only for a claim the chart
-  did not create.
+- **The rendered `AgentRuntime` carries NO volume**, and there is no
+  runtime-side claim name to set. The release-wide claims reach a conversation
+  as the manager's bootstrap default. A route that wants its own says so on its
+  `Pipeline` — see [Persistence is wiring too](#persistence-is-wiring-too).
 - **Idle TTL has one default.** Empty `runtime.idleTtlMinutes` follows the
   release's `runtimeIdleTtlMinutes`, so there is one number unless you
   deliberately want a second.
@@ -930,10 +940,13 @@ identity.** That would be a privilege change applied to work in progress.
 - **The SERVICE ACCOUNT is frozen only where the PIPELINE named one.** The
   runtime's own account is that runtime's CONTENT, so correcting a mistyped one
   reaches conversations already created.
-- **The `AgentRuntime`'s image, idle TTL and volumes are re-read at every pod
-  build**, exactly as a toolset's contents are.
+- **THE CLAIMS ARE FROZEN, RESOLVED**, like the runtime and unlike the account.
+  There is no runtime CONTENT below them to heal from — an `AgentRuntime`
+  declares neither volume.
+- **The `AgentRuntime`'s image and idle TTL are re-read at every pod build**,
+  exactly as a toolset's contents are.
 
-Conversations created before these fields carry neither, and nothing backfills
+Conversations created before these fields carry none, and nothing backfills
 them.
 
 ### `AgentProfile.spec.runtimeRef` is deprecated
@@ -950,6 +963,115 @@ own field.
 It moved because an `AgentRuntime` carries the ServiceAccount an agent runs as.
 A profile choosing one chose the agent's power in the cluster — and a profile is
 prompts, a repo ref and limits, while a Pipeline already grants tools.
+
+## Persistence is wiring too
+
+**A Pipeline also declares WHERE its conversations keep their state**, in
+`spec.persistence`, with an independent binding for each volume.
+
+It sits beside `runtimeRef` and `serviceAccountName` for the reason those are
+there: a runtime is an ENGINE — an image and its pod-level defaults — and where
+a route persists is the route's decision.
+
+**An `AgentRuntime` declares neither volume.** It keeps `spec.contextStorage`
+alone, which is the one storage question only it can answer: whether its BACKEND
+writes context to a disk at all. A runtime keeping context at a vendor API needs
+no volume and must not be given one. **The split is BACKEND SHAPE against
+PLACEMENT.**
+
+### A binding names a claim or a volume, and that decides who creates what
+
+**A pod can mount only a CLAIM, never a `PersistentVolume`** — so naming a
+volume requires that something render the claim on it, and which thing follows
+from where the binding was declared:
+
+| Set where | Who renders the claim | The conversation gets |
+|---|---|---|
+| Pipeline, `claimName` | nobody — it exists | that claim |
+| Pipeline, `volumeName` | **the manager** | the claim it created |
+| chart, `existingClaim` | nobody | it, for routes binding neither |
+| chart, `volumeName` | **the chart** | same |
+| chart, neither, persistence on | **the chart**, as the release default | same |
+| persistence off | nobody | EPHEMERAL — unless a route binds its own |
+
+**Naming both is refused by the API server**, not by a reconciler later. They
+decide who creates the claim, so both is two answers rather than a preference.
+
+{: .ao-callout}
+> **This is the one place naming a resource creates it.** Everywhere else in
+> agent-ops a name is a reference and nothing is provisioned from it. The
+> manager gains `persistentvolumeclaims` **get/list/watch/create** — and
+> deliberately **no `delete`, `update` or `patch`**.
+>
+> **A claim the manager creates carries no ownerRef on the Pipeline.** Deleting
+> a route must never delete the accumulated context of the conversations it
+> started: storage is the one thing here whose loss cannot be repaired by
+> reconciling again. Guarded twice — the absent ownerRef, and the absent verb.
+
+### The chain, and the runtime is in no part of it
+
+```
+pipeline.spec.persistence.<volume>  ->  the chart's release default  ->  ephemeral
+```
+
+**A route binding its own volume keeps it even where release-wide persistence is
+off**, because that operator has said where this route's state goes.
+
+**Where the chart configures none, conversations run ephemeral** and record from
+their first run that they cannot be continued — a configuration, not a fault.
+See [Continuity](#continuity-is-promised-only-where-it-is-possible).
+
+### Two routes, one runtime, two volumes
+
+```yaml
+pipelines:
+  - name: k8s-ops
+    profile: k8s-engineer
+    contextClaim: k8s-ops-context      # a claim that already exists
+  - name: ha-ops
+    profile: ha-engineer
+    contextVolume: pv-ha-context       # a PersistentVolume; the manager
+                                       # renders agentops-ha-ops-context on it
+```
+
+Both routes run the same `AgentRuntime`. **Before this, a second volume meant a
+second runtime CR identical but for one field** — the same failure that once
+made a second trust level need a clone.
+
+### Pointing at storage the chart did not create
+
+Three forms, all three on BOTH volumes, at BOTH levels:
+
+| Form | You supply | What renders the claim |
+|---|---|---|
+| existing claim | `existingClaim` (chart) / `contextClaim` (route) | nothing — yours already exists |
+| volume by name | `volumeName` (chart) / `contextVolume` (route) | the chart, or the manager |
+| volume by label | `selector` (chart) | the chart |
+
+**Binding to a pre-created volume needs an EXPLICIT empty storage class.** An
+absent field is filled in by admission from the cluster's default StorageClass,
+which provisions a second volume and leaves yours untouched.
+
+At chart level that spelling is `storageClassName: "-"`, the convention
+prometheus-community and Bitnami already use:
+
+| Value | Renders |
+|---|---|
+| undefined or empty | no field — the cluster's default provisioner |
+| `-` | `storageClassName: ""` — no class, bind to a pre-created volume |
+| a name | that class |
+
+{: .ao-callout}
+> **`-` is for a STATICALLY created volume, and a retained one is different.** A
+> `PersistentVolume` that was DYNAMICALLY PROVISIONED keeps its
+> `storageClassName` forever. A claim asking for `""` against it is refused —
+> `VolumeMismatch: storageClassName does not match` — and sits `Pending`,
+> looking exactly like a missing provisioner. Read the class off the PV and name
+> THAT.
+
+**The chart renders no `PersistentVolume`, in any form.** A pre-created volume
+is by definition not the release's to create, and a release that created one
+would own the lifecycle of storage holding agent context it did not put there.
 
 ## Capacity: how many run at once
 
@@ -998,7 +1120,7 @@ Two bounds keep this honest:
 - **`runtimeIdleTtlMinutes`** (`RUNTIME_IDLE_TTL_M`) defaults to **1**, so a
   finished conversation returns its slot within a minute instead of holding it
   for ten. `AgentRuntime.spec.idleTTLMinutes` still overrides it per runtime.
-  - The trade is latency, not memory. The session lives in `/data/home` and
+  - The trade is latency, not memory. The context lives on the context volume and
     resumes with its context.
   - An idle pod may also be evicted early to admit waiting work. That deletes
     the pod only, and the conversation resumes on its next input.
@@ -1215,7 +1337,7 @@ way to get this wrong:
 
 | Record | Where | Holds | Authoritative for |
 |---|---|---|---|
-| **Runtime context** | wherever the runtime keeps it — for the reference runtime, session files on `/data/home` | every message, tool call and model response | **the agent's memory** |
+| **Runtime context** | wherever the runtime keeps it — for the reference runtime, transcript files on the context volume | every message, tool call and model response | **the agent's memory** |
 | Thread transcript | the chat surface, via bound channels | what a human said and was told | the human-visible history |
 | Run history | `Conversation.status.runs[]` | the messages consumed + outcome + result, both truncated | what the operator knows |
 

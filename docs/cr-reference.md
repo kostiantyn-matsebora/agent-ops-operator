@@ -11,15 +11,15 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | Kind | You write it | Fields |
 |---|---|---|
 | [AgentProfile](#agentprofile) | yes | 40 |
-| [Pipeline](#pipeline) | yes | 17 |
+| [Pipeline](#pipeline) | yes | 30 |
 | [MCPToolset](#mcptoolset) | yes | 1 |
 | [MCPConfig](#mcpconfig) | yes | 5 |
 | [SignalSource](#signalsource) | yes | 8 |
 | [SignalAdapter](#signaladapter) | yes | 18 |
 | [Channel](#channel) | yes | 4 |
 | [ChannelAdapter](#channeladapter) | yes | 16 |
-| [AgentRuntime](#agentruntime) | yes | 58 |
-| [Conversation](#conversation) | no — the operator does | 38 |
+| [AgentRuntime](#agentruntime) | yes | 46 |
+| [Conversation](#conversation) | no — the operator does | 40 |
 | [ConversationInput](#conversationinput) | no — the operator does | 5 |
 
 ## AgentProfile
@@ -100,6 +100,19 @@ PipelineSpec declares the wiring between the pipeline elements: every referenced
 | `mcpConfigs` | `object` |  | MCPConfigs binds MCPConfig CRs supplying this wiring's MCP servers, overlaid per server key in ref order (later wins). No mode: an agent definition declares no servers, so there is nothing to compose against. |
 | `mcpConfigs.refs` | `[]object` | **yes** | Refs are applied in order: MCP server keys are overlaid with the later ref winning a collision. |
 | `mcpConfigs.refs[].name` | `string` | **yes** | Name of the referenced object. |
+| `persistence` | `object` |  | Persistence declares WHERE this route's conversations keep their state — the CONTEXT volume and the WORKSPACE volume, independently. It sits here for the reason `runtimeRef` and `serviceAccountName` do: a runtime is an engine, and where a route persists is the route's decision. An AgentRuntime declares neither volume, so two Pipelines sharing one runtime keep their conversations on different volumes without cloning it. PRECEDENCE, and no other order: pipeline.spec.persistence.<volume> -> the chart's release default -> ephemeral The CONVERSATION snapshots the RESOLVED claim at creation, so editing this field re-wires only conversations created afterwards. Nothing reads a Pipeline at pod-build time. |
+| `persistence.context` | `object` |  | Context: a conversation's accumulated context, the thing `runtimeContextId` is a handle into. Absent takes the release default. |
+| `persistence.context.accessModes` | `[]string` |  | AccessModes for that claim. Empty is ReadWriteMany, which is what concurrent conversations on one volume need. |
+| `persistence.context.claimName` | `string` |  | ClaimName is a PersistentVolumeClaim that ALREADY EXISTS. Nothing is created; conversations this route originates mount it. |
+| `persistence.context.size` | `string` |  | Size requested by the claim the manager renders for VolumeName. Ignored with ClaimName, where nothing is rendered. Empty requests 5Gi — a claim binding to a pre-created volume gets that volume's capacity whatever it asks for, so this is a floor rather than a size. |
+| `persistence.context.storageClassName` | `string` |  | StorageClassName on that claim. EMPTY RENDERS AN EXPLICIT EMPTY STRING, which is the only value that binds to a pre-created volume — and it is the default here rather than in the chart because this field only ever accompanies VolumeName, where anything else is a mistake. An absent field is filled in by admission with the cluster's default StorageClass, which provisions a second volume beside the one that was named. Set it only for a class whose volumes are pre-created and selected by name, which some CSI drivers require. |
+| `persistence.context.volumeName` | `string` |  | VolumeName is a PersistentVolume the manager renders a claim on, bound to that volume by name with an EXPLICIT empty storage class — which is what disables dynamic provisioning. An absent storage class is filled in by the cluster's default StorageClass, which provisions a second volume and leaves the operator's untouched. |
+| `persistence.workspace` | `object` |  | Workspace: the repository checkout, one subdirectory per conversation. Absent takes the release default, which is ephemeral unless the install turned workspace persistence on. |
+| `persistence.workspace.accessModes` | `[]string` |  | AccessModes for that claim. Empty is ReadWriteMany, which is what concurrent conversations on one volume need. |
+| `persistence.workspace.claimName` | `string` |  | ClaimName is a PersistentVolumeClaim that ALREADY EXISTS. Nothing is created; conversations this route originates mount it. |
+| `persistence.workspace.size` | `string` |  | Size requested by the claim the manager renders for VolumeName. Ignored with ClaimName, where nothing is rendered. Empty requests 5Gi — a claim binding to a pre-created volume gets that volume's capacity whatever it asks for, so this is a floor rather than a size. |
+| `persistence.workspace.storageClassName` | `string` |  | StorageClassName on that claim. EMPTY RENDERS AN EXPLICIT EMPTY STRING, which is the only value that binds to a pre-created volume — and it is the default here rather than in the chart because this field only ever accompanies VolumeName, where anything else is a mistake. An absent field is filled in by admission with the cluster's default StorageClass, which provisions a second volume beside the one that was named. Set it only for a class whose volumes are pre-created and selected by name, which some CSI drivers require. |
+| `persistence.workspace.volumeName` | `string` |  | VolumeName is a PersistentVolume the manager renders a claim on, bound to that volume by name with an EXPLICIT empty storage class — which is what disables dynamic provisioning. An absent storage class is filled in by the cluster's default StorageClass, which provisions a second volume and leaves the operator's untouched. |
 | `profileRef` | `object` | **yes** | ProfileRef: the agent answering the conversations this pipeline originates — those from the signal sources it WATCHES, and those a chat command addresses to it by name. Channels supply no default. |
 | `profileRef.name` | `string` | **yes** | Name of the referenced object. |
 | `runtimeRef` | `object` |  | RuntimeRef selects the AgentRuntime executing this wiring's conversations. Absent, the AgentRuntime named "default" — the one the parent chart renders — then the manager's bootstrap configuration. IT REPLACES `AgentProfile.spec.runtimeRef`, which is deprecated. An AgentRuntime carries the ServiceAccount an agent runs as, so selecting one is selecting the agent's power in the cluster — and that is a wiring decision, made beside the tools and servers the same route grants, not an attribute of the prompts an agent is written with. The CONVERSATION snapshots the resolved name at creation, so editing this field re-wires only conversations created afterwards. The referenced CR's CONTENT — image, idle TTL, volumes — is re-read at every pod build, so fixing a runtime heals conversations already running. |
@@ -311,7 +324,7 @@ Written by the operator. Read it, never set it.
 
 ## AgentRuntime
 
-AgentRuntimeSpec defines HOW agents execute: the runtime image implementing the operator's work contract, and its pod-level defaults. Adopters bring their own agent backend (claude-code, aider, custom) by supplying an image that: 1. long-polls GET $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25 2. executes the returned unit (promptText or promptFile+promptVars against the checked-out repository), streaming progress to STDOUT (pod logs) 3. reports POST $CONTROL_URL/work/done {convo,runId,status,runtimeContextId,result} 4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
+AgentRuntimeSpec defines HOW agents execute: the runtime image implementing the operator's work contract, and its pod-level defaults. Adopters bring their own agent backend (claude-code, aider, custom) by supplying an image that: 1. long-polls GET $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25 2. executes the returned unit (promptText or promptFile+promptVars against the checked-out repository), streaming progress to STDOUT (pod logs) 3. reports POST $CONTROL_URL/work/done {convo,runId,status,runtimeContextId,result} 4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work IT DECLARES NO VOLUME. A runtime is an ENGINE — an image and its pod-level defaults — and WHERE a route's conversations keep their state is a property of the ROUTE, decided beside the tools it grants, the channels it delivers to, the runtime it selects and the identity it executes under. All of those are Pipeline fields, and so is persistence: Pipeline.spec.persistence. The same argument moved `serviceAccountName` here and then off again. Two Pipelines sharing one runtime must be able to keep their conversations on different volumes without cloning it, which is exactly what expressing a second trust level used to require.
 
 ### spec
 
@@ -319,11 +332,7 @@ AgentRuntimeSpec defines HOW agents execute: the runtime image implementing the 
 |---|---|---|---|
 | `args` | `[]string` |  | Command / Args override the image's entrypoint. Both empty runs it as the image declares it. |
 | `command` | `[]string` |  | Command/Args override the image entrypoint. |
-| `context` | `object` |  | Context volume for a conversation's durable accumulated context. |
-| `context.emptyDir` | `boolean` |  | EmptyDir (default when no pvcRef): the accumulated context dies with the pod. |
-| `context.pvcRef` | `object` |  | PVCRef mounts an existing (usually RWX) PVC at the runtime's context path. |
-| `context.pvcRef.name` | `string` | **yes** | Name of the referenced object. |
-| `contextStorage` | `string` |  | ContextStorage declares where this runtime keeps a conversation's context, so the manager can tell whether continuity is possible here BEFORE promising it. A runtime keeping context on its context volume, in a deployment that provides none, can never continue anything — and saying that up front is what stops every follow-up failing for a reason the operator already chose. |
+| `contextStorage` | `string` |  | ContextStorage declares whether this runtime's backend keeps a conversation's context on a disk at all, so the manager can tell whether continuity is possible here BEFORE promising it. A runtime keeping context on a context volume, in a deployment whose route and release both supply none, can never continue anything — and saying that up front is what stops every follow-up failing for a reason the operator already chose. WHICH volume is not asked here and cannot be answered here — see Pipeline.spec.persistence. |
 | `contextSync` | `object` |  | ContextSync moves the LIVE context off the durable volume and keeps a snapshot on it instead. ABSENT means today's behaviour, unchanged: the context volume is mounted directly and there is no sidecar. |
 | `contextSync.exclude` | `[]string` |  | Exclude drops churn from INSIDE the included paths — lock files, temp files, anything rewritten constantly without being context. Without it the change detector reports a change on nearly every cycle and the skip-when-unchanged rule buys nothing. |
 | `contextSync.interval` | `string` |  | Interval is how often the context is checkpointed while a pod is alive, as a Go duration ("2m"). "0" disables the timer and leaves only work-boundary checkpoints, which is the right setting for a low-churn backend. The interval bounds what a SIGKILL can lose: a crash, an OOM or a node reboot takes everything written since the last checkpoint, and no design removes that — only shortens it. |
@@ -357,10 +366,6 @@ AgentRuntimeSpec defines HOW agents execute: the runtime image implementing the 
 | `env[].valueFrom.secretKeyRef.key` | `string` | **yes** | The key of the secret to select from. Must be a valid secret key. |
 | `env[].valueFrom.secretKeyRef.name` | `string` |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
 | `env[].valueFrom.secretKeyRef.optional` | `boolean` |  | Specify whether the Secret or its key must be defined |
-| `home` | `object` |  | Home is the former name of Context. Deprecated: use Context. Honoured for ONE release so that a runtime installed before the rename keeps mounting the volume it already has — a rename that merely moved the field would strand every one of them at the moment of upgrade. Read ONLY through AgentRuntime.ContextVolume(). |
-| `home.emptyDir` | `boolean` |  | EmptyDir (default when no pvcRef): session state dies with the pod. |
-| `home.pvcRef` | `object` |  | PVCRef mounts an existing (usually RWX) PVC at /data/home. |
-| `home.pvcRef.name` | `string` | **yes** | Name of the referenced object. |
 | `idleTtlMinutes` | `integer` |  | IdleTTLMinutes before an idle runtime pod exits (respawned on demand). |
 | `image` | `string` | **yes** | Image implementing the work contract. Derive your own to add tooling: what an agent may REACH is wiring, so an image never grants it. |
 | `nodeSelector` | `map[string]string` |  | NodeSelector placing runtime pods, applied with Tolerations and Affinity below. |
@@ -371,10 +376,6 @@ AgentRuntimeSpec defines HOW agents execute: the runtime image implementing the 
 | `resources.limits` | `map[string]object` |  | Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
 | `resources.requests` | `map[string]object` |  | Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
 | `serviceAccountName` | `string` |  | ServiceAccountName is this runtime's security identity: its RBAC defines exactly what agents executing on this runtime may do in the cluster. Give each runtime with a different trust level its OWN ServiceAccount — runtimes sharing an SA share powers. Falls back to the operator's default runtime SA when empty. |
-| `workspace` | `object` |  | Workspace volume for the repository checkout. Absent = ephemeral, which is always correct — persisting it preserves uncommitted work across a pod restart and skips the re-clone. |
-| `workspace.emptyDir` | `boolean` |  | EmptyDir (default when no pvcRef): the checkout dies with the pod, which costs a re-clone and nothing else. |
-| `workspace.pvcRef` | `object` |  | PVCRef mounts an existing (RWX when conversations run concurrently) PVC, one subdirectory per conversation, at /data/workspace. |
-| `workspace.pvcRef.name` | `string` | **yes** | Name of the referenced object. |
 
 ### status
 
@@ -400,6 +401,7 @@ ConversationSpec pins a conversation to its chat surfaces and an agent profile, 
 |---|---|---|---|
 | `channelRefs` | `[]object` |  | ChannelRefs — every listed channel mirrors the whole conversation (own thread per channel, replies and acks fanned out). Empty = chat-less (HTTP-only / shadow). |
 | `channelRefs[].name` | `string` | **yes** | Name of the referenced object. |
+| `contextClaimName` | `string` |  | ContextClaimName / WorkspaceClaimName are the RESOLVED claims this conversation's runtime pods mount, snapshotted at creation exactly as RuntimeRef and ServiceAccountName are. MATERIALIZED state, never hand-set. They are the answer to `pipeline.spec.persistence.<volume> -> the release default -> ephemeral`, computed ONCE, so that editing a Pipeline's persistence moves only conversations created afterwards. THAT IS SHARPER HERE THAN ANYWHERE ELSE ON THIS OBJECT. Re-resolving would change which volume an INFLIGHT conversation's next pod mounts — work that has already written to the old one, coming back to a different disk and reporting success. Empty means ephemeral OR a conversation predating these fields, and the two behave identically: resolution falls through to the manager's bootstrap default, exactly as it did before. |
 | `inputs` | `[]object` |  |  |
 | `inputs[].agent` | `string` |  | Agent is DEPRECATED and no longer written. It carried the per-message agent override of the retired `/<pipeline>:<agent>` addressing form, which let whoever typed it select an agent definition the WIRING never declared. A Pipeline names one profile and a profile names one agent, so the agent is already fully determined by the wiring. Dispatch still READS it for one release, so inputs already queued when the manager restarts dispatch to the agent they were parsed with. Same posture as the retired `sessionId` dual-read; removing the field is a later change. Deprecated: nothing sets this. Do not add a writer. |
 | `inputs[].id` | `string` | **yes** |  |
@@ -436,6 +438,7 @@ ConversationSpec pins a conversation to its chat surfaces and an agent profile, 
 | `toolsets.mode` | `string` |  | Mode composes this binding's tools with the agent definition's: merge unions them (the agent keeps what it declared, the wiring adds), overwrite passes the wiring's alone (the agent's declaration does not apply to this route). Built-ins included — name them in the toolset. |
 | `toolsets.refs` | `[]object` | **yes** | Refs are applied in order: tool lists concatenate with dedup, the first occurrence keeping its position. |
 | `toolsets.refs[].name` | `string` | **yes** | Name of the referenced object. |
+| `workspaceClaimName` | `string` |  |  |
 
 ### status
 

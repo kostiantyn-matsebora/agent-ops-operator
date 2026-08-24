@@ -8,11 +8,16 @@ release-wide and lives in `chart/values.yaml` (`runtime:` +
 `global.agentops.runtime.*`).
 
 **RELEASE-WIDE BY DEFAULT, PER-ROUTE BY CHOICE.** A `Pipeline` may name its own
-`runtimeRef` and `serviceAccountName`, so an install expresses a second trust
-level on the route rather than by cloning an `AgentRuntime` — see `wiring.md`.
-What stays release-wide is the DEFAULT both fall back to, and the ownership
-below.
+`runtimeRef`, `serviceAccountName` AND `persistence`, so an install expresses a
+second trust level — or a second volume — on the route rather than by cloning an
+`AgentRuntime` — see `wiring.md`. What stays release-wide is the DEFAULT all
+three fall back to, and the ownership below.
 
+- **THE VOLUME IS NOT ON THE RUNTIME AT ALL.** `AgentRuntime.spec.home`,
+  `spec.context` and `spec.workspace` are DELETED with no alias. The runtime
+  keeps `spec.contextStorage` — BACKEND SHAPE, not PLACEMENT. The chart's claims
+  reach a conversation as the manager's BOOTSTRAP DEFAULT (`CONTEXT_PVC` /
+  `WORKSPACE_PVC`), never through the CR.
 - **No subchart renders an `AgentRuntime`, a model credential or a context
   volume.** That is THE SUBSTRATE and it stays the parent's, exclusively.
 - **A BUNDLE DOES RENDER THE ACCOUNTS ITS OWN ROUTES NEED**, scoped to what
@@ -42,6 +47,29 @@ below.
   removed.
 - **Putting the runtime in a bundle is what made a chat-only install unable to
   execute anything**, and made TWO runtime SAs exist, one granted everything.
+
+### THE OPERATOR MAY CREATE STORAGE AND MUST NEVER DESTROY IT
+
+A `Pipeline` persistence binding naming a `volumeName` makes the manager render
+the claim on it, because **a pod can mount only a claim, never a
+`PersistentVolume`**.
+
+**THIS IS THE ONE PLACE `NAMING IS NOT CREATING` DOES NOT HOLD.** It is stated
+rather than smuggled: the manager already creates Pods and ConfigMaps, so the
+category is not new — what is new is that the object OUTLIVES the conversation,
+and the release.
+
+- **RBAC is `get`/`list`/`watch`/`create` on `persistentvolumeclaims`, and
+  NOTHING ELSE.** No `delete`, no `update`, no `patch`. A controller that could
+  rewrite the claim could shrink it.
+- **THE CREATED CLAIM CARRIES NO OWNERREF ON THE PIPELINE.** Deleting a Pipeline
+  must never delete the accumulated context of the conversations it started.
+- **BOTH HALVES, because either alone is a promise rather than a boundary.** The
+  ownerRef guards against garbage collection, the absent verb against a bug.
+- **It is idempotent BY EXISTENCE**, not by patch: an existing claim is left
+  exactly as it is, so an operator who resized or relabelled it keeps their edit
+  — and the chart rendering the same claim for a route it ships is not a second
+  mechanism, it is the same one arriving earlier.
 
 ### The manager reads NO secrets — zero Secret API reads
 
@@ -539,8 +567,8 @@ architectural error, not merely a noisy one.
 - **ownerRef → Conversation**, for GC.
 - **Repo checkout at `/data/workspace`.** claude-code sessions are keyed by cwd,
   so moving this path breaks session resume.
-- **`/data/workspace` and `/data/home` are mount points.** Clear contents, never
-  rmdir.
+- **`/data/workspace` and `/data/context` are mount points.** Clear contents,
+  never rmdir.
 
 ### Dispatch and ingest semantics are pinned by test fixtures
 

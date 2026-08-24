@@ -63,6 +63,17 @@ spec:
                   the checked-out repository), streaming progress to STDOUT (pod logs)
                3. reports    POST $CONTROL_URL/work/done {convo,runId,status,runtimeContextId,result}
                4. exits 0 after RUNTIME_IDLE_TTL_M minutes without work
+
+              IT DECLARES NO VOLUME. A runtime is an ENGINE — an image and its pod-level
+              defaults — and WHERE a route's conversations keep their state is a property
+              of the ROUTE, decided beside the tools it grants, the channels it delivers
+              to, the runtime it selects and the identity it executes under. All of those
+              are Pipeline fields, and so is persistence: Pipeline.spec.persistence.
+
+              The same argument moved `serviceAccountName` here and then off again. Two
+              Pipelines sharing one runtime must be able to keep their conversations on
+              different volumes without cloning it, which is exactly what expressing a
+              second trust level used to require.
             properties:
               args:
                 description: |-
@@ -76,36 +87,19 @@ spec:
                 items:
                   type: string
                 type: array
-              context:
-                description: Context volume for a conversation's durable accumulated
-                  context.
-                properties:
-                  emptyDir:
-                    description: |-
-                      EmptyDir (default when no pvcRef): the accumulated context dies with the
-                      pod.
-                    type: boolean
-                  pvcRef:
-                    description: PVCRef mounts an existing (usually RWX) PVC at the
-                      runtime's context path.
-                    properties:
-                      name:
-                        description: Name of the referenced object.
-                        minLength: 1
-                        type: string
-                    required:
-                    - name
-                    type: object
-                type: object
               contextStorage:
                 default: volume
                 description: |-
-                  ContextStorage declares where this runtime keeps a conversation's context,
-                  so the manager can tell whether continuity is possible here BEFORE
-                  promising it. A runtime keeping context on its context volume, in a
-                  deployment that provides none, can never continue anything — and saying
-                  that up front is what stops every follow-up failing for a reason the
-                  operator already chose.
+                  ContextStorage declares whether this runtime's backend keeps a
+                  conversation's context on a disk at all, so the manager can tell whether
+                  continuity is possible here BEFORE promising it. A runtime keeping
+                  context on a context volume, in a deployment whose route and release both
+                  supply none, can never continue anything — and saying that up front is
+                  what stops every follow-up failing for a reason the operator already
+                  chose.
+
+                  WHICH volume is not asked here and cannot be answered here — see
+                  Pipeline.spec.persistence.
                 enum:
                 - volume
                 - external
@@ -383,30 +377,6 @@ spec:
                   - name
                   type: object
                 type: array
-              home:
-                description: |-
-                  Home is the former name of Context.
-
-                  Deprecated: use Context. Honoured for ONE release so that a runtime
-                  installed before the rename keeps mounting the volume it already has —
-                  a rename that merely moved the field would strand every one of them at
-                  the moment of upgrade. Read ONLY through AgentRuntime.ContextVolume().
-                properties:
-                  emptyDir:
-                    description: 'EmptyDir (default when no pvcRef): session state
-                      dies with the pod.'
-                    type: boolean
-                  pvcRef:
-                    description: PVCRef mounts an existing (usually RWX) PVC at /data/home.
-                    properties:
-                      name:
-                        description: Name of the referenced object.
-                        minLength: 1
-                        type: string
-                    required:
-                    - name
-                    type: object
-                type: object
               idleTtlMinutes:
                 default: 10
                 description: IdleTTLMinutes before an idle runtime pod exits (respawned
@@ -494,30 +464,6 @@ spec:
                   runtimes sharing an SA share powers. Falls back to the operator's default
                   runtime SA when empty.
                 type: string
-              workspace:
-                description: |-
-                  Workspace volume for the repository checkout. Absent = ephemeral, which
-                  is always correct — persisting it preserves uncommitted work across a pod
-                  restart and skips the re-clone.
-                properties:
-                  emptyDir:
-                    description: |-
-                      EmptyDir (default when no pvcRef): the checkout dies with the pod, which
-                      costs a re-clone and nothing else.
-                    type: boolean
-                  pvcRef:
-                    description: |-
-                      PVCRef mounts an existing (RWX when conversations run concurrently) PVC,
-                      one subdirectory per conversation, at /data/workspace.
-                    properties:
-                      name:
-                        description: Name of the referenced object.
-                        minLength: 1
-                        type: string
-                    required:
-                    - name
-                    type: object
-                type: object
             required:
             - image
             type: object

@@ -121,9 +121,10 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 	return &httpapi.Server{
 		Client: k8sClient, Reader: k8sClient, Namespace: ns,
 		// A deployment that CAN carry context: continuity is now promised only
-		// where the runtime has somewhere to keep it, so a fixture with no home
-		// volume would (correctly) withhold every handle and make the resume
-		// tests assert the wrong thing.
+		// where the conversation resolved somewhere to keep it, so a fixture with
+		// no context volume would (correctly) withhold every handle and make the
+		// resume tests assert the wrong thing. It is the RELEASE DEFAULT here —
+		// the bottom of the persistence chain — since no fixture route binds one.
 		Runtime: rt,
 		Ops:     ops,
 		// The router carries the SAME runtime config, exactly as main.go wires

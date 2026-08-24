@@ -88,4 +88,46 @@ spec:
       - name: {{ . }}
       {{- end }}
   {{- end }}
+  {{- if or $p.contextClaim $p.contextVolume $p.workspaceClaim $p.workspaceVolume }}
+  # WHERE this route's conversations keep their state. Unset takes the
+  # release-wide claims (`persistence.context` / `.workspace`), which reach the
+  # manager as its bootstrap default — so this is only for a route that keeps
+  # its state somewhere of its own.
+  #
+  # A CLAIM already exists and nothing is created. A VOLUME is not mountable, so
+  # naming one makes the MANAGER render the claim on it, under a derived name,
+  # with an explicit empty storage class. That claim OUTLIVES this Pipeline: it
+  # carries no ownerRef, and the manager holds no delete verb on claims.
+  persistence:
+    {{- if or $p.contextClaim $p.contextVolume }}
+    context:
+      {{- with $p.contextClaim }}
+      claimName: {{ . }}
+      {{- end }}
+      {{- with $p.contextVolume }}
+      volumeName: {{ . }}
+      {{- end }}
+      {{- with $p.contextSize }}
+      size: {{ . | quote }}
+      {{- end }}
+    {{- end }}
+    {{- if or $p.workspaceClaim $p.workspaceVolume }}
+    workspace:
+      {{- with $p.workspaceClaim }}
+      claimName: {{ . }}
+      {{- end }}
+      {{- with $p.workspaceVolume }}
+      volumeName: {{ . }}
+      {{- end }}
+      {{- with $p.workspaceSize }}
+      size: {{ . | quote }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- if and $p.contextClaim $p.contextVolume }}
+{{- fail (printf "pipelines[%s]: contextClaim and contextVolume are mutually exclusive — they decide WHO renders the claim, so both is two answers rather than a preference" $p.name) }}
+{{- end }}
+{{- if and $p.workspaceClaim $p.workspaceVolume }}
+{{- fail (printf "pipelines[%s]: workspaceClaim and workspaceVolume are mutually exclusive — they decide WHO renders the claim, so both is two answers rather than a preference" $p.name) }}
+{{- end }}
 {{- end }}

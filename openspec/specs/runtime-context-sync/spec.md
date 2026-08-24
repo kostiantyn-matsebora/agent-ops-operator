@@ -158,7 +158,7 @@ runtime's readiness condition.
 #### Scenario: An unconfigured runtime is unchanged
 
 - **WHEN** an AgentRuntime declares no context synchronisation
-- **THEN** it runs exactly as before, with its home volume mounted directly and no synchronising process
+- **THEN** it runs exactly as before, with its context volume mounted directly and no synchronising process
 
 #### Scenario: A misdeclared context is reported
 

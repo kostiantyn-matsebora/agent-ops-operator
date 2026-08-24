@@ -342,7 +342,7 @@ that arrives, because for those installs it is.
 {{- if and (not $root.Release.IsInstall) $ctx.enabled (ne $resolved "agentops-home") -}}
 {{- if lookup "v1" "PersistentVolumeClaim" $root.Release.Namespace "agentops-home" -}}
 {{- if not (lookup "v1" "PersistentVolumeClaim" $root.Release.Namespace $resolved) -}}
-{{- fail (printf "PersistentVolumeClaim \"agentops-home\" exists in namespace %q and this chart version no longer renders it: the context volume was renamed, and its default claim is now %q. Nothing copies a volume, so upgrading as-is would provision a second, EMPTY claim and every conversation in this install would answer without its accumulated context while every signal reported success. Keep the volume you have — this moves no data and is one line:\n\n  persistence:\n    context:\n      existingClaim: agentops-home\n\nOr, deliberately, rebind the PersistentVolume under the new claim name using persistence.context.volumeName together with storageClassName: \"-\"." $root.Release.Namespace $resolved) -}}
+{{- fail (printf "PersistentVolumeClaim \"agentops-home\" exists in namespace %q and this chart version no longer renders it: the context volume was renamed, and its default claim is now %q. Nothing copies a volume, so upgrading as-is would provision a second, EMPTY claim and every conversation in this install would answer without its accumulated context while every signal reported success. Keep the volume you have — this moves no data and is one line:\n\n  persistence:\n    context:\n      existingClaim: agentops-home\n\nOr, better, REBIND the volume under the new name — retain the PV, clear its claimRef, delete the old claim, and set persistence.context.volumeName to the PV. MATCH ITS STORAGE CLASS: a PV that was dynamically provisioned KEEPS its class, and a claim requesting a different one is refused with VolumeMismatch, so set persistence.context.storageClassName to that class. Only a statically created PV with no class takes \"-\"." $root.Release.Namespace $resolved) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -360,6 +360,33 @@ Pending and no runtime pod ever schedules behind.
 This one needs no cluster, so unlike the rename guard it fires under
 `helm template`, in CI and under a GitOps controller too.
 */ -}}
+{{/*
+agentops.retiredRuntimeVolumeKeysGuard — the runtime no longer names a volume,
+and a values file that still does gets told rather than ignored.
+
+SAME CLASS AS THE BLOCK GUARD BELOW, AND FOR THE SAME REASON: Helm reports no
+unread values key, so the alternative is silence. The quiet case here is the
+expensive one — an operator who deliberately pointed the runtime at a claim the
+chart did not create keeps every signal of success while the release-wide claim
+is used instead, and every conversation on that install answers out of the wrong
+volume.
+
+It needs NO CLUSTER, so unlike the claim-rename guard it also protects a GitOps
+install.
+*/}}
+{{- define "agentops.retiredRuntimeVolumeKeysGuard" -}}
+{{- $rt := .Values.runtime -}}
+{{- $retired := list -}}
+{{- range $k := list "contextPvcRef" "homePvcRef" "workspacePvcRef" -}}
+{{- if hasKey $rt $k -}}
+{{- $retired = append $retired (printf "runtime.%s" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if $retired -}}
+{{- fail (printf "These values are GONE, not renamed: %s. An AgentRuntime declares no volume at all — persistence is WIRING, and it moved to the Pipeline. Set it release-wide under persistence.context / persistence.workspace, which reach every conversation with nothing restated; or per route under pipelines[].persistence.context.claimName (or .volumeName) for a route that keeps its state somewhere of its own. A runtime CR still carrying the retired field contributes no volume after this upgrade." (join ", " $retired)) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "agentops.retiredPersistenceKeysGuard" -}}
 {{- $p := .Values.persistence -}}
 {{- $retired := list -}}

@@ -162,16 +162,30 @@ shared checkout is neither.
 | `persistence.context.storageClassName` | `""` | empty uses the cluster default — see below |
 | `persistence.workspace.enabled` | `false` | on keeps uncommitted agent work across a pod restart |
 
-**Upgrading from a release before chart 9.0.0?** This block moved: it was flat
-`persistence.*`, and the claim was `agentops-home`. Supplying a retired key now
-fails the render naming where it went, and
-[`CHANGELOG.md`](CHANGELOG.md) has the one line that keeps the volume you have.
+**These are the RELEASE-WIDE volumes**, which every route takes unless it says
+otherwise. A route that keeps its state somewhere of its own says so on its own
+`Pipeline` — see [Per-route storage](#per-route-storage) below.
+
+**Nothing restates a claim name.** The resolved claim reaches the manager's
+bootstrap default, the reclaiming job and the mount probe on its own, and the
+rendered `AgentRuntime` carries no volume at all.
+
+**Upgrading from a release before chart 9.0.0?** Three things moved, and each
+fails the render rather than being ignored:
+
+| Retired | Now |
+|---|---|
+| flat `persistence.*` | `persistence.context.*` |
+| `runtime.contextPvcRef` / `runtime.homePvcRef` | `persistence.context`, or a route's own binding |
+| `runtime.workspacePvcRef` | `persistence.workspace`, or a route's own binding |
+
+The default claim was renamed too, and **nothing copies a volume**.
+[`CHANGELOG.md`](CHANGELOG.md) carries the two ways through and is the only
+warning a GitOps install gets.
 
 #### Pointing a volume at storage the chart did not create
 
-**Both volumes accept all three forms**, and the resolved claim name follows to
-every consumer — the `AgentRuntime`, the manager's bootstrap default, the
-reclaiming job and the mount probe. Nothing is restated.
+**Both volumes accept all three forms:**
 
 | Form | Key | The chart |
 |---|---|---|
@@ -197,13 +211,69 @@ persistence:
     storageClassName: "-"
 ```
 
+{: .ao-callout}
+> **`-` is for a volume you created by hand. A RETAINED one is different.** A
+> `PersistentVolume` that was dynamically provisioned — which is what an
+> existing agent-ops install has — keeps its `storageClassName` forever. A claim
+> asking for `""` against it is refused with `VolumeMismatch: storageClassName
+> does not match` and sits `Pending`, looking exactly like a missing
+> provisioner. Read the class off the PV and name THAT:
+>
+> ```sh
+> kubectl get pv <name> -o jsonpath='{.spec.storageClassName}'
+> ```
+>
+> And a claim's spec is immutable once created, so getting this wrong is not
+> fixed by re-running `helm upgrade` — delete the wrong claim first.
+
 **The chart never renders a `PersistentVolume`.** Create it yourself — a
 node-affine `local` PV is the usual answer on a cluster with no dynamic
 provisioner.
 
-**Surviving a damaged volume.** A shared volume's filesystem can be corrupted by
-a node reboot, and the storage layer will still call it healthy — it replicates
-blocks and cannot see a filesystem.
+#### Per-route storage
+
+**Persistence is WIRING**, so a route declares its own beside the tools it
+grants and the account it runs as. Leave it out and the route takes the
+release-wide volumes above, which is what nearly every install wants.
+
+```yaml
+pipelines:
+  - name: k8s-ops
+    profile: k8s-engineer
+    contextClaim: k8s-ops-context      # a claim that already exists
+  - name: ha-ops
+    profile: ha-engineer
+    contextVolume: pv-ha-context       # a PersistentVolume the MANAGER
+                                       # renders a claim on
+```
+
+| Key | Who renders the claim |
+|---|---|
+| `contextClaim` / `workspaceClaim` | nobody — it already exists |
+| `contextVolume` / `workspaceVolume` | **the manager**, as `agentops-<route>-<volume>` |
+| `contextSize` / `workspaceSize` | shapes that rendered claim |
+
+**Naming both a claim and a volume is refused by the API server.** They decide
+who creates the claim, so both is two answers rather than a preference.
+
+**Two routes on ONE `AgentRuntime` can keep their state on different volumes.**
+Before chart 9.0.0 that needed a second runtime CR identical but for one field.
+
+{: .ao-callout}
+> **A claim the manager creates OUTLIVES the route.** It carries no ownerRef and
+> the manager holds no `delete` verb on claims, so deleting a Pipeline never
+> deletes the accumulated context of the conversations it started. Removing it
+> is yours to do deliberately:
+>
+> ```sh
+> kubectl -n agent-ops delete pvc agentops-<route>-context
+> ```
+
+#### Surviving a damaged volume
+
+A shared volume's filesystem can be corrupted by a node reboot, and the storage
+layer will still call it healthy — it replicates blocks and cannot see a
+filesystem.
 
 Three settings limit what that costs. All are off by default and independent.
 

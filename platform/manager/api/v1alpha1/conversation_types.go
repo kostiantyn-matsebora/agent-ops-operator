@@ -320,6 +320,29 @@ type ConversationSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+	// ContextClaimName / WorkspaceClaimName are the RESOLVED claims this
+	// conversation's runtime pods mount, snapshotted at creation exactly as
+	// RuntimeRef and ServiceAccountName are.
+	//
+	// MATERIALIZED state, never hand-set. They are the answer to
+	// `pipeline.spec.persistence.<volume> -> the release default -> ephemeral`,
+	// computed ONCE, so that editing a Pipeline's persistence moves only
+	// conversations created afterwards.
+	//
+	// THAT IS SHARPER HERE THAN ANYWHERE ELSE ON THIS OBJECT. Re-resolving
+	// would change which volume an INFLIGHT conversation's next pod mounts —
+	// work that has already written to the old one, coming back to a different
+	// disk and reporting success.
+	//
+	// Empty means ephemeral OR a conversation predating these fields, and the
+	// two behave identically: resolution falls through to the manager's
+	// bootstrap default, exactly as it did before.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	ContextClaimName string `json:"contextClaimName,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	WorkspaceClaimName string `json:"workspaceClaimName,omitempty"`
 	// +optional
 	Inputs []InputItem `json:"inputs,omitempty"`
 }

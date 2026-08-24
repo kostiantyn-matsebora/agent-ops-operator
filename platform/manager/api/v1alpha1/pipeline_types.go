@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -103,6 +104,109 @@ type PipelineSpec struct {
 	// definition declares no servers, so there is nothing to compose against.
 	// +optional
 	MCPConfigs *ToolingBinding `json:"mcpConfigs,omitempty"`
+	// Persistence declares WHERE this route's conversations keep their state —
+	// the CONTEXT volume and the WORKSPACE volume, independently.
+	//
+	// It sits here for the reason `runtimeRef` and `serviceAccountName` do: a
+	// runtime is an engine, and where a route persists is the route's decision.
+	// An AgentRuntime declares neither volume, so two Pipelines sharing one
+	// runtime keep their conversations on different volumes without cloning it.
+	//
+	// PRECEDENCE, and no other order:
+	//
+	//	pipeline.spec.persistence.<volume> -> the chart's release default -> ephemeral
+	//
+	// The CONVERSATION snapshots the RESOLVED claim at creation, so editing
+	// this field re-wires only conversations created afterwards. Nothing reads
+	// a Pipeline at pod-build time.
+	// +optional
+	Persistence *PipelinePersistence `json:"persistence,omitempty"`
+}
+
+// PersistenceBinding says where ONE of a route's two volumes comes from, and
+// which of the two spellings is used decides who renders the claim.
+//
+// A pod can mount only a CLAIM, never a PersistentVolume — so naming a volume
+// requires that something render the claim on it. That something is THE
+// MANAGER when the binding is on a Pipeline, and the CHART when it is in
+// values. This is the one place in this system where naming a resource creates
+// it, and it is stated rather than smuggled.
+//
+// The claim the manager renders carries NO ownerRef on the Pipeline. Deleting
+// a Pipeline must never delete the accumulated context of the conversations it
+// started — storage is the one thing here whose loss cannot be repaired by
+// reconciling again.
+//
+// +kubebuilder:validation:XValidation:rule="!(has(self.claimName) && has(self.volumeName))",message="claimName and volumeName are mutually exclusive: name a claim that already exists, or a PersistentVolume for the manager to render a claim on"
+type PersistenceBinding struct {
+	// ClaimName is a PersistentVolumeClaim that ALREADY EXISTS. Nothing is
+	// created; conversations this route originates mount it.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	ClaimName string `json:"claimName,omitempty"`
+	// VolumeName is a PersistentVolume the manager renders a claim on, bound to
+	// that volume by name with an EXPLICIT empty storage class — which is what
+	// disables dynamic provisioning. An absent storage class is filled in by
+	// the cluster's default StorageClass, which provisions a second volume and
+	// leaves the operator's untouched.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	VolumeName string `json:"volumeName,omitempty"`
+	// Size requested by the claim the manager renders for VolumeName. Ignored
+	// with ClaimName, where nothing is rendered. Empty requests 5Gi — a claim
+	// binding to a pre-created volume gets that volume's capacity whatever it
+	// asks for, so this is a floor rather than a size.
+	// +optional
+	Size string `json:"size,omitempty"`
+	// AccessModes for that claim. Empty is ReadWriteMany, which is what
+	// concurrent conversations on one volume need.
+	// +optional
+	AccessModes []corev1.PersistentVolumeAccessMode `json:"accessModes,omitempty"`
+	// StorageClassName on that claim. EMPTY RENDERS AN EXPLICIT EMPTY STRING,
+	// which is the only value that binds to a pre-created volume — and it is
+	// the default here rather than in the chart because this field only ever
+	// accompanies VolumeName, where anything else is a mistake. An absent field
+	// is filled in by admission with the cluster's default StorageClass, which
+	// provisions a second volume beside the one that was named.
+	//
+	// Set it only for a class whose volumes are pre-created and selected by
+	// name, which some CSI drivers require.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	StorageClassName string `json:"storageClassName,omitempty"`
+}
+
+// PipelinePersistence declares where the conversations a route originates keep
+// their state — INDEPENDENTLY for the two volumes, because they hold different
+// kinds of state and are enabled on different terms.
+//
+// PERSISTENCE IS WIRING. It sits beside the tools this route grants, the
+// channels it delivers to, the runtime it selects and the identity it executes
+// under, for the reason all four are here: whoever is trusted to grant an agent
+// tools and a cluster identity is more qualified to say where its context
+// lives, not less.
+//
+// The chain is exactly:
+//
+//	pipeline.spec.persistence.<volume>  ->  the chart's release default  ->  ephemeral
+//
+// THE RUNTIME IS IN NO PART OF IT. It carries no volume at all; it declares
+// only `contextStorage`, the SHAPE of its backend's storage.
+//
+// The CONVERSATION snapshots what this resolved to at creation, exactly as it
+// snapshots the execution identity. Without that, editing a Pipeline changes
+// which volume an INFLIGHT conversation's next pod mounts — a storage change
+// applied to work that has already written to the old one.
+type PipelinePersistence struct {
+	// Context: a conversation's accumulated context, the thing
+	// `runtimeContextId` is a handle into. Absent takes the release default.
+	// +optional
+	Context *PersistenceBinding `json:"context,omitempty"`
+	// Workspace: the repository checkout, one subdirectory per conversation.
+	// Absent takes the release default, which is ephemeral unless the install
+	// turned workspace persistence on.
+	// +optional
+	Workspace *PersistenceBinding `json:"workspace,omitempty"`
 }
 
 // PipelineStatus reports wiring validity.

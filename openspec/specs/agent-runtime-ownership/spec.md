@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Who owns the agent execution substrate in the Helm chart: the parent chart contributes the runtime, the floor identity a route naming none runs as, the LLM credential and the home volume, while bundles contribute domain — signal sources, profiles, tooling and channels — and reference what the parent provides.
+Who owns the agent execution substrate in the Helm chart: the parent chart contributes the runtime, the floor identity a route naming none runs as, the LLM credential and the context volume, while bundles contribute domain — signal sources, profiles, tooling and channels — and reference what the parent provides.
 ## Requirements
 
 ### Requirement: The main chart owns the default agent runtime
@@ -10,12 +10,12 @@ Who owns the agent execution substrate in the Helm chart: the parent chart contr
 The parent chart SHALL render the default `AgentRuntime` from a top-level
 `runtime:` component, enabled by default. The component SHALL own everything
 describing how agents execute — image, LLM credential reference, idle TTL,
-`nodeSelector`, resources, and the home volume — and SHALL render the runtime
+`nodeSelector`, resources, and the context volume — and SHALL render the runtime
 named `runtime.name` (default `default`), which is the name a PIPELINE with no
 `runtimeRef` falls back to.
 
 **NO SUBCHART SHALL RENDER THE SUBSTRATE** — an `AgentRuntime`, a runtime
-credential Secret, a home volume, or the FLOOR ServiceAccount. Bundles
+credential Secret, a context volume, or the FLOOR ServiceAccount. Bundles
 contribute domain and reference what the parent provides.
 
 **A BUNDLE SHALL RENDER THE ServiceAccounts ITS OWN ROUTES NEED**, which is the
@@ -94,7 +94,7 @@ reconciler SHALL refuse it.
 
 - **WHEN** any bundle is enabled
 - **THEN** no bundle renders the SUBSTRATE — no `AgentRuntime`, no credential,
-  no home volume, no floor account. A bundle DOES render an identity for each
+  no context volume, no floor account. A bundle DOES render an identity for each
   route it ships, which is the reverse of the earlier rule and is stated in
   its own requirement below
 
@@ -134,39 +134,6 @@ The resolution SHALL be computed in one place and be readable by subcharts, so t
 - **WHEN** any combination of defaults, demo mode, and bundle enablement is rendered without an explicit `full`
 - **THEN** no `cluster-admin` binding renders
 
-### Requirement: The credential and home volume are wired, not restated
-When `runtime.credentialsSecret.token` is supplied the component SHALL create that Secret, so the credential is release-managed; when it is empty the `AgentRuntime` SHALL reference the named Secret without creating it, and the post-install notes SHALL warn that the reference is unsatisfied. The credential SHALL reach the runtime as env via `valueFrom` — the manager SHALL read no Secrets.
-
-The rendered `AgentRuntime` SHALL take `home.pvcRef` from the parent's own `persistence` block (its claim name, or `existingClaim`) with an explicit `runtime.homePvcRef` override for a claim the chart did not create. It SHALL take an optional `workspace.pvcRef` from the parent's workspace persistence block the same way. No operator SHALL have to copy a claim name between values blocks, for either volume.
-
-Home persistence SHALL be enabled by default and workspace persistence SHALL be disabled by default. The asymmetry is deliberate: losing session files silently costs conversational history, whereas losing a checkout costs a re-clone.
-
-`runtime.idleTtlMinutes` SHALL default to empty and SHALL then follow the release's `runtimeIdleTtlMinutes`, so there is one number unless an operator deliberately wants two. The chart SHALL WRITE the resolved value into the rendered CR rather than omitting the field: `AgentRuntime.spec.idleTtlMinutes` carries a CRD default, so an omitted field is not unset — the API server stores the CRD default and the manager prefers any non-zero spec value over its own configured TTL, which makes an omitted field render a correct-looking manifest and a wrong stored object.
-
-#### Scenario: Credential comes back with the release
-- **WHEN** `runtime.credentialsSecret.token` is set from a secret store
-- **THEN** the Secret renders with the release and the runtime references it by name only
-
-#### Scenario: Unsatisfied reference is announced, not silent
-- **WHEN** `runtime.enabled=true` and no token is supplied
-- **THEN** the install succeeds and the notes state that runtime pods will reach `CreateContainerConfigError` until the named Secret exists, because the kubelet resolves the reference and nothing else reports it
-
-#### Scenario: Persistence needs no second declaration
-- **WHEN** `persistence.enabled=true`
-- **THEN** the rendered `AgentRuntime` carries `home.pvcRef` naming the chart's claim, with no runtime-side value set
-
-#### Scenario: Sessions persist without being asked for
-- **WHEN** the chart is installed with no persistence values supplied
-- **THEN** the home claim is provisioned and the rendered `AgentRuntime` references it
-
-#### Scenario: Workspace is wired the same way when enabled
-- **WHEN** workspace persistence is enabled
-- **THEN** the rendered `AgentRuntime` carries `workspace.pvcRef` naming the chart's workspace claim, with no runtime-side value set
-
-#### Scenario: Idle TTL has one default
-- **WHEN** `runtime.idleTtlMinutes` is left empty
-- **THEN** the rendered `AgentRuntime` carries the release's `runtimeIdleTtlMinutes`, and runtime pods use that number rather than the CRD's default
-
 ### Requirement: A bundle renders the identities its own routes need
 
 A bundle that ships `Pipeline`s SHALL also render the ServiceAccounts and RBAC
@@ -180,7 +147,7 @@ makes the parent restate each bundle's needs, and in practice yields one shared
 account sized to the most demanding route.
 
 **THE SUBSTRATE STAYS THE PARENT'S, EXCLUSIVELY.** No bundle SHALL render an
-`AgentRuntime`, a model credential, a home volume or the floor account. The
+`AgentRuntime`, a model credential, a context volume or the floor account. The
 earlier rule — "no subchart renders a runtime ServiceAccount" — was protecting
 against a bundle rendering THE SUBSTRATE, including an account sized for
 everything. An account sized DOWN to one route is the opposite, and is required.
@@ -203,7 +170,7 @@ A bundle that ships NO Pipeline SHALL render no account.
 
 - **WHEN** any bundle is enabled
 - **THEN** it renders no `AgentRuntime`, no runtime credential Secret and no
-  home volume, and does not render the floor account
+  context volume, and does not render the floor account
 
 ### Requirement: No runtime identity is cluster-admin, and none may read Secrets
 
@@ -301,7 +268,6 @@ capability as reading a Secret.
 - **THEN** they render their own ClusterRole and account and name it on a
   Pipeline, and the chart's own roles are unchanged
 
-
 ### Requirement: The grant is cluster-wide, and what protects the operator is omission
 
 Agent grants SHALL be `ClusterRole`s bound cluster-wide. There SHALL be no
@@ -353,3 +319,46 @@ the other moves the hole rather than closing it.
 #### Scenario: The grant is a handful of objects
 - **WHEN** the release renders with `rbacMode: full` and every bundle enabled
 - **THEN** the agent grant is a small fixed number of `ClusterRole`s and bindings, not one per namespace
+
+### Requirement: The credential is wired, and neither volume is the runtime's
+When `runtime.credentialsSecret.token` is supplied the component SHALL create that Secret, so the credential is release-managed; when it is empty the `AgentRuntime` SHALL reference the named Secret without creating it, and the post-install notes SHALL warn that the reference is unsatisfied. The credential SHALL reach the runtime as env via `valueFrom` — the manager SHALL read no Secrets.
+
+The rendered `AgentRuntime` SHALL declare NO volume. Persistence is wiring: the CONTEXT and WORKSPACE volumes are declared on the `Pipeline`, and the release-wide claims the parent provisions reach a conversation that binds neither through the manager's bootstrap configuration. No operator SHALL have to copy a claim name between values blocks, for either volume, and no route SHALL need a runtime of its own to keep its state somewhere else.
+
+Where either block points at storage the chart did not create — an existing claim, or a pre-created volume the rendered claim binds to — the resolved claim name SHALL flow to every consumer of that volume by the same wiring. An operator SHALL NOT have to restate it for the runtime, the manager's bootstrap default, the reclaiming job or the mount probe. A capability that reaches one consumer and not the others is how a volume ends up half-wired, which reads as a broken feature rather than a missing value.
+
+Context persistence SHALL be enabled by default and workspace persistence SHALL be disabled by default. The asymmetry is deliberate: losing an agent's accumulated context silently costs conversational history, whereas losing a checkout costs a re-clone.
+
+`runtime.idleTtlMinutes` SHALL default to empty and SHALL then follow the release's `runtimeIdleTtlMinutes`, so there is one number unless an operator deliberately wants two. The chart SHALL WRITE the resolved value into the rendered CR rather than omitting the field: `AgentRuntime.spec.idleTtlMinutes` carries a CRD default, so an omitted field is not unset — the API server stores the CRD default and the manager prefers any non-zero spec value over its own configured TTL, which makes an omitted field render a correct-looking manifest and a wrong stored object.
+
+#### Scenario: Credential comes back with the release
+- **WHEN** `runtime.credentialsSecret.token` is set from a secret store
+- **THEN** the Secret renders with the release and the runtime references it by name only
+
+#### Scenario: Unsatisfied reference is announced, not silent
+- **WHEN** `runtime.enabled=true` and no token is supplied
+- **THEN** the install succeeds and the notes state that runtime pods will reach `CreateContainerConfigError` until the named Secret exists, because the kubelet resolves the reference and nothing else reports it
+
+#### Scenario: Persistence needs no second declaration
+- **WHEN** context persistence is enabled
+- **THEN** the release's claim reaches every conversation whose route binds none, with no runtime-side and no pipeline-side value set
+
+#### Scenario: The runtime declares no volume at all
+- **WHEN** the chart renders its `AgentRuntime`
+- **THEN** that CR carries neither a context nor a workspace volume, because where state lives is the route's decision
+
+#### Scenario: Context persists without being asked for
+- **WHEN** the chart is installed with no persistence values supplied
+- **THEN** the context claim is provisioned and reaches conversations as the release default
+
+#### Scenario: Workspace is wired the same way when enabled
+- **WHEN** workspace persistence is enabled
+- **THEN** the release's workspace claim reaches conversations whose route binds none, with no runtime-side and no pipeline-side value set
+
+#### Scenario: Storage the chart did not create is wired everywhere too
+- **WHEN** a volume is configured against an existing claim or a pre-created volume
+- **THEN** the manager's bootstrap default, the reclaiming job and the mount probe all resolve to that same claim with no further values set
+
+#### Scenario: Idle TTL has one default
+- **WHEN** `runtime.idleTtlMinutes` is left empty
+- **THEN** the rendered `AgentRuntime` carries the release's `runtimeIdleTtlMinutes`, and runtime pods use that number rather than the CRD's default

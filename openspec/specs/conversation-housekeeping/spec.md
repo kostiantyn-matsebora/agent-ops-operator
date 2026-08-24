@@ -310,7 +310,7 @@ listing and the scan would appear to be an orphan.
 - **THEN** the directory and its contents are removed
 
 ### Requirement: Session transcripts are reclaimed by reference and age together
-Transcripts on the home volume SHALL be reclaimed only when their session id
+Transcripts on the context volume SHALL be reclaimed only when their session id
 appears in no conversation's recorded context AND the file is older than a grace
 period that exceeds the longest plausible run.
 

@@ -67,7 +67,7 @@ func contextSyncContainer(conv *agentopsv1alpha1.Conversation, cfg Config,
 		// so this is the only place the true address survives in the pod.
 		{Name: "CONTROL_URL_UPSTREAM", Value: cfg.ControlURL},
 		{Name: "CONVO_ID", Value: conv.Name},
-		{Name: "CONTEXT_LIVE_DIR", Value: "/data/home"},
+		{Name: "CONTEXT_LIVE_DIR", Value: "/data/context"},
 		{Name: "CONTEXT_STORE_DIR", Value: contextStoreMount},
 		{Name: "CONTEXT_SYNC_PATHS", Value: strings.Join(sync.Paths, "\n")},
 		{Name: "CONTEXT_SYNC_INTERVAL", Value: interval},
@@ -112,7 +112,7 @@ func retainOrDefault(sync *agentopsv1alpha1.ContextSync) int32 {
 // copying a shared tree back would each erase the other's writes.
 func contextSyncMounts(conv *agentopsv1alpha1.Conversation) []corev1.VolumeMount {
 	return []corev1.VolumeMount{
-		{Name: "context", MountPath: "/data/home"},
+		{Name: "context", MountPath: "/data/context"},
 		{Name: "context-store", MountPath: contextStoreMount, SubPath: conv.Name},
 	}
 }

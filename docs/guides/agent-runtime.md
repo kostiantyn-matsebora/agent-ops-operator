@@ -16,7 +16,14 @@ next:
 
 An **agent runtime** is what actually executes an agent. It is a container image
 plus an `AgentRuntime` resource describing it: the image, the identity it runs
-as, and where it keeps a conversation's accumulated context.
+as, and the SHAPE of its context storage.
+
+**It declares no volume.** WHERE a route's conversations keep their state is the
+route's decision, on its `Pipeline` — see the
+[Pipeline guide]({{ '/guides/pipeline' | relative_url }}).
+
+A runtime is an ENGINE. Two routes sharing one must be able to persist to
+different volumes without cloning it.
 
 There is one per vendor and trust level, shared by every route that names it.
 The image implements a small HTTP contract — it asks the manager for work, runs
@@ -187,13 +194,21 @@ spec:
 <!-- /generated -->
 
 `contextStorage` is what the manager reads **before** promising a reader that a
-follow-up keeps its context:
+follow-up keeps its context. It is the one storage question only your runtime
+can answer — whether its backend writes context to a disk at all:
 
 | Value | Your runtime keeps context |
 |---|---|
-| `volume` | on the configured context volume |
+| `volume` | on a context volume, whichever one the conversation resolved |
 | `external` | somewhere the manager does not manage |
 | `none` | nowhere — every unit starts fresh |
+
+**It does not say WHICH volume, and cannot.** The manager checks this
+declaration against what the conversation actually resolved.
+
+Under `volume`, a conversation whose route and release both supply none is told
+from its first run that it cannot be continued, rather than failing every
+follow-up.
 
 **The ServiceAccount is the agent's in-cluster power**, and a `Pipeline` may
 name its own and override what you declare here.

@@ -11,7 +11,14 @@
     "Each entry: `pattern` (Python regex, searched case-insensitively unless `case` is true),",
     "`says` (what to write instead — printed on a hit), and `allow` (regexes that mark a line",
     "as RECORDING the removal rather than asserting the thing). The allow list is what lets a",
-    "spec say 'spec.type is removed' while failing one that says 'required spec.type'."
+    "spec say 'spec.type is removed' while failing one that says 'required spec.type'.",
+    "",
+    "A MIGRATION-TABLE ROW IS A RECORD, and several `allow` entries below say so by",
+    "matching the REPLACEMENT name rather than a marker word. A line reading",
+    "`| persistence.enabled | persistence.context.enabled |` states what to write",
+    "instead, which is the whole test — and a wide table cannot carry 'removed' on",
+    "every row without becoming unreadable. The window is one line either side, so",
+    "a header word does not reach row four."
   ],
   "scan": [
     "openspec/specs/**/*.md",
@@ -33,7 +40,8 @@
         "pruned",
         "replaced",
         "stale manifest",
-        "is now"
+        "is now",
+        "gone"
       ]
     },
     {
@@ -46,7 +54,8 @@
         "former",
         "no longer",
         "is gone",
-        "pruned"
+        "pruned",
+        "gone"
       ]
     },
     {
@@ -57,7 +66,8 @@
         "removed",
         "retired",
         "no longer",
-        "is gone"
+        "is gone",
+        "gone"
       ]
     },
     {
@@ -70,7 +80,8 @@
         "retired",
         "no longer",
         "is gone",
-        "regression"
+        "regression",
+        "gone"
       ]
     },
     {
@@ -84,7 +95,8 @@
         "no longer",
         "is gone",
         "was not replaced",
-        "previous"
+        "previous",
+        "gone"
       ]
     },
     {
@@ -96,7 +108,8 @@
         "deleted",
         "retired",
         "no longer",
-        "is gone"
+        "is gone",
+        "gone"
       ]
     },
     {
@@ -125,7 +138,8 @@
         "is gone",
         "does not exist",
         "SHALL NOT use",
-        "404"
+        "404",
+        "gone"
       ]
     },
     {
@@ -151,7 +165,8 @@
         "retired",
         "no longer",
         "is gone",
-        "there is no"
+        "there is no",
+        "gone"
       ]
     },
     {
@@ -179,7 +194,8 @@
         "was renamed",
         "is now",
         "did",
-        "stays published"
+        "stays published",
+        "gone"
       ]
     },
     {
@@ -190,7 +206,8 @@
         "does not exist",
         "no longer",
         "is gone",
-        "never"
+        "never",
+        "gone"
       ]
     },
     {
@@ -203,7 +220,8 @@
         "retired",
         "no longer",
         "is gone",
-        "regression"
+        "regression",
+        "gone"
       ]
     },
     {
@@ -251,6 +269,193 @@
         "is not",
         "SHALL NOT",
         "never"
+      ]
+    },
+    {
+      "id": "home-volume",
+      "pattern": "home volume|home PVC|home claim",
+      "says": "the CONTEXT volume — it is named for what it HOLDS, a conversation's accumulated context, not for the filesystem path one runtime image happens to mount it at",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "was gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "history",
+        "context volume",
+        "CONTEXT volume",
+        "gone"
+      ]
+    },
+    {
+      "id": "runtime-home-field",
+      "pattern": "spec\\.home\\b|`home\\.pvcRef`|home\\.pvcRef|HomeVolume",
+      "says": "an AgentRuntime declares NO volume at all: persistence is wiring and lives on Pipeline.spec.persistence, with the chart's release-wide claim below it. The field was DELETED rather than aliased, because its concept moved to another CR",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "was gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "history",
+        "Pipeline\\.spec\\.persistence",
+        "spec\\.persistence",
+        "gone"
+      ]
+    },
+    {
+      "id": "runtime-pvc-ref-values",
+      "pattern": "runtime\\.homePvcRef|runtime\\.contextPvcRef|runtime\\.workspacePvcRef|homePvcRef|contextPvcRef|workspacePvcRef",
+      "says": "the runtime names no claim: set persistence.context / persistence.workspace release-wide, or pipelines[].persistence for one route",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "was gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "history",
+        "persistence\\.(context|workspace)",
+        "pipelines\\[\\]\\.persistence",
+        "pipelines:",
+        "gone"
+      ]
+    },
+    {
+      "id": "home-pvc-env",
+      "pattern": "HOME_PVC",
+      "says": "CONTEXT_PVC — and it is not dual-read, because the concept moved to another CR",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "was gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "history",
+        "CONTEXT_PVC",
+        "gone"
+      ]
+    },
+    {
+      "id": "home-claim-name",
+      "pattern": "agentops-home",
+      "says": "agentops-context — the default claim was renamed with the volume, and the chart FAILS the render rather than silently provisioning a second, empty one",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "was gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "history",
+        "existing claim",
+        "existingClaim",
+        "migration",
+        "upgrade",
+        "rebind",
+        "guard",
+        "agentops-context",
+        "gone"
+      ]
+    },
+    {
+      "id": "flat-persistence-keys",
+      "pattern": "persistence\\.(enabled|name|size|storageClassName|accessModes|volumeName|existingClaim)\\b",
+      "says": "the block moved wholesale: persistence.context.* and persistence.workspace.*",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "was gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "history",
+        "moved",
+        "flat",
+        "persistence\\.(context|workspace)\\.",
+        "gone"
+      ]
+    },
+    {
+      "id": "data-home-path",
+      "pattern": "/data/home",
+      "says": "/data/context — the mount path moved with the name. /data/workspace is the load-bearing path and it did NOT move",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "was gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "renamed",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "history",
+        "/data/context",
+        "gone"
       ]
     }
   ]

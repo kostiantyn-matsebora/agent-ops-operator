@@ -33,8 +33,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if c.retain != 3 {
 		t.Fatalf("retain = %d, want 3", c.retain)
 	}
-	if c.live != "/data/home" {
-		t.Fatalf("live = %q, want /data/home", c.live)
+	if c.live != "/data/context" {
+		t.Fatalf("live = %q, want /data/context", c.live)
 	}
 }
 
