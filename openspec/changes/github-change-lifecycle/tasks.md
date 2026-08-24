@@ -79,13 +79,17 @@ USE rather than by reading the command back.
 
 ## 5. The reverse direction: an inbound issue becomes a change
 
-- [ ] 5.1 Extend `.claude/commands/opsx/explore.md` to accept an issue number,
-      read it with `gh issue view --json`, and seed the exploration from the
-      reporter's own words. Verify against a throwaway issue that the exploration
-      opens from what was filed
-- [ ] 5.2 Promote IN PLACE on propose — the inbound issue becomes the tracking
-      issue, keeping its title, body and comments, gaining the link and the
-      label. Verify no second issue is created and the original thread is intact
+- [x] 5.1 `/opsx:explore <number>` reads the issue with `gh issue view --json`
+      and explores what was filed — including the comments, which routinely carry
+      the constraint that makes the obvious answer wrong. It also states that
+      exploring is not accepting: an issue may end in "this does not fit", with
+      the reasoning in the thread
+- [x] 5.2 Promotion in place, **exercised against a real filed issue rather than
+      asserted**: an issue was filed as a reporter would write it, given a
+      comment, then promoted. It kept its number, title, body and comment,
+      gained `opsx:proposed` beside the reporter's own `enhancement` label, and
+      the repository's open-issue count did not rise — no second issue anywhere.
+      The probe was then closed with an explanation of what it was
 - [ ] 5.3 Verify the archive path closes a promoted issue exactly as it closes a
       project-authored one, with the reporter's thread still readable
 
@@ -153,9 +157,13 @@ USE rather than by reading the command back.
 
 ## 8. End-to-end, on one change before eleven
 
-- [ ] 8.1 Run this change itself through the full flow — worktree, branch, issue,
-      pull request, review, archive inside the PR, squash merge — without
-      shortcutting any stage
+- [ ] 8.1 Run this change itself through the full flow. **Done up to the merge**:
+      worktree at `../agent-ops-worktrees/github-change-lifecycle`, branch
+      `change/github-change-lifecycle`, issue #29 advancing `proposed` →
+      `applying` → `review`, pull request #30 with the new checks reporting.
+      Outstanding: the review's first real run (needs §2.2), the archive, and the
+      squash merge — **left deliberately for a person**, since the merge is the
+      one step here that cannot be undone
 - [ ] 8.2 Verify the archive-inside-the-PR decision holds in practice (design
       D4): the pull request diff shows the delta specs folding into
       `openspec/specs/`, and the documentation gate passes as expected
@@ -165,12 +173,16 @@ USE rather than by reading the command back.
 
 ## 9. Migrating the eleven in flight
 
-- [ ] 9.1 Write the migration as a SCRIPT, not a hand-run sequence — eleven
-      repetitions are where one gets done differently. Verify with `--dry-run`
-      that it names all eleven and would create exactly one issue and one branch
-      each
-- [ ] 9.2 Run it, and verify every active change has an issue with the correct
-      phase label and a branch, with no change left behind and none given two
+- [x] 9.1 `.github/scripts/opsx-migrate.sh`, verified with `--dry-run`: it names
+      twelve active changes, would create exactly one branch and one issue for
+      each of the ELEVEN that lack them, and correctly KEEPS this change's
+      existing branch and issue #29 rather than duplicating them. An existing
+      branch is never reset to master — a branch that has moved on is somebody's
+      work in progress
+- [ ] 9.2 Run it — **AFTER the merge, not before.** Until the flow is on the
+      default branch the commit hook is not active, and eleven branches nothing
+      yet expects are litter. Then verify every active change has one issue with
+      the right phase label and one branch, none left behind and none given two
 - [ ] 9.3 Verify the sidecar binding is written for all eleven and that
       `openspec list` is unchanged by the migration
 - [ ] 9.4 **Tell the other sessions.** Once every change owns a branch, the §3.4
