@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import {
   Alert, Card, CardBody, CardTitle, Label, PageSection, Stack, StackItem, Title,
 } from '@patternfly/react-core'
-import { ErrorState, Loading } from '../App'
+import { ErrorState, Loading } from '../components/States'
 import { useTopology } from '../api/hooks'
 import { useDisplay } from '../graph/display'
 import { useStream } from '../api/stream'

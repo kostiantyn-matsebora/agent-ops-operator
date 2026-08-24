@@ -369,7 +369,10 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      # NO `configure-pages` STEP. That action exists to prepare a DEPLOYMENT —
+      # it reads the repository's Pages configuration and fails without one,
+      # which is a deployment concern this job does not have. Building the site
+      # is the whole question here; publishing it is Pages' own business.
       - uses: actions/jekyll-build-pages@v1
         with:
           source: ./docs

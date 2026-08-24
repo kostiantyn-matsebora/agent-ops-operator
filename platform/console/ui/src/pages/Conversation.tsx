@@ -8,7 +8,7 @@ import {
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useParams } from 'react-router-dom'
-import { Empty, ErrorState, Loading } from '../App'
+import { Empty, ErrorState, Loading } from '../components/States'
 import { useConversation, useConversationGraph, useMarkRead, useSession, useVocabulary } from '../api/hooks'
 import { useStream } from '../api/stream'
 import { PlainText, RawText } from '../components/Text'

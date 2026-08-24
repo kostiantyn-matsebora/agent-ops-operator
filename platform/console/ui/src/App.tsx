@@ -3,11 +3,12 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import {
   Alert, Badge, Button, Nav, NavItem, NavList, Masthead, MastheadBrand, MastheadContent,
   MastheadMain, Page, PageSidebar, PageSidebarBody, Label, Popover, Toolbar, ToolbarContent,
-  ToolbarGroup, ToolbarItem, EmptyState, EmptyStateBody, Bullseye, Spinner, PageSection,
+  ToolbarGroup, ToolbarItem, PageSection,
 } from '@patternfly/react-core'
 import { useLiveStream, useSession, useUnreadCount } from './api/hooks'
 import { api } from './api/client'
 import { Logo } from './components/Logo'
+import { Empty, Loading } from './components/States'
 import { ThemeSwitcher } from './components/ThemeSwitcher'
 import { NewConversation } from './pages/NewConversation'
 import { LoginPage } from './pages/Login'
@@ -47,30 +48,6 @@ class Boundary extends Component<{ children: ReactNode }, { error?: Error }> {
     }
     return this.props.children
   }
-}
-
-export function Loading() {
-  return (
-    <Bullseye>
-      <Spinner aria-label="loading" />
-    </Bullseye>
-  )
-}
-
-export function ErrorState({ title, children }: { title: string; children?: ReactNode }) {
-  return (
-    <EmptyState titleText={title} headingLevel="h4" status="danger">
-      <EmptyStateBody>{children}</EmptyStateBody>
-    </EmptyState>
-  )
-}
-
-export function Empty({ title, children }: { title: string; children?: ReactNode }) {
-  return (
-    <EmptyState titleText={title} headingLevel="h4">
-      <EmptyStateBody>{children}</EmptyStateBody>
-    </EmptyState>
-  )
 }
 
 const NAV = [

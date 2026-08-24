@@ -4,7 +4,7 @@ import {
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link } from 'react-router-dom'
-import { Empty, ErrorState, Loading } from '../App'
+import { Empty, ErrorState, Loading } from '../components/States'
 import { Crumbs } from '../components/Crumbs'
 import { useQueues } from '../api/hooks'
 import { PlainText } from '../components/Text'

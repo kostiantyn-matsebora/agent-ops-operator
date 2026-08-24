@@ -6,7 +6,7 @@ import {
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link, useParams } from 'react-router-dom'
 import { useState } from 'react'
-import { Empty, ErrorState, Loading } from '../App'
+import { Empty, ErrorState, Loading } from '../components/States'
 import { useDetail, useInventory, useKinds } from '../api/hooks'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'

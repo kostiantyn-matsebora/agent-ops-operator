@@ -1,6 +1,6 @@
 import { Card, CardBody, CardTitle, Grid, GridItem, Label } from '@patternfly/react-core'
 import { Chart, ChartAxis, ChartGroup, ChartLine, ChartThemeColor } from '@patternfly/react-charts/victory'
-import { Empty } from '../App'
+import { Empty } from '../components/States'
 import { useChart } from '../api/hooks'
 import { useDisplay } from '../graph/display'
 

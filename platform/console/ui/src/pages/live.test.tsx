@@ -152,6 +152,13 @@ function emit(name: string, payload: unknown) {
 // ---- one page at a time -------------------------------------------------------
 
 describe('Overview', () => {
+  // 20s, and ONLY this test. Its neighbours assert a delta causes NO refetch, so
+  // a frozen clock proves the absence and returns immediately. This one waits
+  // for a refetch to LAND while `shouldAdvanceTime` creeps the fake clock at
+  // real-time pace — so the wait is real seconds, and the default 5s is a
+  // budget, not a bug. It failed on Node 22 and passed on 24, which is the shape
+  // of a timeout that is simply too tight rather than a defect either version
+  // owns.
   it('updates from a delta without ever showing a spinner', async () => {
     const { OverviewPage } = await import('./Overview')
     const { stop } = mount(<OverviewPage />)
@@ -172,7 +179,7 @@ describe('Overview', () => {
     expect(loading()).toBeNull()
     expect(screen.getByText('Installation')).toBeInTheDocument()
     stop()
-  })
+  }, 20_000)
 })
 
 describe('Queues', () => {
