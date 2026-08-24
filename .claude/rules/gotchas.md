@@ -66,12 +66,16 @@ wipe-and-redeploy therefore lands on the OLD CRDs.**
     -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.persistence.type}'
   ```
 
-**PUBLISHING IS A GIT TAG ONLY WHILE CI RUNS, AND ON A PRIVATE REPO IT DOES
-NOT.** `build-test.md` says nothing is pushed by hand; that holds for the public
-path and is false here. A tag pushed against a private repo publishes NOTHING
-and reports nothing — the absence looks identical to a build still queued.
+**A TAG THAT PUBLISHED NOTHING IS SILENT, AND THE PRIVATE REPOSITORY IS NO
+LONGER THE REASON.** This repository is PUBLIC, so a `<component>-v<semver>` tag
+runs the release workflow and CI publishes. The caveat that it did not — that a
+tag pushed here publishes NOTHING and reports nothing — is WITHDRAWN, and
+re-adding it describes a repository this is not.
 
-- **Check the registry, not the tag**, before believing an image shipped.
+- **The absence still looks identical to a build still queued**, so **check the
+  registry, not the tag**, before believing an image shipped. The live reasons a
+  tag ships nothing are a FAILED RUN and the package's ACTIONS ACCESS, both in
+  `build-test.md`.
 - **The hand build is the ordinary buildx push**, and it MUST stay multi-arch —
   the cluster is mixed x86/arm64, and a single-arch image fails at SCHEDULE
   time, possibly weeks later.

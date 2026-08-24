@@ -116,20 +116,23 @@ map in `.github/components.sh`, which is EMPTY, and the release asserts what it
 pushed against it as EQUALITY — an image that lost an arch and one that gained
 an undeclared one both fail.
 
-### PUBLISHING IS A GIT TAG — WHILE CI RUNS. ON A PRIVATE REPO IT DOES NOT
+### PUBLISHING IS A GIT TAG, AND CI RUNS — THE REPOSITORY IS PUBLIC
 
-**A tag pushed against a private repo publishes NOTHING, and says nothing.**
-There is no workflow run, so the absence is indistinguishable from a build still
-queued.
+**Nothing is pushed by hand.** A `<component>-v<semver>` tag runs `release.yml`,
+which builds and publishes.
 
-- **Check the REGISTRY, never the tag**, before believing an image shipped.
+**"A tag pushed against a private repo publishes NOTHING" is WITHDRAWN**, along
+with every sentence deferring the CI path to a later public repository. It was
+true and is not.
+
+- **A tag can still ship nothing**, and it is still silent when it does — a
+  failed run, or the package's Actions access. **Check the REGISTRY, never the
+  tag**, before believing an image shipped.
 - **The hand build is the buildx push below**, and it stays MULTI-ARCH — the
   cluster is mixed, and a single-arch image fails at SCHEDULE time.
 - **A credential is NEVER read to test whether auth works.**
   `docker-credential-* get` prints the secret. Attempt the push and read the
   error. See `gotchas.md`.
-
-Everything below is the CI path, and it is what holds once the repo is public.
 
 **`<component>-v<semver>` publishes exactly that component**, and `chart-v<semver>`
 publishes the chart. The component name is the one `.github/components.sh`
