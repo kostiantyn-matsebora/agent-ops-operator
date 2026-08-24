@@ -262,8 +262,21 @@ func main() {
 			// this release.
 			ContextPVC:   bootstrapContextClaim(),
 			WorkspacePVC: os.Getenv("WORKSPACE_PVC"),
-			NodeSelector: map[string]string{"node-role/app": "true"},
-			Command:      commandFromEnv(),
+			// NO nodeSelector. It pinned `node-role/app: "true"` — one
+			// cluster's own label, shipped as every install's default, so a
+			// runtime pod on any cluster that did not use that convention sat
+			// Pending with "didn't match Pod's node affinity/selector" and the
+			// conversation never left Queued.
+			//
+			// It was there because the runtime image was built amd64-only by a
+			// hand-run `--platform` flag. Every image this project publishes is
+			// multi-arch now, runtime-claude included, so the reason is gone
+			// with it.
+			//
+			// An install that DOES want placement sets it, on the AgentRuntime
+			// or through `runtime.nodeSelector` — which the chart already
+			// defaults to empty, so this was the only thing putting it back.
+			Command: commandFromEnv(),
 			// The sidecar that keeps context durable when a runtime declares
 			// contextSync. Release-wide, like the manager's own image: it
 			// implements a contract rather than being a backend choice. Empty

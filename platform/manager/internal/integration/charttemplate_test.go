@@ -2073,3 +2073,50 @@ func TestOutputFormatCanBeDeclined(t *testing.T) {
 		t.Fatal("an install must be able to decline the shared format")
 	}
 }
+
+// RWX IS THE SHIPPED DEFAULT ON BOTH VOLUMES, AND NOTHING CHECKED IT.
+//
+// It is the mode a MULTI-NODE install needs: concurrent conversations mount one
+// claim at the same time, and ReadWriteOnce binds a volume to ONE node, so the
+// second conversation to schedule elsewhere fails to attach at the moment of
+// concurrency — far from the setting that caused it.
+//
+// The reason this went unpinned is the reason it needed pinning: the local demo
+// OVERRIDES both volumes to ReadWriteOnce, because k3s local-path offers
+// nothing else. So the shipped default was exercised by no test and no install
+// anyone ran, and a template edit could have quietly dropped it to RWO for
+// everybody.
+//
+// This pins the DEFAULT. It cannot prove RWX attaches — only a multi-node
+// cluster with an RWX provisioner does that.
+func TestBothVolumesDefaultToReadWriteMany(t *testing.T) {
+	out := helmTemplate(t, "--set", "persistence.workspace.enabled=true")
+
+	for _, claim := range []string{"agentops-context", "agentops-workspace"} {
+		doc := claimDoc(t, out, claim)
+		if !strings.Contains(doc, "- ReadWriteMany") {
+			t.Errorf("%s does not default to ReadWriteMany. Concurrent conversations mount one claim "+
+				"at once, so ReadWriteOnce fails the SECOND one to land on another node:\n%s", claim, doc)
+		}
+		if strings.Contains(doc, "ReadWriteOnce") {
+			t.Errorf("%s ships ReadWriteOnce by default:\n%s", claim, doc)
+		}
+	}
+}
+
+// ...and the single-node escape hatch stays available, because the spec makes it
+// a SUPPORTED configuration rather than a downgrade: "a ReadWriteOnce claim...
+// with runtime pods pinned to that node SHALL be a documented, supported way"
+// to have durable context.
+//
+// What must never be silent is RWO with NOTHING PINNED, which is the shape that
+// works until concurrency and then fails on attachment. The chart reports that
+// in its notes — pinned elsewhere in this file.
+func TestReadWriteOnceRemainsExpressible(t *testing.T) {
+	doc := claimDoc(t, helmTemplate(t,
+		"--set", "persistence.context.accessModes={ReadWriteOnce}"), "agentops-context")
+
+	if !strings.Contains(doc, "- ReadWriteOnce") {
+		t.Errorf("a single-node install must still be able to ask for ReadWriteOnce:\n%s", doc)
+	}
+}

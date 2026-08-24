@@ -194,6 +194,17 @@ func TestNamingAVolumeRendersAClaimThatOutlivesThePipeline(t *testing.T) {
 	if claim.Spec.VolumeName != "pv-precreated-context" {
 		t.Fatalf("claim.spec.volumeName = %q, want the volume that was named", claim.Spec.VolumeName)
 	}
+	// RWX BY DEFAULT, for the reason the chart's own claims are: a production
+	// cluster has more than one node, this route's concurrent conversations
+	// scatter across them, and they mount the one claim at the same time.
+	// ReadWriteOnce binds a volume to a single NODE, so the second conversation
+	// to land elsewhere fails to attach — at the moment of concurrency, far
+	// from the setting that caused it.
+	//
+	// It was defaulted in code and asserted NOWHERE, here or on the chart path.
+	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != corev1.ReadWriteMany {
+		t.Fatalf("accessModes = %v, want [ReadWriteMany]", claim.Spec.AccessModes)
+	}
 	// THE EXPLICIT EMPTY STORAGE CLASS IS THE POINT. An absent field is filled
 	// in by admission with the cluster's default StorageClass, which provisions
 	// a SECOND volume beside the one that was named.
@@ -257,5 +268,28 @@ func TestAVolumeBindingResolvesToTheCreatedClaim(t *testing.T) {
 	}
 	if got := claimOf(podFor(t, conv.Name), "context"); got != want {
 		t.Fatalf("the pod mounted %q, want %q", got, want)
+	}
+}
+
+// A route may still ask for ReadWriteOnce and get it — a single-node cluster is
+// a development shape, not a production one, and nothing here forbids it.
+func TestARouteMayDeclareReadWriteOnce(t *testing.T) {
+	ctx := context.Background()
+	mkProfile(t, "pv-prof-rwo")
+	mkPipeline(t, "pv-rwo-pipe", nil, nil, "pv-prof-rwo")
+	bindPersistence(t, "pv-rwo-pipe", &agentopsv1alpha1.PersistenceBinding{
+		VolumeName:  "pv-single-node",
+		AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+	})
+	reconcilePipeline(t, "pv-rwo-pipe")
+
+	name := runtimepod.PipelineClaimName("pv-rwo-pipe", runtimepod.VolumeContext)
+	var claim corev1.PersistentVolumeClaim
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &claim); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), &claim) })
+	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != corev1.ReadWriteOnce {
+		t.Fatalf("accessModes = %v, want the [ReadWriteOnce] the route asked for", claim.Spec.AccessModes)
 	}
 }

@@ -307,7 +307,7 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 		{Name: "REPO_URL", Value: profile.Spec.Repository.URL},
 		{Name: "REPO_REF", Value: profile.Spec.Repository.Ref},
 		{Name: "RUNTIME_IDLE_TTL_M", Value: itoa(cfg.IdleTTLMinutes)},
-		{Name: "HOME", Value: "/data/context"},
+		{Name: "HOME", Value: contextLiveMount},
 		{Name: "MCP_CONFIG", Value: "/etc/agentops/mcp.json"},
 		{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
@@ -365,7 +365,7 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 	default:
 		volumes = append(volumes, corev1.Volume{Name: "context", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 	}
-	mounts = append(mounts, corev1.VolumeMount{Name: "context", MountPath: "/data/context"})
+	mounts = append(mounts, corev1.VolumeMount{Name: "context", MountPath: contextLiveMount})
 
 	// repository auth
 	if a := profile.Spec.Repository.Auth; a != nil {

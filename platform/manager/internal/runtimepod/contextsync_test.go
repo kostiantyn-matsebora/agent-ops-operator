@@ -261,3 +261,54 @@ func TestClearingContextSyncRestoresTheDirectMount(t *testing.T) {
 		t.Fatal("rollback must drop the extended grace period")
 	}
 }
+
+// NO CONTAINER MAY MOUNT TWO VOLUMES AT ONE PATH, and the API server is the
+// one that says so — `mountPath must be unique`, refused outright.
+//
+// THIS IS WRITTEN FROM A LIVE FAILURE, and it is the shape that made it
+// expensive: the pod is never created, so there is no pod to describe, no
+// events on one, and the conversation sits with NO PHASE while the reconciler
+// retries forever. It reads as "nothing is happening", not as an invalid spec.
+//
+// What caused it: the sidecar mounts BOTH the live context and the durable
+// store, and the store's path had been chosen as `/data/context` back when the
+// live path was `/data/home`. Renaming the live path walked into it.
+//
+// Every container is checked, not the one that broke, because the next
+// collision will be somewhere else. Unit tests passed throughout — they asserted
+// mount NAMES and the AGENT container's paths, and the collision was between two
+// mounts of the SIDECAR.
+func TestNoContainerMountsTwoVolumesAtOnePath(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pod  *corev1.Pod
+	}{
+		{"plain", build("conv-paths", Config{Image: "img", ContextPVC: "ctx", WorkspacePVC: "ws"})},
+		{"sidecar", buildResolved("conv-paths-sync", Resolved{Config: syncCfg(), ContextSync: syncSpec()})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			all := append(append([]corev1.Container{}, tc.pod.Spec.InitContainers...),
+				tc.pod.Spec.Containers...)
+			for _, c := range all {
+				seen := map[string]string{}
+				for _, m := range c.VolumeMounts {
+					if prev, dup := seen[m.MountPath]; dup {
+						t.Fatalf("container %q mounts both %q and %q at %q. The API server REFUSES "+
+							"that pod, so the conversation never gets one and never gets a phase",
+							c.Name, prev, m.Name, m.MountPath)
+					}
+					seen[m.MountPath] = m.Name
+				}
+			}
+		})
+	}
+}
+
+// The two paths are DISTINCT, stated directly rather than only as a corollary
+// of the collision test above. A reader changing one should meet this.
+func TestTheLiveAndDurableContextPathsDiffer(t *testing.T) {
+	if contextLiveMount == contextStoreMount {
+		t.Fatalf("the live and durable context paths are both %q. The sidecar mounts both, so "+
+			"one value for the two is a pod that cannot be created", contextLiveMount)
+	}
+}

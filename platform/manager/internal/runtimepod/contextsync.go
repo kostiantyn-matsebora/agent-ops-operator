@@ -14,9 +14,23 @@ import (
 // because the two share a network namespace and no Service names it.
 const contextSyncPort = 8099
 
+// contextLiveMount is the LIVE context path, and it is the agent's $HOME. The
+// sidecar mounts the same pod-local volume here so that what it checkpoints is
+// exactly what the agent wrote.
+const contextLiveMount = "/data/context"
+
 // contextStoreMount is where the sidecar sees the durable volume. The agent
 // container never mounts it, which is the isolation half of this design.
-const contextStoreMount = "/data/context"
+//
+// IT MUST NOT EQUAL THE LIVE PATH. The sidecar mounts BOTH — live at
+// contextLiveMount, durable here — so one value for the two is a pod the API
+// server refuses outright ("mountPath must be unique"), and the conversation
+// then sits with no pod and no phase while the reconciler retries forever.
+//
+// It read /data/context while the live path was still /data/home, and the
+// rename walked straight into it. Named after the VOLUME (`context-store`)
+// now, so the two cannot converge again by someone renaming one of them.
+const contextStoreMount = "/data/context-store"
 
 // contextSyncGrace is the termination grace period a pod gets in sidecar mode.
 //
@@ -67,7 +81,7 @@ func contextSyncContainer(conv *agentopsv1alpha1.Conversation, cfg Config,
 		// so this is the only place the true address survives in the pod.
 		{Name: "CONTROL_URL_UPSTREAM", Value: cfg.ControlURL},
 		{Name: "CONVO_ID", Value: conv.Name},
-		{Name: "CONTEXT_LIVE_DIR", Value: "/data/context"},
+		{Name: "CONTEXT_LIVE_DIR", Value: contextLiveMount},
 		{Name: "CONTEXT_STORE_DIR", Value: contextStoreMount},
 		{Name: "CONTEXT_SYNC_PATHS", Value: strings.Join(sync.Paths, "\n")},
 		{Name: "CONTEXT_SYNC_INTERVAL", Value: interval},
@@ -112,7 +126,7 @@ func retainOrDefault(sync *agentopsv1alpha1.ContextSync) int32 {
 // copying a shared tree back would each erase the other's writes.
 func contextSyncMounts(conv *agentopsv1alpha1.Conversation) []corev1.VolumeMount {
 	return []corev1.VolumeMount{
-		{Name: "context", MountPath: "/data/context"},
+		{Name: "context", MountPath: contextLiveMount},
 		{Name: "context-store", MountPath: contextStoreMount, SubPath: conv.Name},
 	}
 }
