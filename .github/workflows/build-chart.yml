@@ -78,9 +78,15 @@ jobs:
             --set telegram.surface.enabled=true \
             --set telegram.surface.chatId=-1001234567890 \
             --set telegram.surface.credentials.botToken=ci:token \
-            --set housekeeping.enabled=true \
-            --set runtime.egressMediation.enabled=true \
-            --set 'runtime.contextSync.paths={.claude/projects/**}')
+            --set housekeeping.enabled=true)
+          # NO `--set runtime.*`. That block was retired when the runtime values
+          # SPLIT IN TWO, and the render now FAILS on it — which this job did not
+          # discover for two majors, because no chart tag was cut in between.
+          #
+          # Neither flag is needed any more: egress mediation is on by default,
+          # and the reference runtime's context paths ship in the `claude`
+          # bundle. Both images they pull in are rendered by the defaults, so the
+          # existence check still covers them.
           # Ours by NAMESPACE, never a hardcoded vendor list — the third-party
           # set has already turned over once.
           refs=$(grep -Eo "(ghcr\.io/$owner/|kmatsebora/)agentops-[a-z0-9-]+:[A-Za-z0-9._-]+" <<<"$rendered" | sort -u)
