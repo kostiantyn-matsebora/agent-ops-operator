@@ -48,8 +48,11 @@ exists so that the switch is safe, and §7 is the gate that says so.
       to try it, where to go next. The site owns everything else
 - [x] 4.3 The install command resolves a PUBLISHED artifact. This task cannot
       complete before `sdlc-setup` publishes the chart — see `design.md` D3
-- [ ] 4.4 Every link resolves. Run them, including the site links, which fail
-      until §6 enables Pages
+- [x] 4.4 Every link resolves. Run them, including the site links, which fail
+      until §6 enables Pages.
+      **DONE, against the LIVE site.** 50 absolute links across README and every
+      `docs/` page resolve, and all 13 `_data/nav.yml` entries resolve — checked
+      by fetching them, not by reading them
 - [x] 4.5 `wc -l README.md` is within budget, and nothing that moved out was
       dropped rather than linked
 
