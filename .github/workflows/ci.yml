@@ -32,7 +32,7 @@ env:
 jobs:
   # WHAT EXISTS, asked once and answered for every matrix below.
   discover:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     outputs:
       modules: ${{ steps.list.outputs.modules }}
       images: ${{ steps.list.outputs.images }}
@@ -48,7 +48,7 @@ jobs:
   # envtest schedules nothing, so this proves the API-server half and nothing
   # about the kubelet — which is what the e2e-testing change is for.
   operator:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: ${{ env.ENVTEST_MODULE }}
@@ -85,7 +85,7 @@ jobs:
   # envtest log.
   modules:
     needs: discover
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -111,7 +111,7 @@ jobs:
   # Screenshots are deliberately out: they need a browser, and they are
   # regenerated when the UI changes, not on every pull request.
   console-ui:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: platform/console/ui
@@ -130,7 +130,7 @@ jobs:
   # every meaningful permutation and validating the result proves they produce
   # objects a cluster would accept.
   chart:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
@@ -222,7 +222,7 @@ jobs:
   # It needs helm because the worked examples ARE chart output: the same render
   # the job above validates, with its custom resources lifted into the pages.
   docs:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
@@ -260,7 +260,7 @@ jobs:
   # exercised at release, where a manifest is actually produced to assert on.
   images:
     needs: discover
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -291,7 +291,7 @@ jobs:
   # them to the audience it exists to protect the tree from. `--show` prints
   # matches locally, where the fixing happens.
   publication:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -323,7 +323,7 @@ jobs:
   # Two guards, opposite shapes, each following from its subject. Neither is a
   # template for the other.
   retired-vocabulary:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
 

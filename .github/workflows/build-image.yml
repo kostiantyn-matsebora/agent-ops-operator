@@ -39,7 +39,7 @@ permissions:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/agentops-${{ inputs.component }}
     steps:

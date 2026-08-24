@@ -21,7 +21,7 @@ jobs:
   # A typo'd tag must FAIL, never skip. A path- or if-filtered job that quietly
   # does nothing is indistinguishable from a successful release.
   determine:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     outputs:
       component: ${{ steps.parse.outputs.component }}
       version: ${{ steps.parse.outputs.version }}
