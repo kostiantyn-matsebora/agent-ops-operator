@@ -11,6 +11,287 @@ See [../README.md](../README.md) for the product overview and [./](./) for
 reference material. `CLAUDE.md` in this directory owns the rules this file
 follows.
 
+## [channel-telegram 0.24.2] — 2026-08-24
+
+### Fixed
+
+**A signal card larger than about 4KB never arrived**, and the delivery retried
+in a loop. The agents' own answers were unaffected — only event cards failed.
+
+Telegram answered:
+
+```
+can't parse entities: Can't find end tag corresponding to start tag "blockquote"
+```
+
+**Cause.** A signal payload over six lines is folded into
+`<blockquote expandable>`, which spans many lines. The splitter chooses a chunk
+boundary at a newline, on an assumption stated in its own comment — that every
+tag it emits opens and closes on the same line.
+
+That was false for exactly this tag. The first chunk carried an opening tag with
+no end and the second a stray end tag, and the Bot API rejects the **whole
+message** rather than the tag.
+
+The adapter already solved this one path over: a split fold in an agent's answer
+has each piece re-wrapped in its own quote. A signal is not agent output, so it
+never reached that code.
+
+**Fix.** The splitter closes a quote it cuts and reopens the same tag on the
+remainder, and reserves room for the end tag up front — adding it after choosing
+a cut would push the chunk past the 4096 limit, trading one rejected message for
+another.
+
+**Still true after this:** a message the Bot API will never accept retries
+forever. The latch that disables expandable quotes recognises a refusal about an
+*unsupported* tag, and this one was *unbalanced*. This removes the trigger, not
+the poison-pill behaviour.
+
+### Upgrade
+
+Nothing to do. The chart pins the new tag.
+
+## [10.0.0] — 2026-08-24
+
+**Every subchart is renamed, the release-wide permission mode is DELETED, and
+the runtime values block splits in two.** This is the widest values break this
+chart has shipped: every operator has set at least one renamed key.
+
+**Nothing is silently ignored.** Every retired key FAILS the render naming its
+replacement, and the guard needs no cluster — so a GitOps render refuses too.
+Helm never reports an unread values key, and the quiet outcome is the expensive
+one: a bundle that simply does not render is indistinguishable from an operator
+who meant to leave it off.
+
+### The five things that will break, in the order they bite
+
+1. **The subchart keys.** `k8s-bundle` → `kubernetes`, `ha-bundle` →
+   `home-assistant`, `prometheus-bundle` → `prometheus`, `telegram-bundle` →
+   `telegram`.
+2. **`global.agentops.runtime.rbacMode` is gone**, with no alias. An install
+   that had `full` now grants NOTHING until it declares an account.
+3. **`runtime:` splits** into `global.agentops.runtimeDefaults` and `runtimes:`.
+4. **`runtimeIdleTtlMinutes` moves** into the defaults block.
+5. **Egress mediation is ON**, which a `restricted` Pod Security namespace
+   refuses — at POD ADMISSION, not at render.
+
+### Changed
+
+**BREAKING — every subchart is named for the SYSTEM it integrates**, and the
+`-bundle` suffix is dropped.
+
+| Was | Now |
+|---|---|
+| `k8s-bundle:` | `kubernetes:` |
+| `ha-bundle:` | `home-assistant:` |
+| `prometheus-bundle:` | `prometheus:` |
+| `telegram-bundle:` | `telegram:` |
+
+`k8s` and `ha` alone are not descriptive, and both collide in READING with the
+`k8s-ops`, `k8s-observe`, `ha-ops` and `ha-control` PIPELINE names an install
+declares. The same string on two kinds of object is what the naming rules exist
+to prevent.
+
+Published IMAGE names do not change. Only values keys and chart directories do.
+
+**BREAKING — the runtime values block splits in two**, and the rule separating
+them is now stateable in two lines:
+
+| Block | Holds |
+|---|---|
+| `global.agentops.runtimeDefaults` | what EVERY runtime inherits — a COMPLETE, working configuration |
+| `runtimes:` | the runtimes that EXIST, each stating only what DIFFERS |
+
+`runtime:` named one thing, `global.agentops.runtime:` another and
+`rbac.runtime:` a third, and no page stated which was which.
+
+**The defaults are SUFFICIENT.** The model credential is the only value with no
+defensible default, and therefore the only thing an install must supply.
+
+**`resources` is written out** — 100m/256Mi requests, 1/1536Mi limits. The
+numbers already existed, compiled into the operator where no operator could read
+or tune them. Behaviour is unchanged on every install.
+
+**BREAKING — `runtimeIdleTtlMinutes` moves** to
+`global.agentops.runtimeDefaults.idleTtlMinutes`, for the same reason: a
+bundle-shipped runtime cannot read a parent-scope value, so it rendered an EMPTY
+field and the CRD's structural default of 10 silently replaced the release's
+setting.
+
+**BREAKING — the reference runtime becomes the `claude` bundle**, ON by default.
+An install using another vendor turns it off and stops carrying it.
+
+**BREAKING — egress mediation defaults to ON.** The wall that constrains an
+agent that does not cooperate should not be something an operator discovers.
+
+**IT COSTS A PRIVILEGED INIT CONTAINER** (`NET_ADMIN`), which a namespace under
+`restricted` Pod Security admission REFUSES — at POD ADMISSION, when a
+conversation starts, far from the setting responsible. The chart cannot see your
+namespace's Pod Security level, so the notes say this rather than guessing.
+
+Decline it release-wide, or on one runtime:
+
+```yaml
+global:
+  agentops:
+    runtimeDefaults:
+      egressMediation:
+        enabled: false
+```
+
+**BREAKING — the Kubernetes bundle's four consequences become ONE STATED
+SETTING**, `kubernetes.allowMutations`, which is the bundle's own:
+
+1. the MCP server drops `--read-only`, so mutating tools are REGISTERED
+2. that server's ServiceAccount gets the acting grant instead of the reads
+3. the `k8s-admin` mutating toolset renders
+4. the ACTING route ships instead of the observing one
+
+They moved together before too, driven by `rbacMode` — a release-wide value
+whose name mentioned none of the four. Each stays individually overridable, and
+none derives from another now.
+
+### Removed
+
+**BREAKING — `global.agentops.runtime.rbacMode` is DELETED**, with no alias and
+no migration path that preserves its meaning.
+
+**THE DEFAULT IS NOW NO PERMISSIONS, FULL STOP.** No setting widens it.
+
+It rendered an extra, named ServiceAccount carrying a preset posture, and that
+account granted nothing until a `Pipeline` named it. So the name described a
+mode the runtime was in — which is what it USED to mean, and the reading that
+caused the incident it was reverted for.
+
+Its one load-bearing behaviour was demo mode resolving empty to `readonly`. That
+does not survive scrutiny, and it was MEASURED before removal: an agent reaches
+the cluster through the MCP SERVER, which carries its own account and its own
+grant, and the runtime image ships no `kubectl`. On a clean demo install the
+runtime pod's account holds no ClusterRoleBinding and is denied `list
+namespaces`, while the answer still carries real cluster data.
+
+**BREAKING — `rbac.runtime.clusterRoles`, `.bindClusterRoles` and `.namespaced`
+are removed.** They attached to the account the mode rendered and have no other
+target. They survive PER ACCOUNT, on a `rbac.runtime.serviceAccounts` entry.
+
+**BREAKING — `serviceAccountName` names the DEFAULT account and is a REFERENCE
+this chart does not create.** Naming is not creating, the posture adapters
+already have.
+
+Two accounts can then exist, and the second is the useful half:
+
+| Account | Created by | Is |
+|---|---|---|
+| `agentops-runtime` | ALWAYS, the chart | bound to nothing |
+| whatever `serviceAccountName` names | **you** | the default a Pipeline inherits |
+
+So an install that points the default at its own account keeps
+`agentops-runtime` available to NAME on one Pipeline and take that route back to
+nothing.
+
+### Added
+
+**A bundle may ship a runtime**, declaring it in its own values and rendering
+its own CR, exactly as bundles already ship pipelines.
+
+**A new guard replaces a deleted invariant.** "The parent always renders
+`default`" cannot hold once the runtime ships in a bundle an operator may turn
+off. In its place: **the render FAILS when no runtime answers to `default` and a
+route still resolves to it**, naming both the missing runtime and the routes.
+
+It reads no cluster, so it protects a GitOps install exactly as it protects an
+interactive one. Routes naming their own `runtimeRef` need no default, and the
+check knows that.
+
+### Upgrade
+
+**0. APPLY THE CRDs.** No CRD field changed in this release, but the rule has
+not: Helm installs a CRD from `crds/` only when absent and never upgrades one.
+
+```sh
+kubectl apply -f chart/crds/
+```
+
+**1. Rename every subchart key.** Nothing else in those blocks changes.
+
+```yaml
+# before                    # after
+k8s-bundle:                 kubernetes:
+ha-bundle:                  home-assistant:
+prometheus-bundle:          prometheus:
+telegram-bundle:            telegram:
+```
+
+**2. Rewrite the runtime block.**
+
+```yaml
+# before
+runtime:
+  image: ghcr.io/.../agentops-runtime-claude:0.8.0
+  contextSync:
+    paths: [".claude/projects/-data-workspace/**"]
+  credentialsSecret:
+    token: <ref>
+runtimeIdleTtlMinutes: 1
+
+# after
+global:
+  agentops:
+    runtimeDefaults:
+      image: ghcr.io/.../agentops-runtime-claude:0.8.0
+      idleTtlMinutes: 1
+      contextSync:
+        paths: [".claude/projects/-data-workspace/**"]
+      credentialsSecret:
+        token: <ref>
+```
+
+`runtimes:` stays EMPTY unless you declare a second vendor — the `claude` bundle
+ships the one named `default`.
+
+**3. Replace `rbacMode` with a DECLARED account.** This is the step that changes
+what your agents can do, so read it before syncing.
+
+```yaml
+# before
+global:
+  agentops:
+    runtime:
+      rbacMode: full
+
+# after
+rbac:
+  runtime:
+    serviceAccounts:
+      - name: agentops-runtime-acting
+        rbacMode: full          # the same vocabulary, per account
+
+pipelines:
+  - name: k8s-ops
+    serviceAccountName: agentops-runtime-acting   # NAME it on the routes
+```
+
+**IF YOU SKIP THE `pipelines` HALF, THOSE ROUTES SILENTLY LOSE THEIR CLUSTER
+POWER.** They keep working — an agent reaches the cluster through the MCP
+server — but anything using the account's own credentials stops.
+
+**IF YOU WERE ALREADY NAMING `agentops-runtime-acting` on your Pipelines**, keep
+those lines exactly as they are and add only the `rbac.runtime.serviceAccounts`
+entry above. The account name is unchanged.
+
+**4. Decide about egress mediation.** It is ON now. If this namespace runs under
+`restricted` Pod Security admission, turn it off before syncing — otherwise the
+first conversation after the upgrade fails at pod admission.
+
+**5. Move `rbac.runtime.{clusterRoles,bindClusterRoles,namespaced}` onto the
+account** you declared in step 3.
+
+**6. Set `kubernetes.allowMutations: true`** if you had `rbacMode: full` and
+relied on the acting route, the write-capable MCP server or the `k8s-admin`
+toolset. Those four followed the mode and follow this now.
+
+**Then sync.** Any key you missed fails the render naming its replacement.
+
 ## [9.0.0] — 2026-08-24
 
 **Persistence is WIRING. It moves off `AgentRuntime` and onto `Pipeline`**, and
@@ -1246,97 +1527,9 @@ kubectl -n <ns> create secret generic ha-admin \
 
 Then set the endpoint, the credentials and — deliberately — the routes.
 
-## [5.21.0] — 2026-08-21
-
-On 2026-08-20 a node reboot corrupted the ext4 filesystem on the shared context
-volume — its claim was at the time named `agentops-home`, the former spelling.
-Longhorn reported the volume **healthy** throughout, correctly: it replicates
-blocks, and all three replicas agreed on the corrupt ones.
-
-Every runtime pod mounts that volume. Five pods sat in `ContainerCreating` for
-fifteen hours, held every capacity slot, and starved six more conversations. The
-install was completely down and **said nothing**. The only condition present read
-`DeliveryPending=False / AllDelivered`, which looks like health.
-
-### Added
-
-| Value | Default | What it does |
-|---|---|---|
-| `runtime.contextSync.paths` | `[]` | moves the live context to pod-local storage, keeping a snapshot on the volume |
-| `rbac.drainAware` | `false` | releases idle runtime pods from a cordoned node so the filesystem unmounts cleanly |
-| `contextProbe.enabled` | `false` | hourly mount probe, so a damaged idle volume is found in an hour rather than at next use |
-
-- `Conversation.status` carries **`RuntimeStarted`**, whose message is the
-  kubelet's own words. A bare "deadline exceeded" would have reproduced the
-  original failure with a timer attached.
-- New verb `POST /channel/conversations/{name}/reset-context` clears a
-  conversation's context handle and keeps the conversation, its threads and its
-  history. It states the loss on every bound thread. It is operator-initiated
-  only — an automatic version would be indistinguishable from the silent
-  degradation the continuity rules forbid.
-- New metrics: `agentops_storage_outage`, `agentops_storage_outage_seconds`,
-  `agentops_context_operations_total`, `agentops_context_checkpoint_bytes`.
-
-### Changed
-
-- **A runtime pod that never starts is now reaped** after
-  `RUNTIME_START_DEADLINE` (10m), with per-conversation exponential backoff. It
-  still counts against the cap until it is gone. Un-counting it would provision
-  past the cap against resources the cluster has not released.
-- **The storage breaker gained a second edge.** It already treated many failed
-  continuations as an outage. It now also counts pods that cannot be provisioned
-  for a storage reason. That is why it never fired for the incident it was
-  written for — no pod started, so no run existed to report. While open it holds
-  work in `Pending` with a reason naming STORAGE rather than queue, and re-tests
-  with one canary.
-
-### Upgrade
-
-`helm upgrade` with the new image tags. No values change is required and nothing
-new is on by default. Rolling back is reverting the images.
-
-**`contextSync` needs `paths`.** Only the runtime knows where its backend keeps
-context, and the chart must not guess. For the reference runtime:
-
-```yaml
-runtime:
-  contextSync:
-    paths: [".claude/projects/-data-workspace/**"]
-```
-
-With it set, the agent container gets ephemeral storage and **no mount of the
-durable volume at all**. Only the sidecar holds it.
-
-A run already going then survives the volume going bad underneath it. An agent
-can neither read another conversation's context nor corrupt the filesystem.
-
-**Opting in strands existing context, visibly.** Without the sidecar, context
-sits at the claim root. With it, each conversation reads a per-conversation
-subdirectory, which starts empty.
-
-Every conversation holding a context handle will therefore FAIL its next run
-rather than answer without memory. That is the continuity rule working, not a
-defect.
-
-Recover each one:
-
-```sh
-curl -sX POST "$MANAGER/channel/conversations/<name>/reset-context" \
-  -H "Authorization: Bearer $ADAPTER_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"channel":"<a channel it is bound to>"}'
-```
-
-Enable `contextSync` on a quiet install, or accept that live conversations lose
-their memory once and say so.
-
-**`rbac.drainAware` costs the manager its first cluster-scoped grant** — nodes
-get/list/watch, read-only. Every other permission it holds is namespaced. It
-shrinks the corruption window without closing it, because the storage provider
-picks where a shared volume is served independently of where runtime pods run.
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
-| [CHANGELOG-5.0-5.20.md](changelog/CHANGELOG-5.0-5.20.md) | chart 5.0.0 through 5.20.0 |
+| [CHANGELOG-5.0-5.21.md](changelog/CHANGELOG-5.0-5.21.md) | chart 5.0.0 through 5.21.0 |
 | [CHANGELOG-1.0-4.0.md](changelog/CHANGELOG-1.0-4.0.md) | chart 1.0 through 4.0.0 |

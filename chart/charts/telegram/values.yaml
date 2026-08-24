@@ -27,7 +27,12 @@ channelAdapter:
   name: telegram
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-channel-telegram
-    tag: 0.24.1
+    # 0.24.2 stops a folded signal payload being cut in half. A payload over six
+    # lines is wrapped in `<blockquote expandable>`, which spans lines — and a
+    # message over 4096 characters was split inside it, so Telegram refused the
+    # whole message and the op retried forever. Cards larger than ~4KB never
+    # arrived on 0.24.1.
+    tag: 0.24.2
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
