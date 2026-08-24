@@ -37,12 +37,62 @@ jobs:
       modules: ${{ steps.list.outputs.modules }}
       images: ${{ steps.list.outputs.images }}
     steps:
+      # FULL HISTORY, because the filter below diffs against a base commit.
+      # fetch-depth: 1 makes every diff report the whole tree as changed, which
+      # is the failure that looks like the filter simply not working.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - id: list
+        env:
+          # The commit this push or pull request is measured against. Empty on a
+          # branch's first push, where there is nothing to diff and everything
+          # must build.
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
-          echo "modules=$(./.github/components.sh modules \
-            | jq -c --arg m "$ENVTEST_MODULE" 'map(select(. != $m))')" >> "$GITHUB_OUTPUT"
-          echo "images=$(./.github/components.sh images)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+
+          ALL_MODULES=$(./.github/components.sh modules \
+            | jq -c --arg m "$ENVTEST_MODULE" 'map(select(. != $m))')
+          ALL_IMAGES=$(./.github/components.sh images)
+
+          # WHAT CHANGED, or EVERYTHING when that cannot be established. A new
+          # branch reports an all-zero base, and a shallow or grafted history
+          # makes the diff fail — both must build the world rather than build
+          # nothing, because a filter that silently matches nothing is a CI that
+          # silently tests nothing.
+          changed=""
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] \
+             && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            changed=$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" || true)
+          fi
+
+          # THE THREE FILES THAT REBUILD EVERYTHING. The shared Dockerfile is
+          # nine components' recipe, `components.sh` decides what exists at all,
+          # and this workflow decides how any of it is tested. A change to one
+          # of them touches no component directory and invalidates all of them.
+          if [ -z "$changed" ] \
+             || echo "$changed" | grep -qE '^\.github/(docker/|components\.sh|workflows/ci\.yml)'; then
+            echo "building everything: base=${BASE_SHA:-none}" >&2
+            echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
+            echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf '%s\n' "$changed" > /tmp/changed.txt
+          echo "changed files:" >&2; cat /tmp/changed.txt >&2
+
+          # A component is built when a file inside its own directory moved.
+          # `components.sh` reports contexts as `./path`; the diff reports
+          # `path` — normalising here rather than at each use is what keeps the
+          # two from drifting apart.
+          echo "modules=$(echo "$ALL_MODULES" | jq -c --rawfile c /tmp/changed.txt '
+            ($c | split("\n") | map(select(length > 0))) as $files
+            | map(select(. as $m | $files | any(startswith($m + "/"))))')" >> "$GITHUB_OUTPUT"
+
+          echo "images=$(echo "$ALL_IMAGES" | jq -c --rawfile c /tmp/changed.txt '
+            ($c | split("\n") | map(select(length > 0))) as $files
+            | map(select((.context | sub("^\\./"; "")) as $d | $files | any(startswith($d + "/"))))')" >> "$GITHUB_OUTPUT"
 
   # The operator, against a REAL API server. Its own suite file records that
   # envtest schedules nothing, so this proves the API-server half and nothing
@@ -85,6 +135,7 @@ jobs:
   # envtest log.
   modules:
     needs: discover
+    if: needs.discover.outputs.modules != '[]'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
@@ -270,6 +321,7 @@ jobs:
   # exercised at release, where a manifest is actually produced to assert on.
   images:
     needs: discover
+    if: needs.discover.outputs.images != '[]'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
@@ -346,3 +398,40 @@ jobs:
       # quotes the line — `--show` is for local fixing.
       - name: No retired vocabulary asserted as a current claim
         run: python3 .github/scripts/retired-vocabulary-guard.py
+
+  # THE ONE REQUIRED CHECK, AND THE REASON PATH FILTERING IS SAFE.
+  #
+  # A branch-protection rule names a check by NAME. A job SKIPPED because its
+  # paths were untouched never reports that name, so a rule requiring it blocks
+  # the pull request forever — which is how path filtering and required checks
+  # quietly become incompatible.
+  #
+  # This job always runs and decides for itself. `success()` is not used: it
+  # treats a skipped dependency inconsistently while reading as though it were
+  # checking one. Reading the results explicitly states what the gate means — a
+  # SKIPPED job passed by having nothing to do, a CANCELLED one did not pass.
+  ci-green:
+    name: ci-green
+    if: always()
+    needs: [discover, operator, modules, console-ui, chart, docs, images, publication, retired-vocabulary]
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Every relevant check passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "  \(.value.result)\t\(.key)"'
+          bad=$(echo "$RESULTS" | jq -r '
+            to_entries[]
+            | select(.value.result != "success" and .value.result != "skipped")
+            | "\(.key) (\(.value.result))"')
+          if [ -n "$bad" ]; then
+            echo
+            echo "not green:"
+            echo "$bad" | sed 's/^/  /'
+            exit 1
+          fi
+          echo
+          echo "every relevant check passed"
+
