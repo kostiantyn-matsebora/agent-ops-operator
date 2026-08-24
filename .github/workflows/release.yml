@@ -98,3 +98,68 @@ jobs:
     uses: ./.github/workflows/build-chart.yml
     with:
       version: ${{ needs.determine.outputs.version }}
+
+  # THE RELEASE ENTRY, AND IT IS NOT DECORATION.
+  #
+  # A tag publishes an image or a chart to GHCR and nothing else, so the repo's
+  # Releases page stayed EMPTY through thirteen published packages — the first
+  # thing a stranger looks at to decide whether a project is alive said nothing
+  # had ever shipped.
+  #
+  # It runs AFTER the artifact, and only when the artifact actually published:
+  # an entry announcing a version the registry does not hold is worse than none,
+  # because that is exactly the page somebody copies an install command from.
+  github_release:
+    name: github release
+    needs: [determine, image, chart]
+    if: |
+      always() && needs.determine.result == 'success' &&
+      (needs.image.result == 'success' || needs.chart.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose the notes and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENT: ${{ needs.determine.outputs.component }}
+          VERSION: ${{ needs.determine.outputs.version }}
+          IS_CHART: ${{ needs.determine.outputs.is_chart }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          notes=$(mktemp)
+
+          if [ "$IS_CHART" = "true" ]; then
+            title="chart $VERSION"
+            {
+              echo "\`\`\`sh"
+              echo "helm install agent-ops \\"
+              echo "  oci://ghcr.io/$owner/charts/agent-ops-operator \\"
+              echo "  --version $VERSION -n agent-ops --create-namespace"
+              echo "\`\`\`"
+              echo
+              # The CHANGELOG entry for exactly this version, or nothing. An
+              # entry inventing its own summary would drift from the file every
+              # upgrade decision is actually made from.
+              awk -v v="## [$VERSION]" '
+                index($0, v) == 1 { on = 1; next }
+                on && /^## \[/     { exit }
+                on                 { print }
+              ' docs/CHANGELOG.md
+            } > "$notes"
+          else
+            title="$COMPONENT $VERSION"
+            {
+              echo "\`\`\`"
+              echo "ghcr.io/$owner/agentops-$COMPONENT:$VERSION"
+              echo "\`\`\`"
+              echo
+              echo "Published by \`${GITHUB_REF#refs/tags/}\`. Chart releases are tagged"
+              echo "separately — a component version moves independently of the chart's."
+            } > "$notes"
+          fi
+
+          gh release create "${GITHUB_REF#refs/tags/}" \
+            --title "$title" --notes-file "$notes" --verify-tag
