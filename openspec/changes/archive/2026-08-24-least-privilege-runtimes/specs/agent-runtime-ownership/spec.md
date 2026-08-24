@@ -94,10 +94,10 @@ somebody wrote down.
 **THIS BANS `rbacMode` TOO, AND THE FIRST VERSION OF THIS CHANGE DID NOT.**
 Deleting the release-wide `global.agentops.runtime.rbacMode` removed the preset
 from the account every unnamed route inherited, and left the identical mechanism
-one level down on `rbac.runtime.serviceAccounts[].rbacMode` — so this
-requirement described half of what shipped. `readonly` and `full` SHALL be
-DELETED with no alias: a declared account states `clusterRoles`,
-`bindClusterRoles` or `namespaced`, or it holds nothing.
+one level down on `rbac.runtime.serviceAccounts[].rbacMode` — so this requirement
+described half of what shipped. `readonly` and `full` SHALL be DELETED with no
+alias: a declared account states `clusterRoles`, `bindClusterRoles` or
+`namespaced`, or it holds nothing.
 
 - **A reviewer reading `rbacMode: full` sees a word, not the verbs.** That is
   the whole objection to a preset, and it does not become smaller because the
@@ -149,7 +149,7 @@ inherited default is an account of the operator's that carries rights.
 
 #### Scenario: No bundle renders the floor
 - **WHEN** any bundle is enabled
-- **THEN** no bundle renders the floor account, though a bundle DOES render an identity for each route it ships and may render a runtime of its own
+- **THEN** no bundle renders the floor account, though a bundle DOES render an identity for a route it grants something to, and may render a runtime of its own
 
 ## MODIFIED Requirements
 

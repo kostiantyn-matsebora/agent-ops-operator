@@ -16,11 +16,12 @@ reporting it would reach the agent that made it.
 ## Requirements
 
 ### Requirement: The HA signal adapter is a standalone, dependency-free module
+
 `signals/ha/` SHALL be its own Go module with no dependencies outside this
 repository, reaching Home Assistant over plain HTTP and the manager over the
-`/signal/*` contract. It SHALL hold no Kubernetes client and SHALL declare
-`kubernetesAccess: false`, because its data source is Home Assistant, not the
-cluster.
+`/signal/*` contract. It SHALL hold no Kubernetes client and SHALL NAME NO
+ServiceAccount, because its data source is Home Assistant, not the cluster —
+so it runs as the release floor, an account bound to nothing.
 
 It SHALL normalize what it observes into signals — `fingerprint`, `labels`,
 optional `title`, `payload`, `kind` — and post them to the manager's inbound
@@ -33,7 +34,7 @@ manager-side, driven by the `SignalSource`.
 
 #### Scenario: No cluster access
 - **WHEN** the adapter's workload is rendered
-- **THEN** it mounts no ServiceAccount token and holds no Kubernetes permissions
+- **THEN** it names no account of its own, runs as the release floor, and holds no Kubernetes permissions
 
 ### Requirement: Configuration reuses the cluster-events vocabulary exactly
 The adapter's `spec.config` SHALL use the same two-part shape as the cluster

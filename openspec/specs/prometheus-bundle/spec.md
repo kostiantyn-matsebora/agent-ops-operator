@@ -80,10 +80,11 @@ assertion.
 
 ### Requirement: Sender self-registration is a VictoriaMetrics-only sub-feature and says so
 The `registration` sub-component SHALL keep its behavior: when enabled with a
-required target reference it SHALL set `kubernetesAccess: true` on the rendered
-SignalAdapter, render a Role scoped to
-`vmalertmanagerconfigs.operator.victoriametrics.com` plus a RoleBinding for the
-adapter's deterministic ServiceAccount into the target namespace, and place the
+required target reference it SHALL render the adapter's ServiceAccount BESIDE
+its grant and NAME it on the rendered SignalAdapter — the operator creates no
+account and binds no RBAC — plus a Role scoped to
+`vmalertmanagerconfigs.operator.victoriametrics.com` and a RoleBinding for that
+account in the target namespace, and place the
 `register` block — target plus the optional routing knobs `matchers`,
 `groupWait`, `groupInterval`, `repeatInterval`, `maxAlerts`, `sendResolved` —
 into the source's opaque config. Rendering SHALL fail loudly when registration is
@@ -101,9 +102,9 @@ implementation for other senders.
 #### Scenario: One flag wires a VictoriaMetrics sender
 - **WHEN** the bundle renders with registration enabled and a valid target
   alongside the default source
-- **THEN** the SignalAdapter carries `kubernetesAccess: true`, the Role and
-  RoleBinding land in the target namespace bound to the adapter's SA, and the
-  source's config carries the `register` block
+- **THEN** the SignalAdapter NAMES the account this component rendered, the Role
+  and RoleBinding land in the target namespace bound to it, and the source's
+  config carries the `register` block
 
 #### Scenario: Registration without a target fails at render time
 - **WHEN** registration is enabled with no target reference
