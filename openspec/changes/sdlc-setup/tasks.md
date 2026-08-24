@@ -144,12 +144,22 @@
 - [x] 4.3 One image job per component calling `build-image.yml`, each gated on
       `needs.determine.outputs.component`, with the right context/dockerfile and
       the component's platform declaration from 1.2
-- [ ] 4.4 End-to-end proof: cut `manager-v<next-patch>`, confirm the image
+- [x] 4.4 End-to-end proof: cut `manager-v<next-patch>`, confirm the image
       publishes, both arches are present, and a re-push of the same tag is
-      rejected by the guard
-- [ ] 4.5 Second proof on the image that was single-arch by accident: cut
+      rejected by the guard.
+      **DONE on `manager-v0.57.1`**: published `linux/amd64` and `linux/arm64`,
+      and deleting and re-pushing the tag failed at `Refuse to overwrite a
+      published tag` BEFORE any build, every later step skipped.
+      **THE FIRST ATTEMPT FAILED FOR A FOURTH REASON NOBODY HAD LISTED** — see
+      `build-test.md`. `manager-v0.57.0` and `runtime-claude-v0.8.1` are burnt
+      tags: the token had `Packages: write` and login succeeded, but each package
+      had no ACTIONS ACCESS for this repository, because all thirteen were first
+      published by hand rather than by the workflow
+- [x] 4.5 Second proof on the image that was single-arch by accident: cut
       `runtime-claude-v<next-patch>`, confirm it publishes BOTH arches, and pull
-      it on an arm64 node
+      it on an arm64 node.
+      **DONE on `runtime-claude-v0.8.2`** — the manifest carries `linux/amd64`
+      AND `linux/arm64`, which is what the single-arch accident could not
 
 ## 5. Chart publishing
 
