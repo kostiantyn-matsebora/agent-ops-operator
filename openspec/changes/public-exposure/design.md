@@ -169,13 +169,26 @@ minutes rather than never:
   topics, homepage and the feature toggles were all applied while private, and
   they are what a stranger meets first. Only the two the plan refuses moved.
 - **The branch-protection SHAPE was decided before it could be applied**, so
-  the move costs no thinking later: deletion blocked; the six stable CI jobs
-  required (`operator`, `modules`, `console-ui`, `chart`, `docs`,
-  `publication` — `images` is a matrix and its name is not stable enough to
-  require); **admins exempt**, because direct commits to `master` are how this
-  project actually works and a policy that blocks them is the one bypassed on
-  the first hotfix; no required reviews, since a solo maintainer cannot
+  the move costs no thinking later: deletion blocked; **`ci-green` required, and
+  NOTHING ELSE**; **admins exempt**, because direct commits to `master` are how
+  this project actually works and a policy that blocks them is the one bypassed
+  on the first hotfix; no required reviews, since a solo maintainer cannot
   self-approve and the branch would simply freeze.
+- **REQUIRING THE INDIVIDUAL JOBS IS NOW WRONG, NOT MERELY UNNECESSARY.** This
+  read "the six stable CI jobs required — `operator`, `modules`, `console-ui`,
+  `chart`, `docs`, `publication`" and excluded `images` because a matrix job's
+  name is not stable enough to require.
+  - **CI BUILDS ONLY WHAT CHANGED NOW**, so a documentation-only pull request
+    skips `modules` and `chart` — and a protection rule names a check by NAME,
+    while a SKIPPED job never reports that name. The rule would wait forever for
+    a status that is not coming, on exactly the cheapest pull requests.
+  - **The `images` exclusion was the same problem seen early.** What made a
+    matrix name unstable is what makes every filtered job's presence
+    conditional; the answer generalises rather than staying an exception.
+  - **`ci-green` exists for this.** It always runs, and passes when every check
+    relevant to that pull request passed or was skipped for having nothing to
+    do. One name, always reported, and its verdict covers the jobs a list would
+    have had to enumerate and keep in step.
 - **Force pushes stay ALLOWED until the flip**, then are blocked. Blocking them
   earlier would have prevented the history rewrite that §5 needed.
 

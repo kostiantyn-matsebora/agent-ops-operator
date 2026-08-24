@@ -84,10 +84,14 @@ exists so that the switch is safe, and §7 is the gate that says so.
       rather than a policy that will be bypassed on the first hotfix. **ALSO
       PLAN-BLOCKED WHILE PRIVATE** (HTTP 403, "upgrade to GitHub Pro or make this
       repository public"), so it runs immediately after 7.6 too. The shape is
-      SETTLED and is in `design.md` D4a — deletion blocked, the six CI jobs
-      required, admins exempt so direct commits to `master` keep working, no
-      required reviews because a solo maintainer cannot self-approve, and force
-      pushes left ALLOWED until the flip is done
+      SETTLED and is in `design.md` D4a — deletion blocked, **`ci-green` required
+      and nothing else**, admins exempt so direct commits to `master` keep
+      working, no required reviews because a solo maintainer cannot
+      self-approve, and force pushes left ALLOWED until the flip is done.
+      **REQUIRING THE SIX INDIVIDUAL JOBS WOULD NOW BREAK PULL REQUESTS**, which
+      is why the shape changed rather than merely aged: CI builds only what
+      changed, a skipped job never reports its name, and a rule requiring one
+      waits forever — on the cheapest pull requests, the documentation-only ones
 
 ## 7. The gate
 
@@ -100,8 +104,12 @@ Each line is a condition that becomes impossible or expensive after the flip.
       contradiction reads it once and remembers it
 - [ ] 7.4 Images are public and the chart installs from the registry by a person
       who has cloned nothing (`sdlc-setup`), verified anonymously
-- [ ] 7.5 Licence, community files, templates and settings are in place, and the
-      site is live
+- [ ] 7.5 Licence, community files, templates and settings are in place.
+      **THE SITE IS NOT PART OF THIS GATE, AND CANNOT BE.** This read "and the
+      site is live", which no ordering can satisfy: 6.3 records that Pages is
+      refused for a private repository on this plan, so the site cannot exist
+      until after 7.6 — the very step this line gates. 6.3 owns it, immediately
+      after the flip
 - [ ] 7.6 **Flip the repository to public.** Then verify as a stranger would:
       open it signed out, follow the README's install command, and follow every
       link in its index
