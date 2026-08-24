@@ -82,6 +82,33 @@ Archive a completed change in the experimental workflow.
    mv "<changeRoot>" "<planningHome.changesDir>/archive/YYYY-MM-DD-<name>"
    ```
 
+5.5 **Close the tracking issue and remove the worktree — THIS REPOSITORY'S RULE**
+
+   The archive runs INSIDE the change's pull request, so the diff shows the
+   delta specs folding into `openspec/specs/` — which is what a reviewer here
+   should be looking at. See `.claude/rules/worktree-delivery.md`.
+
+   ```bash
+   gh issue edit <n> --add-label opsx:archived \
+     --remove-label opsx:review --remove-label opsx:applying
+   gh issue comment <n> --body "Archived. Deltas folded into openspec/specs/."
+   gh issue close <n>
+   ```
+
+   Then, once the pull request has MERGED — not before, or the branch loses its
+   working copy while the review is still open:
+
+   ```bash
+   git worktree remove ../agent-ops-worktrees/<name>
+   ```
+
+   - **The `.github-issue` sidecar moves into the archive with the change.** It
+     is a reference and is what makes an archived change traceable; do not
+     delete it.
+   - **No issue on the change?** It predates the flow. Archive anyway and say so
+     — do not open one at archive time, which would create a thread nobody ever
+     used.
+
 6. **Display summary**
 
    Show archive completion summary including:

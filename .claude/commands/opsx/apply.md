@@ -23,6 +23,32 @@ Implement tasks from an OpenSpec change.
 
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx:apply <other>`).
 
+1.5 **Work in the change's own worktree — THIS REPOSITORY'S RULE**
+
+   Every openspec change is implemented in its own worktree on its own branch and
+   lands as a pull request. See `.claude/rules/worktree-delivery.md`.
+
+   ```bash
+   git worktree list                                  # is one already open?
+   git worktree add -b change/<name> ../agent-ops-worktrees/<name> origin/master
+   ```
+
+   - **The worktree lives OUTSIDE the repository.** One inside it doubles the
+     derived component inventory and breaks CI's matrices, silently.
+   - **Reuse an existing worktree** rather than creating a second; `git worktree
+     list` is the check.
+   - **Everything below runs in that worktree**, including the commits.
+   - **Advance the tracking issue** to `opsx:applying` and say so once:
+
+     ```bash
+     gh issue edit <n> --add-label opsx:applying --remove-label opsx:proposed
+     gh issue comment <n> --body "Implementation started on \`change/<name>\`."
+     ```
+
+     The issue number is in the change's `.github-issue` file. If there is none,
+     the change predates the tracking flow — open one per
+     `.claude/commands/opsx/propose.md` rather than skipping it.
+
 2. **Check status to understand the schema**
    ```bash
    openspec status --change "<name>" --json
