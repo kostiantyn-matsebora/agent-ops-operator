@@ -36,6 +36,11 @@ jobs:
     outputs:
       modules: ${{ steps.list.outputs.modules }}
       images: ${{ steps.list.outputs.images }}
+      operator: ${{ steps.list.outputs.operator }}
+      ui: ${{ steps.list.outputs.ui }}
+      chart: ${{ steps.list.outputs.chart }}
+      docs: ${{ steps.list.outputs.docs }}
+      site: ${{ steps.list.outputs.site }}
     steps:
       # FULL HISTORY, because the filter below diffs against a base commit.
       # fetch-depth: 1 makes every diff report the whole tree as changed, which
@@ -76,6 +81,7 @@ jobs:
             echo "building everything: base=${BASE_SHA:-none}" >&2
             echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
             echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
+            for j in operator ui chart docs site; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
 
@@ -90,6 +96,23 @@ jobs:
             ($c | split("\n") | map(select(length > 0))) as $files
             | map(select(. as $m | $files | any(startswith($m + "/"))))')" >> "$GITHUB_OUTPUT"
 
+          # THE FIXED JOBS ARE FILTERED TOO, and `operator` is why. It provisions
+          # envtest and runs the suite against a real API server — minutes, on
+          # every push, including one that edited a paragraph. Its tests render
+          # the CHART, so it watches both trees.
+          #
+          # Each flag is `true` or empty; a job reads its own and nothing else,
+          # so adding a job means adding one line here rather than editing a
+          # shared expression.
+          m() { grep -qE "$1" /tmp/changed.txt && echo true; }
+          {
+            echo "operator=$(m '^(platform/manager/|chart/)')"
+            echo "ui=$(m '^platform/console/ui/')"
+            echo "chart=$(m '^(chart/|platform/manager/api/)')"
+            echo "docs=$(m '^(docs/|chart/|platform/manager/api/|\.github/scripts/docs-generate)')"
+            echo "site=$(m '^docs/')"
+          } >> "$GITHUB_OUTPUT"
+
           echo "images=$(echo "$ALL_IMAGES" | jq -c --rawfile c /tmp/changed.txt '
             ($c | split("\n") | map(select(length > 0))) as $files
             | map(select((.context | sub("^\\./"; "")) as $d | $files | any(startswith($d + "/"))))')" >> "$GITHUB_OUTPUT"
@@ -98,6 +121,8 @@ jobs:
   # envtest schedules nothing, so this proves the API-server half and nothing
   # about the kubelet — which is what the e2e-testing change is for.
   operator:
+    needs: discover
+    if: needs.discover.outputs.operator == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -180,6 +205,8 @@ jobs:
   # Screenshots are deliberately out: they need a browser, and they are
   # regenerated when the UI changes, not on every pull request.
   console-ui:
+    needs: discover
+    if: needs.discover.outputs.ui == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -199,6 +226,8 @@ jobs:
   # every meaningful permutation and validating the result proves they produce
   # objects a cluster would accept.
   chart:
+    needs: discover
+    if: needs.discover.outputs.chart == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -296,6 +325,8 @@ jobs:
   # It needs helm because the worked examples ARE chart output: the same render
   # the job above validates, with its custom resources lifted into the pages.
   docs:
+    needs: discover
+    if: needs.discover.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -366,6 +397,8 @@ jobs:
   # This runs the same Jekyll build Pages runs, and only that — link checking and
   # prose linting are separate questions and are not smuggled in here.
   site:
+    needs: discover
+    if: needs.discover.outputs.site == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

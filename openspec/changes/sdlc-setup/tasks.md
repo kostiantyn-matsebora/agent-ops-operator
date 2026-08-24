@@ -52,7 +52,7 @@
 - [x] 2.7 Job `images`: matrix over the thirteen Dockerfiles,
       `docker/build-push-action` with `push: false`, `platforms: linux/amd64`,
       and GHA layer cache. Derive the matrix from the Dockerfiles present
-- [ ] 2.8 Open a scratch PR and confirm all jobs run and pass; deliberately
+- [x] 2.8 Open a scratch PR and confirm all jobs run and pass; deliberately
       break one module and one UI test and confirm each failure is attributed to
       the thing that broke.
       **A RUNNER EXISTS NOW** — a self-hosted one, because GitHub-hosted minutes
@@ -83,6 +83,22 @@
       eleven CRDs in every permutation, since kubeconform treats a missing schema
       as an error and its strict set has none for CustomResourceDefinition —
       which is why running the commands was worth doing, and not enough
+      **DONE ON PR #27, AND THE ATTRIBUTION IS EXACT.** A failing Go test and a
+      failing UI test turned `modules (signals/cron)` and `console-ui` red and
+      nothing else — chart, docs, discover, publication, retired-vocabulary and
+      site all green.
+      - **`images (signal-cron)` STAYED GREEN**, which is the distinction worth
+        having: the module job runs tests, the image job only compiles. A first
+        attempt appended to a file that did not exist, so the package lost its
+        `package` clause and stopped COMPILING — that failed the image build too
+        and proved nothing, since a package that cannot compile fails every job
+        that compiles it
+      - **The path filter holds on a pull request too**: two component
+        directories touched produced four matrix jobs, not twenty-five
+      - **`publication` failed once, for a real reason, and it was mine.**
+        `git add -A` swept another session's unfinished file into the commit and
+        the guard caught in CI what no local run could — that session had since
+        edited its working copy clean while the committed version had not
 
 ## 3. Reusable image publish workflow
 
