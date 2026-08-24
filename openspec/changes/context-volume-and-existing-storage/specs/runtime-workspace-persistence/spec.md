@@ -14,9 +14,15 @@ CONTEXT volume everywhere it is named, never the home volume. That it happens to
 be the runtime process's `$HOME` is a property of one runtime image, not what
 the volume is for.
 
-The MOUNT PATH SHALL NOT move. It is the process home directory, and the
-reference runtime keys its stored context off it, so relocating it would break
-continuity for every existing conversation.
+The MOUNT PATH SHALL move with the name, to `/data/context`. An earlier reading
+held it load-bearing because the reference runtime resolves `${HOME}/.claude/`
+off it. Checked against a live volume, it is not: a claim's contents appear AT
+the mount path, so the same volume mounted elsewhere shows the same bytes, and
+the stored transcript directory is named for the WORKING DIRECTORY rather than
+for `$HOME`.
+
+`/data/workspace` SHALL NOT move. THAT is the load-bearing path — the transcript
+directory is named for it, so relocating it strands every stored context.
 
 Turning persistence off SHALL NOT be silent at the moment it costs something. A
 run whose context is gone SHALL FAIL with an explicit reason rather than
@@ -38,25 +44,30 @@ question is asked.
 - **WHEN** a run is asked to continue a context whose stored state no longer exists
 - **THEN** the run fails with an explicit reason instead of answering without context, the thread is told what happened and that a new conversation is the remedy, and the conversation records that it can no longer be continued
 
-#### Scenario: The mount path is unchanged by the rename
+#### Scenario: The mount path moves and stored context still resolves
 - **WHEN** a runtime pod is built after the rename
-- **THEN** the context volume is mounted at the same path it was mounted at before, and a conversation created before the rename resumes its context
+- **THEN** the context volume is mounted at the context path, `$HOME` names it, and a conversation created before the rename resumes its context because nothing inside the volume moved
 
-### Requirement: AgentRuntime can declare a persistent workspace volume
-`AgentRuntime.spec` SHALL accept a `workspace` volume declaration alongside the
-context volume, referencing a PersistentVolumeClaim. When declared, the runtime
-pod SHALL mount the repository checkout path from that claim; when absent, the
-checkout path SHALL remain ephemeral.
+#### Scenario: The checkout path is untouched
+- **WHEN** a runtime pod is built after the rename
+- **THEN** the repository checkout is at the same path as before, because the stored transcript directory is named for it
 
-The checkout path SHALL NOT move — claude-code sessions are keyed by working
-directory, and relocating it breaks session resume.
+### Requirement: The workspace volume is declared on the wiring, not the runtime
+The workspace volume SHALL be declared where the context volume is — on the
+`Pipeline` — and `AgentRuntime` SHALL declare neither. When a route binds one,
+its runtime pods SHALL mount the repository checkout path from that claim, one
+subdirectory per conversation; when none resolves, the checkout path SHALL
+remain ephemeral.
+
+The checkout path SHALL NOT move — claude-code keys its stored transcripts by
+working directory, and relocating it breaks resume.
 
 #### Scenario: Workspace claim is mounted
-- **WHEN** an `AgentRuntime` declares a workspace claim
-- **THEN** runtime pods built from it mount the checkout path from that claim at the unchanged path
+- **WHEN** a route resolves a workspace claim
+- **THEN** runtime pods mount the checkout path from that claim at the unchanged path
 
 #### Scenario: Absent declaration stays ephemeral
-- **WHEN** an `AgentRuntime` declares no workspace volume
+- **WHEN** neither the route nor the release supplies a workspace volume
 - **THEN** runtime pods use ephemeral storage for the checkout, as before
 
 ### Requirement: Workspace persistence is opt-in and provisioned by the chart
@@ -141,14 +152,19 @@ the lifecycle of storage holding agent context it did not put there.
 - **WHEN** any combination of these values is rendered
 - **THEN** the release contains no `PersistentVolume` object
 
-### Requirement: The rename does not strand an installed runtime or its stored context
+### Requirement: The rename does not strand an install from its stored context
 The context volume's rename SHALL NOT be able to silently separate an install
 from the context it already has.
 
-The retired `AgentRuntime` field SHALL be DUAL-READ for one release: a runtime
-declaring the old field SHALL keep working, and the new field SHALL win where
-both are present. A rename that merely moved the field would strand every
-installed runtime at the moment of upgrade.
+The retired `AgentRuntime` field SHALL be DELETED rather than aliased. A
+one-release dual-read was considered and rejected: an alias is honest only where
+a field was renamed IN PLACE, and this field's concept moved to a DIFFERENT CR,
+so an alias would resolve to something that is not on that object at all.
+
+The upgrade note SHALL therefore state plainly that a runtime still declaring
+the retired field contributes no volume, and SHALL name where the declaration
+moves to. Being told is recoverable; an alias that quietly resolves to nothing
+is not.
 
 The DEFAULT CLAIM NAME changes with the rename, and nothing copies a volume. An
 upgrade that adopted the new name unremarked would provision a second, empty
@@ -169,13 +185,9 @@ volume gets it provisioned anyway, sitting `Pending`, with no runtime pod ever
 scheduling behind it. This check SHALL NOT depend on reading the cluster, so
 unlike the claim guard it also protects a GitOps install.
 
-#### Scenario: An old runtime keeps running
+#### Scenario: A runtime declaring the retired field is not silently honoured
 - **WHEN** an `AgentRuntime` declaring only the retired field is reconciled after the upgrade
-- **THEN** its volume is mounted as before and its conversations keep their context
-
-#### Scenario: Both fields present
-- **WHEN** an `AgentRuntime` declares both the retired field and its replacement
-- **THEN** the replacement is used
+- **THEN** it contributes no volume, and the upgrade note names the Pipeline field the declaration moves to
 
 #### Scenario: An upgrade cannot silently move the volume
 - **WHEN** an install holding a claim under the retired name is upgraded without stating which claim its context lives on

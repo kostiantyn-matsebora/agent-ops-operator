@@ -1,9 +1,21 @@
-## MODIFIED Requirements
+## REMOVED Requirements
 
 ### Requirement: The credential and home volume are wired, not restated
+**Reason**: Renamed. The requirement's subject changed twice over — the volume
+is the CONTEXT volume, not the home volume, and it is no longer the runtime's to
+declare at all. A heading naming a retired word and an ownership that moved
+would be wrong in both halves, and this capability's own guard now fails a build
+on the first of them.
+
+The replacement below carries the credential wiring unchanged and states the
+runtime's new relationship to storage: none.
+
+## ADDED Requirements
+
+### Requirement: The credential is wired, and neither volume is the runtime's
 When `runtime.credentialsSecret.token` is supplied the component SHALL create that Secret, so the credential is release-managed; when it is empty the `AgentRuntime` SHALL reference the named Secret without creating it, and the post-install notes SHALL warn that the reference is unsatisfied. The credential SHALL reach the runtime as env via `valueFrom` — the manager SHALL read no Secrets.
 
-The rendered `AgentRuntime` SHALL take its CONTEXT volume claim from the parent's own context persistence block (its claim name, or an existing claim) with an explicit runtime-side override for a claim the chart did not create. It SHALL take an optional workspace claim from the parent's workspace persistence block the same way. No operator SHALL have to copy a claim name between values blocks, for either volume.
+The rendered `AgentRuntime` SHALL declare NO volume. Persistence is wiring: the CONTEXT and WORKSPACE volumes are declared on the `Pipeline`, and the release-wide claims the parent provisions reach a conversation that binds neither through the manager's bootstrap configuration. No operator SHALL have to copy a claim name between values blocks, for either volume, and no route SHALL need a runtime of its own to keep its state somewhere else.
 
 Where either block points at storage the chart did not create — an existing claim, or a pre-created volume the rendered claim binds to — the resolved claim name SHALL flow to every consumer of that volume by the same wiring. An operator SHALL NOT have to restate it for the runtime, the manager's bootstrap default, the reclaiming job or the mount probe. A capability that reaches one consumer and not the others is how a volume ends up half-wired, which reads as a broken feature rather than a missing value.
 
@@ -21,19 +33,23 @@ Context persistence SHALL be enabled by default and workspace persistence SHALL 
 
 #### Scenario: Persistence needs no second declaration
 - **WHEN** context persistence is enabled
-- **THEN** the rendered `AgentRuntime` carries a context volume reference naming the chart's claim, with no runtime-side value set
+- **THEN** the release's claim reaches every conversation whose route binds none, with no runtime-side and no pipeline-side value set
 
-#### Scenario: Sessions persist without being asked for
+#### Scenario: The runtime declares no volume at all
+- **WHEN** the chart renders its `AgentRuntime`
+- **THEN** that CR carries neither a context nor a workspace volume, because where state lives is the route's decision
+
+#### Scenario: Context persists without being asked for
 - **WHEN** the chart is installed with no persistence values supplied
-- **THEN** the context claim is provisioned and the rendered `AgentRuntime` references it
+- **THEN** the context claim is provisioned and reaches conversations as the release default
 
 #### Scenario: Workspace is wired the same way when enabled
 - **WHEN** workspace persistence is enabled
-- **THEN** the rendered `AgentRuntime` carries `workspace.pvcRef` naming the chart's workspace claim, with no runtime-side value set
+- **THEN** the release's workspace claim reaches conversations whose route binds none, with no runtime-side and no pipeline-side value set
 
 #### Scenario: Storage the chart did not create is wired everywhere too
 - **WHEN** a volume is configured against an existing claim or a pre-created volume
-- **THEN** the runtime, the manager's bootstrap default, the reclaiming job and the mount probe all resolve to that same claim with no further values set
+- **THEN** the manager's bootstrap default, the reclaiming job and the mount probe all resolve to that same claim with no further values set
 
 #### Scenario: Idle TTL has one default
 - **WHEN** `runtime.idleTtlMinutes` is left empty
