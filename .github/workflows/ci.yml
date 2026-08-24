@@ -138,10 +138,15 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pyyaml
+      # INTO $RUNNER_TEMP, NOT /usr/local/bin. Writing to a system directory
+      # assumes the job runs as root, which is true of GitHub-hosted runners and
+      # false of most self-hosted ones — so the assumption is invisible until CI
+      # runs somewhere else and fails on tar rather than on anything it tests.
       - name: Install kubeconform
         run: |
           curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
-            | tar -xz -C /usr/local/bin kubeconform
+            | tar -xz -C "$RUNNER_TEMP" kubeconform
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Convert this repo's CRDs into validation schemas
         run: python3 .github/scripts/crd-schemas.py chart/crds "$RUNNER_TEMP/crd-schemas"
       - run: helm lint chart
@@ -230,10 +235,15 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pyyaml
+      # INTO $RUNNER_TEMP, NOT /usr/local/bin. Writing to a system directory
+      # assumes the job runs as root, which is true of GitHub-hosted runners and
+      # false of most self-hosted ones — so the assumption is invisible until CI
+      # runs somewhere else and fails on tar rather than on anything it tests.
       - name: Install kubeconform
         run: |
           curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
-            | tar -xz -C /usr/local/bin kubeconform
+            | tar -xz -C "$RUNNER_TEMP" kubeconform
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       # THREE checks in one run, and the failure names the command to run --
       # a drift check that reports a difference without the fix is a puzzle.
       #
