@@ -1,0 +1,26 @@
+{%- comment -%}
+The repository, in the masthead.
+
+IT IS IN THE FOOTER TOO, and that is not a substitute. These pages run from
+~3,900px to ~21,000px tall, so on the Installation page the footer's link sits
+about twenty screens below the fold — a reader looking for the source finds the
+theme switcher and nothing else.
+
+THE MARK IS COMMITTED, NOT INLINED, because `docs-site` requires a mark
+belonging to another project to come from that project's canonical source and
+live under assets/img/logos/ with its terms recorded. It is
+`mark-github-16` from primer/octicons, MIT — an ICON SET rather than a brand
+asset, which ships no colour and leaves the fill to the consumer, so the two
+committed variants are ordinary use rather than a recolour.
+
+The page names the `-light` file ONLY. `themed.js` resolves the other.
+
+`site.github.repository_url` is set by GitHub Pages, with the literal as the
+fallback so a local `jekyll build` renders the same link.
+{%- endcomment -%}
+<a class="ao-repo-link"
+   href="{{ site.github.repository_url | default: 'https://github.com/kostiantyn-matsebora/agent-ops-operator' }}"
+   title="Source on GitHub">
+  <img src="{{ '/assets/img/logos/github-light.svg' | relative_url }}" alt="" width="16" height="16">
+  <span class="ao-sr-only">Source on GitHub</span>
+</a>

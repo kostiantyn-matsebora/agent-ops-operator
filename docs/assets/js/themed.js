@@ -47,12 +47,14 @@
   // Registration is by element reference, so a component that later moves one of
   // these into a panel changes nothing, and a second registration is a no-op:
   // paint() rewrites only when the resolved name differs from what is there.
-  var content = document.getElementById('ao-content');
-  if (content) {
-    [].forEach.call(content.querySelectorAll('img[src]'), function (img) {
-      if (VARIANT.test(img.getAttribute('src'))) window.agentops.themed(img, 'src');
-    });
-  }
+  // THE WHOLE DOCUMENT, not the content column. This file opens by calling
+  // itself the ONE resolver for every themed asset on the site, and scanning
+  // only `#ao-content` made that false the moment the CHROME carried one: the
+  // masthead's source mark sat outside, so it rendered the light file on a dark
+  // page — the same silent failure this block was added to fix for diagrams.
+  [].forEach.call(document.querySelectorAll('img[src]'), function (img) {
+    if (VARIANT.test(img.getAttribute('src'))) window.agentops.themed(img, 'src');
+  });
 
   paint();
   new MutationObserver(paint).observe(document.documentElement, {

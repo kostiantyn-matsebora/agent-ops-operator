@@ -12,6 +12,19 @@ integration agent-ops speaks to — and never to suggest endorsement.
 | `telegram.svg` | Telegram | `telegram.org/img/t_logo.svg` | Telegram mark, used referentially |
 | `mcp.svg` | Model Context Protocol | `raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/docs/favicon.svg` | MIT-licensed repository |
 | `claude.svg` | Claude | `claude.ai/favicon.svg` | Anthropic mark, used referentially |
+| `github-{light,dark}.svg` | GitHub | `raw.githubusercontent.com/primer/octicons/main/icons/mark-github-16.svg` | MIT (primer/octicons) |
+
+**The GitHub pair is the one entry that is NOT a chip-set mark**, and the one
+that ships in two colours. Both differences follow from what it is:
+
+- **It is site CHROME** — the masthead's link to the source — rather than a mark
+  naming an integration this product speaks to.
+- **It is an MIT-licensed ICON, not a brand asset.** `mark-github-16` ships with
+  no colour at all: the icon set leaves the fill to the consumer, so giving it
+  one is ordinary use rather than the recolouring the rule below forbids. The
+  PATH is committed exactly as fetched, and the two files differ in nothing else.
+- **Two files because the masthead has two grounds.** `themed.js` resolves which
+  one a reader sees, the same mechanism every other themed asset uses.
 
 Three rules, each of which is what keeps referential use referential:
 
