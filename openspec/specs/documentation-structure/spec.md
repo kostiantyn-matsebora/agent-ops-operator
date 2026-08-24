@@ -187,6 +187,13 @@ what the console IS — its endpoints, RBAC grant, values reference and internal
 structure — goes to `docs/console.md`. A rule naming only one of a pair is how
 the next writer picks at random.
 
+For security that split is: the threat, the posture a default install carries,
+what a control bounds and what is still open go to the site page
+`docs/security.md`, and the chart key that sets a control, its default and its
+YAML go to `docs/installation.md`. The two cover one subject on two axes — by
+threat and by key — and the rule SHALL state that the security page carries no
+values table, so a default is stated in one place and cannot drift.
+
 It SHALL further record that every product asset published on the site is a
 **build output**, and SHALL name the command that regenerates **each kind**: the
 screenshots of the console's views, and the landing page's recording of the
@@ -248,12 +255,29 @@ how a page reads, the routing rule SHALL route to it rather than restating it.
 - **THEN** the routing rule tells them the site's copied token block is the
   second half of that change
 
+#### Scenario: A contributor documents a security control
+
+- **WHEN** a change alters what a control bounds, or the default it ships with
+- **THEN** the routing rule names which of the two documents receives which half,
+  and the contributor does not restate the default on the security page
+
+#### Scenario: Security is inserted into the reading order
+
+- **WHEN** the security page is published into the *Start here* group
+- **THEN** it sits between the Console page and Installation in the navigation
+- **AND** the Console page's what-next card points at it, and its own card points
+  at Installation, so no card skips an entry
+
 ### Requirement: The site's reading order is one chain, declared in one place
 
 The site's *Start here* group SHALL present its pages in the order a reader
 follows them, and each page's what-next card SHALL point at the page that
 follows it in that group. The order SHALL be: the landing page, the Introduction,
-Getting started, the Console page, Installation.
+Getting started, the Console page, Security, Installation.
+
+Security sits before Installation because it is an evaluation gate rather than an
+install step: the reader deciding whether to run model output in their cluster
+decides before they choose values, not after.
 
 Navigation order and the what-next chain SHALL agree. A page SHALL NOT send a
 reader past an entry that sits between them in the navigation.

@@ -62,8 +62,8 @@ theme's own CSS/JS rather than switching the build to a workflow.
 ### Requirement: The site delivers the theme and the landing page only
 
 The site's deliverables SHALL be the theme, `docs/index.md`,
-`docs/introduction.md`, `docs/getting-started.md`, `docs/installation.md`,
-`docs/console-guide.md` and the guides under `docs/guides/`. A page is a
+`docs/introduction.md`, `docs/getting-started.md`, `docs/console-guide.md`,
+`docs/security.md`, `docs/installation.md` and the guides under `docs/guides/`. A page is a
 deliverable exactly when it carries YAML front matter; the remaining `docs/*.md`
 reference pages carry none and SHALL NOT be edited for the site — no YAML front matter added, no headings changed, no links
 rewritten — SHALL NOT appear in the site navigation, and SHALL NOT be treated as
@@ -117,6 +117,13 @@ require editing it.
   entry
 - **THEN** it is built as a site page with the assigned layout, is reachable at
   its declared URL, and no layout, include or stylesheet was edited to publish it
+
+#### Scenario: A site page links an architecture decision record
+
+- **WHEN** a site page references reasoning recorded under `docs/adr/`
+- **THEN** the record is linked where it lives, carrying no front matter and no
+  navigation entry
+- **AND** the record is not edited to be linked from the site
 
 ### Requirement: The site is recognisably the same product as the console
 
