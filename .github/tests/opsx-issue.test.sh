@@ -28,8 +28,23 @@ assert_equals "101" "$(S open demo-change)"
 it "writes the binding as a bare number, and nothing else"
 assert_equals "101" "$(cat "$repo/openspec/changes/demo-change/.github-issue")"
 
-it "titles it with the change name and the proposal's headline"
+it "titles it with the change name and the proposal's first sentence"
 assert_contains "$(cat "$GH_CALLS")" "demo-change: Retries keep the first failure"
+
+# THE FIRST SENTENCE, NOT THE FIRST LINE. The prose is hard-wrapped, so a
+# line-scoped read cuts a title mid-clause — `...serviceaccounts that nothing`
+# on a real proposal, which reads as a bug in the tool rather than as a title.
+it "joins the wrapped paragraph rather than cutting at the line break"
+assert_contains "$(cat "$GH_CALLS")" "demo-change: Retries keep the first failure rather than the last one"
+
+it "stops at the first sentence and takes no more of the Why"
+assert_not_contains "$(cat "$GH_CALLS")" "must never reach the title"
+
+# WHERE TO READ IT, AS A LINK. A path is not a pointer to anybody who has not
+# cloned this repository. With no `gh repo view` available the row says so
+# rather than emitting a broken link.
+it "carries a row for reading the change"
+assert_contains "$(cat "$GH_CALLS")" "**Read it**"
 
 it "labels it as proposed"
 assert_contains "$(cat "$GH_CALLS")" "opsx:proposed"
