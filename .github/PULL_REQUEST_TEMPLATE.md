@@ -11,7 +11,16 @@ cannot be inferred from the tree.
 <!-- In the terms the commit convention uses: what it does, and why that
 mattered. Not which files were touched — the diff says that. -->
 
-Closes #
+Refs #
+
+<!-- A CHANGE'S TRACKING ISSUE CLOSES AT ARCHIVE, NOT AT MERGE. `Closes #` here
+     hands it to GitHub to close the moment this pull request lands — so a
+     PROPOSAL closes the issue that was meant to follow the change through
+     applying, review and archiving. Write `Refs #<n>`.
+
+     `Closes #<n>` is right in exactly two cases: this pull request ARCHIVES the
+     change (the issue's life really does end with it), or the issue is an
+     ordinary filed one that this work finishes and no change tracks. -->
 
 ## What it affects
 

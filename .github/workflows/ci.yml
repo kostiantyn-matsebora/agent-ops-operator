@@ -623,10 +623,40 @@ jobs:
   # treats a skipped dependency inconsistently while reading as though it were
   # checking one. Reading the results explicitly states what the gate means — a
   # SKIPPED job passed by having nothing to do, a CANCELLED one did not pass.
+  # A CHANGE'S TRACKING ISSUE CLOSES AT ARCHIVE, NOT AT MERGE.
+  #
+  # GitHub closes an issue itself when a merged pull request's body says
+  # `Closes #<n>`, so a PROPOSAL carrying the template's closing keyword ends the
+  # issue that was meant to follow its change through applying, review and
+  # archiving. #54 was exactly that: a proposal saying `Closes #53`.
+  #
+  # The template now writes `Refs #` — but a template is a suggestion at the
+  # moment somebody is typing quickly, and this failure is silent and days late.
+  pr-closes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: A tracking issue is not closed by the pull request that proposes it
+        env:
+          # THROUGH THE ENVIRONMENT, never interpolated into the script: a pull
+          # request body is text a stranger wrote.
+          BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$BODY" > "$RUNNER_TEMP/pr-body.md"
+          python3 .github/scripts/pr-closes-guard.py \
+            --body-file "$RUNNER_TEMP/pr-body.md" \
+            --range "$BASE_SHA..$GITHUB_SHA" \
+            --root .
+
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title]
+    needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed
