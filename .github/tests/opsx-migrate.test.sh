@@ -117,6 +117,26 @@ assert_not_contains "$out" "issue:#79"
 it "warns about the PROMOTED case, which no lookup can see"
 assert_contains "$out" "PROMOTED"
 
+# A FAILED LOOKUP IS NOT "NO MATCH". An expired token, a rate limit or a dropped
+# connection would otherwise fall straight through to opening an issue — the
+# duplicate this whole lookup exists to prevent, arriving through a different
+# door and with no dry-run in between to catch it.
+it "ABORTS when the issue list cannot be read, rather than opening one"
+: > "$GH_CALLS"
+out=$(GH_LIST_FAILS=1 M2 2>&1) && rc=0 || rc=$?
+assert_status 1 "$rc"
+assert_contains "$out" "FATAL"
+
+it "and opens nothing at all when the lookup failed"
+assert_not_contains "$(cat "$GH_CALLS")" "issue create"
+
+# ONE FETCH PER RUN, not per change: the list is repository-wide and identical
+# every time, and each extra call is another chance for a transient failure.
+it "reads the issue list once for the whole run, not once per change"
+: > "$GH_CALLS"
+M2 --dry-run >/dev/null
+assert_equals "1" "$(grep -c 'issue list' "$GH_CALLS" || true)"
+
 it "ADOPTS an existing tracking issue rather than opening a second one"
 : > "$GH_CALLS"
 assert_contains "$(M2)" "issue:#77 (adopted)"
