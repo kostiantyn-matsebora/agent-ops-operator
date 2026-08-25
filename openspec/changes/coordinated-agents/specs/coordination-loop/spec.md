@@ -56,10 +56,10 @@ merely stopped work would be a silent drop.
 
 ### Requirement: Invocation is asynchronous
 
-Invoking an Agent SHALL return the created (or reused) member conversation's
+Invoking an AgentCapability SHALL return the created (or reused) member conversation's
 identity at once and SHALL NOT wait for a result. The invoke SHALL report
 whether it created a conversation or attached to an existing one.
 
 #### Scenario: Attach reported
-- **WHEN** a coordinator invokes an Agent with a signature a live member already carries
+- **WHEN** a coordinator invokes an AgentCapability with a signature a live member already carries
 - **THEN** the invoke returns that member's name and reports `attached`

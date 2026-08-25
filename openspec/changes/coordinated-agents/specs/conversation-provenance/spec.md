@@ -26,7 +26,7 @@ Conversation reuse by signature SHALL match only conversations with the same
 members of the same root invoked as the same entry.
 
 #### Scenario: Two incidents, one signature
-- **WHEN** two roots each invoke the same Agent with inputs of one signature
+- **WHEN** two roots each invoke the same AgentCapability with inputs of one signature
 - **THEN** two member conversations exist, one per root
 
 ### Requirement: The tree is derivable from the API alone

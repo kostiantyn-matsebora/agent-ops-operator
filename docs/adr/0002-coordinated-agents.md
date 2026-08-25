@@ -35,8 +35,8 @@ fake makes a behaviour depend on an omission rather than a field:
 |---|---|
 | **A** | coordinator as channel; Pipeline unchanged |
 | **B** | `Pipeline.spec.addressable` flag; sources and channels forbidden by CEL |
-| **C** | extract `Agent`; every Pipeline references one |
-| **D** | extract `Agent`; Pipeline takes it INLINE or by ref; new `Coordinator` kind |
+| **C** | extract `AgentCapability`; every Pipeline references one |
+| **D** | extract `AgentCapability`; Pipeline takes it INLINE or by ref; new `Coordinator` kind |
 | **E** | subagents inside the coordinator's pod (claude-code's own Task tool) |
 
 ## Trade-off analysis
@@ -60,30 +60,35 @@ available as E.
 
 ## Decisions
 
-**D1 — `Agent` is the capability kind.** The six capability fields, nothing
-wired. An unwired Agent is inert.
+**D1 — `AgentCapability` is the capability kind.** The six capability fields, nothing
+wired. An unwired AgentCapability is inert.
+
+- Not `Agent`: `terminology.md` reserves that word for the definition in
+  `.claude/agents/` that `AgentProfile.spec.agent` selects. A third meaning one
+  lookup from both is the collision that rule exists to stop. In prose the
+  members of a composition are still agents.
 
 **D2 — `Pipeline` and `Coordinator` are the two wiring kinds. Neither involves
 the other.**
 
 ```
-        Agent
+     AgentCapability
         ▲   ▲
  Pipeline   Coordinator
  one agent, a composition:
- signals    sources in, escalation out,
- + humans   agents invoked by description
+ signals    sources in, /<coordinator> in,
+ + humans   escalation out, agents invoked
 ```
 
 | Kind | Field | Rule |
 |---|---|---|
-| `Pipeline` | inline fields OR `agentRef` | mutually exclusive by CEL; inline IS today's Pipeline unchanged |
-| `Coordinator` | `signalSourceRefs` | inbound is CLAIMED, as a Pipeline's is |
+| `Pipeline` | inline fields OR `capabilityRef` | mutually exclusive by CEL; inline IS today's Pipeline unchanged |
+| `Coordinator` | `signalSourceRefs` | inbound is CLAIMED, as a Pipeline's is; `/<coordinator> <task>` addresses it as a Pipeline is addressed, binding the origin surface |
 | | `channelRefs` | where it ESCALATES to |
-| | `agents[]{agentRef, description}` | the WHOLE outbound reach; enforced server-side per token, not by `--allowedTools` |
+| | `agents[]{capabilityRef, description}` | the WHOLE outbound reach; enforced server-side per token, not by `--allowedTools` |
 | | `limits{maxAgents, maxTurns, deadline}` | see D5 |
 
-- Description lives on the entry, not the Agent.
+- Description lives on the entry, not the AgentCapability.
 - An entry without a description is refused.
 
 **D3 — The manager routes results.** A conversation the coordinator started
@@ -135,7 +140,7 @@ the only place a person sees incidents they were not told about.
 
 ## Not decided here
 
-- Whether `Agent` replaces the inline Pipeline fields later.
+- Whether `AgentCapability` replaces the inline Pipeline fields later.
 - `Coordinator` status shape.
 - Whether a member may be a Coordinator.
 - Choreography (agent-to-agent with no root) — waits for the budget to exist.

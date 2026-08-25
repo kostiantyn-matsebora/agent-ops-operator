@@ -37,21 +37,21 @@ refers to the ADR's decisions as D1–D6.
 
 ## Decisions
 
-### D-A — `AgentSpec` is a shared struct, embedded in three places
+### D-A — `AgentCapabilitySpec` is a shared struct, embedded in three places
 
-| Struct | Embeds `AgentSpec` as |
+| Struct | Embeds `AgentCapabilitySpec` as |
 |---|---|
-| `AgentSpec` (new) | itself |
+| `AgentCapabilitySpec` (new) | itself |
 | `PipelineSpec` | inline (`json:",inline"`) — the six fields keep their JSON names |
 | `CoordinatorSpec` | inline, for the coordinating agent |
 
 - `PipelineSpec.AgentRef *ObjectRef` beside it; CEL on the Pipeline:
-  `!(has(self.agentRef) && (has(self.profileRef) || has(self.toolsets) || …))`.
+  `!(has(self.capabilityRef) && (has(self.profileRef) || has(self.toolsets) || …))`.
 - `profileRef` becomes `+optional` on the struct; a Pipeline with neither
-  `agentRef` nor `profileRef` fails `Ready`, not admission — CEL cannot express
+  `capabilityRef` nor `profileRef` fails `Ready`, not admission — CEL cannot express
   "one of" across an embedded struct without a rule per field.
-- `dispatch.ResolveAgent(ctx, reader, obj) (AgentSpec, error)` is the ONE
-  resolver: returns the embedded struct or the referenced Agent's. Everything
+- `dispatch.ResolveCapability(ctx, reader, obj) (AgentCapabilitySpec, error)` is the ONE
+  resolver: returns the embedded struct or the referenced AgentCapability's. Everything
   that read `pipeline.Spec.<capability>` calls it.
 - Alternative rejected: a `spec.agent` sub-object on Pipeline. Moves every
   existing field one level down — the migration D chose to avoid.
@@ -59,13 +59,17 @@ refers to the ADR's decisions as D1–D6.
 ### D-B — `Coordinator` reconciles like a Pipeline, and `PipelinesForSource` grows a second kind
 
 - `internal/chat/pipelines.go` `PipelinesForSource` returns a `[]Claimant`
-  interface — name, kind, resolved `AgentSpec`, channel refs, `Ready`. Pipeline
+  interface — name, kind, resolved `AgentCapabilitySpec`, channel refs, `Ready`. Pipeline
   and Coordinator implement it. Every call site iterates claimants.
-- `Coordinator.Ready` = own capability resolves ∧ every `agents[].agentRef`
-  resolves ∧ each Agent `Ready`. Message lists the failing entry names.
+- `Coordinator.Ready` = own capability resolves ∧ every `agents[].capabilityRef`
+  resolves ∧ each AgentCapability `Ready`. Message lists the failing entry names.
 - A root conversation created from a Coordinator: `spec.pipelineRef` empty,
   new `spec.coordinatorRef` set, `spec.channelRefs` EMPTY (D3/D4), limits
   snapshotted into `status.budget{maxAgents,maxTurns,deadline}`.
+- `internal/addressing` and `HandleCommand` resolve the addressed segment
+  across BOTH kinds — one Get per kind, Pipeline first; a name held by both is
+  reported by the Coordinator reconciler's `Ready`. An addressed root binds the
+  origin surface (`boundChannels` unchanged) and nothing else.
 - Alternative rejected: a Coordinator that is a Pipeline with extra fields.
   Then a Coordinator claiming a chat surface would bind it at admission, and
   escalation-by-decision (D4) is gone.
@@ -133,7 +137,7 @@ refers to the ADR's decisions as D1–D6.
 
 ### D-G — Console reads two more kinds and derives the tree client-side
 
-- The adapter's watch set grows by `agents` and `coordinators` (RBAC in the
+- The adapter's watch set grows by `agentcapabilities` and `coordinators` (RBAC in the
   chart).
 - The tree is derived from the conversation snapshot by `causedBy`; no new
   endpoint. The incident view is a route on the root; member transcripts link
@@ -144,7 +148,7 @@ refers to the ADR's decisions as D1–D6.
 
 | Phase | Ships | Master consistent because |
 |---|---|---|
-| 1 | `Agent`, `AgentSpec`, `agentRef`, resolver | pure addition |
+| 1 | `AgentCapability`, `AgentCapabilitySpec`, `capabilityRef`, resolver | pure addition |
 | 2 | `Coordinator`, `causedBy`, routing, budget, escalation, `closeReason` | a Coordinator nobody applies changes nothing |
 | 3 | `mcp-aops`, chart wiring, toolset | the verb surface behind the wall |
 | 4 | console | view only |
@@ -173,7 +177,7 @@ refers to the ADR's decisions as D1–D6.
    one.
 2. `helm upgrade`. No Pipeline changes. `mcp-aops` renders only when
    `coordination.enabled: true`.
-3. Adopt: write an `Agent`, list it in a `Coordinator`, point the Coordinator at
+3. Adopt: write an `AgentCapability`, list it in a `Coordinator`, point the Coordinator at
    a source.
 
 Rollback: delete Coordinators; roots close `root-deleted` through escalation;

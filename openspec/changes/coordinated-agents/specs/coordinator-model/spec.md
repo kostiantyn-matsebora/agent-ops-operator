@@ -8,7 +8,7 @@ The `Coordinator` CRD is the wiring for a COMPOSITION: what feeds a coordinating
 A `Coordinator` SHALL carry `signalSourceRefs`, claimed exactly as a Pipeline
 claims — shareable, fanned out, counted in `Wired` — and `channelRefs`, which
 are the surfaces it ESCALATES to and nothing else. It SHALL carry the six
-capability fields for the coordinating agent itself, inline or by `agentRef`
+capability fields for the coordinating agent itself, inline or by `capabilityRef`
 with the same exclusivity a Pipeline has.
 
 #### Scenario: A Coordinator and a Pipeline share a source
@@ -21,27 +21,27 @@ with the same exclusivity a Pipeline has.
 
 ### Requirement: The agents list is the whole outbound reach
 
-`spec.agents[]` SHALL be a list of `{name, agentRef, description}`. The
-Coordinator SHALL be able to invoke exactly the Agents this list names and no
+`spec.agents[]` SHALL be a list of `{name, capabilityRef, description}`. The
+Coordinator SHALL be able to invoke exactly the AgentCapabilities this list names and no
 other object of any kind. `description` SHALL be required and non-empty; it
-lives on the entry, so two Coordinators may describe one Agent differently.
+lives on the entry, so two Coordinators may describe one AgentCapability differently.
 
 #### Scenario: An entry without a description is refused
 - **WHEN** an `agents[]` entry omits `description`
 - **THEN** the API server rejects the manifest
 
 #### Scenario: Invoking outside the list fails
-- **WHEN** the coordinating agent asks to invoke an Agent its Coordinator does not list
+- **WHEN** the coordinating agent asks to invoke an AgentCapability its Coordinator does not list
 - **THEN** the request is refused naming the Coordinator, and no conversation is created
 
 ### Requirement: Readiness names every member that is not
 
-`Ready` SHALL be False, naming each of them, when any listed `agentRef` does not
-resolve or resolves to an Agent whose own `Ready` is False. A Coordinator that
+`Ready` SHALL be False, naming each of them, when any listed `capabilityRef` does not
+resolve or resolves to an AgentCapability whose own `Ready` is False. A Coordinator that
 is not Ready SHALL claim nothing.
 
 #### Scenario: A dangling member
-- **WHEN** an `agents[]` entry names an Agent that does not exist
+- **WHEN** an `agents[]` entry names an AgentCapability that does not exist
 - **THEN** the Coordinator's `Ready` is False with the entry's name in its message
 - **AND** signals on its sources are not routed to it
 

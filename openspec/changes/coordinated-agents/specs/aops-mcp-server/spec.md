@@ -6,7 +6,7 @@ The aops MCP server is the component through which a coordinating agent sees and
 ### Requirement: Read tools over the agentops kinds
 
 The server SHALL expose read tools listing and getting Conversations,
-Pipelines, Agents, Coordinators, SignalSources and Channels, including a
+Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels, including a
 conversation's tree by root. Reads SHALL be filtered to what the calling
 Coordinator lists and what it caused.
 
@@ -36,7 +36,7 @@ conversation because one Coordinator may hold several roots at once, and a
 token naming only the Coordinator could not scope to one of them.
 
 #### Scenario: A forged name is refused by the manager
-- **WHEN** a caller holding root A's token invokes an Agent listed only by another Coordinator
+- **WHEN** a caller holding root A's token invokes an AgentCapability listed only by another Coordinator
 - **THEN** the manager refuses it, regardless of the caller's tool allowlist, and the server has made no decision
 
 #### Scenario: One Coordinator, two roots

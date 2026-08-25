@@ -3,30 +3,30 @@ Phases follow design D-H. Every build and test below runs INSIDE the worktree
 every deploy uses `--state-values-set chartPath=` naming this worktree's
 `chart/` — the defaults resolve master and report success against it.
 
-## 1. Phase 1 — `Agent` and the shared capability (design D-A)
+## 1. Phase 1 — `AgentCapability` and the shared capability (design D-A)
 
-- [ ] 1.1 `api/v1alpha1/agent_types.go`: `AgentSpec` with the six capability
-      fields moved out of `PipelineSpec`; `Agent` kind + list; `AgentStatus`
+- [ ] 1.1 `api/v1alpha1/agentcapability_types.go`: `AgentCapabilitySpec` with the six capability
+      fields moved out of `PipelineSpec`; `AgentCapability` kind + list; `AgentStatus`
       with `Ready`. Doc comments say it is the CAPABILITY and wires nothing.
-- [ ] 1.2 `PipelineSpec` embeds `AgentSpec` inline (JSON names unchanged) and
+- [ ] 1.2 `PipelineSpec` embeds `AgentCapabilitySpec` inline (JSON names unchanged) and
       gains `AgentRef *ObjectRef`; CEL rule for exclusivity per D-A;
       `profileRef` becomes optional.
-- [ ] 1.3 `dispatch.ResolveAgent` — the one resolver. Every read of a
+- [ ] 1.3 `dispatch.ResolveCapability` — the one resolver. Every read of a
       Pipeline's capability fields moves to it (signals.go creation, router
       origination, pipeline reconciler validation, runtimepod resolution).
-- [ ] 1.4 Agent reconciler: `Ready` validates the same refs the Pipeline
+- [ ] 1.4 AgentCapability reconciler: `Ready` validates the same refs the Pipeline
       reconciler validates today, through shared code — no second validator.
-- [ ] 1.5 Pipeline `Ready` False naming a dangling `agentRef`; neither
-      `agentRef` nor `profileRef` → `Ready` False, not admission.
-- [ ] 1.6 Regenerate deepcopy and CRDs; `chart/crds/agents.agentops.dev.yaml`.
+- [ ] 1.5 Pipeline `Ready` False naming a dangling `capabilityRef`; neither
+      `capabilityRef` nor `profileRef` → `Ready` False, not admission.
+- [ ] 1.6 Regenerate deepcopy and CRDs; `chart/crds/agentcapabilities.agentops.dev.yaml`.
 - [ ] 1.7 Tests: envtest — inline and referenced Pipelines produce identical
       conversation snapshots; CEL rejects both forms; every existing Pipeline
       fixture passes unchanged.
 
 ## 2. Phase 2 — `Coordinator`, provenance, the loop (design D-B, D-C, D-E)
 
-- [ ] 2.1 `api/v1alpha1/coordinator_types.go`: embedded `AgentSpec` or
-      `agentRef`, `signalSourceRefs`, `channelRefs`, `agents[]{name, agentRef,
+- [ ] 2.1 `api/v1alpha1/coordinator_types.go`: embedded `AgentCapabilitySpec` or
+      `capabilityRef`, `signalSourceRefs`, `channelRefs`, `agents[]{name, capabilityRef,
       description (required, MinLength=1)}`, `limits{maxAgents, maxTurns,
       deadline}`; status with `Ready`.
 - [ ] 2.2 `ConversationSpec.CausedBy *Provenance{root, entry}`,
@@ -35,8 +35,12 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 2.3 `PipelinesForSource` → claimants of both kinds (D-B); every call site
       iterates claimants; `Wired` counts both; bare-chat choice list names
       both.
+- [ ] 2.3b `internal/addressing` + `HandleCommand` resolve `/<name>` across
+      Pipeline and Coordinator; `/pipelines` and the choice list carry both
+      kinds' addressed forms; an addressed root binds the origin surface only.
 - [ ] 2.4 Coordinator reconciler: `Ready` per D-B, message lists failing entry
-      names; a not-Ready Coordinator claims nothing.
+      names, and a name a Pipeline also holds; a not-Ready Coordinator claims
+      nothing.
 - [ ] 2.5 Root creation from a Coordinator: no `channelRefs`, limits
       snapshotted into `status.budget`.
 - [ ] 2.6 Manager `/coordinate/*` surface: `invoke`, `close`, `escalate`,
@@ -44,7 +48,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       `agents[]` list and root scope enforced HERE (D-F). `invoke` returns
       created|attached.
 - [ ] 2.7 Member creation: `causedBy` set, no channels, capability from the
-      listed Agent, reuse scoped by `causedBy` in `reusableBy`.
+      listed AgentCapability, reuse scoped by `causedBy` in `reusableBy`.
 - [ ] 2.8 `handleWorkDone` on a member appends the result input on the root in
       the same status write (D-C); dedup key `member:<conv>:<runId>`; closed
       root → skip. Reconciler backstop re-derives a missing append.
@@ -87,16 +91,16 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       `global.builtinToolsets.agentops-coordinate`, the rendered `MCPConfig`;
       NOTES.txt line.
 - [ ] 4.5 Smoke against a live install from the worktree chart: a Coordinator
-      with one Agent, a signal, `invoke` observed creating a member, result
+      with one AgentCapability, a signal, `invoke` observed creating a member, result
       landing on the root, `escalate` opening a Telegram thread. Record the
       verdict, not the transcript.
 
 ## 5. Phase 4 — console (design D-G)
 
-- [ ] 5.1 Adapter watches `agents` and `coordinators`; chart Role grants
+- [ ] 5.1 Adapter watches `agentcapabilities` and `coordinators`; chart Role grants
       list/watch on both.
-- [ ] 5.2 Inventory rows and topology nodes for both kinds; `agentRef` and
-      `agents[]` edges; unwired Agent rendered distinct from misconfigured.
+- [ ] 5.2 Inventory rows and topology nodes for both kinds; `capabilityRef` and
+      `agents[]` edges; unwired AgentCapability rendered distinct from misconfigured.
 - [ ] 5.3 Incident view on a root: one timeline, members interleaved,
       expandable; member transcript links to its root; list groups by root
       with a flatten toggle; un-escalated closures marked with `closeReason`.
@@ -108,12 +112,13 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 6.1 `.claude/rules/wiring.md`, three claims, each named: "no other CR
       carries wiring" → two wiring kinds; the `#### Capabilities are wiring,
       exclusively` header and its section → capabilities are declared on an
-      Agent OR inline on a Pipeline/Coordinator, and reached through wiring
+      AgentCapability OR inline on a Pipeline/Coordinator, and reached through wiring
       only; under `### MCPToolset`, "Bound from `Pipeline.spec.toolsets` ONLY"
       → bound from any capability's `toolsets`, never a profile's. The
       escalation-time Coordinator read stated as the one exception to
       "nothing reads wiring after creation".
-- [ ] 6.2 `terminology.md`: `Agent`, `Coordinator`, `root`, `member`, `escalate`;
+- [ ] 6.2 `terminology.md`: the "Agent is TAKEN" entry names `AgentCapability`
+      and why the CRD is not `Agent`; `Coordinator`, `root`, `member`, `escalate`;
       `structure.md`: `platform/mcp-aops`; `invariants.md`: the loop refusal,
       the budget, "a caused conversation binds no human channel".
 - [ ] 6.3 `retired-vocabulary.json`: no new term — nothing is retired.
@@ -132,7 +137,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ### 8a. Reference docs
 
-- [ ] 8a.1 `docs/concepts.md`: kind table (thirteen), `Agent`, `Coordinator`,
+- [ ] 8a.1 `docs/concepts.md`: kind table (thirteen), `AgentCapability`, `Coordinator`,
       `causedBy`, the loop, escalation, budget, the state matrix rows.
 - [ ] 8a.2 `docs/contracts.md`: `/coordinate/*`, `/work/done` root routing,
       `/channel/inbound` refusal, the aops MCP tool contract, the four token
