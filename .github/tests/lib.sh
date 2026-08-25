@@ -99,6 +99,9 @@ printf '%s\n' "$*" >> "${GH_CALLS:-/dev/null}"
 case "$*" in
   "issue create"*)  echo "https://github.com/o/r/issues/${GH_NEW_ISSUE:-101}" ;;
   "issue view"*)    cat "${GH_FIXTURE:-/dev/null}" 2>/dev/null || echo '{}' ;;
+  # The issue LIST a lookup reads. Empty by default: a repository with no
+  # tracking issues is the state every first run meets.
+  "issue list"*)    cat "${GH_ISSUES:-/dev/null}" 2>/dev/null || echo '[]' ;;
   "api graphql"*)   cat "${GH_FIXTURE:-/dev/null}" 2>/dev/null || echo '{"data":{}}' ;;
   *)                : ;;
 esac
