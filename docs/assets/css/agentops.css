@@ -1463,6 +1463,23 @@ a:hover {
   border-radius: var(--ao-radius);
 }
 
+/* THE STILL RAIL IS THE PLAY BUTTON AND NOTHING ELSE.
+   Under `prefers-reduced-motion: reduce` the presentation is composed, paused
+   and offering one control — the script detaches the caption, the dots and the
+   progress bar, because the beats are already on the page as the list beside
+   it. The three-column grid above is authored for the full transport, so left
+   alone it renders that one small round button stranded at the left of a bar
+   the width of the column. Shrink the rail to what it actually holds. */
+.ao-pres.is-still .ao-pres-rail {
+  /* `align-self`, NOT `align-items` on the wrap: the wrap is a column flex
+     container, so shrinking every child would take the VIEWPORT down to the
+     stage's authored 668px and defeat the scale-to-fit at every narrower
+     width. Only the rail shrinks. */
+  align-self: flex-start;
+  grid-template-columns: auto;
+  padding: 0.4rem;
+}
+
 .ao-pres-play {
   display: grid;
   place-items: center;

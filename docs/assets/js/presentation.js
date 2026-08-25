@@ -265,6 +265,9 @@
 
     var current = 0;
     var timer = null;
+    // Whether the presentation is sitting as the reduced-motion still. Read by
+    // the play button, cleared for good by `engage`.
+    var stillNow = false;
     var raf = null;
     var started = 0;
 
@@ -323,9 +326,40 @@
       play.setAttribute('aria-label', 'Play the presentation');
     }
 
+    // WHILE STILL, THE BUTTON'S JOB IS TO LEAVE THE STILL. It is the same
+    // element, the same label and the same handler in both configurations —
+    // a second control beside it would be a second thing to style, label and
+    // keep reachable, and the two would drift.
     play.addEventListener('click', function () {
+      if (stillNow) { engage(); return; }
       if (timer) pause(); else start();
     });
+
+    // ENGAGING IS ONE-WAY, and it is the READER'S OWN action rather than
+    // something the page did at them — which is the whole of what the
+    // preference asks. There is no path back to the still: pausing afterwards
+    // leaves the ordinary paused transport, because taking the beat list back
+    // out from under a reader who has just pressed play would move the page for
+    // the person who asked for less movement.
+    //
+    // It starts at beat ONE, not at what the still was composed as. The still
+    // is every element lit at once, which is the LAST beat's state — resuming
+    // from there would play the ending and wrap around to the beginning.
+    function engage() {
+      stillNow = false;
+      wrap.classList.remove('is-still');
+      list.parentNode.removeChild(list);
+      // Re-appended in their authored order, so the rail is byte-for-byte the
+      // transport every other reader gets.
+      rail.appendChild(caption);
+      rail.appendChild(dotsBox);
+      rail.appendChild(progress);
+      // Above the rail, where it was built: a running presentation without it
+      // loses the manifest half of every beat.
+      wrap.insertBefore(stanzaBox, rail);
+      goTo(0);
+      start();
+    }
 
     // SCALE, NEVER REFLOW. `transform` does not reduce the stage's layout
     // width, so the viewport is given the scaled height in the same step —
@@ -343,19 +377,33 @@
 
     list.parentNode.removeChild(list);
 
-    // REDUCED MOTION IS THE COMPOSED DRAWING PLUS THE LIST. Nothing moves, the
-    // whole model is on the stage at once, and the beats stay readable in
-    // order — the same content the no-scripting reader gets.
+    // REDUCED MOTION IS THE COMPOSED DRAWING PLUS THE LIST, AND A WAY IN.
+    // Nothing moves, the whole model is on the stage at once, and the beats
+    // stay readable in order — the same content the no-scripting reader gets.
+    //
+    // THE PLAY BUTTON SURVIVES, AND THAT IS THE POINT OF THIS BRANCH. The
+    // transport used to be removed with the motion it drove, which answered
+    // `reduce` by DELETING the control: a reader with the system setting on
+    // could not play the page's central explanation even deliberately, and it
+    // was reported from a second machine as a missing animation — which is also
+    // what a broken script looks like. The preference says do not move things
+    // AT me. It does not say never let me ask.
     var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (still) {
       goTo(beats.length - 1);
       Object.keys(parts).forEach(function (id) { parts[id].classList.add('is-on'); });
       pause();
-      // The transport goes with the motion it drove. What is left is the whole
-      // model on one stage and the beats as the list the page wrote — the same
-      // content a reader without scripting gets.
+      stillNow = true;
+      wrap.classList.add('is-still');
+      // DETACHED, NOT HIDDEN. `display: none` reads cleaner and leaves the dots
+      // in the tab order and the caption in the accessibility tree — nine beats
+      // announced twice, once from the rail and once from the list beside it.
+      // The stanza box goes for a plainer reason: a still has no current beat
+      // to show lines for.
       wrap.removeChild(stanzaBox);
-      wrap.removeChild(rail);
+      rail.removeChild(caption);
+      rail.removeChild(dotsBox);
+      rail.removeChild(progress);
       wrap.parentNode.insertBefore(list, wrap.nextSibling);
     } else {
       goTo(0);
