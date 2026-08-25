@@ -84,5 +84,29 @@ it "refuses a change that does not exist"
 S open no-such-change >/dev/null 2>&1
 assert_status 1 "$?"
 
+# THE ARCHIVE PATH IS WHERE `close` ACTUALLY RUNS. `openspec archive` moves the
+# change — sidecar and all — before the command that closes its issue is called,
+# and resolving only the live path made that command fail at exactly that point.
+it "still finds the binding after the change is archived"
+mkdir -p "$repo/openspec/changes/archive"
+mv "$repo/openspec/changes/demo-change" \
+   "$repo/openspec/changes/archive/2026-08-25-demo-change"
+assert_equals "101" "$(S number demo-change)"
+
+it "closes an archived change's issue"
+: > "$GH_CALLS"; S close demo-change >/dev/null
+assert_contains "$(cat "$GH_CALLS")" "issue close 101"
+
+it "advances an archived change's phase label"
+: > "$GH_CALLS"; S phase demo-change archived >/dev/null
+assert_contains "$(cat "$GH_CALLS")" "opsx:archived"
+
+# A BARE SUFFIX MATCH WOULD HAND ONE CHANGE ANOTHER'S ISSUE. `*-auth` matches
+# `2026-01-01-oauth`, so the date prefix is part of the pattern.
+it "does not mistake a longer archived name for this one"
+mkdir -p "$repo/openspec/changes/archive/2026-08-25-not-demo-change"
+echo 999 > "$repo/openspec/changes/archive/2026-08-25-not-demo-change/.github-issue"
+assert_equals "101" "$(S number demo-change)"
+
 rm -rf "$repo" "$tmp"
 summary
