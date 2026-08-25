@@ -41,12 +41,19 @@ Implement tasks from an OpenSpec change.
    - **Advance the tracking issue** to `opsx:applying` and say so once:
 
      ```bash
-     gh issue edit <n> --add-label opsx:applying --remove-label opsx:proposed
-     gh issue comment <n> --body "Implementation started on \`change/<name>\`."
+     .github/scripts/opsx-issue.sh phase <name> applying \
+       --note "Implementation started on \`change/<name>\`."
      ```
 
-     The issue number is in the change's `.github-issue` file. If there is none,
-     the change predates the tracking flow — open one per
+     **THE SCRIPT, NEVER RAW `gh issue edit`.** It advances the label, removes
+     the three it is not, comments once — and REGENERATES THE BODY, which is
+     what makes the issue's link to the change resolve. At `/opsx:propose` the
+     branch does not exist yet, so the link written then points at nothing; this
+     transition is what fixes it. Raw `gh` calls do the labels and leave the
+     404 in place for the life of the issue.
+
+     It finds the issue number itself, from the change's `.github-issue` file.
+     If there is none, the change predates the tracking flow — open one per
      `.claude/commands/opsx/propose.md` rather than skipping it.
 
 2. **Check status to understand the schema**

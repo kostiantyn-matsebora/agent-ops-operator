@@ -46,6 +46,34 @@ assert_not_contains "$(cat "$GH_CALLS")" "must never reach the title"
 it "carries a row for reading the change"
 assert_contains "$(cat "$GH_CALLS")" "**Read it**"
 
+# A BOUND IS NOT A SLICE. Cutting at a fixed offset ends a title inside a word —
+# `...serviceaccounts that noth...` on a real proposal in this tree — which is
+# the same defect at the other end of the same function.
+# NOT truncating $GH_CALLS: the assertions below this point read the whole
+# recording, and clearing it here would take demo-change's calls with it.
+make_change "$repo" long-change \
+  "The chart grants the manager permissions on serviceaccounts that nothing calls"
+S open long-change >/dev/null
+it "trims a long title back to a word, not to an offset"
+assert_contains "$(cat "$GH_CALLS")" "serviceaccounts that..."
+
+it "never ends a title inside a word"
+assert_not_contains "$(cat "$GH_CALLS")" "that noth..."
+
+# THE PHASE COMMAND IS WHAT REGENERATES THE BODY, so the link it writes only
+# becomes correct if the flow actually calls it. It did not: apply.md and
+# archive.md advanced the label with raw `gh issue edit`, which leaves the body
+# — and its link to a branch that does not exist yet — untouched for the life of
+# the issue. Dead code in a script nobody calls is invisible; this is the check
+# that makes it visible.
+# Matched as a COMMAND — start of line, inside a fenced block — not as a
+# mention: both files now name `gh issue edit` in prose, to say not to use it.
+it "is what the opsx commands call, rather than raw gh issue edit"
+for f in "$ROOT/.claude/commands/opsx/apply.md" "$ROOT/.claude/commands/opsx/archive.md"; do
+  assert_equals "0" "$(grep -cE '^[[:space:]]*gh issue (edit|comment|close)' "$f" || true)"
+  assert_contains "$(cat "$f")" "opsx-issue.sh phase"
+done
+
 it "labels it as proposed"
 assert_contains "$(cat "$GH_CALLS")" "opsx:proposed"
 

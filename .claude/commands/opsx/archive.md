@@ -89,11 +89,17 @@ Archive a completed change in the experimental workflow.
    should be looking at. See `.claude/rules/worktree-delivery.md`.
 
    ```bash
-   gh issue edit <n> --add-label opsx:archived \
-     --remove-label opsx:review --remove-label opsx:applying
-   gh issue comment <n> --body "Archived. Deltas folded into openspec/specs/."
-   gh issue close <n>
+   .github/scripts/opsx-issue.sh phase <name> archived \
+     --note "Archived. Deltas folded into openspec/specs/."
+   .github/scripts/opsx-issue.sh close <name>
    ```
+
+   **THE SCRIPT, NEVER RAW `gh issue edit`.** Besides the label and the comment
+   it REGENERATES THE BODY, and this is the transition where that matters most:
+   the change directory has just moved into `openspec/changes/archive/`, so
+   every link written before now points at a path that no longer exists. It also
+   resolves the binding from the ARCHIVED location, which raw `gh` cannot do
+   because it needs the issue number the sidecar just moved.
 
    Then, once the pull request has MERGED — not before, or the branch loses its
    working copy while the review is still open:

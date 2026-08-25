@@ -108,7 +108,18 @@ headline() {
   line=${line%.}
   # A title is scanned in a list, so it is bounded. 72 leaves room for the
   # change name in front of it.
-  [ ${#line} -gt 72 ] && line="${line:0:69}..."
+  #
+  # TRIMMED TO A WORD, NOT TO AN OFFSET. A fixed slice cuts mid-word —
+  # `...serviceaccounts that noth...` on a real proposal in this tree — which is
+  # the same "reads like a broken tool" defect this function was rewritten to
+  # stop making at the other end.
+  if [ ${#line} -gt 72 ]; then
+    line="${line:0:69}"
+    # Only when there is a space to trim back to: one 70-character word is
+    # better cut than dropped.
+    case "$line" in *\ *) line="${line% *}" ;; esac
+    line="$line..."
+  fi
   echo "${line:-$1}"
 }
 
