@@ -70,7 +70,21 @@ make_change() {  # make_change <repo> <name> [headline]
   local dir="$1/openspec/changes/$2"
   mkdir -p "$dir"
   printf 'schema: spec-driven\ncreated: 2026-01-01\n' > "$dir/.openspec.yaml"
-  printf '# %s\n\n## Why\n\nbecause\n' "${3:-A change called $2}" > "$dir/proposal.md"
+  # THE SHAPE openspec ACTUALLY GENERATES: no `# ` heading — the change's name is
+  # its directory, so the proposal never repeats it — and hard-wrapped prose
+  # under `## Why`. This fixture used to open with `# <headline>`, so the title
+  # extraction was tested against a document no proposal in this repository
+  # looks like, and every real issue was titled `<change>: # Why`.
+  cat > "$dir/proposal.md" <<EOF
+## Why
+
+**${3:-A change called $2}** rather than the
+last one. A second sentence that must never reach the title.
+
+## What Changes
+
+- something
+EOF
 }
 
 # --- a `gh` that answers without a network ----------------------------------

@@ -28,8 +28,51 @@ assert_equals "101" "$(S open demo-change)"
 it "writes the binding as a bare number, and nothing else"
 assert_equals "101" "$(cat "$repo/openspec/changes/demo-change/.github-issue")"
 
-it "titles it with the change name and the proposal's headline"
+it "titles it with the change name and the proposal's first sentence"
 assert_contains "$(cat "$GH_CALLS")" "demo-change: Retries keep the first failure"
+
+# THE FIRST SENTENCE, NOT THE FIRST LINE. The prose is hard-wrapped, so a
+# line-scoped read cuts a title mid-clause — `...serviceaccounts that nothing`
+# on a real proposal, which reads as a bug in the tool rather than as a title.
+it "joins the wrapped paragraph rather than cutting at the line break"
+assert_contains "$(cat "$GH_CALLS")" "demo-change: Retries keep the first failure rather than the last one"
+
+it "stops at the first sentence and takes no more of the Why"
+assert_not_contains "$(cat "$GH_CALLS")" "must never reach the title"
+
+# WHERE TO READ IT, AS A LINK. A path is not a pointer to anybody who has not
+# cloned this repository. With no `gh repo view` available the row says so
+# rather than emitting a broken link.
+it "carries a row for reading the change"
+assert_contains "$(cat "$GH_CALLS")" "**Read it**"
+
+# A BOUND IS NOT A SLICE. Cutting at a fixed offset ends a title inside a word —
+# `...serviceaccounts that noth...` on a real proposal in this tree — which is
+# the same defect at the other end of the same function.
+# NOT truncating $GH_CALLS: the assertions below this point read the whole
+# recording, and clearing it here would take demo-change's calls with it.
+make_change "$repo" long-change \
+  "The chart grants the manager permissions on serviceaccounts that nothing calls"
+S open long-change >/dev/null
+it "trims a long title back to a word, not to an offset"
+assert_contains "$(cat "$GH_CALLS")" "serviceaccounts that..."
+
+it "never ends a title inside a word"
+assert_not_contains "$(cat "$GH_CALLS")" "that noth..."
+
+# THE PHASE COMMAND IS WHAT REGENERATES THE BODY, so the link it writes only
+# becomes correct if the flow actually calls it. It did not: apply.md and
+# archive.md advanced the label with raw `gh issue edit`, which leaves the body
+# — and its link to a branch that does not exist yet — untouched for the life of
+# the issue. Dead code in a script nobody calls is invisible; this is the check
+# that makes it visible.
+# Matched as a COMMAND — start of line, inside a fenced block — not as a
+# mention: both files now name `gh issue edit` in prose, to say not to use it.
+it "is what the opsx commands call, rather than raw gh issue edit"
+for f in "$ROOT/.claude/commands/opsx/apply.md" "$ROOT/.claude/commands/opsx/archive.md"; do
+  assert_equals "0" "$(grep -cE '^[[:space:]]*gh issue (edit|comment|close)' "$f" || true)"
+  assert_contains "$(cat "$f")" "opsx-issue.sh phase"
+done
 
 it "labels it as proposed"
 assert_contains "$(cat "$GH_CALLS")" "opsx:proposed"

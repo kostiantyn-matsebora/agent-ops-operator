@@ -76,21 +76,99 @@ number() {
   tr -dc '0-9' < "$f"
 }
 
-# The one line the issue is allowed to say about the change: its proposal's
-# title, which the proposal already had to write.
+# The one line the issue is allowed to say about the change, and it is TAKEN
+# rather than written: the first sentence of the proposal's own Why.
+#
+# IT USED TO READ THE FIRST `# ` HEADING, AND THERE ISN'T ONE. An openspec
+# proposal opens at `## Why` — the change's name is the directory, so the file
+# never repeats it — and `s/^# *//` on `## Why` strips one hash and yields
+# `# Why`. Every issue this script has ever opened is titled
+# `<change>: # Why`, which says nothing and looks like a bug in the tool that
+# reads it. #38 is the surviving example.
+#
+# The first sentence is the one a proposal spends the most care on, and taking
+# it is not a copy in the sense the pointer rule forbids: a title identifies,
+# and an issue with no title cannot be scanned at all.
 headline() {
   local p; p="$(change_dir "$1")/proposal.md"
-  [ -r "$p" ] && sed -n 's/^# *//p' "$p" | head -1 || true
+  [ -r "$p" ] || { echo "$1"; return 0; }
+  # From under `## Why`, the first non-empty prose line, to its first full stop.
+  # Bold markers go: `**The review posts findings**` is emphasis for a reader
+  # of the file, and noise in a list of issue titles.
+  # THE PARAGRAPH IS JOINED BEFORE THE SENTENCE IS CUT, because the prose here
+  # is hard-wrapped: `head -1` takes a LINE, and a first sentence routinely runs
+  # onto the second one. Cutting by line produced `...serviceaccounts that
+  # nothing`, which reads as a truncation bug rather than a title.
+  local line
+  line=$(sed -n '/^## Why/,/^## /p' "$p" |
+         sed '1d;/^#/d' |
+         awk 'NF{buf=buf" "$0;next} buf{print buf;exit} END{if(buf)print buf}' |
+         sed 's/^ *//; s/\*\*//g; s/`//g')
+  line=${line%%. *}
+  line=${line%.}
+  # A title is scanned in a list, so it is bounded. 72 leaves room for the
+  # change name in front of it.
+  #
+  # TRIMMED TO A WORD, NOT TO AN OFFSET. A fixed slice cuts mid-word —
+  # `...serviceaccounts that noth...` on a real proposal in this tree — which is
+  # the same "reads like a broken tool" defect this function was rewritten to
+  # stop making at the other end.
+  if [ ${#line} -gt 72 ]; then
+    line="${line:0:69}"
+    # Only when there is a space to trim back to: one 70-character word is
+    # better cut than dropped.
+    case "$line" in *\ *) line="${line% *}" ;; esac
+    line="$line..."
+  fi
+  echo "${line:-$1}"
+}
+
+# WHERE THE CHANGE CAN BE READ, AS A LINK — a path is not a pointer to anybody
+# who has not cloned this repository, and the issue's whole job is pointing.
+# The ref follows the change: its own branch while it is in flight, the default
+# branch once it is archived and the branch is gone.
+slug() { gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true; }
+
+read_links() {
+  local change="$1" repo ref path default root
+  repo=$(slug); [ -n "$repo" ] || return 0
+  root=$(repo_root)
+  if [ -d "$root/openspec/changes/$change" ]; then
+    path="openspec/changes/$change"
+  else
+    path="openspec/changes/archive/$(basename "$(change_dir "$change")")"
+  fi
+
+  # THE DEFAULT BRANCH WHEREVER IT HAS THE FILE, the change's branch otherwise.
+  #
+  # A MERGED CHANGE HAS NO BRANCH LEFT. GitHub deletes it on merge, so a link to
+  # `change/<name>` is a 404 for every change that has landed — which is most of
+  # the ones anybody follows a link to. Verified against a live one before this
+  # rule replaced it.
+  #
+  # And a slashed branch cannot be linked anyway: `blob/change/<name>/...` is
+  # ambiguous between ref and path, and GitHub resolves neither that nor the
+  # `refs/heads/` form. Both were tried; both 404.
+  default=$(git -C "$root" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+  default=${default#origin/}; default=${default:-master}
+  if git -C "$root" cat-file -e "origin/$default:$path/proposal.md" 2>/dev/null; then
+    ref="$default"
+  else
+    ref="change/$change"
+  fi
+  local base="https://github.com/$repo/blob/$ref/$path"
+  echo "[proposal]($base/proposal.md) · [design]($base/design.md) · [tasks]($base/tasks.md)"
 }
 
 body() {
-  local change="$1" head; head=$(headline "$change")
+  local change="$1" head links; head=$(headline "$change"); links=$(read_links "$change")
   cat <<EOF
 ${head:-$change}
 
 | | |
 |---|---|
 | **Change** | \`openspec/changes/$change/\` |
+| **Read it** | ${links:-not published yet} |
 | **Branch** | \`change/$change\` |
 | **Phase** | see the \`$PREFIX:\` label |
 
@@ -158,6 +236,13 @@ cmd_phase() {
     [ "$other" = "$to" ] || args+=(--remove-label "$PREFIX:$other")
   done
   gh issue edit "$n" "${args[@]}" >/dev/null
+
+  # THE BODY IS REGENERATED AT EVERY TRANSITION, and that is what makes the
+  # links honest. At `propose` the change exists only in a working copy, so its
+  # branch link resolves to nothing; by `applying` the branch is pushed, and at
+  # `archived` the directory has moved and only the default branch still has it.
+  # A body written once would be a 404 for the whole life of the issue.
+  gh issue edit "$n" --body "$(body "$change")" >/dev/null
 
   # ONE comment per transition, not per task. A stream of progress comments
   # makes the issue longer than the artifact it points at.
