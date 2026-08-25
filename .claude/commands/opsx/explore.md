@@ -23,6 +23,34 @@ Enter explore mode. Think deeply. Visualize freely. Follow the conversation wher
 
 ---
 
+## Starting from a GitHub issue (this repository)
+
+`/opsx:explore <number>` — or any argument naming an issue — explores what
+somebody actually filed.
+
+```bash
+gh issue view <n> --json number,title,body,labels,comments
+```
+
+- **Read what the reporter wrote, and explore THAT.** The feature template asks
+  what they are trying to do before what they want built, and the first answer
+  is the one worth exploring — the second is often not the cheapest way to it.
+- **Read the comments too.** The thread routinely carries the constraint that
+  makes the obvious answer wrong.
+- **If it becomes a change, the issue is PROMOTED IN PLACE** — it becomes the
+  tracking issue, keeping its thread:
+
+  ```bash
+  .github/scripts/opsx-issue.sh open <change> --promote <n>
+  ```
+
+  **Never close it in favour of a project-authored issue.** That discards their
+  words and every reply attached to them, and answers a person who asked a
+  question by pointing them at a different page.
+- **Exploring is not accepting.** An issue may be explored and end in "this does
+  not fit", with the reasoning in the thread. Promotion happens at propose time,
+  not here.
+
 ## The Stance
 
 - **Curious, not prescriptive** - Ask questions that emerge naturally, don't follow a script

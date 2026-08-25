@@ -30,8 +30,18 @@ docker volume create agentops-gomodcache; docker volume create agentops-gocache
 # volumes are created ROOT-owned; chown once or every write fails as your uid
 docker run --rm -u 0 -v agentops-gomodcache:/gomodcache -v agentops-gocache:/gocache \
   golang:1.23 chown -R "$(id -u):$(id -g)" /gomodcache /gocache
+# TWO MOUNTS, NOT ONE, AND NOT THEIR COMMON PARENT. Every change is worked in a
+# worktree at ../agent-ops-worktrees/<name>, which is invisible inside a
+# container that mounted only this directory — `go build` there fails naming a
+# missing module, in a way that reads as a broken checkout. Mounting the shared
+# parent instead would hand the container every other project on this machine.
+#
+# BOTH are required even to build inside a worktree alone: a worktree's `.git`
+# is a FILE pointing into this repository's .git/worktrees/, so git cannot
+# resolve anything without the main checkout mounted too.
 docker run -d --name agentops-go -u "$(id -u):$(id -g)" \
   -v "$PWD":"$PWD" -w "$PWD" \
+  -v "$(dirname "$PWD")/agent-ops-worktrees":"$(dirname "$PWD")/agent-ops-worktrees" \
   -v agentops-gocache:/gocache -v agentops-gomodcache:/gomodcache \
   -e GOCACHE=/gocache -e GOMODCACHE=/gomodcache \
   -e HOME=/tmp -e GOFLAGS=-buildvcs=false \
@@ -50,7 +60,14 @@ Four details, each of which cost a debugging round:
 - **Run as the invoking uid.** `controller-gen` writes deepcopy and CRDs INTO
   the repo, and a root-owned generated file is a mess to undo.
 - **Mount the repo at its REAL path**, not `/src`. Compiler diagnostics then
-  carry paths that resolve on the host.
+  carry paths that resolve on the host — and with a worktree the real path is the
+  only one that resolves at all, since `-w` names a directory the container must
+  actually have.
+- **Working in a worktree? `-w` is that worktree's path**, not the repository's:
+
+  ```sh
+  docker exec -i -w "$PWD" agentops-go go build ./...   # from inside the worktree
+  ```
 - **`go clean -modcache` fails** (`unlinkat //gomodcache: permission denied`) —
   it tries to remove the mount point. Remove the VOLUME instead.
 

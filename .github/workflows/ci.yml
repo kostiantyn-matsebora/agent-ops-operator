@@ -470,6 +470,140 @@ jobs:
       - name: No retired vocabulary asserted as a current claim
         run: python3 .github/scripts/retired-vocabulary-guard.py
 
+  # THE PLANNING ARTIFACTS PARSE, AND THE PUBLISHED CONTRACT STILL DOES.
+  #
+  # `openspec` appeared in NO workflow until this job. `openspec/specs/` is what
+  # this project points at for "is this behaviour intended", and a specification
+  # is trusted precisely because nothing else reads it -- no compiler, no test --
+  # so a malformed one looks exactly like a correct one until somebody relies on
+  # it.
+  #
+  # SCOPE IS WHAT MAKES IT SURVIVABLE. Specs are validated ALWAYS; a change is
+  # validated only when this pull request touches it. A dozen changes are open at
+  # any time and an unfinished delta is unfinished correctly -- judging all of
+  # them would fail every pull request for work it was not about, and the job
+  # would be switched off within a day.
+  openspec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The change filter diffs against a base commit, exactly as `discover`
+          # does, so the shallow default clone is not enough.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # PINNED. An unpinned CLI would change the definition of valid between one
+      # pull request and the next, which is the one thing a gate may not do.
+      - run: npm install -g @fission-ai/openspec@1.10.0
+      - name: The published specifications are valid
+        run: openspec validate --specs --strict
+      - name: Every change this pull request touches is valid
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          changed=""
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] \
+             && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            changed=$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" || true)
+          fi
+          names=$(printf '%s\n' "$changed" \
+            | sed -n 's|^openspec/changes/\([^/]*\)/.*|\1|p' \
+            | grep -v '^archive$' | sort -u)
+          if [ -z "$names" ]; then
+            echo "this pull request touches no openspec change"
+            exit 0
+          fi
+          failed=0
+          for name in $names; do
+            [ -d "openspec/changes/$name" ] || { echo "  skipped  $name (deleted)"; continue; }
+            echo "::group::$name"
+            openspec validate "$name" --type change --strict || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed
+
+  # DOCUMENTATION IS PART OF THE CHANGE, FOR EVERYONE.
+  #
+  # The rule was enforced in exactly one place: a PreToolUse hook in one
+  # contributor's local harness. That is absent for every other contributor, for
+  # every session whose harness is not installed, and for automation -- and this
+  # repository is public, so "every other contributor" is a real population now.
+  #
+  # The hook and this job call the SAME script, and a third step proves they
+  # agree. Two enforcement points asking one question is safe only while they
+  # give one answer.
+  docs-task:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # EVERY SCRIPT THIS WORKFLOW DEPENDS ON, not only the documentation gate.
+      # They decide things — refusing a commit, refusing to resolve somebody's
+      # review thread, opening an issue — and each was originally verified once
+      # by hand. `gh` and `openspec` are stubbed, so the suite reaches no network
+      # and touches no real repository.
+      - name: The workflow's own scripts
+        run: ./.github/tests/run.sh
+      - name: Every change this pull request touches carries a finished documentation task
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "no base commit to diff against; nothing to check"
+            exit 0
+          fi
+          python3 .github/scripts/docs-task-guard.py --range "$BASE_SHA..$GITHUB_SHA"
+
+  # THE TITLE IS THE COMMIT SUBJECT, BECAUSE THE MERGE IS A SQUASH.
+  #
+  # `git log --oneline` is meant to read as an account of this project, and with
+  # a squash merge the one line it gains per change is the pull request's TITLE.
+  # A title is the one field nobody proofreads -- it is typed once, at the moment
+  # the work feels finished -- so it is checked rather than trusted.
+  #
+  # Push events skip this: there is no title to check, and `ci-green` treats a
+  # skipped job as passed by having nothing to do.
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: The title follows the commit convention
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "$TITLE" \
+             | grep -qE '^(feat|fix|docs|chore|refactor|test|ci)(\([a-z0-9._/-]+\))?!?: .+'; then
+            echo "ok: $TITLE"
+            exit 0
+          fi
+          cat >&2 <<EOF
+          This pull request's title becomes the commit subject on master:
+
+            $TITLE
+
+          It must read: type(scope): what it does, as a sentence.
+
+            types   feat, fix, docs, chore, refactor, test, ci
+            scope   the component, subsystem or surface -- manager, console,
+                    wiring, site, openspec
+            !       before the colon marks a breaking change, which also owes an
+                    entry in docs/CHANGELOG.md
+
+            feat(wiring)!: the Pipeline names the identity, and SILENCE MEANS NO POWER
+            fix(console): the asset harnesses wrote to platform/docs, and said it worked
+
+          The subject says what changed and why it mattered, not which files moved.
+          See CONTRIBUTING.md.
+          EOF
+          exit 1
+
   # THE ONE REQUIRED CHECK, AND THE REASON PATH FILTERING IS SAFE.
   #
   # A branch-protection rule names a check by NAME. A job SKIPPED because its
@@ -484,7 +618,7 @@ jobs:
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary]
+    needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

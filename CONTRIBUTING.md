@@ -48,6 +48,52 @@ installed, `openspec list` shows what is in flight and `openspec show <name>`
 prints one. Reading an archived change under `openspec/changes/archive/` is the
 fastest way to see the shape.
 
+### One change, one worktree, one branch, one pull request
+
+**Every openspec change is implemented in its own git worktree**, on its own
+branch, and lands as a single pull request:
+
+```sh
+git worktree add -b change/<name> ../agent-ops-worktrees/<name> origin/master
+cd ../agent-ops-worktrees/<name>
+```
+
+- **The worktree lives OUTSIDE the repository, and that is forced.** The release
+  inventory is derived by searching the tree for module manifests and container
+  recipes, so a second copy beneath the root reports twice as many components and
+  hands CI a doubled matrix — silently, and looking like a new component rather
+  than a working copy.
+- **The branch is the statement of provenance.** It is named for the change, so
+  nothing asks you to type that name again; the pull request template has no
+  field for it.
+- **The merge is a squash**, so the pull request's TITLE becomes the commit
+  subject on `master` and must follow the convention below. A check enforces it,
+  because a title is the one field nobody proofreads.
+- **`openspec archive` runs inside the pull request**, not after it merges. The
+  diff then shows the delta specs folding into `openspec/specs/`, which is the
+  part a reviewer of this project should be looking at.
+
+**Why this is stricter than it looks.** Several people and sessions work this
+repository at once, and while they shared one checkout it cost work twice: a
+branch collision that had to be cherry-picked back, and a `git clean` that
+deleted somebody else's entire unstaged change directory. A worktree gives each
+piece of work its own HEAD and its own files.
+
+`.claude/rules/worktree-delivery.md` is the full rule.
+
+### The issue that tracks it
+
+Each change has **one** GitHub issue, opened when it is proposed and closed when
+it archives, carrying an `opsx:` label saying which phase it is in.
+
+**It is a pointer, never a copy.** The body is generated and links the change
+directory and the pull request; the rationale, design, specs and tasks live in
+`openspec/changes/<name>/` and are not restated there.
+
+**If you filed an issue that becomes a change, your issue becomes the tracking
+issue.** It is not closed in favour of one we wrote — your thread is where the
+conversation already is.
+
 ## Documentation is part of the change, not a follow-up
 
 **This is the rule most likely to send a pull request back**, so it is stated
@@ -235,6 +281,31 @@ is built.
 naming one would block every pull request that did not touch it forever.
 `ci-green` exists for that: it is the single check branch protection requires,
 and it fails if any job that DID run failed.
+
+**What reports through it**, beyond the module, chart, image and site jobs:
+
+| Check | Fails when |
+|---|---|
+| `publication` | the tree names a private deployment |
+| `retired-vocabulary` | it asserts a name this project stopped using |
+| `openspec` | a published specification is invalid, or a change your diff touched is |
+| `docs-task` | a change your diff touched does not end in a finished documentation section |
+| `pr-title` | the title would not read as a commit subject |
+
+The last two judge only what your pull request TOUCHED. A dozen changes are open
+at any time and an unfinished one is unfinished correctly, so a gate judging all
+of them would fail every pull request for work it was not about.
+
+**Claude reviews the pull request** on open and on every push, commenting on
+specific lines and leaving one summary. It reads this project's own rules, so it
+raises a contradiction with a recorded invariant or a retired term as well as
+ordinary defects — and **it does not repeat a finding it has already made**, so
+what appears after a push is what is new. It resolves its own threads once you
+fix them, and it never touches anybody else's.
+
+**A pull request from a fork gets no review**, shown as a SKIPPED check rather
+than a failing one: repository secrets are withheld from fork workflows by
+design, so there is nothing you could do about it and nothing you should.
 
 **Releases are the maintainer's, and they are chart-shaped.** A component tag
 (`<component>-v<semver>`) publishes one image and creates no GitHub Release; a

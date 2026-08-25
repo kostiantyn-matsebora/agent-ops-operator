@@ -80,3 +80,16 @@ rules:
       from it and name it, and a task list MUST NOT merely restate the specs.
       An implementer who re-derives an agreed design arrives somewhere else,
       which is the whole cost the prototype was committed to avoid.
+    - >-
+      THIS CHANGE WILL BE DELIVERED ON ITS OWN BRANCH, `change/<name>`, from its
+      own git worktree, as ONE pull request — see
+      .claude/rules/worktree-delivery.md. A task list MUST NOT instruct
+      committing to the default branch, and MUST NOT restate the delivery
+      mechanism as work: creating the worktree, opening the tracking issue and
+      opening the pull request are the opsx commands' own steps, not tasks.
+    - >-
+      WHERE A TASK'S VERIFICATION IS A DEPLOY OR A BUILD, it MUST say that it
+      runs against the WORKTREE's tree rather than the default branch's. Both
+      the build container and the GitOps deploy resolve a fixed path by
+      default, so a verification run without the override silently tests master
+      and reports success.

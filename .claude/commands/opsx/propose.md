@@ -79,6 +79,25 @@ When ready to implement, run /opsx:apply
       - Use **AskUserQuestion tool** to clarify
       - Then continue with creation
 
+4.5 **Open the tracking issue — THIS REPOSITORY'S RULE**
+
+   One issue per change, opened once the artifacts exist so its title can come
+   from the proposal. See `.claude/rules/worktree-delivery.md`.
+
+   ```bash
+   .github/scripts/opsx-issue.sh open <name>                    # new
+   .github/scripts/opsx-issue.sh open <name> --promote <issue>  # from a filed issue
+   ```
+
+   - **It is idempotent.** The number is written to `<change>/.github-issue` and
+     a re-run returns it rather than opening a second issue.
+   - **THE ISSUE IS A POINTER.** The script generates the body; never paste the
+     proposal into it. A copied proposal is a second thing to keep true, and
+     nothing tells a reader which of the two they are reading.
+   - **PROMOTE, never replace.** If this change came from an issue somebody else
+     filed, `--promote` adopts that issue — keeping their title, body and every
+     comment. The reporter is waiting in that thread.
+
 5. **Show final status**
    ```bash
    openspec status --change "<name>"

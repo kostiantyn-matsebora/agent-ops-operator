@@ -42,46 +42,26 @@ root="${CLAUDE_PROJECT_DIR:-.}"
 tasks="$root/openspec/changes/$name/tasks.md"
 [ -r "$tasks" ] || exit 0
 
-# The LAST `## ` section is the one the rule is about.
-last_heading=$(grep -n '^## ' "$tasks" | tail -1)
-[ -n "$last_heading" ] || exit 0
-lineno=${last_heading%%:*}
-title=${last_heading#*:}
+# THE DECISION IS NOT MADE HERE. `.github/scripts/docs-task-guard.py` is the one
+# implementation, and CI calls the same script — so the local gate and the check
+# cannot drift into two answers to one question. This hook decides only WHEN to
+# ask, and fails open when it cannot ask at all.
+guard="$root/.github/scripts/docs-task-guard.py"
+command -v python3 >/dev/null 2>&1 || exit 0
+[ -r "$guard" ] || exit 0
 
-if ! printf '%s' "$title" | grep -qi 'documentation'; then
-  cat >&2 <<EOF
-BLOCKED: '$name' has no documentation section, and it must be the LAST one.
-
-Its final section is:
-  $title
-
-Every change ends with a dedicated documentation task covering BOTH halves,
-listed separately because they are skipped independently:
-
-  1. the reference docs   — docs/concepts.md, docs/contracts.md, a bundle page,
-                            docs/CHANGELOG.md
-  2. THE ADOPTER SITE     — the landing page, introduction.md,
-                            getting-started.md, installation.md, docs/guides/*
-
-Add it to $tasks, complete it, then archive.
-See .claude/rules/documentation.md.
-EOF
-  exit 2
+if message=$(python3 "$guard" --tasks "$tasks" 2>&1); then
+  exit 0
 fi
 
-undone=$(tail -n +"$lineno" "$tasks" | grep -c '^- \[ \]')
-if [ "$undone" -gt 0 ]; then
-  cat >&2 <<EOF
-BLOCKED: '$name' has $undone unfinished documentation task(s).
+cat >&2 <<EOF
+BLOCKED: '$name' cannot be archived yet.
 
-$(tail -n +"$lineno" "$tasks" | grep '^- \[ \]' | sed 's/^/  /')
+$message
 
-Archiving records the work as finished while the half a reader meets is not.
-Finish these, or say explicitly that you are archiving with documentation
-outstanding and why.
+Archiving is the point of no return — the deltas fold into the specs and nobody
+revisits the change. Finish these, or say explicitly that you are archiving with
+documentation outstanding and why.
 See .claude/rules/documentation.md.
 EOF
-  exit 2
-fi
-
-exit 0
+exit 2
