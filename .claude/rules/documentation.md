@@ -78,7 +78,6 @@ filename — so the routing is explicit:
 | Work contract, adapter contracts, HTTP endpoints | `docs/contracts.md` |
 | An integration's ADOPTER-FACING content | `docs/integrations/<system>.md` — named for the SYSTEM, never the subchart |
 | WHAT A BUNDLE RENDERS | nothing. The `renders` marker on that page, then `python3 .github/scripts/docs-generate.py` |
-| Every integration the site names, including those with no page | `docs/integrations/index.md` |
 | The PARENT chart's values, install, upgrade, uninstall | `docs/installation.md` |
 | Breaking change + upgrade steps | `docs/CHANGELOG.md`, newest first |
 | Terminology | `.claude/rules/terminology.md`, `wiring.md`, `adapters.md` |

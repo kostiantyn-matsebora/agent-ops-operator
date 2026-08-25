@@ -19,7 +19,6 @@ path. Plugins are limited to the set Pages enables by default.
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `security.md` | the THREAT MODEL — trust boundaries, the flows that cross them, the control on each, the platform's own posture and the residual risk. **No values table, no default, no control YAML**: those are `installation.md`'s |
 | `installation.md` | the REAL install, and the PARENT chart's values |
-| `integrations/index.md` | EVERY integration the site names, against the three seams a Pipeline wires — including the ones that are not pages |
 | `integrations/<system>.md` | one integration each: what starts work, what it may reach, where it answers, what turning it on costs |
 | `guides/*.md` | one adoption tier each, in learning order — hand-written prose around GENERATED resource blocks |
 
@@ -27,6 +26,12 @@ path. Plugins are limited to the set Pages enables by default.
   untouched reference and keeps its own URL.
   - **What the console is FOR goes to the guide.** What it IS goes to the
     reference.
+- **THERE IS NO INTEGRATION INDEX PAGE, AND THE NAV GROUP IS THE INDEX.** A
+  page listing what `_data/nav.yml` already lists is a second navigation written
+  by hand, edited in step with the first forever.
+  - **A name with no page of its own leads to whatever owns it** — the console to
+    the console guide, cron and bring-your-own to `guides/signal-adapter.md`,
+    any MCP server to `guides/toolsets.md`.
 - **AN INTEGRATION PAGE IS NAMED FOR THE SYSTEM, NEVER FOR THE SUBCHART.**
   `integrations/home-assistant.md`, not `ha.md`. Packaging is renamed when its
   scope is understood better — `vm-bundle` → `prometheus-bundle` → `prometheus`

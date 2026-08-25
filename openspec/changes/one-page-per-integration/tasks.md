@@ -73,7 +73,7 @@ restated, and every claim about a route is checked against a real
 - [x] 6.1 Build the site and assert per page, in both colour schemes, that `document.documentElement.scrollWidth` does not exceed `clientWidth`. Verify the four new pages pass in both.
 - [x] 6.2 Assert NO ELEMENT exceeds its own content column, at 1600/1280/900/620px — not just that the page body does not scroll, which is the assertion that passed while the object list ran under the on-this-page rail. An object list is the widest thing these pages carry.
 - [x] 6.3 Run the prose lint from `docs/CLAUDE.md` over every new and changed page. Verify it is silent.
-- [x] 6.4 Crawl the built site and verify every internal link resolves, since this change moves four pages and repoints roughly a dozen references.
+- [x] 6.4 Crawl the built site and verify every internal link resolves AND every `#fragment` names a real id on its target page. A page-level crawl passes on a link whose anchor does not exist — which is how two stale anchors into the rewritten Kubernetes page reached review.
 - [x] 6.5 Screenshot an integration page in both themes and READ the captures. Verify the generated block renders as a code listing with every object name fully visible — not as escaped text, not clipped, not behind a horizontal scrollbar. Write the captures to the scratchpad, never the repository.
 
 ## 7. Documentation

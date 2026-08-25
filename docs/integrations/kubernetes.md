@@ -171,6 +171,27 @@ Off, it explains. On, it can also fix.
 > on deliberately.
 {: .ao-callout}
 
+**One flag moves both walls together**, because an operator who asks for an
+acting agent and leaves the server read-only has asked for something and given
+it no way to do it.
+
+**Each is still settable on its own.** The useful one is an acting route on a
+server that cannot act:
+
+```sh
+--set kubernetes.allowMutations=true \
+--set kubernetes.mcpServers.readOnly=true
+```
+
+```powershell
+--set kubernetes.allowMutations=true `
+--set kubernetes.mcpServers.readOnly=true
+```
+
+That gives you the `k8s-operate` route and the `k8s-admin` toolset, on a server
+whose mutating tools are never registered — broad grants that nothing can
+exercise, which is the shape to hold while you decide.
+
 ## Tune what reaches you
 
 Turned it on and got paged about noise? Everything below goes under

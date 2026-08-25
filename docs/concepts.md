@@ -284,7 +284,7 @@ silently rewrite grouping.
 
 **Suppression is the adapter's job, and is distinct from grouping.** It decides
 whether a signal is emitted at all — see
-[kubernetes](integrations/kubernetes.md#tuning-which-events-are-real).
+[kubernetes](integrations/kubernetes.md#tune-what-reaches-you).
 
 ### SignalAdapter
 
@@ -733,7 +733,7 @@ yields a write-capable server under a `full` ServiceAccount, everything else a
 read-only server under a `readonly` one.
 
 Widening the agent therefore widens the MCP path unless you say otherwise — see
-[kubernetes](integrations/kubernetes.md#what-it-may-reach) for the
+[kubernetes](integrations/kubernetes.md#may-it-act) for the
 override that recovers the separation.
 
 ## Capabilities are wiring
