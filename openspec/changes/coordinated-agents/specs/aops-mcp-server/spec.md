@@ -24,16 +24,24 @@ waiting on any agent's work. `invoke` SHALL report created or attached.
 - **WHEN** a coordinating agent calls `invoke`
 - **THEN** it receives the member's name within the request, and the result arrives later as an input
 
-### Requirement: Reach is bounded per token, not per allowlist
+### Requirement: Reach is bounded by the manager, per conversation, not by an allowlist
 
-The server SHALL authenticate each caller by a derived token whose context is
-the Coordinator name, and SHALL enforce the `agents[]` list and the root scope
-on every verb itself. An allowlist inside the runtime pod SHALL NOT be relied on
-for any bound.
+Every verb SHALL carry the calling conversation's token, derived by the
+manager with context `coordinator:<name>:<conversation>` and injected into
+that conversation's runtime pod. The server SHALL forward it and decide
+nothing: the MANAGER validates the token and enforces the Coordinator's
+`agents[]` list and the root scope on every verb. An allowlist inside the
+runtime pod SHALL NOT be relied on for any bound. The token is per
+conversation because one Coordinator may hold several roots at once, and a
+token naming only the Coordinator could not scope to one of them.
 
-#### Scenario: A forged name is refused server-side
-- **WHEN** a caller with Coordinator A's token invokes an Agent listed only by Coordinator B
-- **THEN** the server refuses it, regardless of the caller's tool allowlist
+#### Scenario: A forged name is refused by the manager
+- **WHEN** a caller holding root A's token invokes an Agent listed only by another Coordinator
+- **THEN** the manager refuses it, regardless of the caller's tool allowlist, and the server has made no decision
+
+#### Scenario: One Coordinator, two roots
+- **WHEN** roots A and B of one Coordinator are open and A's token asks to close a member of B
+- **THEN** the manager refuses it as out of scope
 
 ### Requirement: The server sits behind the component wall
 

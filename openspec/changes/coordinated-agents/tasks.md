@@ -105,8 +105,14 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 6. Rules and vocabulary
 
-- [ ] 6.1 `.claude/rules/wiring.md`: "no other CR carries wiring" → two wiring
-      kinds; the escalation-time Coordinator read stated as the one exception.
+- [ ] 6.1 `.claude/rules/wiring.md`, three claims, each named: "no other CR
+      carries wiring" → two wiring kinds; the `#### Capabilities are wiring,
+      exclusively` header and its section → capabilities are declared on an
+      Agent OR inline on a Pipeline/Coordinator, and reached through wiring
+      only; under `### MCPToolset`, "Bound from `Pipeline.spec.toolsets` ONLY"
+      → bound from any capability's `toolsets`, never a profile's. The
+      escalation-time Coordinator read stated as the one exception to
+      "nothing reads wiring after creation".
 - [ ] 6.2 `terminology.md`: `Agent`, `Coordinator`, `root`, `member`, `escalate`;
       `structure.md`: `platform/mcp-aops`; `invariants.md`: the loop refusal,
       the budget, "a caused conversation binds no human channel".
