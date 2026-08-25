@@ -119,17 +119,31 @@ headline() {
 slug() { gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true; }
 
 read_links() {
-  local change="$1" repo ref path
+  local change="$1" repo ref path default root
   repo=$(slug); [ -n "$repo" ] || return 0
-  if [ -d "$(repo_root)/openspec/changes/$change" ]; then
-    ref="change/$change"
+  root=$(repo_root)
+  if [ -d "$root/openspec/changes/$change" ]; then
     path="openspec/changes/$change"
   else
-    # Archived: the directory moved and the branch is merged, so the default
-    # branch is the only ref that still resolves.
-    ref=$(git -C "$(repo_root)" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
-    ref=${ref#origin/}; ref=${ref:-master}
     path="openspec/changes/archive/$(basename "$(change_dir "$change")")"
+  fi
+
+  # THE DEFAULT BRANCH WHEREVER IT HAS THE FILE, the change's branch otherwise.
+  #
+  # A MERGED CHANGE HAS NO BRANCH LEFT. GitHub deletes it on merge, so a link to
+  # `change/<name>` is a 404 for every change that has landed — which is most of
+  # the ones anybody follows a link to. Verified against a live one before this
+  # rule replaced it.
+  #
+  # And a slashed branch cannot be linked anyway: `blob/change/<name>/...` is
+  # ambiguous between ref and path, and GitHub resolves neither that nor the
+  # `refs/heads/` form. Both were tried; both 404.
+  default=$(git -C "$root" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+  default=${default#origin/}; default=${default:-master}
+  if git -C "$root" cat-file -e "origin/$default:$path/proposal.md" 2>/dev/null; then
+    ref="$default"
+  else
+    ref="change/$change"
   fi
   local base="https://github.com/$repo/blob/$ref/$path"
   echo "[proposal]($base/proposal.md) · [design]($base/design.md) · [tasks]($base/tasks.md)"
