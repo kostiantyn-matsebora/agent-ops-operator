@@ -551,7 +551,7 @@ binds the console as a channel, so a turnkey install can start a conversation in
 the console with no wiring step.
 
 The names come from `global.agentops.console`, and the render fails if they
-disagree with the console's own (see [the Kubernetes bundle](kubernetes.md)).
+disagree with the console's own (see [the Kubernetes integration](integrations/kubernetes.md)).
 
 Nothing else claims it for you. Wiring names a profile, sources and channels
 from different bundles, so only the installer sees all of it.

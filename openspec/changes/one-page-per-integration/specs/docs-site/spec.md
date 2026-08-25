@@ -26,7 +26,19 @@ lists, and a hand-copied inventory rots.
 
 **Every integration the site names SHALL have an owner page, but not every one
 SHALL have a page of its own.** Where an existing page already owns the subject,
-the integration index SHALL point at it rather than a new page restating it.
+the name SHALL lead there rather than to a new page restating it — the console
+to the console guide, a mechanism to the guide that teaches it.
+
+**THE SET SHALL NOT BE INDEXED BY A PAGE OF ITS OWN.** The site's navigation
+already lists every integration page, so an index would be a second navigation
+written by hand — the thing `_data/nav.yml` exists to prevent — and it would
+have to be edited in step with the sidebar forever.
+
+**A RUNTIME IS NOT AN INTEGRATION.** The four questions are the `Pipeline`'s
+three seams — what starts work, what may be reached, where it answers — and a
+runtime is the fourth thing: what EXECUTES the agent. A runtime vendor SHALL
+therefore keep its own reference page rather than be filled into a shape that
+would leave three of its four sections empty. Shipping as a bundle is not what makes something an integration.
 
 #### Scenario: A reader arrives from a mark on the landing page
 
@@ -43,41 +55,14 @@ the integration index SHALL point at it rather than a new page restating it.
 #### Scenario: An integration ships without a chart
 
 - **WHEN** an integration ships as an image with no chart rendering it
-- **THEN** the page or index entry says so, and says which resources the reader
-  declares themselves
+- **THEN** its page says so, and says which resources the reader declares
+  themselves
 
 #### Scenario: A reader wants every value
 
 - **WHEN** a reader needs the exhaustive values for an integration's chart
 - **THEN** the page sends them to the chart's own values rather than restating
   them
-
-### Requirement: The integration index carries the whole set, including what is not a page
-
-`docs/integrations/` SHALL carry an index naming **every** integration the site
-promises, whether or not it has a page of its own.
-
-It SHALL show each against the three seams a `Pipeline` wires — what starts work,
-what may be reached, where the answer goes — so that a reader can see at a glance
-that most integrations start work, some grant tools, and few carry answers.
-
-An integration with no page of its own SHALL still appear, naming the page that
-owns it or the resources the reader declares.
-
-**Bringing your own SHALL be a row on that table**, pointing at the contract
-guides. It is not an absence of an integration, it is the seam the product
-exposes.
-
-#### Scenario: An integration has no page
-
-- **WHEN** an integration is named on the landing page but has no page of its own
-- **THEN** the index names it, says why, and sends the reader to whatever owns it
-
-#### Scenario: A reader asks which seam a system plugs into
-
-- **WHEN** the index is read
-- **THEN** each integration is shown against what starts work, what may be
-  reached and where answers go
 
 ## RENAMED Requirements
 

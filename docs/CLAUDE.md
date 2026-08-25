@@ -19,12 +19,28 @@ path. Plugins are limited to the set Pages enables by default.
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `security.md` | the THREAT MODEL — trust boundaries, the flows that cross them, the control on each, the platform's own posture and the residual risk. **No values table, no default, no control YAML**: those are `installation.md`'s |
 | `installation.md` | the REAL install, and the PARENT chart's values |
+| `integrations/index.md` | EVERY integration the site names, against the three seams a Pipeline wires — including the ones that are not pages |
+| `integrations/<system>.md` | one integration each: what starts work, what it may reach, where it answers, what turning it on costs |
 | `guides/*.md` | one adoption tier each, in learning order — hand-written prose around GENERATED resource blocks |
 
 - **`console-guide.md` is published at `/console/`.** `console.md` is the
   untouched reference and keeps its own URL.
   - **What the console is FOR goes to the guide.** What it IS goes to the
     reference.
+- **AN INTEGRATION PAGE IS NAMED FOR THE SYSTEM, NEVER FOR THE SUBCHART.**
+  `integrations/home-assistant.md`, not `ha.md`. Packaging is renamed when its
+  scope is understood better — `vm-bundle` → `prometheus-bundle` → `prometheus`
+  — and a reader's bookmark should survive that.
+  - **The four answer the same four questions in the same order**, which is the
+    `Pipeline`'s own: what starts work, what it may reach, where it answers,
+    what it costs to turn on.
+  - **"Where it answers" is OMITTED where the system carries no answers**, never
+    left present and empty. Telegram is the only one that has it.
+  - **A RUNTIME IS NOT AN INTEGRATION.** `docs/claude.md` stays a reference
+    page: a runtime is what EXECUTES an agent, not a seam a Pipeline wires, and
+    three of the four questions would be blank.
+  - **A page states no exhaustive values.** `helm show values` is the list, and
+    a hand-copied inventory rots.
 - **Every product asset is build output**, never a hand capture, and every one
   is rendered from ONE curated fixture that names no real cluster.
   - **The screenshots** — `npm run screenshots` in `console/ui`, published to
@@ -44,10 +60,18 @@ path. Plugins are limited to the set Pages enables by default.
   `chart/crds/`. Never edit it, and never give it a nav entry.
   - **The `yaml` blocks in `guides/` come from the same run** — the resource
     templates from the CRDs, the worked examples from `helm template`.
+  - **What a BUNDLE RENDERS comes from the same run** —
+    `<!-- generated: renders bundle=<subchart> -->` fills a table with a row per
+    component, attributed by rendering the chart with that component off and on
+    and diffing the objects. The bundle is named by its SUBCHART DIRECTORY.
   - **A page declares what it wants in an HTML comment**
     (`<!-- generated: … -->`) and the generator fills the block beneath it. CI
     regenerates everything and FAILS on a difference, which is the only thing
     that stops a committed generated file rotting.
+  - **The generator owns what is rendered. The page owns what it means.** A
+    generated table states objects. Which one is conditional, which account
+    carries which grant, and why a component exists at all are the prose around
+    the block — write them there, or the next regeneration deletes them.
 
 **Adding a page is the markdown file plus ONE line in `_data/nav.yml`**, and the
 page DECLARES its own `permalink`. No permalink style is configured, and the

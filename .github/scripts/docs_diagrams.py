@@ -180,6 +180,89 @@ DIAGRAMS: dict[str, dict] = {
 # ONE ILLUSTRATION PER CLAIM THAT IS HARD TO READ IN PROSE. The Secrets boundary
 # and the context mount are the two the page cannot state in a sentence anyone
 # believes on first reading — a picture of the path is what makes them land.
+# One per integration page, and each shows the SAME three seams a Pipeline
+# wires: what starts work, the route, and what the agent reaches or answers on.
+# A reader who met the model on the landing page meets it again per vendor.
+# One per integration page. THREE COLUMNS, LIKE EVERY OTHER DIAGRAM HERE, and
+# the geometry note above says why: the site displays a drawing in a 720px
+# column with no breakout, so 950 authored is 0.76 on screen and a FOURTH
+# column drops that to 0.55 -- where a 14px label renders under 8px. These were
+# authored with four and looked exactly as small as that predicts.
+#
+# Each shows the same three beats an adopter reads the page for: what arrives,
+# what decides whether it is real, and what answers.
+INTEGRATION_DIAGRAMS: dict[str, dict] = {
+    # TWO LANES, AND THE ROUTE IS WHERE THEY MEET. That is the product's own
+    # model -- a Pipeline claims a source AND binds the tools -- so the picture
+    # states it rather than showing a single file of boxes.
+    #
+    # It also keeps the MCP server, which a three-box version dropped. The
+    # renderer pairs row to row when BOTH columns hold two boxes, so each lane
+    # gets its own arrow instead of the server hanging off the rules.
+    "kubernetes": {
+        "dir": "integrations",
+        "alt": "Two lanes meet on the route: cluster events filtered by your "
+               "suppression rules, and the MCP server's tools filtered by the "
+               "toolsets you bind.",
+        "cols": [
+            [("a cluster Event", "Warning, by default", "plain"),
+             ("the MCP server", "reads the cluster", "subject")],
+            [("your rules", "still broken?", "yours"),
+             ("your toolsets", "what it may call", "yours")],
+            [("k8s-observe", "where they meet", "subject")],
+        ],
+        "arrows": ["filtered by", "meet on"],
+    },
+    "prometheus": {
+        "dir": "integrations",
+        "alt": "Two lanes meet on the route: firing alerts your Alertmanager "
+               "sends, and the metrics the query server exposes through the "
+               "toolset you bind.",
+        "cols": [
+            [("a firing alert", "from Alertmanager", "plain"),
+             ("the query server", "reads your metrics", "subject")],
+            [("your receiver", "which alerts to send", "yours"),
+             ("your toolsets", "what it may call", "yours")],
+            [("alert-triage", "where they meet", "subject")],
+        ],
+        "arrows": ["chosen by", "meet on"],
+    },
+    "home-assistant": {
+        "dir": "integrations",
+        "alt": "A Home Assistant log record is re-checked by the rules, and "
+               "opens a conversation on one of two routes: one that uses the "
+               "house, one that repairs it.",
+        "cols": [
+            [("a log record", "from your house", "plain")],
+            [("your rules", "did it recur?", "yours")],
+            [("ha-control", "uses the house", "subject"),
+             ("ha-ops", "repairs it", "subject")],
+        ],
+        "arrows": ["watched", "only if real"],
+    },
+    # TELEGRAM IS THE ONE THAT ANSWERS, so its second lane is the reply rather
+    # than a toolset -- this bundle grants none. Both lanes run through the
+    # single poller, which is the rule the whole integration is shaped by.
+    "telegram": {
+        "dir": "integrations",
+        "alt": "One poller reads every update for a bot token: a message on "
+               "the group surface starts a conversation, and a message in a "
+               "topic continues the one that owns it.",
+        # ONE BOX IN THE MIDDLE, DELIBERATELY. Both kinds of message fan IN to
+        # it and it fans back OUT, which is the whole rule: a second concurrent
+        # reader of one bot token gets 409s and steals updates. Drawn as two
+        # middle boxes it would say the opposite.
+        "cols": [
+            [("on the group", "anyone can start one", "plain"),
+             ("in a topic", "the conversation there", "plain")],
+            [("one poller", "per bot token", "yours")],
+            [("a new topic", "opened to answer in", "subject"),
+             ("its next turn", "answered in place", "subject")],
+        ],
+        "arrows": ["both read by", "routed to"],
+    },
+}
+
 SECURITY_DIAGRAMS: dict[str, dict] = {
     "connect": {
         "dir": "security",

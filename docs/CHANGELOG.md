@@ -1709,7 +1709,7 @@ never CR state.
 
 ## [5.22.0] — 2026-08-21
 
-Adds the Home Assistant bundle. See [home-assistant.md](home-assistant.md).
+Adds the Home Assistant bundle. See [the Home Assistant integration](integrations/home-assistant.md).
 
 ### Added
 

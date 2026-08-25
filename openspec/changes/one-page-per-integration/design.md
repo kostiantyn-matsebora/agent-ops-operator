@@ -31,7 +31,8 @@ for the other three.
 - One page shape, used four times, that a fifth integration can be added to
   without inventing a new one.
 - A component inventory that cannot be wrong, because nobody types it.
-- Delete more than is added: four pages go, and the exhaustive values with them.
+- Remove more than is added: four pages of subchart documentation become four
+  integration pages, and the exhaustive values go with the old ones.
 
 **Non-Goals:**
 
@@ -52,7 +53,7 @@ The naive form of this does not survive contact with the chart. Toggling one
 flag at a time fails outright:
 
 ```
-k8s-bundle: mcp.url is required when mcp.enabled=true
+kubernetes: mcp.url is required when mcp.enabled=true
 (or enable the mcpServers component to run the MCP server in-cluster)
 ```
 
@@ -71,22 +72,33 @@ The baseline is the bundle enabled with every component off **plus every
 required component's own `sets`**, and the component's row is what its own
 `sets` add to that.
 
-Verified against the current chart — every row is the component's own
+Verified by rendering the chart as it stands — every row is the component's own
 contribution and nothing else:
 
 ```
 eventsAdapter -> SignalAdapter/k8s-events, SignalSource/cluster-events,
-                 ClusterRole + ClusterRoleBinding/agentops-signal-k8s-events-events
+                 ServiceAccount/agentops-signal-k8s-events,
+                 ClusterRole + ClusterRoleBinding/agentops-signal-k8s-events-events-default
 profile       -> AgentProfile/k8s-engineer
 mcp           -> MCPConfig/k8s-api, MCPToolset/k8s-observability
 mcpServers    -> Deployment + Service + ServiceAccount + ClusterRole
                  + ClusterRoleBinding/agentops-mcp-k8s
-pipelines     -> Pipeline/k8s-observe, ServiceAccount/agentops-k8s-observe
+pipelines     -> Pipeline/k8s-observe
 ```
 
-Four of those five reproduce `k8s-bundle.md`'s hand-written table word for word,
-which is the evidence that the technique describes the same thing a human was
-describing. The fifth is the row the human has not written yet.
+`home-assistant` was rendered the same way and behaves the same: its wiring
+component contributes `Pipeline/ha-control` and `Pipeline/ha-ops` and nothing
+else, and its `logsAdapter` contributes exactly the adapter and the source.
+
+**All five rows reproduce `docs/kubernetes.md`'s hand-written table**, which is
+the evidence that the technique describes the same thing a human was describing.
+
+**That the table is right TODAY is not an argument against generating it — it is
+the argument for it.** The wiring row named one `Pipeline` while `af5bb49` had
+the chart rendering a route `ServiceAccount` beside it, and went back to being
+correct when `84a2654` stopped rendering that account. Nobody edited the row in
+either direction. A table whose accuracy is restored by an unrelated chart
+change is not being maintained, it is being lucky.
 
 **A MISSING `requires` FAILS THE RENDER, LOUDLY.** That is the property that
 makes a hand-maintained dependency list safe: the chart's own guard refuses, the
@@ -107,8 +119,9 @@ Alternatives considered:
 
 ### ONE marker per bundle, emitting the whole table
 
-**Chosen:** `<!-- generated: renders bundle=k8s-bundle -->` fills one table with
-a row per component.
+**Chosen:** `<!-- generated: renders bundle=kubernetes -->` fills one table with
+a row per component. The bundle is named by its subchart directory —
+`kubernetes`, `prometheus`, `home-assistant`, `telegram` — not by the page.
 
 A marker per component would put four or five markers on a page whose table is
 one thing, and each would have to be kept in the right order by hand. One marker
@@ -142,32 +155,61 @@ change to the marker machinery, and it is small — but it is the reason the
 ```
 docs/integrations/<system>.md
   │
-  ├─ one paragraph        what this integration is, and what it ships as
-  ├─ What starts work     the signal lane
-  ├─ What it may reach    the toolsets, and at which privilege
-  ├─ Where it answers     — present only where the system carries answers
-  ├─ Turn it on           the flag, the credential, the one decision
-  ├─ What it renders      the GENERATED block
-  └─ Tuning               the deep prose, where the integration has any
+  ├─ one line + a diagram   what this does for you
+  ├─ What you get           the outcomes, as a table
+  ├─ Turn it on            the command, and where the answers turn up
+  ├─ The values you set     what exists · what things are called
+  ├─ Tune what reaches you  TASK headings — "Stop telling me about X"
+  ├─ Adopt it               worked pipelines binding the bundle's parts
+  ├─ What the bundle renders  the GENERATED listing
+  └─ Going deeper           one link to concepts.md
 ```
+
+**IT IS USAGE-LED, AND THE FIRST DRAFT WAS NOT.** That draft opened on the
+signal lane and the toolsets, put "turn it on" fourth, and moved the old pages'
+reference prose in whole — the verification ladder, owner-reference grouping,
+the self-exclusion loop, Alertmanager's rule vocabulary.
+
+- **An adopter is configuring, tuning and adopting**, in that order. A bundle is
+  a thing they switch on and then bend to their install, so the page is those
+  three acts and the mechanism is a link.
+- **"Adopt it" is the act the first draft had no section for**, and it is the
+  one that makes a bundle worth documenting: its source, profile, toolsets and
+  config are ordinary CRs with stable names, bindable from pipelines of the
+  reader's own, with their own agents.
+- **That reframes the generated block.** It is not trivia about the chart, it is
+  the list of names a reader's own `Pipeline` references — so it is headed *what
+  the bundle renders* and sits beside Adopt it.
+- **Tuning is TASK-HEADED**, never vocabulary-headed. "Stop telling me about
+  probe warnings" and four lines of YAML, not a table of what `for` means.
 
 **Write Kubernetes first and completely.** It is the only one with all of
 signals, tools, suppression rules and self-exclusion, so the shape that survives
 it survives the rest. The other three are then filled against it rather than
 re-derived, which is the role a prototype would otherwise play.
 
-**"Where it answers" is omitted, not left empty.** Only Telegram carries answers,
-and a heading reading "not applicable" on three pages teaches that the section is
-noise.
+**AND IT IS REVIEWED BEFORE THE OTHER THREE ARE WRITTEN.** The shape was wrong
+twice — reference-led, then still carrying developer material — and each miss
+would have been three more pages to redo.
+
+**NOTHING GENERIC IS RESTATED PER INTEGRATION.** `serviceAccountName`,
+`runtimeRef`, `maxTurns` and how `channels` merge are Pipeline and profile
+facts. Four pages restating them is one fact in four places, and the guides
+already own it.
+
+**A page states what is TRUE OF ITS OWN LANE**, which is why each one's values
+tables are checked against a real `helm template` of that bundle's route rather
+than against the page it replaces.
 
 ### Pages are named for the system, and the URL is the page
 
 `docs/integrations/kubernetes.md` at `/integrations/kubernetes/`. The permalink is
 declared on the page, as every site page declares its own.
 
-`home-assistant.md`, not `ha.md` — `ha` is the SUBCHART's abbreviation, and the
-whole point of the naming rule is that the page does not inherit the packaging's
-vocabulary.
+`home-assistant.md`, not `ha.md`. That one is already right — `413bbbc` renamed
+`ha-bundle.md` past the subchart's old abbreviation — and the rule is what keeps
+it right: a page does not inherit the packaging's vocabulary, so a subchart
+renamed again leaves the page and every link to it alone.
 
 ### The deep prose moves, it is not rewritten
 
@@ -186,24 +228,34 @@ from memory would lose the reasoning that makes them worth publishing.
 - **The `requires` graph is hand-maintained.** → A missing entry fails the render
   rather than producing a wrong row, so the failure mode is a red build with the
   chart's own error message in it.
-- **Four pages are deleted and their inbound links break** — six in `README.md`,
-  four in `installation.md`. → The link updates are tasks, and a repository-wide
-  grep for the old filenames is the check.
+- **Four pages move and their inbound links break** — five in one `README.md`
+  table row (the fifth is `docs/claude.md`, which does not move), four in
+  `installation.md`, four in `docs/index.md`'s *Run it* list. All of them name
+  the CURRENT filenames already, as raw GitHub URLs, because `413bbbc` renamed
+  the pages and repointed them. → The link updates are tasks, and a
+  repository-wide grep for both the pre-`413bbbc` names and the current ones is
+  the check.
+- **No published URL is at stake.** None of the four carries front matter, so
+  none declares a `permalink` and none is reachable as a site page today. The
+  move is a file move plus the front matter that publishes them for the first
+  time — which is also why the second rename in one release cycle costs a reader
+  nothing.
 - **A generated table is less expressive than the prose it replaces.** → That is
   the trade being made deliberately: the prose stays, above the block, and only
   the inventory is surrendered to the generator.
-- **`prometheus-bundle` has never been rendered by the generator**, so its first
-  preset may surface a values problem nobody has hit. → Better found by this
-  change than by an adopter.
+- **`prometheus` has never been rendered by the generator** — `PRESETS` runs
+  `tier1` through `tier4` and none enables it — so its first preset may surface a
+  values problem nobody has hit. → Better found by this change than by an
+  adopter.
 
 ## Migration Plan
 
 Site-only. No chart version, no image, nothing for an adopter to upgrade, so no
 `CHANGELOG.md` entry.
 
-**The deletions must land in the same change as the additions.** A release in
-which `README.md` still links `docs/k8s-bundle.md` while the file is gone is a
-broken link on the project's front page, and a release in which both exist is two
+**The moves must land in the same change as the rewrites.** A release in which
+`README.md` still links `docs/kubernetes.md` while the file has moved is a broken
+link on the project's front page, and a release in which both copies exist is two
 documents wearing one subject — which is the state this change exists to end.
 
 Rollback is `git revert`: the four pages come back with it.
