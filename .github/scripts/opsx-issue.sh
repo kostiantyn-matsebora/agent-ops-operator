@@ -33,7 +33,41 @@ EOF
 }
 
 repo_root() { git rev-parse --show-toplevel; }
-change_dir() { echo "$(repo_root)/openspec/changes/$1"; }
+
+# A CHANGE IS LIVE OR ARCHIVED, AND `close` RUNS AFTER IT IS ARCHIVED.
+#
+# `openspec archive` moves the directory to
+# openspec/changes/archive/<YYYY-MM-DD>-<name>/ and the sidecar travels with it —
+# deliberately, since a reference is what keeps an archived change traceable. But
+# resolving only the live path meant `phase ... archived` and `close` failed at
+# EXACTLY the point /opsx:archive tells you to run them, reporting "no tracking
+# issue" for a change whose issue was sitting right there. The issue then stays
+# open on work that is finished, or somebody closes it by hand and the label is
+# never advanced.
+#
+# The date prefix is matched rather than a bare suffix: `*-$1` would let a change
+# named `auth` collect the sidecar of `2026-01-01-oauth`.
+change_dir() {
+  local root live hit
+  root=$(repo_root)
+  live="$root/openspec/changes/$1"
+  [ -d "$live" ] && { echo "$live"; return 0; }
+  # `|| true` BECAUSE THERE MAY BE NO ARCHIVE DIRECTORY AT ALL. `find` exits 1
+  # on a missing path, `pipefail` makes that the assignment's status, and
+  # `errexit` then aborts this function BEFORE the fallback below — the same
+  # shape that made `ci.yml`'s openspec gate die on a pull request touching no
+  # change. Every caller today embeds the substitution in a larger word, so the
+  # abort merely yields an empty string that still reads as "not found"; a
+  # future `x=$(change_dir "$name")` would get that empty string rather than the
+  # live path this function promises.
+  hit=$(find "$root/openspec/changes/archive" -maxdepth 1 -type d \
+          -name '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-'"$1" 2>/dev/null |
+        sort | tail -1) || true
+  # The live path is still the answer when there is no archive either: the
+  # caller's own "no tracking issue" message is the right report for a change
+  # that does not exist.
+  echo "${hit:-$live}"
+}
 sidecar()    { echo "$(change_dir "$1")/.github-issue"; }
 
 number() {
