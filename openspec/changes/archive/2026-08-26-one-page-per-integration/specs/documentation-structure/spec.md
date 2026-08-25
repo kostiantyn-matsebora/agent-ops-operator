@@ -2,11 +2,16 @@
 
 ### Requirement: The document routing rule is recorded for contributors
 
-`CLAUDE.md` SHALL state which document receives which kind of update —
-concepts to `docs/concepts.md`, contracts to `docs/contracts.md`, an
+The repository's own CONTEXT SHALL state which document receives which kind of
+update — concepts to `docs/concepts.md`, contracts to `docs/contracts.md`, an
 integration's adopter-facing content to that integration's own page under
 `docs/integrations/`, upgrade steps to `CHANGELOG.md`, README only for pitch,
 kind list, demo, or install — and SHALL state the README line budget as a number.
+
+That context is `CLAUDE.md` plus the topic files under `.claude/rules/` that it
+indexes: one topic per file, with `CLAUDE.md` naming the routing so a reader
+reaches it in one hop. Where this requirement says `CLAUDE.md`, the index and the
+file it routes to are meant together — a rule stated twice is a rule that drifts.
 
 **The routing rule SHALL name integration pages by the SYSTEM they document, not
 by the subchart that packages it.** It previously named them by their bundle, so
@@ -35,6 +40,13 @@ decision an operator makes — goes to the site page `docs/console-guide.md`, an
 what the console IS — its endpoints, RBAC grant, values reference and internal
 structure — goes to `docs/console.md`. A rule naming only one of a pair is how
 the next writer picks at random.
+
+For security that split is: the threat, the posture a default install carries,
+what a control bounds and what is still open go to the site page
+`docs/security.md`, and the chart key that sets a control, its default and its
+YAML go to `docs/installation.md`. The two cover one subject on two axes — by
+threat and by key — and the rule SHALL state that the security page carries no
+values table, so a default is stated in one place and cannot drift.
 
 It SHALL further record that every product asset published on the site is a
 **build output**, and SHALL name the command that regenerates **each kind**: the
@@ -77,6 +89,19 @@ how a page reads, the routing rule SHALL route to it rather than restating it.
 - **WHEN** a change alters the console and its documentation must be updated
 - **THEN** the routing rule names which of the two console documents receives it,
   and the contributor does not have to choose between two similar filenames
+
+#### Scenario: A contributor documents a security control
+
+- **WHEN** a change alters what a control bounds, or the default it ships with
+- **THEN** the routing rule names which of the two documents receives which half,
+  and the contributor does not restate the default on the security page
+
+#### Scenario: Security is inserted into the reading order
+
+- **WHEN** the security page is published into the *Start here* group
+- **THEN** it sits between the Console page and Installation in the navigation
+- **AND** the Console page's what-next card points at it, and its own card points
+  at Installation, so no card skips an entry
 
 #### Scenario: The console's UI changes
 

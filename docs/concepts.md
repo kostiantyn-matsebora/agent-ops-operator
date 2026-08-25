@@ -99,7 +99,7 @@ bundling an MCP server in it. It also removes a version pin that could skew agai
 whatever cluster the image happened to run near.
 
 Practically: an agent reaches Kubernetes through the MCP tools its Pipeline
-binds (the [k8s bundle](kubernetes.md) ships them). `Bash` no longer implies
+binds (the [Kubernetes integration](integrations/kubernetes.md) ships them). `Bash` no longer implies
 cluster access. Binding `agentops-shell` is still useful for the workspace, it
 just stops being a second door to the API.
 
@@ -284,7 +284,7 @@ silently rewrite grouping.
 
 **Suppression is the adapter's job, and is distinct from grouping.** It decides
 whether a signal is emitted at all — see
-[kubernetes](kubernetes.md#event-suppression-eventsadaptersourcerules).
+[kubernetes](integrations/kubernetes.md#tune-what-reaches-you).
 
 ### SignalAdapter
 
@@ -733,7 +733,7 @@ yields a write-capable server under a `full` ServiceAccount, everything else a
 read-only server under a `readonly` one.
 
 Widening the agent therefore widens the MCP path unless you say otherwise — see
-[kubernetes](kubernetes.md#kubernetes-as-mcp-tools-mcp--mcpservers) for the
+[kubernetes](integrations/kubernetes.md#may-it-act) for the
 override that recovers the separation.
 
 ## Capabilities are wiring

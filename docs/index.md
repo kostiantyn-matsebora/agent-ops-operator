@@ -116,14 +116,14 @@ A Kubernetes operator for agents you can address.
 
 {: .ao-chipsets}
 - **Works with**
-  - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes
-  - ![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) Prometheus
-  - Cron schedules
-  - ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) Home Assistant
-  - ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) Telegram
-  - ![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console
-  - ![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) any MCP server
-  - your own
+  - [![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes]({{ '/integrations/kubernetes/' | relative_url }})
+  - [![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) Prometheus]({{ '/integrations/prometheus/' | relative_url }})
+  - [Cron schedules]({{ '/guides/signal-adapter/' | relative_url }})
+  - [![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) Home Assistant]({{ '/integrations/home-assistant/' | relative_url }})
+  - [![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) Telegram]({{ '/integrations/telegram/' | relative_url }})
+  - [![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console]({{ '/console/' | relative_url }})
+  - [![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) any MCP server]({{ '/guides/toolsets/' | relative_url }})
+  - [your own]({{ '/guides/signal-adapter/' | relative_url }})
 
 ## Why agent-ops?
 
@@ -208,13 +208,13 @@ Documented HTTP contracts, no fork.
 
 - [The console]({{ '/console/' | relative_url }})
   — the wiring as a graph, live runs, and the channel it also is.
-- [Cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/kubernetes.md)
+- [Cluster events]({{ '/integrations/kubernetes/' | relative_url }})
   — the events lane, the agent that answers it, and Kubernetes MCP tooling.
-- [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram.md)
+- [Telegram]({{ '/integrations/telegram/' | relative_url }})
   — the ingest stack and the chat surface.
-- [Prometheus](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus.md)
+- [Prometheus]({{ '/integrations/prometheus/' | relative_url }})
   — the Alertmanager alert lane, its metrics tooling and the agent that answers.
-- [Home Assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/home-assistant.md)
+- [Home Assistant]({{ '/integrations/home-assistant/' | relative_url }})
   — the house's log lane, and two agents split by what they may do to it.
 
 ## Keep it current

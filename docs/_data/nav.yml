@@ -2,10 +2,16 @@
 # path. The sidebar include renders this and nothing else, so publishing a page
 # is one line here — not a second navigation written by hand.
 #
-# Only site deliverables belong in this list. The reference pages under docs/
-# are built by the branch deploy but are not treated by this change, so they
-# have no entry until the change that publishes them adds one. An entry
-# pointing at a page that does not exist is a defect, not a placeholder.
+# Only site deliverables belong in this list. The remaining reference pages
+# under docs/ are built by the branch deploy but carry no front matter, so they
+# have no entry until the change that publishes them adds one — which is what
+# the Integrations group is: four pages that were reference material until they
+# were rewritten for an adopter. An entry pointing at a page that does not
+# exist is a defect, not a placeholder.
+#
+# THERE IS NO INDEX PAGE, and the group is the index. A page listing four
+# entries the sidebar already lists is a second navigation written by hand,
+# which is the thing this file exists to stop.
 groups:
   - title: Start here
     entries:
@@ -21,6 +27,16 @@ groups:
         url: /security/
       - title: Installation
         url: /installation/
+  - title: Integrations
+    entries:
+      - title: Kubernetes
+        url: /integrations/kubernetes/
+      - title: Prometheus
+        url: /integrations/prometheus/
+      - title: Home Assistant
+        url: /integrations/home-assistant/
+      - title: Telegram
+        url: /integrations/telegram/
   - title: Guides
     entries:
       - title: "Put an agent to work"

@@ -14,9 +14,9 @@ finished.**
   change ACTUALLY did — which is routinely not what the proposal said it would.
 - **BOTH HALVES, listed separately in the task**, because they are skipped
   independently:
-  1. the reference docs (`docs/concepts.md`, `docs/contracts.md`, a bundle page)
+  1. the reference docs (`docs/concepts.md`, `docs/contracts.md`)
   2. **the ADOPTER SITE** — the landing page, Introduction, Getting started,
-     Installation, the guides
+     Installation, the integration pages, the guides
 - **An `/opsx:archive` with the task unticked is a change reported as finished
   while half of what a reader meets is stale.** Archiving is what makes it
   permanent.
@@ -76,7 +76,8 @@ filename — so the routing is explicit:
 |---|---|
 | CRD fields, semantics, how capabilities resolve | `docs/concepts.md` |
 | Work contract, adapter contracts, HTTP endpoints | `docs/contracts.md` |
-| A subchart's components or values | `docs/<bundle>.md` |
+| An integration's ADOPTER-FACING content | `docs/integrations/<system>.md` — named for the SYSTEM, never the subchart |
+| WHAT A BUNDLE RENDERS | nothing. The `renders` marker on that page, then `python3 .github/scripts/docs-generate.py` |
 | The PARENT chart's values, install, upgrade, uninstall | `docs/installation.md` |
 | Breaking change + upgrade steps | `docs/CHANGELOG.md`, newest first |
 | Terminology | `.claude/rules/terminology.md`, `wiring.md`, `adapters.md` |
@@ -112,8 +113,23 @@ is reverted by the next run — silently, because the run reports success.
   marker and the command. That is the point of generating rather than typing.
 
 **Both value rows are "values", so the split is stated.** The PARENT chart's
-belong to `docs/installation.md`, a SUBCHART's to that bundle's own page, and
-neither restates the other.
+belong to `docs/installation.md`, a SUBCHART's to that integration's own page,
+and neither restates the other.
+
+**AND NEITHER CARRIES AN INVENTORY OF WHAT A BUNDLE RENDERS.** That row routes
+to the GENERATOR rather than to a page, because it is a fact about the chart in
+exactly the way a worked example is.
+
+- **A page declares `<!-- generated: renders bundle=<subchart> -->`** and the
+  generator fills it by rendering the chart with each component off and on and
+  diffing the objects. `--check` then fails on a stale table.
+- **IT WAS TYPED BY HAND AND IT WENT WRONG SILENTLY.** `af5bb49` gave each route
+  its own `ServiceAccount` and no component table said so. `84a2654` stopped
+  rendering them, and all three tables became correct again — repaired by the
+  chart changing back rather than by anyone noticing.
+- **`docs/claude.md` keeps its own hand-written table**, being a reference page
+  rather than an integration page. A runtime is what EXECUTES an agent, not a
+  seam a Pipeline wires.
 
 **`installation.md` carries the values an operator must DECIDE**, grouped by the
 decision they serve. `helm show values` is the exhaustive list, and a

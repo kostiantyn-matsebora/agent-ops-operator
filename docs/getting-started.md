@@ -71,7 +71,7 @@ follow-up later.
    ```
 
 2. **Install the chart.** The flag brings up
-   [the Kubernetes bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/kubernetes.md),
+   [the Kubernetes integration]({{ '/integrations/kubernetes/' | relative_url }}),
    wired to the console. The token is just to sign in — pick a real one outside
    a laptop.
 
@@ -208,10 +208,10 @@ exits on the idle TTL.
 - **[Introduction]({{ '/introduction/' | relative_url }})** — the model behind
   what you just did, and the rest of the guides.
 - **A real lane** —
-  [cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/kubernetes.md),
-  [Prometheus alerts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus.md),
-  [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram.md),
-  [Home Assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/home-assistant.md).
+  [cluster events]({{ '/integrations/kubernetes/' | relative_url }}),
+  [Prometheus alerts]({{ '/integrations/prometheus/' | relative_url }}),
+  [Telegram]({{ '/integrations/telegram/' | relative_url }}),
+  [Home Assistant]({{ '/integrations/home-assistant/' | relative_url }}).
 - **[Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)**
   and **[the CR reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md)**
   — every kind, every field, and how tool access resolves.

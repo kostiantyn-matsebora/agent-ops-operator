@@ -177,7 +177,7 @@ in learning order. The reference pages are read here:
 | [docs/cr-reference.md](docs/cr-reference.md) | Every field of every kind, generated from the CRDs the chart ships |
 | [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
-| [kubernetes](docs/kubernetes.md) · [telegram](docs/telegram.md) · [prometheus](docs/prometheus.md) · [home-assistant](docs/home-assistant.md) · [claude](docs/claude.md) | The bundles: what each ships, and the agent — or runtime — it brings |
+| [kubernetes](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/kubernetes/) · [prometheus](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/prometheus/) · [home-assistant](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/home-assistant/) · [telegram](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/telegram/) · [claude](docs/claude.md) | Each integration: configure it, tune it, and bind its parts into your own pipelines |
 | [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/) | What a default install grants, what each of the three walls bounds, what is not addressed |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) · [docs/adr/](docs/adr/) | Upgrade guides newest first, and decisions with the alternatives that were built |
 
