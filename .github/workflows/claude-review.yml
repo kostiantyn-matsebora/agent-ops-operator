@@ -75,12 +75,29 @@ jobs:
         env:
           RESOLVE_LIST: ${{ github.workspace }}/.resolve-threads
         with:
-          # NO STATIC CREDENTIAL. This repository is connected to the Claude
-          # GitHub integration, so the action authenticates by exchanging the
-          # workflow's OIDC token — which is what `id-token: write` above is for.
-          # A static `anthropic_api_key` or `claude_code_oauth_token` TAKES
-          # PRECEDENCE over that, so passing an empty one is not harmless
-          # tidiness: it is a credential input that can silently win.
+          # THE GITHUB APP IS NOT A MODEL CREDENTIAL, AND THIS FILE USED TO
+          # SAY IT WAS. It claimed that being connected to the Claude GitHub
+          # integration made the OIDC exchange sufficient and passed nothing —
+          # so the first pull request that actually reached the action died on
+          # `Either ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or workload
+          # identity federation ... is required`.
+          #
+          # THE TWO HALVES ARE SEPARATE, and the run log shows both:
+          # `Using GITHUB_TOKEN from OIDC` is the APP, authorising this action
+          # to read the pull request and comment on it. Nothing in it authorises
+          # a call to Anthropic — GitHub cannot grant that.
+          #
+          # WHY IT LOOKED FINE FOR A WHOLE CHANGE. The action skips itself,
+          # successfully, on a pull request that edits this file — so the change
+          # that introduced the review never ran it, and the credential gap
+          # first appeared on the pull request after it. The always-ran guard
+          # below is what turned that silence into a failure.
+          #
+          # A STATIC CREDENTIAL TAKES PRECEDENCE over workload identity
+          # federation, so this input and `anthropic_federation_rule_id` are
+          # mutually exclusive: adopting federation means DELETING this line,
+          # not setting both.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           #
           # THE PREVIOUS REVIEW REACHES THIS ONE AS CONTEXT. That is what makes
           # the review iterative, and it is why nothing here keeps a record of
