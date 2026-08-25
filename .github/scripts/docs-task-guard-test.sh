@@ -50,6 +50,54 @@ for dir in "$fixtures"/*/; do
   fi
 done
 
+# THE HOOK MUST JUDGE THE TREE THE COMMAND RUNS IN.
+#
+# Every change is archived from its own worktree, and `$CLAUDE_PROJECT_DIR` is
+# the MAIN checkout — where that change's tasks file belongs to a different
+# commit. Reading it judged `master`'s copy, where the work is untouched and
+# every task is open, and refused an archive that was finished.
+#
+# The fixtures above cannot catch that: they stage ONE tree, so every candidate
+# path resolves to the same answer. This stages TWO that disagree.
+echo
+echo "  the worktree case"
+main=$(mktemp -d); wt=$(mktemp -d)
+for tree in "$main" "$wt"; do
+  mkdir -p "$tree/openspec/changes/wt-change" "$tree/.github/scripts"
+  cp "$guard" "$tree/.github/scripts/"
+done
+# The main checkout holds the change UNSTARTED, as `master` would.
+cp "$fixtures/unticked/tasks.md" "$main/openspec/changes/wt-change/tasks.md"
+# The worktree holds it FINISHED, as the branch does.
+cp "$fixtures/complete/tasks.md" "$wt/openspec/changes/wt-change/tasks.md"
+
+wt_fail=0
+# 1. A `cd` into the worktree: the shell will be there when openspec runs.
+got=0
+printf '{"tool_input":{"command":"cd %s && openspec archive wt-change"},"cwd":"%s"}' "$wt" "$main" \
+  | CLAUDE_PROJECT_DIR="$main" bash "$hook" >/dev/null 2>&1 || got=$?
+[ "$got" -eq 0 ] || { echo "  FAILED   cd into the worktree — expected 0, got $got"; wt_fail=1; }
+
+# 2. The payload's cwd already in the worktree, with no `cd` at all.
+got=0
+printf '{"tool_input":{"command":"openspec archive wt-change"},"cwd":"%s"}' "$wt" \
+  | CLAUDE_PROJECT_DIR="$main" bash "$hook" >/dev/null 2>&1 || got=$?
+[ "$got" -eq 0 ] || { echo "  FAILED   cwd in the worktree — expected 0, got $got"; wt_fail=1; }
+
+# 3. AND IT STILL REFUSES. Nothing points at the worktree, so the main
+#    checkout's unfinished copy is the one judged — the gate must still bite.
+got=0
+printf '{"tool_input":{"command":"openspec archive wt-change"},"cwd":"%s"}' "$main" \
+  | CLAUDE_PROJECT_DIR="$main" bash "$hook" >/dev/null 2>&1 || got=$?
+[ "$got" -eq 2 ] || { echo "  FAILED   unfinished in the main checkout — expected 2, got $got"; wt_fail=1; }
+
+rm -rf "$main" "$wt"
+if [ "$wt_fail" -ne 0 ]; then
+  fail=1
+else
+  echo "  ok       judges the tree the command runs in, and still refuses an unfinished one"
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "The local gate and the CI check disagree, or one of them is wrong." >&2
