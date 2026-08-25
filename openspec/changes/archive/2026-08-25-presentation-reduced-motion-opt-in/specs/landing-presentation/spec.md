@@ -31,9 +31,9 @@ and it SHALL be the ONLY control offered while the presentation is still.
 
 The preference says *do not move things at me*. It does not say *never let me
 ask*, and a page that answers it by DELETING the control has decided on the
-reader's behalf that the explanation is not for them. The nine beats are the
-landing page's central account of the product, and on that machine they would
-otherwise be reachable only in a form the page did not author.
+reader's behalf that the explanation is not for them. The beats are the landing
+page's central account of the product, and on that machine they would otherwise
+be reachable only in a form the page did not author.
 
 **Nothing SHALL move until that control is used.** Engaging it is the reader's
 own action, so what follows is the ordinary presentation with its full
