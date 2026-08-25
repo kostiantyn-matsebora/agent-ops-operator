@@ -84,6 +84,21 @@ it "refuses a change that does not exist"
 S open no-such-change >/dev/null 2>&1
 assert_status 1 "$?"
 
+# NO ARCHIVE DIRECTORY AT ALL is the state of a repository that has never
+# archived anything, and `find` exits 1 on a missing path. Under `pipefail` that
+# became the assignment's status and `errexit` aborted the lookup before its own
+# fallback — the same shape that killed ci.yml's openspec gate. Exercised
+# through a BARE substitution, because every caller in the script embeds it in a
+# larger word and that masks the abort as an empty string.
+it "does not abort when there is no archive directory at all"
+rm -rf "$repo/openspec/changes/archive"
+out=$(cd "$repo" && bash -c '
+  set -euo pipefail
+  . .github/scripts/opsx-issue.sh number demo-change >/dev/null
+  change_dir no-such-change >/dev/null
+  echo RETURNED' 2>/dev/null || true)
+assert_equals "RETURNED" "$out"
+
 # THE ARCHIVE PATH IS WHERE `close` ACTUALLY RUNS. `openspec archive` moves the
 # change — sidecar and all — before the command that closes its issue is called,
 # and resolving only the live path made that command fail at exactly that point.

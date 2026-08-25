@@ -52,9 +52,17 @@ change_dir() {
   root=$(repo_root)
   live="$root/openspec/changes/$1"
   [ -d "$live" ] && { echo "$live"; return 0; }
+  # `|| true` BECAUSE THERE MAY BE NO ARCHIVE DIRECTORY AT ALL. `find` exits 1
+  # on a missing path, `pipefail` makes that the assignment's status, and
+  # `errexit` then aborts this function BEFORE the fallback below — the same
+  # shape that made `ci.yml`'s openspec gate die on a pull request touching no
+  # change. Every caller today embeds the substitution in a larger word, so the
+  # abort merely yields an empty string that still reads as "not found"; a
+  # future `x=$(change_dir "$name")` would get that empty string rather than the
+  # live path this function promises.
   hit=$(find "$root/openspec/changes/archive" -maxdepth 1 -type d \
           -name '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-'"$1" 2>/dev/null |
-        sort | tail -1)
+        sort | tail -1) || true
   # The live path is still the answer when there is no archive either: the
   # caller's own "no tracking issue" message is the right report for a change
   # that does not exist.
