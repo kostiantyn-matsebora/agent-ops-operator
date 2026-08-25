@@ -509,9 +509,17 @@ jobs:
              && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
             changed=$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" || true)
           fi
+          # `|| true` IS LOAD-BEARING, AND ITS ABSENCE FAILED THE FIRST PULL
+          # REQUEST THAT TOUCHED NO CHANGE. `grep` exits 1 when it prints
+          # nothing, `pipefail` promotes that to the pipeline's status, and
+          # `set -e` kills the step INSIDE the command substitution — so the
+          # empty-`names` branch three lines down, which exists precisely for
+          # this case, was never reached. The step failed in 18ms having printed
+          # not one word, which reads as a broken runner rather than as a
+          # no-match.
           names=$(printf '%s\n' "$changed" \
             | sed -n 's|^openspec/changes/\([^/]*\)/.*|\1|p' \
-            | grep -v '^archive$' | sort -u)
+            | grep -v '^archive$' | sort -u || true)
           if [ -z "$names" ]; then
             echo "this pull request touches no openspec change"
             exit 0
