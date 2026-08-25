@@ -45,9 +45,25 @@ needs no change to branch protection.
 
 ### Requirement: A change's documentation task is verified on every pull request
 
-CI SHALL fail a pull request carrying an openspec change whose task list does
-not end in a completed documentation section covering both the reference docs
-and the adopter site.
+CI SHALL fail a pull request that FINISHES an openspec change whose task list
+does not end in a completed documentation section covering both the reference
+docs and the adopter site.
+
+**A pull request finishes a change two ways, and no others:** it ARCHIVES the
+change — which is the claim of completion itself — or every task outside the
+documentation section is complete. A change a pull request merely TOUCHES is not
+judged on its documentation: a proposal's documentation tasks are unticked
+because nothing has been written yet, and failing that pull request asks for the
+documentation of work nobody has done.
+
+**The check SHALL judge an archived change at its archived location.** Archiving
+MOVES the change, so the live task list is absent from the tree the check reads —
+and a check scoped to what still exists reports that the pull request touches no
+change at all, at the one moment the rule exists to protect.
+
+**Whether the last section IS a documentation section SHALL be judged whatever
+the change's phase.** That is a property of the file rather than of the work, and
+a proposal is the cheapest moment to catch a task list that never had one.
 
 **The rule already existed and was enforced in one contributor's local
 tooling.** A gate that lives in a harness is absent for every other
@@ -66,9 +82,20 @@ cannot be skipped.
 
 #### Scenario: The documentation task is unticked
 
-- **WHEN** a pull request carries a change whose documentation tasks are not all
+- **WHEN** a pull request finishes a change whose documentation tasks are not all
   complete
 - **THEN** the check fails and names the outstanding tasks
+
+#### Scenario: A change is proposed
+
+- **WHEN** a pull request adds a change whose implementation tasks are all
+  outstanding
+- **THEN** the check reports it as pending and does not fail
+
+#### Scenario: A change is archived
+
+- **WHEN** a pull request archives a change
+- **THEN** its documentation section is judged at the archived location
 
 #### Scenario: The documentation section is missing entirely
 
