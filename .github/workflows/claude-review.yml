@@ -31,6 +31,12 @@ permissions: {}
 
 jobs:
   review:
+    # WHAT CROSSES TO `reconcile`, BESIDES THE ARTIFACT: whether a list was
+    # produced at all. An ABSENT list and an EMPTY one are different facts —
+    # "the review asked for nothing" against "the review never got that far" —
+    # and the privileged job cannot tell them apart from a missing file.
+    outputs:
+      list: ${{ steps.list.outputs.produced }}
     # DRAFTS AND FORKS ARE SKIPPED, AND THE TWO ARE DIFFERENT REASONS.
     #
     # A draft is not asking yet. A FORK cannot be reviewed at all: its
@@ -212,15 +218,31 @@ jobs:
       # The list of thread ids is the ONLY thing crossing into the privileged
       # job. Uploaded even when empty, so `reconcile` can tell "nothing to do"
       # from "the review never got that far".
-      - if: always() && steps.hygiene.outputs.ok == 'true'
-        run: touch "${{ github.workspace }}/.resolve-threads"
+      #
+      # `include-hidden-files` IS WHAT MAKES THAT TRUE, AND WITHOUT IT THE WHOLE
+      # MECHANISM WAS A NO-OP. `.resolve-threads` is a DOTFILE, and
+      # `upload-artifact` v4 excludes hidden files by default — so the file was
+      # created correctly, matched nothing, and `if-no-files-found: ignore`
+      # reported that in one line nobody reads. `reconcile` then downloaded
+      # nothing, found no list, and printed "the review asked for no threads",
+      # which is the message for the HEALTHY case. A review that had resolved a
+      # thread would have failed to, silently.
+      - id: list
+        if: always() && steps.hygiene.outputs.ok == 'true'
+        run: |
+          touch "${{ github.workspace }}/.resolve-threads"
+          echo "produced=true" >> "$GITHUB_OUTPUT"
       - if: always() && steps.hygiene.outputs.ok == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: resolve-threads
           path: .resolve-threads
           retention-days: 1
-          if-no-files-found: ignore
+          include-hidden-files: true
+          # NOT `ignore`. The file is created one step above, so no match means
+          # the upload is broken rather than that there was nothing to say —
+          # exactly the case that hid this bug.
+          if-no-files-found: error
 
   # THE PRIVILEGE LIVES HERE, AND NO MODEL DOES.
   #
@@ -240,7 +262,21 @@ jobs:
         with:
           name: resolve-threads
         continue-on-error: true
+
+      # A MISSING LIST IS A BROKEN PIPE, NOT AN EMPTY ONE — unless the review
+      # never produced one, which `needs.review.outputs.list` is what says. The
+      # resolver reads an absent file as "nothing to resolve", so without this
+      # step a severed transfer reports the same sentence as a clean review.
+      - name: The review's list actually arrived
+        if: needs.review.outputs.list == 'true'
+        run: |
+          [ -f .resolve-threads ] && exit 0
+          echo "::error::The review produced a resolve list and it did not reach this job. \
+          Nothing was resolved, and the resolver would have called that 'no threads'."
+          exit 1
+
       - name: Resolve the threads the review addressed
+        if: needs.review.outputs.list == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

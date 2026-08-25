@@ -107,9 +107,17 @@ def main() -> int:
     owner, _, repo = args.repo.partition("/")
     allowed = {a.strip() for a in args.authors.split(",") if a.strip()}
 
+    # AN ABSENT LIST IS NOT AN EMPTY ONE, and reading them alike is what let a
+    # severed transfer report the healthy sentence for a whole change. The
+    # review writes this file before it uploads it, EVEN WHEN IT HOLDS NOTHING,
+    # so a missing one means the list never arrived — not that there was
+    # nothing to say.
     if not args.file.is_file():
-        print("nothing to resolve: the review asked for no threads")
-        return 0
+        print(f"the resolve list is ABSENT at {args.file}: the review's list "
+              "never arrived, so nothing could be resolved. An EMPTY list is "
+              "the healthy 'nothing to resolve'; a missing one is a broken "
+              "transfer.", file=sys.stderr)
+        return 1
     wanted = [line.strip() for line in args.file.read_text().splitlines() if line.strip()]
     if not wanted:
         print("nothing to resolve: the review asked for no threads")
