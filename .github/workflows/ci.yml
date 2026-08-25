@@ -635,21 +635,48 @@ jobs:
   pr-closes:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # READING THE PULL REQUEST IS A PERMISSION, and the workflow's default is
+    # `contents: read` alone. Stated here rather than inherited, so the fetch
+    # cannot silently fall back to the frozen payload the moment somebody
+    # tightens the top-level block.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: A tracking issue is not closed by the pull request that proposes it
         env:
-          # THROUGH THE ENVIRONMENT, never interpolated into the script: a pull
-          # request body is text a stranger wrote.
-          BODY: ${{ github.event.pull_request.body }}
+          # THE BODY IS FETCHED LIVE, NOT TAKEN FROM THE EVENT PAYLOAD.
+          #
+          # `github.event.pull_request.body` is frozen at the moment the run was
+          # CREATED. A re-run replays that payload, so a body corrected after a
+          # refusal is judged as it was before the correction — and `edited` is
+          # not one of `pull_request`'s default trigger types, so the edit starts
+          # no new run either. #54 sat refused with `Refs #53` in its description
+          # and `Closes #53` in the payload, and nothing about the failure said
+          # which text was being read.
+          #
+          # A guard whose subject is the body has to read the body. The payload
+          # remains the fallback for anything without a number to ask about.
+          FALLBACK_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          printf '%s' "$BODY" > "$RUNNER_TEMP/pr-body.md"
+          body="$RUNNER_TEMP/pr-body.md"
+          if [ -n "${PR_NUMBER:-}" ] && gh pr view "$PR_NUMBER" --json body --jq .body > "$body" 2>/dev/null; then
+            echo "read the pull request body as it stands now"
+          else
+            # THROUGH THE ENVIRONMENT, never interpolated into the script: a pull
+            # request body is text a stranger wrote.
+            printf '%s' "$FALLBACK_BODY" > "$body"
+            echo "::notice::could not read the live body; judging the event payload, which a re-run freezes"
+          fi
           python3 .github/scripts/pr-closes-guard.py \
-            --body-file "$RUNNER_TEMP/pr-body.md" \
+            --body-file "$body" \
             --range "$BASE_SHA..$GITHUB_SHA" \
             --root .
 
