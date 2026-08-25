@@ -53,6 +53,10 @@ with a chart-documented default. The values, and the Coordinator's
 editing the Coordinator does not change the budget or the escalation surfaces
 of an incident already in flight.
 
+#### Scenario: A limit edit does not reach a running incident
+- **WHEN** a Coordinator's `maxAgents` is lowered while one of its incidents is open
+- **THEN** that incident keeps the value it was created with
+
 ### Requirement: Deleting a Coordinator cascades nothing
 
 Deleting a Coordinator SHALL leave every conversation it started exactly as it
@@ -63,7 +67,3 @@ to its Coordinator.
 #### Scenario: Coordinator deleted mid-incident
 - **WHEN** a Coordinator is deleted while one of its roots has open members
 - **THEN** the root and its members are unchanged, a later `escalate` opens threads on the snapshotted channels, and the budget still closes it
-
-#### Scenario: A limit edit does not reach a running incident
-- **WHEN** a Coordinator's `maxAgents` is lowered while one of its incidents is open
-- **THEN** that incident keeps the value it was created with
