@@ -49,7 +49,7 @@ query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
           isResolved
           isOutdated
           path
-          comments(first:1) { nodes { author { login } } }
+          comments(first:1) { nodes { author { login __typename } } }
         }
       }
     }
@@ -76,6 +76,22 @@ def gh_graphql(query: str, **variables) -> dict:
     return payload["data"]
 
 
+def normalise_login(login: str) -> str:
+    """One spelling for a bot, whichever API produced it.
+
+    REST reports `claude[bot]`; GraphQL reports `claude` and marks the account
+    `__typename: Bot`. The allowlist is written the REST way, because that is
+    how a person reads a login on GitHub — so both sides are normalised here
+    rather than one of them being rewritten to match the other.
+
+    THIS IS WHY NOTHING WAS EVER RESOLVED. The comparison was
+    `claude` (GraphQL) against `claude[bot]` (config), so the review refused its
+    own threads on every run — reported honestly by the diagnostic above it, and
+    invisible until a review actually had a finding to close.
+    """
+    return login.strip().lower().removesuffix("[bot]")
+
+
 def fetch_threads(owner: str, repo: str, number: int) -> dict[str, dict]:
     threads: dict[str, dict] = {}
     cursor = None
@@ -86,7 +102,14 @@ def fetch_threads(owner: str, repo: str, number: int) -> dict[str, dict]:
         page = gh_graphql(THREADS_QUERY, **kwargs)["repository"]["pullRequest"]["reviewThreads"]
         for node in page["nodes"]:
             comments = node["comments"]["nodes"]
-            node["author"] = (comments[0]["author"] or {}).get("login") if comments else None
+            author = (comments[0]["author"] or {}) if comments else {}
+            node["author"] = author.get("login")
+            # GRAPHQL AND REST SPELL A BOT DIFFERENTLY, and that is the whole of
+            # the identity bug this guards. REST says `claude[bot]`; GraphQL says
+            # `claude` and puts the botness in `__typename`. Carrying the type
+            # is what lets a HUMAN who happens to be called `claude` be refused
+            # while the app is recognised.
+            node["authorIsBot"] = author.get("__typename") == "Bot"
             threads[node["id"]] = node
         if not page["pageInfo"]["hasNextPage"]:
             return threads
@@ -105,7 +128,7 @@ def main() -> int:
     args = ap.parse_args()
 
     owner, _, repo = args.repo.partition("/")
-    allowed = {a.strip() for a in args.authors.split(",") if a.strip()}
+    allowed = {normalise_login(a) for a in args.authors.split(",") if a.strip()}
 
     # AN ABSENT LIST IS NOT AN EMPTY ONE, and reading them alike is what let a
     # severed transfer report the healthy sentence for a whole change. The
@@ -128,7 +151,8 @@ def main() -> int:
     # Every login that actually authored a thread here. Printed whatever happens:
     # if the identity is wrong, this line is what says so on the first run,
     # rather than a silent no-op that reads like "there was nothing to do".
-    seen = sorted({t["author"] for t in threads.values() if t["author"]})
+    seen = sorted({f"{t['author']}{'' if t.get('authorIsBot') else ' (person)'}"
+                   for t in threads.values() if t["author"]})
     print(f"thread authors on this pull request: {', '.join(seen) or 'none'}")
     print(f"recognised as the review: {', '.join(sorted(allowed))}")
 
@@ -139,9 +163,19 @@ def main() -> int:
             print(f"  REFUSED  {thread_id}: no such thread on this pull request")
             refused += 1
             continue
-        if thread["author"] not in allowed:
+        outdated = ' (outdated)' if thread['isOutdated'] else ''
+        if normalise_login(thread["author"] or "") not in allowed:
             print(f"  REFUSED  {thread_id}: authored by {thread['author']!r}, not the review"
-                  f"{' (outdated)' if thread['isOutdated'] else ''}")
+                  f"{outdated}")
+            refused += 1
+            continue
+        # A RECOGNISED NAME IS NOT A RECOGNISED ACCOUNT. `claude` is a login a
+        # person can hold, and the normalisation above makes it match the app's
+        # entry — so the type is what settles it. Refusing here is the safe
+        # half: nothing is resolved, which is visible.
+        if not thread.get("authorIsBot"):
+            print(f"  REFUSED  {thread_id}: {thread['author']!r} is a person, not the review app"
+                  f"{outdated}")
             refused += 1
             continue
         if thread["isResolved"]:
