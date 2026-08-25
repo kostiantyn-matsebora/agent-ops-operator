@@ -5,8 +5,11 @@ A coordinator opens a human thread by DECISION, not by arrival, and the two othe
 
 ### Requirement: Escalation binds the coordinator's channels late, with a first message
 
-A root conversation SHALL bind its Coordinator's `channelRefs` when the
-coordinating agent escalates and not before. The thread on each SHALL open with
+A root conversation SHALL bind the escalation channels snapshotted onto it at
+creation (`spec.escalationChannelRefs`, copied from the Coordinator's
+`channelRefs`) when the coordinating agent escalates and not before. Escalation
+SHALL read no Coordinator, so it works after the Coordinator is edited or
+deleted. The thread on each SHALL open with
 the message the agent supplied, and prior inputs and results SHALL NOT be
 replayed into it.
 

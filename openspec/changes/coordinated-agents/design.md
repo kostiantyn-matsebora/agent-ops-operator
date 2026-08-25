@@ -89,11 +89,13 @@ refers to the ADR's decisions as D1–D6.
 
 ### D-D — Escalation reuses reopen's late-thread path
 
-- `escalate` verb → manager sets `spec.channelRefs` = Coordinator's
-  `channelRefs` (read at ESCALATION time, the one place a Coordinator is read
-  after creation — stated because it breaks the "nothing reads wiring at
-  dispatch" habit), stamps `status.escalatedAt`, and enqueues `ensure-topic`
-  with the digest as the topic's opening message.
+- The Coordinator's `channelRefs` are SNAPSHOTTED onto the root at creation
+  as `spec.escalationChannelRefs` — they are refs, and refs are snapshotted;
+  reading them at escalation time would have been the one read of wiring after
+  creation, and would have nothing to read once the Coordinator is deleted.
+- `escalate` verb → manager sets `spec.channelRefs` = the snapshot, stamps
+  `status.escalatedAt`, and enqueues `ensure-topic` with the digest as the
+  topic's opening message. Nothing reads the Coordinator.
 - `DeliverInputs` MUST NOT replay: it skips inputs with `arrivedAt <
   escalatedAt`. This is the one correction to the queue-iteration behaviour
   noted in Context, and it is scoped to escalated roots.
@@ -156,9 +158,10 @@ refers to the ADR's decisions as D1–D6.
 
 ## Risks / Trade-offs
 
-- **Reading the Coordinator at escalation time** is a deliberate exception to
-  the snapshot rule, for channels only — disclosure, not privilege. Stated in
-  `wiring.md`.
+- **Deleting a Coordinator cascades nothing**, exactly as deleting a Pipeline
+  does: open roots keep running on their snapshot — budget, escalation
+  channels, members — until the budget closes them or a person does. No
+  finalizer, no ownerRef, no `delete` on conversations.
 - **Root context growth.** Unbounded by design here; the member descriptions
   and `maxTurns` are the controls. A later change may summarise.
 - **`DeliverInputs` on the queue** was already timing-dependent; this change
@@ -180,8 +183,9 @@ refers to the ADR's decisions as D1–D6.
 3. Adopt: write an `AgentCapability`, list it in a `Coordinator`, point the Coordinator at
    a source.
 
-Rollback: delete Coordinators; roots close `root-deleted` through escalation;
-Pipelines are unaffected.
+Rollback: delete Coordinators. Open roots are not touched — they keep their
+snapshot and end by budget or by hand, and nothing cascades. Pipelines are
+unaffected.
 
 ## Open Questions
 

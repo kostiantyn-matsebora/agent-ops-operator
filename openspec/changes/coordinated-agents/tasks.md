@@ -41,8 +41,9 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 2.4 Coordinator reconciler: `Ready` per D-B, message lists failing entry
       names, and a name a Pipeline also holds; a not-Ready Coordinator claims
       nothing.
-- [ ] 2.5 Root creation from a Coordinator: no `channelRefs`, limits
-      snapshotted into `status.budget`.
+- [ ] 2.5 Root creation from a Coordinator: no `channelRefs`; limits
+      snapshotted into `status.budget`; the Coordinator's `channelRefs`
+      snapshotted into `spec.escalationChannelRefs`.
 - [ ] 2.6 Manager `/coordinate/*` surface: `invoke`, `close`, `escalate`,
       `read`; caller token context `coordinator:<name>:<conversation>`;
       `agents[]` list and root scope enforced HERE (D-F). `invoke` returns
@@ -66,8 +67,9 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 3. Phase 2 — escalation (design D-D)
 
-- [ ] 3.1 `escalate` sets `spec.channelRefs` from the Coordinator read at that
-      moment, stamps `escalatedAt`, enqueues `ensure-topic` with the digest as
+- [ ] 3.1 `escalate` sets `spec.channelRefs` from the root's
+      `spec.escalationChannelRefs` snapshot — reads no Coordinator — stamps
+      `escalatedAt`, enqueues `ensure-topic` with the digest as
       the opening message.
 - [ ] 3.2 `DeliverInputs` fences on `escalatedAt`: nothing earlier is
       delivered to the escalated channels.
@@ -114,9 +116,8 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       exclusively` header and its section → capabilities are declared on an
       AgentCapability OR inline on a Pipeline/Coordinator, and reached through wiring
       only; under `### MCPToolset`, "Bound from `Pipeline.spec.toolsets` ONLY"
-      → bound from any capability's `toolsets`, never a profile's. The
-      escalation-time Coordinator read stated as the one exception to
-      "nothing reads wiring after creation".
+      → bound from any capability's `toolsets`, never a profile's. Deleting
+      a Coordinator cascades nothing, stated beside the Pipeline rule.
 - [ ] 6.2 `terminology.md`: the "Agent is TAKEN" entry names `AgentCapability`
       and why the CRD is not `Agent`; `Coordinator`, `root`, `member`, `escalate`;
       `structure.md`: `platform/mcp-aops`; `invariants.md`: the loop refusal,

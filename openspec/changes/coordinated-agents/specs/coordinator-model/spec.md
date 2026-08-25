@@ -45,12 +45,24 @@ is not Ready SHALL claim nothing.
 - **THEN** the Coordinator's `Ready` is False with the entry's name in its message
 - **AND** signals on its sources are not routed to it
 
-### Requirement: Limits are declared on the Coordinator and snapshotted onto the root
+### Requirement: Limits and escalation channels are snapshotted onto the root
 
 `spec.limits` SHALL carry `maxAgents`, `maxTurns` and `deadline`, each optional
-with a chart-documented default. The values SHALL be snapshotted onto the root
-conversation at creation, so editing the Coordinator does not change the budget
+with a chart-documented default. The values, and the Coordinator's
+`channelRefs`, SHALL be snapshotted onto the root conversation at creation, so
+editing the Coordinator does not change the budget or the escalation surfaces
 of an incident already in flight.
+
+### Requirement: Deleting a Coordinator cascades nothing
+
+Deleting a Coordinator SHALL leave every conversation it started exactly as it
+is — open roots keep running on their snapshot and end by budget or by hand —
+as deleting a Pipeline does. No finalizer and no ownerRef ties a conversation
+to its Coordinator.
+
+#### Scenario: Coordinator deleted mid-incident
+- **WHEN** a Coordinator is deleted while one of its roots has open members
+- **THEN** the root and its members are unchanged, a later `escalate` opens threads on the snapshotted channels, and the budget still closes it
 
 #### Scenario: A limit edit does not reach a running incident
 - **WHEN** a Coordinator's `maxAgents` is lowered while one of its incidents is open
