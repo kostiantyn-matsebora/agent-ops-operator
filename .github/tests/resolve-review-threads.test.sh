@@ -76,6 +76,15 @@ it "does nothing at all when the list is empty"
 out=$(python3 "$S" --repo o/r --pr 1 --file "$tmp/list" 2>&1)
 assert_contains "$out" "asked for no threads"
 
+# AN EMPTY LIST AND AN ABSENT ONE ARE DIFFERENT FACTS. Reading them alike is
+# what let a review whose artifact never uploaded print the healthy sentence.
+it "refuses, loudly, when the list is absent rather than empty"
+rm -f "$tmp/list"
+out=$(python3 "$S" --repo o/r --pr 1 --file "$tmp/list" 2>&1) && rc=0 || rc=$?
+assert_equals "1" "$rc"
+assert_contains "$out" "ABSENT"
+printf 'PRRT_mine\n' > "$tmp/list"
+
 it "honours a narrowed --authors, refusing what is no longer recognised"
 printf 'PRRT_mine\n' > "$tmp/list"
 out=$(python3 "$S" --repo o/r --pr 1 --file "$tmp/list" --authors "someone-else" 2>&1)
