@@ -73,8 +73,15 @@ USE rather than by reading the command back.
 - [x] 4.2 Advance the phase label from `apply` and `archive`, one comment per
       transition. Verify the throwaway change's issue shows exactly one comment
       per transition and no per-task noise
-- [ ] 4.3 Close the issue on archive, and verify the sidecar survives into
+- [x] 4.3 Close the issue on archive, and verify the sidecar survives into
       `openspec/changes/archive/` so an archived change stays traceable
+      **VERIFIED 2026-08-25, and it FAILED FIRST.** The sidecar does survive into
+      `openspec/changes/archive/<date>-<name>/` — but `opsx-issue.sh` resolved only the
+      LIVE path, so `phase archived` and `close` reported "no tracking issue" at exactly
+      the point /opsx:archive calls them. #33 was closed by hand. Fixed in #37; the
+      lookup now falls back to the archive, matched on the date prefix so `auth` cannot
+      collect `2026-01-01-oauth`'s number. Confirmed against the real archived change:
+      `number presentation-reduced-motion-opt-in` -> 33.
 - [x] 4.4 Add the `openspec/config.yaml` rule that makes the binding part of what
       a generated artifact carries, and verify it is injected by generating one
       artifact and reading the instructions output
@@ -135,7 +142,7 @@ USE rather than by reading the command back.
 
 ## 7. The iterative review
 
-- [ ] 7.1 **BLOCKED ON THE MERGE, not on anything buildable.** The action refuses
+- [x] 7.1 **BLOCKED ON THE MERGE, not on anything buildable.** The action refuses
       to run when this workflow file differs from the default branch's copy — a
       pull request may not rewrite the review that judges it — so its first real
       run is the NEXT pull request. Found the only way it could be: the job went
@@ -146,6 +153,14 @@ USE rather than by reading the command back.
       triggers `[opened, synchronize, ready_for_review]`, drafts skipped, and a
       per-PR concurrency group with `cancel-in-progress`. Verify a first run
       posts inline comments and one summary
+      **VERIFIED on #34**, the first pull request after the merge. It also found what
+      the merge could not: the action had NO MODEL CREDENTIAL — the GitHub App
+      authorises reading and commenting, not the Anthropic call — so the first run
+      failed on `Either ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or workload identity
+      federation ... is required`, and the always-ran guard refused to call that green.
+      Fixed in #35. The review then ran for 2m39s, posting ONE sticky summary and no
+      inline comments (there were no findings). Inline comments confirmed separately on
+      #37 and #40, which each carried one.
 - [ ] 7.2 Skip forks explicitly on `pull_request.head.repo.fork` (design D13) and
       verify the check reports SKIPPED rather than failing on a missing secret —
       the two look identical in the checks list and mean opposite things
@@ -158,14 +173,26 @@ USE rather than by reading the command back.
       carries content on its way out, and reviewing it spends a model call on
       text about to be deleted. Confirmed in the workflow log: the step ran and
       reported `ok=true` on this branch
-- [ ] 7.5 Verify NO REPETITION across pushes — push a second commit leaving one
+- [x] 7.5 Verify NO REPETITION across pushes — push a second commit leaving one
       finding unaddressed, and confirm the existing remark is untouched and no
       duplicate appears. **This is the whole capability; a passing run that
       re-posts is a failure**
-- [ ] 7.6 Add `.github/scripts/resolve-review-threads.py` and the `reconcile`
+      **VERIFIED on #37 and #40.** A finding was left standing across a push on #37:
+      the second run added a reply in the existing thread and did NOT re-post the
+      finding — three comments on that thread in total, one of them the review's
+      "Fixed in 293cc78". The sticky summary is edited in place rather than re-posted:
+      one PR-level comment from the review on each pull request.
+- [x] 7.6 Add `.github/scripts/resolve-review-threads.py` and the `reconcile`
       job — `contents: write`, NO model, resolving only the thread ids handed to
       it. Verify a fixed finding's thread is answered and resolved on the next
       push
+      **FALSIFIED, THEN VERIFIED.** On #37 the review replied "Fixed in <sha>" and the
+      thread stayed open: `reconcile` refused it — `authored by 'claude', not the
+      review`. REST and GraphQL spell a bot differently (`claude[bot]` against
+      `claude`), so the allowlist could never match. Fixed in #39, which also made the
+      ACCOUNT TYPE decide, since `claude` is a login a person can hold. **On #40 both
+      threads came back `isResolved=true` with no human click.** Found by 7.7's
+      diagnostic, exactly as that task predicted.
 - [x] 7.7 The script refuses any thread whose first comment is not the review's,
       **verified against a REAL human-authored thread** rather than a fixture: a
       review comment was posted on this pull request as the maintainer, handed to
@@ -182,16 +209,27 @@ USE rather than by reading the command back.
 
 ## 8. End-to-end, on one change before eleven
 
-- [ ] 8.1 Run this change itself through the full flow. **Done up to the merge**:
+- [x] 8.1 Run this change itself through the full flow. **Done up to the merge**:
       worktree at `../agent-ops-worktrees/github-change-lifecycle`, branch
       `change/github-change-lifecycle`, issue #29 advancing `proposed` →
       `applying` → `review`, pull request #30 with the new checks reporting.
       Outstanding: the review's first real run (needs §2.2), the archive, and the
       squash merge — **left deliberately for a person**, since the merge is the
       one step here that cannot be undone
-- [ ] 8.2 Verify the archive-inside-the-PR decision holds in practice (design
+      **VERIFIED end to end on `presentation-reduced-motion-opt-in`**, a change proposed,
+      applied, archived and merged after this flow landed: issue #33 advancing
+      proposed -> applying -> review -> archived, worktree at
+      `../agent-ops-worktrees/presentation-reduced-motion-opt-in`, branch
+      `change/presentation-reduced-motion-opt-in`, pull request #34 squash-merged, and
+      the worktree removed afterwards. THIS change's own merge remains a person's, as
+      written.
+- [x] 8.2 Verify the archive-inside-the-PR decision holds in practice (design
       D4): the pull request diff shows the delta specs folding into
       `openspec/specs/`, and the documentation gate passes as expected
+      **VERIFIED on #34.** `openspec archive` ran on the branch, and the pull request's
+      diff carried `openspec/specs/landing-presentation/spec.md` (+1 requirement, ~1
+      modified) beside the implementation. The `docs-task` gate passed on the same run,
+      and `openspec` validated the change while it was still in `openspec/changes/`.
 - [x] 8.3 Verify `.github/components.sh` still reports 13 images and 12 modules
       with the worktree present, and that `find . -type d -name docs` returns
       exactly one line
@@ -204,16 +242,45 @@ USE rather than by reading the command back.
       existing branch and issue #29 rather than duplicating them. An existing
       branch is never reset to master — a branch that has moved on is somebody's
       work in progress
-- [ ] 9.2 Run it — **AFTER the merge, not before.** Until the flow is on the
+- [x] 9.2 Run it — **AFTER the merge, not before.** Until the flow is on the
       default branch the commit hook is not active, and eleven branches nothing
       yet expects are litter. Then verify every active change has one issue with
       the right phase label and one branch, none left behind and none given two
-- [ ] 9.3 Verify the sidecar binding is written for all eleven and that
+      **RUN 2026-08-25**: 11 branches and 10 issues created (#42-#51), with #29, #38
+      and #41 KEPT rather than duplicated. Thirteen changes, each with exactly one
+      issue and one branch — listed and checked, none left behind and none given two.
+      
+      **AND IT FOUND A HAZARD THE DRY-RUN OF 9.1 COULD NOT.** Idempotence rests on the
+      sidecar, and a sidecar written by a CONCURRENT SESSION lives in ITS worktree,
+      uncommitted and invisible from the shared checkout. The first dry-run therefore
+      read `one-page-per-integration issue:would open` while #41 already existed. It
+      was caught by dry-running before the real run, and fixed by writing that
+      session's number into this checkout first — but a future run has the same
+      exposure, and the script cannot see what it cannot read. **Dry-run first is not
+      advice, it is the procedure.**
+- [x] 9.3 Verify the sidecar binding is written for all eleven and that
       `openspec list` is unchanged by the migration
-- [ ] 9.4 **Tell the other sessions.** Once every change owns a branch, the §3.4
+      **VERIFIED.** Every one of the thirteen carries its binding — the eleven the
+      migration wrote, plus #29 and #41 kept. `openspec list` reports 13 changes,
+      unchanged by the migration: a sidecar is not an artifact openspec reads.
+      
+      **Committed onto each change's OWN branch**, never the default one — which the
+      §3.4 hook now enforces, so this is not merely a convention.
+- [x] 9.4 **Tell the other sessions.** Once every change owns a branch, the §3.4
       hook starts refusing commits to `master` that were fine an hour earlier.
       Verify by making the intended refusal happen once, deliberately, and
       reading the message it gives
+      **THE REFUSAL WAS MADE TO HAPPEN, DELIBERATELY.** A change's sidecar was staged on
+      `master` in the shared checkout and a commit attempted: the hook exited 2 and
+      named the change, the branch it owns, and the worktree command to use instead.
+      
+      **AND THE HAZARD IT GUARDS IS REAL, PROVEN THE HARD WAY IN THE SAME SESSION.**
+      Committing the eleven sidecars onto their branches with plumbing moved
+      `change/one-page-per-integration` while a CONCURRENT SESSION had it checked out —
+      its worktree's HEAD followed the ref, its index did not, and its `git status`
+      showed a staged DELETION of a file it had never touched. A `git commit -a` there
+      would have made that real. Reverted with `update-ref` before any harm; the
+      lesson is that `git worktree list` must be READ and ACTED ON, not merely run.
 
 ## 10. Documentation
 
