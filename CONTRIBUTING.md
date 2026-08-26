@@ -307,6 +307,17 @@ fix them, and it never touches anybody else's.
 than a failing one: repository secrets are withheld from fork workflows by
 design, so there is nothing you could do about it and nothing you should.
 
+**A finding is acted on from the thread.** Reply `fix it` under a finding you
+accept, then comment `/fix-accepted` on the pull request: one run fixes
+everything accepted in one commit, answers each fixed thread with the sha and
+resolves it, and leaves everything nobody accepted open — which, since branch
+protection requires every conversation resolved, keeps the merge blocked until
+a person deals with it. The accept phrases are in `.github/review-triage.json`,
+matched mechanically; dispatching needs write access; and the step that writes
+the fix cannot push, only the model-free step after it can. The full rule,
+including what the landed commit still needs from you, is
+`.claude/rules/worktree-delivery.md`.
+
 **Releases are the maintainer's, and they are chart-shaped.** A component tag
 (`<component>-v<semver>`) publishes one image and creates no GitHub Release; a
 `chart-v<semver>` tag publishes the chart and announces it, notes composed from

@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "THE ACCEPT VOCABULARY, STATED ONCE. `.github/scripts/accepted-findings.py` reads",
+    "this file to decide which review findings a dispatch acts on, and the",
+    "contributor docs (.claude/rules/worktree-delivery.md, CONTRIBUTING.md) point",
+    "here rather than restating it. What decides that code will be written to a",
+    "branch may not be a judgement call, so it is a LIST matched by a program —",
+    "never a classifier reading whether the conversation sounded agreeable.",
+    "",
+    "THE MATCHING RULE: the reply's WHOLE text, trimmed of surrounding whitespace",
+    "and of trailing punctuation (. ! ,), compared case-insensitively against",
+    "`accept`. Nothing else counts. A reply that quotes a phrase inside a longer",
+    "sentence, asks a question, argues, or agrees in other words is NOT an",
+    "acceptance, and the thread and the code are left exactly as they are.",
+    "",
+    "`dispatch` is the pull-request comment that starts one run over everything",
+    "accepted. It is a TRIGGER: the work list is derived from the threads, and",
+    "no other text in the dispatch comment is read."
+  ],
+  "accept": ["fix it", "fix", "fix this", "agreed, fix"],
+  "dispatch": ["/fix-accepted"],
+  "trailing_punctuation": ".!,"
+}

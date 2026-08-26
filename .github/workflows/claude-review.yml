@@ -176,9 +176,41 @@ jobs:
               Count it in the summary as dismissed, so the gap stays visible
               rather than reading as though everything raised was dealt with.
 
-            THE SUMMARY says, in a line: how many findings are new, how many
-            carried over, how many you resolved, how many were dismissed. Then
-            the substance. Do not restate carried-over findings in it.
+            HOW TO WRITE — `.claude/rules/authoring.md` binds the review as it
+            binds every rule file. A finding is read in a thread beside a diff,
+            by somebody deciding whether to type `fix it`; a wall of prose is
+            what gets skimmed and ignored.
+
+            AN INLINE FINDING is at most SIX lines, in this shape and no other:
+
+                **<the claim, one sentence>**
+                <what breaks, or which rule/spec it contradicts, ≤ 2 sentences, naming the file>
+                Fix: <one line, only where the fix is obvious>
+
+            - The claim is a sentence a maintainer could reply `fix it` to. Not
+              a heading, not a category.
+            - Never restate the diff, the surrounding code or the rule's whole
+              argument — the reader has both open. Name the rule by file and
+              heading; do not quote it.
+            - One finding per comment. Two problems on one line are two
+              comments.
+
+            THE SUMMARY is one comment, in this shape and no other:
+
+                ### Review
+                N new · N carried over · N resolved · N dismissed
+
+                | # | Where | Finding |
+                |---|---|---|
+                | 1 | `path:line` | the claim, one sentence, linking its thread |
+
+            - The table lists NEW findings only. A carried-over or resolved
+              finding is already visible in its thread and is not restated.
+            - No table when nothing is new: the count line, then one line
+              saying what was read and found clean.
+            - No preamble, no "Otherwise:" paragraph, no closing remarks. A
+              summary that explains what the review did instead of what it
+              found is the wall of text this shape exists to prevent.
 
             Post GitHub comments only. Do not return the review as a message.
           claude_args: |

@@ -92,13 +92,59 @@ answer to "is this behaviour intended".
 
 ### THE GATES ARE ALREADY REQUIRED — THROUGH ONE CHECK
 
-Branch protection names **`ci-green`** and nothing else. Every real gate reports
-through it, so **adding a required gate is a line in that job's `needs:`**, never
-a settings change somebody has to remember.
+Branch protection names **`ci-green`** as its only status check. Every real gate
+reports through it, so **adding a required gate is a line in that job's
+`needs:`**, never a settings change somebody has to remember.
 
 That is what `continuous-integration`'s always-present-check requirement is for:
 a protection rule names a check by NAME, and a job skipped for untouched paths
 never reports that name.
+
+**THE ONE GATE NOT REPORTED THROUGH IT IS CONVERSATION RESOLUTION**, and it is
+not an inconsistency to fix. Branch protection ALSO requires every review thread
+resolved before merging (`required_conversation_resolution`, verified live on
+2026-08-26). It cannot be a job in `needs:` because it is not a check at all —
+it is a property of the pull request, evaluated by GitHub at merge time, and a
+job asserting it would race every reply. It is what makes an untriaged review
+finding block the merge, below.
+
+### THE REVIEW FOUND SOMETHING. NOW WHAT
+
+`claude-review.yml` posts findings as review threads, and an open thread blocks
+the merge. Triage happens IN THE THREAD, in a stated vocabulary, and one comment
+acts on everything accepted:
+
+| You type | Where | It means |
+|---|---|---|
+| `fix it` (or another phrase from `.github/review-triage.json`) | a reply in the finding's thread | ACCEPTED — the next dispatch fixes it |
+| anything else, or nothing | the thread | not accepted; the thread and the code stay as they are |
+| `/fix-accepted` | a comment on the pull request | DISPATCH — one run, one commit, over everything accepted |
+| resolve the thread yourself | the thread | dismissed; the review counts it and does not raise it again |
+
+- **THE VOCABULARY IS A FILE, MATCHED BY A PROGRAM** —
+  `.github/review-triage.json`, read by `accepted-findings.py`. Whole reply,
+  trimmed, trailing punctuation dropped, case-insensitive. "Sure, if you think
+  so" is not an acceptance, and neither is `fix it` inside a longer sentence:
+  what decides that code is written to a branch may not be a judgement call.
+- **THE DISPATCH IS A TRIGGER, NEVER AN INSTRUCTION.** The work list is derived
+  by walking the threads; nothing reads the dispatch comment's text. A dispatch
+  "asking for" work no thread accepted performs none of it.
+- **WHO MAY DISPATCH: write access**, from the comment's own author
+  association. A fork's pull request is refused. Both refusals are posted on
+  the pull request, because a silent no-op reads as a broken bot.
+- **THE MODEL CANNOT PUSH.** `review-dispatch.yml` produces the fix under
+  `contents: read` as a patch artifact; a model-free job applies it, pushes,
+  replies `Fixed in <sha>` in each fixed thread, and only then hands the ids to
+  `resolve-review-threads.py`. A thread is resolved only where its patch landed;
+  a stale patch pushes nothing, resolves nothing, and says so — rebase and
+  dispatch again.
+- **AN UNTRIAGED FINDING KEEPS ITS THREAD OPEN, AND THE MERGE BLOCKED.** That
+  is the feature: a finding nobody accepted and nobody dismissed is a decision
+  still owed.
+- **THE LANDED COMMIT HAS NO CI AND NO REVIEW UNTIL YOU PUSH AGAIN.** A push
+  made with the workflow token starts no workflow — GitHub withholds
+  `synchronize` from it — so the dispatch says so on the pull request. An empty
+  commit is enough.
 
 ### WHAT THE MAIN CHECKOUT IS STILL FOR
 
