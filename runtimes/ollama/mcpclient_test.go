@@ -77,7 +77,8 @@ func TestUnreachableServerIsSkipped(t *testing.T) {
 	m.Connect(context.Background(), mcpConfig{Servers: map[string]mcpServer{
 		"dead": {Command: "/nonexistent/binary"},
 		"none": {},
-	}}, r, func(f string, a ...any) { logs = append(logs, f) })
+	}}, func(f string, a ...any) { logs = append(logs, f) })
+	m.ListTools(context.Background(), r, func(f string, a ...any) { logs = append(logs, f) })
 	if len(r.order) != 0 || len(logs) != 2 {
 		t.Errorf("both servers must be logged and skipped: tools=%v logs=%v", r.order, logs)
 	}

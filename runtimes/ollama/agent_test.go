@@ -165,3 +165,19 @@ func TestPromptFileWithVars(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 }
+
+func TestEmptyAnswerIsNudgedOnce(t *testing.T) {
+	s := &scripted{replies: []Message{text(""), text("recovered")}}
+	a, _ := newAgent(t, s)
+	res := a.Run(context.Background(), WorkUnit{PromptText: "q"})
+	if res.Status != "succeeded" || res.Result != "recovered" || len(s.sent) != 2 {
+		t.Errorf("%+v sent=%d", res, len(s.sent))
+	}
+	if last := s.sent[1][len(s.sent[1])-1]; last.Role != "user" || !strings.Contains(last.Content, "empty") {
+		t.Errorf("the nudge must be a user message: %+v", last)
+	}
+	a, _ = newAgent(t, &scripted{replies: []Message{text(""), text("")}})
+	if res := a.Run(context.Background(), WorkUnit{PromptText: "q"}); res.Status != "failed" || !strings.Contains(res.Result, "twice") {
+		t.Errorf("a second empty answer fails: %+v", res)
+	}
+}

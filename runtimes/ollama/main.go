@@ -79,18 +79,17 @@ func main() {
 		logf("[runtime] initial sync: %v", err)
 	}
 
-	registry := NewRegistry()
-	Builtins{Workspace: workspace, OutputMax: envInt("TOOL_OUTPUT_MAX", 64*1024),
-		BashTimeout: time.Duration(envInt("BASH_TIMEOUT_S", 120)) * time.Second}.Register(registry)
+	builtins := Builtins{Workspace: workspace, OutputMax: envInt("TOOL_OUTPUT_MAX", 64*1024),
+		BashTimeout: time.Duration(envInt("BASH_TIMEOUT_S", 120)) * time.Second}
 	cfg, err := readMCPConfig(env("MCP_CONFIG", "/etc/agentops/mcp.json"))
 	if err != nil {
 		logf("[mcp] config: %v — no MCP tools this pod", err)
 	}
 	mcpc := &MCPClient{CallTimeout: 2 * time.Minute}
-	mcpc.Connect(ctx, cfg, registry, logf)
+	mcpc.Connect(ctx, cfg, logf)
 	defer mcpc.Close()
 
-	agent := &Agent{Chat: ollama, Registry: registry, Workspace: workspace, NumCtx: numCtx, Model: model,
+	agent := &Agent{Chat: ollama, Workspace: workspace, NumCtx: numCtx, Model: model,
 		ModelCanCallTools: info.Tools || err != nil || !info.Present, // unknown is not "cannot"
 		Store:             &ContextStore{Dir: filepath.Join(home, ".agentops", "contexts"), Sleep: time.Sleep},
 		Out:               os.Stdout, Logf: logf}
@@ -117,6 +116,11 @@ func main() {
 		if info, err := ollama.Check(ctx); err == nil {
 			agent.ModelCanCallTools = info.Tools || !info.Present
 		}
+		// A registry PER UNIT: the built-ins, plus whatever the MCP servers list
+		// now that the proxy has seen this unit's grants.
+		agent.Registry = NewRegistry()
+		builtins.Register(agent.Registry)
+		mcpc.ListTools(ctx, agent.Registry, logf)
 		res := agent.Run(ctx, *unit)
 		lastWork = time.Now()
 		fmt.Fprintf(os.Stdout, "\n=== RESULT (%s) ===\n%s\n", res.Status, res.Result)

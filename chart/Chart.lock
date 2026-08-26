@@ -14,5 +14,8 @@ dependencies:
 - name: claude
   repository: ""
   version: 0.1.0
-digest: sha256:efa7982cb9265b39231761263bc18eb05198f4ea33c669f05671160b50687740
-generated: "2026-08-24T14:09:42.444576417+03:00"
+- name: ollama
+  repository: ""
+  version: 0.1.0
+digest: sha256:b9b2d619468b1f43d856f0bec10507018bf84b0b79e2732d842405edd6c00b0d
+generated: "2026-08-26T19:24:25.044445249+03:00"

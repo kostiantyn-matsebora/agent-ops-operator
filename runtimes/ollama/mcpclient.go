@@ -52,10 +52,14 @@ func readMCPConfig(path string) (mcpConfig, error) {
 	return cfg, nil
 }
 
-// Connect opens every server and registers its tools. A server that fails to
-// connect is LOGGED with the consequence and skipped; the run continues with
-// the rest.
-func (m *MCPClient) Connect(ctx context.Context, cfg mcpConfig, r *Registry, logf func(string, ...any)) {
+// Connect opens a session to every server. A server that fails to connect is
+// LOGGED with the consequence and skipped; the run continues with the rest.
+//
+// It registers NO tools. Listing happens per unit, in ListTools, because under
+// egress mediation the proxy in the pod grants nothing until it has seen the
+// work unit go by on /work — a tools/list made at startup comes back empty,
+// and the reference runtime never met that because its CLI connects per run.
+func (m *MCPClient) Connect(ctx context.Context, cfg mcpConfig, logf func(string, ...any)) {
 	m.sessions = map[string]*mcp.ClientSession{}
 	names := make([]string, 0, len(cfg.Servers))
 	for n := range cfg.Servers {
@@ -63,13 +67,27 @@ func (m *MCPClient) Connect(ctx context.Context, cfg mcpConfig, r *Registry, log
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		srv := cfg.Servers[name]
-		session, err := m.connectOne(ctx, name, srv)
+		session, err := m.connectOne(ctx, name, cfg.Servers[name])
 		if err != nil {
-			logf("[mcp] %s: not connected: %v — its tools are unavailable this run", name, err)
+			logf("[mcp] %s: not connected: %v — its tools are unavailable", name, err)
 			continue
 		}
 		m.sessions[name] = session
+		logf("[mcp] %s: connected", name)
+	}
+}
+
+// ListTools registers every connected server's tools, as mcp__<server>__<tool>,
+// into a registry built for ONE unit. Called after the unit is polled and
+// before the loop runs, so what is listed is what this unit is granted.
+func (m *MCPClient) ListTools(ctx context.Context, r *Registry, logf func(string, ...any)) {
+	names := make([]string, 0, len(m.sessions))
+	for n := range m.sessions {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		session := m.sessions[name]
 		var count int
 		for tool, err := range session.Tools(ctx, nil) {
 			if err != nil {
@@ -77,15 +95,14 @@ func (m *MCPClient) Connect(ctx context.Context, cfg mcpConfig, r *Registry, log
 				break
 			}
 			schema, _ := json.Marshal(tool.InputSchema)
-			full := "mcp__" + name + "__" + tool.Name
 			toolName := tool.Name
-			r.Add(Tool{Name: full, Description: tool.Description, Schema: schema,
+			r.Add(Tool{Name: "mcp__" + name + "__" + toolName, Description: tool.Description, Schema: schema,
 				Call: func(ctx context.Context, args json.RawMessage) (string, bool, error) {
 					return m.call(ctx, session, toolName, args)
 				}})
 			count++
 		}
-		logf("[mcp] %s: connected, %d tool(s)", name, count)
+		logf("[mcp] %s: %d tool(s) listed", name, count)
 	}
 }
 

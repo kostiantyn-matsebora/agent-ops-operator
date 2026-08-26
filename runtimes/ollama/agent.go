@@ -132,6 +132,7 @@ func (a *Agent) Run(ctx context.Context, u WorkUnit) RunResult {
 	}
 	// Reserve a quarter of the window for the answer.
 	budget := a.NumCtx * 3 / 4
+	nudged := false
 	for i := 1; i <= maxTurns; i++ {
 		history := append(append([]Message{}, t.Messages...), turn[:len(turn)-1]...)
 		messages, dropped := Trim(system, history, turn[len(turn)-1], budget)
@@ -148,11 +149,21 @@ func (a *Agent) Run(ctx context.Context, u WorkUnit) RunResult {
 		}
 		turn = append(turn, resp)
 		if len(resp.ToolCalls) == 0 {
-			save()
 			result := strings.TrimSpace(resp.Content)
+			if result == "" && !nudged {
+				// A small model sometimes ends a turn with nothing — usually a
+				// tool call it could not form, which the server drops unseen.
+				// One nudge costs a turn and recovers most of them; a second
+				// empty answer is reported as what it is.
+				nudged = true
+				a.Logf("[runtime] the model returned an empty answer — asking once for a text answer")
+				turn = append(turn, Message{Role: "user", Content: "Your last message was empty. Answer the request now, in text, using only what you already know or the tools you were given."})
+				continue
+			}
+			save()
 			if result == "" {
 				return RunResult{Status: "failed", ExitCode: 1, RuntimeContextID: t.ID, Continuity: continuity,
-					Result: "the model returned an empty answer"}
+					Result: "the model returned an empty answer twice"}
 			}
 			return RunResult{Status: "succeeded", ExitCode: 0, RuntimeContextID: t.ID, Continuity: continuity, Result: result}
 		}
