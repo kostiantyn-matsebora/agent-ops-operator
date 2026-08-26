@@ -50,8 +50,8 @@ assert_contains "$p" '"findings"'
 it "asks the reviewer for the four finding fields the inline comment is built from, with the caps"
 assert_contains "$p" '"where"'
 assert_contains "$p" '"fix"'
-assert_contains "$p" 'AT MOST 20 WORDS'
-assert_contains "$p" 'AT MOST 15 WORDS'
+assert_contains "$p" 'AT MOST 15 WORDS, ONE CLAUSE'
+assert_contains "$p" 'AT MOST 12 WORDS'
 
 it "posts a finding as four labeled lines, not prose"
 assert_contains "$prompt" '**Claim:**'
