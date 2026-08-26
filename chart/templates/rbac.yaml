@@ -100,7 +100,7 @@ rules:
     resources: ["persistentvolumeclaims"]
     # Tidy up: drop the claim when its Pipeline is deleted, so an uninstall
     # leaves no dangling storage behind.
-    verbs: ["get", "list", "watch", "create", "delete"]
+    verbs: [ "get", "list", "watch", "create", "delete" ]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
