@@ -34,7 +34,7 @@ which is the finding: the contract is vendor-neutral.
   mean the same thing on both runtimes, connects the bound MCP servers from the
   same `mcp.json`, and keeps context as one transcript per conversation under
   `$HOME/.agentops/contexts/`, declared to `context-sync` by the bundle.
-- `docs/integrations/ollama.md`, and the Ollama chip on the landing page.
+- `docs/runtimes/ollama.md`, and the Ollama chip on the landing page.
 
 - **Every runtime has its own name, and `default` is a copy.** The claude
   bundle's CR is now named `claude`, the ollama one `ollama`, and the parent

@@ -302,7 +302,7 @@ different volume, `persistence` — neither is this runtime's to declare.
 
 `ollama.enabled: false` renders nothing, so existing installs are
 byte-identical, and the parent's `runtimes:` block keeps its Ollama example
-comment as the second way to declare the same thing by hand. `docs/integrations/ollama.md`
+comment as the second way to declare the same thing by hand. `docs/runtimes/ollama.md`
 carries the worked values; the bundle cannot know an endpoint.
 
 *Alternative rejected:* a parent-chart list of extra runtimes. It existed as
@@ -316,7 +316,7 @@ instance.
 `docs/CLAUDE.md` rules that A RUNTIME IS NOT AN INTEGRATION — an integration
 page answers what starts work, what it may reach, where it answers and what it
 costs, and a runtime would leave three of the four blank. That rule stands, so
-the page is NOT `docs/integrations/ollama.md`. It is `docs/runtimes/ollama.md`,
+the page is NOT `docs/runtimes/ollama.md`. It is `docs/runtimes/ollama.md`,
 the first page of a new **Runtimes** nav group, and `docs/CLAUDE.md` gains the
 page kind: a runtime page answers what it EXECUTES, what it NEEDS from you,
 where its context lives, and what it costs to turn on. `docs/claude.md` stays
@@ -351,7 +351,7 @@ and how to choose between the two images. `docs/installation.md`'s hand-written
   arguments, loops of the same call → Unknown names and bad arguments come back
   as readable tool errors the model can recover from; `maxTurns` bounds the
   thrash; the run reports the turn-limit failure rather than silence. Model
-  quality is an operator choice, and `docs/integrations/ollama.md` says which sizes are worth
+  quality is an operator choice, and `docs/runtimes/ollama.md` says which sizes are worth
   trying.
 - **Ollama serialises work per model** → Five concurrent conversations
   (`MAX_ACTIVE_CONVERSATIONS`) against one Ollama endpoint queue at the server;

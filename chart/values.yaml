@@ -176,11 +176,12 @@ ollama:
 #
 # `default` is the name a Pipeline declaring no `runtimeRef` resolves to, and
 # THE CHART RENDERS IT as a copy of one declared runtime: the one flagged
-# `default: true` (here, or on a bundle), or the FIRST configured when none is
-# — `runtimes:` entries in order, then the bundles. One runtime alone is always
+# `default: true` (here, or on a bundle), or the FIRST configured when none is —
+# `runtimes:` entries in order, then the bundles. One runtime alone is always
 # the default. Every runtime is optional. THE RENDER FAILS when NO runtime is
-# declared while a route still resolves to `default`, or when two are flagged. That check replaced the old guarantee that this chart always rendered one:
-# a runtime may now come from a bundle, and a bundle can be turned off.
+# declared while a route still resolves to `default`, or when two are flagged.
+# That check replaced the old guarantee that this chart always rendered one: a
+# runtime may now come from a bundle, and a bundle can be turned off.
 #
 #   runtimes:
 #     - name: mine                 # inherits every default; states its own image
