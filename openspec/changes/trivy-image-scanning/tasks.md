@@ -68,9 +68,11 @@ step for step; D1 says this is a port, not a redesign.
   fourteen legs pulling it is slow and rate-limitable, and the gate now carries a network
   dependency the build did not have
 - [x] 3.6 Enable the gate LAST, after task 1 is closed out
-- [ ] 3.7 Verify per-component isolation on a real run: every component's
+- [x] 3.7 Verify per-component isolation on a real run: every component's
   findings readable separately in the security tab, none replaced by another's.
-  D2 names this as the highest-consequence detail, and it fails GREEN
+  D2 names this as the highest-consequence detail, and it fails GREEN.
+  VERIFIED on PR #77 run 33003598861: 14 distinct `trivy-<component>`
+  analyses on the PR ref
 - [x] 3.8 Verify `fail-fast: false` still holds, so one component's failure does
   not hide the other thirteen
 - [x] 3.9 Verify the scan follows the changed-only filter: a pull request
@@ -109,12 +111,16 @@ Additive and separable — D4. Its own workflow, not a second trigger on `ci.yml
 
 ## 6. Close out
 
-- [ ] 6.1 A pull request with a deliberately vulnerable dependency FAILS the
-  gate, naming the component. A gate that has never failed has not been tested
-- [ ] 6.2 That same run still uploaded its SARIF — this is what `if: always()`
-  buys and it is invisible until the gate fails
-- [ ] 6.3 A clean pull request passes, and CI's wall-clock time is still
-  acceptable on a rebuild-everything change — fourteen scans in the matrix
+- [x] 6.1 A pull request with a deliberately vulnerable dependency FAILS the
+  gate, naming the component. A gate that has never failed has not been tested.
+  VERIFIED run 33004629926: `.trivyignore` removed, only `images
+  (runtime-claude)` failed (`Total: 4`), `ci-green` red, then reverted
+- [x] 6.2 That same run still uploaded its SARIF — this is what `if: always()`
+  buys and it is invisible until the gate fails. VERIFIED: that failed job
+  logged `Successfully uploaded results` before the gate step
+- [x] 6.3 A clean pull request passes, and CI's wall-clock time is still
+  acceptable on a rebuild-everything change — fourteen scans in the matrix.
+  VERIFIED: first run green, longest leg (manager) 171s, most 65–100s
 - [x] 6.4 `python3 .github/scripts/publication-guard.py` passes. Record the
   verdict only
 - [x] 6.5 `openspec validate trivy-image-scanning --strict`
