@@ -15,6 +15,10 @@ THE TEMPLATE NOW SAYS `Refs #`, AND THIS IS WHY THAT IS NOT ENOUGH. A template i
 a suggestion at the moment somebody is typing quickly, and the failure is silent:
 the issue is closed by GitHub, days later, in a thread nobody is reading.
 
+AND THE OTHER WAY ROUND: a pull request that ARCHIVES a change MUST carry
+`Closes #<n>` for that change's issue, or the guard refuses it — two archived
+changes sat with open issues because the keyword was simply not written.
+
 WHAT IS ALLOWED. `Closes #<n>` is correct in exactly two cases, and both are
 recognised here:
 
@@ -94,12 +98,32 @@ def main() -> int:
         return 0
 
     closes = {int(n) for n in CLOSING.findall(body)}
+    tracked = tracked_issues(args.root)
+    archived = archived_by(args.diff_range, args.root)
+
+    # THE OTHER DIRECTION, AND THE ONE THAT WENT WRONG TWICE. An archive pull
+    # request that names no `Closes #<n>` leaves the tracking issue open forever
+    # once the script's separate `close` step is forgotten — #38 and #67 sat
+    # open under `opsx:archived` until somebody asked. GitHub closes on the
+    # keyword and on nothing else, so the keyword is required exactly where the
+    # rule says it is right.
+    owed = sorted((n, c) for n, c in tracked.items() if c in archived and n not in closes)
+    if owed:
+        listed = "\n".join(f"    Closes #{n}   ->   {c}" for n, c in owed)
+        print(f"""
+This pull request ARCHIVES a change and does not close its tracking issue:
+
+{listed}
+
+A change's tracking issue closes at archive, and GitHub closes it only on the
+keyword. Add the line above to the pull request body.
+
+See .claude/rules/worktree-delivery.md.""", file=sys.stderr)
+        return 1
+
     if not closes:
         print("pr-closes-guard: this pull request closes no issue by keyword")
         return 0
-
-    tracked = tracked_issues(args.root)
-    archived = archived_by(args.diff_range, args.root)
 
     bad = []
     for number in sorted(closes):
