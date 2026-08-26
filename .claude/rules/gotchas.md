@@ -219,6 +219,13 @@ rules loaded on demand.
   naming a rule file drops that file alone and leaves `CLAUDE.md` in place.
   Session-wide, so it fits a job whose every context wants the same subset;
   the review passes it as `--settings` inline, on the guarded side.
+- **A BACKGROUND `Agent` RESULT NEVER ARRIVES AFTER THE TURN ENDS, AND UNDER
+  `claude -p` THE TURN IS THE PROCESS.** The consolidator on #74 spawned three
+  reviewers, wrote "I'll wait for them", ended its turn — and the run reported
+  `success` after 13 turns with nothing posted. Waiting is done by CALLING
+  something (`sleep 60` through Bash) until the results are in hand; a turn
+  that ends to wait has ended the run. The job now also fails without a
+  summary comment, so a review that stops short is red.
 - **An inline `--agents` definition sits inside single quotes in `claude_args`,
   which is split like a shell line.** One apostrophe in the reviewer prompt
   ends the argument early and reads as a JSON error somewhere else. The suite

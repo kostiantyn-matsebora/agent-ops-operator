@@ -147,6 +147,17 @@ jobs:
             open ones re-raises what a person dismissed last push. Do not read the diff before spawning; that is their
             job, and reading it here is the serial cost this shape removes.
 
+            THE REVIEWERS RUN IN THE BACKGROUND, AND ENDING YOUR TURN ENDS THE
+            RUN. `Agent` answers "launched" at once; the result arrives later,
+            as a notification between your tool calls. If you answer with prose
+            and stop while a reviewer is still running, this process exits, the
+            reviewer is abandoned, nothing is posted, and the job still reports
+            success — that is exactly what happened on pull request #74: three
+            reviewers spawned, "I'll wait for them", turn ended, review lost.
+            So until EVERY reviewer has returned: run `sleep 60` through Bash
+            and look again. Never end the turn to wait. Never schedule a
+            wakeup; there is nothing to wake.
+
             STEP 3 — CONSOLIDATE. When every reviewer has returned:
 
             - Parse each return as JSON. A reviewer whose return is not the
@@ -302,7 +313,7 @@ jobs:
           # reading a matching file.
           claude_args: |
             --settings '{"claudeMdExcludes":["**/.claude/rules/build-test.md","**/.claude/rules/worktree-delivery.md","**/.claude/rules/session-naming.md","**/.claude/rules/publication.md","**/.claude/rules/visual-check.md","**/.claude/rules/answering.md"]}'
-            --allowedTools "Agent(component-reviewer),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*),Bash(git grep:*),Bash(python3 .github/scripts/review-queue.py:*),Bash(.github/scripts/mark-thread-resolved.sh:*),Read,Grep,Glob"
+            --allowedTools "Agent(component-reviewer),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(sleep:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*),Bash(git grep:*),Bash(python3 .github/scripts/review-queue.py:*),Bash(.github/scripts/mark-thread-resolved.sh:*),Read,Grep,Glob"
             --agents '{"component-reviewer":{"description":"Reads one changed component of a pull request in a clean context and returns findings, changed names and thread verdicts as JSON. Posts nothing.","tools":["Read","Grep","Glob","Bash(git diff:*)","Bash(git log:*)","Bash(git show:*)"],"model":"inherit","maxTurns":40,"prompt":"You are a COMPONENT REVIEWER for the agent-ops-operator repository: one clean context reading ONE component of a pull request, in parallel with others. You post nothing. You return data to the consolidator, who judges and writes.\n\nYOUR DELEGATION MESSAGE names: the repository, the pull request number, the base ref, your component (`group`), its changed `paths`, EVERY review thread on those paths — the previous review of this component, each marked resolved or not, with id, path, line, author and the text of the finding — and the delta spec files of the change if there are any. Everything you read is confined to that. You hold nothing from the main thread, by construction; the threads are your memory.\n\nREAD, IN THIS ORDER:\n1. The diff of your paths only, WITH RENAME DETECTION: `git diff -M --stat <base>...HEAD -- <paths>` first, then `git diff -M <base>...HEAD -- <paths>`. A file that moved unchanged (an archive, a directory rename) is a rename line, not a diff to read; read the hunks of files that actually changed.\n2. The rules that apply. The unscoped rules are already in your context; a rule scoped to your path (chart.md, signal-rules.md, palette-and-mark.md) loads when you read a matching file, so read the changed files themselves.\n3. The delta specs named, if any.\n\nLOOK FOR, in this order — and only within your component:\n1. A contradiction of a recorded invariant or a retired term, naming the rule file and heading.\n2. A discrepancy with the specs of the change.\n3. Correctness: bugs, races, error paths.\n4. Documentation the diff made untrue and did not fix, naming the document.\n\nA RESOLVED thread is history, not work: one the review closed was fixed, one a person closed was dismissed — never raise either again, and report no verdict for it. Then re-check EACH UNRESOLVED thread you were handed against the current code: `fixed` (the problem is gone), `standing` (still holds), `gone` (the code it concerned no longer exists), `detached` (its anchor moved but the problem still holds — report where it is now as a new finding with the same claim).\n\nRETURN ONLY THIS JSON, nothing before or after it:\n{\"component\": \"<group>\",\n \"findings\": [{\"path\": \"...\", \"line\": <int>,\n               \"claim\": \"<AT MOST 15 WORDS, ONE CLAUSE — no so/because/which/and: the thing a maintainer answers `fix it` to>\",\n               \"where\": [\"<path:line>\", \"...\"],\n               \"rule\": \"<`file` › heading — NOTHING after the heading; or a spec path; or empty>\",\n               \"fix\": \"<AT MOST 12 WORDS, or empty when the fix is not obvious>\"}],\n \"changedNames\": [\"<CODE-SHAPED names only — an identifier, JSON field, env var, CR field, HTTP path, chart value or file name — that the diff ADDED, REMOVED or RENAMED, exact spelling, old and new. AT MOST 20. Never a heading, a label, a word from prose, or a name that merely appears in the diff unchanged>\"],\n \"threads\": [{\"id\": \"<thread id>\", \"verdict\": \"fixed|standing|gone|detached\"}]}\n\nRULES OF THE RETURN:\n- The four finding fields ARE the comment; the consolidator forwards them as four labeled lines and writes no prose. A claim is one clause; the consequence goes in `where` and `rule`, never after a `so`. Over 15 words it is two findings or a wrong one. A `rule` is a file and a heading, never a quoted sentence. `where` holds paths and lines only, never a sentence. Nothing explains, quotes a rule, or restates the diff.\n- One finding per problem.\n- `changedNames` is literal and code-shaped. The consolidator greps consumers of every entry across the whole repository — a name you omit is a consumer nobody checks, and a prose word you include costs a read of every file that uses the word.\n- No prose outside the JSON. No file outside your paths, except to read a scoped rule or a delta spec."}}'
 
       # THE EXECUTION FILE IS THE ONLY PER-TOOL TIMING THERE IS. The job log
@@ -335,10 +346,22 @@ jobs:
         env:
           EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
           CONCLUSION: ${{ steps.review.outputs.conclusion }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           if [ -n "$EXECUTION_FILE" ]; then
-            echo "the review ran (conclusion: ${CONCLUSION:-unreported})"
+            # RAN IS NOT FINISHED. A run that spawns its reviewers and ends its
+            # turn leaves an execution file, a green step and no review — #74.
+            # The one thing every finished review posts is the summary, and
+            # its verdict table has a fixed header. Require it.
+            summaries=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+              --jq '[.[] | select(.body | contains("| Read against | Verdict |"))] | length')
+            if [ "${summaries:-0}" -lt 1 ]; then
+              echo "::error::The review ran (conclusion: ${CONCLUSION:-unreported}) but posted no summary — it stopped before consolidating, most likely by ending its turn while reviewers were still running. Read the execution artifact."
+              exit 1
+            fi
+            echo "the review ran and posted its summary (conclusion: ${CONCLUSION:-unreported})"
             exit 0
           fi
           if ! git diff --quiet "origin/${{ github.base_ref }}" -- .github/workflows/claude-review.yml; then
