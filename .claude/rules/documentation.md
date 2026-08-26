@@ -30,6 +30,7 @@ in prose is followed until the evening somebody is tired.
 |---|---|
 | `openspec/config.yaml` — `rules.tasks` / `rules.proposal` | injected into the instructions each time a tasks or proposal file is GENERATED, so the section is written in the first place |
 | `.claude/hooks/require-docs-task.sh` — a `PreToolUse` hook on Bash | **REFUSES `openspec archive`** when the last section is not documentation, or when its tasks are unticked |
+| `.claude/hooks/require-release-docs.sh` — a `PreToolUse` hook on Bash | **REFUSES `git push` of a `chart-v<semver>` tag** unless `chart/Chart.yaml`, a `## [<semver>]` changelog entry and every version the docs print agree on the number. A CHANGE's docs and a RELEASE's docs are two events, and only the first had a gate until 13.1.0 shipped saying 13.0.1 |
 
 - **The config half reaches the model at the moment it writes the file**, where
   a context file may already have been compacted away.
@@ -79,6 +80,7 @@ filename — so the routing is explicit:
 | An integration's ADOPTER-FACING content | `docs/integrations/<system>.md` — named for the SYSTEM, never the subchart |
 | WHAT A BUNDLE RENDERS | nothing. The `renders` marker on that page, then `python3 .github/scripts/docs-generate.py` |
 | The PARENT chart's values, install, upgrade, uninstall | `docs/installation.md` |
+| A RELEASE — the chart version the install command prints, a first-party image tag a worked example shows | `docs/installation.md` and `docs/concepts.md`, and `python3 .github/scripts/docs-generate.py --check` FAILS on a number the chart does not ship. Chart 13.1.0 shipped with the site still saying `--version 13.0.1`, and no hook could see it: the two hooks check a task's shape and a commit's branch, nothing checks a typed number |
 | Breaking change + upgrade steps | `docs/CHANGELOG.md`, newest first |
 | Terminology | `.claude/rules/terminology.md`, `wiring.md`, `adapters.md` |
 | Invariants | `.claude/rules/invariants.md` |
