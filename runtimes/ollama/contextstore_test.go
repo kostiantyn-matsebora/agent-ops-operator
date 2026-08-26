@@ -54,7 +54,7 @@ func TestConfirmedMissing(t *testing.T) {
 	os.MkdirAll(s.Dir, 0o755)
 	var delays []time.Duration
 	s.Sleep = func(d time.Duration) { delays = append(delays, d) }
-	_, err := s.Load("oc-000000000000")
+	_, err := s.Load("oc-0a1b2c3d4e5f")
 	if !errors.Is(err, ErrContextMissing) {
 		t.Errorf("want ErrContextMissing, got %v", err)
 	}
@@ -72,7 +72,7 @@ func TestStoreErrorIsNotAbsence(t *testing.T) {
 	// so every read fails with ENOTDIR — is the store not answering. A stale
 	// mount looks the same. It must not be reported as the context being gone.
 	os.WriteFile(s.Dir, []byte("not a directory"), 0o644)
-	_, err := s.Load("oc-000000000000")
+	_, err := s.Load("oc-0a1b2c3d4e5f")
 	if errors.Is(err, ErrContextMissing) || err == nil || !strings.Contains(err.Error(), "unavailable") {
 		t.Errorf("an unreadable store is unavailability, got %v", err)
 	}

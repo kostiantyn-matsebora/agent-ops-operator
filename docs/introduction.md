@@ -99,7 +99,8 @@ mistake costs, and the earliest one is not the smallest.
 6. **[Talk to agents from your own chat]({{ '/guides/channel-adapter/' | relative_url }})**
    — the same, for the surface people type on.
 7. **[Run agents on your own backend]({{ '/guides/agent-runtime/' | relative_url }})**
-   — another vendor, a local model, your own harness.
+   — another vendor, your own harness. A local model is already shipped:
+   [Ollama]({{ '/runtimes/ollama/' | relative_url }}).
 
 Past what a guide needs:
 [concepts.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)

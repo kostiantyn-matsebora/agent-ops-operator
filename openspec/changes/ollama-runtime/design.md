@@ -311,27 +311,29 @@ sync paths are DOMAIN — `agent-runtime-ownership` already says a vendor arrivi
 as a bundle must not need a hand-written CR. The bundle is that rule's second
 instance.
 
-### 12. Documentation: an integration page, and the landing page says it
+### 12. Documentation: a Runtimes group on the site, and the landing page says it
 
-Ollama is a SYSTEM the adopter runs and points at — the same relation the site
-has to Home Assistant — so its page is `docs/integrations/ollama.md`, in the
-shape of the four existing integration pages and in the Integrations nav group,
-with the `renders bundle=ollama` marker so the renders table is generated.
-`docs/claude.md` is NOT the precedent: it sits at the root with no nav entry,
-reference material the README links directly, and this change leaves that
-asymmetry visible rather than fixing it.
+`docs/CLAUDE.md` rules that A RUNTIME IS NOT AN INTEGRATION — an integration
+page answers what starts work, what it may reach, where it answers and what it
+costs, and a runtime would leave three of the four blank. That rule stands, so
+the page is NOT `docs/integrations/ollama.md`. It is `docs/runtimes/ollama.md`,
+the first page of a new **Runtimes** nav group, and `docs/CLAUDE.md` gains the
+page kind: a runtime page answers what it EXECUTES, what it NEEDS from you,
+where its context lives, and what it costs to turn on. `docs/claude.md` stays
+the reference page it is — moving it into the group is its own change, and the
+asymmetry is visible on purpose.
 
 The landing page carries the local-model story or the proposal's opening claim
-is made nowhere an adopter reads: an Ollama chip in "Works with" (a logo under
-`docs/assets/img/logos/`, the same third-party treatment as the other four),
-the "Runs Claude Code" claim amended to "Runs Claude Code — or a local model",
-and a row in "Why agent-ops?" for keeping the cluster's data in the cluster.
-`README.md` mirrors all three — the claims line, the "Works with" line, the
-integrations row — within its 215-line budget, by `documentation.md`'s rule
-that the two are one story for two audiences. The page covers the operational
-facts (per-model serialisation against `MAX_ACTIVE_CONVERSATIONS`, `keep_alive`
-against `idleTtlMinutes`, `num_ctx`, a shell is the pod's shell) and how to
-choose between the two images. `docs/installation.md`'s hand-written
+is made nowhere an adopter reads: an Ollama chip in "Works with" linking the
+page (a mark under `docs/assets/img/logos/`, the same third-party treatment as
+the other four), the "Runs Claude Code" claim amended to "Runs Claude Code — or
+a local model", and a row in "Why agent-ops?" for keeping the cluster's data in
+the cluster. `README.md` mirrors all three — the claims line, the "Works with"
+line, the integrations row — within its 215-line budget, by `documentation.md`'s
+rule that the two are one story for two audiences. The page covers the
+operational facts (per-model serialisation against `MAX_ACTIVE_CONVERSATIONS`,
+`keep_alive` against `idleTtlMinutes`, `num_ctx`, a shell is the pod's shell)
+and how to choose between the two images. `docs/installation.md`'s hand-written
 `runtimes:` Ollama example becomes the bundle's values.
 `.claude/rules/structure.md` gains the component in its `runtimes/` row and
 `build-test.md` the second container.

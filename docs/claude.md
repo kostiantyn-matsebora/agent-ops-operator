@@ -7,7 +7,8 @@ operator's work contract.
 you supply a token, its credential `Secret`.
 
 **ON by default**, unlike every other bundle here. It is what a fresh install
-executes on.
+executes on. The other runtime bundle, `chart/charts/ollama/`, is the local-model
+one — see [runtimes/ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/).
 
 | Renders | When |
 |---|---|

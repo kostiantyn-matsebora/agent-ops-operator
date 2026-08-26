@@ -37,6 +37,10 @@ groups:
         url: /integrations/home-assistant/
       - title: Telegram
         url: /integrations/telegram/
+  - title: Runtimes
+    entries:
+      - title: Ollama
+        url: /runtimes/ollama/
   - title: Guides
     entries:
       - title: "Put an agent to work"

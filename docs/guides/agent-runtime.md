@@ -35,8 +35,9 @@ it, and reports what happened.
 
 Writing a runtime is appropriate when:
 
-- The **backend** is different — another vendor's CLI, a local model, your own
-  harness.
+- The **backend** is different — another vendor's CLI, your own harness. A
+  local model over Ollama is [already shipped]({{ '/runtimes/ollama/' | relative_url }}),
+  and is the worked example of a runtime that is its own harness.
 - You need behaviour the contract allows but `runtimes/claude` does not
   implement.
 

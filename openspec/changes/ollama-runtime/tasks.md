@@ -203,16 +203,18 @@ change is finished.
 
 **The adopter site:**
 
-- [ ] 11.4 Write `docs/integrations/ollama.md` in the shape of the four existing
-  integration pages, carrying the `<!-- generated: renders bundle=ollama -->`
-  marker: what Ollama is here (an endpoint you already run — the bundle deploys
-  none), enabling the bundle with worked values (`OLLAMA_URL`, `OLLAMA_MODEL`),
+- [ ] 11.4 Write `docs/runtimes/ollama.md` — a RUNTIME page, the kind
+  `docs/CLAUDE.md` gains in this task: what it executes, what it needs, where
+  its context lives, what it costs — carrying the
+  `<!-- generated: renders bundle=ollama -->` marker: what Ollama is here (an
+  endpoint you already run — the bundle deploys none), enabling the bundle with
+  worked values (`ollama.endpoint`, `ollama.model`),
   the env it reads, what the runtime supports (tools, continuity, cost,
   latency), how to choose between the two images, and the operational facts
   stated plainly — per-model serialisation vs `MAX_ACTIVE_CONVERSATIONS`,
   `keep_alive` vs `idleTtlMinutes`, `num_ctx`, `agentops-shell` means the pod's
   shell, model sizes worth trying
-- [ ] 11.5 `docs/_data/nav.yml`: the page in the Integrations group
+- [ ] 11.5 `docs/_data/nav.yml`: a new **Runtimes** group holding the page; `docs/CLAUDE.md`: the runtime page kind beside the integration one, and the `renders` marker's applicability
 - [ ] 11.6 `docs/index.md`: an Ollama chip in "Works with" linking the page, with
   `docs/assets/img/logos/ollama.svg` added the way the other four logos were;
   the "Runs Claude Code" claim amended to "Runs Claude Code — or a local model";

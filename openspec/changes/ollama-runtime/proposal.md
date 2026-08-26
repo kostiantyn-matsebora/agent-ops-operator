@@ -63,10 +63,11 @@ just describe claude-code.
   (dependency + condition). The bundle does NOT deploy Ollama; it points at an
   endpoint the adopter already runs. A route selects it with
   `pipelines[].runtimeRef: ollama`.
-- **Docs**: a new `docs/integrations/ollama.md` — an adopter integration page
-  in the shape of the four existing ones, Ollama being a system the adopter
-  runs and points at — with what the runtime supports, what it costs, the env
-  it reads, how to choose between the two images, and the operational facts.
+- **Docs**: a new `docs/runtimes/ollama.md`, the first page of a **Runtimes**
+  nav group — a runtime is not an integration by the site's own rule, so it
+  gets a page kind of its own — with what the runtime executes, what it needs,
+  where its context lives, what it costs, and how to choose between the two
+  images.
   The landing page and the README gain the Ollama chip, the amended "Runs
   Claude Code" claim and the local-model row; the installation page's bundle
   list and the site's navigation gain the entry.
@@ -120,7 +121,7 @@ instance of that rule, not a change to it.
   `chart/Chart.yaml`, `ollama.enabled: false`. Existing installs render
   byte-identically. The parent's `runtimes:` block and its defaults are
   untouched.
-- **Docs**: new `docs/integrations/ollama.md`; `docs/contracts.md` work contract gains the
+- **Docs**: new `docs/runtimes/ollama.md`; `docs/contracts.md` work contract gains the
   second reference implementation; `docs/installation.md` lists the bundle;
   `docs/_data/nav.yml` gains the page; `docs/CHANGELOG.md` records the chart
   minor; `README.md` unchanged. `.claude/rules/structure.md` gains the component

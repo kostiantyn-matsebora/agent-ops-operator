@@ -20,6 +20,7 @@ path. Plugins are limited to the set Pages enables by default.
 | `security.md` | the THREAT MODEL — trust boundaries, the flows that cross them, the control on each, the platform's own posture and the residual risk. **No values table, no default, no control YAML**: those are `installation.md`'s |
 | `installation.md` | the REAL install, and the PARENT chart's values |
 | `integrations/<system>.md` | one integration each: what starts work, what it may reach, where it answers, what turning it on costs |
+| `runtimes/<vendor>.md` | one runtime each: what it EXECUTES, what it NEEDS from you, where its context lives, what turning it on costs |
 | `guides/*.md` | one adoption tier each, in learning order — hand-written prose around GENERATED resource blocks |
 
 - **`console-guide.md` is published at `/console/`.** `console.md` is the
@@ -41,9 +42,14 @@ path. Plugins are limited to the set Pages enables by default.
     what it costs to turn on.
   - **"Where it answers" is OMITTED where the system carries no answers**, never
     left present and empty. Telegram is the only one that has it.
-  - **A RUNTIME IS NOT AN INTEGRATION.** `docs/claude.md` stays a reference
-    page: a runtime is what EXECUTES an agent, not a seam a Pipeline wires, and
-    three of the four questions would be blank.
+  - **A RUNTIME IS NOT AN INTEGRATION.** A runtime is what EXECUTES an agent,
+    not a seam a Pipeline wires, and three of the four questions would be
+    blank. It has a page KIND of its own, `runtimes/<vendor>.md`, in the
+    Runtimes nav group, answering its own four: what it executes, what it
+    needs, where its context lives, what it costs. `runtimes/ollama.md` is the
+    first. `docs/claude.md` stays a reference page until a change moves it.
+  - **The `renders` marker applies to a runtime bundle too.** It has no
+    sub-components, so the whole of it is the generator's "Always" row.
   - **A page states no exhaustive values.** `helm show values` is the list, and
     a hand-copied inventory rots.
 - **Every product asset is build output**, never a hand capture, and every one

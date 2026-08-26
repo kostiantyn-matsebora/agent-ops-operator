@@ -122,9 +122,11 @@ substrate they run on comes from this chart.
 | Prometheus alerts | `prometheus.enabled` | [prometheus]({{ '/integrations/prometheus/' | relative_url }}) |
 | Telegram | `telegram.enabled` | [telegram]({{ '/integrations/telegram/' | relative_url }}) |
 | Home Assistant | `home-assistant.enabled` | [home-assistant]({{ '/integrations/home-assistant/' | relative_url }}) |
+| Ollama runtime | `ollama.enabled` | [ollama]({{ '/runtimes/ollama/' | relative_url }}) |
 
-All four are off by default. Each bundle's own page owns its values — this page
-does not repeat them.
+All five are off by default. Each bundle's own page owns its values — this page
+does not repeat them. The fifth is a RUNTIME rather than an integration: it
+starts no work and answers nowhere, it executes.
 
 ## Configure
 
@@ -539,18 +541,22 @@ image:
 **The defaults are SUFFICIENT.** The model credential is the only value with no
 defensible default, and therefore the only thing you must supply.
 
-**Declaring a second vendor is an entry stating only its difference:**
+**A second vendor is a bundle, or an entry stating only its difference.** The
+chart ships [Ollama]({{ '/runtimes/ollama/' | relative_url }}) as a bundle:
 
 ```yaml
-runtimes:
-  - name: ollama
-    image: registry.example.com/agentops-runtime-ollama:0.1.0
-    contextStorage: external      # keeps context at its own API, needs no disk
+ollama:
+  enabled: true
+  endpoint: http://ollama.ollama.svc:11434   # a server you already run
+  model: qwen2.5:14b                         # a model already pulled there
 
 pipelines:
   - name: house-ops
     runtimeRef: ollama            # the route selects it
 ```
+
+A vendor with no bundle is a `runtimes:` entry with its own image, and
+whatever differs from the defaults.
 
 **`default` is what a route naming no `runtimeRef` resolves to.** The `claude`
 bundle ships it, on by default. **Turn that bundle off with no replacement and
