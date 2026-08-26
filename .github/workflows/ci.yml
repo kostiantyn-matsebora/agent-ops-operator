@@ -72,12 +72,13 @@ jobs:
             changed=$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" || true)
           fi
 
-          # THE THREE FILES THAT REBUILD EVERYTHING. The shared Dockerfile is
+          # THE FOUR PATHS THAT REBUILD EVERYTHING. The shared Dockerfile is
           # nine components' recipe, `components.sh` decides what exists at all,
-          # and this workflow decides how any of it is tested. A change to one
-          # of them touches no component directory and invalidates all of them.
+          # this workflow decides how any of it is tested, and the scan action
+          # runs against every image. A change to one of them touches no
+          # component directory and invalidates all of them.
           if [ -z "$changed" ] \
-             || echo "$changed" | grep -qE '^\.github/(docker/|components\.sh|workflows/ci\.yml)'; then
+             || echo "$changed" | grep -qE '^\.github/(docker/|components\.sh|workflows/ci\.yml|actions/)'; then
             echo "building everything: base=${BASE_SHA:-none}" >&2
             echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
             echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
