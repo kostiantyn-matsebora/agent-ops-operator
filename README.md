@@ -13,7 +13,8 @@ can reply to.
 <img src="docs/assets/img/claim-thinks.svg" width="18" alt=""> **Automation that thinks** &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/kubernetes.svg" width="18" alt=""> **Kubernetes-native** &nbsp;·&nbsp;
 <img src="docs/assets/img/claim-gitops.svg" width="18" alt=""> **GitOps-ready** &nbsp;·&nbsp;
-<img src="docs/assets/img/logos/claude.svg" width="18" alt=""> **Runs Claude Code — or a local model**
+<img src="docs/assets/img/logos/claude.svg" width="18" alt=""> **Runs Claude Code** &nbsp;·&nbsp;
+**Runs Ollama**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-agent--ops-informational)](https://kostiantyn-matsebora.github.io/agent-ops-operator/)

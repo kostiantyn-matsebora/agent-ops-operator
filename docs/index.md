@@ -12,7 +12,8 @@ A Kubernetes operator for agents you can address.
 - ![]({{ '/assets/img/claim-thinks.svg' | relative_url }}) Automation that thinks
 - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes-native
 - ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps-ready
-- ![]({{ '/assets/img/logos/claude.svg' | relative_url }}) Runs Claude Code — or a local model
+- ![]({{ '/assets/img/logos/claude.svg' | relative_url }}) Runs Claude Code
+- Runs Ollama
 
 {: .ao-tabs #tour}
 - **How it works**
