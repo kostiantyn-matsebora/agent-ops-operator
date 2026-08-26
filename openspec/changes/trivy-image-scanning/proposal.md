@@ -1,6 +1,6 @@
 ## Why
 
-**Thirteen images are published and none of them is ever scanned.** CI builds
+**Fourteen images are published and none of them is ever scanned.** CI builds
 every image on every pull request and asserts the Dockerfile works; nothing asks
 what is inside the result. `.github/` contains no scanner of any kind.
 
@@ -38,15 +38,17 @@ Two properties of it are the reason it works, and both are kept:
 - **The SARIF category is per component.** `deployment-dashboard` passes a
   distinct `category` per service because results otherwise overwrite one
   another in the security tab. Here that becomes
-  `trivy-${{ matrix.image.component }}` across a thirteen-way matrix, where
-  getting it wrong means twelve components' findings silently replaced by the
-  thirteenth's.
+  `trivy-${{ matrix.image.component }}` across a fourteen-way matrix, where
+  getting it wrong means thirteen components' findings silently replaced by the
+  fourteenth's.
 - **`security-events: write` is granted on the scanning job only.** `ci.yml`
   declares `contents: read` at workflow level, and that stays.
 - **A scheduled scan of the PUBLISHED images.** Beyond the ported pattern, and
   separable — see `design.md` D4. It is the only mechanism that catches a CVE
   disclosed after an image was built, which is a case no build-triggered scan can
-  reach. It reports and never fails.
+  reach — and, because CI builds only the components a pull request touched,
+  the only mechanism that scans an untouched component's base image at all. It
+  reports and never fails.
 - **Nothing is added to the release path.** See `design.md` D3.
 
 ## Capabilities
@@ -57,10 +59,13 @@ Two properties of it are the reason it works, and both are kept:
   component's overwriting another's, and what an exception is.
 
 ### Modified Capabilities
-<!-- none. `continuous-integration` and `release-publishing` are introduced by
-     the unarchived `sdlc-setup` change and are not yet in openspec/specs/, so
-     this change declares its own capability rather than writing a delta against
-     one that does not exist. See Impact — Ordering. -->
+- `security-posture-page`: the supply-chain statement on `docs/security.md`
+  says what the published images carry; scanning joins it, stated with the same
+  bound (fixable HIGH/CRITICAL gate, unfixable findings reported nowhere).
+
+<!-- `continuous-integration` is deliberately NOT modified. Scanning is its own
+     capability — what blocks, what is reported, what an exception is — and the
+     CI spec keeps describing the build the scan is attached to. -->
 
 ## Impact
 
@@ -75,10 +80,12 @@ Two properties of it are the reason it works, and both are kept:
 
 **Ordering**
 
-- **`sdlc-setup` should archive before this change does.** It introduces
-  `continuous-integration` and `release-publishing`, and this change's job lives
-  inside the workflow those describe. The other order leaves this requirement
-  pointing at a CI capability the published specs do not contain.
+- None left. `sdlc-setup` and `publish-security-page` both archived on
+  2026-08-24, so `continuous-integration`, `release-publishing` and
+  `security-posture-page` are published specs this change reads against.
+- **CI builds only what a pull request changed** (`continuous-integration`), so
+  a pull request scans only the components it touched. That is what makes the
+  scheduled scan a coverage mechanism rather than a nicety.
 
 **Documentation — the reference docs**
 
@@ -94,11 +101,10 @@ Two properties of it are the reason it works, and both are kept:
 
 **Documentation — the adopter site**
 
-- Expected to need nothing: no site page describes CI.
-- **`publish-security-page` intersects and is not blocked.** Its supply-chain
-  lines say what published images carry; once this lands, "nothing scans them"
-  stops being true and its gap list is one entry shorter. Recorded so the two are
-  reconciled deliberately rather than found contradicting each other.
+- `docs/security.md` — **required.** Its supply-chain paragraph states SBOM and
+  provenance and the absence of signing; what the images are scanned for, and
+  what is knowingly not gated, is stated beside it. No other site page describes
+  CI.
 
 **Not affected**
 

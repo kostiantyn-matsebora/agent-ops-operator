@@ -8,7 +8,7 @@ never the findings themselves — a findings list is a local artifact.
   will use (`severity CRITICAL,HIGH`, `ignore-unfixed: true`). Record the count
   per component
 - [ ] 1.2 Record the counts WITHOUT `ignore-unfixed` as well, for the three base
-  tiers only — distroless, `debian:bookworm-slim` (egress-proxy),
+  tiers only — distroless, `debian:bookworm-slim` (egress-proxy, runtime-ollama),
   `node:22-bookworm-slim` (runtime-claude). This is the number D5 trades away,
   and it should be known rather than assumed
 - [ ] 1.3 Decide from 1.1 whether any fixable finding must be fixed before the
@@ -55,15 +55,18 @@ step for step; D1 says this is a port, not a redesign.
   pull request from a fork, where the token is read-only, and guard the upload so
   an external contribution cannot go red for a permission it cannot hold. The
   GATE must still run for a fork — that is the half that protects the merge
-- [ ] 3.5 Cache Trivy's vulnerability database across the matrix. Thirteen legs
-  pulling it is slow and rate-limitable, and the gate now carries a network
+- [ ] 3.5 Cache Trivy's vulnerability database across the matrix. Up to
+  fourteen legs pulling it is slow and rate-limitable, and the gate now carries a network
   dependency the build did not have
 - [ ] 3.6 Enable the gate LAST, after task 1 is closed out
 - [ ] 3.7 Verify per-component isolation on a real run: every component's
   findings readable separately in the security tab, none replaced by another's.
   D2 names this as the highest-consequence detail, and it fails GREEN
 - [ ] 3.8 Verify `fail-fast: false` still holds, so one component's failure does
-  not hide the other twelve
+  not hide the other thirteen
+- [ ] 3.9 Verify the scan follows the changed-only filter: a pull request
+  touching one component scans that one and builds nothing else. The scan adds
+  no matrix leg the build did not already have
 
 ## 4. The scheduled scan
 
@@ -100,7 +103,7 @@ Additive and separable — D4. Its own workflow, not a second trigger on `ci.yml
 - [ ] 6.2 That same run still uploaded its SARIF — this is what `if: always()`
   buys and it is invisible until the gate fails
 - [ ] 6.3 A clean pull request passes, and CI's wall-clock time is still
-  acceptable with thirteen scans in the matrix
+  acceptable on a rebuild-everything change — fourteen scans in the matrix
 - [ ] 6.4 `python3 .github/scripts/publication-guard.py` passes. Record the
   verdict only
 - [ ] 6.5 `openspec validate trivy-image-scanning --strict`
@@ -126,9 +129,13 @@ Both halves, listed separately because they are skipped independently.
 
 ### 7.2 The adopter site
 
-- [ ] 7.2.1 Confirm no site page describes CI, and that none needs editing
-- [ ] 7.2.2 **Reconcile with `publish-security-page`.** Its supply-chain lines
-  and its not-addressed section are written against "nothing scans them". If that
-  change has not landed, update its artifacts; if it has, update the page. Either
-  way this is a deliberate reconciliation, not something discovered later by a
-  reader meeting two documents that disagree
+- [ ] 7.2.1 `docs/security.md` — the supply-chain paragraph ("Every published
+  image carries an SBOM and max-mode provenance…") states beside it that every
+  image is scanned on the pull request that builds it and on a schedule
+  afterwards, what blocks (a fixable HIGH/CRITICAL) and what is knowingly not
+  gated (unfixable findings). Same register as the signing sentence: what holds,
+  and no further
+- [ ] 7.2.2 The `security-posture-page` MODIFIED delta in this change's
+  `specs/` says the same thing, so the published spec and the page agree.
+  Created with `/opsx:continue`, not by hand
+- [ ] 7.2.3 Confirm no other site page describes CI
