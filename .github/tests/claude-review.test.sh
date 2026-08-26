@@ -71,6 +71,25 @@ assert_contains "$prompt" "git grep -l -F"
 assert_contains "$prompt" "unreviewed: <group>"
 assert_contains "$prompt" ".claude/rules/"
 
+it "excludes the developer-session rules by ** glob, and keeps the review's"
+excl=$(py 'print(" ".join(json.loads(parts[parts.index("--settings")+1])["claudeMdExcludes"]))')
+for f in build-test worktree-delivery session-naming publication visual-check answering; do
+  assert_contains "$excl" "**/.claude/rules/$f.md"
+done
+for f in invariants terminology wiring retired-vocabulary adapters structure authoring documentation gotchas; do
+  assert_not_contains "$excl" "$f.md"
+done
+
+it "hands a reviewer the component's whole review history, resolved threads included"
+assert_contains "$prompt" "unresolved AND resolved"
+assert_contains "$p" "A RESOLVED thread is history, not work"
+
+it "excludes only rule files, never CLAUDE.md"
+assert_not_contains "$excl" "CLAUDE.md"
+
+it "every excluded rule exists — a glob that matches nothing is a rule silently kept"
+for g in $excl; do [ -f "$ROOT/${g#**/}" ] && pass || fail "no such rule: $g"; done
+
 it "still holds the two-job split: only reconcile has contents: write"
 assert_equals "reconcile" "$(python3 -c '
 import yaml,sys; d=yaml.safe_load(open(sys.argv[1]))
