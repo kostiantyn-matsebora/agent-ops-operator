@@ -169,19 +169,19 @@
   runtime-ollama-v0.1.0`; then check the REGISTRY, flip the new package to
   public in the UI, and confirm both architectures landed (never overwrite a
   pushed tag)
-- [ ] 10.4 Deploy the worktree's chart (helmfile with the worktree `chartPath`,
+- [x] 10.4 Deploy the worktree's chart (helmfile with the worktree `chartPath`,
   `helm upgrade --dry-run=server` first) with the bundle enabled against a real
   Ollama endpoint: a text-only run, a run using a built-in tool, and a run using
   an MCP tool — checking pod logs for the tool lines and the manager for the
   reported result
-- [ ] 10.5 Continuity: run a second unit on the same conversation and confirm
+- [x] 10.5 Continuity: run a second unit on the same conversation and confirm
   `continuity: continued`; confirm the sidecar snapshot holds
   `.agentops/contexts/`; delete the context file and confirm the run FAILS with
   `unavailable` and a readable message rather than answering
-- [ ] 10.6 Tool gating: a Pipeline binding `agentops-observe` only produces a
+- [x] 10.6 Tool gating: a Pipeline binding `agentops-observe` only produces a
   run whose advertised tools exclude `Bash`, and an MCP call outside the bound
   toolsets is refused by the egress proxy as well as by the gate
-- [ ] 10.7 Rollback: disable the bundle, confirm an inflight conversation reports
+- [x] 10.7 Rollback: disable the bundle, confirm an inflight conversation reports
   the missing runtime on its status and a new one on the re-pointed route runs
   on the reference runtime
 
@@ -192,18 +192,18 @@ change is finished.
 
 **Reference docs:**
 
-- [ ] 11.1 `docs/contracts.md`: name the second reference implementation in the
+- [x] 11.1 `docs/contracts.md`: name the second reference implementation in the
   work contract section, and what building it found about the contract's
   vendor-neutrality
-- [ ] 11.2 `docs/concepts.md`: the runtime section names both images where it
+- [x] 11.2 `docs/concepts.md`: the runtime section names both images where it
   names one; `docs/claude.md` gets one line pointing at the Ollama page
-- [ ] 11.3 `.claude/rules/structure.md`: `ollama` in the `runtimes/` row and a
+- [x] 11.3 `.claude/rules/structure.md`: `ollama` in the `runtimes/` row and a
   short entry under the runtime section; `.claude/rules/build-test.md`: the
   `agentops-go125` container (if 1.3 did not already land it)
 
 **The adopter site:**
 
-- [ ] 11.4 Write `docs/runtimes/ollama.md` — a RUNTIME page, the kind
+- [x] 11.4 Write `docs/runtimes/ollama.md` — a RUNTIME page, the kind
   `docs/CLAUDE.md` gains in this task: what it executes, what it needs, where
   its context lives, what it costs — carrying the
   `<!-- generated: renders bundle=ollama -->` marker: what Ollama is here (an
@@ -214,21 +214,21 @@ change is finished.
   stated plainly — per-model serialisation vs `MAX_ACTIVE_CONVERSATIONS`,
   `keep_alive` vs `idleTtlMinutes`, `num_ctx`, `agentops-shell` means the pod's
   shell, model sizes worth trying
-- [ ] 11.5 `docs/_data/nav.yml`: a new **Runtimes** group holding the page; `docs/CLAUDE.md`: the runtime page kind beside the integration one, and the `renders` marker's applicability
-- [ ] 11.6 `docs/index.md`: an Ollama chip in "Works with" linking the page, with
+- [x] 11.5 `docs/_data/nav.yml`: a new **Runtimes** group holding the page; `docs/CLAUDE.md`: the runtime page kind beside the integration one, and the `renders` marker's applicability
+- [x] 11.6 `docs/index.md`: an Ollama chip in "Works with" linking the page, with
   `docs/assets/img/logos/ollama.svg` added the way the other four logos were;
   the "Runs Claude Code" claim amended to "Runs Claude Code — or a local model";
   a "Why agent-ops?" row for keeping the cluster's data in the cluster
-- [ ] 11.7 `README.md`: mirror the three — the claims line, the "Works with"
+- [x] 11.7 `README.md`: mirror the three — the claims line, the "Works with"
   line, the integrations table row — and verify it stays within the 215-line
   budget
-- [ ] 11.8 `docs/installation.md`: the bundle in the bundles list with its
+- [x] 11.8 `docs/installation.md`: the bundle in the bundles list with its
   `enabled` flag and the two values an adopter must decide; the hand-written
   `runtimes:` Ollama example becomes the bundle's values
-- [ ] 11.9 `docs/introduction.md` / `docs/guides/agent-runtime.md`: where they
+- [x] 11.9 `docs/introduction.md` / `docs/guides/agent-runtime.md`: where they
   say "a local model", link the page — nothing more, the default install is
   unchanged
-- [ ] 11.10 Run `python3 .github/scripts/docs-generate.py` and commit what it
+- [x] 11.10 Run `python3 .github/scripts/docs-generate.py` and commit what it
   regenerates (the renders table; `cr-reference.md` is unaffected — no CRD
   changed), then `python3 .github/scripts/publication-guard.py` — the page names
   a placeholder endpoint, never a real one
