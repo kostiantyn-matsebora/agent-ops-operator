@@ -91,7 +91,7 @@
   for concurrency and per-reviewer duration against the three timed serial
   runs (126s, 351s, 415s); read the summary for the reach line; read one
   inline finding for the shape. Record the numbers here.
-  **BLOCKED ON THE MERGE**, for the reason 5.1 states. The dry run's numbers stand in until then: 3 reviewers, 127s wall, 8 → 5 findings, reach 3 broken / 4 hold.
+  **LIVE ON #70, the archive pull request** — one group (`openspec/`), so one reviewer and no parallelism to gain; model step 337s. The summary was in shape (counts, reach line, table, verdict table) and the one finding was real: a duplicate `--agents` line had left the stale reviewer running. Two costs were visible in that run and are fixed on the same pull request: an archive is a directory MOVE read line by line without `-M`, and prose words reported as changed names sent the reach step reading their consumers. The execution file is now kept as an artifact, so the next slow run is measured per tool rather than reasoned about. The dry run's numbers — 3 reviewers, 127s, 8 → 5 findings — remain the only multi-component measurement.
 
 ## 7. Documentation
 
