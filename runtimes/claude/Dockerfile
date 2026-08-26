@@ -1,4 +1,3 @@
-# GATE TEST — reverted in the next commit.
 # agentops claude agent runtime — the default AgentRuntime image.
 # docker buildx build --platform linux/amd64,linux/arm64 \
 #   -t ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:<tag> ./runtimes/claude/
