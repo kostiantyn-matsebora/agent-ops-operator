@@ -46,7 +46,7 @@ MCP server carries its OWN account and its own grant, which is how a demo
 install reads the cluster with no runtime permissions at all.
 
 **A release-wide permission MODE used to select an account.** It is gone, with
-no alias — see [CHANGELOG]({{ '/CHANGELOG.md' | relative_url }}) for the upgrade step.
+no alias — see [CHANGELOG]({{ '/changelog/' | relative_url }}) for the upgrade step.
 
 **One more decision comes with it:** whether an agent may run a pod
 ([`allowPodExecution`](#allowpodexecution--read-this-before-turning-it-on)).
@@ -187,7 +187,7 @@ fails the render rather than being ignored:
 | `runtime.workspacePvcRef` | `persistence.workspace`, or a route's own binding |
 
 The default claim was renamed too, and **nothing copies a volume**.
-[`CHANGELOG.md`]({{ '/CHANGELOG.md' | relative_url }}) carries the two ways through and is the only
+[`CHANGELOG.md`]({{ '/changelog/' | relative_url }}) carries the two ways through and is the only
 warning a GitOps install gets.
 
 #### Pointing a volume at storage the chart did not create
@@ -700,7 +700,7 @@ CRDs *and* the Pipelines and Channels that are instances of them.
 | `crds.keep: true` | inherent — Helm never deletes CRDs it installed from `crds/` |
 
 **Helm never upgrades them either.** When a release changes a CRD field, its
-entry in [CHANGELOG.md]({{ '/CHANGELOG.md' | relative_url }}) says so and gives you the `kubectl apply`
+entry in [CHANGELOG.md]({{ '/changelog/' | relative_url }}) says so and gives you the `kubectl apply`
 line. Nothing else in the chart needs that treatment.
 
 ## Wire one route
@@ -755,7 +755,7 @@ helm upgrade agent-ops `
   --version <version> -n agent-ops
 ```
 
-Read [CHANGELOG.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
+Read [the changelog]({{ '/changelog/' | relative_url }})
 first. It is the only place migration steps live, newest first, keyed by chart
 version.
 

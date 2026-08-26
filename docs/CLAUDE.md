@@ -19,6 +19,7 @@ path. Plugins are limited to the set Pages enables by default.
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `security.md` | the THREAT MODEL — trust boundaries, the flows that cross them, the control on each, the platform's own posture and the residual risk. **No values table, no default, no control YAML**: those are `installation.md`'s |
 | `installation.md` | the REAL install, and the PARENT chart's values |
+| `CHANGELOG.md` | every chart version newest first, and the upgrade steps — a SITE page at `/changelog/`, because the upgrade guides it holds are what Installation sends an adopter to. It carried no front matter until 13.1.0, and the links landed on raw text |
 | `integrations/<system>.md` | one integration each: what starts work, what it may reach, where it answers, what turning it on costs |
 | `runtimes/<vendor>.md` | one runtime each: what it EXECUTES, what it NEEDS from you, where its context lives, what turning it on costs |
 | `guides/*.md` | one adoption tier each, in learning order — hand-written prose around GENERATED resource blocks |
@@ -63,7 +64,8 @@ path. Plugins are limited to the set Pages enables by default.
   answered.
 - **The recording carries no text of its own.** No caption, no title card. What
   each beat shows is the page's words, beside it.
-- **Every other `docs/*.md` is a reference page, not a site page.** They carry no
+- **Every other `docs/*.md` is a reference page, not a site page** — the changelog
+  is the exception above. They carry no
   front matter, so Jekyll copies them verbatim. Do not add front matter, headings
   or navigation entries to them — publishing one is its own change.
 - **`cr-reference.md` is GENERATED and is one of those reference pages.** Every
