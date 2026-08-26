@@ -9,7 +9,7 @@ SHALL be derived from the Dockerfiles that exist rather than enumerated in
 prose.
 
 **IT SHALL BUILD WHAT CHANGED, NOT EVERYTHING.** A component SHALL be built when
-a file inside its own directory moved. Thirteen image builds and twelve module
+a file inside its own directory moved. Fourteen image builds and thirteen module
 builds on a documentation-only commit is cost with no signal, and the wait it
 adds is paid by every contributor on every push.
 
