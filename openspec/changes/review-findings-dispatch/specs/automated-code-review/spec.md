@@ -125,3 +125,28 @@ person deals with it — which is the intended cost, not a side effect.
 - **WHEN** a dispatch completes
 - **THEN** every thread nobody accepted is still open, and the pull request
   still cannot merge
+
+### Requirement: A finding is written to be triaged, not read as an essay
+
+An inline finding SHALL open with a one-sentence claim a person can accept or
+reject, followed by at most a few lines naming what breaks or which rule is
+contradicted, and SHALL NOT restate the diff or the rule's full argument. The
+summary SHALL be a count line and a table of new findings, with no prose around
+it.
+
+**Triage happens by reading a thread beside a diff.** A finding that is a wall
+of text is skimmed, and a skimmed finding is neither accepted nor dismissed —
+it stays open, blocking the merge for a reason nobody read. The authoring rules
+that bind this project's own documents bind its review for the same reason.
+
+#### Scenario: A finding is posted
+
+- **WHEN** the review comments on a line
+- **THEN** the comment leads with a one-sentence claim, stays within a few
+  lines, and names the rule or spec by file rather than quoting it
+
+#### Scenario: The summary is posted
+
+- **WHEN** the review posts its summary
+- **THEN** it is the four counts and a table of new findings, and a run with
+  nothing new carries the counts and one line

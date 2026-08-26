@@ -73,9 +73,11 @@ must be re-checked rather than assumed.
 **Code**
 
 - `.github/workflows/` — a new comment-triggered workflow with the two-step
-  split. `claude-review.yml` is untouched: a pull request may not rewrite the
-  review that judges it, and the same argument applies to the thing that fixes
-  its findings.
+  split. `claude-review.yml` changes in ONE respect: the prompt's reporting
+  format, so a finding is something a maintainer can read in a thread and
+  answer `fix it` to — six lines, a claim first — and the summary is a count
+  line and a table rather than prose. The mechanism is untouched, and the
+  action still refuses to run the edited file on its own pull request.
 - `.github/scripts/` — the thread-walking program that produces the work list,
   and the applier. `resolve-review-threads.py` is REUSED, not replaced: it
   already refuses any thread the review did not author.

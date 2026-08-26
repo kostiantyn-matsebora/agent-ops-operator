@@ -87,6 +87,18 @@
   **VERIFIED on #65.** With the second finding's thread untriaged, `mergeStateStatus` read `BLOCKED` after the dispatch completed — the conversation-resolution rule holding it, with `ci-green` green.
   **ALREADY CLOSED, on #62, before this change.** `github-change-lifecycle` was archived (`2026-08-26-github-change-lifecycle`) with §7.5, 7.6, 7.8 and 7.9 each ticked and verified there — a fixed-and-unfixed pair was reached on a probe pull request after all. Nothing to record; the archived tasks file already carries the verdicts.
 
+## 6a. The review's findings are readable in a thread
+
+- [x] 6a.1 Rewrite the reporting half of the `claude-review.yml` prompt to the
+  authoring rules: an inline finding is ≤ 6 lines led by a one-sentence claim,
+  the summary is a count line plus a table of NEW findings, and nothing is
+  restated. Verify the live shape on the next reviewed pull request — the
+  action refuses to run the edited file on this one, and the always-ran guard
+  reports that as a notice rather than green.
+  **DONE in the prompt; live shape blocked on the merge**, for the reason the
+  task states. The mechanism half of the file is untouched — `git diff` on it
+  is confined to the prompt's `HOW TO WRITE` section.
+
 ## 7. Documentation
 
 ### 7.1 The reference docs
