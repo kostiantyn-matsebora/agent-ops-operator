@@ -84,6 +84,10 @@ runs:
         exit-code: "0"
         ignore-unfixed: true
         severity: CRITICAL,HIGH
+        # SARIF IGNORES `severity` unless told otherwise — the action emits every
+        # level by default, so the tab showed MEDIUM findings the gate never sees.
+        # One threshold for both runs is the whole point of the pair (design D5).
+        limit-severities-for-sarif: true
         cache: false
         cache-dir: ${{ github.workspace }}/.cache/trivy
       env:
