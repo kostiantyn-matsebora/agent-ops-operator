@@ -327,7 +327,7 @@ and it fails if any job that DID run failed.
 | `pr-title` | the title would not read as a commit subject |
 | `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |
 
-The last two judge only what your pull request TOUCHED. A dozen changes are open
+`openspec` and `docs-task` judge only what your pull request TOUCHED. A dozen changes are open
 at any time and an unfinished one is unfinished correctly, so a gate judging all
 of them would fail every pull request for work it was not about.
 
