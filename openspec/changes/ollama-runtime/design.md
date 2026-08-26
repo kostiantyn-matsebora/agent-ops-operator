@@ -316,7 +316,7 @@ instance.
 `docs/CLAUDE.md` rules that A RUNTIME IS NOT AN INTEGRATION — an integration
 page answers what starts work, what it may reach, where it answers and what it
 costs, and a runtime would leave three of the four blank. That rule stands, so
-the page is NOT `docs/runtimes/ollama.md`. It is `docs/runtimes/ollama.md`,
+the page is NOT `docs/integrations/ollama.md`. It is `docs/runtimes/ollama.md`,
 the first page of a new **Runtimes** nav group, and `docs/CLAUDE.md` gains the
 page kind: a runtime page answers what it EXECUTES, what it NEEDS from you,
 where its context lives, and what it costs to turn on. `docs/claude.md` stays
