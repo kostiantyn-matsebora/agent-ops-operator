@@ -1,0 +1,71 @@
+# The Ollama agent runtime, as a bundle.
+#
+# OFF BY DEFAULT. The `claude` bundle is what a fresh install executes on; this
+# one is a SECOND vendor an install turns on beside it and selects per route
+# with `pipelines[].runtimeRef: ollama`. Both run on one install — the vendor
+# runtime for the hard lanes, this one for the routine ones that must not leave
+# the cluster.
+#
+# THE BUNDLE DEPLOYS NO MODEL SERVER. `endpoint` names an Ollama you already
+# run — in the cluster, on a GPU box, anywhere the runtime pod can reach — and
+# `model` names one already pulled there. Two things this chart cannot know,
+# and therefore the two you must set.
+#
+# WHAT IT DOES NOT SHIP, because that IS the substrate and stays the parent's:
+# the runtime DEFAULTS every runtime inherits, the FLOOR ServiceAccount, and the
+# context volume. This bundle declares one runtime and inherits the rest.
+enabled: false
+
+# The AgentRuntime CR name, what a Pipeline's `runtimeRef` selects. `default`
+# is legal here if the `claude` bundle is off and this is the install's only
+# runtime; the parent's default-runtime guard says so if neither answers.
+name: ollama
+
+# The runtime image, and the one place its tag is written. NO domain tooling in
+# it: what an agent may reach is wiring — see docs/concepts.md#runtime-images-are-generic.
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-ollama:0.1.0
+
+# WHERE THE MODEL IS. Required when the bundle is enabled; the render fails
+# naming this key otherwise, because a runtime with no endpoint would start,
+# report the endpoint unreachable on every run, and look like a broken model.
+endpoint: ""            # e.g. http://ollama.ollama.svc:11434
+
+# WHICH MODEL, by its Ollama name — already pulled on that server. Required
+# with the bundle. A model that cannot call tools is legitimate on a text-only
+# route and fails a tool-granting one by name; `docs/integrations/ollama.md`
+# says which sizes are worth trying.
+model: ""               # e.g. qwen2.5:14b
+
+# THE CONTEXT WINDOW, sent on EVERY request. Ollama's server default silently
+# drops the front of an over-long prompt — where the system prompt and the
+# signal payload sit — so it is never left to the server. Raise it for models
+# that support more; the cost is memory on the model server.
+numCtx: 8192
+
+# How long the server keeps the model loaded after a run ("5m", "1h", "-1"
+# for always). Set with `idleTtlMinutes` in mind: a runtime pod that outlives
+# the model's residency pays a model load on its next run.
+keepAlive: "10m"
+
+# Further knobs the runtime reads, as ordinary env entries. `env` here is laid
+# OVER the ones the keys above produce; state a credential for a proxy in
+# front of Ollama as one more entry, with `valueFrom` — the manager reads no
+# Secrets and the kubelet resolves it.
+#
+#   OLLAMA_TIMEOUT_S   one inference call's timeout, default 600
+#   BASH_TIMEOUT_S     the Bash tool's timeout, default 120
+#   TOOL_OUTPUT_MAX    bytes a tool result is truncated at, default 65536
+env: []
+
+# WHERE THIS RUNTIME KEEPS ITS CONTEXT, relative to $HOME — one JSON transcript
+# per conversation. This is the value that turns context synchronisation ON,
+# and it is here rather than in the release-wide defaults for the same reason
+# the image is: it is this backend's layout and means nothing to another.
+# Clearing it mounts the context volume directly, with no sidecar.
+contextSync:
+  paths:
+    - ".agentops/contexts/**"
+
+# Any key `global.agentops.runtimeDefaults` accepts is accepted here too, and
+# overrides it for THIS runtime only — `idleTtlMinutes`, `nodeSelector`,
+# `resources`, `egressMediation`, `contextStorage`.

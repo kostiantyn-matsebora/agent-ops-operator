@@ -158,8 +158,9 @@ not see. */ -}}
 {{- /* The runtime-shipping bundles. One line each, and there is no way to
 discover them: a bundle whose runtime this list missed would render a CR the
 default-runtime guard could not see, and the manager's bootstrap env would miss
-the sidecar and proxy images that runtime asked for. */ -}}
-{{- range $key := list "claude" -}}
+the sidecar and proxy images that runtime asked for. `ollama` proved the point:
+its first render passed every test but this guard, which reported "(none)". */ -}}
+{{- range $key := list "claude" "ollama" -}}
 {{- $bv := index $root.Values $key -}}
 {{- if and $bv $bv.enabled -}}
 {{- $out = append $out (fromYaml (include "agentops.mergedRuntime" (dict "root" $root "entry" (omit $bv "enabled" "global")))) -}}

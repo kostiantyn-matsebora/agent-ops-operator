@@ -155,6 +155,18 @@ claude:
   credentialsSecret:
     token: ""
 
+# The SECOND vendor this chart ships: a local-model runtime over an Ollama
+# endpoint you already run (chart/charts/ollama/values.yaml). OFF by default,
+# and it deploys no model server — `endpoint` and `model` are yours to set.
+# A route selects it with `pipelines[].runtimeRef: ollama`.
+#
+#   ollama:
+#     enabled: true
+#     endpoint: http://ollama.ollama.svc:11434
+#     model: qwen2.5:14b
+ollama:
+  enabled: false
+
 # THE RUNTIMES THIS INSTALL DECLARES — the second of the two runtime blocks.
 #
 # THE RULE SEPARATING THEM, in one line each:

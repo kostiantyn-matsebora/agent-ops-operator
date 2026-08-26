@@ -7,7 +7,7 @@ container IS at runtime.
 | Group | Holds | The type |
 |---|---|---|
 | `platform/` | `manager` `console` `housekeeping` `context-sync` `egress-proxy` | the product's own components |
-| `runtimes/` | `claude` | client side of the work contract |
+| `runtimes/` | `claude` `ollama` | client side of the work contract |
 | `signals/` | `cron` `alertmanager` `k8s-events` `ha` `telegram` | push to `/signal/inbound` |
 | `channels/` | `telegram` | serve `/channel/*` |
 | `gateways/` | `telegram` | speaks no agent-ops contract at all |
@@ -158,6 +158,33 @@ contract.
   agent may reach is WIRING.
 - **Need one? Derive an image** and point `AgentRuntime.spec.image` at it
   (README). That is why the field exists.
+
+### `runtimes/ollama/`
+
+**The second runtime, in which the RUNTIME is the harness** — Go, the agent
+loop, tool dispatch, the transcript and the context handle all its own; Ollama
+is called only for the next message. It is what proved the work contract
+vendor-neutral: no manager, CRD or contract change was needed to build it.
+
+- **`ollama.go` is the ONLY file that knows the vendor**, behind a
+  `chatter` interface. An OpenAI-compatible sibling (vLLM, llama.cpp) is one
+  more file.
+- **Built-ins implemented natively** — `Read`, `Grep`, `Glob`, `Edit`, `Write`,
+  `Bash` — so the chart's risk-split toolsets mean the same thing here. Paths
+  are workspace-confined after symlink resolution; results are bounded.
+- **MCP over the official Go SDK**, from the same mounted `mcp.json`,
+  advertised as `mcp__<server>__<tool>`. The one dependency-taking module in
+  the repository, and the reason it needs Go 1.25 — see `build-test.md`.
+- **The gate is applied ONCE, before the request.** Only allowed tools are
+  advertised; a narrowing specifier such as `Bash(kubectl:*)` grants NOTHING
+  rather than widening to bare `Bash`.
+- **Context is one JSON transcript per conversation** under
+  `$HOME/.agentops/contexts/`, declared to `context-sync` by the bundle.
+  `housekeeping` does not know this layout.
+- **`options.num_ctx` is on EVERY request.** The server default truncates the
+  front of the prompt silently.
+- **Shipped as `chart/charts/ollama/`**, off by default, in the claude
+  bundle's exact shape.
 
 ### The Telegram trio
 

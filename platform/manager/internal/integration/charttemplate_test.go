@@ -2195,3 +2195,81 @@ func TestDemoModeAsksForReadWriteOnce(t *testing.T) {
 		t.Errorf("an explicit mode must win under demo mode:\n%s", typed)
 	}
 }
+
+// The ollama bundle is the SECOND vendor runtime, in the claude bundle's exact
+// shape: off by default, one AgentRuntime through the parent's renderer, no
+// substrate. Enabled, it inherits the defaults and carries only what names the
+// vendor — the image, the endpoint and model as env, and its own sync paths.
+func TestOllamaBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
+	out := helmTemplate(t, "--set", "ollama.enabled=true",
+		"--set", "ollama.endpoint=http://ollama.ollama.svc:11434",
+		"--set", "ollama.model=qwen2.5:14b")
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 2 {
+		t.Fatalf("want the claude runtime plus the ollama one, got %d", n)
+	}
+	var rt string
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: ollama\n") {
+			rt = doc
+		}
+	}
+	if rt == "" {
+		t.Fatal("no AgentRuntime named ollama rendered")
+	}
+	for _, want := range []string{
+		`image: "ghcr.io/kostiantyn-matsebora/agentops-runtime-ollama:`,
+		"serviceAccountName: agentops-runtime\n", // the floor, inherited
+		"contextStorage: volume\n",
+		"idleTtlMinutes: 1\n", // the release default, not the CRD's 10
+		"- .agentops/contexts/**\n",
+		"name: OLLAMA_URL\n      value: http://ollama.ollama.svc:11434\n",
+		"name: OLLAMA_MODEL\n      value: qwen2.5:14b\n",
+		"name: OLLAMA_NUM_CTX\n      value: \"8192\"\n",
+	} {
+		if !strings.Contains(rt, want) {
+			t.Errorf("ollama runtime lacks %q:\n%s", want, rt)
+		}
+	}
+	if strings.Contains(rt, ".claude/projects") {
+		t.Error("the ollama runtime must not inherit claude-code's sync paths")
+	}
+	// no substrate: the ServiceAccount count is unchanged from the default render
+	if got, want := strings.Count(out, "kind: ServiceAccount\n"), strings.Count(helmTemplate(t), "kind: ServiceAccount\n"); got != want {
+		t.Errorf("the bundle must render no ServiceAccount: %d vs %d", got, want)
+	}
+}
+
+// Enabled without an endpoint or a model, the render FAILS naming the key. A
+// runtime pointed at nothing starts fine and fails every run, which reads as
+// a broken model rather than a missing value.
+func TestOllamaBundleRequiresEndpointAndModel(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--set", "ollama.enabled=true"}, "ollama.endpoint is required"},
+		{[]string{"--set", "ollama.enabled=true", "--set", "ollama.endpoint=http://ollama.ollama.svc:11434"}, "ollama.model is required"},
+	} {
+		if out := helmTemplateErr(t, tc.args...); !strings.Contains(out, tc.want) {
+			t.Errorf("%v: want %q, got %s", tc.args, tc.want, out)
+		}
+	}
+}
+
+// The default-runtime guard treats the ollama bundle exactly as a `runtimes:`
+// entry: named `default` it may replace the claude bundle, and named anything
+// else it cannot answer for a route that resolves to `default`.
+func TestOllamaBundleAgainstTheDefaultRuntimeGuard(t *testing.T) {
+	base := []string{"--set", "claude.enabled=false",
+		"--set", "ollama.enabled=true",
+		"--set", "ollama.endpoint=http://ollama.ollama.svc:11434",
+		"--set", "ollama.model=qwen2.5:14b",
+		"--set", "global.demo.enabled=true"} // a route naming no runtimeRef
+	if out := helmTemplateErr(t, base...); !strings.Contains(out, "default") {
+		t.Errorf("a route resolving to `default` with only `ollama` rendered must fail naming it, got %s", out)
+	}
+	out := helmTemplate(t, append(base, "--set", "ollama.name=default")...)
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 1 {
+		t.Errorf("ollama named default must be the one runtime, got %d", n)
+	}
+}
