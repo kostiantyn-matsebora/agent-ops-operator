@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: Every runtime has its own name, and `default` is a copy of the flagged or first one
+### Requirement: Exactly one runtime answers to the default name, and its absence FAILS the render
 `default` SHALL be the name a `Pipeline` declaring no runtime resolves to.
 
 EVERY RUNTIME SHALL RENDER UNDER ITS OWN NAME — a bundle's under the name its
@@ -40,6 +40,10 @@ controller exactly as it protects an interactive one.
 #### Scenario: Two flags are refused
 - **WHEN** two runtimes both carry `default: true`
 - **THEN** the render fails naming both
+
+#### Scenario: A replacement satisfies the guard
+- **WHEN** an install disables one runtime bundle and declares another
+- **THEN** the render succeeds, and the CR named `default` is a copy of the replacement
 
 #### Scenario: Turning off the only runtime is refused
 - **WHEN** an install disables the bundle shipping its only runtime while a Pipeline declares no runtime
