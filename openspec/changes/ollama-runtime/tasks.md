@@ -1,20 +1,26 @@
 ## 1. Module scaffolding
 
-- [ ] 1.1 Create `runtime-ollama/go.mod` — module path
-  `github.com/kostiantyn-matsebora/agent-ops-operator/runtime-ollama`, `go 1.25`
-  (the official MCP SDK's floor), with `github.com/modelcontextprotocol/go-sdk`
-  as the only direct dependency
-- [ ] 1.2 Create `runtime-ollama/Dockerfile` — build in `golang:1.25`, ship a
-  distroless or slim runtime image with `git`, `openssh-client`, `ca-certificates`
-  and ordinary shell utilities, and NO domain tooling (no kubectl, no cloud CLI,
-  no bundled MCP server); `HOME=/data/home`, non-root user
-- [ ] 1.3 Record in `CLAUDE.md`'s build section that this module builds in
-  `golang:1.25` while the rest stay on 1.23, so `go build ./...` in the shared
-  1.23 container is expected to fail here
+- [ ] 1.1 Create `runtimes/ollama/go.mod` — module path
+  `github.com/kostiantyn-matsebora/agent-ops-operator/runtimes/ollama`, `go 1.25`
+  (the official MCP SDK's floor — RE-VERIFY it before pinning), with
+  `github.com/modelcontextprotocol/go-sdk` as the only direct dependency
+- [ ] 1.2 Create `runtimes/ollama/Dockerfile` — `golang:1.25` build stage, a
+  `debian:bookworm-slim` runtime stage with `git`, `openssh-client`,
+  `ca-certificates` and ordinary shell utilities, NO domain tooling (no kubectl,
+  no cloud CLI, no bundled MCP server), non-root user, the
+  `org.opencontainers.image.source` LABEL, and `$BUILDPLATFORM`/`TARGETARCH`
+  so it builds multi-arch. Confirm `.github/components.sh images` lists
+  `runtime-ollama` with this Dockerfile and `modules` lists the module
+- [ ] 1.3 Start the second persistent build container, `agentops-go125`, from
+  `golang:1.25` with the SAME mounts as `agentops-go` (repo at its real path,
+  the worktrees parent, both named cache volumes); record it in
+  `.claude/rules/build-test.md` so `go build ./...` failing on this module in
+  the 1.23 container is expected
 - [ ] 1.4 Confirm the manager needs no change: `WorkUnit` carries `agent`,
   `allowedTools`, `toolsMode`, `maxTurns`, `systemPrompt`, `runtimeContextId`,
-  and `workDone` accepts `continuity`/`continuityReason`. If anything is
-  missing, stop and raise it as a contract change
+  and `workDone` accepts `continuity`/`continuityReason`; `runtimepod` injects
+  `HOME=/data/context`, `WORKSPACE` and `MCP_CONFIG`; `context-sync` proxies
+  `CONTROL_URL`. If anything is missing, stop and raise it as a contract change
 
 ## 2. Work contract plumbing
 
@@ -23,11 +29,11 @@
   `GET /work?convo&pod&wait=25`, and `POST /work/done` with the reference
   runtime's retry cadence
 - [ ] 2.2 `main.go`: read the injected env (`CONTROL_URL`, `CONVO_ID`,
-  `POD_NAME`, `REPO_URL`, `REPO_REF`, `RUNTIME_IDLE_TTL_M`, `HOME`,
-  `MCP_CONFIG`, git auth) plus this runtime's own (`OLLAMA_URL`,
-  `OLLAMA_MODEL`, `OLLAMA_NUM_CTX`, `OLLAMA_KEEP_ALIVE`, `OLLAMA_TIMEOUT_S`,
-  `BASH_TIMEOUT_S`, `TOOL_OUTPUT_MAX`); exit non-zero when a required one is
-  missing
+  `POD_NAME`, `REPO_URL`, `REPO_REF`, `RUNTIME_IDLE_TTL_M`, `HOME`, `WORKSPACE`,
+  `MCP_CONFIG`, `GIT_AUTH_TYPE`/`GIT_SSH_KEY`/`GIT_TOKEN`) plus this runtime's
+  own (`OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_NUM_CTX`, `OLLAMA_KEEP_ALIVE`,
+  `OLLAMA_TIMEOUT_S`, `BASH_TIMEOUT_S`, `TOOL_OUTPUT_MAX`); exit non-zero
+  naming a required one that is missing
 - [ ] 2.3 Poll loop with idle TTL: exit 0 after `RUNTIME_IDLE_TTL_M` minutes
   without work
 - [ ] 2.4 `repo.go`: clone/fetch the profile repo at `/data/workspace`, ssh and
@@ -118,58 +124,109 @@
 - [ ] 8.3 Gone-versus-slow: on a miss re-check at 500 ms / 1.5 s / 3 s; a read
   ERROR is unavailability of the store, never absence of the context
 - [ ] 8.4 Confirmed absence fails the run with `continuity: unavailable`, a
-  `continuityReason` naming the home volume, and a non-empty user-facing message
-  telling the person to start a new conversation
+  `continuityReason` naming the context volume, and a non-empty user-facing
+  message telling the person to start a new conversation
 - [ ] 8.5 Trimming: keep the system prompt and the current turn, drop oldest
   first to fit `OLLAMA_NUM_CTX`, and log what was dropped; trimming is NOT
   reported as `unavailable`
 - [ ] 8.6 Tests: continue, create, slow-then-found, error-is-not-absent,
   confirmed-missing, and trimming
 
-## 9. Chart
+## 9. Chart: the `ollama` bundle
 
-- [ ] 9.1 Add `extraRuntimes: []` to `chart/values.yaml` with a commented Ollama
-  example (endpoint, model, `contextStorage: volume`) and the note that the chart
-  deploys no model server
-- [ ] 9.2 Render them from a sibling of `chart/templates/runtime.yaml`, resolving
-  home and workspace claims through the SAME helper the default runtime uses,
-  and defaulting `serviceAccountName` to the release runtime SA
-- [ ] 9.3 Confirm an empty list renders byte-identically to the current chart
-  (`helm template` diff)
-- [ ] 9.4 Pin the rendering in `internal/integration/charttemplate_test.go`: one
-  declared entry produces a second `AgentRuntime` with its image,
-  `contextStorage` and env, sharing the runtime SA and the persistence claims
-- [ ] 9.5 Bump the chart version and add a `CHANGELOG.md` entry describing
-  `extraRuntimes` (feature, not breaking — empty default changes nothing)
+- [ ] 9.1 Create `chart/charts/ollama/` — `Chart.yaml`, `values.yaml`
+  (`enabled: false`, `name: ollama`, `image`, `env` with `OLLAMA_URL` and
+  `OLLAMA_MODEL` left for the adopter and the tuning knobs commented,
+  `contextSync.paths: [".agentops/contexts/**"]`, an OPTIONAL
+  `credentialsSecret`), and `templates/runtime.yaml` calling the parent's
+  `agentops.renderRuntime` exactly as `chart/charts/claude/` does; the values
+  comment states the bundle deploys no model server
+- [ ] 9.2 Add the dependency to `chart/Chart.yaml` with
+  `condition: ollama.enabled`; run `.github/scripts/serviceaccount-guard.py`
+  and the publication guard — the bundle renders no account and names no real
+  endpoint
+- [ ] 9.3 Confirm `ollama.enabled: false` renders byte-identically to the
+  current chart (`helm template` diff)
+- [ ] 9.4 Pin the rendering in
+  `platform/manager/internal/integration/charttemplate_test.go`: the enabled
+  bundle produces a second `AgentRuntime` with its image, env and
+  `contextSync`, inheriting `contextStorage`, `idleTtlMinutes` and `resources`
+  from the defaults, and renders no ServiceAccount
+- [ ] 9.5 Confirm the default-runtime guard: `claude.enabled: false` +
+  `ollama.name: default` renders; `claude.enabled: false` + `ollama.name: ollama`
+  with a route naming no `runtimeRef` FAILS the render
+- [ ] 9.6 Bump the chart minor and add the `docs/CHANGELOG.md` entry (feature,
+  not breaking — the bundle is off by default and changes nothing)
 
-## 10. Documentation
+## 10. Build, publish and verify
 
-- [ ] 10.1 Write `docs/runtimes.md`: both shipped images side by side — tools,
-  continuity, cost, latency, the env each reads, how to choose, how to write a
-  third; state the Ollama operational facts plainly (per-model serialisation vs
-  `MAX_ACTIVE_CONVERSATIONS`, `keep_alive` vs `RUNTIME_IDLE_TTL_M`, `num_ctx`,
-  and that `agentops-shell` means the pod's shell)
-- [ ] 10.2 `docs/contracts.md`: name the second reference implementation in the
-  work contract section
-- [ ] 10.3 `CLAUDE.md`: add `runtime-ollama/` to the map, add the routing row for
-  runtime images → `docs/runtimes.md`, and record the Go 1.25 build container
-- [ ] 10.4 `README.md`: only if the kind list, pitch, demo or install command
-  changes — they do not; verify it stays at ≤150 lines untouched
-
-## 11. Build, test and verify
-
-- [ ] 11.1 `docker run --rm -v $PWD:/src -w /src/runtime-ollama golang:1.25 sh -c
-  'go build ./... && go vet ./... && go test ./...'`
-- [ ] 11.2 Confirm the other eight modules still build in `golang:1.23`
-- [ ] 11.3 Build and push `agentops-runtime-ollama:0.1.0` (never overwrite a
+- [ ] 10.1 `docker exec -i -w "$PWD/runtimes/ollama" agentops-go125 sh -c
+  'go build ./... && go vet ./... && go test ./...'` from the worktree
+- [ ] 10.2 Confirm every other module still builds in `agentops-go` (1.23) via
+  the `components.sh modules` loop, and that CI's matrix picks the right Go
+  version for this one
+- [ ] 10.3 Publish by tag: `git tag runtime-ollama-v0.1.0 && git push origin
+  runtime-ollama-v0.1.0`; then check the REGISTRY, flip the new package to
+  public in the UI, and confirm both architectures landed (never overwrite a
   pushed tag)
-- [ ] 11.4 Against a real Ollama endpoint: a text-only run, a run using a
-  built-in tool, and a run using an MCP tool — checking pod logs for the tool
-  lines and the manager for the reported result
-- [ ] 11.5 Continuity: run a second unit on the same conversation and confirm
-  `continuity: continued`; delete the context file and confirm the run FAILS with
+- [ ] 10.4 Deploy the worktree's chart (helmfile with the worktree `chartPath`,
+  `helm upgrade --dry-run=server` first) with the bundle enabled against a real
+  Ollama endpoint: a text-only run, a run using a built-in tool, and a run using
+  an MCP tool — checking pod logs for the tool lines and the manager for the
+  reported result
+- [ ] 10.5 Continuity: run a second unit on the same conversation and confirm
+  `continuity: continued`; confirm the sidecar snapshot holds
+  `.agentops/contexts/`; delete the context file and confirm the run FAILS with
   `unavailable` and a readable message rather than answering
-- [ ] 11.6 Tool gating: a Pipeline binding `agentops-observe` only produces a run
-  whose advertised tools exclude `Bash`
-- [ ] 11.7 Cluster apply: `helm upgrade --dry-run=server` before applying the
-  chart change, then verify with a live task signal to a claimed source
+- [ ] 10.6 Tool gating: a Pipeline binding `agentops-observe` only produces a
+  run whose advertised tools exclude `Bash`, and an MCP call outside the bound
+  toolsets is refused by the egress proxy as well as by the gate
+- [ ] 10.7 Rollback: disable the bundle, confirm an inflight conversation reports
+  the missing runtime on its status and a new one on the re-pointed route runs
+  on the reference runtime
+
+## 11. Documentation
+
+Both halves, ticked separately, and this section is the last one before the
+change is finished.
+
+**Reference docs:**
+
+- [ ] 11.1 `docs/contracts.md`: name the second reference implementation in the
+  work contract section, and what building it found about the contract's
+  vendor-neutrality
+- [ ] 11.2 `docs/concepts.md`: the runtime section names both images where it
+  names one; `docs/claude.md` gets one line pointing at the Ollama page
+- [ ] 11.3 `.claude/rules/structure.md`: `ollama` in the `runtimes/` row and a
+  short entry under the runtime section; `.claude/rules/build-test.md`: the
+  `agentops-go125` container (if 1.3 did not already land it)
+
+**The adopter site:**
+
+- [ ] 11.4 Write `docs/integrations/ollama.md` in the shape of the four existing
+  integration pages, carrying the `<!-- generated: renders bundle=ollama -->`
+  marker: what Ollama is here (an endpoint you already run — the bundle deploys
+  none), enabling the bundle with worked values (`OLLAMA_URL`, `OLLAMA_MODEL`),
+  the env it reads, what the runtime supports (tools, continuity, cost,
+  latency), how to choose between the two images, and the operational facts
+  stated plainly — per-model serialisation vs `MAX_ACTIVE_CONVERSATIONS`,
+  `keep_alive` vs `idleTtlMinutes`, `num_ctx`, `agentops-shell` means the pod's
+  shell, model sizes worth trying
+- [ ] 11.5 `docs/_data/nav.yml`: the page in the Integrations group
+- [ ] 11.6 `docs/index.md`: an Ollama chip in "Works with" linking the page, with
+  `docs/assets/img/logos/ollama.svg` added the way the other four logos were;
+  the "Runs Claude Code" claim amended to "Runs Claude Code — or a local model";
+  a "Why agent-ops?" row for keeping the cluster's data in the cluster
+- [ ] 11.7 `README.md`: mirror the three — the claims line, the "Works with"
+  line, the integrations table row — and verify it stays within the 215-line
+  budget
+- [ ] 11.8 `docs/installation.md`: the bundle in the bundles list with its
+  `enabled` flag and the two values an adopter must decide; the hand-written
+  `runtimes:` Ollama example becomes the bundle's values
+- [ ] 11.9 `docs/introduction.md` / `docs/guides/agent-runtime.md`: where they
+  say "a local model", link the page — nothing more, the default install is
+  unchanged
+- [ ] 11.10 Run `python3 .github/scripts/docs-generate.py` and commit what it
+  regenerates (the renders table; `cr-reference.md` is unaffected — no CRD
+  changed), then `python3 .github/scripts/publication-guard.py` — the page names
+  a placeholder endpoint, never a real one

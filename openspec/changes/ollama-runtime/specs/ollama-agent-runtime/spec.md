@@ -191,10 +191,14 @@ what it was granted.
 
 ### Requirement: The runtime stores the context it hands back
 
-The runtime SHALL persist each conversation's message transcript under its home
-volume, SHALL return an opaque `runtimeContextId` naming it, and SHALL declare
-`contextStorage: volume` on its `AgentRuntime` — continuity here depends on that
-volume outliving the pod.
+The runtime SHALL persist each conversation's message transcript under `$HOME`
+— the context volume, or the pod-local copy `context-sync` restores and
+snapshots — SHALL return an opaque `runtimeContextId` naming it, and SHALL keep
+`contextStorage: volume` on its `AgentRuntime`. Its bundle SHALL declare the
+transcript directory in `contextSync.paths`, because only the runtime knows
+where its backend keeps context; continuity here depends on a durable context
+claim outliving the pod, and a route with none is told its context is not
+promised by the existing rule.
 
 Given a handle, the runtime SHALL load that transcript, append the new turn, and
 report `continuity: continued`. Given none, it SHALL create one and report
@@ -245,7 +249,7 @@ SHALL NOT answer without the context it was promised.
 
 - **WHEN** re-checks confirm the transcript is absent
 - **THEN** the run reports `failed` with `continuity: unavailable`, a reason
-  naming the home volume, and a readable message telling the user to start a new
+  naming the context volume, and a readable message telling the user to start a new
   conversation
 - **AND** no answer is produced from an empty context
 
@@ -334,7 +338,8 @@ never by re-running an agent turn that may have already acted.
 
 - **WHEN** an install wants a small model for one route and a larger one for
   another
-- **THEN** it declares two `AgentRuntime` CRs and points each profile's
+- **THEN** it declares two `AgentRuntime` CRs — the bundle's and a `runtimes:`
+  entry naming the same image and another model — and points each Pipeline's
   `runtimeRef` at one, with no CRD change
 
 #### Scenario: A failed turn is not silently repeated
