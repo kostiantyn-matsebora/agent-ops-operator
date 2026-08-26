@@ -35,6 +35,15 @@ which is the finding: the contract is vendor-neutral.
   `$HOME/.agentops/contexts/`, declared to `context-sync` by the bundle.
 - `docs/integrations/ollama.md`, and the Ollama chip on the landing page.
 
+- **Every runtime has its own name, and `default` is a copy.** The claude
+  bundle's CR is now named `claude`, the ollama one `ollama`, and the parent
+  renders one more `AgentRuntime` named `default` — a copy of the runtime
+  flagged `default: true` (`claude.default`, `ollama.default`,
+  `runtimes[].default`), or of the first configured when none is. So a fresh
+  install is unchanged (`default` is claude's copy), turning claude off and
+  ollama on needs no rename, and `runtimeRef: claude` now works. Two flags fail
+  the render. A `Pipeline` naming `runtimeRef: default` keeps resolving.
+
 **Nothing changes for an install that does not enable the bundle.** The
 rendered manifest is identical.
 

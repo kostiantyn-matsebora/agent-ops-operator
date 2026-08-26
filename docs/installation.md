@@ -531,7 +531,7 @@ global:
       # set it when the runtime image is not multi-arch
       nodeSelector: {}
 
-runtimes: []      # the `claude` bundle ships the one named `default`
+runtimes: []      # the `claude` bundle ships `claude`; `default` is its copy
 
 image:
   # the manager itself; its tag moves per release
@@ -558,11 +558,15 @@ pipelines:
 A vendor with no bundle is a `runtimes:` entry with its own image, and
 whatever differs from the defaults.
 
-**`default` is what a route naming no `runtimeRef` resolves to.** The `claude`
-bundle ships it, on by default. **Turn that bundle off with no replacement and
-the render FAILS**, naming the missing runtime and the routes that needed it —
-rather than leaving conversations in `Pending` forever with the reason in the
-manager's log.
+**`default` is what a route naming no `runtimeRef` resolves to, and the chart
+renders it as a copy of one runtime you declared.** Every runtime keeps its own
+name. Which one is copied is `default: true` on that runtime — on a bundle or a
+`runtimes:` entry — or, with none flagged, the first configured. Every runtime
+is optional: the `claude` bundle is the first shipped and on by default, so it
+is the default on a fresh install, and turning it off with another on moves the
+default there with no rename. **No runtime at all FAILS the render** when a
+route still needs one, naming the routes — rather than leaving conversations in
+`Pending` forever with the reason in the manager's log. So do two flags.
 
 **Why the defaults live under `global.`** — a forcing, not tidiness. A subchart
 reads no parent scope but that one, and a bundle-shipped runtime has nowhere

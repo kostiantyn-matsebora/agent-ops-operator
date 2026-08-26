@@ -19,8 +19,9 @@ import (
 // the operator.
 func TestDefaultInstallRendersOneRuntimeNamedDefault(t *testing.T) {
 	out := helmTemplate(t, "--set", "claude.credentialsSecret.token=x")
-	if strings.Count(out, "kind: AgentRuntime\n") != 1 {
-		t.Fatalf("a default install must render exactly one AgentRuntime:\n%s", out)
+	// the claude runtime under its own name, plus the parent's `default` copy
+	if strings.Count(out, "kind: AgentRuntime\n") != 2 {
+		t.Fatalf("a default install must render the claude runtime and its default copy:\n%s", out)
 	}
 	for _, needle := range []string{"name: default", "memory: 1536Mi", "memory: 256Mi", "contextStorage: volume"} {
 		if !strings.Contains(out, needle) {
@@ -254,7 +255,8 @@ func TestNoBundleRendersTheFloorOrTheDefaults(t *testing.T) {
 	if got := strings.Count(out, "name: agentops-runtime\n  namespace:"); got != 1 {
 		t.Fatalf("exactly one floor ServiceAccount must render, got %d:\n%s", got, out)
 	}
-	if got := strings.Count(out, "kind: AgentRuntime\n"); got != 1 {
-		t.Fatalf("exactly one AgentRuntime must render with every bundle on, got %d", got)
+	// the claude runtime plus its `default` copy; the ollama bundle is off
+	if got := strings.Count(out, "kind: AgentRuntime\n"); got != 2 {
+		t.Fatalf("the claude runtime and its default copy must render with every bundle on, got %d", got)
 	}
 }

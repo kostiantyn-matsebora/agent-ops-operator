@@ -524,7 +524,7 @@ global:
         envName: CLAUDE_CODE_OAUTH_TOKEN
         token: ""                 # supplied = the chart CREATES the Secret
 
-runtimes: []                      # the `claude` bundle ships the one named `default`
+runtimes: []                      # the `claude` bundle ships `claude`; `default` is its copy
 ```
 
 **THE DEFAULTS ARE SUFFICIENT.** A runtime declaring nothing but a name renders

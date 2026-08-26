@@ -175,12 +175,16 @@ ollama:
 #                                     only what DIFFERS from those defaults
 #
 # `default` is the name a Pipeline declaring no `runtimeRef` resolves to, and
-# THE RENDER FAILS when nothing answers to it while a route still resolves to
-# it. That check replaced the old guarantee that this chart always rendered one:
+# THE CHART RENDERS IT as a copy of one declared runtime: the one flagged
+# `default: true` (here, or on a bundle), or the FIRST configured when none is
+# — `runtimes:` entries in order, then the bundles. One runtime alone is always
+# the default. Every runtime is optional. THE RENDER FAILS when NO runtime is
+# declared while a route still resolves to `default`, or when two are flagged. That check replaced the old guarantee that this chart always rendered one:
 # a runtime may now come from a bundle, and a bundle can be turned off.
 #
 #   runtimes:
-#     - name: default              # inherits every default; states its own image
+#     - name: mine                 # inherits every default; states its own image
+#       default: true              # the one a route naming no runtimeRef runs on
 #     - name: ollama               # a second VENDOR, stating only its difference
 #       image: ghcr.io/example/agentops-runtime-ollama:0.1.0
 #       contextStorage: external   # keeps context at its own API, needs no disk

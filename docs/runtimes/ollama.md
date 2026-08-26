@@ -17,12 +17,14 @@ next:
 **This is a runtime, not an integration.** It starts no work and answers on no
 surface. It is what EXECUTES an agent — and the second one this chart ships.
 
-**Ollama is a model server, and it supplies inference only.** No agent loop, no
-tool execution, no memory. This runtime builds all of that itself and asks
-Ollama for one thing: the next message.
+**With this bundle, agent-ops runs a route on a model your own Ollama serves.**
+Each conversation gets a `runtime-ollama` pod. The manager hands it work units,
+the pod runs the agent loop, executes the tools and keeps the transcript, and
+your Ollama server is asked for the next message. Nothing an agent reads leaves
+your cluster.
 
-So any tool-capable model Ollama serves becomes an agent here — with the same
-toolsets and MCP servers the reference runtime gets.
+A route opts in with `runtimeRef: ollama`. Every other route keeps running
+where it did.
 
 ![The manager hands a work unit to runtime-ollama, which runs the agent loop and the tools itself, keeps one transcript per conversation, and asks Ollama only for the next message.]({{ '/assets/img/runtimes/ollama-light.svg' | relative_url }}){: .ao-diagram}
 
@@ -79,8 +81,16 @@ pipelines:
     mcpConfigs: [k8s-api]
 ```
 
-**Nothing else moves.** The reference runtime keeps the name `default`, so
-every route naming no `runtimeRef` runs where it did.
+**Nothing else moves.** `default` stays a copy of the first configured
+runtime — the reference one — so every route naming no `runtimeRef` runs where
+it did.
+
+**To make Ollama the default**, flag it: `ollama.default=true`. Every route
+naming no `runtimeRef` then runs here, and the reference runtime is still
+selectable as `runtimeRef: claude`.
+
+**Without Claude.** Turn the reference bundle off (`claude.enabled=false`) and
+this is the only runtime — so it is the default without the flag.
 
 ## What it needs
 

@@ -3,23 +3,15 @@ This bundle's ONE runtime, rendered through the PARENT's shared renderer so its
 CR cannot drift from a runtime the install declares itself — the exact shape of
 chart/charts/claude/templates/runtime.yaml.
 
-`endpoint` and `model` become the env the runtime reads. They are REQUIRED once
-the bundle is enabled: a runtime pointed at nothing starts fine and fails every
-run, which reads as a broken model rather than a missing value.
+`endpoint` and `model` become the env the runtime reads, through the parent's
+`agentops.ollamaRuntimeEntry` — the same helper the parent uses when it copies
+this runtime as `default`, so the copy carries the same env. Both are REQUIRED
+once the bundle is enabled: a runtime pointed at nothing starts fine and fails
+every run, which reads as a broken model rather than a missing value.
 
 IT RENDERS NO SUBSTRATE. No floor ServiceAccount, no runtime defaults, no
 context volume: a bundle contributes domain, and a vendor's runtime is domain.
 */ -}}
 {{- if .Values.enabled }}
-{{- $endpoint := .Values.endpoint | required "ollama.endpoint is required when the bundle is enabled — the URL of an Ollama server you already run, e.g. http://ollama.ollama.svc:11434; this bundle deploys none" }}
-{{- $model := .Values.model | required "ollama.model is required when the bundle is enabled — a model already pulled on that server, e.g. qwen2.5:14b" }}
-{{- $env := list
-  (dict "name" "OLLAMA_URL" "value" $endpoint)
-  (dict "name" "OLLAMA_MODEL" "value" $model)
-  (dict "name" "OLLAMA_NUM_CTX" "value" (.Values.numCtx | toString))
-  (dict "name" "OLLAMA_KEEP_ALIVE" "value" (.Values.keepAlive | toString)) }}
-{{- range .Values.env }}{{ $env = append $env . }}{{ end }}
-{{- $entry := omit .Values "enabled" "global" "endpoint" "model" "numCtx" "keepAlive" "env" }}
-{{- $_ := set $entry "env" $env }}
-{{- include "agentops.renderRuntime" (dict "root" $ "entry" $entry) }}
+{{- include "agentops.renderRuntime" (dict "root" $ "entry" (fromYaml (include "agentops.ollamaRuntimeEntry" .Values))) }}
 {{- end }}

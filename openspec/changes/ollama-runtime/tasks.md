@@ -155,6 +155,11 @@
 - [x] 9.5 Confirm the default-runtime guard: `claude.enabled: false` +
   `ollama.name: default` renders; `claude.enabled: false` + `ollama.name: ollama`
   with a route naming no `runtimeRef` FAILS the render
+- [x] 9.7 Every runtime under its own name (`claude`, `ollama`), a `default`
+  flag per runtime, and the parent rendering `default` as a copy of the flagged
+  or first configured one — the mapping from `ollama.endpoint`/`model` to env in
+  a parent helper so the copy carries it; chart tests for flag, first, two
+  flags, none
 - [x] 9.6 Bump the chart minor and add the `docs/CHANGELOG.md` entry (feature,
   not breaking — the bundle is off by default and changes nothing)
 

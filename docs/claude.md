@@ -3,8 +3,10 @@
 The reference agent runtime, shipped as a bundle: `claude-code` implementing the
 operator's work contract.
 
-`chart/charts/claude/` renders exactly two objects — one `AgentRuntime` and, when
-you supply a token, its credential `Secret`.
+`chart/charts/claude/` renders exactly two objects — one `AgentRuntime` named
+`claude` and, when you supply a token, its credential `Secret`. The PARENT
+renders the `AgentRuntime` named `default` as a copy of it, unless another
+runtime is flagged `default: true`.
 
 **ON by default**, unlike every other bundle here. It is what a fresh install
 executes on. The other runtime bundle, `chart/charts/ollama/`, is the local-model
@@ -12,7 +14,8 @@ one — see [runtimes/ollama](https://kostiantyn-matsebora.github.io/agent-ops-o
 
 | Renders | When |
 |---|---|
-| `AgentRuntime` (named `default`) | always, while `claude.enabled` |
+| `AgentRuntime` (named `claude`) | always, while `claude.enabled` |
+| `AgentRuntime` named `default`, a copy of it | rendered by the PARENT while this is the flagged or first configured runtime |
 | `Secret` (the model credential) | only when a token is supplied |
 
 ## Why a bundle at all

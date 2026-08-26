@@ -16,10 +16,14 @@
 # context volume. This bundle declares one runtime and inherits the rest.
 enabled: false
 
-# The AgentRuntime CR name, what a Pipeline's `runtimeRef` selects. `default`
-# is legal here if the `claude` bundle is off and this is the install's only
-# runtime; the parent's default-runtime guard says so if neither answers.
+# The AgentRuntime CR name, what a Pipeline's `runtimeRef` selects.
 name: ollama
+
+# Make THIS the runtime a Pipeline naming no `runtimeRef` runs on. The parent
+# renders the CR named `default` as a copy of the flagged runtime — or of the
+# first configured when none is flagged, so with the `claude` bundle off this
+# one is the default without the flag. Every runtime is optional.
+default: false
 
 # The runtime image, and the one place its tag is written. NO domain tooling in
 # it: what an agent may reach is wiring — see docs/concepts.md#runtime-images-are-generic.

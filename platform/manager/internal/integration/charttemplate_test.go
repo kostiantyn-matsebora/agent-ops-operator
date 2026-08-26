@@ -713,8 +713,9 @@ func TestParentOwnsExactlyOneRuntime(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			out := helmTemplate(t, combo...)
-			if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 1 {
-				t.Errorf("want exactly 1 AgentRuntime, got %d", n)
+			// the claude bundle's own CR plus the parent's `default` copy of it
+			if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 2 {
+				t.Errorf("want the claude runtime and its default copy, got %d", n)
 			}
 			var sas int
 			for _, doc := range splitDocs(out) {
@@ -2204,8 +2205,8 @@ func TestOllamaBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
 	out := helmTemplate(t, "--set", "ollama.enabled=true",
 		"--set", "ollama.endpoint=http://ollama.ollama.svc:11434",
 		"--set", "ollama.model=qwen2.5:14b")
-	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 2 {
-		t.Fatalf("want the claude runtime plus the ollama one, got %d", n)
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
+		t.Fatalf("want claude, ollama and the default copy, got %d", n)
 	}
 	var rt string
 	for _, doc := range splitDocs(out) {
@@ -2256,20 +2257,57 @@ func TestOllamaBundleRequiresEndpointAndModel(t *testing.T) {
 	}
 }
 
-// The default-runtime guard treats the ollama bundle exactly as a `runtimes:`
-// entry: named `default` it may replace the claude bundle, and named anything
-// else it cannot answer for a route that resolves to `default`.
-func TestOllamaBundleAgainstTheDefaultRuntimeGuard(t *testing.T) {
-	base := []string{"--set", "claude.enabled=false",
-		"--set", "ollama.enabled=true",
+// WHICH RUNTIME IS `default` IS A FLAG, OR THE FIRST CONFIGURED. Every runtime
+// renders under its own name and the parent renders one more CR named
+// `default`, a copy of the flagged one, annotated with its source. One runtime
+// alone is therefore always the default; the claude bundle off and the ollama
+// one on needs no rename; two flags is refused.
+func TestDefaultRuntimeIsTheFlaggedOrFirstConfigured(t *testing.T) {
+	ollama := []string{"--set", "ollama.enabled=true",
 		"--set", "ollama.endpoint=http://ollama.ollama.svc:11434",
 		"--set", "ollama.model=qwen2.5:14b",
 		"--set", "global.demo.enabled=true"} // a route naming no runtimeRef
-	if out := helmTemplateErr(t, base...); !strings.Contains(out, "default") {
-		t.Errorf("a route resolving to `default` with only `ollama` rendered must fail naming it, got %s", out)
+	defaultOf := func(out string) (string, string) {
+		for _, doc := range splitDocs(out) {
+			if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: default\n") {
+				src := ""
+				for _, line := range strings.Split(doc, "\n") {
+					if strings.Contains(line, "agentops.dev/default-of:") {
+						src = strings.Trim(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), `"`)
+					}
+				}
+				return doc, src
+			}
+		}
+		return "", ""
 	}
-	out := helmTemplate(t, append(base, "--set", "ollama.name=default")...)
-	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 1 {
-		t.Errorf("ollama named default must be the one runtime, got %d", n)
+	// ollama alone: it is the default, under its own name plus the copy
+	out := helmTemplate(t, append(ollama, "--set", "claude.enabled=false")...)
+	if doc, src := defaultOf(out); src != "ollama" || !strings.Contains(doc, "name: OLLAMA_URL") {
+		t.Errorf("ollama alone must be copied as default, got source %q", src)
+	}
+	if strings.Count(out, "\nkind: AgentRuntime\n") != 2 {
+		t.Error("ollama alone renders exactly ollama and default")
+	}
+	// both, none flagged: the first configured — claude — is the default
+	if _, src := defaultOf(helmTemplate(t, ollama...)); src != "claude" {
+		t.Errorf("with both and no flag the first configured is default, got %q", src)
+	}
+	// both, ollama flagged: the flag wins
+	if doc, src := defaultOf(helmTemplate(t, append(ollama, "--set", "ollama.default=true")...)); src != "ollama" || strings.Contains(doc, "kind: Secret") {
+		t.Errorf("the flag must move the default, got %q", src)
+	}
+	// the copy carries no Secret of its own, even when the source has a token
+	if out := helmTemplate(t, "--set", "claude.credentialsSecret.token=x"); strings.Count(out, "kind: Secret\nmetadata:\n  name: agentops-claude\n") != 1 {
+		t.Error("the default copy must not render a second credential Secret")
+	}
+	// two flags: refused by name
+	two := append(ollama, "--set", "ollama.default=true", "--set", "claude.default=true")
+	if out := helmTemplateErr(t, two...); !strings.Contains(out, "2 runtimes are flagged") {
+		t.Errorf("two flagged defaults must fail naming both, got %s", out)
+	}
+	// nothing declared and a route needing default: still refused
+	if out := helmTemplateErr(t, "--set", "claude.enabled=false", "--set", "global.demo.enabled=true"); !strings.Contains(out, "Declared runtimes: (none)") {
+		t.Errorf("no runtime at all must fail, got %s", out)
 	}
 }
