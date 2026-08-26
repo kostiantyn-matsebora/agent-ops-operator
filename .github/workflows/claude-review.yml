@@ -147,16 +147,18 @@ jobs:
             open ones re-raises what a person dismissed last push. Do not read the diff before spawning; that is their
             job, and reading it here is the serial cost this shape removes.
 
-            THE REVIEWERS RUN IN THE BACKGROUND, AND ENDING YOUR TURN ENDS THE
-            RUN. `Agent` answers "launched" at once; the result arrives later,
-            as a notification between your tool calls. If you answer with prose
-            and stop while a reviewer is still running, this process exits, the
-            reviewer is abandoned, nothing is posted, and the job still reports
-            success — that is exactly what happened on pull request #74: three
-            reviewers spawned, "I'll wait for them", turn ended, review lost.
-            So until EVERY reviewer has returned: run `sleep 60` through Bash
-            and look again. Never end the turn to wait. Never schedule a
-            wakeup; there is nothing to wake.
+            HOW TO CALL `Agent`, AND IT IS NOT OPTIONAL: every call carries
+            `run_in_background: false`, and ALL of them are in ONE message.
+            Foreground is what makes the turn wait for the result; one message
+            is what makes them run at the same time. Both were violated on
+            pull requests #74 and #77 — nine calls in nine messages, each
+            `run_in_background: true` — and it cost one review entirely (the
+            turn ended while they ran; under `claude -p` that ends the process)
+            and seven minutes of `sleep` on the other. A background agent's
+            result arrives only between your tool calls; do not run one. If a
+            result ever reads "Async agent launched", you got it wrong: keep
+            calling `sleep 60` through Bash until every reviewer has returned,
+            and never end the turn to wait.
 
             STEP 3 — CONSOLIDATE. When every reviewer has returned:
 
@@ -353,10 +355,13 @@ jobs:
           if [ -n "$EXECUTION_FILE" ]; then
             # RAN IS NOT FINISHED. A run that spawns its reviewers and ends its
             # turn leaves an execution file, a green step and no review — #74.
-            # The one thing every finished review posts is the summary, and
-            # its verdict table has a fixed header. Require it.
+            # The one thing every finished review posts is the summary. Its
+            # COUNT LINE is on both shapes — "N new · M carried over · …"
+            # under a "### Review" heading; the verdict table is only on a
+            # clean one, and requiring it failed the first real review (#77,
+            # six findings, no table) for the wrong reason.
             summaries=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
-              --jq '[.[] | select(.body | contains("| Read against | Verdict |"))] | length')
+              --jq '[.[] | select((.body | startswith("### Review")) and (.body | test(" new · ")))] | length')
             if [ "${summaries:-0}" -lt 1 ]; then
               echo "::error::The review ran (conclusion: ${CONCLUSION:-unreported}) but posted no summary — it stopped before consolidating, most likely by ending its turn while reviewers were still running. Read the execution artifact."
               exit 1
