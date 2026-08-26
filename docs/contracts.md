@@ -807,6 +807,14 @@ runs with `--permission-mode dontAsk` so an unlisted tool is denied outright. In
 a pod there is nobody to answer a permission prompt, so prompting would hang the
 run until its idle TTL.
 
+`runtime-ollama` is the second implementation, and the one that had to build
+everything the CLI provides for the first: the agent loop, tool dispatch, the
+transcript and the handle. It composes the same two halves, applies the gate
+ONCE before the request — only allowed tools are advertised — and logs every
+allowlist entry it cannot provide. Building it needed no change to this
+contract, which is what makes the contract vendor-neutral rather than a
+description of one CLI.
+
 **`$CONTROL_URL` is not always the manager.** When a runtime declares
 `contextSync`, the manager points it at a sidecar in the same pod, which
 forwards every request to the real manager.

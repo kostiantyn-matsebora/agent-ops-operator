@@ -82,6 +82,10 @@ DOCUMENTED_PLACEHOLDERS = {
     # a cluster-internal service name, which is a shape the publication
     # allowlist permits. An ENTRY, never a loosened rule.
     "http://vmsingle-vm.monitoring.svc:8429",
+    # ollama/values.yaml examples — a cluster-internal service name and a
+    # public model name, both shapes the allowlist permits.
+    "http://ollama.ollama.svc:11434",
+    "qwen2.5:14b",
 }
 CREDENTIAL_PLACEHOLDERS = {
     "placeholder-token",
@@ -271,6 +275,15 @@ BUNDLES = {
     # they render whenever the bundle does, which is what the page means by
     # shipping in two layers: the implementations are guessable and the surface
     # is not. That unconditional layer is the `always` row.
+    # A RUNTIME BUNDLE: one CR, no sub-components, so the whole of it is the
+    # "Always" row. Both values are required by the bundle, so they are set.
+    "ollama": {
+        "enable": {
+            "endpoint": "http://ollama.ollama.svc:11434",
+            "model": "qwen2.5:14b",
+        },
+        "components": {},
+    },
     "telegram": {
         "enable": {
             "surface.chatId": "-1001234567890",
@@ -954,6 +967,7 @@ def main() -> int:
     light, dark = docs_diagrams.palette(STYLESHEET)
     for slug, spec in {**docs_diagrams.DIAGRAMS,
                        **docs_diagrams.INTEGRATION_DIAGRAMS,
+                       **docs_diagrams.RUNTIME_DIAGRAMS,
                        **docs_diagrams.SECURITY_DIAGRAMS}.items():
         # `dir` is the page family the drawing belongs to. Guide diagrams state
         # none, so their directory is the default rather than repeated sixteen

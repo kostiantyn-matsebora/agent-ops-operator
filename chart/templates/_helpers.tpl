@@ -149,6 +149,30 @@ direction Helm allows, and each runtime-shipping bundle gets a line below.
 Adding a vendor bundle means adding that line — there is no way to discover it,
 and a bundle whose runtime this list missed would render a CR the guard could
 not see. */ -}}
+{{- /* THE OLLAMA BUNDLE'S VALUES AS A RUNTIME ENTRY. `endpoint`, `model`, `numCtx`
+and `keepAlive` become the env the runtime reads; `env` is laid over them.
+
+A PARENT helper, because two callers need the same answer: the bundle's own
+template, and `agentops.declaredRuntimes` — from which the `default` copy is
+rendered. When the mapping lived in the bundle's template, the copy carried the
+bundle's VALUES and no env at all: a runtime named `default` pointed at nothing.
+Call with the bundle's values. */ -}}
+{{- define "agentops.ollamaRuntimeEntry" -}}
+{{- $v := . -}}
+{{- $endpoint := $v.endpoint | required "ollama.endpoint is required when the bundle is enabled — the URL of an Ollama server you already run, e.g. http://ollama.ollama.svc:11434; this bundle deploys none" -}}
+{{- /* `model` is OPTIONAL: unset, the runtime uses the server's only pulled model
+and fails its runs naming the choices when there are several. */ -}}
+{{- $env := list
+  (dict "name" "OLLAMA_URL" "value" $endpoint)
+  (dict "name" "OLLAMA_MODEL" "value" ($v.model | default "" | toString))
+  (dict "name" "OLLAMA_NUM_CTX" "value" ($v.numCtx | default 8192 | toString))
+  (dict "name" "OLLAMA_KEEP_ALIVE" "value" ($v.keepAlive | default "10m" | toString)) -}}
+{{- range ($v.env | default list) }}{{ $env = append $env . }}{{ end -}}
+{{- $entry := omit $v "enabled" "global" "endpoint" "model" "numCtx" "keepAlive" "env" -}}
+{{- $_ := set $entry "env" $env -}}
+{{- toYaml $entry -}}
+{{- end -}}
+
 {{- define "agentops.declaredRuntimes" -}}
 {{- $root := . -}}
 {{- $out := list -}}
@@ -158,14 +182,38 @@ not see. */ -}}
 {{- /* The runtime-shipping bundles. One line each, and there is no way to
 discover them: a bundle whose runtime this list missed would render a CR the
 default-runtime guard could not see, and the manager's bootstrap env would miss
-the sidecar and proxy images that runtime asked for. */ -}}
-{{- range $key := list "claude" -}}
+the sidecar and proxy images that runtime asked for. `ollama` proved the point:
+its first render passed every test but this guard, which reported "(none)". */ -}}
+{{- range $key := list "claude" "ollama" -}}
 {{- $bv := index $root.Values $key -}}
 {{- if and $bv $bv.enabled -}}
-{{- $out = append $out (fromYaml (include "agentops.mergedRuntime" (dict "root" $root "entry" (omit $bv "enabled" "global")))) -}}
+{{- $entry := omit $bv "enabled" "global" -}}
+{{- if eq $key "ollama" -}}{{- $entry = fromYaml (include "agentops.ollamaRuntimeEntry" $bv) -}}{{- end -}}
+{{- $out = append $out (fromYaml (include "agentops.mergedRuntime" (dict "root" $root "entry" $entry))) -}}
 {{- end -}}
 {{- end -}}
 {{- toYaml $out -}}
+{{- end -}}
+
+{{- /* WHICH RUNTIME ANSWERS TO `default`.
+
+Every runtime renders under its OWN name — `claude`, `ollama`, whatever a
+`runtimes:` entry says — and the parent renders ONE MORE CR named `default`,
+a copy of the runtime this helper picks: the one flagged `default: true`, or,
+with none flagged, the FIRST configured (top-level `runtimes:` in order, then
+the bundles in the order `agentops.declaredRuntimes` lists them). One runtime
+alone is therefore always the default. Two flagged is refused by the guard.
+
+EVERY RUNTIME IS OPTIONAL, and this is what makes it so: turning the reference
+bundle off and another on needs no rename, and the CR a route resolves to is
+still one named `default`, which is what keeps the manager out of it. Returns
+the chosen entry as YAML, or nothing when no runtime is declared. */ -}}
+{{- define "agentops.defaultRuntimeEntry" -}}
+{{- $declared := fromYamlArray (include "agentops.declaredRuntimes" .) -}}
+{{- $pick := dict -}}
+{{- range $rt := $declared -}}{{- if and $rt.default (not $pick) -}}{{- $pick = $rt -}}{{- end -}}{{- end -}}
+{{- if and (not $pick) $declared -}}{{- $pick = first $declared -}}{{- end -}}
+{{- if $pick -}}{{- toYaml $pick -}}{{- end -}}
 {{- end -}}
 
 {{- /* THE DEFAULT-RUNTIME GUARD.
@@ -193,7 +241,16 @@ something actually resolving to that name. */ -}}
 {{- range $rt := $declared -}}
 {{- $names = append $names ($rt.name | default "") -}}
 {{- end -}}
-{{- if not (has "default" $names) -}}
+{{- if $declared -}}{{- $names = append $names "default" -}}{{- end -}}
+{{- /* WHICH RUNTIME IS `default` IS DECIDED BY agentops.defaultRuntimeEntry, and the
+parent renders a CR of that name from it. So `default` is missing only when NOTHING
+is declared at all — or when the flag was set twice, which is refused first. */ -}}
+{{- $flagged := list -}}
+{{- range $rt := $declared -}}{{- if $rt.default -}}{{- $flagged = append $flagged $rt.name -}}{{- end -}}{{- end -}}
+{{- if gt (len $flagged) 1 -}}
+{{- fail (printf "%d runtimes are flagged `default: true` (%s), and only one can answer to that name. Flag one, or none — with none flagged the first configured runtime is the default." (len $flagged) (join ", " $flagged)) -}}
+{{- end -}}
+{{- if and (not (has "default" $names)) (eq (len $names) 0) -}}
 {{- $needing := list -}}
 {{- range $p := (.Values.pipelines | default list) -}}
 {{- if not $p.runtimeRef -}}
@@ -244,7 +301,7 @@ which a Helm condition cannot express — so its helpers are always loaded. */ -
 {{- end -}}
 {{- end -}}
 {{- if $needing -}}
-{{- fail (printf "No AgentRuntime named \"default\" is declared in this release, and %d route(s) resolve to it: %s. A Pipeline naming no runtimeRef falls back to the runtime named `default`, so these routes would create conversations that never execute — Pending forever, with the reason in the manager's log and nowhere you look. Declare one under the top-level `runtimes:` (an entry naming only `name: default` inherits every value from global.agentops.runtimeDefaults), re-enable the bundle that shipped it, or give each route above its own `runtimeRef`. Declared runtimes: %s" (len $needing) (join ", " $needing) (ternary "(none)" (join ", " $names) (eq (len $names) 0))) -}}
+{{- fail (printf "No AgentRuntime named \"default\" is declared in this release, and %d route(s) resolve to it: %s. A Pipeline naming no runtimeRef falls back to the runtime named `default`, so these routes would create conversations that never execute — Pending forever, with the reason in the manager's log and nowhere you look. Declare one under the top-level `runtimes:` (an entry naming only its `name` inherits every value from global.agentops.runtimeDefaults), or enable a runtime bundle — the first one configured becomes `default`, or the one flagged `default: true`. Or give each route above its own `runtimeRef`. Declared runtimes: %s" (len $needing) (join ", " $needing) (ternary "(none)" (join ", " $names) (eq (len $names) 0))) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -263,7 +320,7 @@ configuration, not through this CR. */ -}}
 {{- $rt := fromYaml (include "agentops.mergedRuntime" .) -}}
 {{- $name := $rt.name | required "every entry in `runtimes:` needs a name — it is what a Pipeline's spec.runtimeRef refers to, and `default` is the one a route naming none resolves to" -}}
 {{- $cred := $rt.credentialsSecret | default dict -}}
-{{- if $cred.token }}
+{{- if and $cred.token (not $rt.defaultOf) }}
 ---
 # Created because this runtime supplied a credential token, so the agent's
 # credential is provisioned with the release instead of being a prerequisite
@@ -288,6 +345,13 @@ metadata:
   namespace: {{ $root.Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-runtime
+  {{- with $rt.defaultOf }}
+  # THE DEFAULT: a copy of the runtime named below, rendered by the parent so a
+  # route naming no runtimeRef has a CR of this name to resolve to. Which one is
+  # copied is `default: true` on that runtime, or the first configured.
+  annotations:
+    agentops.dev/default-of: {{ . | quote }}
+  {{- end }}
 spec:
   image: {{ $rt.image | required (printf "runtime %q declares no image, and global.agentops.runtimeDefaults.image is empty — a runtime with no image is a CR the API server refuses" $name) | quote }}
   # The agent's security identity — its RBAC IS its power. A REFERENCE: this

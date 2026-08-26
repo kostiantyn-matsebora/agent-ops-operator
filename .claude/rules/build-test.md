@@ -71,6 +71,28 @@ Four details, each of which cost a debugging round:
 - **`go clean -modcache` fails** (`unlinkat //gomodcache: permission denied`) —
   it tries to remove the mount point. Remove the VOLUME instead.
 
+**`runtimes/ollama/` NEEDS GO 1.25, AND FAILS IN `agentops-go` BY DESIGN.** The
+official MCP SDK it takes has a 1.25 floor; every other module is 1.23. A
+SECOND persistent container, same mounts, from `golang:1.25`:
+
+```sh
+docker run -d --name agentops-go125 -u "$(id -u):$(id -g)" \
+  -v "$PWD":"$PWD" -w "$PWD" \
+  -v "$(dirname "$PWD")/agent-ops-worktrees":"$(dirname "$PWD")/agent-ops-worktrees" \
+  -v agentops-gocache:/gocache -v agentops-gomodcache:/gomodcache \
+  -e GOCACHE=/gocache -e GOMODCACHE=/gomodcache \
+  -e HOME=/tmp -e GOFLAGS=-buildvcs=false \
+  golang:1.25 sleep infinity
+docker exec -i -w "$PWD/runtimes/ollama" agentops-go125 go test ./...
+```
+
+- **The `components.sh modules` loop above runs that module in the wrong
+  container and fails on it.** That failure is expected; it is not a broken
+  checkout. CI reads the Go version from each module's `go.mod`, so it needs
+  no such list.
+- **The caches are SHARED between the two containers**, which is fine — the
+  module cache is keyed by module version and the build cache by toolchain.
+
 **A VM-BACKED DAEMON MOUNTS YOUR HOME, NOT `/tmp`.** Rancher Desktop runs the
 daemon in a VM, so `-v /tmp/whatever:/data` bind-mounts an EMPTY directory.
 

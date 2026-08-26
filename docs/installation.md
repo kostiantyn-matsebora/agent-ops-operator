@@ -122,9 +122,11 @@ substrate they run on comes from this chart.
 | Prometheus alerts | `prometheus.enabled` | [prometheus]({{ '/integrations/prometheus/' | relative_url }}) |
 | Telegram | `telegram.enabled` | [telegram]({{ '/integrations/telegram/' | relative_url }}) |
 | Home Assistant | `home-assistant.enabled` | [home-assistant]({{ '/integrations/home-assistant/' | relative_url }}) |
+| Ollama runtime | `ollama.enabled` | [ollama]({{ '/runtimes/ollama/' | relative_url }}) |
 
-All four are off by default. Each bundle's own page owns its values — this page
-does not repeat them.
+All five are off by default. Each bundle's own page owns its values — this page
+does not repeat them. The fifth is a RUNTIME rather than an integration: it
+starts no work and answers nowhere, it executes.
 
 ## Configure
 
@@ -529,7 +531,7 @@ global:
       # set it when the runtime image is not multi-arch
       nodeSelector: {}
 
-runtimes: []      # the `claude` bundle ships the one named `default`
+runtimes: []      # the `claude` bundle ships `claude`; `default` is its copy
 
 image:
   # the manager itself; its tag moves per release
@@ -539,24 +541,32 @@ image:
 **The defaults are SUFFICIENT.** The model credential is the only value with no
 defensible default, and therefore the only thing you must supply.
 
-**Declaring a second vendor is an entry stating only its difference:**
+**A second vendor is a bundle, or an entry stating only its difference.** The
+chart ships [Ollama]({{ '/runtimes/ollama/' | relative_url }}) as a bundle:
 
 ```yaml
-runtimes:
-  - name: ollama
-    image: registry.example.com/agentops-runtime-ollama:0.1.0
-    contextStorage: external      # keeps context at its own API, needs no disk
+ollama:
+  enabled: true
+  endpoint: http://ollama.ollama.svc:11434   # a server you already run
+  model: qwen2.5:14b                         # optional while the server has one model
 
 pipelines:
   - name: house-ops
     runtimeRef: ollama            # the route selects it
 ```
 
-**`default` is what a route naming no `runtimeRef` resolves to.** The `claude`
-bundle ships it, on by default. **Turn that bundle off with no replacement and
-the render FAILS**, naming the missing runtime and the routes that needed it —
-rather than leaving conversations in `Pending` forever with the reason in the
-manager's log.
+A vendor with no bundle is a `runtimes:` entry with its own image, and
+whatever differs from the defaults.
+
+**`default` is what a route naming no `runtimeRef` resolves to, and the chart
+renders it as a copy of one runtime you declared.** Every runtime keeps its own
+name. Which one is copied is `default: true` on that runtime — on a bundle or a
+`runtimes:` entry — or, with none flagged, the first configured. Every runtime
+is optional: the `claude` bundle is the first shipped and on by default, so it
+is the default on a fresh install, and turning it off with another on moves the
+default there with no rename. **No runtime at all FAILS the render** when a
+route still needs one, naming the routes — rather than leaving conversations in
+`Pending` forever with the reason in the manager's log. So do two flags.
 
 **Why the defaults live under `global.`** — a forcing, not tidiness. A subchart
 reads no parent scope but that one, and a bundle-shipped runtime has nowhere

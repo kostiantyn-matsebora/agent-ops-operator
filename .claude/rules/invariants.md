@@ -21,7 +21,11 @@ second trust level — or a second volume — on the route rather than by clonin
     1. **A chat-only install could execute nothing**, because the runtime lived
        in a bundle and no bundle was on. `agentops.defaultRuntimeGuard` now
        FAILS the render when nothing answers to `default` while a route resolves
-       to it. A failed render is recoverable; conversations stuck in `Pending`
+       to it. **`default` IS RENDERED BY THE PARENT as a copy of one declared
+       runtime** — the one flagged `default: true`, or the first configured —
+       and every runtime keeps its own name (`claude`, `ollama`). Every runtime
+       is optional; claude is merely the first shipped. Two flags fail the
+       render. A failed render is recoverable; conversations stuck in `Pending`
        with the reason in no one's view are not.
     2. **Two runtime ServiceAccounts existed and one was granted everything.**
        That was a release-wide MODE binding a shared account. Accounts are

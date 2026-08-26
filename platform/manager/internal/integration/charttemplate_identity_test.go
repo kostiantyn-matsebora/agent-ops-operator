@@ -152,8 +152,8 @@ func TestASecondAccountNeedsNoSecondRuntime(t *testing.T) {
 			runtimes++
 		}
 	}
-	if runtimes != 1 {
-		t.Fatalf("%d AgentRuntime objects rendered, want exactly 1 — expressing a second trust level "+
+	if runtimes != 2 { // the runtime and its `default` copy
+		t.Fatalf("%d AgentRuntime objects rendered, want exactly 2 (one runtime plus its default copy) — expressing a second trust level "+
 			"must not need a cloned runtime, which is the whole point of the field", runtimes)
 	}
 }

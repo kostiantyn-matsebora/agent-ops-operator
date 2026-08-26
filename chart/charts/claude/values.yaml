@@ -16,10 +16,15 @@
 # context volume. This bundle declares one runtime and inherits the rest.
 enabled: true
 
-# The AgentRuntime CR name. `default` is what a Pipeline declaring no
-# `runtimeRef` resolves to, so renaming it means every route needs one — and the
-# parent's guard will say so rather than letting conversations queue forever.
-name: default
+# The AgentRuntime CR name, what a Pipeline's `runtimeRef` selects.
+name: claude
+
+# WHICH RUNTIME IS `default` — the one a Pipeline naming no `runtimeRef` runs
+# on. The parent renders a CR of that name as a copy of the runtime flagged
+# here, or of the FIRST configured when none is flagged. This bundle is the
+# first shipped and on by default, so on a fresh install it is the default
+# without the flag. Flag another runtime to move the default, never rename.
+default: false
 
 # EVERYTHING ELSE IS INHERITED FROM `global.agentops.runtimeDefaults`, and the
 # keys below override it for THIS runtime only. Leave them empty and this

@@ -35,8 +35,9 @@ it, and reports what happened.
 
 Writing a runtime is appropriate when:
 
-- The **backend** is different — another vendor's CLI, a local model, your own
-  harness.
+- The **backend** is different — another vendor's CLI, your own harness. A
+  local model over Ollama is [already shipped]({{ '/runtimes/ollama/' | relative_url }}),
+  and is the worked example of a runtime that is its own harness.
 - You need behaviour the contract allows but `runtimes/claude` does not
   implement.
 
@@ -82,9 +83,10 @@ runtimes:
     image: registry.example.com/my-agentops-runtime:1.0.0
 ```
 
-**`default` is what a route naming no `runtimeRef` resolves to**, and the
-`claude` bundle ships it. Turn that bundle off with no replacement and the
-render FAILS, naming the missing runtime and the routes that needed it — which
+**`default` is what a route naming no `runtimeRef` resolves to**, and the chart
+renders it as a copy of one declared runtime — the one flagged `default: true`,
+or the first configured. Declare yours alone and it is the default. Declare no
+runtime at all and the render FAILS, naming the routes that needed one — which
 is the honest alternative to conversations queueing forever.
 
 A bundle may ship a runtime of its own the same way.

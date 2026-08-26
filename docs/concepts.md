@@ -524,7 +524,7 @@ global:
         envName: CLAUDE_CODE_OAUTH_TOKEN
         token: ""                 # supplied = the chart CREATES the Secret
 
-runtimes: []                      # the `claude` bundle ships the one named `default`
+runtimes: []                      # the `claude` bundle ships `claude`; `default` is its copy
 ```
 
 **THE DEFAULTS ARE SUFFICIENT.** A runtime declaring nothing but a name renders
@@ -1553,8 +1553,10 @@ context, and a wrong guess persists nothing while looking configured.
 **Which is why the VENDOR'S BUNDLE ships the declaration for the runtime it
 ships.** The value above is `runtime-claude`'s, and it is the default in
 `chart/charts/claude/values.yaml` — beside that runtime's image and its model
-credential, which live there for the same reason. So a default install with a
-context volume runs synchronised without anyone setting anything.
+credential, which live there for the same reason. `chart/charts/ollama/` ships
+its own, `.agentops/contexts/**`, for the same reason again. So a default
+install with a context volume runs synchronised without anyone setting
+anything.
 
 **Not the release-wide runtime defaults.** Those are what every runtime
 inherits, and an include list is one vendor's filesystem layout: it describes
