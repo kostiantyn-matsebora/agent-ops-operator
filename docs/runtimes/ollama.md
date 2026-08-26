@@ -18,10 +18,11 @@ next:
 surface. It is what EXECUTES an agent — and the second one this chart ships.
 
 **With this bundle, agent-ops runs a route on a model your own Ollama serves.**
-Each conversation gets a `runtime-ollama` pod. The manager hands it work units,
-the pod runs the agent loop, executes the tools and keeps the transcript, and
-your Ollama server is asked for the next message. Nothing an agent reads leaves
-your cluster.
+Each conversation gets a `runtime-ollama` pod. The manager hands it work units.
+The pod runs the agent loop, executes the tools and keeps the transcript, and
+asks your Ollama server for the next message.
+
+Nothing an agent reads leaves your cluster.
 
 A route opts in with `runtimeRef: ollama`. Every other route keeps running
 where it did.
