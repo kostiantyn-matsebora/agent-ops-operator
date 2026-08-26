@@ -84,5 +84,4 @@ jobs:
           image-ref: ${{ matrix.image.ref }}
           category: trivy-published-${{ matrix.image.component }}
           gate: "false"
-        env:
-          TRIVY_PLATFORM: linux/amd64
+          platform: linux/amd64

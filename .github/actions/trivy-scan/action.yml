@@ -40,6 +40,13 @@ inputs:
       them all — nothing fails and the run is green. Derive it from the
       component name (e.g. "trivy-manager").
     required: true
+  platform:
+    description: >
+      Platform to scan when the reference is a multi-arch manifest, e.g.
+      "linux/amd64". Empty scans a local image as it is. Stated as an input
+      because a scan of one architecture must say which.
+    required: false
+    default: ""
   gate:
     description: >
       Whether to run the gate. Default true. The scheduled scan of the
@@ -98,6 +105,7 @@ runs:
         cache: false
         cache-dir: ${{ github.workspace }}/.cache/trivy
       env:
+        TRIVY_PLATFORM: ${{ inputs.platform }}
         # A restored database is used as it is; a miss downloads one.
         TRIVY_SKIP_DB_UPDATE: ${{ steps.db.outputs.cache-matched-key != '' }}
         TRIVY_SKIP_JAVA_DB_UPDATE: ${{ steps.db.outputs.cache-matched-key != '' }}
@@ -127,5 +135,6 @@ runs:
         cache: false
         cache-dir: ${{ github.workspace }}/.cache/trivy
       env:
+        TRIVY_PLATFORM: ${{ inputs.platform }}
         TRIVY_SKIP_DB_UPDATE: true
         TRIVY_SKIP_JAVA_DB_UPDATE: true
