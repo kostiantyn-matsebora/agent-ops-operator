@@ -97,10 +97,17 @@ rules:
   # to whoever edits it; a controller that could rewrite it could shrink it.
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "create"]
+    # Tidy up: drop the claim when its Pipeline is deleted, so an uninstall
+    # leaves no dangling storage behind.
+    verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # Read channel credentials directly so a mistyped credentialsSecretRef can be
+  # reported on the Channel's Ready condition before any adapter pod starts.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
