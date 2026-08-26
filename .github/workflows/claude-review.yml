@@ -147,16 +147,18 @@ jobs:
             open ones re-raises what a person dismissed last push. Do not read the diff before spawning; that is their
             job, and reading it here is the serial cost this shape removes.
 
-            THE REVIEWERS RUN IN THE BACKGROUND, AND ENDING YOUR TURN ENDS THE
-            RUN. `Agent` answers "launched" at once; the result arrives later,
-            as a notification between your tool calls. If you answer with prose
-            and stop while a reviewer is still running, this process exits, the
-            reviewer is abandoned, nothing is posted, and the job still reports
-            success — that is exactly what happened on pull request #74: three
-            reviewers spawned, "I'll wait for them", turn ended, review lost.
-            So until EVERY reviewer has returned: run `sleep 60` through Bash
-            and look again. Never end the turn to wait. Never schedule a
-            wakeup; there is nothing to wake.
+            HOW TO CALL `Agent`, AND IT IS NOT OPTIONAL: every call carries
+            `run_in_background: false`, and ALL of them are in ONE message.
+            Foreground is what makes the turn wait for the result; one message
+            is what makes them run at the same time. Both were violated on
+            pull requests #74 and #77 — nine calls in nine messages, each
+            `run_in_background: true` — and it cost one review entirely (the
+            turn ended while they ran; under `claude -p` that ends the process)
+            and seven minutes of `sleep` on the other. A background agent's
+            result arrives only between your tool calls; do not run one. If a
+            result ever reads "Async agent launched", you got it wrong: keep
+            calling `sleep 60` through Bash until every reviewer has returned,
+            and never end the turn to wait.
 
             STEP 3 — CONSOLIDATE. When every reviewer has returned:
 
