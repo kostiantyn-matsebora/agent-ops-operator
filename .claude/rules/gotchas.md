@@ -212,6 +212,13 @@ rules loaded on demand.
   through verbatim is `claude_args`, so a Claude Code fact — does this
   allowlist spawn, do these run concurrently, what is in a context — is
   settled locally with `claude -p` and the same flags, in a minute.
+- **`claudeMdExcludes` MATCHES `**/` GLOBS AND ABSOLUTE PATHS, AND A RELATIVE
+  PATH MATCHES NOTHING** — silently, the rule stays loaded. It is the only
+  knob over what a subagent inherits: there is no per-agent opt-out, and
+  `.claude/rules/` cannot be split from `CLAUDE.md` by any setting, but a glob
+  naming a rule file drops that file alone and leaves `CLAUDE.md` in place.
+  Session-wide, so it fits a job whose every context wants the same subset;
+  the review passes it as `--settings` inline, on the guarded side.
 - **An inline `--agents` definition sits inside single quotes in `claude_args`,
   which is split like a shell line.** One apostrophe in the reviewer prompt
   ends the argument early and reads as a JSON error somewhere else. The suite
