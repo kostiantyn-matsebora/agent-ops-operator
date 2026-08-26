@@ -16,6 +16,9 @@ reviewer = agents['component-reviewer']
 $1
 " "$W"; }
 
+it "passes --agents exactly once — a second copy is the one that runs, and it is stale"
+assert_equals "1" "$(py 'print(parts.count("--agents"))')"
+
 it "defines exactly one reviewer, inline, in this file"
 assert_equals "component-reviewer" "$(py 'print(" ".join(agents))')"
 
