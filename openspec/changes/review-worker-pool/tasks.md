@@ -1,6 +1,6 @@
 ## 1. The roles
 
-- [ ] 1.1 `.claude/agents/component-reviewer.md`: the workflow's inline
+- [x] 1.1 `.claude/agents/component-reviewer.md`: the workflow's inline
   `--agents` definition moved verbatim — description, tools (`Read`, `Grep`,
   `Glob`, `Bash(git diff:*)`, `Bash(git log:*)`, `Bash(git show:*)`), the
   reading order and the RETURN JSON. Verify: `claude -p` from a checkout can
@@ -16,7 +16,7 @@
 
 ## 2. The script
 
-- [ ] 2.1 `.claude/workflows/review-pr.js`: `meta` with name `review-pr` and
+- [x] 2.1 `.claude/workflows/review-pr.js`: `meta` with name `review-pr` and
   three phases (Queue, Read, Consolidate); phase 1 an agent returning
   `{queue, threads}` by schema from `gh pr diff --name-only`,
   `review-queue.py` and the thread query; phase 2 `pipeline(queue, …)` with
@@ -31,7 +31,7 @@
 
 ## 3. The workflow file
 
-- [ ] 3.1 `claude-review.yml`: before the action step, `git checkout
+- [x] 3.1 `claude-review.yml`: before the action step, `git checkout
   "origin/${{ github.base_ref }}" -- .claude/workflows/review-pr.js
   .claude/agents/component-reviewer.md .claude/agents/review-coordinator.md`,
   with a `::notice` naming any of them the pull request changed; the
@@ -40,17 +40,17 @@
   `--allowedTools` gains `Workflow` and the two agent names. Verify:
   `python3 -c "import yaml; yaml.safe_load(open(...))"` and a diff that removes
   more lines than it adds
-- [ ] 3.2 The "review actually ran" gate: keep the execution-file and
+- [x] 3.2 The "review actually ran" gate: keep the execution-file and
   summary-count checks (#78's marker), and fail when the workflow's return is
   absent. Verify by reading the gate against the three outcomes (returned with
   summary, returned without, no execution file)
-- [ ] 3.3 `.github/scripts/serviceaccount-guard.py`-style dry read is not
+- [x] 3.3 `.github/scripts/serviceaccount-guard.py`-style dry read is not
   applicable; instead run the whole file through `actionlint` if available,
   else `yamllint`. Verify: no error
 
 ## 4. The first run, measured
 
-- [ ] 4.1 Merge, then on the next pull request read the run: the `/workflows`
+- [ ] 4.1 Merge, then on the next pull request read the run (local dry run on #77 from this checkout: 3 min 1 s wall, 10 agents, 0 errors, 22-CPU host): the `/workflows`
   record's per-agent timing from the execution artifact, the effective
   concurrent pool on `ubuntu-latest`, the summary on the pull request, the
   gate green. Record the pool size and the wall time here, beside #77's ten
@@ -64,18 +64,18 @@ Both halves, ticked separately, and this is the last section.
 
 **Reference docs:**
 
-- [ ] 5.1 `.claude/rules/worktree-delivery.md` "THE REVIEW FOUND SOMETHING":
+- [x] 5.1 `.claude/rules/worktree-delivery.md` "THE REVIEW FOUND SOMETHING":
   the review is a saved workflow with two roles, runnable as `/review-pr <n>`
   from a checkout; the guard is the base-branch restore
-- [ ] 5.2 `.claude/rules/gotchas.md`: the two subagent-under-`-p` entries
+- [x] 5.2 `.claude/rules/gotchas.md`: the two subagent-under-`-p` entries
   become the record of why the plan is a script (keep the measurements)
-- [ ] 5.3 `CONTRIBUTING.md`: how a change is reviewed, and that the review
+- [x] 5.3 `CONTRIBUTING.md`: how a change is reviewed, and that the review
   runs locally; `openspec/specs` is updated by the archive
-- [ ] 5.4 `docs/CHANGELOG.md`: no entry — nothing an adopter installs changes;
+- [x] 5.4 `docs/CHANGELOG.md`: no entry — nothing an adopter installs changes;
   state that here as the check having been made
 
 **The adopter site:**
 
-- [ ] 5.5 Verified again at the end: no page under `docs/` describes the
+- [x] 5.5 Verified again at the end: no page under `docs/` describes the
   review workflow (`grep -rn "claude-review\|component-reviewer" docs/*.md
   docs/guides/*.md` returns nothing), so the site is unchanged

@@ -115,7 +115,13 @@ finding block the merge, below.
 ### THE REVIEW FOUND SOMETHING. NOW WHAT
 
 `claude-review.yml` posts findings as review threads, and an open thread blocks
-the merge. Triage happens IN THE THREAD, in a stated vocabulary, and one comment
+the merge. **The review is a saved workflow with two roles** —
+`.claude/workflows/review-pr.js` runs one `component-reviewer` per changed
+component, concurrently, and hands every reading to the `review-coordinator`,
+the only role that posts. It runs from a checkout too: `/review-pr` with
+`{repo, number, base}` (`dryRun: true` posts nothing). The job restores all
+three files from the BASE branch before running, so a pull request cannot
+rewrite the review that judges it. Triage happens IN THE THREAD, in a stated vocabulary, and one comment
 acts on everything accepted:
 
 | You type | Where | It means |
