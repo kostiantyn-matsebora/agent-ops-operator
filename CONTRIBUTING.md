@@ -306,10 +306,10 @@ The template asks three things, and they are the review:
 **CI RUNS WHAT YOUR DIFF TOUCHED, AND `ci-green` IS THE REQUIRED CHECK.** The
 jobs are derived from the tree, not listed: a change under one component builds
 and tests that component alone, and a paragraph in a markdown file runs neither
-the operator's envtest suite nor any image build. Three paths deliberately
-rebuild everything — `.github/docker/`, `.github/components.sh` and
-`.github/workflows/ci.yml` — because each of them can change how anything else
-is built.
+the operator's envtest suite nor any image build. Four paths deliberately
+rebuild everything — `.github/docker/`, `.github/components.sh`,
+`.github/workflows/ci.yml` and `.github/actions/` — because each of them can
+change how anything else is built or scanned.
 
 **A path-filtered job that did not run reports NO status**, so a required check
 naming one would block every pull request that did not touch it forever.

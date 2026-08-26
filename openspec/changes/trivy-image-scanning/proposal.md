@@ -63,9 +63,10 @@ Two properties of it are the reason it works, and both are kept:
   says what the published images carry; scanning joins it, stated with the same
   bound (fixable HIGH/CRITICAL gate, unfixable findings reported nowhere).
 
-<!-- `continuous-integration` is deliberately NOT modified. Scanning is its own
-     capability — what blocks, what is reported, what an exception is — and the
-     CI spec keeps describing the build the scan is attached to. -->
+- `continuous-integration`: the scan action joins the paths that rebuild
+  everything — a change to it that scans nothing has not been tested. Scanning
+  itself stays its own capability; the CI spec describes the build it is
+  attached to.
 
 ## Impact
 
