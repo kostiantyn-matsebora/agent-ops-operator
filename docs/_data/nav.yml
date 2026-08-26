@@ -27,6 +27,8 @@ groups:
         url: /security/
       - title: Installation
         url: /installation/
+      - title: Changelog
+        url: /changelog/
   - title: Integrations
     entries:
       - title: Kubernetes

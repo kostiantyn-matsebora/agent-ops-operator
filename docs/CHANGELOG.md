@@ -1,4 +1,10 @@
-# Changelog
+---
+title: Changelog
+permalink: /changelog/
+description: >-
+  Every chart version, newest first — what changed, and the upgrade steps a
+  breaking one needs.
+---
 
 All notable changes to this project are documented here, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. Versions are
@@ -7,9 +13,8 @@ CHART versions. Image tags move independently and are named in each entry.
 This file holds the **ten most recent versions**. Older entries are in
 `changelog/`, linked at the [foot of this page](#older-versions).
 
-See [../README.md](../README.md) for the product overview and [./](./) for
-reference material. `CLAUDE.md` in this directory owns the rules this file
-follows.
+See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
+for the source and the reference material beside this file.
 
 ## [13.1.0] — 2026-08-26
 
@@ -1850,5 +1855,5 @@ Then set the endpoint, the credentials and — deliberately — the routes.
 
 | Archive | Covers |
 |---|---|
-| [CHANGELOG-5.0-5.21.md](changelog/CHANGELOG-5.0-5.21.md) | chart 5.0.0 through 5.21.0 |
-| [CHANGELOG-1.0-4.0.md](changelog/CHANGELOG-1.0-4.0.md) | chart 1.0 through 4.0.0 |
+| [CHANGELOG-5.0-5.21.md]({{ '/changelog/CHANGELOG-5.0-5.21.md' | relative_url }}) | chart 5.0.0 through 5.21.0 |
+| [CHANGELOG-1.0-4.0.md]({{ '/changelog/CHANGELOG-1.0-4.0.md' | relative_url }}) | chart 1.0 through 4.0.0 |
