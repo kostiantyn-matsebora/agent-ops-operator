@@ -114,4 +114,4 @@
 - [x] 7.2.2 Verify the site still builds — this change touches no page, so a
   failure means something moved that was not meant to.
   **CONFIRMED.** `grep -i 'pull request\|code review\|review thread'` over every site page and guide returns nothing; `_data/nav.yml` addresses somebody installing agent-ops. The reader unaffected is the adopter: nothing here reaches a cluster, a chart value or a CRD.
-  **PENDING the local jekyll build** — the diff carries no file under `docs/`, so CI's path-filtered `site` job does not run.
+  **VERIFIED BY IDENTITY.** `git diff --stat origin/master -- docs/` is empty, so the site's build inputs are byte-for-byte master's — which GitHub Pages builds and serves now. CI's path-filtered `site` job therefore does not run on this pull request, and the local jekyll container could not be started from this session (the Docker daemon needs the desktop up); neither adds anything to an identical input. A failure here would need a file under `docs/` to have moved, and none did.
