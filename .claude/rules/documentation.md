@@ -30,6 +30,7 @@ in prose is followed until the evening somebody is tired.
 |---|---|
 | `openspec/config.yaml` — `rules.tasks` / `rules.proposal` | injected into the instructions each time a tasks or proposal file is GENERATED, so the section is written in the first place |
 | `.claude/hooks/require-docs-task.sh` — a `PreToolUse` hook on Bash | **REFUSES `openspec archive`** when the last section is not documentation, or when its tasks are unticked |
+| `.claude/hooks/require-release-docs.sh` — a `PreToolUse` hook on Bash | **REFUSES `git push` of a `chart-v<semver>` tag** unless `chart/Chart.yaml`, a `## [<semver>]` changelog entry and every version the docs print agree on the number. A CHANGE's docs and a RELEASE's docs are two events, and only the first had a gate until 13.1.0 shipped saying 13.0.1 |
 
 - **The config half reaches the model at the moment it writes the file**, where
   a context file may already have been compacted away.
