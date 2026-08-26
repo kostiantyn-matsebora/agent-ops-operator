@@ -72,8 +72,9 @@ Four details, each of which cost a debugging round:
   it tries to remove the mount point. Remove the VOLUME instead.
 
 **THE CONTAINER IS `golang:1.25`, AND IT IS THE ONLY ONE.** That is the
-toolchain every image builds with (`.github/docker/go-module.Dockerfile` and
-the four own Dockerfiles), and two modules REQUIRE it: `runtimes/ollama/` for
+toolchain every Go image builds with (`.github/docker/go-module.Dockerfile`
+and the manager, console and egress-proxy Dockerfiles — `runtime-claude` is
+Node), and two modules REQUIRE it: `runtimes/ollama/` for
 the official MCP SDK's 1.25 floor, and `platform/manager/` since
 `trivy-image-scanning` bumped `golang.org/x/net` past what Go 1.23 links.
 The other modules still declare `go 1.23` and a newer toolchain builds them

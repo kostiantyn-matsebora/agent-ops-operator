@@ -325,7 +325,7 @@ and it fails if any job that DID run failed.
 | `openspec` | a published specification is invalid, or a change your diff touched is |
 | `docs-task` | a change your diff touched does not end in a finished documentation section |
 | `pr-title` | the title would not read as a commit subject |
-| `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see below |
+| `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |
 
 The last two judge only what your pull request TOUCHED. A dozen changes are open
 at any time and an unfinished one is unfinished correctly, so a gate judging all

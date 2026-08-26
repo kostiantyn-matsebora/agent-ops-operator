@@ -136,14 +136,16 @@ Properties of the product you cannot read off the values.
 Every published image carries an **SBOM** and **max-mode provenance**, recorded
 by the build. **Nothing is signed, and the chart is not attested.**
 
-**Every image is scanned for known vulnerabilities** — on the pull request that
-builds it, where a CRITICAL or HIGH finding **with a fix available** blocks the
-merge, and weekly against the published images, which reports to the
-repository's security tab and blocks nothing. **A finding with no available fix
-does not block**, knowingly: an unfixable upstream vulnerability is information
-rather than a task, and a gate that cannot be made green is one that gets
-switched off. The SBOM is the complete inventory; the scan is the actionable
-part of it.
+**Every image is scanned for known vulnerabilities**, twice over. On the pull
+request that builds it, a CRITICAL or HIGH finding **with a fix available**
+blocks the merge. Weekly, the published images are scanned again against a
+newer database, which reports to the repository's security tab and blocks
+nothing.
+
+**A finding with no available fix does not block**, knowingly. An unfixable
+upstream vulnerability is information rather than a task, and a gate that
+cannot be made green is one that gets switched off. The SBOM is the complete
+inventory. The scan is the actionable part of it.
 
 Read what an image carries:
 
