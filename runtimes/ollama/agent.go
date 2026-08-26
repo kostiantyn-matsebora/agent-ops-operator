@@ -61,6 +61,10 @@ func (a *Agent) Run(ctx context.Context, u WorkUnit) RunResult {
 	if err != nil {
 		return failed(-1, err.Error())
 	}
+	if a.Model == "" {
+		return failed(1, "no model: OLLAMA_MODEL is unset and the Ollama server does not have exactly one model pulled — "+
+			"set ollama.model to the one this route should use")
+	}
 
 	// The allowlist: the wiring's half from the unit, the agent definition's
 	// half from the checkout, composed per mode — then the gate, ONCE.

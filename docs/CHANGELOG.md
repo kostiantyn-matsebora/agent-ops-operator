@@ -27,7 +27,8 @@ which is the finding: the contract is vendor-neutral.
   `ollama` through the parent's shared renderer, inheriting
   `global.agentops.runtimeDefaults`. A route selects it with
   `pipelines[].runtimeRef: ollama`. The bundle deploys no model server, and
-  the render FAILS naming the key when either value is missing.
+  the render FAILS naming the key when the endpoint is missing. The model is
+  optional while the server has exactly one pulled.
 - The runtime implements the six built-in tools natively — `Read`, `Grep`,
   `Glob`, `Edit`, `Write`, `Bash` — so `agentops-observe` / `-shell` / `-edit`
   mean the same thing on both runtimes, connects the bound MCP servers from the

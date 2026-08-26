@@ -2240,16 +2240,17 @@ func TestOllamaBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
 	}
 }
 
-// Enabled without an endpoint or a model, the render FAILS naming the key. A
-// runtime pointed at nothing starts fine and fails every run, which reads as
-// a broken model rather than a missing value.
-func TestOllamaBundleRequiresEndpointAndModel(t *testing.T) {
+// Enabled without an endpoint, the render FAILS naming the key. A runtime
+// pointed at nothing starts fine and fails every run, which reads as a broken
+// model rather than a missing value. The MODEL is optional: unset, the runtime
+// uses the server's only pulled model and fails its runs naming the choices
+// when there are several.
+func TestOllamaBundleRequiresEndpoint(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
 		{[]string{"--set", "ollama.enabled=true"}, "ollama.endpoint is required"},
-		{[]string{"--set", "ollama.enabled=true", "--set", "ollama.endpoint=http://ollama.ollama.svc:11434"}, "ollama.model is required"},
 	} {
 		if out := helmTemplateErr(t, tc.args...); !strings.Contains(out, tc.want) {
 			t.Errorf("%v: want %q, got %s", tc.args, tc.want, out)

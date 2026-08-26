@@ -42,7 +42,7 @@ func main() {
 	ollamaURL := os.Getenv("OLLAMA_URL")
 	model := os.Getenv("OLLAMA_MODEL")
 	var missing []string
-	for _, kv := range [][2]string{{"CONTROL_URL", controlURL}, {"CONVO_ID", convo}, {"OLLAMA_URL", ollamaURL}, {"OLLAMA_MODEL", model}} {
+	for _, kv := range [][2]string{{"CONTROL_URL", controlURL}, {"CONVO_ID", convo}, {"OLLAMA_URL", ollamaURL}} {
 		if kv[1] == "" {
 			missing = append(missing, kv[0])
 		}
@@ -67,10 +67,13 @@ func main() {
 	switch {
 	case err != nil:
 		logf("[runtime] startup check: endpoint=%s FAILED: %v — runs will fail until it answers", ollamaURL, err)
+	case ollama.Model == "":
+		logf("[runtime] startup check: endpoint=%s ok, NO MODEL CONFIGURED and the server lists %d — set OLLAMA_MODEL (ollama.model) to one of: %v", ollamaURL, len(info.Models), info.Models)
 	case !info.Present:
 		logf("[runtime] startup check: endpoint=%s ok, model=%s NOT PRESENT — pull it on the server; runs will fail naming it", ollamaURL, model)
 	default:
-		logf("[runtime] startup check: endpoint=%s ok, model=%s present, tools=%v", ollamaURL, model, info.Tools)
+		logf("[runtime] startup check: endpoint=%s ok, model=%s present, tools=%v%s", ollamaURL, ollama.Model, info.Tools,
+			map[bool]string{true: " (the server's only model, chosen because OLLAMA_MODEL is unset)", false: ""}[model == ""])
 	}
 
 	repo := Repo{URL: os.Getenv("REPO_URL"), Ref: env("REPO_REF", "master"), AuthType: os.Getenv("GIT_AUTH_TYPE"),
@@ -89,7 +92,7 @@ func main() {
 	mcpc.Connect(ctx, cfg, logf)
 	defer mcpc.Close()
 
-	agent := &Agent{Chat: ollama, Workspace: workspace, NumCtx: numCtx, Model: model,
+	agent := &Agent{Chat: ollama, Workspace: workspace, NumCtx: numCtx, Model: ollama.Model,
 		ModelCanCallTools: info.Tools || err != nil || !info.Present, // unknown is not "cannot"
 		Store:             &ContextStore{Dir: filepath.Join(home, ".agentops", "contexts"), Sleep: time.Sleep},
 		Out:               os.Stdout, Logf: logf}
@@ -115,6 +118,7 @@ func main() {
 		}
 		if info, err := ollama.Check(ctx); err == nil {
 			agent.ModelCanCallTools = info.Tools || !info.Present
+			agent.Model = ollama.Model
 		}
 		// A registry PER UNIT: the built-ins, plus whatever the MCP servers list
 		// now that the proxy has seen this unit's grants.

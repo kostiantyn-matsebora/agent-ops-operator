@@ -34,10 +34,13 @@ image: ghcr.io/kostiantyn-matsebora/agentops-runtime-ollama:0.1.0
 # report the endpoint unreachable on every run, and look like a broken model.
 endpoint: ""            # e.g. http://ollama.ollama.svc:11434
 
-# WHICH MODEL, by its Ollama name — already pulled on that server. Required
-# with the bundle. A model that cannot call tools is legitimate on a text-only
-# route and fails a tool-granting one by name; `docs/integrations/ollama.md`
-# says which sizes are worth trying.
+# WHICH MODEL, by its Ollama name — already pulled on that server. OPTIONAL:
+# left empty, the runtime uses the server's ONLY pulled model, and with several
+# pulled every run fails naming them until this says which. Ollama serves many
+# models and its API has no default, so the choice is yours exactly when there
+# is one to make. A model that cannot call tools is legitimate on a text-only
+# route and fails a tool-granting one by name; docs/runtimes/ollama.md says
+# which sizes are worth trying.
 model: ""               # e.g. qwen2.5:14b
 
 # THE CONTEXT WINDOW, sent on EVERY request. Ollama's server default silently

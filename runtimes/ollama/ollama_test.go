@@ -63,6 +63,33 @@ func TestChatFailuresNameTheEndpoint(t *testing.T) {
 	}
 }
 
+func TestCheckPicksTheOnlyModelWhenNoneIsConfigured(t *testing.T) {
+	models := `{"models":[{"name":"qwen2.5:7b"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tags":
+			io.WriteString(w, models)
+		case "/api/show":
+			io.WriteString(w, `{"capabilities":["completion","tools"]}`)
+		}
+	}))
+	defer srv.Close()
+	o := &Ollama{URL: srv.URL, HTTP: srv.Client()}
+	if info, err := o.Check(context.Background()); err != nil || o.Model != "qwen2.5:7b" || !info.Present {
+		t.Errorf("the only model must be chosen: model=%q %+v %v", o.Model, info, err)
+	}
+	models = `{"models":[{"name":"a"},{"name":"b"}]}`
+	o = &Ollama{URL: srv.URL, HTTP: srv.Client()}
+	if info, err := o.Check(context.Background()); err != nil || o.Model != "" || len(info.Models) != 2 {
+		t.Errorf("several models and none configured must leave the choice open, naming them: %q %+v %v", o.Model, info, err)
+	}
+	models = `{"models":[]}`
+	o = &Ollama{URL: srv.URL, HTTP: srv.Client()}
+	if _, err := o.Check(context.Background()); err != nil || o.Model != "" {
+		t.Errorf("no model pulled: %q %v", o.Model, err)
+	}
+}
+
 func TestCheck(t *testing.T) {
 	present := true
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

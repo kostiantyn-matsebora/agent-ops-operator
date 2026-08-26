@@ -144,6 +144,14 @@ func TestMissingContextFails(t *testing.T) {
 	}
 }
 
+func TestNoModelFailsTheRunReadably(t *testing.T) {
+	a, _ := newAgent(t, &scripted{replies: []Message{text("x")}})
+	a.Model = ""
+	if res := a.Run(context.Background(), WorkUnit{PromptText: "q"}); res.Status != "failed" || !strings.Contains(res.Result, "ollama.model") {
+		t.Errorf("%+v", res)
+	}
+}
+
 func TestEmptyPromptAndInferenceFailure(t *testing.T) {
 	a, _ := newAgent(t, &scripted{})
 	if res := a.Run(context.Background(), WorkUnit{}); res.Status != "failed" || res.Result != "empty prompt" {

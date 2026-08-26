@@ -155,6 +155,9 @@ func (o *Ollama) Chat(ctx context.Context, messages []Message, tools []ToolDef, 
 type ModelInfo struct {
 	Present bool
 	Tools   bool
+	// Models is what the server lists, filled when no model is configured so
+	// the failure can name the choices.
+	Models []string
 }
 
 // Check verifies the endpoint (GET /api/tags) and the model (POST /api/show).
@@ -169,9 +172,31 @@ func (o *Ollama) Check(ctx context.Context) (ModelInfo, error) {
 	if err != nil {
 		return ModelInfo{}, fmt.Errorf("%s unreachable: %w", o.URL, err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		return ModelInfo{}, fmt.Errorf("%s /api/tags: %s", o.URL, resp.Status)
+	}
+	var tags struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
+		return ModelInfo{}, fmt.Errorf("%s /api/tags: decode: %w", o.URL, err)
+	}
+	// NO MODEL CONFIGURED: the server's ONLY model is the model. Ollama serves
+	// several and its API has no default, so with more than one pulled the
+	// choice is the operator's and the run says so. Chosen once, at startup,
+	// and kept — a model pulled later must not move a running runtime.
+	if o.Model == "" {
+		names := make([]string, 0, len(tags.Models))
+		for _, m := range tags.Models {
+			names = append(names, m.Name)
+		}
+		if len(names) != 1 {
+			return ModelInfo{Models: names}, nil
+		}
+		o.Model = names[0]
 	}
 	body, _ := json.Marshal(map[string]string{"model": o.Model})
 	resp, err = o.post(ctx, "/api/show", body)

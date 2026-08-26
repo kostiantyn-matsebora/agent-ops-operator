@@ -64,9 +64,14 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set ollama.model=qwen2.5:14b
 ```
 
-**Both values are required.** Without them the render fails and names the key.
-A runtime pointed at nothing would start, fail every run, and look like a
-broken model.
+**The endpoint is required.** Without it the render fails and names the key. A
+runtime pointed at nothing would start, fail every run, and look like a broken
+model.
+
+**The model is optional when the server has one.** Ollama serves many models
+and has no default of its own, so: one model pulled, and the runtime uses it.
+Several pulled, and every run fails naming them until `ollama.model` says
+which.
 
 Then a route selects it:
 
@@ -97,7 +102,7 @@ this is the only runtime — so it is the default without the flag.
 | Value | Is |
 |---|---|
 | `ollama.endpoint` | the server's URL, as a pod reaches it |
-| `ollama.model` | a model already pulled there, by its Ollama name |
+| `ollama.model` | a model already pulled there, by its Ollama name. Optional while the server has exactly one |
 | `ollama.numCtx` | the context window, sent on every request. Default `8192` |
 | `ollama.keepAlive` | how long the server keeps the model loaded after a run. Default `10m` |
 | `ollama.env` | further knobs, as env entries — a bearer for a proxy in front of Ollama goes here, with `valueFrom` |

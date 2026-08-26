@@ -548,7 +548,7 @@ chart ships [Ollama]({{ '/runtimes/ollama/' | relative_url }}) as a bundle:
 ollama:
   enabled: true
   endpoint: http://ollama.ollama.svc:11434   # a server you already run
-  model: qwen2.5:14b                         # a model already pulled there
+  model: qwen2.5:14b                         # optional while the server has one model
 
 pipelines:
   - name: house-ops

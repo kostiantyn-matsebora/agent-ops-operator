@@ -160,10 +160,11 @@ Call with the bundle's values. */ -}}
 {{- define "agentops.ollamaRuntimeEntry" -}}
 {{- $v := . -}}
 {{- $endpoint := $v.endpoint | required "ollama.endpoint is required when the bundle is enabled — the URL of an Ollama server you already run, e.g. http://ollama.ollama.svc:11434; this bundle deploys none" -}}
-{{- $model := $v.model | required "ollama.model is required when the bundle is enabled — a model already pulled on that server, e.g. qwen2.5:14b" -}}
+{{- /* `model` is OPTIONAL: unset, the runtime uses the server's only pulled model
+and fails its runs naming the choices when there are several. */ -}}
 {{- $env := list
   (dict "name" "OLLAMA_URL" "value" $endpoint)
-  (dict "name" "OLLAMA_MODEL" "value" $model)
+  (dict "name" "OLLAMA_MODEL" "value" ($v.model | default "" | toString))
   (dict "name" "OLLAMA_NUM_CTX" "value" ($v.numCtx | default 8192 | toString))
   (dict "name" "OLLAMA_KEEP_ALIVE" "value" ($v.keepAlive | default "10m" | toString)) -}}
 {{- range ($v.env | default list) }}{{ $env = append $env . }}{{ end -}}
