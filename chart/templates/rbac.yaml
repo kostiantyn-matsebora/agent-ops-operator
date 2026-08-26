@@ -83,6 +83,7 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
   # Pipeline reconciler: renders the claim for a persistence binding that names
   # a PersistentVolume, because a pod can mount only a claim.
   #
