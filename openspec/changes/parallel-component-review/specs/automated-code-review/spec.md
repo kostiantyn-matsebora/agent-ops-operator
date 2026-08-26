@@ -69,3 +69,44 @@ defined inside the guarded file inherits the guard.
 - **WHEN** a pull request changes the reviewer's definition
 - **THEN** the review does not run on that pull request and says so, exactly
   as it does for any other edit to the review workflow
+
+## MODIFIED Requirements
+
+### Requirement: A finding is written to be triaged, not read as an essay
+
+An inline finding SHALL be four labeled lines and nothing else:
+
+| Line | Holds | Bound |
+|---|---|---|
+| `Claim` | the one thing a person can accept or reject | one clause, at most fifteen words |
+| `Where` | the paths and lines concerned | paths only, no sentence |
+| `Rule` | the rule file and heading, or the spec path, contradicted | nothing after the heading; omitted when none |
+| `Fix` | the obvious fix | at most twelve words; omitted when not obvious |
+
+The consequence of a claim SHALL live in `Where` and `Rule`, never in a clause
+appended to the claim, and the review SHALL count the words before posting.
+
+The summary SHALL be a count line, a reach line stating which changed names
+were followed to how many consumers, and a table of new findings — with no
+prose around them.
+
+**Triage happens by reading a thread beside a diff.** A finding that is a wall
+of text is skimmed, and a skimmed finding is neither accepted nor dismissed —
+it stays open, blocking the merge for a reason nobody read. A cap stated as
+"a few lines" was measured and did not hold: the review wrote a bold sentence
+and two long sentences, which is prose wearing a shape. Labeled lines with
+counted bounds are what held.
+
+#### Scenario: A finding is posted
+
+- **WHEN** the review comments on a line
+- **THEN** the comment is the four labeled lines, the claim is one clause
+  within its bound, and the rule is named by file and heading rather than
+  quoted
+
+#### Scenario: The summary is posted
+
+- **WHEN** the review posts its summary
+- **THEN** it is the four counts, the reach line and a table of new findings,
+  and a run with nothing new carries the counts, the reach line and a table
+  of verdicts
