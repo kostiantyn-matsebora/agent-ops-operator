@@ -143,6 +143,7 @@ def classify(thread: dict, allowed: set[str], vocabulary: dict) -> tuple[str, di
         return "already resolved", None
 
     accepted_by = None
+    refused = None
     for reply in comments[1:]:
         if not is_acceptance(reply.get("body", ""), vocabulary):
             continue
@@ -150,18 +151,26 @@ def classify(thread: dict, allowed: set[str], vocabulary: dict) -> tuple[str, di
         # THE REVIEW MAY NOT ACCEPT ITS OWN FINDING. Matched on type as well as
         # login, exactly as the resolver does, so a person named `claude` is a
         # person here too.
+        #
+        # AN INVALID ACCEPTANCE DOES NOT VETO A LATER VALID ONE. It is recorded
+        # and the walk goes on: a stray `fix it` from a passer-by, or from the
+        # review, must not lock a maintainer out of accepting the same finding
+        # underneath it. The refusal is still what gets reported if nobody
+        # valid accepts.
         if author.get("__typename") == "Bot" or normalise_login(author.get("login")) in allowed:
-            return f"acceptance written by the review itself ({author.get('login')!r})", None
+            refused = refused or f"acceptance written by the review itself ({author.get('login')!r})"
+            continue
         if reply.get("authorAssociation") not in WRITE_ASSOCIATIONS:
-            return (f"acceptance by {author.get('login')!r} "
-                    f"({reply.get('authorAssociation')}), who cannot push here"), None
+            refused = refused or (f"acceptance by {author.get('login')!r} "
+                                  f"({reply.get('authorAssociation')}), who cannot push here")
+            continue
         accepted_by = {"login": author.get("login"), "reply": reply.get("body", "")}
-        # The FIRST acceptance wins; a later one adds nothing and a later
+        # The FIRST valid acceptance wins; a later one adds nothing and a later
         # objection does not retract -- the thread is where that argument
         # happens, and the person can resolve it if they change their mind.
         break
     if accepted_by is None:
-        return "not accepted", None
+        return refused or "not accepted", None
 
     return "accepted", {
         "threadId": thread["id"],

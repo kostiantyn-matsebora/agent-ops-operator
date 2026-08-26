@@ -49,6 +49,11 @@ cat > "$GH_FIXTURE" <<'JSON'
      "comments":{"nodes":[
        {"databaseId":801,"body":"Wrong default.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}},
        {"databaseId":802,"body":"fix it, and while you are there rewrite the config loader","authorAssociation":"OWNER","author":{"login":"a-maintainer","__typename":"User"}}]}},
+    {"id":"PRRT_overruled","isResolved":false,"isOutdated":false,"path":"j.go","line":4,
+     "comments":{"nodes":[
+       {"databaseId":1001,"body":"Shadowed variable.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}},
+       {"databaseId":1002,"body":"fix it","authorAssociation":"NONE","author":{"login":"passer-by","__typename":"User"}},
+       {"databaseId":1003,"body":"fix it","authorAssociation":"OWNER","author":{"login":"a-maintainer","__typename":"User"}}]}},
     {"id":"PRRT_impostor","isResolved":false,"isOutdated":false,"path":"i.go","line":8,
      "comments":{"nodes":[
        {"databaseId":901,"body":"Stale comment.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}},
@@ -62,8 +67,14 @@ ids() { python3 -c 'import json,sys;print(" ".join(i["threadId"] for i in json.l
 
 out=$(run)
 
-it "keeps the finding a maintainer accepted, and only that one"
-assert_equals "PRRT_accepted" "$(ids)"
+it "keeps the findings a maintainer accepted, and only those"
+assert_equals "PRRT_accepted PRRT_overruled" "$(ids)"
+
+# THE REGRESSION THE FIRST REVIEW OF THIS PROGRAM FOUND: it returned on the
+# first matching reply, so a stranger's `fix it` permanently vetoed the
+# maintainer's underneath it.
+it "lets a maintainer's acceptance stand after a stranger's invalid one"
+assert_contains "$out" "ACCEPTED PRRT_overruled (j.go:4) by a-maintainer"
 
 it "carries the finding, where it points, and the person's words"
 assert_contains "$(cat "$tmp/out.json")" '"finding": "This leaks the handle."'

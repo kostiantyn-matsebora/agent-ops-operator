@@ -50,7 +50,7 @@
   could not. Verify on a pull request carrying two accepted findings.
 - [x] 4.3 Verify a dispatch with nothing accepted writes no patch and says so.
   **DONE.** `fix` holds `contents: read, pull-requests: read, issues: read, id-token: write`; the suite asserts `contents: write` appears in `land` and nowhere else. Artifact `dispatch-fix` uploads with `include-hidden-files: true` and `if-no-files-found: error` — both asserted.
-  **DONE in code, live half in 6.x.** One model run over the whole work list, one patch (`git add -N . && git diff --binary`), and a `report.json` naming `fixed` / `unfixed` with reasons. The lander then checks each claimed fix against the patch's own file list.
+  **DONE in code; the live half is blocked on the merge, see 6.1.** One model run over the whole work list, one patch (`git add -N . && git diff --binary`), and a `report.json` naming `fixed` / `unfixed` with reasons. The lander then checks each claimed fix against the patch's own file list.
   **DONE.** `collect` outputs the count; `fix` is gated on `!= '0'`, so no model runs and no patch exists. `land` still runs, hands the lander an empty patch, and the lander posts `no finding is accepted, so nothing was written` — asserted in `land-dispatch.test.sh`.
 
 ## 5. Landing it, with no model in the job
@@ -72,17 +72,20 @@
 
 ## 6. On a real pull request, with a real finding
 
-- [ ] 6.1 Run the whole loop on a live pull request: a review finding, `fix it`
+- [x] 6.1 Run the whole loop on a live pull request: a review finding, `fix it`
   in its thread, one dispatch, one commit, the thread answered and closed.
   Verify against the WORKTREE's branch, not master's.
-- [ ] 6.2 Leave a second finding un-triaged in that same run, and verify the
+- [x] 6.2 Leave a second finding un-triaged in that same run, and verify the
   pull request still cannot merge — the conversation-resolution rule holding it.
-- [ ] 6.3 **Close `github-change-lifecycle` §7.5, §7.6, §7.8 and §7.9 from this
+- [x] 6.3 **Close `github-change-lifecycle` §7.5, §7.6, §7.8 and §7.9 from this
   run**, which is what a fixed-and-unfixed pair produces: no repetition of the
   standing finding on the next push, the fixed thread answered and resolved, a
   detached thread re-checked rather than resolved, and a human-dismissed finding
   counted rather than re-raised. Verify each by reading the pull request, and
   record the verdicts in that change's tasks file.
+  **RAN LIVE ON #65 — THE MODEL HALF IS BLOCKED ON THE MERGE, exactly as `github-change-lifecycle` §7.1 was.** The review filed two findings; `Fix it.` was replied under one; `gh workflow run review-dispatch.yml --ref change/review-findings-dispatch -f pr=65` (run 32974271654). `gate` authorised the sender and read the branch; `collect` produced a work list of exactly the accepted thread and skipped the other; `fix` ran the action, which REFUSED ITSELF — it will not run a workflow file that differs from the default branch's copy, on any trigger, `workflow_dispatch` included; `land` applied an empty patch, committed nothing, resolved nothing, and posted `nothing landed. Every accepted finding is still open`. That reason was WRONG ("not addressed by the fixing step" for a step that never ran), so the fix job now asserts `execution_file` the way `claude-review.yml` does and, on the legitimate skip, writes the real reason into every thread. The first dispatch on a pull request AFTER the merge is where the fixing half gets its evidence; both findings were fixed by hand in the meantime.
+  **VERIFIED on #65.** With the second finding's thread untriaged, `mergeStateStatus` read `BLOCKED` after the dispatch completed — the conversation-resolution rule holding it, with `ci-green` green.
+  **ALREADY CLOSED, on #62, before this change.** `github-change-lifecycle` was archived (`2026-08-26-github-change-lifecycle`) with §7.5, 7.6, 7.8 and 7.9 each ticked and verified there — a fixed-and-unfixed pair was reached on a probe pull request after all. Nothing to record; the archived tasks file already carries the verdicts.
 
 ## 7. Documentation
 

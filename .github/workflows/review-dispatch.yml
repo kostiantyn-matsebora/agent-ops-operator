@@ -78,7 +78,14 @@ jobs:
       branch: ${{ steps.who.outputs.branch }}
       dispatcher: ${{ steps.who.outputs.dispatcher }}
     steps:
+      # THE TRUSTED COPY, NOT THE PULL REQUEST'S. On `pull_request_review_comment`
+      # `github.ref` is the pull request's MERGE ref, so a bare checkout would
+      # read the vocabulary file the pull request itself may be editing. The
+      # default branch on a comment event; the ref a maintainer dispatched by
+      # hand. `land` reads its programs from the same place.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
       - id: who
         name: Who sent this, and may they
         env:
@@ -137,6 +144,8 @@ jobs:
       accepted: ${{ steps.list.outputs.accepted }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
       # THE WORK LIST IS DERIVED FROM THE THREADS. The program never sees the
       # dispatch comment; a person cannot direct work through it.
       - id: list
@@ -177,7 +186,8 @@ jobs:
         with:
           name: dispatch-work-list
           path: ${{ runner.temp }}/dispatch
-      - uses: anthropics/claude-code-action@v1
+      - id: model
+        uses: anthropics/claude-code-action@v1
         env:
           WORK_LIST: ${{ runner.temp }}/dispatch/work-list.json
           REPORT: ${{ runner.temp }}/dispatch/report.json
@@ -217,6 +227,36 @@ jobs:
             Return nothing else.
           claude_args: |
             --allowedTools "Read,Edit,MultiEdit,Write,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*)"
+
+      # A MODEL THAT DID NOT RUN MUST NOT READ AS A MODEL THAT FIXED NOTHING.
+      # The action skips itself, successfully, whenever this workflow file
+      # differs from the default branch's copy — on EVERY trigger, the hand
+      # run included, which is how the first live dispatch of this workflow
+      # reported "not addressed by the fixing step" for a finding no model ever
+      # saw. `execution_file` is set only once Claude actually ran. Where the
+      # skip is the legitimate one, the report says so in every thread; where
+      # it is not, the job fails rather than landing a silence.
+      - name: The fixing step actually ran
+        env:
+          EXECUTION_FILE: ${{ steps.model.outputs.execution_file }}
+          REPORT: ${{ runner.temp }}/dispatch/report.json
+          WORK_LIST: ${{ runner.temp }}/dispatch/work-list.json
+          DEFAULT: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [ -z "$EXECUTION_FILE" ] || { echo "the fixing step ran"; exit 0; }
+          git fetch -q origin "$DEFAULT"
+          if ! git diff --quiet "origin/$DEFAULT" -- .github/workflows/review-dispatch.yml; then
+            echo "::notice::This branch edits .github/workflows/review-dispatch.yml, so the action refuses to run it — a pull request may not rewrite what acts on its findings. Dispatch works once this is merged."
+            python3 -c '
+          import json, sys
+          work = json.load(open(sys.argv[1]))
+          json.dump({"fixed": [], "unfixed": [{"threadId": i["threadId"], "reason": "the fixing step did not run: this branch edits review-dispatch.yml, which the action refuses to run until it is merged"} for i in work]}, open(sys.argv[2], "w"))
+          ' "$WORK_LIST" "$REPORT"
+            exit 0
+          fi
+          echo "::error::The fixing step reported success without running: no execution file, and this workflow file matches the default branch."
+          exit 1
 
       # THE PATCH IS THE WHOLE OF WHAT CROSSES. `--binary` so a changed image
       # survives; `add -N` so a NEW file is in the diff at all. A missing report
