@@ -89,6 +89,10 @@ answer to "is this behaviour intended".
   back on the default branch in the one change meant to stop them.
 - **Cost, accepted:** an archive commit that must reflect review feedback needs
   an amend or a follow-up commit on the branch.
+- **THE ARCHIVE PULL REQUEST MUST SAY `Closes #<n>`**, and the `pr-closes` check
+  refuses one that does not. GitHub closes on the keyword and on nothing else;
+  the script's `close` is a second step, and #38 and #67 stayed open under
+  `opsx:archived` because both were skipped.
 
 ### THE GATES ARE ALREADY REQUIRED — THROUGH ONE CHECK
 
