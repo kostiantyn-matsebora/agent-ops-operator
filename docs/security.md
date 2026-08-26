@@ -142,7 +142,8 @@ blocks the merge. Weekly, the published images are scanned again against a
 newer database.
 
 Both scans report to the repository's security tab. Only the pull-request scan
-blocks anything.
+blocks anything, and on a pull request from a fork it blocks without
+reporting — a fork's token cannot write there.
 
 **A finding with no available fix does not block**, knowingly. An unfixable
 upstream vulnerability is information rather than a task, and a gate that
