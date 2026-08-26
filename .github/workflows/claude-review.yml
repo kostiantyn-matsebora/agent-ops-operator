@@ -353,10 +353,13 @@ jobs:
           if [ -n "$EXECUTION_FILE" ]; then
             # RAN IS NOT FINISHED. A run that spawns its reviewers and ends its
             # turn leaves an execution file, a green step and no review — #74.
-            # The one thing every finished review posts is the summary, and
-            # its verdict table has a fixed header. Require it.
+            # The one thing every finished review posts is the summary. Its
+            # COUNT LINE is on both shapes — "N new · M carried over · …"
+            # under a "### Review" heading; the verdict table is only on a
+            # clean one, and requiring it failed the first real review (#77,
+            # six findings, no table) for the wrong reason.
             summaries=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
-              --jq '[.[] | select(.body | contains("| Read against | Verdict |"))] | length')
+              --jq '[.[] | select((.body | startswith("### Review")) and (.body | test(" new · ")))] | length')
             if [ "${summaries:-0}" -lt 1 ]; then
               echo "::error::The review ran (conclusion: ${CONCLUSION:-unreported}) but posted no summary — it stopped before consolidating, most likely by ending its turn while reviewers were still running. Read the execution artifact."
               exit 1
