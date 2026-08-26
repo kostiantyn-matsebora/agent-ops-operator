@@ -206,11 +206,25 @@ jobs:
 
             - The table lists NEW findings only. A carried-over or resolved
               finding is already visible in its thread and is not restated.
-            - No table when nothing is new: the count line, then one line
-              saying what was read and found clean.
-            - No preamble, no "Otherwise:" paragraph, no closing remarks. A
-              summary that explains what the review did instead of what it
-              found is the wall of text this shape exists to prevent.
+            - NOTHING NEW: the count line, then THIS table and nothing else —
+              one cell per reading, a cell is a verdict of at most four words:
+
+                  | Read against | Verdict |
+                  |---|---|
+                  | invariants and retired terms | clean |
+                  | the change's own specs | matches |
+                  | correctness | clean |
+                  | documentation | updated in the change |
+
+            - THE WHOLE COMMENT IS AT MOST TWELVE LINES. Over that, it is
+              wrong, whatever it says.
+            - NEVER list what you read, how many lines matched, or what you
+              checked and found fine. The reader asked what you FOUND; the
+              method is in this prompt. "Read X, Y and Z; the 151 lines match
+              verbatim; no heading collides" is the paragraph this rule
+              exists to delete.
+            - No preamble, no "Otherwise:" paragraph, no closing remarks, no
+              sentence outside a table cell.
 
             Post GitHub comments only. Do not return the review as a message.
           claude_args: |
