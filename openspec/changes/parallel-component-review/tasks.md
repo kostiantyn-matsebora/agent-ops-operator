@@ -36,7 +36,7 @@
   rewrites. Verify on the live run in §6 that an inline comment is the
   reviewer's words within the shape.
   **DONE.** Inline in `claude_args` via `--agents`: `tools: Read, Grep, Glob, Bash(git diff|log|show:*)`, `model: inherit`, `maxTurns: 40`. `claude-review.test.sh` asserts no posting tool, no `mark-thread-resolved`, no `Agent`, no apostrophe (it would end the shell argument — found by the first splice failing).
-  **DONE in the prompt; verified in the local dry run** — the consolidator forwarded reviewer claims as the first line of each six-line finding. Live shape on the first reviewed pull request after the merge.
+  **DONE — and then TIGHTENED**: the six-line shape still read as prose in the dry run (a long bold sentence plus two long sentences), so a finding is now FOUR LABELED LINES — `Claim` ≤ 20 words, `Where` paths only, `Rule`, `Fix` ≤ 15 words — and the reviewer returns exactly those fields, so the consolidator forwards and never writes. Live shape on the first reviewed pull request after the merge.
 
 ## 4. The consolidator — the main context
 

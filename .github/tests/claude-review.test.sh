@@ -42,15 +42,27 @@ assert_equals "True" "$(py 'print(isinstance(reviewer.get("maxTurns"), int))')"
 
 it "asks the reviewer for JSON with the three fields the consolidator reads"
 p=$(py 'print(reviewer["prompt"])')
+prompt=$(py 'print(step["with"]["prompt"])')
 assert_contains "$p" '"changedNames"'
 assert_contains "$p" '"threads"'
 assert_contains "$p" '"findings"'
+
+it "asks the reviewer for the four finding fields the inline comment is built from, with the caps"
+assert_contains "$p" '"where"'
+assert_contains "$p" '"fix"'
+assert_contains "$p" 'AT MOST 20 WORDS'
+assert_contains "$p" 'AT MOST 15 WORDS'
+
+it "posts a finding as four labeled lines, not prose"
+assert_contains "$prompt" '**Claim:**'
+assert_contains "$prompt" '**Where:**'
+assert_contains "$prompt" '**Rule:**'
+assert_contains "$prompt" '**Fix:**'
 
 it "keeps the reviewer definition free of apostrophes, which end the shell argument"
 assert_equals "0" "$(py 'print(json.dumps(reviewer).count(chr(39)))')"
 
 it "consolidates in the main context: queue, reach, and the first finding"
-prompt=$(py 'print(step["with"]["prompt"])')
 assert_contains "$prompt" "review-queue.py"
 assert_contains "$prompt" "git grep -l -F"
 assert_contains "$prompt" "unreviewed: <group>"
