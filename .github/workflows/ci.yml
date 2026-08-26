@@ -413,10 +413,12 @@ jobs:
   # a multi-platform result, which is why the build stays `linux/amd64` and why
   # nothing here is added to the release path (design D3). Nothing escapes a
   # pull request: `push: false` is unchanged.
-  # `trivy-db` IS BEST-EFFORT. A failed warm-up must not skip fourteen build
-  # and scan legs: the action's restore misses and downloads instead, which is
-  # slower and still a scan. `!cancelled()` runs this whatever `trivy-db` did,
-  # while a cancelled run stays cancelled.
+  # `trivy-db` IS BEST-EFFORT, twice over. A failed warm-up must not skip
+  # fourteen build and scan legs: the action's restore misses and downloads
+  # instead, which is slower and still a scan. `!cancelled()` runs this whatever
+  # `trivy-db` did, while a cancelled run stays cancelled — and `ci-green` does
+  # not list `trivy-db` either, because a warm-up that failed while every scan
+  # still ran is not a reason to block a merge.
   images:
     needs: [discover, trivy-db]
     if: ${{ !cancelled() && needs.discover.result == 'success' && needs.discover.outputs.images != '[]' }}
@@ -754,7 +756,7 @@ jobs:
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, chart, docs, site, trivy-db, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
+    needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

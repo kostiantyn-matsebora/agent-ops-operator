@@ -73,25 +73,16 @@ jobs:
       # arm64 half has the same packages from the same Dockerfile, so this is
       # close to the whole answer, but it is not the whole answer, and claiming
       # both would be the silent kind of wrong.
-      - name: Trivy scan (report only)
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ matrix.image.ref }}
-          scan-type: image
-          format: sarif
-          output: trivy-results.sarif
-          exit-code: "0"
-          ignore-unfixed: true
-          severity: CRITICAL,HIGH
-          # SARIF IGNORES `severity` unless told otherwise — the action emits every
-          # level by default, so the tab showed MEDIUM findings the gate never sees.
-          # One threshold for both runs is the whole point of the pair (design D5).
-          limit-severities-for-sarif: true
-        env:
-          TRIVY_PLATFORM: linux/amd64
+      # THE SAME ACTION AS THE PULL-REQUEST GATE, with the gate off. One
+      # scanner, one threshold, one set of exceptions — a second copy is how the
+      # two come to disagree about what a finding is (design D1).
+      #
       # A category DISTINCT from ci.yml's `trivy-<component>`, so a scheduled
       # result never replaces a pull request's or the reverse.
-      - uses: github/codeql-action/upload-sarif@v4
+      - uses: ./.github/actions/trivy-scan
         with:
-          sarif_file: trivy-results.sarif
+          image-ref: ${{ matrix.image.ref }}
           category: trivy-published-${{ matrix.image.component }}
+          gate: "false"
+        env:
+          TRIVY_PLATFORM: linux/amd64

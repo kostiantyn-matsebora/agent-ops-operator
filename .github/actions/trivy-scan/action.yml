@@ -40,6 +40,13 @@ inputs:
       them all — nothing fails and the run is green. Derive it from the
       component name (e.g. "trivy-manager").
     required: true
+  gate:
+    description: >
+      Whether to run the gate. Default true. The scheduled scan of the
+      published images passes false: it reports and never fails, because there
+      is no change under review to reject.
+    required: false
+    default: "true"
   upload:
     description: >
       Whether to upload the SARIF. Default true. A pull request from a fork
@@ -108,6 +115,7 @@ runs:
 
     # ── Run 2: the gate (exit-code 1 on a fixable CRITICAL/HIGH) ─────────────
     - name: Trivy scan (gate — fail on fixable CRITICAL/HIGH)
+      if: inputs.gate == 'true'
       uses: aquasecurity/trivy-action@v0.36.0
       with:
         image-ref: ${{ inputs.image-ref }}

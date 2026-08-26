@@ -139,13 +139,16 @@ by the build. **Nothing is signed, and the chart is not attested.**
 **Every image is scanned for known vulnerabilities**, twice over. On the pull
 request that builds it, a CRITICAL or HIGH finding **with a fix available**
 blocks the merge. Weekly, the published images are scanned again against a
-newer database, which reports to the repository's security tab and blocks
-nothing.
+newer database.
+
+Both scans report to the repository's security tab. Only the pull-request scan
+blocks anything.
 
 **A finding with no available fix does not block**, knowingly. An unfixable
 upstream vulnerability is information rather than a task, and a gate that
-cannot be made green is one that gets switched off. The SBOM is the complete
-inventory. The scan is the actionable part of it.
+cannot be made green is one that gets switched off.
+
+The SBOM is the complete inventory. The scan is the actionable part of it.
 
 Read what an image carries:
 

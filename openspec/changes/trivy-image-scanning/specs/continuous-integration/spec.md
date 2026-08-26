@@ -22,8 +22,9 @@ the matrix derived in the first place.
 touch no component directory while invalidating every component: the shared
 Dockerfile that is many components' recipe, the script that decides what
 components exist at all, the workflow that decides how any of them is tested,
-and the scan action every image is scanned by. A change to the scan that
-scans nothing has not been tested, and reports success.
+and the composite actions under `.github/actions/`, which is where the scan
+every image runs through lives. A change to the scan that scans nothing has not
+been tested, and reports success.
 
 **WHERE THE COMPARISON BASE CANNOT BE ESTABLISHED, EVERYTHING SHALL BUILD.** A
 branch's first push has nothing to compare against, and a shallow checkout makes
@@ -54,7 +55,7 @@ reports success while doing so.
 
 #### Scenario: The scan action changes
 
-- **WHEN** a pull request changes `.github/actions/trivy-scan/`
+- **WHEN** a pull request changes anything under `.github/actions/`
 - **THEN** every image is built and scanned on that pull request
 
 #### Scenario: The shared recipe changes
@@ -70,3 +71,6 @@ reports success while doing so.
 - **THEN** everything is built rather than nothing
 
 #### Scenario: No artifact escapes from a pull request
+
+- **WHEN** CI runs for a pull request
+- **THEN** no image or chart is pushed to any registry
