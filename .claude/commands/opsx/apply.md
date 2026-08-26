@@ -46,8 +46,10 @@ Implement tasks from an OpenSpec change.
      ```
 
      **THE SCRIPT, NEVER RAW `gh issue edit`.** It advances the label, removes
-     the three it is not, comments once — and REGENERATES THE BODY, which is
-     what makes the issue's link to the change resolve. At `/opsx:propose` the
+     the three it is not, comments once — and REGENERATES THE POINTER (the body
+     on an issue it opened, its own comment on a PROMOTED one, whose body is the
+     reporter's), which is what makes the issue's link to the change resolve. At
+     `/opsx:propose` the
      branch does not exist yet, so the link written then points at nothing; this
      transition is what fixes it. Raw `gh` calls do the labels and leave the
      404 in place for the life of the issue.

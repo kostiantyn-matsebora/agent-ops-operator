@@ -99,8 +99,17 @@ USE rather than by reading the command back.
       gained `opsx:proposed` beside the reporter's own `enhancement` label, and
       the repository's open-issue count did not rise — no second issue anywhere.
       The probe was then closed with an explanation of what it was
-- [ ] 5.3 Verify the archive path closes a promoted issue exactly as it closes a
+- [x] 5.3 Verify the archive path closes a promoted issue exactly as it closes a
       project-authored one, with the reporter's thread still readable
+      **FALSIFIED, THEN VERIFIED, on #63** — a reporter-style issue with a comment,
+      promoted into a scratch change and taken through `phase archived` + `close`.
+      The close and the labels behaved; the BODY did not: `phase` regenerated it
+      unconditionally, so the reporter's words were replaced by the pointer table
+      one transition after the one 5.2 had tested. `opsx-issue.sh` now reads the
+      issue and rewrites the pointer COMMENT when the body is not its own; re-run
+      on #63, the body stayed the reporter's, the pointer comment was patched in
+      place, the issue closed. A test pins it and the delta spec gained the
+      scenario. The probe was closed with an explanation
 
 ## 6. The two gates
 
@@ -161,13 +170,26 @@ USE rather than by reading the command back.
       Fixed in #35. The review then ran for 2m39s, posting ONE sticky summary and no
       inline comments (there were no findings). Inline comments confirmed separately on
       #37 and #40, which each carried one.
-- [ ] 7.2 Skip forks explicitly on `pull_request.head.repo.fork` (design D13) and
+- [x] 7.2 Skip forks explicitly on `pull_request.head.repo.fork` (design D13) and
       verify the check reports SKIPPED rather than failing on a missing secret —
       the two look identical in the checks list and mean opposite things
-- [ ] 7.3 Write the review prompt against the project's own doctrine (design
+      **VERIFIED BY PROXY on #62.** No fork pull request has ever reached this
+      repository and one account cannot fork its own, so the fork clause itself
+      could not be exercised. What was: the DRAFT clause of the same `if:`, on the
+      probe opened as a draft — both `review` and `reconcile` reported
+      `conclusion: skipped`, never `failure`. The fork half is the other operand of
+      that expression and reports through the same path; the first fork pull
+      request is where it gets its own evidence
+- [x] 7.3 Write the review prompt against the project's own doctrine (design
       D11): the invariants, the retired vocabulary and the change's delta specs,
       alongside ordinary correctness. Verify on a deliberately doctrine-breaking
       test branch that it names the rule contradicted
+      **VERIFIED on #62**, a probe granting the manager `secrets` get/list and
+      `delete` on claims — two edits that pass every guard and every test. The
+      review filed two inline findings, each quoting the invariant by its heading
+      and naming `.claude/rules/invariants.md` (and `wiring.md` / `adapters.md`
+      for the mechanism the edit bypassed). Zero other findings on a diff that had
+      nothing else wrong with it
 - [x] 7.4 The review runs both hygiene guards first and skips itself when either
       fails, with a `::notice::` saying why — a failing guard means the diff
       carries content on its way out, and reviewing it spends a model call on
@@ -201,11 +223,21 @@ USE rather than by reading the command back.
       `isResolved: false` afterwards. It also PRINTS every author it saw, so the
       first real review run reports the login to pin rather than silently
       resolving nothing
-- [ ] 7.8 Verify a detached thread is re-checked rather than resolved: push a
+- [x] 7.8 Verify a detached thread is re-checked rather than resolved: push a
       whitespace-only edit around an open finding, and confirm it is re-raised at
       its new location and the old thread closed as superseded
-- [ ] 7.9 Verify a human-resolved finding is not re-raised and IS counted in the
+      **VERIFIED on #62.** A blank line ABOVE the finding did not detach it —
+      GitHub tracks the shift (`isOutdated: false`, line moved). A whitespace edit
+      ON the anchored line did (`isOutdated: true`). The next run replied
+      "Superseded" in the old thread, `reconcile` resolved it, and the finding was
+      re-raised as a new thread at its current line, with the summary linking both
+- [x] 7.9 Verify a human-resolved finding is not re-raised and IS counted in the
       sticky summary as dismissed
+      **VERIFIED on #62.** The `secrets` thread was resolved by the maintainer with
+      no code change, then a commit was pushed. The next run left it alone —
+      no new thread on those lines — and the summary read "0 new findings, 2
+      carried over, 0 resolved by this pass, 1 dismissed", naming who resolved it
+      and that the code still contradicts the rule
 
 ## 8. End-to-end, on one change before eleven
 

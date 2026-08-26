@@ -127,6 +127,12 @@ gains the phase label; nothing is duplicated and nothing is lost.
 - **THEN** that same issue tracks the change, keeps its original text and
   comments, and gains the change's link and phase label
 
+#### Scenario: The change advances
+
+- **WHEN** a change promoted from an inbound issue moves to another phase
+- **THEN** the reporter's body is untouched, and the pointer the promotion left
+  as a comment is what carries the refreshed links and phase
+
 #### Scenario: The change is archived
 
 - **WHEN** a change promoted from an inbound issue is archived
