@@ -1,4 +1,4 @@
-## Gotchas (paid for in debugging)
+## Gotchas (paid for in debugging, twice) (paid for in debugging)
 
 - **RBAC `resources:` are lowercase plurals.** A blanket rename once produced
   `AgentRuntimes` and silently broke the informer — forbidden loops in the log,
@@ -193,3 +193,26 @@ reaching it is `/ha-ops <task>` and never an accident.
   render and the source fans out to both.
 - **That is reported in NOTES.txt, never refused.** Refusing it would be the
   deleted `sourceConflicts` guard returning one layer up.
+
+### A REVIEW SUBAGENT UNDER THE ACTION
+
+**A SUBAGENT ARRIVES WITH EVERY UNSCOPED RULE FILE ALREADY IN CONTEXT.**
+Measured on 2026-08-26 for `parallel-component-review`: a `component-reviewer`
+spawned from `claude -p` held `CLAUDE.md` and all fifteen unscoped
+`.claude/rules/*.md` before reading anything; only the three `paths:`-scoped
+rules loaded on demand.
+
+- **So "route the rules to the reviewer that needs them" is free for scoped
+  rules and impossible for the rest.** The fixed cost is paid per reviewer, in
+  parallel. The lever is scoping more rules, which is a decision about the
+  rules.
+- **`claude-code-action` REFUSES ANY WORKFLOW FILE THAT IS NEW OR DIFFERS FROM
+  THE DEFAULT BRANCH COPY — on every trigger, `workflow_dispatch` included.** A
+  spike of the action on a branch cannot run at all. What the action passes
+  through verbatim is `claude_args`, so a Claude Code fact — does this
+  allowlist spawn, do these run concurrently, what is in a context — is
+  settled locally with `claude -p` and the same flags, in a minute.
+- **An inline `--agents` definition sits inside single quotes in `claude_args`,
+  which is split like a shell line.** One apostrophe in the reviewer prompt
+  ends the argument early and reads as a JSON error somewhere else. The suite
+  counts them.

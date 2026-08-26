@@ -90,9 +90,26 @@ current line, never touch a person's thread.
 `model: inherit` initially. A reviewer's job is bounded enough that a smaller
 model may serve; that is measured after the shape works, not guessed before.
 
-**NO PROTOTYPE, ONE SPIKE.** The surfaces are a workflow file and a run log. The
-spike is a throwaway branch with the shape wired and a reviewer instructed to
-report what its context contained; it answers three facts and is discarded.
+**NO PROTOTYPE, ONE SPIKE — AND IT RAN LOCALLY, NOT ON A BRANCH.** The action
+refuses to run any workflow file that is new or differs from the default
+branch's, so a throwaway branch cannot exercise it at all. The three facts are
+Claude Code facts, and the action passes `claude_args` through verbatim, so
+`claude -p` in the worktree with exactly the workflow's flags answers them.
+Run on 2026-08-26, 48s wall, two reviewers:
+
+| Fact | Answer |
+|---|---|
+| (a) `Agent(component-reviewer)` on the allowlist spawns an inline `--agents` definition | YES |
+| (b) two reviewers spawned in one message run concurrently | YES — windows 138–140s and 139–141s overlapped |
+| (c) what a reviewer's context holds before it reads anything | `CLAUDE.md` and EVERY UNSCOPED rule file (15); the three `paths:`-scoped ones (`chart.md`, `signal-rules.md`, `palette-and-mark.md`) load only on reading a matching file; the git status snapshot; the tools named in its definition and nothing else |
+
+**Consequence of (c): rule routing is free for scoped rules and impossible for
+the rest.** A reviewer for `chart/` gets `chart.md` the moment it reads a
+template, and no other reviewer pays for it. The 15 unscoped files are in
+every reviewer's context regardless — the fixed cost is paid N times, in
+parallel, and the delegation message need not name any of them. The lever on
+that cost is scoping more rules with `paths:`, which is a decision about the
+rules and belongs to a change of its own.
 
 ## Risks / Trade-offs
 
