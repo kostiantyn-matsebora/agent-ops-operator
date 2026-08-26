@@ -96,7 +96,9 @@ Additive and separable — D4. Its own workflow, not a second trigger on `ci.yml
   wrong
 - [ ] 4.6 Verify it runs at all: trigger it manually once via `workflow_dispatch`
   before trusting the schedule. A schedule that never fires and a scan that finds
-  nothing look identical
+  nothing look identical. BLOCKED UNTIL MERGE: a new workflow is not
+  dispatchable until it exists on master. Run it at `/opsx:archive`, before
+  archiving
 
 ## 5. Exceptions
 
