@@ -19,9 +19,10 @@ surface. It is what EXECUTES an agent — and the second one this chart ships.
 
 **Ollama is a model server, and it supplies inference only.** No agent loop, no
 tool execution, no memory. This runtime builds all of that itself and asks
-Ollama for one thing — the next message — so any tool-capable model Ollama
-serves becomes an agent here, with the same toolsets and MCP servers the
-reference runtime gets.
+Ollama for one thing: the next message.
+
+So any tool-capable model Ollama serves becomes an agent here — with the same
+toolsets and MCP servers the reference runtime gets.
 
 ![The manager hands a work unit to runtime-ollama, which runs the agent loop and the tools itself, keeps one transcript per conversation, and asks Ollama only for the next message.]({{ '/assets/img/runtimes/ollama-light.svg' | relative_url }}){: .ao-diagram}
 
