@@ -219,6 +219,10 @@ rules loaded on demand.
   naming a rule file drops that file alone and leaves `CLAUDE.md` in place.
   Session-wide, so it fits a job whose every context wants the same subset;
   the review passes it as `--settings` inline, on the guarded side.
+- **`Agent` IS CALLED WITH `run_in_background: false`, ALL CALLS IN ONE MESSAGE.**
+  Foreground makes the turn wait; one message makes them concurrent. The
+  consolidator did the opposite twice — nine calls in nine messages, each
+  background — measured in the run's execution artifact.
 - **A BACKGROUND `Agent` RESULT NEVER ARRIVES AFTER THE TURN ENDS, AND UNDER
   `claude -p` THE TURN IS THE PROCESS.** The consolidator on #74 spawned three
   reviewers, wrote "I'll wait for them", ended its turn — and the run reported
