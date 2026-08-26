@@ -13,7 +13,7 @@ A Kubernetes operator for agents you can address.
 - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes-native
 - ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps-ready
 - ![]({{ '/assets/img/logos/claude.svg' | relative_url }}) Runs Claude Code
-- Runs Ollama
+- ![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) Runs Ollama
 
 {: .ao-tabs #tour}
 - **How it works**
@@ -124,7 +124,7 @@ A Kubernetes operator for agents you can address.
   - [![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) Telegram]({{ '/integrations/telegram/' | relative_url }})
   - [![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console]({{ '/console/' | relative_url }})
   - [![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) any MCP server]({{ '/guides/toolsets/' | relative_url }})
-  - [Ollama]({{ '/runtimes/ollama/' | relative_url }})
+  - [![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) Ollama]({{ '/runtimes/ollama/' | relative_url }})
   - [your own]({{ '/guides/signal-adapter/' | relative_url }})
 
 ## Why agent-ops?
@@ -138,7 +138,7 @@ The same wiring, wherever something needs looking at.
 | **Run the checks nobody gets to** | Certificates, drift and capacity, on a schedule. |
 | ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) **An assistant for your home** | Its logs, its devices, its config. Not everything is a cluster. |
 | ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) **Ask it from chat** | It answers in the thread where your team already talks. |
-| **Keep it in the cluster** | Route the routine lanes to a model you host. Nothing they read leaves. |
+| ![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) **Keep it in the cluster** | Route the routine lanes to a model you host. Nothing they read leaves. |
 | ![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) **Plug in your own** | Three HTTP contracts: your source, your runtime, your channel. |
 {: .ao-areas}
 

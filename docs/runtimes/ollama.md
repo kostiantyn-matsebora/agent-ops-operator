@@ -17,9 +17,13 @@ next:
 **This is a runtime, not an integration.** It starts no work and answers on no
 surface. It is what EXECUTES an agent — and the second one this chart ships.
 
-An operator that watches your cluster sends its events, its logs and its object
-YAML to whoever answers. With this runtime, whoever answers is a model you
-host. Both runtimes run on one install, and each **Pipeline** picks its own.
+**Ollama is a model server, and it supplies inference only.** No agent loop, no
+tool execution, no memory. This runtime builds all of that itself and asks
+Ollama for one thing — the next message — so any tool-capable model Ollama
+serves becomes an agent here, with the same toolsets and MCP servers the
+reference runtime gets.
+
+![The manager hands a work unit to runtime-ollama, which runs the agent loop and the tools itself, keeps one transcript per conversation, and asks Ollama only for the next message.]({{ '/assets/img/runtimes/ollama-light.svg' | relative_url }}){: .ao-diagram}
 
 ## What you get
 

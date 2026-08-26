@@ -314,6 +314,32 @@ SECURITY_DIAGRAMS: dict[str, dict] = {
 }
 
 
+# One per RUNTIME page. A runtime is not an integration -- it starts no work
+# and answers nowhere -- so its three beats are its own: what hands it work,
+# what it does itself, and what it reaches for. The middle box is the one the
+# page is about, and for runtime-ollama the point of the picture is how much
+# sits in that box: the loop, the tools and the transcript are the runtime's,
+# and the model server is asked for one thing.
+RUNTIME_DIAGRAMS: dict[str, dict] = {
+    "ollama": {
+        "dir": "runtimes",
+        "alt": "The manager hands a work unit to runtime-ollama, which runs the "
+               "agent loop and the tools itself, keeps one transcript per "
+               "conversation, and asks Ollama only for the next message.",
+        "cols": [
+            [("the manager", "one unit at a time", "plain")],
+            [("runtime-ollama", "loop, tools, transcript", "yours")],
+            [("Ollama", "the next message only", "subject"),
+             ("the context", "one transcript each", "plain")],
+        ],
+        # No return line: drawn, it ran from the model server back to the
+        # manager and read as Ollama reporting the run. The report is the
+        # runtime's, and the page says so in words.
+        "arrows": ["GET /work", "asks / keeps"],
+    },
+}
+
+
 def _ink(kind: str, p: dict[str, str]) -> tuple[str, str, str]:
     """fill, stroke, and the accent bar down the left edge.
 

@@ -14,7 +14,7 @@ can reply to.
 <img src="docs/assets/img/logos/kubernetes.svg" width="18" alt=""> **Kubernetes-native** &nbsp;·&nbsp;
 <img src="docs/assets/img/claim-gitops.svg" width="18" alt=""> **GitOps-ready** &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/claude.svg" width="18" alt=""> **Runs Claude Code** &nbsp;·&nbsp;
-**Runs Ollama**
+<img src="docs/assets/img/logos/ollama-light.svg" width="18" alt=""> **Runs Ollama**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-agent--ops-informational)](https://kostiantyn-matsebora.github.io/agent-ops-operator/)
@@ -41,7 +41,7 @@ cron schedules &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/home-assistant.svg" width="18" alt=""> Home Assistant &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/telegram.svg" width="18" alt=""> Telegram &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/agent-ops.svg" width="18" alt=""> the console &nbsp;·&nbsp;
-Ollama &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/ollama-light.svg" width="18" alt=""> Ollama &nbsp;·&nbsp;
 any MCP server &nbsp;·&nbsp; your own
 
 ## How it works

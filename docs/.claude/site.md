@@ -56,8 +56,10 @@ interchangeable.**
 | `readme-flow.py` | `assets/img/readme-flow-{light,dark}.svg` | the README column |
 | `threat-model.py` | `assets/img/security/threat-model-{light,dark}.svg` | the security page's trust boundaries |
 
-- **The GUIDE diagrams are not here.** They are specs in
-  `.github/scripts/docs_diagrams.py`, rendered by `docs-generate.py`, and CI
+- **The GUIDE, INTEGRATION, RUNTIME and SECURITY diagrams are not here.** They
+  are specs in `.github/scripts/docs_diagrams.py` (`DIAGRAMS`,
+  `INTEGRATION_DIAGRAMS`, `RUNTIME_DIAGRAMS`, `SECURITY_DIAGRAMS`, each with
+  its `dir`), rendered by `docs-generate.py`, and CI
   fails on a stale one. The security page's four smaller illustrations are in
   that same dict, told apart by a `dir` key — a guide entry states none and
   lands in `assets/img/guides/`.

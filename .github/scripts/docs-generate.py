@@ -967,6 +967,7 @@ def main() -> int:
     light, dark = docs_diagrams.palette(STYLESHEET)
     for slug, spec in {**docs_diagrams.DIAGRAMS,
                        **docs_diagrams.INTEGRATION_DIAGRAMS,
+                       **docs_diagrams.RUNTIME_DIAGRAMS,
                        **docs_diagrams.SECURITY_DIAGRAMS}.items():
         # `dir` is the page family the drawing belongs to. Guide diagrams state
         # none, so their directory is the default rather than repeated sixteen

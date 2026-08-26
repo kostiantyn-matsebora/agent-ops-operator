@@ -12,10 +12,12 @@ integration agent-ops speaks to — and never to suggest endorsement.
 | `telegram.svg` | Telegram | `telegram.org/img/t_logo.svg` | Telegram mark, used referentially |
 | `mcp.svg` | Model Context Protocol | `raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/docs/favicon.svg` | MIT-licensed repository |
 | `claude.svg` | Claude | `claude.ai/favicon.svg` | Anthropic mark, used referentially |
+| `ollama-{light,dark}.svg` | Ollama | `raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/ollama.svg` | Simple Icons, CC0 — Ollama publishes no SVG mark of its own. Uncoloured like the octicon, so the fill is ours and it ships as a pair |
 | `github-{light,dark}.svg` | GitHub | `raw.githubusercontent.com/primer/octicons/main/icons/mark-github-16.svg` | MIT (primer/octicons) |
 
-**The GitHub pair is the one entry that is NOT a chip-set mark**, and the one
-that ships in two colours. Both differences follow from what it is:
+**The GitHub pair is the one entry that is NOT a chip-set mark.** It and the
+Ollama pair are the two that ship in two colours, for the same reason: an
+uncoloured icon takes the fill its ground needs, and `themed.js` picks the file. Both differences follow from what it is:
 
 - **It is site CHROME** — the masthead's link to the source — rather than a mark
   naming an integration this product speaks to.
