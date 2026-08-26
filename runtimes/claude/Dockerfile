@@ -13,7 +13,7 @@ RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
       git openssh-client curl jq ca-certificates procps && \
     rm -rf /var/lib/apt/lists/* && \
-    npm install -g @anthropic-ai/claude-code && \
+    npm install -g npm@latest @anthropic-ai/claude-code && \
     npm cache clean --force
 
 # NO kubectl, and no other domain tooling. This image is a VENDOR runtime: it

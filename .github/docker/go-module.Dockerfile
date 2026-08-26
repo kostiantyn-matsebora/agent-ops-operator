@@ -22,7 +22,7 @@
 # ENTRYPOINT does not expand build arguments, and distroless carries no shell
 # for the shell form — so a per-component `ENTRYPOINT ["/${BINARY}"]` cannot
 # work. A fixed path is the only shape that does.
-FROM --platform=$BUILDPLATFORM golang:1.23 AS build
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod ./

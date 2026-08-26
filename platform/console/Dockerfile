@@ -30,7 +30,7 @@ RUN find dist -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -nam
       -exec gzip -9 -k -f {} \; \
  && echo "compressed:" && du -sh dist
 
-FROM --platform=$BUILDPLATFORM golang:1.23 AS build
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod ./

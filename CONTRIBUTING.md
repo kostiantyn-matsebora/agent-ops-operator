@@ -190,6 +190,40 @@ helm template agent-ops chart/ --set global.demo.enabled=true
 CI runs all of it on every pull request, plus `kubeconform` over each rendered
 chart permutation and the two guards over the published tree, below.
 
+`platform/manager/` and `runtimes/ollama/` need Go 1.25; the others declare
+1.23 and build under either. Every image is built with `golang:1.25`, because
+the toolchain that builds a binary is the standard library it ships.
+
+### The image scan
+
+Every image CI builds is scanned with Trivy in the same
+job — `.github/actions/trivy-scan`, called from the `images` matrix — and the
+findings land in the repository's **Security → Code scanning** tab under
+`trivy-<component>`.
+
+**What fails your pull request:** a CRITICAL or HIGH finding **with a fixed
+version available**. The job log names the package, the installed version and
+the version that fixes it, so the fix is nearly always a bump — a base image, a
+Go dependency, an npm package.
+
+**What does not:** a finding with no fix released (`ignore-unfixed`). An
+unfixable upstream CVE is information, not a task, and a gate that cannot be
+made green is one somebody switches off. Severity below HIGH is not gated.
+
+**A fixable finding you cannot act on now** is excepted in `.trivyignore`, one
+CVE per line, with the reason and an expiry: `CVE-2026-12345 exp:2026-10-31`.
+An expired entry stops suppressing its finding — Trivy honours the date itself.
+Never loosen the severity threshold or exempt a component; that changes what
+is checked everywhere in order to permit one thing.
+
+**A pull request from a fork** runs the gate and skips the upload: its token
+cannot write security events, and the gate is the half that protects the merge.
+
+**The published images are re-scanned weekly** by `image-scan.yml`, against a
+newer database and with nothing changed here. It reports under
+`trivy-published-<component>` and blocks nothing — there is no change under
+review to reject.
+
 ## Commit messages
 
 **`type(scope): what the commit does, as a sentence.`**
@@ -291,6 +325,7 @@ and it fails if any job that DID run failed.
 | `openspec` | a published specification is invalid, or a change your diff touched is |
 | `docs-task` | a change your diff touched does not end in a finished documentation section |
 | `pr-title` | the title would not read as a commit subject |
+| `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see below |
 
 The last two judge only what your pull request TOUCHED. A dozen changes are open
 at any time and an unfinished one is unfinished correctly, so a gate judging all

@@ -368,10 +368,54 @@ jobs:
   # Every Dockerfile builds. amd64 only and never pushed: pull-request feedback
   # speed matters more than arch coverage here, and the multi-arch build is
   # exercised at release, where a manifest is actually produced to assert on.
-  images:
+  # TRIVY'S DATABASE, PULLED ONCE. Every image leg below scans, and every scan
+  # needs the day's vulnerability database from ghcr.io — anonymously, which is
+  # rate-limited. Fourteen concurrent legs each fetching it is slow and fails
+  # in a way that reads as a flaky scanner. This job saves it under the key
+  # `.github/actions/trivy-scan` restores, so the matrix starts warm.
+  trivy-db:
     needs: discover
     if: needs.discover.outputs.images != '[]'
     runs-on: ubuntu-latest
+    steps:
+      - id: date
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - id: cached
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: cache-trivy-${{ steps.date.outputs.date }}
+          lookup-only: true
+      - if: steps.cached.outputs.cache-hit != 'true'
+        uses: oras-project/setup-oras@v1
+      - if: steps.cached.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.cache/trivy/db"
+          oras pull ghcr.io/aquasecurity/trivy-db:2
+          tar -xzf db.tar.gz -C "$GITHUB_WORKSPACE/.cache/trivy/db"
+          rm db.tar.gz
+      - if: steps.cached.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: cache-trivy-${{ steps.date.outputs.date }}
+
+  # BUILT, THEN SCANNED, NEVER PUSHED. `load: true` puts the single-platform
+  # result in the runner's daemon so Trivy can read it; `load:` cannot express
+  # a multi-platform result, which is why the build stays `linux/amd64` and why
+  # nothing here is added to the release path (design D3). Nothing escapes a
+  # pull request: `push: false` is unchanged.
+  images:
+    needs: [discover, trivy-db]
+    if: needs.discover.outputs.images != '[]'
+    runs-on: ubuntu-latest
+    # `security-events: write` HERE AND NOWHERE ELSE — the SARIF upload needs
+    # it, and the workflow-level `contents: read` stays the default for every
+    # other job.
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
@@ -386,8 +430,24 @@ jobs:
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/amd64
           push: false
+          load: true
+          tags: agentops-${{ matrix.image.component }}:scan
           cache-from: type=gha,scope=${{ matrix.image.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.component }}
+      # THE CATEGORY IS DERIVED, per component. Under one shared category each
+      # upload replaces the last and the security tab shows one component's
+      # findings while appearing to describe fourteen — green all the way.
+      #
+      # A FORK'S PULL REQUEST CANNOT UPLOAD: its token is read-only whatever
+      # the block above says, and `upload-sarif` fails on it. The upload is
+      # skipped there so an external contribution never goes red for a
+      # permission it cannot hold; the GATE still runs, and that is the half
+      # that protects the merge.
+      - uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: agentops-${{ matrix.image.component }}:scan
+          category: trivy-${{ matrix.image.component }}
+          upload: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
 
   # THE SITE BUILDS. GitHub Pages builds `docs/` natively on merge, which means
   # nothing checks it BEFORE merge: a bad Liquid tag, a missing include or a
@@ -683,7 +743,7 @@ jobs:
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
+    needs: [discover, operator, modules, console-ui, chart, docs, site, trivy-db, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

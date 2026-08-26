@@ -5,7 +5,7 @@
 # which refuses a tag already in the registry and asserts the pushed manifest's
 # architectures against the declaration in .github/components.sh. The command above
 # builds locally; it does not publish.
-FROM --platform=$BUILDPLATFORM golang:1.23 AS build
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
