@@ -943,6 +943,56 @@ def rewrite(path: pathlib.Path, schemas: dict[str, dict]) -> str:
 
 # --------------------------------------------------------------------------
 
+# A RELEASE CHANGES WHAT THE DOCS PRINT, AND NOTHING ELSE CHECKED THAT. Chart
+# 13.1.0 shipped while installation.md still told adopters to install 13.0.1,
+# and the reference runtime's image tag sat two patches behind in two worked
+# examples. Neither the docs-task hook (which checks a task is ticked) nor CI
+# (which checks generated blocks) could see it: the numbers are typed by hand.
+#
+# So every `--version X.Y.Z` a page prints must be the chart's own version, and
+# every first-party image tag a page prints must be the tag the chart ships.
+# Placeholders (`<version>`) are not numbers and pass. The changelog is exempt:
+# it is the one page that legitimately names every version there has been.
+VERSION_RE = re.compile(r"--version (\d+\.\d+\.\d+)")
+IMAGE_RE = re.compile(r"ghcr\.io/kostiantyn-matsebora/(agentops-[a-z0-9-]+):(\d+\.\d+\.\d+)")
+
+
+def shipped_image_tags() -> dict[str, str]:
+    """image name -> the tag the chart ships, from the parent and bundle values."""
+    tags: dict[str, str] = {}
+    for values in [CHART / "values.yaml", *sorted((CHART / "charts").glob("*/values.yaml"))]:
+        text = values.read_text()
+        for m in re.finditer(r"^\s*(?:image|repository):\s*(\S+)", text, re.M):
+            ref = m.group(1)
+            im = IMAGE_RE.search(ref)
+            if im:
+                tags[im.group(1)] = im.group(2)
+        # the parent states the manager as repository + tag on separate lines
+        rep = re.search(r"^image:\n\s+repository:\s*ghcr\.io/kostiantyn-matsebora/(agentops-[a-z0-9-]+)\n\s+tag:\s*(\S+)", text, re.M)
+        if rep:
+            tags[rep.group(1)] = rep.group(2)
+    return tags
+
+
+def check_versions() -> list[str]:
+    """Every version and first-party tag the docs print, against the chart."""
+    chart_version = re.search(r"^version:\s*(\S+)", (CHART / "Chart.yaml").read_text(), re.M).group(1)
+    tags = shipped_image_tags()
+    problems: list[str] = []
+    pages = [p for p in [*DOCS.glob("*.md"), *DOCS.glob("*/*.md"), REPO / "README.md"]
+             if "_site" not in p.parts and p.name != "CHANGELOG.md" and p.parent.name != "changelog"]
+    for page in sorted(pages):
+        for n, line in enumerate(page.read_text().splitlines(), 1):
+            for m in VERSION_RE.finditer(line):
+                if m.group(1) != chart_version:
+                    problems.append(f"{page.relative_to(REPO)}:{n}: --version {m.group(1)}, chart is {chart_version}")
+            for m in IMAGE_RE.finditer(line):
+                want = tags.get(m.group(1))
+                if want and m.group(2) != want:
+                    problems.append(f"{page.relative_to(REPO)}:{n}: {m.group(1)}:{m.group(2)}, chart ships {want}")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail on any difference")
@@ -1001,6 +1051,12 @@ def main() -> int:
         return 1
 
     stale = [p for p, body in produced.items() if not p.exists() or p.read_text() != body]
+    if stale := check_versions():
+        print("Versions the docs print that the chart does not ship:", file=sys.stderr)
+        for problem in stale:
+            print(f"  {problem}", file=sys.stderr)
+        return 1
+
     if args.check:
         if stale:
             print("Generated documentation is stale:", file=sys.stderr)

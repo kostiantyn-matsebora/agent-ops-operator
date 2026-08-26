@@ -282,6 +282,11 @@ a package first published by a hand `docker push` starts with that list empty.
   `ENTRYPOINT` cannot expand a build argument and distroless has no shell, so a
   per-component path was never available.
 
+**A RELEASE IS NOT DONE UNTIL THE DOCS PRINT ITS NUMBER.** `installation.md`'s
+install command names the chart version and the worked examples name image
+tags; `python3 .github/scripts/docs-generate.py --check` fails on a stale one,
+in CI and locally. Run it after tagging, before calling the release shipped.
+
 After a release, to move an install onto it:
 
 1. **Update the image refs** — chart values for the manager, `AgentRuntime` CRs
