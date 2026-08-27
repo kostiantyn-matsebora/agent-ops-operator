@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -57,9 +58,12 @@ type pendingEntry struct {
 	// delayed because a lax one happened to arrive first.
 	deadline time.Time
 	rule     compiledRule
-	// recurred records whether any event arrived after the first. It is the
-	// whole basis of verification rung 2, for kinds with no health predicate.
-	recurred bool
+	// lastSeen is when the most recent event arrived. It is the whole basis of
+	// verification rung 2, for kinds with no health predicate: not WHETHER the
+	// event recurred, but whether it was still recurring as the window closed.
+	// A boolean here once cost twelve conversations about Longhorn retries
+	// that had healed two minutes before the catch-all fired.
+	lastSeen time.Time
 	// sample is the most recent signal, used as the emitted signal's base so
 	// labels, fingerprint and title stay exactly as normalize built them.
 	sample Signal
@@ -90,6 +94,38 @@ const minEscalationDwell = time.Minute
 // four times faster for a real outage, and still long enough that a slow start
 // resolves first.
 const escalationDivisor = 4
+
+// closingWindowDivisor and minClosingWindow define the CLOSING part of a dwell
+// — the tail of the window an event must still be arriving in for rung 2 to
+// believe it. A third of the window actually waited, floored at thirty
+// seconds: a 3m catch-all believes an event seen in its last minute, a window
+// shortened to 1m believes one seen in its last 30s. Derived rather than
+// configured, for the same reason escalation's quarter is: the only sensible
+// setting is a fraction of `for`, and a knob would document itself as a
+// decision an adopter must make. signals/ha/pending.go carries the same two
+// numbers, and they are changed together.
+const closingWindowDivisor = 3
+const minClosingWindow = 30 * time.Second
+
+// closingWindow is how long before `now` the closing part of the window began.
+func closingWindow(waited time.Duration) time.Duration {
+	w := waited / closingWindowDivisor
+	if w < minClosingWindow {
+		w = minClosingWindow
+	}
+	return w
+}
+
+// stillRecurring is rung 2: was the event still arriving as the window closed?
+// A controller with a live problem keeps re-emitting right up to the deadline;
+// a burst that retried for thirty seconds and healed has recurred, and is the
+// transient this rung exists to drop.
+func (e *pendingEntry) stillRecurring(now time.Time) bool {
+	if e.lastSeen.Equal(e.firstSeen) {
+		return false // never recurred at all
+	}
+	return now.Sub(e.lastSeen) <= closingWindow(now.Sub(e.firstSeen))
+}
 
 type pendingQueue struct {
 	mu      sync.Mutex
@@ -159,12 +195,13 @@ func (q *pendingQueue) Add(source string, sig Signal, rule compiledRule) {
 			members:      map[string]objectRef{},
 			reasonCounts: map[string]int{},
 			firstSeen:    now,
+			lastSeen:     now,
 			deadline:     now.Add(rule.dwell),
 			rule:         rule,
 		}
 		q.entries[key] = e
 	} else {
-		e.recurred = true
+		e.lastSeen = now
 		if d := now.Add(rule.dwell); d.Before(e.deadline) {
 			e.deadline = d
 		}
@@ -249,7 +286,7 @@ func (q *pendingQueue) Flush(now time.Time) {
 // decide runs the verification ladder over an entry's members.
 //
 //	rung 1  a member has a health predicate  -> is it still unhealthy?
-//	rung 2  no predicate, but the object exists -> did the event RECUR?
+//	rung 2  no predicate, but the object exists -> was it STILL RECURRING at the close?
 //	rung 3  we cannot even say it exists -> EMIT (fail open)
 //
 // An entry survives if ANY member is still unhealthy: a Deployment with one
@@ -270,10 +307,15 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 	switch {
 	case anyUnhealthy:
 		// rung 1: confirmed still broken
-	case anyUnknown && e.recurred:
-		// rung 2: no predicate, but it kept happening — still live
-	case anyUnknown && !e.recurred:
-		// rung 2: no predicate and it went quiet — it stopped
+	case anyUnknown && e.stillRecurring(now):
+		// rung 2: no predicate, but it was still happening at the close — live
+	case anyUnknown:
+		// rung 2: no predicate and it went quiet before the close — it stopped.
+		// Logged because this is the one drop a reader cannot reconstruct from
+		// the object: it looks exactly like the live case until the timeline
+		// is on the record.
+		log.Printf("dwell: %s dropped as quiet — last event %s before the window closed (waited %s)",
+			e.workload, now.Sub(e.lastSeen).Round(time.Second), now.Sub(e.firstSeen).Round(time.Second))
 		return Signal{}, false
 	default:
 		// every member is gone or healthy: churn
@@ -317,6 +359,7 @@ func (e *pendingEntry) evidence(now time.Time) string {
 	fmt.Fprintf(&b, "\n  objects (%d): %s\n", len(names), strings.Join(names, ", "))
 	fmt.Fprintf(&b, "  first seen %s, still true at %s\n",
 		e.firstSeen.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "  last seen %s before the window closed\n", now.Sub(e.lastSeen).Round(time.Second))
 	if len(e.sample.Payload) > 0 {
 		fmt.Fprintf(&b, "\nmost recent event:\n%s\n", e.sample.Payload)
 	}

@@ -59,7 +59,7 @@ eventsAdapter:
     # 0.3.0 adds the time axis (route.timeIntervals / route.muteTimeIntervals);
     # an earlier image ignores those keys, which looks like a window that never
     # fires.
-    tag: 0.4.3
+    tag: 0.4.4
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding
@@ -101,7 +101,10 @@ eventsAdapter:
     # `for` holds a matched event, then RE-CHECKS the involved object before
     # emitting: gone (the terminating pod of a rollout) or recovered (the new
     # pod became Ready) means drop; still unhealthy means emit once, with the
-    # whole burst's evidence attached.
+    # whole burst's evidence attached. A kind with no health predicate (only
+    # Pod has one) is believed only if the event was STILL RECURRING as the
+    # window closed — its last third, floored at 30s. A burst that retried for
+    # forty seconds and healed has recurred, and is dropped as churn.
     #
     # Two properties make this set safe to trust, and both are pinned by test:
     #   * the LAST rule is a catch-all with a dwell, never a drop — so a reason

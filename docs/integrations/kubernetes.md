@@ -224,6 +224,13 @@ nobody anticipated.
 `escalateAfterObjects` overrides the wait when three objects fail at once,
 because that is no longer one flapping pod.
 
+**Only a Pod can be looked at.** For any other kind — a Node, a Job, a storage
+operator's own objects — the adapter asks the events instead: was this still
+arriving as the window closed? "Closed" is the last third of the wait, never
+less than thirty seconds. A controller that retried for forty seconds and then
+healed has recurred, and is dropped; one still retrying at the deadline is
+reported once, with the whole burst attached and the time of its last event.
+
 ### "Tell me immediately about OOM kills"
 
 ```yaml

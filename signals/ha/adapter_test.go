@@ -336,6 +336,10 @@ func TestHealthLadder(t *testing.T) {
 	ref := recordRef{source: "ha-logs", integration: "hue", logger: "homeassistant.components.hue",
 		location: "light.py:88", countAtOpen: 3}
 	key := ref.logger + "@" + ref.location
+	// The closing part of the window began at `since`; a record's Timestamp is
+	// its LATEST occurrence, in epoch seconds.
+	since := time.Date(2026, 8, 21, 12, 2, 0, 0, time.UTC)
+	before, after := float64(since.Add(-time.Minute).Unix()), float64(since.Add(30*time.Second).Unix())
 
 	cases := []struct {
 		name string
@@ -347,10 +351,22 @@ func TestHealthLadder(t *testing.T) {
 			records: map[string]logRecord{key: {Count: 3}},
 			entries: map[string][]string{"hue": {"setup_retry"}},
 		}, verdictUnhealthy},
-		{"count rose during the window", &healthSnapshot{
-			records: map[string]logRecord{key: {Count: 5}},
+		{"count rose, still rising at the close", &healthSnapshot{
+			records: map[string]logRecord{key: {Count: 5, Timestamp: after}},
 			entries: map[string][]string{"hue": {"loaded"}},
 		}, verdictUnhealthy},
+		// It recurred, and then it stopped: a blip that healed. The loaded
+		// entry says recovered.
+		{"count rose early, quiet at the close, loaded", &healthSnapshot{
+			records: map[string]logRecord{key: {Count: 5, Timestamp: before}},
+			entries: map[string][]string{"hue": {"loaded"}},
+		}, verdictHealthy},
+		// Same blip, no predicate: the log alone cannot say, so rung 2 decides
+		// from the arrival timeline.
+		{"count rose early, quiet at the close, no predicate", &healthSnapshot{
+			records: map[string]logRecord{key: {Count: 5, Timestamp: before}},
+			entries: map[string][]string{},
+		}, verdictUnknown},
 		{"loaded and quiet", &healthSnapshot{
 			records: map[string]logRecord{key: {Count: 3}},
 			entries: map[string][]string{"hue": {"loaded"}},
@@ -376,7 +392,7 @@ func TestHealthLadder(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a := adapterWithSnapshot(tc.snap)
-			if got := a.health(ref); got != tc.want {
+			if got := a.health(ref, since); got != tc.want {
 				t.Fatalf("health = %v, want %v", got, tc.want)
 			}
 		})

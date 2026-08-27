@@ -4,18 +4,18 @@ dependencies:
   version: 0.2.0
 - name: kubernetes
   repository: ""
-  version: 0.3.0
+  version: 0.3.1
 - name: telegram
   repository: ""
   version: 0.4.0
 - name: home-assistant
   repository: ""
-  version: 0.1.0
+  version: 0.1.1
 - name: claude
   repository: ""
   version: 0.1.0
 - name: ollama
   repository: ""
   version: 0.1.0
-digest: sha256:b9b2d619468b1f43d856f0bec10507018bf84b0b79e2732d842405edd6c00b0d
-generated: "2026-08-26T19:24:25.044445249+03:00"
+digest: sha256:e5beafc0ea00fd3b2f716d260cfef4439ac0685eb8559a33e580b9e38eba6d13
+generated: "2026-08-27T23:35:41.500799503+03:00"

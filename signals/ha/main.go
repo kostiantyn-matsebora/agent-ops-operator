@@ -609,7 +609,12 @@ func (a *adapter) refreshSnapshot(ctx context.Context, source string, sess *haSe
 // YAML-configured integrations, which have no entries) fall to rung 2
 // deliberately: recurrence is what the log itself can prove, and inventing a
 // health check for the rest would mean guessing.
-func (a *adapter) health(ref recordRef) verdict {
+//
+// `since` is the start of the window's closing part. A count that rose during
+// the window is the log saying it kept happening — but a count that rose in the
+// first thirty seconds and never again is a blip that healed, and the record's
+// own timestamp (its latest occurrence) is what tells the two apart.
+func (a *adapter) health(ref recordRef, since time.Time) verdict {
 	a.mu.Lock()
 	src, ok := a.sources[ref.source]
 	var snap *healthSnapshot
@@ -630,10 +635,11 @@ func (a *adapter) health(ref recordRef) verdict {
 
 	rec, present := snap.records[ref.logger+"@"+ref.location]
 	switch {
-	case present && rec.Count > ref.countAtOpen:
-		// It kept happening while we waited. That is the strongest evidence the
-		// log can give, and it outranks a loaded config entry: an integration
-		// can be up and failing at the same time.
+	case present && rec.Count > ref.countAtOpen && !rec.At().Before(since):
+		// It was still happening as the window closed. That is the strongest
+		// evidence the log can give, and it outranks a loaded config entry: an
+		// integration can be up and failing at the same time. A count that rose
+		// only BEFORE `since` falls through: it recurred, and then it stopped.
 		return verdictUnhealthy
 	case present && hasPredicate:
 		// Every entry loaded and no new occurrences: it recovered.

@@ -89,7 +89,7 @@ logsAdapter:
   name: home-assistant
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-ha
-    tag: 0.2.3
+    tag: 0.2.4
   resources: {}
   # The log source. It is INERT until a Pipeline claims it — wiring is
   # pipeline-only, so either turn the `pipelines:` component below on or declare
@@ -130,8 +130,10 @@ logsAdapter:
     #
     # `for` holds a matched record, then RE-CHECKS before emitting: the
     # integration's config entries loaded again (it recovered) or the record
-    # never recurred (it stopped) means drop; still failing means emit once,
-    # with the whole burst's evidence attached.
+    # was no longer recurring as the window closed (it stopped) means drop;
+    # still failing means emit once, with the whole burst's evidence attached.
+    # "Still recurring" is the window's last third, floored at 30s: a network
+    # blip that logged for thirty seconds and stopped is churn, not a report.
     #
     # Two properties make this set safe to trust, and both are pinned by test:
     #   * the LAST rule is a catch-all with a dwell, never a drop — so an error
