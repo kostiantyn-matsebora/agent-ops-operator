@@ -44,9 +44,16 @@ jobs:
     # so the job would fail on a missing credential — and a red check an outside
     # contributor cannot turn green reads as "your change is broken" when nothing
     # about their change is. Skipped is honest; failed is not.
+    #
+    # A DEPENDABOT PULL REQUEST IS THE THIRD, for both of the fork's reasons at
+    # once: its secrets come from Dependabot's own store, which holds no
+    # `CLAUDE_CODE_OAUTH_TOKEN`, and the action refuses a bot actor outright
+    # ("Workflow initiated by non-human actor"). Thirteen of them opened on
+    # 2026-08-27 and every one got a red review for a diff nobody wrote.
     if: >-
       !github.event.pull_request.draft &&
-      !github.event.pull_request.head.repo.fork
+      !github.event.pull_request.head.repo.fork &&
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
