@@ -66,7 +66,10 @@ composition rule is untouched.
   `runtimes/copilot/tools.js` + `runtime.js`, `runtimes/ollama/tools.go` +
   `agent.go` — each reads the body and appends it; unit tests in all three.
   Three runtime image tags; the chart's `claude`, `copilot` and `ollama`
-  bundles move to them. Chart minor.
+  bundles move to them. Chart minor. **Depends on `copilot-runtime` landing
+  first**: `runtimes/copilot/`, its bundle and `docs/runtimes/copilot.md` are
+  that change's files, and this change edits them. Applied before it lands,
+  the copilot items are deferred and `copilot-runtime` carries them.
 - **Reference docs**: `docs/contracts.md` (the work contract's agent
   obligation: the runtime adopts the definition; the prompt is silent),
   `docs/concepts.md` (§ agent role file, § `toolsets.mode`), `docs/CHANGELOG.md`.

@@ -2,7 +2,7 @@
 
 - [ ] 1.1 `dispatch/templates/task.md`: drop the "Adopt the agent role" section; keep one sentence of fallback posture (cautious SRE/platform advisor within your tools, observe before you act) with no file, no path, no "mention if missing"
 - [ ] 1.2 `dispatch/templates/investigate.md`: the same for its inline sentence
-- [ ] 1.3 A dispatch test asserting no rendered prompt for any lane contains `agents/` or `.md` with an empty or a set `AGENT_NAME`
+- [ ] 1.3 A dispatch test asserting no rendered prompt for any lane contains `agents/` or `<agent>.md` (the rendered `AGENT_NAME` followed by `.md`) with an empty or a set `AGENT_NAME` — scoped to the definition path, since the Rules line legitimately names `CLAUDE.md`
 - [ ] 1.4 Remove the `.claude/agents/<agent>.md` mentions from `dispatch.go`'s comments; the path is the runtime's
 
 ## 2. The runtimes adopt the body
