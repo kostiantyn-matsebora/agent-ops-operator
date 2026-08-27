@@ -17,5 +17,8 @@ dependencies:
 - name: ollama
   repository: ""
   version: 0.1.0
-digest: sha256:e5beafc0ea00fd3b2f716d260cfef4439ac0685eb8559a33e580b9e38eba6d13
-generated: "2026-08-27T23:35:41.500799503+03:00"
+- name: copilot
+  repository: ""
+  version: 0.1.0
+digest: sha256:e06cc6550dc14da57cbec5f7a67da3c5f1e92804945b0d92c37ce2efb8aa791f
+generated: "2026-08-28T00:04:56.712704344+03:00"

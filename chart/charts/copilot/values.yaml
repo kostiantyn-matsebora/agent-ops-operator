@@ -1,0 +1,85 @@
+# The GitHub Copilot agent runtime, as a bundle.
+#
+# OFF BY DEFAULT. The `claude` bundle is what a fresh install executes on; this
+# one is a THIRD vendor an install turns on beside it and selects per route
+# with `pipelines[].runtimeRef: copilot`. Any number run on one install.
+#
+# WHAT IS DIFFERENT ABOUT THIS VENDOR, and why none of it reaches a CRD: Copilot
+# names its tools differently (`view`, `bash`, `mcp:<server>-<tool>`), reads an
+# agent definition from `.github/agents/<agent>.agent.md` where an omitted
+# `tools:` means EVERY tool, and lets the caller choose the session id. The
+# runtime image translates all three at the boundary — a Pipeline binds the
+# same MCPToolsets it binds for claude, an empty allowlist stays empty, and
+# `runtimeContextId` is a handle the runtime minted. See docs/runtimes/copilot.md.
+#
+# WHAT IT DOES NOT SHIP, because that IS the substrate and stays the parent's:
+# the runtime DEFAULTS every runtime inherits, the FLOOR ServiceAccount, and the
+# context volume. This bundle declares one runtime and inherits the rest.
+enabled: false
+
+# The AgentRuntime CR name, what a Pipeline's `runtimeRef` selects.
+name: copilot
+
+# Make THIS the runtime a Pipeline naming no `runtimeRef` runs on. The parent
+# renders the CR named `default` as a copy of the flagged runtime — or of the
+# first configured when none is flagged, so with the `claude` bundle off and
+# this one alone it is the default without the flag. Every runtime is optional.
+default: false
+
+# The runtime image, and the one place its tag is written. NO domain tooling in
+# it: what an agent may reach is wiring — see docs/concepts.md#runtime-images-are-generic.
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-copilot:0.1.0
+
+# ONE secret with a GitHub token that has Copilot access. Projected as env via
+# valueFrom; the manager reads no Secrets.
+#
+# Supply `token` and this bundle CREATES the Secret, release-managed — point it
+# at a secret store from your helmfile and the credential is provisioned with
+# the release. Leave it empty to reference a Secret you manage yourself.
+#
+# Getting it wrong fails at START, not on the first run: the runtime exits
+# naming the variable, and the pod restarts until the Secret exists.
+#
+# THE KEY AND THE ENV VAR NAME THIS VENDOR, which is why they are here and not
+# in the release-wide defaults. Another backend states its own on its own entry.
+credentialsSecret:
+  name: agentops-copilot
+  key: githubToken
+  envName: COPILOT_GITHUB_TOKEN
+  token: ""
+
+# WHICH MODEL, by Copilot's id. OPTIONAL: left empty, the runtime uses Copilot's
+# default for the account — which ages well and costs unpredictably. Pin one
+# here when the bill matters more than the upgrade.
+model: ""               # e.g. gpt-5
+
+# A HARD CEILING ON WHAT ONE RUN MAY SPEND, in Copilot AI credits. OPTIONAL and
+# off when empty. The work contract's `maxTurns` bounds a claude run and an
+# ollama loop; Copilot's nearest control is this credit budget, not a turn
+# count, so the runtime logs the requested turns and enforces this instead.
+# Without it a run is bounded by the run timeout below and the idle TTL.
+maxAiCredits: ""        # e.g. 50
+
+# Further knobs the runtime reads, as ordinary env entries — laid OVER the ones
+# the keys above produce.
+#
+#   COPILOT_RUN_TIMEOUT_S   one run's wall-clock ceiling, default 3600
+#   COPILOT_LOG_LEVEL       the SDK's own log level, default warning
+#   COPILOT_PROVIDER_JSON   BYOK: the SDK's `provider` config as JSON, verbatim —
+#                           an OpenAI-compatible endpoint of your own; the
+#                           GitHub token is then optional
+env: []
+
+# WHERE THIS RUNTIME KEEPS ITS CONTEXT, relative to $HOME — the Copilot SDK's
+# session store, one directory per session id. This is the value that turns
+# context synchronisation ON, and it is here rather than in the release-wide
+# defaults for the same reason the image is: it is this backend's layout and
+# means nothing to another. Clearing it mounts the context volume directly,
+# with no sidecar.
+contextSync:
+  paths:
+    - ".copilot/session-state/**"
+
+# Any key `global.agentops.runtimeDefaults` accepts is accepted here too, and
+# overrides it for THIS runtime only — `idleTtlMinutes`, `nodeSelector`,
+# `resources`, `egressMediation`, `contextStorage`.

@@ -2312,3 +2312,84 @@ func TestDefaultRuntimeIsTheFlaggedOrFirstConfigured(t *testing.T) {
 		t.Errorf("no runtime at all must fail, got %s", out)
 	}
 }
+
+// The copilot bundle is the THIRD vendor runtime, in the ollama bundle's exact
+// shape: off by default, one AgentRuntime through the parent's renderer, no
+// substrate. Enabled, it inherits the defaults and carries only what names the
+// vendor — the image, the credential as env, the model and credit ceiling as
+// env, and its own sync paths.
+func TestCopilotBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
+	out := helmTemplate(t, "--set", "copilot.enabled=true",
+		"--set", "copilot.credentialsSecret.token=ghp_placeholder",
+		"--set", "copilot.model=gpt-5",
+		"--set", "copilot.maxAiCredits=50")
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
+		t.Fatalf("want claude, copilot and the default copy, got %d", n)
+	}
+	var rt, secret string
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: copilot\n") {
+			rt = doc
+		}
+		if strings.Contains(doc, "kind: Secret\n") && strings.Contains(doc, "\n  name: agentops-copilot\n") {
+			secret = doc
+		}
+	}
+	if rt == "" {
+		t.Fatal("no AgentRuntime named copilot rendered")
+	}
+	for _, want := range []string{
+		`image: "ghcr.io/kostiantyn-matsebora/agentops-runtime-copilot:`,
+		"serviceAccountName: agentops-runtime\n", // the floor, inherited
+		"contextStorage: volume\n",
+		"idleTtlMinutes: 1\n", // the release default, not the CRD's 10
+		"- .copilot/session-state/**\n",
+		"name: COPILOT_MODEL\n      value: gpt-5\n",
+		"name: COPILOT_MAX_AI_CREDITS\n      value: \"50\"\n",
+		"name: COPILOT_GITHUB_TOKEN\n      valueFrom:\n        secretKeyRef:\n          key: githubToken\n          name: agentops-copilot\n",
+	} {
+		if !strings.Contains(rt, want) {
+			t.Errorf("copilot runtime lacks %q:\n%s", want, rt)
+		}
+	}
+	if strings.Contains(rt, ".claude/projects") {
+		t.Error("the copilot runtime must not inherit claude-code's sync paths")
+	}
+	if secret == "" || !strings.Contains(secret, "githubToken: \"ghp_placeholder\"") {
+		t.Errorf("a supplied token must render the credential Secret:\n%s", secret)
+	}
+	// no substrate: the ServiceAccount count is unchanged from the default render
+	if got, want := strings.Count(out, "kind: ServiceAccount\n"), strings.Count(helmTemplate(t), "kind: ServiceAccount\n"); got != want {
+		t.Errorf("the bundle must render no ServiceAccount: %d vs %d", got, want)
+	}
+}
+
+// Without a token the runtime references the Secret by name and creates
+// nothing; without a model or a credit ceiling neither env entry renders, so
+// the runtime's own defaults apply. The reference bundle off and this one on
+// makes it the default with no rename.
+func TestCopilotBundleDefaultsAndBecomesDefault(t *testing.T) {
+	out := helmTemplate(t, "--set", "copilot.enabled=true")
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: Secret\n") && strings.Contains(doc, "agentops-copilot") {
+			t.Error("no token supplied, so no Secret may render")
+		}
+		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: copilot\n") {
+			for _, absent := range []string{"COPILOT_MODEL", "COPILOT_MAX_AI_CREDITS"} {
+				if strings.Contains(doc, absent) {
+					t.Errorf("unset %s must not render", absent)
+				}
+			}
+			if !strings.Contains(doc, "name: agentops-copilot\n") {
+				t.Error("the runtime must reference the credential Secret by name")
+			}
+		}
+	}
+	alone := helmTemplate(t, "--set", "copilot.enabled=true", "--set", "claude.enabled=false")
+	if doc, src := defaultOf(alone); src != "copilot" || !strings.Contains(doc, "COPILOT_GITHUB_TOKEN") {
+		t.Errorf("copilot alone must be copied as default with its env, got source %q", src)
+	}
+	if strings.Count(alone, "\nkind: AgentRuntime\n") != 2 {
+		t.Error("copilot alone renders exactly copilot and default")
+	}
+}

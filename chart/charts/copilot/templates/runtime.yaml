@@ -1,0 +1,37 @@
+{{- /*
+This bundle's ONE runtime, rendered through the PARENT's shared renderer so its
+CR cannot drift from a runtime the install declares itself — the exact shape of
+chart/charts/ollama/templates/runtime.yaml.
+
+`model`, `maxAiCredits` and the credential become the env the runtime reads,
+through the parent's `agentops.copilotRuntimeEntry` — the same helper the
+parent uses when it copies this runtime as `default`, so the copy carries the
+same env. The credential rides in `env` as a valueFrom reference rather than
+as `credentialsSecret`, because the shared renderer refuses an entry stating
+both and this vendor needs env for its model too; the Secret is therefore
+rendered HERE, in the renderer's own shape, when a token was supplied.
+
+IT RENDERS NO SUBSTRATE. No floor ServiceAccount, no runtime defaults, no
+context volume: a bundle contributes domain, and a vendor's runtime is domain.
+*/ -}}
+{{- if .Values.enabled }}
+{{- $cred := .Values.credentialsSecret | default dict }}
+{{- if $cred.token }}
+---
+# Created because this runtime supplied a credential token, so the agent's
+# credential is provisioned with the release instead of being a prerequisite
+# someone has to remember. The AgentRuntime references it by NAME only — the
+# manager reads no Secrets, the kubelet resolves it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $cred.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-runtime
+type: Opaque
+stringData:
+  {{ $cred.key }}: {{ $cred.token | quote }}
+{{- end }}
+{{- include "agentops.renderRuntime" (dict "root" $ "entry" (fromYaml (include "agentops.copilotRuntimeEntry" .Values))) }}
+{{- end }}

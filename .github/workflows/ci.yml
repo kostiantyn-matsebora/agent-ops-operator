@@ -269,6 +269,7 @@ jobs:
             [default]=""
             [demo]="--set global.demo.enabled=true"
             [kubernetes]="--set kubernetes.enabled=true"
+            [copilot]="--set copilot.enabled=true --set copilot.credentialsSecret.token=placeholder"
             [prometheus]="$PROM"
             [home-assistant]="$HA"
             [telegram]="$TG"

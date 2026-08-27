@@ -56,3 +56,10 @@ dependencies:
     version: 0.1.0
     repository: ""
     condition: ollama.enabled
+  # embedded subchart (chart/charts/copilot) — a THIRD vendor runtime, GitHub
+  # Copilot through its SDK. OFF by default; a route selects it with
+  # `runtimeRef: copilot`.
+  - name: copilot
+    version: 0.1.0
+    repository: ""
+    condition: copilot.enabled

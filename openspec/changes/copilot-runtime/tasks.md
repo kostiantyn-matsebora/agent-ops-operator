@@ -61,10 +61,10 @@
 
 ## 9. Chart: the `copilot` bundle
 
-- [ ] 9.1 Create `chart/charts/copilot/` — `Chart.yaml` 0.1.0, `values.yaml` (`enabled: false`, `name: copilot`, `default: false`, `image`, `credentialsSecret{name: agentops-copilot, key, envName: COPILOT_GITHUB_TOKEN, token: ""}`, `contextSync.paths: [".copilot/session-state/**"]`, optional `model`/`maxAiCredits`, the runtimeDefaults-override note), `templates/runtime.yaml` calling `agentops.renderRuntime`, the credential Secret template in the claude bundle's shape
-- [ ] 9.2 Add `agentops.copilotRuntimeEntry` to `chart/templates/_helpers.tpl` (model/credits → env) and add `copilot` to the `agentops.declaredRuntimes` bundle range — the default-runtime guard and the bootstrap env see nothing else
-- [ ] 9.3 `chart/Chart.yaml`: the dependency with `condition: copilot.enabled`; `chart/values.yaml`: the documented `copilot:` section beside `ollama:`
-- [ ] 9.4 Extend `internal/integration/charttemplate_test.go`: defaults render byte-identically; bundle on renders the runtime under its own name, its Secret when `token` is set, `default` still a copy of claude; bundle on with claude off makes copilot the default; `serviceaccount-guard.py` still passes
+- [x] 9.1 Create `chart/charts/copilot/` — `Chart.yaml` 0.1.0, `values.yaml` (`enabled: false`, `name: copilot`, `default: false`, `image`, `credentialsSecret{name: agentops-copilot, key, envName: COPILOT_GITHUB_TOKEN, token: ""}`, `contextSync.paths: [".copilot/session-state/**"]`, optional `model`/`maxAiCredits`, the runtimeDefaults-override note), `templates/runtime.yaml` calling `agentops.renderRuntime`, the credential Secret template in the claude bundle's shape
+- [x] 9.2 Add `agentops.copilotRuntimeEntry` to `chart/templates/_helpers.tpl` (model/credits → env) and add `copilot` to the `agentops.declaredRuntimes` bundle range — the default-runtime guard and the bootstrap env see nothing else
+- [x] 9.3 `chart/Chart.yaml`: the dependency with `condition: copilot.enabled`; `chart/values.yaml`: the documented `copilot:` section beside `ollama:`
+- [x] 9.4 Extend `internal/integration/charttemplate_test.go`: defaults render byte-identically; bundle on renders the runtime under its own name, its Secret when `token` is set, `default` still a copy of claude; bundle on with claude off makes copilot the default; `serviceaccount-guard.py` still passes
 - [ ] 9.5 Bump the chart minor and record it in `docs/CHANGELOG.md`, newest first
 
 ## 10. Verify against a live install
