@@ -19,7 +19,7 @@
       linking the changelog), `ci` workflow status, `image-scan` workflow
       status labelled `published images` (linking the workflow's runs).
 - [x] 2.2 `wc -l README.md` stays within the 215-line budget.
-- [ ] 2.3 Check the rendered badges on the forge once the branch is pushed
+- [x] 2.3 Check the rendered badges on the forge once the branch is pushed
       (a shields filter that matches nothing renders "no tags").
 
 ## 3. Documentation
