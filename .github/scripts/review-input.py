@@ -28,10 +28,12 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 
 THREADS_QUERY = """
-query($o:String!,$r:String!,$n:Int!){
+query($o:String!,$r:String!,$n:Int!,$after:String){
   repository(owner:$o,name:$r){pullRequest(number:$n){
-    reviewThreads(first:100){nodes{id isResolved isOutdated path line
-      comments(first:1){nodes{databaseId author{login} body}}}}}}}
+    reviewThreads(first:100,after:$after){
+      pageInfo{hasNextPage endCursor}
+      nodes{id isResolved isOutdated path line
+        comments(first:1){nodes{databaseId author{login} body}}}}}}}
 """
 
 
@@ -40,10 +42,23 @@ def sh(*cmd: str) -> str:
 
 
 def threads(repo: str, number: int) -> list[dict]:
+    """EVERY thread, paginated. A page of 100 is more than a review leaves,
+    until the pull request that proves otherwise — and a thread the review
+    never sees is one it raises again."""
     owner, name = repo.split("/", 1)
-    out = sh("gh", "api", "graphql", "-f", f"query={THREADS_QUERY}",
-             "-f", f"o={owner}", "-f", f"r={name}", "-F", f"n={number}")
-    nodes = json.loads(out)["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    nodes: list[dict] = []
+    after: str | None = None
+    while True:
+        args = ["gh", "api", "graphql", "-f", f"query={THREADS_QUERY}",
+                "-f", f"o={owner}", "-f", f"r={name}", "-F", f"n={number}"]
+        if after:
+            args += ["-f", f"after={after}"]
+        page = json.loads(sh(*args))["data"]["repository"]["pullRequest"]["reviewThreads"]
+        nodes.extend(page.get("nodes") or [])
+        info = page.get("pageInfo") or {}
+        if not info.get("hasNextPage"):
+            break
+        after = info["endCursor"]
     flat = []
     for t in nodes:
         first = (t.get("comments") or {}).get("nodes") or [{}]

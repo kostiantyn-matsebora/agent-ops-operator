@@ -17,7 +17,11 @@ cat > "$tmp/bin/gh" <<'STUB'
 case "$*" in
   "pr view"*)     echo '{"baseRefName":"master","headRefName":"change/thing"}' ;;
   "pr diff"*)     printf 'docs/a.md\nsignals/cron/main.go\nplatform/manager/x.go\n' ;;
-  "api graphql"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"PRRT_1","isResolved":false,"isOutdated":false,"path":"docs/a.md","line":3,"comments":{"nodes":[{"databaseId":7,"author":{"login":"bot"},"body":"**Claim:** x"}]}}]}}}}}' ;;
+  # TWO PAGES. The first says there is another and hands a cursor; the call
+  # that carries the cursor gets the second. A caller that stops at one page
+  # sees one thread and the test says so.
+  "api graphql"*"after=CUR"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"PRRT_2","isResolved":true,"isOutdated":false,"path":"signals/cron/main.go","line":1,"comments":{"nodes":[{"databaseId":8,"author":{"login":"bot"},"body":"**Claim:** y"}]}}]}}}}}' ;;
+  "api graphql"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"CUR"},"nodes":[{"id":"PRRT_1","isResolved":false,"isOutdated":false,"path":"docs/a.md","line":3,"comments":{"nodes":[{"databaseId":7,"author":{"login":"bot"},"body":"**Claim:** x"}]}}]}}}}}' ;;
 esac
 STUB
 chmod +x "$tmp/bin/gh"
@@ -29,7 +33,10 @@ git -C "$repo" add -A && git -C "$repo" commit -qm specs
 
 it "builds the input from the three gh calls and the checkout, and emits the matrix"
 out=$(cd "$repo" && PATH="$tmp/bin:$PATH" GITHUB_OUTPUT="$tmp/gho" python3 "$INPUT" --repo o/r --number 5 --out "$tmp/input.json" 2>&1)
-assert_contains "$out" "3 component(s) from 3 path(s), 1 thread(s), 1 delta spec(s)"
+assert_contains "$out" "3 component(s) from 3 path(s), 2 thread(s), 1 delta spec(s)"
+
+it "walks every page of threads — the second page's thread is there"
+assert_contains "$(cat "$tmp/input.json")" '"id": "PRRT_2"'
 assert_contains "$(cat "$tmp/gho")" 'count=3'
 assert_contains "$(cat "$tmp/gho")" 'base=master'
 assert_contains "$(cat "$tmp/gho")" '{"group": "platform/manager", "slug": "platform__manager"}'
