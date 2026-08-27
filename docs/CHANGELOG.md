@@ -19,12 +19,13 @@ for the source and the reference material beside this file.
 ## [13.1.1] — 2026-08-27
 
 **Every image rebuilt on the current toolchain.** The weekly scan of the
-published images reported the same fixable findings in every Go binary — 22 Go
-standard-library CVEs, CVE-2025-68121 among them at CRITICAL — plus eight in
-the manager from `golang.org/x/net`, `x/oauth2` and `x/text`, and five inside
-npm's bundled dependencies in `runtime-claude`. The tree had already moved past
-all of them (Go 1.25, the manager's `x/*` bumped). The published images had
-not.
+published images reported fixable findings in every Go binary: 22 Go
+standard-library CVEs, CVE-2025-68121 among them at CRITICAL.
+
+The manager carried eight more from `golang.org/x/net`, `x/oauth2` and
+`x/text`, and `runtime-claude` five inside npm's bundled dependencies. The tree
+had already moved past all of them (Go 1.25, the manager's `x/*` bumped). The
+published images had not.
 
 ### Changed
 
