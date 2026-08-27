@@ -228,6 +228,14 @@ rules loaded on demand.
   loop in code, runs `pipeline()` readers concurrently and returns their data
   validated by schema. Agent teams were not an option: `-p` spawns no
   teammates. If a plan must not be dropped, do not give it to a model turn.
+- **`claude-code-action` EXITS AFTER THE MODEL'S FIRST TURN, SO A BACKGROUND
+  `Workflow` NEVER RUNS UNDER IT.** The tool launches the run and returns at
+  once; the CLI stays alive and gives the model a second turn with the result
+  (measured locally: 3 min, ten agents, two `result` events). The action
+  ended the process nine seconds after the first turn on #94 — the run never
+  started and the step read "success". The review therefore runs `claude -p`
+  itself, with the credential as env and the stream-json stdout as the
+  execution file. The gate on the summary comment is what caught it.
 - **An inline `--agents` definition sits inside single quotes in `claude_args`,
   which is split like a shell line.** One apostrophe in the reviewer prompt
   ends the argument early and reads as a JSON error somewhere else. The suite
