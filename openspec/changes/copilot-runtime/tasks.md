@@ -72,7 +72,7 @@
 - [x] 10.1 Deploy the worktree's chart (`helmfile sync` with `chartPath` pointed at the worktree) after a server-side dry-run; confirm `agentops-conv-*` pods for a copilot route carry the `context-sync` sidecar and the egress init container
 - [x] 10.2 Point one Pipeline's `runtimeRef` at `copilot` and post a `kind: task` signal to a source it claims; confirm the answer reaches every bound thread
 - [x] 10.3 Reply in the thread and confirm the second run resumes the same context — then delete the session state and confirm the run FAILS with the cannot-be-continued message rather than answering fresh
-- [ ] 10.4 Bind observation-only toolsets on one route and confirm shell is denied there while the same profile keeps it on another route; bind `Bash(kubectl:*)` and confirm a non-kubectl command is denied and logged
+- [x] 10.4 Bind observation-only toolsets on one route and confirm shell is denied there while the same profile keeps it on another route; bind `Bash(kubectl:*)` and confirm a non-kubectl command is denied and logged
 
 ## 11. Documentation
 
