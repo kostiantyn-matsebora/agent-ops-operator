@@ -70,6 +70,10 @@ assert_contains "$prompt" '"base": "origin/${{ github.base_ref }}"'
 assert_contains "$prompt" 'Do not post'
 assert_not_contains "$prompt" 'Agent'
 
+it "does not run a pull request's own edit of this file"
+assert_contains "$(py 'print(step["if"])')" "steps.guard.outputs.workflow_edited != 'true'"
+assert_contains "$(py 'print([s for s in steps if s.get("id")=="guard"][0]["run"])')" "workflow_edited=true"
+
 it "runs the CLI itself, which stays alive for a background workflow — the action does not"
 assert_not_contains "$(py 'print(step.get("uses",""))')" "claude-code-action"
 assert_contains "$(py 'print(step["run"])')" 'claude -p "$PROMPT" --output-format stream-json'

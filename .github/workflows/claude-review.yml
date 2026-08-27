@@ -92,10 +92,21 @@ jobs:
       # with the merge. The notice says which, so the reviewer of that pull
       # request knows the review it got was not the one in the diff.
       - if: steps.hygiene.outputs.ok == 'true'
+        id: guard
         name: The review's roles and script are the base branch's
         run: |
           set -euo pipefail
           base="origin/${{ github.base_ref }}"
+          # THIS FILE IS THE ONE THING THAT CANNOT BE RESTORED, so an edited
+          # copy does not run at all. A `pull_request` run executes the head's
+          # workflow file; `claude-code-action` refused to run when it differed
+          # from the base, and running the CLI directly dropped that refusal
+          # (#97 ran its own edit). The gate below reports the skip as a notice.
+          if git diff --quiet "$base" -- .github/workflows/claude-review.yml; then
+            echo "workflow_edited=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "workflow_edited=true" >> "$GITHUB_OUTPUT"
+          fi
           restored=""
           for f in .claude/workflows/review-pr.js .claude/agents/component-reviewer.md .claude/agents/review-coordinator.md; do
             # A file the base does not have yet cannot be restored from it — the
@@ -123,7 +134,7 @@ jobs:
       # execution file as the stream-json stdout, the conclusion from its last
       # `result` event. The inline-comment MCP tool it carried is replaced by
       # `gh api` in the coordinator's role file.
-      - if: steps.hygiene.outputs.ok == 'true'
+      - if: steps.hygiene.outputs.ok == 'true' && steps.guard.outputs.workflow_edited != 'true'
         id: review
         name: Run the review workflow
         env:
@@ -153,7 +164,10 @@ jobs:
           npm install -g @anthropic-ai/claude-code >/dev/null
           claude --version
           out="$RUNNER_TEMP/review-execution.jsonl"
-          eval "set -- $CLAUDE_ARGS"
+          # CLAUDE_ARGS is a YAML block, one flag per line; joined onto one line
+          # before `eval`, or `set --` consumes the first line and the second
+          # runs as a command (`--allowedTools: command not found`, #97).
+          eval "set -- $(printf '%s' "$CLAUDE_ARGS" | tr '\n' ' ')"
           conclusion=success
           claude -p "$PROMPT" --output-format stream-json --verbose "$@" > "$out" || conclusion=failure
           echo "execution_file=$out" >> "$GITHUB_OUTPUT"
@@ -212,7 +226,7 @@ jobs:
             exit 0
           fi
           if ! git diff --quiet "origin/${{ github.base_ref }}" -- .github/workflows/claude-review.yml; then
-            echo "::notice::This pull request edits .github/workflows/claude-review.yml, so the action refuses to run it — a pull request may not rewrite the review that judges it. The review begins working once this is merged."
+            echo "::notice::This pull request edits .github/workflows/claude-review.yml, so the review does not run on it — a pull request may not rewrite the review that judges it. The review begins working once this is merged."
             exit 0
           fi
           echo "::error::The review reported success without running: no execution file, and this workflow file matches the base branch. A check that passes while nothing was read is worse than one that fails."
