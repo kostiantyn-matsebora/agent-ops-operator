@@ -2386,10 +2386,27 @@ func TestCopilotBundleDefaultsAndBecomesDefault(t *testing.T) {
 		}
 	}
 	alone := helmTemplate(t, "--set", "copilot.enabled=true", "--set", "claude.enabled=false")
-	if doc, src := defaultOf(alone); src != "copilot" || !strings.Contains(doc, "COPILOT_GITHUB_TOKEN") {
+	if doc, src := defaultRuntimeDoc(alone); src != "copilot" || !strings.Contains(doc, "COPILOT_GITHUB_TOKEN") {
 		t.Errorf("copilot alone must be copied as default with its env, got source %q", src)
 	}
 	if strings.Count(alone, "\nkind: AgentRuntime\n") != 2 {
 		t.Error("copilot alone renders exactly copilot and default")
 	}
+}
+
+// defaultRuntimeDoc returns the rendered `default` AgentRuntime and the name of
+// the runtime it was copied from.
+func defaultRuntimeDoc(out string) (string, string) {
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: default\n") {
+			src := ""
+			for _, line := range strings.Split(doc, "\n") {
+				if strings.Contains(line, "agentops.dev/default-of:") {
+					src = strings.Trim(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), `"`)
+				}
+			}
+			return doc, src
+		}
+	}
+	return "", ""
 }
