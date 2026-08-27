@@ -115,14 +115,18 @@ finding block the merge, below.
 ### THE REVIEW FOUND SOMETHING. NOW WHAT
 
 `claude-review.yml` posts findings as review threads, and an open thread blocks
-the merge. **The review is a saved workflow with two roles** —
-`.claude/workflows/review-pr.js` runs one `component-reviewer` per changed
-component, concurrently, and hands every reading to the `review-coordinator`,
-the only role that posts. It runs from a checkout too: `/review-pr` with
-`{repo, number, base}` (`dryRun: true` posts nothing). The job restores all
-three files from the BASE branch before running, so a pull request cannot
-rewrite the review that judges it. Triage happens IN THE THREAD, in a stated vocabulary, and one comment
-acts on everything accepted:
+the merge. **The review is four jobs and two roles** — `queue` is a program
+(`review-input.py` over `review-queue.py`), `read` is a matrix of one
+`component-reviewer` job per changed component, all at once, `consolidate`
+runs the `review-coordinator` — the only role that posts — over the readings'
+artifacts, and `reconcile` resolves threads with no model. It runs by hand
+too: `gh workflow run claude-review.yml -f number=<pr>` (`-f dry_run=true`
+posts nothing). Every model job installs the CLI through
+`.github/actions/claude-cli` and restores its role file from the BASE branch
+first, so a pull request cannot rewrite the review that judges it. The
+fan-out is the matrix and not a pool inside one session: `gotchas.md` has the
+measurement. Triage happens IN THE THREAD, in a stated vocabulary, and one
+comment acts on everything accepted:
 
 | You type | Where | It means |
 |---|---|---|

@@ -234,6 +234,19 @@ rules loaded on demand.
   loop in code, runs `pipeline()` readers concurrently and returns their data
   validated by schema. Agent teams were not an option: `-p` spawns no
   teammates. If a plan must not be dropped, do not give it to a model turn.
+  - **THAT SCRIPT IS GONE, AND THE LOOP IS THE ACTIONS MATRIX NOW — the plan
+    still is not a model turn.** The dynamic-workflow runtime pools concurrent
+    `agent()` calls at `Math.min(16, Math.max(2, availableParallelism() - 2))`,
+    computed once at process start with NO override (read out of CLI 2.1.247);
+    `ubuntu-latest` has four vCPUs, so the pool was TWO. On #106 eight readers
+    started in pairs — 2:16, 2:16, 4:17, 5:02, 7:54, 7:57, 9:29 — the run was
+    stopped at 600 s with the eighth never started, and the coordinator never
+    ran. A bigger runner lifts the cap for money; a job per reading lifts it
+    for free (twenty concurrent jobs on a public repository). So the unit of a
+    reading is a JOB: `claude-review.yml`'s `read` matrix, one `claude -p` per
+    component on its own runner, readings as artifacts, the queue built by a
+    program. The measurement is what settles "just add more agents": more
+    `agent()` calls join the queue behind the two that run.
 - **`claude-code-action` EXITS AFTER THE MODEL'S FIRST TURN, SO A BACKGROUND
   `Workflow` NEVER RUNS UNDER IT.** The tool launches the run and returns at
   once; the CLI stays alive and gives the model a second turn with the result
@@ -241,7 +254,9 @@ rules loaded on demand.
   ended the process nine seconds after the first turn on #94 — the run never
   started and the step read "success". The review therefore runs `claude -p`
   itself, with the credential as env and the stream-json stdout as the
-  execution file. The gate on the summary comment is what caught it.
+  execution file. The gate on the summary comment is what caught it. Still
+  true with no background workflow left: each job is one `claude -p` whose
+  one turn IS the reading, and the summary gate is unchanged.
 - **An inline `--agents` definition sits inside single quotes in `claude_args`,
   which is split like a shell line.** One apostrophe in the reviewer prompt
   ends the argument early and reads as a JSON error somewhere else. The suite

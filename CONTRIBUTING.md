@@ -333,12 +333,16 @@ and it fails if any job that DID run failed.
 at any time and an unfinished one is unfinished correctly, so a gate judging all
 of them would fail every pull request for work it was not about.
 
-**Claude reviews the pull request** on open and on every push — a saved
-workflow, `/review-pr`, that reads each changed component in its own context
-and consolidates once; the same command runs from a checkout, and
-`dryRun: true` returns the readings without posting — commenting on
-specific lines and leaving one summary. It reads **per component, in parallel**
-— one clean context per changed component — and then **across them**: every
+**Claude reviews the pull request** on open and on every push —
+`claude-review.yml`, four jobs: a program builds the queue of changed
+components, one job per component reads it, one job consolidates and posts,
+and one that runs no model resolves threads. The same review runs by hand
+against any pull request, `gh workflow run claude-review.yml -f number=<pr>`,
+and `-f dry_run=true` stops after the readings (the run's artifacts) without
+posting. It comments on specific lines and leaves one summary. It reads **per
+component, in parallel** — one clean context, one runner, per changed
+component, so a change touching eight components is read in the time of one —
+and then **across them**: every
 identifier, field, path or env var the change added, removed or renamed is
 followed to its consumers, because this repository's modules import nothing
 from one another and a contract change breaks at runtime in a component the
