@@ -967,9 +967,11 @@ def shipped_image_tags() -> dict[str, str]:
             im = IMAGE_RE.search(ref)
             if im:
                 tags[im.group(1)] = im.group(2)
-        # the parent states the manager as repository + tag on separate lines
-        rep = re.search(r"^image:\n\s+repository:\s*ghcr\.io/kostiantyn-matsebora/(agentops-[a-z0-9-]+)\n\s+tag:\s*(\S+)", text, re.M)
-        if rep:
+        # repository + tag on separate lines, comments between allowed: the
+        # parent's manager at the top level, and a bundle's images nested under
+        # their component key. Anchored on column 0 this saw only the manager,
+        # and a bundle's tag drifted unchecked.
+        for rep in re.finditer(r"^\s*image:\n(?:\s*#.*\n)*\s+repository:\s*ghcr\.io/kostiantyn-matsebora/(agentops-[a-z0-9-]+)\n(?:\s*#.*\n)*\s+tag:\s*(\S+)", text, re.M):
             tags[rep.group(1)] = rep.group(2)
     return tags
 
@@ -1051,9 +1053,13 @@ def main() -> int:
         return 1
 
     stale = [p for p, body in produced.items() if not p.exists() or p.read_text() != body]
-    if stale := check_versions():
+    # A DIFFERENT NAME from `stale`. This once read `stale := check_versions()`,
+    # which replaced the drift list with an empty one whenever every version
+    # agreed -- so nothing was ever written or reported, and a guide went on
+    # printing a tag the chart no longer shipped while every run said up to date.
+    if wrong_versions := check_versions():
         print("Versions the docs print that the chart does not ship:", file=sys.stderr)
-        for problem in stale:
+        for problem in wrong_versions:
             print(f"  {problem}", file=sys.stderr)
         return 1
 

@@ -80,13 +80,13 @@ before the first install, not after.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 13.1.0 -n agent-ops
+     --version 13.1.1 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 13.1.0 -n agent-ops
+     --version 13.1.1 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public
@@ -522,7 +522,7 @@ global:
   agentops:
     runtimeDefaults:
       # the agent backend — swap it to change vendor
-      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.2
+      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.3
       credentialsSecret:
         # read by the kubelet, never by the operator
         name: agentops-claude

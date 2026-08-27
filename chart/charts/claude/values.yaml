@@ -65,7 +65,7 @@ default: false
 # 0.2.0+ composes the allowlist with the agent definition's own `tools:` and
 # passes it verbatim — no substituted `Read` when nothing is declared. Pinning
 # an older tag keeps that substitution and ignores toolsets.mode.
-image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.2
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.3
 
 # WHERE THIS RUNTIME KEEPS ITS CONTEXT — include globs relative to $HOME, and
 # the declaration that turns context synchronisation ON.

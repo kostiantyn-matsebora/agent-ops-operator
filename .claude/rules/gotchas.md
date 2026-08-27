@@ -76,6 +76,12 @@ re-adding it describes a repository this is not.
   registry, not the tag**, before believing an image shipped. The live reasons a
   tag ships nothing are a FAILED RUN and the package's ACTIONS ACCESS, both in
   `build-test.md`.
+- **MORE THAN THREE TAGS IN ONE `git push` TRIGGERS NOTHING.** GitHub creates
+  no `push` event for a push carrying more than three tags — documented, and
+  silent: the tags land, `release.yml` never runs, and the run list looks like
+  nobody tagged. Twelve rebuild tags went that way on 2026-08-27. Push release
+  tags THREE AT A TIME; a tag that already landed is deleted and re-pushed,
+  since nothing was built from it.
 - **The hand build is the ordinary buildx push**, and it MUST stay multi-arch —
   the cluster is mixed x86/arm64, and a single-arch image fails at SCHEDULE
   time, possibly weeks later.
