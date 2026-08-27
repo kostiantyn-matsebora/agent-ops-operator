@@ -228,13 +228,21 @@ in-process, never logged, and an unresolvable placeholder fails the server's
 registration loudly rather than reaching an MCP server as the literal text
 `${TOKEN}`.
 
-### D7 — Role text is prepended, not turned into a custom agent
+### D7 — Role text is appended to the system message, on create AND resume
 
-`unit.systemPrompt` (an inline role from a repo-less profile) has no SDK
-equivalent to `--append-system-prompt`. It is prepended as a delimited block to
-the FIRST prompt of a session, not re-sent on resume, where it is already in the
-transcript. The alternative — a single `customAgents` entry carrying it as
-`prompt` — drags D5's intersection problem in for a system prompt's sake.
+`unit.systemPrompt` (an inline role from a repo-less profile) goes through the
+SDK's `systemMessage: {mode: "append", content}` — the direct equivalent of
+`--append-system-prompt`, which the first draft of this design believed did not
+exist. The SDK does not persist it, so the runtime supplies it on `resumeSession`
+too (verified: the marker reached the model on create and was absent on a
+resume that carried none). The alternative — a `customAgents` entry carrying it
+as `prompt` — drags D5's intersection problem in for a system prompt's sake.
+
+A denied tool call is answered `{kind: "reject", feedback}`, and the feedback is
+what the model reads — verified: a bare `reject` ENDS THE TURN with no text,
+which reported success with an empty result until the runtime refused to. That
+is the same posture as `--permission-mode dontAsk`: a denial the model is told
+about, never a prompt and never a silent stop.
 
 ### D8 — `maxTurns` has no equivalent and is not faked
 
@@ -283,8 +291,6 @@ project does not ship.
   first word plus prefix, deny anything with shell metacharacters that could
   smuggle a second command. Deny is the safe direction, and every denial is
   logged with the pattern that failed to match.
-- **The role text is not re-sent on resume** → if long conversations drift,
-  D7 is cheap to change to per-turn prepending; recorded as an open question.
 - **No enforced turn cap** (D8) → a runaway loop is bounded by the idle TTL, the
   conversation cap, and optionally `COPILOT_MAX_AI_CREDITS`.
 - **A third image to keep patched, and it carries a bundled CLI** → it is a
@@ -307,7 +313,6 @@ one under the old vendor via `latest-wins`.
 
 ## Open Questions
 
-- Does role drift show up over long resumed conversations under D7?
 - Should the runtime surface Copilot's usage/credit events into the run result,
   or is that telemetry the activity contract should carry instead?
 - Which Copilot model default belongs in the bundle (`auto` vs a pinned id),

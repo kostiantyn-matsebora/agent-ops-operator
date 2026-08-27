@@ -1,0 +1,18 @@
+{
+  "name": "agentops-runtime-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "agent-ops AgentRuntime image driving GitHub Copilot through its SDK — implements the /work contract, nothing else.",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@github/copilot": "1.0.80",
+    "@github/copilot-sdk": "1.0.11"
+  }
+}

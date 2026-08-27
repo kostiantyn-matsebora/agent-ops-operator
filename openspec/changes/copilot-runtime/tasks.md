@@ -9,49 +9,49 @@
 
 ## 2. The component skeleton
 
-- [ ] 2.1 Create `runtimes/copilot/` with `package.json` (`@github/copilot-sdk` the only dependency), no dependency on any other module in this repo; confirm `.github/components.sh images` lists `runtime-copilot`
-- [ ] 2.2 Write `runtime.js`: env config (`CONTROL_URL`, `CONVO_ID`, `POD_NAME`, `REPO_*`, `GIT_*`, `RUNTIME_IDLE_TTL_M`, `WORKSPACE`, `MCP_CONFIG`, `COPILOT_GITHUB_TOKEN`, optional `COPILOT_MODEL`, `COPILOT_MAX_AI_CREDITS`), exit non-zero naming a required one that is missing
-- [ ] 2.3 Port the repo sync: clone/fetch/reset at `/data/workspace`, SSH and HTTPS auth, clear contents never rmdir the mount point
-- [ ] 2.4 Implement the poll loop: long-poll `/work`, idle-TTL exit `0`, `POST /work/done` with the reference runtime's retry cadence
+- [x] 2.1 Create `runtimes/copilot/` with `package.json` (`@github/copilot-sdk` the only dependency), no dependency on any other module in this repo; confirm `.github/components.sh images` lists `runtime-copilot`
+- [x] 2.2 Write `runtime.js`: env config (`CONTROL_URL`, `CONVO_ID`, `POD_NAME`, `REPO_*`, `GIT_*`, `RUNTIME_IDLE_TTL_M`, `WORKSPACE`, `MCP_CONFIG`, `COPILOT_GITHUB_TOKEN`, optional `COPILOT_MODEL`, `COPILOT_MAX_AI_CREDITS`), exit non-zero naming a required one that is missing
+- [x] 2.3 Port the repo sync: clone/fetch/reset at `/data/workspace`, SSH and HTTPS auth, clear contents never rmdir the mount point
+- [x] 2.4 Implement the poll loop: long-poll `/work`, idle-TTL exit `0`, `POST /work/done` with the reference runtime's retry cadence
 
 ## 3. Tool vocabulary translation
 
-- [ ] 3.1 `tools.js`: read `.github/agents/<agent>.agent.md` frontmatter `tools:` (inline, flow-list and block forms), returning "declares nothing" for absent/unparseable, logging the reason
-- [ ] 3.2 Reuse the `merge`/`overwrite` composition semantics verbatim — union with the agent's keeping position, dedup, unknown mode reads as `merge`
-- [ ] 3.3 `vocabulary.js`: map composed patterns to `availableTools` entries per the design's table, returning the unmapped ones separately rather than dropping them
-- [ ] 3.4 Refuse `mcp__<server>__*` explicitly with its own log line — never widen it to `mcp:*`
-- [ ] 3.5 Build the permission handler: approve only invocations matching the composed patterns, enforce sub-command scoping (`Bash(kubectl:*)`), deny anything with shell metacharacters that could smuggle a second command, log every denial with the pattern that failed
-- [ ] 3.6 Always pass an explicit `availableTools`, including `[]`; never let the vendor's "no declaration means everything" default apply
-- [ ] 3.7 At session start, log any mapped target the runtime did not register — a wrong wire name must surface on the first run, not as a tool that silently never appears
+- [x] 3.1 `tools.js`: read `.github/agents/<agent>.agent.md` frontmatter `tools:` (inline, flow-list and block forms), returning "declares nothing" for absent/unparseable, logging the reason
+- [x] 3.2 Reuse the `merge`/`overwrite` composition semantics verbatim — union with the agent's keeping position, dedup, unknown mode reads as `merge`
+- [x] 3.3 `vocabulary.js`: map composed patterns to `availableTools` entries per the design's table, returning the unmapped ones separately rather than dropping them
+- [x] 3.4 Refuse `mcp__<server>__*` explicitly with its own log line — never widen it to `mcp:*`
+- [x] 3.5 Build the permission handler: approve only invocations matching the composed patterns, enforce sub-command scoping (`Bash(kubectl:*)`), deny anything with shell metacharacters that could smuggle a second command, log every denial with the pattern that failed
+- [x] 3.6 Always pass an explicit `availableTools`, including `[]`; never let the vendor's "no declaration means everything" default apply
+- [x] 3.7 At session start, log any mapped target the runtime did not register — a wrong wire name must surface on the first run, not as a tool that silently never appears
 
 ## 4. Session lifecycle and continuity
 
-- [ ] 4.1 Mint a `crypto.randomUUID()` session id when the unit carries no `runtimeContextId`; never derive it from the conversation name; report `continuity: new`
-- [ ] 4.2 Resume when the unit carries one; report the established id on `/work/done` under `runtimeContextId` with `continuity: continued`
-- [ ] 4.3 Implement the missing-context ladder: re-check `session-state/<id>/` at 500ms/1.5s/3s, treat unreadable as present, retry once when it reappears
-- [ ] 4.4 On confirmed absence, FAIL with `continuity: unavailable`, a `continuityReason` naming the context volume, and the same user-facing text the other runtimes use — never an empty result, never a fresh session presented as a continuation
-- [ ] 4.5 Prepend `unit.systemPrompt` as a delimited block on session creation only; log its length as `runtime-claude` does
+- [x] 4.1 Mint a `crypto.randomUUID()` session id when the unit carries no `runtimeContextId`; never derive it from the conversation name; report `continuity: new`
+- [x] 4.2 Resume when the unit carries one; report the established id on `/work/done` under `runtimeContextId` with `continuity: continued`
+- [x] 4.3 Implement the missing-context ladder: re-check `session-state/<id>/` at 500ms/1.5s/3s, treat unreadable as present, retry once when it reappears
+- [x] 4.4 On confirmed absence, FAIL with `continuity: unavailable`, a `continuityReason` naming the context volume, and the same user-facing text the other runtimes use — never an empty result, never a fresh session presented as a continuation
+- [x] 4.5 Prepend `unit.systemPrompt` as a delimited block on session creation only; log its length as `runtime-claude` does
 
 ## 5. MCP and prompts
 
-- [ ] 5.1 Translate `$MCP_CONFIG` into the SDK's `mcpServers` record — stdio (`command`/`args`/`env`) and http (`type`/`url`/`headers`)
-- [ ] 5.2 Expand `${VAR}` placeholders from `process.env` in-process; never log the resolved value
-- [ ] 5.3 Fail an individual server's registration with a logged reason when a placeholder cannot be resolved, rather than passing the literal text through
-- [ ] 5.4 Resolve `promptText`, or `promptFile` + `promptVars` read relative to the checkout, failing the unit with a readable reason when neither yields a prompt
-- [ ] 5.5 Log the requested `maxTurns` without pretending to enforce it; wire optional `COPILOT_MAX_AI_CREDITS` to `sessionLimits.maxAiCredits`
+- [x] 5.1 Translate `$MCP_CONFIG` into the SDK's `mcpServers` record — stdio (`command`/`args`/`env`) and http (`type`/`url`/`headers`)
+- [x] 5.2 Expand `${VAR}` placeholders from `process.env` in-process; never log the resolved value
+- [x] 5.3 Fail an individual server's registration with a logged reason when a placeholder cannot be resolved, rather than passing the literal text through
+- [x] 5.4 Resolve `promptText`, or `promptFile` + `promptVars` read relative to the checkout, failing the unit with a readable reason when neither yields a prompt
+- [x] 5.5 Log the requested `maxTurns` without pretending to enforce it; wire optional `COPILOT_MAX_AI_CREDITS` to `sessionLimits.maxAiCredits`
 
 ## 6. Transcript
 
-- [ ] 6.1 Subscribe with `streaming: true` and render events to stdout in the existing `[init]`/`[copilot]`/`[tool]`/`=== RESULT ===` shape, so pod logs read the same across runtimes
-- [ ] 6.2 Cap the reported `result` at the same 2000 characters and report `status`/`exitCode`/`continuity` with the same meanings
+- [x] 6.1 Subscribe with `streaming: true` and render events to stdout in the existing `[init]`/`[copilot]`/`[tool]`/`=== RESULT ===` shape, so pod logs read the same across runtimes
+- [x] 6.2 Cap the reported `result` at the same 2000 characters and report `status`/`exitCode`/`continuity` with the same meanings
 
 ## 7. Tests
 
-- [ ] 7.1 `tools.test.js`: frontmatter parsing (all forms, absent, malformed) and `merge`/`overwrite` composition
-- [ ] 7.2 `vocabulary.test.js`: every row of the mapping table, unmapped-denies, per-server wildcard refused, sub-command matching including the metacharacter denials
-- [ ] 7.3 `mcp.test.js`: stdio and http translation, `${VAR}` expansion, unresolvable placeholder fails that server only
-- [ ] 7.4 A continuity test over the ladder: reappearing state retries, unreadable path is not absence, confirmed absence fails with a non-empty result and `continuity: unavailable`
-- [ ] 7.5 `node --test` passes with no network access
+- [x] 7.1 `tools.test.js`: frontmatter parsing (all forms, absent, malformed) and `merge`/`overwrite` composition
+- [x] 7.2 `vocabulary.test.js`: every row of the mapping table, unmapped-denies, per-server wildcard refused, sub-command matching including the metacharacter denials
+- [x] 7.3 `mcp.test.js`: stdio and http translation, `${VAR}` expansion, unresolvable placeholder fails that server only
+- [x] 7.4 A continuity test over the ladder: reappearing state retries, unreadable path is not absence, confirmed absence fails with a non-empty result and `continuity: unavailable`
+- [x] 7.5 `node --test` passes with no network access
 
 ## 8. Image
 
