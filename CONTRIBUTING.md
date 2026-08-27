@@ -353,8 +353,8 @@ as well as ordinary defects — and **it does not repeat a finding it has alread
 made**, so what appears after a push is what is new. It resolves its own threads
 once you fix them, and it never touches anybody else's. A pull request cannot
 rewrite the review that judges it: the roles, the queue and the prompt scripts
-are restored from the pull request's base branch before they run, the thread
-resolver runs from that branch's checkout, and a pull request editing
+are restored from `master` — the default branch, and every pull request's
+base — before they run, the thread resolver runs from its checkout, and a pull request editing
 `claude-review.yml` itself is not reviewed until it merges.
 
 **A pull request from a fork gets no review**, shown as a SKIPPED check rather

@@ -105,6 +105,7 @@ for t in $(printf '%s' "$allowed" | tr ',' ' '); do assert_contains "$tools" "$t
 
 it "the coordinator runs its role in consolidate, and holds the summary gate and the resolve list"
 c=$(py 'print(runs("consolidate"))')
+assert_contains "$c" ".github/scripts/mark-thread-resolved.sh"
 assert_contains "$c" 'claude -p "$prompt" --agent review-coordinator'
 assert_contains "$c" '--output-format stream-json'
 assert_contains "$c" 'review-prompt.py coordinator'

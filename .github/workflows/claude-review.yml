@@ -317,7 +317,7 @@ jobs:
           BASE: origin/${{ needs.queue.outputs.base }}
         run: |
           set -euo pipefail
-          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py; do
+          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/mark-thread-resolved.sh; do
             if git cat-file -e "$BASE:$f" 2>/dev/null; then git checkout "$BASE" -- "$f"; fi
           done
       - id: cli
