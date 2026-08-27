@@ -16,7 +16,7 @@
 
 ## 4. Verification on the reference install
 
-- [ ] 4.1 Deploy the worktree's chart (`--state-values-set chartPath=...`), then induce a self-healing burst on a kind with no predicate and a persisting one; verify the first opens no conversation and the second opens one whose signal card names the last-arrival gap
+- [x] 4.1 Deploy the worktree's chart (`--state-values-set chartPath=...`), then induce a self-healing burst on a kind with no predicate and a persisting one; verify the first opens no conversation and the second opens one whose signal card names the last-arrival gap
 
 ## 5. Documentation
 
