@@ -9,7 +9,7 @@ The full CRD reference, and how an agent's capabilities are resolved.
 **Who the agent is.** Identity only:
 
 - **Git repository** — private OK, SSH key or HTTPS PAT via `secretRef`.
-- **Agent role file** in that repo — `.claude/agents/<name>.md`.
+- **Agent role file** in that repo — `.claude/agents/<name>.md` for the claude and ollama runtimes, `.github/agents/<name>.agent.md` for copilot.
 - **Credentials** as `env[]` with `valueFrom`.
 - **Prompts and limits.**
 
@@ -805,8 +805,10 @@ keys are overlaid, with the later ref winning a collision.
 ### `toolsets.mode` — what the route composes against
 
 The `toolsets` stanza carries a `mode`, and the thing it composes against is the
-**agent's own definition**: the `tools:` frontmatter of
-`.claude/agents/<agent>.md` in the profile's repository.
+**agent's own definition**: the `tools:` frontmatter of the agent's file in the
+profile's repository — `.claude/agents/<agent>.md` on the claude and ollama
+runtimes, `.github/agents/<agent>.agent.md` on copilot. The path is the
+runtime's fact; the composition rule is the same on all of them.
 
 **Not the profile** — the profile carries no capabilities at all.
 
@@ -1554,7 +1556,8 @@ context, and a wrong guess persists nothing while looking configured.
 ships.** The value above is `runtime-claude`'s, and it is the default in
 `chart/charts/claude/values.yaml` — beside that runtime's image and its model
 credential, which live there for the same reason. `chart/charts/ollama/` ships
-its own, `.agentops/contexts/**`, for the same reason again. So a default
+its own, `.agentops/contexts/**`, and `chart/charts/copilot/` ships
+`.copilot/session-state/**`, for the same reason again. So a default
 install with a context volume runs synchronised without anyone setting
 anything.
 

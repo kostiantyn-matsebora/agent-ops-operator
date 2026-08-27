@@ -223,6 +223,25 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # The Node runtimes' unit suites. Neither ran in CI until the copilot runtime
+  # arrived with 55 tests nothing executed. No npm install: the suites import
+  # only the modules beside runtime.js, by design -- the copilot SDK bundles a
+  # 300 MB CLI, and a suite that needed it would be a suite that does not run.
+  node-runtimes:
+    needs: discover
+    if: contains(needs.discover.outputs.images, 'runtime-claude') || contains(needs.discover.outputs.images, 'runtime-copilot')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runtime: [claude, copilot]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test
+        working-directory: runtimes/${{ matrix.runtime }}
+
   # Render AND validate. A lint proves the templates parse; only rendering
   # every meaningful permutation and validating the result proves they produce
   # objects a cluster would accept.
@@ -757,7 +776,7 @@ jobs:
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
+    needs: [discover, operator, modules, console-ui, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

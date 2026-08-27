@@ -48,7 +48,7 @@ path. Plugins are limited to the set Pages enables by default.
     blank. It has a page KIND of its own, `runtimes/<vendor>.md`, in the
     Runtimes nav group, answering its own four: what it executes, what it
     needs, where its context lives, what it costs. `runtimes/ollama.md` is the
-    first. `docs/claude.md` stays a reference page until a change moves it.
+    first, `runtimes/copilot.md` the second. `docs/claude.md` stays a reference page until a change moves it.
   - **The `renders` marker applies to a runtime bundle too.** It has no
     sub-components, so the whole of it is the generator's "Always" row.
   - **A page states no exhaustive values.** `helm show values` is the list, and

@@ -123,10 +123,11 @@ substrate they run on comes from this chart.
 | Telegram | `telegram.enabled` | [telegram]({{ '/integrations/telegram/' | relative_url }}) |
 | Home Assistant | `home-assistant.enabled` | [home-assistant]({{ '/integrations/home-assistant/' | relative_url }}) |
 | Ollama runtime | `ollama.enabled` | [ollama]({{ '/runtimes/ollama/' | relative_url }}) |
+| GitHub Copilot runtime | `copilot.enabled` | [copilot]({{ '/runtimes/copilot/' | relative_url }}) |
 
-All five are off by default. Each bundle's own page owns its values — this page
-does not repeat them. The fifth is a RUNTIME rather than an integration: it
-starts no work and answers nowhere, it executes.
+All six are off by default. Each bundle's own page owns its values — this page
+does not repeat them. The last two are RUNTIMES rather than integrations: they
+start no work and answer nowhere, they execute.
 
 ## Configure
 
@@ -541,8 +542,9 @@ image:
 **The defaults are SUFFICIENT.** The model credential is the only value with no
 defensible default, and therefore the only thing you must supply.
 
-**A second vendor is a bundle, or an entry stating only its difference.** The
-chart ships [Ollama]({{ '/runtimes/ollama/' | relative_url }}) as a bundle:
+**Another vendor is a bundle, or an entry stating only its difference.** The
+chart ships [Ollama]({{ '/runtimes/ollama/' | relative_url }}) and
+[GitHub Copilot]({{ '/runtimes/copilot/' | relative_url }}) as bundles:
 
 ```yaml
 ollama:
@@ -550,9 +552,16 @@ ollama:
   endpoint: http://ollama.ollama.svc:11434   # a server you already run
   model: qwen2.5:14b                         # optional while the server has one model
 
+copilot:
+  enabled: true
+  credentialsSecret:
+    token: placeholder-token                  # a GitHub token with Copilot access
+
 pipelines:
   - name: house-ops
     runtimeRef: ollama            # the route selects it
+  - name: k8s-observe
+    runtimeRef: copilot
 ```
 
 A vendor with no bundle is a `runtimes:` entry with its own image, and

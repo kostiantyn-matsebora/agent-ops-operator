@@ -43,6 +43,8 @@ groups:
     entries:
       - title: Ollama
         url: /runtimes/ollama/
+      - title: GitHub Copilot
+        url: /runtimes/copilot/
   - title: Guides
     entries:
       - title: "Put an agent to work"

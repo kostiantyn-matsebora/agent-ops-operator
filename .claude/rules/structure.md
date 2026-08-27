@@ -7,7 +7,7 @@ container IS at runtime.
 | Group | Holds | The type |
 |---|---|---|
 | `platform/` | `manager` `console` `housekeeping` `context-sync` `egress-proxy` | the product's own components |
-| `runtimes/` | `claude` `ollama` | client side of the work contract |
+| `runtimes/` | `claude` `ollama` `copilot` | client side of the work contract |
 | `signals/` | `cron` `alertmanager` `k8s-events` `ha` `telegram` | push to `/signal/inbound` |
 | `channels/` | `telegram` | serve `/channel/*` |
 | `gateways/` | `telegram` | speaks no agent-ops contract at all |
@@ -185,6 +185,45 @@ vendor-neutral: no manager, CRD or contract change was needed to build it.
   front of the prompt silently.
 - **Shipped as `chart/charts/ollama/`**, off by default, in the claude
   bundle's exact shape.
+
+### `runtimes/copilot/`
+
+**The third runtime, and the first whose VENDOR owns the tool vocabulary** —
+Node plus `@github/copilot-sdk`, in process. Copilot runs the loop and the
+tools; the runtime translates, permits and reports.
+
+- **`vocabulary.js` is the boundary.** agent-ops patterns → Copilot's two
+  layers: `availableTools` (`Read`→`builtin:view`, `Bash`→`builtin:bash`,
+  `mcp__s__t`→`mcp:s-t`) plus `onPermissionRequest`. UNMAPPED DENIES and is
+  logged; `mcp__<server>__*` is REFUSED, never widened to `mcp:*`;
+  `Bash(kubectl:*)` is ENFORCED per call — the opposite of ollama, and both
+  are right: what a runtime can enforce is its own fact.
+- **The definition is `.github/agents/<agent>.agent.md`**, Copilot's path,
+  composed by `tools.js` exactly as `runtimes/claude/tools.js` does. Copilot's
+  own discovery of that directory is OFF (`enableConfigDiscovery: false`) and
+  the composed list is ALWAYS passed explicitly, `[]` included, because the
+  vendor reads an omitted `tools:` as everything.
+- **A denial is `{kind: "reject", feedback}`.** A bare `reject` ENDS THE TURN
+  with no text; `deny` is refused as malformed. The feedback is what the model
+  reads, which is `--permission-mode dontAsk` one vendor over.
+- **The session id is MINTED here** (`crypto.randomUUID()`), state under
+  `$HOME/.copilot/session-state/<id>/` — `session.db`, `events.jsonl` — which
+  the bundle declares to `context-sync`. `Session not found` is the resume
+  failure the ladder in `continuity.js` keys on.
+- **SDK AND CLI ARE PINNED EXACTLY, both.** SDK 1.0.11 declares
+  `@github/copilot ^1.0.79`, and CLI 1.0.81 dropped the `./sdk` export the SDK
+  resolves at startup — a floating range installs a pair that throws before
+  any session exists. `npm ci` from the lockfile is what the image runs.
+- **`mode: "empty"`** — the SDK's multi-tenant posture: no telemetry, no
+  cross-session store, no skills, no memory, custom instructions skipped.
+- **`maxTurns` is logged, not faked.** `COPILOT_MAX_AI_CREDITS` →
+  `sessionLimits.maxAiCredits` is the real ceiling; `COPILOT_PROVIDER_JSON`
+  is the SDK's BYOK `provider`, verbatim, and is how the smoke test runs
+  with no credential.
+- **Shipped as `chart/charts/copilot/`**, off by default. The credential
+  rides in `env` as a `valueFrom` because `agentops.renderRuntime` refuses an
+  entry with both `env` and `credentialsSecret`; the bundle renders the Secret
+  itself.
 
 ### The Telegram trio
 

@@ -56,7 +56,7 @@
 ## 8. Image
 
 - [ ] 8.1 `runtimes/copilot/Dockerfile` on `node:22-bookworm-slim`: git, openssh-client, curl, jq, ca-certificates, procps; install the SDK; `HOME=/data/context`; non-root; the `org.opencontainers.image.source` LABEL; multi-arch — build `linux/arm64` locally and run `--version` before believing it
-- [ ] 8.2 Carry the runtime-claude comment forbidding domain tooling, naming the derive-your-own-image escape hatch
+- [x] 8.2 Carry the runtime-claude comment forbidding domain tooling, naming the derive-your-own-image escape hatch
 - [ ] 8.3 Publish by tag: `git tag runtime-copilot-v0.1.0 && git push origin runtime-copilot-v0.1.0`; confirm the run passed the Trivy gate, then the package's Actions access and visibility flip (UI, once), and check the REGISTRY rather than the tag
 
 ## 9. Chart: the `copilot` bundle
@@ -65,7 +65,7 @@
 - [x] 9.2 Add `agentops.copilotRuntimeEntry` to `chart/templates/_helpers.tpl` (model/credits → env) and add `copilot` to the `agentops.declaredRuntimes` bundle range — the default-runtime guard and the bootstrap env see nothing else
 - [x] 9.3 `chart/Chart.yaml`: the dependency with `condition: copilot.enabled`; `chart/values.yaml`: the documented `copilot:` section beside `ollama:`
 - [x] 9.4 Extend `internal/integration/charttemplate_test.go`: defaults render byte-identically; bundle on renders the runtime under its own name, its Secret when `token` is set, `default` still a copy of claude; bundle on with claude off makes copilot the default; `serviceaccount-guard.py` still passes
-- [ ] 9.5 Bump the chart minor and record it in `docs/CHANGELOG.md`, newest first
+- [x] 9.5 Bump the chart minor and record it in `docs/CHANGELOG.md`, newest first
 
 ## 10. Verify against a live install
 
@@ -78,7 +78,7 @@
 
 Both halves, ticked separately; this section is last on purpose and the archive hook checks it.
 
-- [ ] 11.1 Reference docs: `docs/contracts.md` — the third implementation and the per-runtime obligations it makes visible (definition path, vendor default neutralisation, unmapped-denies, what each runtime can enforce of a narrowing pattern); `docs/concepts.md` — capability resolution when the runtime's vocabulary differs, `Pipeline.spec.runtimeRef` as the whole vendor switch; `docs/CHANGELOG.md` entry
-- [ ] 11.2 Adopter site: new `docs/runtimes/copilot.md` in the ollama page's shape (what it executes, what it needs, where its context lives, what it enforces, the `renders bundle=copilot` marker) plus the `docs-generate.py` bundle entry; `docs/_data/nav.yml`; `docs/installation.md` bundle row and section; `docs/index.md` and `README.md` chips and the "Works with"/runtimes line (`wc -l README.md` ≤ 215)
-- [ ] 11.3 `python3 .github/scripts/docs-generate.py` then `--check`; `python3 .github/scripts/retired-vocabulary-guard.py` and `publication-guard.py` pass
-- [ ] 11.4 Context: `.claude/rules/structure.md` (the component, the group table), `.claude/rules/wiring.md` (the agent definition path is per-runtime), `docs/CLAUDE.md` (the runtimes page kind now has two)
+- [x] 11.1 Reference docs: `docs/contracts.md` — the third implementation and the per-runtime obligations it makes visible (definition path, vendor default neutralisation, unmapped-denies, what each runtime can enforce of a narrowing pattern); `docs/concepts.md` — capability resolution when the runtime's vocabulary differs, `Pipeline.spec.runtimeRef` as the whole vendor switch; `docs/CHANGELOG.md` entry
+- [x] 11.2 Adopter site: new `docs/runtimes/copilot.md` in the ollama page's shape (what it executes, what it needs, where its context lives, what it enforces, the `renders bundle=copilot` marker) plus the `docs-generate.py` bundle entry; `docs/_data/nav.yml`; `docs/installation.md` bundle row and section; `docs/index.md` and `README.md` chips and the "Works with"/runtimes line (`wc -l README.md` ≤ 215)
+- [x] 11.3 `python3 .github/scripts/docs-generate.py` then `--check`; `python3 .github/scripts/retired-vocabulary-guard.py` and `publication-guard.py` pass
+- [x] 11.4 Context: `.claude/rules/structure.md` (the component, the group table), `.claude/rules/wiring.md` (the agent definition path is per-runtime), `docs/CLAUDE.md` (the runtimes page kind now has two)

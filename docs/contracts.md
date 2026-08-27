@@ -788,8 +788,12 @@ An `AgentRuntime` image must:
 **`allowedTools` is the route's half of the allowlist, not the whole of it.**
 
 The unit also carries `toolsMode` (`merge` | `overwrite`) and `agent`. A runtime
-holding the repository is expected to read `.claude/agents/<agent>.md`, take its
-`tools:` frontmatter as the agent's own declaration, and compose the two:
+holding the repository is expected to read the agent's definition, take its
+`tools:` frontmatter as the agent's own declaration, and compose the two.
+WHERE that definition lives is the runtime's fact, not the contract's:
+`runtime-claude` and `runtime-ollama` read `.claude/agents/<agent>.md`,
+`runtime-copilot` reads `.github/agents/<agent>.agent.md`, and another backend
+may read somewhere else.
 
 | `toolsMode` | Result |
 |---|---|
@@ -814,6 +818,22 @@ ONCE before the request — only allowed tools are advertised — and logs every
 allowlist entry it cannot provide. Building it needed no change to this
 contract, which is what makes the contract vendor-neutral rather than a
 description of one CLI.
+
+`runtime-copilot` is the third, and the first whose vendor owns its own tool
+vocabulary. It translates the composed allowlist at the point of use — into
+Copilot's availability filters and a per-invocation permission callback — and
+what it cannot translate it withholds and logs, never passes through. Three
+obligations it made visible bind every runtime:
+
+| Obligation | Because |
+|---|---|
+| **an absent or unreadable definition contributes NOTHING**, whatever the vendor's own default | Copilot reads a definition with no `tools:` as "every tool"; the runtime passes the composed list explicitly, empty included, so that reading never applies |
+| **a pattern the runtime cannot honour is reported, never guessed at** | passing it through would hand the vendor a string it reads as some other tool; dropping it silently would widen or narrow a route with no record |
+| **what a narrowing pattern such as `Bash(kubectl:*)` does is the RUNTIME's fact** | `runtime-ollama` has no per-invocation hook and grants nothing on it; `runtime-copilot` has one and enforces the scope; each says so on its own page |
+
+The session id is the runtime's to mint there — the SDK accepts a caller-chosen
+one — which is the first backend to exercise `runtimeContextId` as a handle the
+runtime chose rather than one scraped from a vendor's output.
 
 **`$CONTROL_URL` is not always the manager.** When a runtime declares
 `contextSync`, the manager points it at a sidecar in the same pod, which

@@ -284,6 +284,13 @@ BUNDLES = {
         },
         "components": {},
     },
+    # The copilot bundle needs nothing to render: the token is optional at
+    # render time (empty references a Secret the adopter creates), so the
+    # "Always" row is the CR alone and the conditional Secret is not in it.
+    "copilot": {
+        "enable": {},
+        "components": {},
+    },
     "telegram": {
         "enable": {
             "surface.chatId": "-1001234567890",

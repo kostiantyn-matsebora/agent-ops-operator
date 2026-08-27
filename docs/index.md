@@ -14,6 +14,7 @@ A Kubernetes operator for agents you can address.
 - ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps-ready
 - ![]({{ '/assets/img/logos/claude.svg' | relative_url }}) Runs Claude Code
 - ![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) Runs Ollama
+- ![]({{ '/assets/img/logos/github-light.svg' | relative_url }}) Runs GitHub Copilot
 
 {: .ao-tabs #tour}
 - **How it works**
@@ -125,6 +126,7 @@ A Kubernetes operator for agents you can address.
   - [![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console]({{ '/console/' | relative_url }})
   - [![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) any MCP server]({{ '/guides/toolsets/' | relative_url }})
   - [![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) Ollama]({{ '/runtimes/ollama/' | relative_url }})
+  - [![]({{ '/assets/img/logos/github-light.svg' | relative_url }}) GitHub Copilot]({{ '/runtimes/copilot/' | relative_url }})
   - [your own]({{ '/guides/signal-adapter/' | relative_url }})
 
 ## Why agent-ops?
