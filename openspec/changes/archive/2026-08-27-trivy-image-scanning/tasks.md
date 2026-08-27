@@ -94,11 +94,14 @@ Additive and separable — D4. Its own workflow, not a second trigger on `ci.yml
 - [x] 4.5 State which architecture is scanned. Published images are multi-arch
   and a scan covers one — claiming coverage of both would be the silent kind of
   wrong
-- [ ] 4.6 Verify it runs at all: trigger it manually once via `workflow_dispatch`
+- [x] 4.6 Verify it runs at all: trigger it manually once via `workflow_dispatch`
   before trusting the schedule. A schedule that never fires and a scan that finds
   nothing look identical. BLOCKED UNTIL MERGE: a new workflow is not
   dispatchable until it exists on master. Run it at `/opsx:archive`, before
-  archiving
+  archiving. RAN 2026-08-27 after merge, run 33046412491: 13 published images
+  scanned (signal-cron skipped, no release tag), green, 13
+  `trivy-published-*` categories on master — and they show the 22 stdlib
+  findings the Go 1.23-built releases still carry
 
 ## 5. Exceptions
 
