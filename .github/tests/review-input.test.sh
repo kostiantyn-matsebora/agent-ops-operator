@@ -60,7 +60,7 @@ assert_contains "$r" "openspec/changes/thing/specs/cap/spec.md"
 assert_not_contains "$r" "signals/cron"
 
 it "a component with no threads is told so"
-assert_contains "$(python3 "$PROMPT" reader --input "$tmp/input.json" --group signals/cron)" "  none"
+assert_contains "$(python3 "$PROMPT" reader --input "$tmp/input.json" --group platform/manager)" "  none"
 
 it "an unknown component is refused"
 python3 "$PROMPT" reader --input "$tmp/input.json" --group nope >/dev/null 2>&1
