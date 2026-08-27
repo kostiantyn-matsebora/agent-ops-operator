@@ -49,9 +49,10 @@ inputs:
     default: ""
   gate:
     description: >
-      Whether to run the gate. Default true. The scheduled scan of the
-      published images passes false: it reports and never fails, because there
-      is no change under review to reject.
+      Whether to run the gate. Default true, and every caller in this
+      repository leaves it so — the scheduled scan of the published images
+      included, since a run that cannot fail says nothing. Kept for a caller
+      with a reason to report only.
     required: false
     default: "true"
   upload:
