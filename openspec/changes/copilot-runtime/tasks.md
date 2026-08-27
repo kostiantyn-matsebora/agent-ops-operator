@@ -1,16 +1,18 @@
 ## 1. Pin the vendor facts before writing code
 
-- [ ] 1.1 Verify against the installed `@github/copilot-sdk`: `SessionConfig.sessionId` is honoured on create, `resumeSession(id)` resumes it, and state lands at `$HOME/.copilot/session-state/<id>/`
-- [ ] 1.2 Enumerate the built-in tool wire names the runtime actually registers (`view`/`grep`/`glob`/`edit`/`write`/`bash` and neighbours) and record the list the mapper targets
+- [ ] 1.1 Verify against the installed `@github/copilot-sdk`: `SessionConfig.sessionId` is honoured on create, `resumeSession(id)` resumes it, and state lands at `$HOME/.copilot/session-state/<id>/` — record the layout the bundle's `contextSync.paths` will name
+- [ ] 1.2 Enumerate the built-in tool wire names the runtime actually registers (`view`/`grep`/`glob`/`edit`/`write`/`shell` and neighbours) and correct the design's D4 table to the list the mapper targets
 - [ ] 1.3 Confirm what `resumeSession` throws for an unknown id, so D3's ladder keys on a real failure and not on a message match
 - [ ] 1.4 Confirm `availableTools: []` yields NO tools (not "unset means all"), and that `onPermissionRequest` is called for every invocation including built-ins
+- [ ] 1.5 Confirm the SDK does not discover `.github/agents/` on its own from `workingDirectory`; if it does, find the option that disables it (D5)
+- [ ] 1.6 Confirm the manager needs no change: `WorkUnit` carries `agent`, `allowedTools`, `toolsMode`, `maxTurns`, `systemPrompt`, `runtimeContextId`; `/work/done` accepts `continuity`/`continuityReason`; `runtimepod` injects `HOME=/data/context`, `WORKSPACE`, `MCP_CONFIG`; `context-sync` proxies `CONTROL_URL`. Anything missing is a contract change to raise, not to work around
 
-## 2. The module skeleton
+## 2. The component skeleton
 
-- [ ] 2.1 Create `runtime-copilot/` with `package.json` (`@github/copilot-sdk`, no other runtime dependency), no dependency on any other module in this repo
-- [ ] 2.2 Write `runtime.js`: env config (`CONTROL_URL`, `CONVO_ID`, `POD_NAME`, `REPO_*`, `GIT_*`, `RUNTIME_IDLE_TTL_M`, `WORKSPACE`, `MCP_CONFIG`), fail fast on missing `CONTROL_URL`/`CONVO_ID`
+- [ ] 2.1 Create `runtimes/copilot/` with `package.json` (`@github/copilot-sdk` the only dependency), no dependency on any other module in this repo; confirm `.github/components.sh images` lists `runtime-copilot`
+- [ ] 2.2 Write `runtime.js`: env config (`CONTROL_URL`, `CONVO_ID`, `POD_NAME`, `REPO_*`, `GIT_*`, `RUNTIME_IDLE_TTL_M`, `WORKSPACE`, `MCP_CONFIG`, `COPILOT_GITHUB_TOKEN`, optional `COPILOT_MODEL`, `COPILOT_MAX_AI_CREDITS`), exit non-zero naming a required one that is missing
 - [ ] 2.3 Port the repo sync: clone/fetch/reset at `/data/workspace`, SSH and HTTPS auth, clear contents never rmdir the mount point
-- [ ] 2.4 Implement the poll loop: long-poll `/work`, idle-TTL exit `0`, `POST /work/done` with bounded retry
+- [ ] 2.4 Implement the poll loop: long-poll `/work`, idle-TTL exit `0`, `POST /work/done` with the reference runtime's retry cadence
 
 ## 3. Tool vocabulary translation
 
@@ -24,15 +26,15 @@
 
 ## 4. Session lifecycle and continuity
 
-- [ ] 4.1 Mint a `crypto.randomUUID()` session id when the unit carries no `runtimeContextId`; never derive it from the conversation name
-- [ ] 4.2 Resume when the unit carries one; report the established id on `/work/done` under `runtimeContextId`
+- [ ] 4.1 Mint a `crypto.randomUUID()` session id when the unit carries no `runtimeContextId`; never derive it from the conversation name; report `continuity: new`
+- [ ] 4.2 Resume when the unit carries one; report the established id on `/work/done` under `runtimeContextId` with `continuity: continued`
 - [ ] 4.3 Implement the missing-context ladder: re-check `session-state/<id>/` at 500ms/1.5s/3s, treat unreadable as present, retry once when it reappears
-- [ ] 4.4 On confirmed absence, FAIL with the same user-facing text `runtime-claude` uses — never an empty result, never a fresh session presented as a continuation
+- [ ] 4.4 On confirmed absence, FAIL with `continuity: unavailable`, a `continuityReason` naming the context volume, and the same user-facing text the other runtimes use — never an empty result, never a fresh session presented as a continuation
 - [ ] 4.5 Prepend `unit.systemPrompt` as a delimited block on session creation only; log its length as `runtime-claude` does
 
 ## 5. MCP and prompts
 
-- [ ] 5.1 Translate `/etc/agentops/mcp.json` into the SDK's `mcpServers` record — stdio (`command`/`args`/`env`) and http (`type`/`url`/`headers`)
+- [ ] 5.1 Translate `$MCP_CONFIG` into the SDK's `mcpServers` record — stdio (`command`/`args`/`env`) and http (`type`/`url`/`headers`)
 - [ ] 5.2 Expand `${VAR}` placeholders from `process.env` in-process; never log the resolved value
 - [ ] 5.3 Fail an individual server's registration with a logged reason when a placeholder cannot be resolved, rather than passing the literal text through
 - [ ] 5.4 Resolve `promptText`, or `promptFile` + `promptVars` read relative to the checkout, failing the unit with a readable reason when neither yields a prompt
@@ -48,33 +50,35 @@
 - [ ] 7.1 `tools.test.js`: frontmatter parsing (all forms, absent, malformed) and `merge`/`overwrite` composition
 - [ ] 7.2 `vocabulary.test.js`: every row of the mapping table, unmapped-denies, per-server wildcard refused, sub-command matching including the metacharacter denials
 - [ ] 7.3 `mcp.test.js`: stdio and http translation, `${VAR}` expansion, unresolvable placeholder fails that server only
-- [ ] 7.4 A continuity test over the ladder: reappearing state retries, unreadable path is not absence, confirmed absence fails with a non-empty result
+- [ ] 7.4 A continuity test over the ladder: reappearing state retries, unreadable path is not absence, confirmed absence fails with a non-empty result and `continuity: unavailable`
 - [ ] 7.5 `node --test` passes with no network access
 
 ## 8. Image
 
-- [ ] 8.1 `runtime-copilot/Dockerfile` on `node:22-bookworm-slim`: git, openssh-client, curl, jq, ca-certificates, procps; install the SDK; `HOME=/data/home`; non-root
+- [ ] 8.1 `runtimes/copilot/Dockerfile` on `node:22-bookworm-slim`: git, openssh-client, curl, jq, ca-certificates, procps; install the SDK; `HOME=/data/context`; non-root; the `org.opencontainers.image.source` LABEL; multi-arch — build `linux/arm64` locally and run `--version` before believing it
 - [ ] 8.2 Carry the runtime-claude comment forbidding domain tooling, naming the derive-your-own-image escape hatch
-- [ ] 8.3 Build and push `agentops-runtime-copilot:0.1.0` (never overwrite a pushed tag)
+- [ ] 8.3 Publish by tag: `git tag runtime-copilot-v0.1.0 && git push origin runtime-copilot-v0.1.0`; confirm the run passed the Trivy gate, then the package's Actions access and visibility flip (UI, once), and check the REGISTRY rather than the tag
 
-## 9. Chart
+## 9. Chart: the `copilot` bundle
 
-- [ ] 9.1 Add `additionalRuntimes: []` to `chart/values.yaml` with one-line comments, and amend the `runtime:` comment that currently says additional runtimes stay hand-written
-- [ ] 9.2 Render them in `chart/templates/runtime.yaml`: per-entry `AgentRuntime` + optional credential Secret, reusing the SA helper and the parent's home/workspace claim resolution
-- [ ] 9.3 Refuse (fail the render) an entry naming its own `serviceAccountName`, and an entry whose name collides with `runtime.name`
-- [ ] 9.4 Extend `internal/integration/charttemplate_test.go`: defaults render exactly one runtime; one entry renders two runtimes, two credential Secrets, still one runtime SA
-- [ ] 9.5 Bump the chart version and add the `CHANGELOG.md` entry, newest first
+- [ ] 9.1 Create `chart/charts/copilot/` — `Chart.yaml` 0.1.0, `values.yaml` (`enabled: false`, `name: copilot`, `default: false`, `image`, `credentialsSecret{name: agentops-copilot, key, envName: COPILOT_GITHUB_TOKEN, token: ""}`, `contextSync.paths: [".copilot/session-state/**"]`, optional `model`/`maxAiCredits`, the runtimeDefaults-override note), `templates/runtime.yaml` calling `agentops.renderRuntime`, the credential Secret template in the claude bundle's shape
+- [ ] 9.2 Add `agentops.copilotRuntimeEntry` to `chart/templates/_helpers.tpl` (model/credits → env) and add `copilot` to the `agentops.declaredRuntimes` bundle range — the default-runtime guard and the bootstrap env see nothing else
+- [ ] 9.3 `chart/Chart.yaml`: the dependency with `condition: copilot.enabled`; `chart/values.yaml`: the documented `copilot:` section beside `ollama:`
+- [ ] 9.4 Extend `internal/integration/charttemplate_test.go`: defaults render byte-identically; bundle on renders the runtime under its own name, its Secret when `token` is set, `default` still a copy of claude; bundle on with claude off makes copilot the default; `serviceaccount-guard.py` still passes
+- [ ] 9.5 Bump the chart minor and record it in `docs/CHANGELOG.md`, newest first
 
-## 10. Docs
+## 10. Verify against a live install
 
-- [ ] 10.1 `docs/contracts.md`: name the second reference implementation and state the per-runtime obligations it makes visible — definition path, vendor default neutralisation, unmapped-denies
-- [ ] 10.2 `docs/concepts.md`: how capabilities resolve when the runtime's vocabulary differs, and that `runtimeRef` is the whole vendor switch
-- [ ] 10.3 `README.md`: one line in the module list, staying inside the 150-line budget (`wc -l README.md`)
-- [ ] 10.4 `CLAUDE.md`: add `runtime-copilot/` to the map and the module list, and add the build/test lines for it
+- [ ] 10.1 Deploy the worktree's chart (`helmfile sync` with `chartPath` pointed at the worktree) after a server-side dry-run; confirm `agentops-conv-*` pods for a copilot route carry the `context-sync` sidecar and the egress init container
+- [ ] 10.2 Point one Pipeline's `runtimeRef` at `copilot` and post a `kind: task` signal to a source it claims; confirm the answer reaches every bound thread
+- [ ] 10.3 Reply in the thread and confirm the second run resumes the same context — then delete the session state and confirm the run FAILS with the cannot-be-continued message rather than answering fresh
+- [ ] 10.4 Bind observation-only toolsets on one route and confirm shell is denied there while the same profile keeps it on another route; bind `Bash(kubectl:*)` and confirm a non-kubectl command is denied and logged
 
-## 11. Verify against a live install
+## 11. Documentation
 
-- [ ] 11.1 Server-side dry-run the rendered chart before applying (`helm upgrade --dry-run=server`)
-- [ ] 11.2 Point one profile's `runtimeRef` at the copilot runtime and post a `kind: task` signal to a source its Pipeline claims; confirm the answer reaches every bound thread
-- [ ] 11.3 Reply in the thread and confirm the second run resumes the same context — then delete the session state and confirm the run FAILS with the cannot-be-continued message rather than answering fresh
-- [ ] 11.4 Bind observation-only toolsets on one route and confirm shell is denied there while the same profile keeps it on another route
+Both halves, ticked separately; this section is last on purpose and the archive hook checks it.
+
+- [ ] 11.1 Reference docs: `docs/contracts.md` — the third implementation and the per-runtime obligations it makes visible (definition path, vendor default neutralisation, unmapped-denies, what each runtime can enforce of a narrowing pattern); `docs/concepts.md` — capability resolution when the runtime's vocabulary differs, `Pipeline.spec.runtimeRef` as the whole vendor switch; `docs/CHANGELOG.md` entry
+- [ ] 11.2 Adopter site: new `docs/runtimes/copilot.md` in the ollama page's shape (what it executes, what it needs, where its context lives, what it enforces, the `renders bundle=copilot` marker) plus the `docs-generate.py` bundle entry; `docs/_data/nav.yml`; `docs/installation.md` bundle row and section; `docs/index.md` and `README.md` chips and the "Works with"/runtimes line (`wc -l README.md` ≤ 215)
+- [ ] 11.3 `python3 .github/scripts/docs-generate.py` then `--check`; `python3 .github/scripts/retired-vocabulary-guard.py` and `publication-guard.py` pass
+- [ ] 11.4 Context: `.claude/rules/structure.md` (the component, the group table), `.claude/rules/wiring.md` (the agent definition path is per-runtime), `docs/CLAUDE.md` (the runtimes page kind now has two)
