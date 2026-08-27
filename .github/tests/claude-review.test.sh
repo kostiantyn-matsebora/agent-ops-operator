@@ -43,7 +43,10 @@ it "is four jobs: queue, read, consolidate, reconcile — and nothing else"
 assert_equals "queue read consolidate reconcile" "$(py 'print(" ".join(jobs))')"
 assert_equals "queue" "$(py 'print(jobs["read"]["needs"])')"
 assert_equals "queue read" "$(py 'print(" ".join(jobs["consolidate"]["needs"]))')"
-assert_equals "consolidate" "$(py 'print(jobs["reconcile"]["needs"])')"
+assert_equals "queue consolidate" "$(py 'print(" ".join(jobs["reconcile"]["needs"]))')"
+
+it "the privileged job runs the base branch's resolver, never the pull request's"
+assert_contains "$(py 'print(step("reconcile","uses","actions/checkout@v4")["with"]["ref"])')" "needs.queue.outputs.base"
 
 it "the queue runs no model: a program builds it — the base branch's program"
 assert_not_contains "$(py 'print(runs("queue"))')" "claude -p"

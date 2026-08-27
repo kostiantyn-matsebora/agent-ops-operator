@@ -425,8 +425,14 @@ jobs:
   # `contents: write` is what `resolveReviewThread` requires. This job runs one
   # program over a list of ids, and that program re-reads every thread from
   # GitHub and refuses any the review did not author.
+  #
+  # IT CHECKS OUT THE BASE BRANCH, NOT THE PULL REQUEST. The resolver is a
+  # program in the tree, and this is the one job that can resolve a thread;
+  # run from the pull request's checkout it would be the pull request's
+  # program holding the privilege. Found by the review, on the pull request
+  # that gave the review its matrix.
   reconcile:
-    needs: consolidate
+    needs: [queue, consolidate]
     if: needs.consolidate.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -434,6 +440,8 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.queue.outputs.base }}
       - uses: actions/download-artifact@v4
         with:
           name: resolve-threads

@@ -121,11 +121,14 @@ the merge. **The review is four jobs and two roles** — `queue` is a program
 runs the `review-coordinator` — the only role that posts — over the readings'
 artifacts, and `reconcile` resolves threads with no model. It runs by hand
 too: `gh workflow run claude-review.yml -f number=<pr>` (`-f dry_run=true`
-posts nothing). Every model job installs the CLI through
-`.github/actions/claude-cli` and restores its role file from the BASE branch
-first, and `queue` restores the queue and prompt scripts the same way, so a
-pull request cannot rewrite the review that judges it — nor shrink its own
-queue. The
+posts nothing). NOTHING THE REVIEW RUNS COMES FROM THE PULL REQUEST: `queue`
+restores `review-input.py`, `review-queue.py` and `components.sh` from the
+BASE branch before building the queue; `read` and `consolidate` restore the
+composite action, `review-prompt.py` and `review-reading-check.py`, then
+install the CLI through `.github/actions/claude-cli`, which restores the
+job's role file; `reconcile` checks out the base branch itself. So a pull
+request cannot rewrite the review that judges it, shrink its own queue, or
+resolve a thread it did not earn. The
 fan-out is the matrix and not a pool inside one session: `gotchas.md` has the
 measurement. Triage happens IN THE THREAD, in a stated vocabulary, and one
 comment acts on everything accepted:
