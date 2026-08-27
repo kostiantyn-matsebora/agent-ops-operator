@@ -92,10 +92,21 @@ jobs:
       # with the merge. The notice says which, so the reviewer of that pull
       # request knows the review it got was not the one in the diff.
       - if: steps.hygiene.outputs.ok == 'true'
+        id: guard
         name: The review's roles and script are the base branch's
         run: |
           set -euo pipefail
           base="origin/${{ github.base_ref }}"
+          # THIS FILE IS THE ONE THING THAT CANNOT BE RESTORED, so an edited
+          # copy does not run at all. A `pull_request` run executes the head's
+          # workflow file; `claude-code-action` refused to run when it differed
+          # from the base, and running the CLI directly dropped that refusal
+          # (#97 ran its own edit). The gate below reports the skip as a notice.
+          if git diff --quiet "$base" -- .github/workflows/claude-review.yml; then
+            echo "workflow_edited=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "workflow_edited=true" >> "$GITHUB_OUTPUT"
+          fi
           restored=""
           for f in .claude/workflows/review-pr.js .claude/agents/component-reviewer.md .claude/agents/review-coordinator.md; do
             # A file the base does not have yet cannot be restored from it — the
@@ -110,83 +121,63 @@ jobs:
             echo "::notice::This pull request edits the review's own roles or script ($restored ); it is reviewed by the base branch's copies, and the edit takes effect once merged."
           fi
 
-      - if: steps.hygiene.outputs.ok == 'true'
+      # THE CLI ITSELF, NOT `claude-code-action`. The review is a saved dynamic
+      # workflow, and the `Workflow` tool launches it in the BACKGROUND: the
+      # model's first turn ends in seconds, the runtime carries the run, and the
+      # model gets a second turn with the result when it completes. The CLI
+      # stays alive for that. The action does not: on #94 it exited nine
+      # seconds after the first turn, the run never started, and the job read
+      # "success". Measured both ways — locally with the CLI (3 min, ten agents,
+      # a second result), in CI with the action (43 s, two turns, nothing).
+      #
+      # What the action supplied is supplied here: the credential as env, the
+      # execution file as the stream-json stdout, the conclusion from its last
+      # `result` event. The inline-comment MCP tool it carried is replaced by
+      # `gh api` in the coordinator's role file.
+      - if: steps.hygiene.outputs.ok == 'true' && steps.guard.outputs.workflow_edited != 'true'
         id: review
-        uses: anthropics/claude-code-action@v1
+        name: Run the review workflow
         env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RESOLVE_LIST: ${{ github.workspace }}/.resolve-threads
-        with:
-          # THE GITHUB APP IS NOT A MODEL CREDENTIAL, AND THIS FILE USED TO
-          # SAY IT WAS. It claimed that being connected to the Claude GitHub
-          # integration made the OIDC exchange sufficient and passed nothing —
-          # so the first pull request that actually reached the action died on
-          # `Either ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or workload
-          # identity federation ... is required`.
-          #
-          # THE TWO HALVES ARE SEPARATE, and the run log shows both:
-          # `Using GITHUB_TOKEN from OIDC` is the APP, authorising this action
-          # to read the pull request and comment on it. Nothing in it authorises
-          # a call to Anthropic — GitHub cannot grant that.
-          #
-          # WHY IT LOOKED FINE FOR A WHOLE CHANGE. The action skips itself,
-          # successfully, on a pull request that edits this file — so the change
-          # that introduced the review never ran it, and the credential gap
-          # first appeared on the pull request after it. The always-ran guard
-          # below is what turned that silence into a failure.
-          #
-          # A STATIC CREDENTIAL TAKES PRECEDENCE over workload identity
-          # federation, so this input and `anthropic_federation_rule_id` are
-          # mutually exclusive: adopting federation means DELETING this line,
-          # not setting both.
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          #
-          # THE PREVIOUS REVIEW REACHES THIS ONE AS CONTEXT. That is what makes
-          # the review iterative, and it is why nothing here keeps a record of
-          # findings: the pull request already holds them.
-          track_progress: false
-          use_sticky_comment: true
           # THE PLAN IS A SCRIPT, NOT THIS PROMPT. `.claude/workflows/review-pr.js`
           # builds the queue, runs one `component-reviewer` per component
           # concurrently, and hands every reading to the `review-coordinator`,
-          # which alone posts. This prompt only starts it. It used to hold the
-          # whole plan, and the model executing it lost a review by ending its
-          # turn with readers running (#74) and slept seven minutes on another
-          # (#77) — a plan the model holds is a plan the model can drop.
-          prompt: |
+          # which alone posts. This prompt only starts it.
+          PROMPT: |
             Run the saved workflow `review-pr` with these args and nothing else:
             {"repo": "${{ github.repository }}", "number": ${{ github.event.pull_request.number }}, "base": "origin/${{ github.base_ref }}"}
             Do not read the diff and do not review anything yourself. Do not post:
             the workflow's coordinator posts. When it returns, reply with its
             result JSON verbatim.
-          # THE RULES A REVIEW READS ARE CHOSEN BY GLOB, NOT INHERITED WHOLE.
-          #
-          # Every context this run opens — the consolidator and each reviewer —
-          # loads CLAUDE.md and every unscoped rule file before reading a byte
-          # of the diff: ~27k words, ~40k tokens, re-sent on every turn. Six of
-          # those files govern a DEVELOPER session and nothing a reviewer does:
-          # how to build in a container, how to publish, how a change reaches
-          # master, window naming, screenshotting, chat-answer format. Together
-          # a fifth of the load.
-          #
-          # `claudeMdExcludes` drops them for this session by glob. MEASURED,
-          # not assumed: a relative path matches nothing; `**/` globs and
-          # absolute paths do, and CLAUDE.md itself stays. There is no per-agent
-          # opt-out (the docs say so), which is why it is session-wide here —
-          # the consolidator needs none of the six either. Passed as
-          # `--settings` inline so the choice lives in this guarded file.
-          #
-          # What stays is the review: invariants, terminology, wiring,
-          # retired-vocabulary, adapters, structure, authoring, documentation,
-          # gotchas — plus the three `paths:`-scoped rules a reviewer loads on
-          # reading a matching file.
-          claude_args: |
+          # THE RULES A REVIEW READS ARE CHOSEN BY GLOB, NOT INHERITED WHOLE:
+          # `claudeMdExcludes` drops the six developer-session rule files for
+          # this session. MEASURED: a relative path matches nothing; `**/` globs
+          # do, and CLAUDE.md itself stays. Session-wide, because there is no
+          # per-agent opt-out and the coordinator needs none of the six either.
+          CLAUDE_ARGS: |
             --settings '{"claudeMdExcludes":["**/.claude/rules/build-test.md","**/.claude/rules/worktree-delivery.md","**/.claude/rules/session-naming.md","**/.claude/rules/publication.md","**/.claude/rules/visual-check.md","**/.claude/rules/answering.md"]}'
-            --allowedTools "Workflow,Agent(component-reviewer),Agent(review-coordinator),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*),Bash(git grep:*),Bash(git ls-files:*),Bash(python3 .github/scripts/review-queue.py:*),Bash(.github/scripts/mark-thread-resolved.sh:*),Read,Grep,Glob"
+            --allowedTools "Workflow,Agent(component-reviewer),Agent(review-coordinator),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*),Bash(git grep:*),Bash(git ls-files:*),Bash(python3 .github/scripts/review-queue.py:*),Bash(.github/scripts/mark-thread-resolved.sh:*),Read,Grep,Glob"
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code >/dev/null
+          claude --version
+          out="$RUNNER_TEMP/review-execution.jsonl"
+          # CLAUDE_ARGS is a YAML block, one flag per line; joined onto one line
+          # before `eval`, or `set --` consumes the first line and the second
+          # runs as a command (`--allowedTools: command not found`, #97).
+          eval "set -- $(printf '%s' "$CLAUDE_ARGS" | tr '\n' ' ')"
+          conclusion=success
+          claude -p "$PROMPT" --output-format stream-json --verbose "$@" > "$out" || conclusion=failure
+          echo "execution_file=$out" >> "$GITHUB_OUTPUT"
+          # the LAST result event is the run's: the first is the launch, the
+          # second arrives when the workflow completes
+          last=$(grep '"type":"result"' "$out" | tail -1 || true)
+          [ -n "$last" ] || conclusion=failure
+          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
+          echo "$(grep -c '"type":"result"' "$out" || true) result event(s); conclusion=$conclusion"
 
-      # THE EXECUTION FILE IS THE ONLY PER-TOOL TIMING THERE IS. The job log
-      # shows the model step as one black box of minutes; this file records
-      # every turn and tool call with timestamps. Kept a day so a slow review
-      # can be read for WHERE the time went rather than argued about.
       - if: always() && steps.review.outputs.execution_file != ''
         uses: actions/upload-artifact@v4
         with:
@@ -235,7 +226,7 @@ jobs:
             exit 0
           fi
           if ! git diff --quiet "origin/${{ github.base_ref }}" -- .github/workflows/claude-review.yml; then
-            echo "::notice::This pull request edits .github/workflows/claude-review.yml, so the action refuses to run it — a pull request may not rewrite the review that judges it. The review begins working once this is merged."
+            echo "::notice::This pull request edits .github/workflows/claude-review.yml, so the review does not run on it — a pull request may not rewrite the review that judges it. The review begins working once this is merged."
             exit 0
           fi
           echo "::error::The review reported success without running: no execution file, and this workflow file matches the base branch. A check that passes while nothing was read is worse than one that fails."

@@ -1,7 +1,7 @@
 ---
 name: review-coordinator
 description: Consolidates the per-component readings of a pull request review — dedups findings, resolves the reach of every changed name to its consumers, and is the ONLY role that posts to the pull request, inline findings and one summary. Run once per review by the review-pr workflow, after every reader has returned.
-tools: Read, Grep, Glob, Bash(gh pr comment:*), Bash(gh api:*), Bash(git grep:*), Bash(git diff:*), Bash(.github/scripts/mark-thread-resolved.sh:*), mcp__github_inline_comment__create_inline_comment
+tools: Read, Grep, Glob, Bash(gh pr comment:*), Bash(gh pr view:*), Bash(gh api:*), Bash(git grep:*), Bash(git diff:*), Bash(.github/scripts/mark-thread-resolved.sh:*)
 model: inherit
 ---
 
@@ -49,8 +49,16 @@ STEP 2 — POST. The rules below on repetition, threads, and shape.
 
 HOW TO REPORT — and the rules about repetition are the important part:
 
-- Use `mcp__github_inline_comment__create_inline_comment` (with
-  `confirmed: true`) for each finding, on its lines.
+- Post each finding as a review comment on its line, through the API — one
+  call per finding, on the pull request's head commit:
+
+      sha=$(gh pr view <PR NUMBER> --json headRefOid -q .headRefOid)
+      gh api repos/<REPO>/pulls/<PR NUMBER>/comments \
+        -f commit_id="$sha" -f path='<path>' -F line=<line> -f side=RIGHT \
+        -f body='<the four labeled lines>'
+
+  A line the diff does not touch cannot carry a comment; anchor on the
+  nearest changed line of that file, and say the real line in `Where`.
 - Use `gh pr comment <PR NUMBER>` for the summary. ONE summary.
 - **A FINDING ALREADY MADE THAT STILL STANDS: SAY NOTHING.** A reader's
   verdict `standing` means its thread is left exactly as it is. Posting it
