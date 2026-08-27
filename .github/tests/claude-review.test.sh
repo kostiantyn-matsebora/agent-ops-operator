@@ -18,10 +18,10 @@ py() { python3 -c "
 import sys, yaml, json, shlex
 d = yaml.safe_load(open(sys.argv[1]))
 steps = d['jobs']['review']['steps']
-step = [s for s in steps if 'claude-code-action' in s.get('uses','')][0]
-parts = shlex.split(step['with']['claude_args'])
+step = [s for s in steps if s.get('id') == 'review'][0]
+parts = shlex.split(step['env']['CLAUDE_ARGS'])
 allowed = parts[parts.index('--allowedTools')+1]
-prompt = step['with']['prompt']
+prompt = step['env']['PROMPT']
 restore = [s for s in steps if 'base branch' in s.get('name','')]
 $1
 " "$W"; }
@@ -70,8 +70,10 @@ assert_contains "$prompt" '"base": "origin/${{ github.base_ref }}"'
 assert_contains "$prompt" 'Do not post'
 assert_not_contains "$prompt" 'Agent'
 
-it "no longer keeps a checklist by hand"
-assert_equals "False" "$(py 'print(step["with"].get("track_progress", False))')"
+it "runs the CLI itself, which stays alive for a background workflow — the action does not"
+assert_not_contains "$(py 'print(step.get("uses",""))')" "claude-code-action"
+assert_contains "$(py 'print(step["run"])')" 'claude -p "$PROMPT" --output-format stream-json'
+assert_contains "$(py 'print(" ".join(step["env"]))')" "CLAUDE_CODE_OAUTH_TOKEN"
 
 it "gives the reviewer no posting tool, and no way to spawn"
 tools=$(fm tools "$REVIEWER")
@@ -106,6 +108,8 @@ assert_contains "$c" '**Rule:**'
 assert_contains "$c" '**Fix:**'
 assert_contains "$(fm tools "$COORD")" "gh pr comment"
 assert_not_contains "$(fm tools "$COORD")" "Agent"
+assert_not_contains "$(fm tools "$COORD")" "mcp__"
+assert_contains "$c" "pulls/<PR NUMBER>/comments"
 
 it "consolidates in the coordinator: reach, unreviewed, and the first finding"
 assert_contains "$c" "git grep -l -F"
