@@ -43,6 +43,7 @@ STEP 1 — CONSOLIDATE.
   component the diff never names.
 - THE FIRST FINDING, if the changed paths touch `.claude/rules/`,
   `.claude/agents/`, `.github/actions/claude-cli/`,
+  `.github/scripts/review-input.py`, `.github/scripts/review-queue.py`,
   `.github/scripts/review-prompt.py`, `.github/scripts/review-reading-check.py`
   or `.github/workflows/claude-review.yml`: say so, naming the file — those
   are the things a branch can change that alter how it is read. Raise it even

@@ -144,6 +144,7 @@ jobs:
         run: |
           set -euo pipefail
           base=$(gh pr view "$PR" --json baseRefName -q .baseRefName)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
           if [ "$DISPATCHED" = "true" ] || git diff --quiet "origin/$base" -- .github/workflows/claude-review.yml; then
             echo "workflow_edited=false" >> "$GITHUB_OUTPUT"
           else
@@ -166,12 +167,23 @@ jobs:
       # into one entry per component; every review thread, once; the change's
       # delta specs. It used to be an agent asked to run these commands: 136 s
       # and eleven refused commands on #106.
+      #
+      # THE PROGRAM IS THE BASE BRANCH'S. A queue built by the pull request's
+      # own copy could leave a component out of it, and an absent entry is not
+      # an `unreviewed` row — it is nothing. So the three files that decide
+      # the queue are restored first, exactly as the roles are.
       - id: input
         if: steps.decide.outputs.run == 'true'
         name: What changed, and who reads it
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 .github/scripts/review-input.py --repo "${{ github.repository }}" --number "$PR" --out review-input.json
+          BASE: origin/${{ steps.guard.outputs.base }}
+        run: |
+          set -euo pipefail
+          for f in .github/scripts/review-input.py .github/scripts/review-queue.py .github/components.sh; do
+            if git cat-file -e "$BASE:$f" 2>/dev/null; then git checkout "$BASE" -- "$f"; fi
+          done
+          python3 .github/scripts/review-input.py --repo "${{ github.repository }}" --number "$PR" --out review-input.json
 
       - if: steps.decide.outputs.run == 'true'
         uses: actions/upload-artifact@v4

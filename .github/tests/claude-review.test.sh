@@ -45,10 +45,14 @@ assert_equals "queue" "$(py 'print(jobs["read"]["needs"])')"
 assert_equals "queue read" "$(py 'print(" ".join(jobs["consolidate"]["needs"]))')"
 assert_equals "consolidate" "$(py 'print(jobs["reconcile"]["needs"])')"
 
-it "the queue runs no model: a program builds it"
+it "the queue runs no model: a program builds it — the base branch's program"
 assert_not_contains "$(py 'print(runs("queue"))')" "claude -p"
 assert_contains "$(py 'print(runs("queue"))')" "review-input.py"
 assert_not_contains "$(py 'print(" ".join(uses("queue")))')" "claude-cli"
+q=$(py 'print(step("queue","id","input")["run"])')
+for f in .github/scripts/review-input.py .github/scripts/review-queue.py .github/components.sh; do assert_contains "$q" "$f"; done
+assert_contains "$q" 'git checkout "$BASE" -- "$f"'
+python3 -c 'import sys; s=sys.argv[1]; sys.exit(0 if s.index("git checkout") < s.index("python3 .github/scripts/review-input.py") else 1)' "$q" && pass || fail "the restore must precede the program it restores"
 
 it "the read matrix is the queue's component list, one job each, and a failed reading fails alone"
 assert_contains "$(py 'print(jobs["read"]["strategy"]["matrix"]["entry"])')" "fromJSON(needs.queue.outputs.groups)"

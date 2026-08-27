@@ -123,7 +123,9 @@ artifacts, and `reconcile` resolves threads with no model. It runs by hand
 too: `gh workflow run claude-review.yml -f number=<pr>` (`-f dry_run=true`
 posts nothing). Every model job installs the CLI through
 `.github/actions/claude-cli` and restores its role file from the BASE branch
-first, so a pull request cannot rewrite the review that judges it. The
+first, and `queue` restores the queue and prompt scripts the same way, so a
+pull request cannot rewrite the review that judges it — nor shrink its own
+queue. The
 fan-out is the matrix and not a pool inside one session: `gotchas.md` has the
 measurement. Triage happens IN THE THREAD, in a stated vocabulary, and one
 comment acts on everything accepted:

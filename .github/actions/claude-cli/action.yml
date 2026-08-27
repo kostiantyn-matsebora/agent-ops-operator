@@ -9,8 +9,8 @@
 #
 # THE RESTORE LIVES HERE TOO. A pull request may not rewrite the thing that
 # judges it: the role files a model reads are taken from the BASE branch before
-# the model runs. Three jobs need that, and each carrying the loop would be
-# three places for it to rot. The caller restores THIS FILE the same way, in a
+# the model runs. Both model jobs need that, and each carrying the loop would
+# be two places for it to rot. The caller restores THIS FILE the same way, in a
 # step before `uses:` resolves it — a composite is a file in the checkout, so
 # it is as editable by a pull request as the roles are.
 name: Claude CLI

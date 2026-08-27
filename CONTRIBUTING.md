@@ -341,7 +341,8 @@ against any pull request, `gh workflow run claude-review.yml -f number=<pr>`,
 and `-f dry_run=true` stops after the readings (the run's artifacts) without
 posting. It comments on specific lines and leaves one summary. It reads **per
 component, in parallel** — one clean context, one runner, per changed
-component, so a change touching eight components is read in the time of one —
+component, so a change touching eight components is read in the time of one;
+a reading that fails is named `unreviewed` in the summary, never dropped —
 and then **across them**: every
 identifier, field, path or env var the change added, removed or renamed is
 followed to its consumers, because this repository's modules import nothing
@@ -350,7 +351,10 @@ diff never names. The summary states that reach. It reads this project's own
 rules, so it raises a contradiction with a recorded invariant or a retired term
 as well as ordinary defects — and **it does not repeat a finding it has already
 made**, so what appears after a push is what is new. It resolves its own threads
-once you fix them, and it never touches anybody else's.
+once you fix them, and it never touches anybody else's. A pull request cannot
+rewrite the review that judges it: the roles, the queue and the prompt scripts
+are restored from `master` before they run, and a pull request editing
+`claude-review.yml` itself is not reviewed until it merges.
 
 **A pull request from a fork gets no review**, shown as a SKIPPED check rather
 than a failing one: repository secrets are withheld from fork workflows by
