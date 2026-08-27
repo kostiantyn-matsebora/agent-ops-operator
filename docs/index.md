@@ -179,7 +179,7 @@ Documented HTTP contracts, no fork.
 
 - **Your own signal source** — Datadog, Dynatrace, Sentry, a sensor on your
   bench.
-- **Your own agent runtime** — Codex, Gemini, Copilot or a script of your own.
+- **Your own agent runtime** — Codex, Gemini or a script of your own.
   Swap the image. The work contract does not change.
 - **Your own channel** — Slack, Teams, Discord, e-mail. The operator sends
   meaning, your adapter renders it.
