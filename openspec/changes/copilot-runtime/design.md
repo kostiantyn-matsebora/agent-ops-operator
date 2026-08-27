@@ -63,11 +63,20 @@ it.
 
 The deciding factor is the context handle. `createSession({sessionId})` accepts
 an id we choose; `resumeSession(id)` continues it; state lands at
-`$HOME/.copilot/session-state/<id>/`. The CLI cannot be told the id of a NEW
+`$COPILOT_HOME/session-state/<id>/` — `session.db`, `events.jsonl`,
+`checkpoints/`, `files/` (verified), and `COPILOT_HOME` defaults to
+`$HOME/.copilot`. The CLI cannot be told the id of a NEW
 session (github/copilot-cli#442) — the documented workaround is to diff the
 state directory after the run and guess which directory is ours. That is a race
 under concurrent pods and a lie under any failure that writes a directory
 without finishing a run.
+
+The SDK and the CLI it drives are PINNED EXACTLY, both of them. The SDK
+declares `@github/copilot: ^1.0.79`, and CLI 1.0.81 — published four days after
+SDK 1.0.11 — dropped the `./sdk` package export the SDK resolves at startup, so
+a floating range installs a pair that throws before any session exists. The
+two are one artifact released as two packages; `package.json` names both
+versions and `npm ci` from the lockfile is what the image runs.
 
 Everything else the contract needs is a first-class option rather than a flag
 scrape: `availableTools`/`excludedTools` (allowlist), `onPermissionRequest`
@@ -100,7 +109,7 @@ different handle, which is exactly the failure `latest-wins` exists to undo.
 
 Mirrors the ladder both existing runtimes implement:
 
-1. `resumeSession(id)` throws → re-check `$HOME/.copilot/session-state/<id>/`
+1. `resumeSession(id)` throws `Session not found: <id>` (verified) → re-check `$HOME/.copilot/session-state/<id>/`
    after 500ms/1.5s/3s. A directory that reappears means the store was SLOW,
    not empty: retry once. An unreadable path is NOT absent — treat it as
    present and retry.
@@ -134,14 +143,24 @@ claude-code fuses: *availability* (which tools exist for the session) and
 | `Grep` | `builtin:grep` | approve |
 | `Glob` | `builtin:glob` | approve |
 | `Edit` | `builtin:edit` | approve |
-| `Write` | `builtin:write` | approve |
-| `Bash` | `builtin:shell` | approve every command |
-| `Bash(kubectl:*)` | `builtin:shell` | approve only invocations whose command matches `kubectl *` |
+| `Write` | `builtin:create` | approve |
+| `Bash` | `builtin:bash` | approve every command |
+| `Bash(kubectl:*)` | `builtin:bash` | approve only invocations whose command matches `kubectl *` |
 | `mcp__<server>__<tool>` | `mcp:<server>-<tool>` | approve |
 | anything unmapped | — (withheld) | deny |
 
-The target wire names are read off SDK source and are PINNED by task 1 before
-the table is trusted; a wrong one is logged at session start (Risks).
+PINNED against SDK 1.0.11 / CLI 1.0.80 on 2026-08-27, by advertising
+`builtin:*` to a fake model endpoint and reading the request: the runtime
+registers `bash read_bash stop_bash list_bash view create edit web_fetch skill
+sql read_agent list_agents write_agent grep glob task`. Six are mapped; the
+rest — sub-agents, skills, web fetch, the SQL scratchpad, the background-shell
+companions — have no agent-ops pattern and are never available. A wrong name
+would still be logged at session start (Risks), because the inventory is a
+vendor fact that moves.
+
+The permission handler answers `{kind: "reject"}` to deny and
+`{kind: "approve-once"}` to allow — the runtime refuses `deny` as a malformed
+payload and FAILS the tool call, which reads as a denial but is an error.
 
 Three consequences worth stating outright:
 
@@ -179,6 +198,13 @@ Copilot's own default — an omitted `tools:` means every tool — is neutralise
 the boundary: the runtime always passes an explicit `availableTools` (possibly
 `[]`) and never lets the definition's default apply. `[]` means no tool is
 available, which is the correct reading of a composition that produced nothing.
+
+Copilot's own discovery of `.github/agents/` is OFF by default
+(`enableConfigDiscovery: false`, verified: a definition in the working directory
+left no trace in the session) and the runtime never turns it on. Nor does it
+load custom instructions — `skipCustomInstructions: true` — since the profile's
+prompt is the whole of the agent's instructions here and `AGENTS.md` or
+`CLAUDE.md` in a checkout must not silently join it.
 
 The definition is read and composed BY US, and never handed to Copilot as a
 `customAgents` entry with `agent:` selected. That would re-apply the

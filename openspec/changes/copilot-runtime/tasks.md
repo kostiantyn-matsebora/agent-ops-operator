@@ -1,11 +1,11 @@
 ## 1. Pin the vendor facts before writing code
 
-- [ ] 1.1 Verify against the installed `@github/copilot-sdk`: `SessionConfig.sessionId` is honoured on create, `resumeSession(id)` resumes it, and state lands at `$HOME/.copilot/session-state/<id>/` — record the layout the bundle's `contextSync.paths` will name
-- [ ] 1.2 Enumerate the built-in tool wire names the runtime actually registers (`view`/`grep`/`glob`/`edit`/`write`/`shell` and neighbours) and correct the design's D4 table to the list the mapper targets
-- [ ] 1.3 Confirm what `resumeSession` throws for an unknown id, so D3's ladder keys on a real failure and not on a message match
-- [ ] 1.4 Confirm `availableTools: []` yields NO tools (not "unset means all"), and that `onPermissionRequest` is called for every invocation including built-ins
-- [ ] 1.5 Confirm the SDK does not discover `.github/agents/` on its own from `workingDirectory`; if it does, find the option that disables it (D5)
-- [ ] 1.6 Confirm the manager needs no change: `WorkUnit` carries `agent`, `allowedTools`, `toolsMode`, `maxTurns`, `systemPrompt`, `runtimeContextId`; `/work/done` accepts `continuity`/`continuityReason`; `runtimepod` injects `HOME=/data/context`, `WORKSPACE`, `MCP_CONFIG`; `context-sync` proxies `CONTROL_URL`. Anything missing is a contract change to raise, not to work around
+- [x] 1.1 Verify against the installed `@github/copilot-sdk`: `SessionConfig.sessionId` is honoured on create, `resumeSession(id)` resumes it, and state lands at `$HOME/.copilot/session-state/<id>/` — record the layout the bundle's `contextSync.paths` will name
+- [x] 1.2 Enumerate the built-in tool wire names the runtime actually registers (`view`/`grep`/`glob`/`edit`/`write`/`shell` and neighbours) and correct the design's D4 table to the list the mapper targets
+- [x] 1.3 Confirm what `resumeSession` throws for an unknown id, so D3's ladder keys on a real failure and not on a message match
+- [x] 1.4 Confirm `availableTools: []` yields NO tools (not "unset means all"), and that `onPermissionRequest` is called for every invocation including built-ins
+- [x] 1.5 Confirm the SDK does not discover `.github/agents/` on its own from `workingDirectory`; if it does, find the option that disables it (D5)
+- [x] 1.6 Confirm the manager needs no change: `WorkUnit` carries `agent`, `allowedTools`, `toolsMode`, `maxTurns`, `systemPrompt`, `runtimeContextId`; `/work/done` accepts `continuity`/`continuityReason`; `runtimepod` injects `HOME=/data/context`, `WORKSPACE`, `MCP_CONFIG`; `context-sync` proxies `CONTROL_URL`. Anything missing is a contract change to raise, not to work around
 
 ## 2. The component skeleton
 
