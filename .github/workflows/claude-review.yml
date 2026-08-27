@@ -130,14 +130,21 @@ jobs:
       # file, and the CLI holds no refusal of its own (#97 ran its own edit).
       # The roles, the prompt scripts and the composite action ARE restored,
       # from the base, by every job that reads them.
+      #
+      # A DISPATCH IS EXEMPT. `gh workflow run --ref <branch>` is a person
+      # choosing to run THAT branch's copy — which is the only way a change to
+      # this file can be exercised before it merges. The first dry run of the
+      # matrix shape skipped itself here, on the pull request that introduced
+      # it.
       - id: guard
         name: A pull request may not rewrite the review that judges it
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPATCHED: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
           base=$(gh pr view "$PR" --json baseRefName -q .baseRefName)
-          if git diff --quiet "origin/$base" -- .github/workflows/claude-review.yml; then
+          if [ "$DISPATCHED" = "true" ] || git diff --quiet "origin/$base" -- .github/workflows/claude-review.yml; then
             echo "workflow_edited=false" >> "$GITHUB_OUTPUT"
           else
             echo "workflow_edited=true" >> "$GITHUB_OUTPUT"

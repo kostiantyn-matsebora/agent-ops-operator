@@ -116,9 +116,11 @@ assert_contains "$(py 'print(json.dumps([s.get("with",{}) for s in steps("consol
 assert_contains "$(py 'print(json.dumps([s.get("with",{}) for s in steps("read")]))')" 'reading-${{ matrix.entry.slug }}'
 assert_contains "$(py 'print(json.dumps(step("consolidate","id","list")))')" "produced=true"
 
-it "does not run a pull request's own edit of this file"
+it "does not run a pull request's own edit of this file — unless a person dispatched that branch on purpose"
 assert_contains "$(py 'print(runs("queue"))')" "workflow_edited=true"
 assert_contains "$(py 'print(jobs["read"]["if"])')" "needs.queue.outputs.run == 'true'"
+assert_contains "$(py 'print(step("queue","id","guard")["env"]["DISPATCHED"])')" "github.event_name == 'workflow_dispatch'"
+assert_contains "$(py 'print(step("queue","id","guard")["run"])')" '[ "$DISPATCHED" = "true" ] ||'
 
 it "can be dispatched by hand against a pull request, with a dry run"
 assert_contains "$(py 'print(" ".join(d.get("on", d.get(True))["workflow_dispatch"]["inputs"]))')" "number"
