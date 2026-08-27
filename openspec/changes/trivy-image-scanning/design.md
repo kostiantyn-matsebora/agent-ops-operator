@@ -20,8 +20,9 @@ with `push: false`, `load: true` and a `:scan` tag, and grants
 
 | | `deployment-dashboard` | here |
 |---|---|---|
-| shape | one workflow per service, category written out per service | **one matrix over thirteen components**, so the category must be derived |
-| base images | uniform | **three tiers** — distroless (11 of 13), `debian:bookworm-slim` (egress-proxy), `node:22-bookworm-slim` plus an npm tree (runtime-claude) |
+| shape | one workflow per service, category written out per service | **one matrix over fourteen components**, so the category must be derived |
+| base images | uniform | **three tiers** — distroless (11 of 14), `debian:bookworm-slim` (egress-proxy, runtime-ollama), `node:22-bookworm-slim` plus an npm tree (runtime-claude) |
+| what a run builds | every service | **only the components the pull request touched** (`continuous-integration`), so a pull-request scan is partial by design |
 
 The second is why the gate's threshold is not a decision to make from taste. A
 distroless image carries almost no OS package surface; the runtime image carries
@@ -76,7 +77,7 @@ warms Trivy's vulnerability database for the second.
 
 **Uploading under a shared category means each component's results replace the
 previous component's.** The surface then shows one component's findings while
-appearing to describe thirteen. Nothing fails: every upload succeeds, and the run
+appearing to describe fourteen. Nothing fails: every upload succeeds, and the run
 is green. This is the single highest-consequence detail in porting a
 per-service pattern to a matrix, which is why the spec states it as a requirement
 rather than leaving it to the implementation.
@@ -101,8 +102,13 @@ covers on a schedule.
 ### D4 — The scheduled scan is additive, reports only, and is separable
 
 It goes beyond the ported pattern. It is included because it is the only
-mechanism that reaches the dominant case: a CVE disclosed after an image was
-built, where no pull request and no release is involved.
+mechanism that reaches two cases:
+
+1. **A CVE disclosed after an image was built**, where no pull request and no
+   release is involved — the dominant one.
+2. **A component no pull request touches.** CI builds only what changed, so a
+   base-image finding in an untouched component is never seen by the
+   pull-request scan, however long it stays vulnerable.
 
 It reports and never gates: there is no change under review to reject, and a
 failing scheduled run pages somebody about a fact rather than a regression.
@@ -118,9 +124,9 @@ build nor appears in the security tab.
 
 **Named because it is a real trade-off and the alternative is defensible.**
 Reporting unfixed findings would make the security tab a complete inventory,
-which is what an inventory is for. It would also fill it, for the two Debian-based
-images, with entries nobody can act on and no way to distinguish a new one
-arriving.
+which is what an inventory is for. It would also fill it, for the three
+Debian-based images, with entries nobody can act on and no way to distinguish a
+new one arriving.
 
 Following the reference keeps both repositories' surfaces meaning the same thing:
 *what is actionable*. If a complete inventory is wanted later, the images already
@@ -150,9 +156,9 @@ guard.
   they cannot fix or even diagnose.
 
 - **Trivy's database download is a network dependency in every image job** →
-  Thirteen matrix legs pulling the DB is both slow and rate-limitable. Task 3.5
-  caches it. Worth stating that the gate now has an external dependency the build
-  did not have.
+  Up to fourteen matrix legs pulling the DB — a shared-Dockerfile edit rebuilds
+  everything — is both slow and rate-limitable. Task 3.5 caches it. Worth
+  stating that the gate now has an external dependency the build did not have.
 
 - **The gate is only as current as Trivy's database** → True of any scanner, and
   the reason D4 exists: the schedule re-asks the same question against a newer

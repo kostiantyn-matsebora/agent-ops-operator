@@ -1,0 +1,87 @@
+# THE PUBLISHED IMAGES, RE-SCANNED ON A SCHEDULE.
+#
+# A CVE disclosed today affects images built before it was known, and no
+# pull-request scan reaches that case — nothing is triggered by a disclosure.
+# Nor does a pull request scan a component it did not touch: ci.yml builds only
+# what changed. This workflow asks the same question as the pull-request gate,
+# against every image ever released, with a newer database and nothing changed
+# in the repository.
+#
+# IT REPORTS AND NEVER GATES. There is no change under review to reject, and a
+# red scheduled run pages somebody about a fact rather than a regression. The
+# findings land in the security tab under their own categories.
+#
+# SEPARABLE BY DESIGN (design D4): if it proves noisy it is deleted without
+# touching the pull-request gate, which is why it is its own workflow and not
+# a second trigger on ci.yml.
+name: image-scan
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"      # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # WHAT IS PUBLISHED: every component `.github/components.sh` derives, at the
+  # newest `<component>-v<semver>` release tag — the tag is what published it.
+  # A component with no release tag has no published image and is reported as
+  # skipped, never silently absent; `signal-cron` is that case today.
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.list.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: list
+        run: |
+          set -euo pipefail
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          images="[]"
+          for c in $(./.github/components.sh images | jq -r '.[].component'); do
+            tag=$(git tag -l "$c-v*" | sort -V | tail -1)
+            if [ -z "$tag" ]; then
+              echo "::notice::$c has no release tag, so no published image — skipped"
+              continue
+            fi
+            ref="ghcr.io/$owner/agentops-$c:${tag#"$c-v"}"
+            images=$(jq -c --arg c "$c" --arg r "$ref" '. + [{component:$c, ref:$r}]' <<<"$images")
+          done
+          echo "$images" | jq .
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+
+  scan:
+    needs: discover
+    if: needs.discover.outputs.images != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.discover.outputs.images) }}
+    name: scan (${{ matrix.image.component }})
+    steps:
+      - uses: actions/checkout@v4
+      # ONE ARCHITECTURE. Every published manifest carries linux/amd64 and
+      # linux/arm64, and a scan reads one image — the runner's, amd64. The
+      # arm64 half has the same packages from the same Dockerfile, so this is
+      # close to the whole answer, but it is not the whole answer, and claiming
+      # both would be the silent kind of wrong.
+      # THE SAME ACTION AS THE PULL-REQUEST GATE, with the gate off. One
+      # scanner, one threshold, one set of exceptions — a second copy is how the
+      # two come to disagree about what a finding is (design D1).
+      #
+      # A category DISTINCT from ci.yml's `trivy-<component>`, so a scheduled
+      # result never replaces a pull request's or the reverse.
+      - uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: ${{ matrix.image.ref }}
+          category: trivy-published-${{ matrix.image.component }}
+          gate: "false"
+          platform: linux/amd64

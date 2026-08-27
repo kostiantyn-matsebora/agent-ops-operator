@@ -29,7 +29,7 @@ away with it — warm rebuilds are ~2s through `exec` and are not through
 docker volume create agentops-gomodcache; docker volume create agentops-gocache
 # volumes are created ROOT-owned; chown once or every write fails as your uid
 docker run --rm -u 0 -v agentops-gomodcache:/gomodcache -v agentops-gocache:/gocache \
-  golang:1.23 chown -R "$(id -u):$(id -g)" /gomodcache /gocache
+  golang:1.25 chown -R "$(id -u):$(id -g)" /gomodcache /gocache
 # TWO MOUNTS, NOT ONE, AND NOT THEIR COMMON PARENT. Every change is worked in a
 # worktree at ../agent-ops-worktrees/<name>, which is invisible inside a
 # container that mounted only this directory — `go build` there fails naming a
@@ -45,7 +45,7 @@ docker run -d --name agentops-go -u "$(id -u):$(id -g)" \
   -v agentops-gocache:/gocache -v agentops-gomodcache:/gomodcache \
   -e GOCACHE=/gocache -e GOMODCACHE=/gomodcache \
   -e HOME=/tmp -e GOFLAGS=-buildvcs=false \
-  golang:1.23 sleep infinity
+  golang:1.25 sleep infinity
 # then, for every go command (-w keeps submodules working):
 docker exec -i -w "$PWD" agentops-go go build ./...
 ```
@@ -71,27 +71,22 @@ Four details, each of which cost a debugging round:
 - **`go clean -modcache` fails** (`unlinkat //gomodcache: permission denied`) —
   it tries to remove the mount point. Remove the VOLUME instead.
 
-**`runtimes/ollama/` NEEDS GO 1.25, AND FAILS IN `agentops-go` BY DESIGN.** The
-official MCP SDK it takes has a 1.25 floor; every other module is 1.23. A
-SECOND persistent container, same mounts, from `golang:1.25`:
+**THE CONTAINER IS `golang:1.25`, AND IT IS THE ONLY ONE.** That is the
+toolchain every Go image builds with (`.github/docker/go-module.Dockerfile`
+and the manager, console and egress-proxy Dockerfiles — `runtime-claude` is
+Node), and two modules REQUIRE it: `runtimes/ollama/` for
+the official MCP SDK's 1.25 floor, and `platform/manager/` since
+`trivy-image-scanning` bumped `golang.org/x/net` past what Go 1.23 links.
+The other modules still declare `go 1.23` and a newer toolchain builds them
+unchanged, so one container covers the whole tree.
 
-```sh
-docker run -d --name agentops-go125 -u "$(id -u):$(id -g)" \
-  -v "$PWD":"$PWD" -w "$PWD" \
-  -v "$(dirname "$PWD")/agent-ops-worktrees":"$(dirname "$PWD")/agent-ops-worktrees" \
-  -v agentops-gocache:/gocache -v agentops-gomodcache:/gomodcache \
-  -e GOCACHE=/gocache -e GOMODCACHE=/gomodcache \
-  -e HOME=/tmp -e GOFLAGS=-buildvcs=false \
-  golang:1.25 sleep infinity
-docker exec -i -w "$PWD/runtimes/ollama" agentops-go125 go test ./...
-```
-
-- **The `components.sh modules` loop above runs that module in the wrong
-  container and fails on it.** That failure is expected; it is not a broken
-  checkout. CI reads the Go version from each module's `go.mod`, so it needs
-  no such list.
-- **The caches are SHARED between the two containers**, which is fine — the
-  module cache is keyed by module version and the build cache by toolchain.
+- **A `golang:1.23` CONTAINER IS RETIRED.** It was the toolchain until the image
+  scan measured 22 fixable HIGH/CRITICAL stdlib findings in every binary it
+  built — the build toolchain IS the stdlib the image ships. A second container
+  named `agentops-go125` existed only for `runtimes/ollama/`; if one is still
+  running, remove it rather than keeping two toolchains to disagree.
+- **CI reads the Go version from each module's `go.mod`**, so it needs no such
+  list, and a module that lifts its floor lifts only its own job.
 
 **A VM-BACKED DAEMON MOUNTS YOUR HOME, NOT `/tmp`.** Rancher Desktop runs the
 daemon in a VM, so `-v /tmp/whatever:/data` bind-mounts an EMPTY directory.

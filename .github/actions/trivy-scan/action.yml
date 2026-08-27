@@ -1,0 +1,140 @@
+# ONE IMAGE, TWO TRIVY RUNS. Ported from deployment-dashboard's
+# .github/actions/trivy-scan, step for step.
+#
+#   1. SARIF run  — exit-code 0, never fails anything, uploaded to the security
+#                   tab `if: always()` so the tab is current even on the run
+#                   where the gate below fails.
+#   2. Gate run   — exit-code 1 on a CRITICAL or HIGH finding WITH A FIX
+#                   AVAILABLE. Table output, so the finding is readable in the
+#                   job log without leaving the run.
+#
+# TWO RUNS IS NOT DUPLICATION. A run that exits non-zero may not produce a
+# complete report, so a single gating run with SARIF output would suppress the
+# reporting it is supposed to accompany. The second run is cheap: the first
+# already pulled Trivy's vulnerability database, and both read the same cache.
+#
+# `ignore-unfixed: true` ON BOTH. A gate that cannot be made green gets
+# bypassed, and then it enforces nothing — an unfixable upstream CVE is
+# information, not a task. It applies to the reporting run too, following the
+# reference, so the security tab means one thing: what is actionable. The
+# complete inventory is the SBOM every published image already carries.
+name: Trivy image scan
+description: >
+  Scans a locally-loaded container image with Trivy: a SARIF run that never
+  fails and is always uploaded, then a gate run that fails on a fixable
+  CRITICAL or HIGH finding.
+
+inputs:
+  image-ref:
+    description: >
+      Image reference to scan — a local tag such as "agentops-manager:scan"
+      already loaded into the runner's Docker daemon, or a published reference
+      Trivy can pull.
+    required: true
+  category:
+    description: >
+      SARIF category, and it MUST be unique per scanned image. Results uploaded
+      under one category REPLACE what was there: with a shared category across a
+      matrix, each component's upload overwrites the previous one and the
+      security tab shows one component's findings while appearing to describe
+      them all — nothing fails and the run is green. Derive it from the
+      component name (e.g. "trivy-manager").
+    required: true
+  platform:
+    description: >
+      Platform to scan when the reference is a multi-arch manifest, e.g.
+      "linux/amd64". Empty scans a local image as it is. Stated as an input
+      because a scan of one architecture must say which.
+    required: false
+    default: ""
+  gate:
+    description: >
+      Whether to run the gate. Default true. The scheduled scan of the
+      published images passes false: it reports and never fails, because there
+      is no change under review to reject.
+    required: false
+    default: "true"
+  upload:
+    description: >
+      Whether to upload the SARIF. Default true. A pull request from a fork
+      holds a read-only token and cannot write security events, so its caller
+      passes false and keeps the gate — the half that protects the merge.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # ONE DATABASE PULL PER DAY, NOT PER MATRIX LEG. Trivy's database is
+    # fetched from ghcr.io anonymously and that is rate-limited; fourteen legs
+    # each pulling it is both slow and the failure that looks like a flaky
+    # scanner. `ci.yml`'s `trivy-db` job saves the day's database under this
+    # exact key before the matrix starts; `restore-keys` accepts yesterday's
+    # when a caller (the scheduled scan) has no warm-up job of its own.
+    #
+    # THE ACTION'S OWN CACHE IS OFF (`cache: false`). It saves a key per run
+    # and restores nothing across a matrix's concurrent legs, so it would race
+    # rather than share.
+    - name: Date
+      id: date
+      shell: bash
+      run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+    - name: Restore Trivy database
+      id: db
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ github.workspace }}/.cache/trivy
+        key: cache-trivy-${{ steps.date.outputs.date }}
+        restore-keys: cache-trivy-
+
+    # ── Run 1: SARIF (exit-code 0 — never fails the build) ───────────────────
+    - name: Trivy scan (SARIF)
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        scan-type: image
+        format: sarif
+        output: trivy-results.sarif
+        exit-code: "0"
+        ignore-unfixed: true
+        severity: CRITICAL,HIGH
+        # SARIF IGNORES `severity` unless told otherwise — the action emits every
+        # level by default, so the tab showed MEDIUM findings the gate never sees.
+        # One threshold for both runs is the whole point of the pair (design D5).
+        limit-severities-for-sarif: true
+        cache: false
+        cache-dir: ${{ github.workspace }}/.cache/trivy
+      env:
+        TRIVY_PLATFORM: ${{ inputs.platform }}
+        # A restored database is used as it is; a miss downloads one.
+        TRIVY_SKIP_DB_UPDATE: ${{ steps.db.outputs.cache-matched-key != '' }}
+        TRIVY_SKIP_JAVA_DB_UPDATE: ${{ steps.db.outputs.cache-matched-key != '' }}
+
+    # `if: always()` IS THE POINT. Without it the gate failing skips the upload,
+    # and the security tab describes the last run that passed — the failing run
+    # is exactly the one whose findings are worth having recorded.
+    # `security-events: write` is granted by the calling JOB.
+    - name: Upload SARIF to the security tab
+      if: always() && inputs.upload == 'true'
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: trivy-results.sarif
+        category: ${{ inputs.category }}
+
+    # ── Run 2: the gate (exit-code 1 on a fixable CRITICAL/HIGH) ─────────────
+    - name: Trivy scan (gate — fail on fixable CRITICAL/HIGH)
+      if: inputs.gate == 'true'
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        scan-type: image
+        format: table
+        exit-code: "1"
+        ignore-unfixed: true
+        severity: CRITICAL,HIGH
+        cache: false
+        cache-dir: ${{ github.workspace }}/.cache/trivy
+      env:
+        TRIVY_PLATFORM: ${{ inputs.platform }}
+        TRIVY_SKIP_DB_UPDATE: true
+        TRIVY_SKIP_JAVA_DB_UPDATE: true

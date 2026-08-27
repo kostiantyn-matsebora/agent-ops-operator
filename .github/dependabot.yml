@@ -2,7 +2,7 @@
 # maintenance costs the workflows create. Dependabot is the proportionate
 # answer to exactly those three.
 #
-# Docker base images are deliberately EXCLUDED: golang:1.23, node:22-alpine and
+# Docker base images are deliberately EXCLUDED: golang:1.25, node:22-alpine and
 # distroless/static already float, and a pull request per Dockerfile across
 # thirteen of them would cost more attention than it returns.
 #

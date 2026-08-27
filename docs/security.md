@@ -134,8 +134,24 @@ Properties of the product you cannot read off the values.
 | **Under egress control the container is hardened further** | all capabilities dropped, privilege escalation refused |
 
 Every published image carries an **SBOM** and **max-mode provenance**, recorded
-by the build. **Nothing is signed, and the chart is not attested.** Read what an
-image carries:
+by the build. **Nothing is signed, and the chart is not attested.**
+
+**Every image is scanned for known vulnerabilities**, twice over. On the pull
+request that builds it, a CRITICAL or HIGH finding **with a fix available**
+blocks the merge. Weekly, the published images are scanned again against a
+newer database.
+
+Both scans report to the repository's security tab. Only the pull-request scan
+blocks anything, and on a pull request from a fork it blocks without
+reporting — a fork's token cannot write there.
+
+**A finding with no available fix does not block**, knowingly. An unfixable
+upstream vulnerability is information rather than a task, and a gate that
+cannot be made green is one that gets switched off.
+
+The SBOM is the complete inventory. The scan is the actionable part of it.
+
+Read what an image carries:
 
 {% raw %}
 ```sh
