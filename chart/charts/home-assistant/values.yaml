@@ -89,7 +89,7 @@ logsAdapter:
   name: home-assistant
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-ha
-    tag: 0.2.2
+    tag: 0.2.3
   resources: {}
   # The log source. It is INERT until a Pipeline claims it — wiring is
   # pipeline-only, so either turn the `pipelines:` component below on or declare
