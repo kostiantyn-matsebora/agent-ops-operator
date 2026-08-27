@@ -12,7 +12,7 @@
 ## 3. Release and pin
 
 - [x] 3.1 Pin `signal-k8s-events` 0.4.4 and `signal-ha` 0.2.4 in `chart/charts/kubernetes/values.yaml` and `chart/charts/home-assistant/values.yaml`, bump both bundle charts and the parent chart (13.2.0 — a behaviour change); verify `helm lint chart` and the chart template tests pass in the worktree's test container
-- [ ] 3.2 POST-MERGE, as #98 did: tag `signal-k8s-events-v0.4.4` and `signal-ha-v0.2.4` from the merge commit (two tags, under the three-per-push limit), verify both images exist in the registry for `linux/amd64` and `linux/arm64`, then tag `chart-v13.2.0` — `require-release-docs.sh` checks the numbers agree
+- [x] 3.2 POST-MERGE, as #98 did: `signal-k8s-events-v0.4.4` and `signal-ha-v0.2.4` tagged from the merge commit `d52c9d5` in one push; both images published with `linux/amd64` and `linux/arm64`. `chart-v13.2.0` is DEFERRED by decision — the chart pins the images but is not released yet, so nothing installable references them
 
 ## 4. Verification on the reference install
 
