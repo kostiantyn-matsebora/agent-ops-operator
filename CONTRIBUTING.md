@@ -221,8 +221,10 @@ cannot write security events, and the gate is the half that protects the merge.
 
 **The published images are re-scanned weekly** by `image-scan.yml`, against a
 newer database and with nothing changed here. It reports under
-`trivy-published-<component>` and blocks nothing — there is no change under
-review to reject.
+`trivy-published-<component>`, then fails on the same fixable CRITICAL/HIGH
+the pull-request gate fails on, so the README's published-images badge goes
+red. The fix is a re-release of the image it names — a component tag, three
+per push at most.
 
 ## Commit messages
 

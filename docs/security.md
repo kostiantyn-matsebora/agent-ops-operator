@@ -141,9 +141,13 @@ request that builds it, a CRITICAL or HIGH finding **with a fix available**
 blocks the merge. Weekly, the published images are scanned again against a
 newer database.
 
-Both scans report to the repository's security tab. Only the pull-request scan
-blocks anything, and on a pull request from a fork it blocks without
-reporting — a fork's token cannot write there.
+Both scans report to the repository's security tab, and both fail on the same
+fixable finding. The pull-request scan blocks the merge. The weekly scan
+reports before it fails, and turns the README's published-images badge red
+until the image is re-released.
+
+On a pull request from a fork the gate blocks without reporting — a fork's
+token cannot write there.
 
 **A finding with no available fix does not block**, knowingly. An unfixable
 upstream vulnerability is information rather than a task, and a gate that

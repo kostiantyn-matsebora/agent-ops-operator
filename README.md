@@ -19,6 +19,9 @@ can reply to.
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-agent--ops-informational)](https://kostiantyn-matsebora.github.io/agent-ops-operator/)
 [![API](https://img.shields.io/badge/API-v1alpha1-blueviolet)](docs/cr-reference.md)
+[![Chart](https://img.shields.io/github/v/tag/kostiantyn-matsebora/agent-ops-operator?filter=chart-v*&label=chart)](docs/CHANGELOG.md)
+[![CI](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml)
+[![Published images](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml)
 
 ### **→ [The documentation site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) is the main source of information.**
 

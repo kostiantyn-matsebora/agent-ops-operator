@@ -7,9 +7,14 @@
 # against every image ever released, with a newer database and nothing changed
 # in the repository.
 #
-# IT REPORTS AND NEVER GATES. There is no change under review to reject, and a
-# red scheduled run pages somebody about a fact rather than a regression. The
-# findings land in the security tab under their own categories.
+# IT REPORTS, THEN IT FAILS. The findings land in the security tab under their
+# own categories first, and then the same gate a pull request meets fails the
+# job on a fixable CRITICAL or HIGH — so this workflow's status, which the
+# README badge shows, means "every published image scans clean today". It
+# used to report and never gate, on the argument that there is no change to
+# reject; its first run was green over 101 fixable findings, and a status
+# that cannot go red says nothing. A red run names the image, and the fix is
+# a re-release (build-test.md: three tags per push).
 #
 # SEPARABLE BY DESIGN (design D4): if it proves noisy it is deleted without
 # touching the pull-request gate, which is why it is its own workflow and not
@@ -73,9 +78,11 @@ jobs:
       # arm64 half has the same packages from the same Dockerfile, so this is
       # close to the whole answer, but it is not the whole answer, and claiming
       # both would be the silent kind of wrong.
-      # THE SAME ACTION AS THE PULL-REQUEST GATE, with the gate off. One
-      # scanner, one threshold, one set of exceptions — a second copy is how the
-      # two come to disagree about what a finding is (design D1).
+      # THE SAME ACTION AS THE PULL-REQUEST GATE, gate included. One scanner,
+      # one threshold, one set of exceptions — a second copy is how the two
+      # come to disagree about what a finding is (design D1). The action
+      # uploads the SARIF `if: always()` BEFORE the gate runs, so a failing
+      # leg is the one whose findings are recorded.
       #
       # A category DISTINCT from ci.yml's `trivy-<component>`, so a scheduled
       # result never replaces a pull request's or the reverse.
@@ -83,5 +90,4 @@ jobs:
         with:
           image-ref: ${{ matrix.image.ref }}
           category: trivy-published-${{ matrix.image.component }}
-          gate: "false"
           platform: linux/amd64
