@@ -12,7 +12,9 @@ evaluated at EMIT so a problem that outlives the window still surfaces.
 Everything else bounds the volume rather than the meaning: bursts coalesce into
 one enriched signal, inhibition suppresses the consequences of a known cause, and
 a per-source emit cap REPORTS its clipping rather than quietly dropping.
+
 ## Requirements
+
 ### Requirement: Suppression rules are ordered, first-match-wins, and use Alertmanager matcher syntax
 A source's `config.rules` SHALL be an ordered list evaluated first-match-wins. Each rule carries `matchers` (Alertmanager syntax over the signal's label set: `=`, `!=`, `=~`, `!~`, with quoted values), an optional `for` duration, and an optional `action` (`drop`). A rule with empty `matchers` is a catch-all. A rule with `action: drop` suppresses the event outright; otherwise the event enters the dwell queue for `for` (default 0 = emit immediately).
 
@@ -46,10 +48,14 @@ Verification SHALL proceed as a three-rung ladder:
 1. **The kind has a health predicate** — evaluate it. **Pod** is the only kind that SHALL carry one: phase, `Ready` condition, and container waiting reasons (`CrashLoopBackOff`, `ImagePullBackOff`, `ErrImagePull`, `CreateContainerConfigError` and siblings). A container merely being created SHALL NOT count as unhealthy.
 
    Node, Job and PersistentVolumeClaim deliberately do NOT carry predicates, and fall to rung 2. Giving them predicates would mean watching three more resources — three more external RBAC grants — for a path the shipped defaults never take: the reasons that concern those kinds (`NodeNotReady`, node pressure conditions, `BackoffLimitExceeded`, `DeadlineExceeded`, `VolumeFailedDelete`) all carry `for: 0` and so are never verified at all. Rung 2 is sound for them, since a controller with a live problem keeps re-emitting.
-2. **The object exists but has no health predicate** — emit only if the event RECURRED during the window; drop if it went silent. A controller with a live problem keeps re-emitting; a resolved one stops.
+2. **The object exists but has no health predicate** — emit only if the event was **still recurring as the window closed**; drop if it went silent before then. A controller with a live problem keeps re-emitting; a resolved one stops. Recurrence earlier in the window SHALL NOT count on its own: a burst that retries for thirty seconds and then heals has recurred, and is exactly the transient this rung exists to drop.
+
+   "As the window closed" SHALL mean the last arrival fell within the **closing part** of the window actually waited — its final third, with a floor of thirty seconds — derived from the dwell rather than configured, so a rule shortened by `escalateAfterObjects` or by a stricter later rule keeps the same proportion.
 3. **Existence cannot be determined** — **emit**, failing open. Silently dropping an object the adapter cannot evaluate at all would convert an unknown into a nonexistent problem, which is the failure this capability exists to prevent.
 
 Rung 2 SHALL NOT be an existence check. An object with no health predicate that still exists is not evidence of an ongoing problem — an autoscaler whose metric lookup flapped once still exists, and treating existence as confirmation would emit on every transient failure of every uninspectable kind.
+
+An emitted signal's evidence SHALL state when the last event arrived relative to the window's close, so a reader can see why it was believed.
 
 `for: 0` SHALL emit immediately with no re-check.
 
@@ -88,6 +94,18 @@ The premise a long dwell rests on — that one object misbehaving is churn — s
 #### Scenario: A persistent failure on an uninspectable kind is emitted
 - **WHEN** the same autoscaler keeps emitting that warning throughout the dwell window
 - **THEN** a signal is emitted
+
+#### Scenario: A burst that healed before the window closed is churn
+- **WHEN** a kind with no health predicate emits the same warning six times over forty seconds, then nothing more, under a rule with a three-minute dwell
+- **THEN** no signal is emitted, because the last arrival fell outside the closing minute of the window
+
+#### Scenario: A controller still retrying at the close is reported
+- **WHEN** a kind with no health predicate keeps emitting the same warning every few seconds through the whole three-minute dwell
+- **THEN** one signal is emitted at the deadline, carrying the whole burst's evidence and the time of its last arrival
+
+#### Scenario: The closing window follows a shortened dwell
+- **WHEN** a rule's dwell is shortened to one minute by escalation or by a stricter rule arriving later
+- **THEN** the closing window is thirty seconds — the floor — and not a third of the original dwell
 
 ### Requirement: Reasons describing a completed event never dwell
 A rule SHALL NOT apply a non-zero dwell to a reason that reports something that has ALREADY happened rather than an ongoing state. For such reasons the liveness re-check is not merely uninformative but destructive: the object recovers or is replaced, the re-check finds it healthy, and a real incident is erased.
@@ -225,4 +243,3 @@ Muting SHALL NOT be silent. A muted lane and an idle lane are indistinguishable 
 #### Scenario: The cost of the window is reported
 - **WHEN** a mute window closes
 - **THEN** the number of events it muted is reported, so an over-broad window is visible rather than inferred
-
