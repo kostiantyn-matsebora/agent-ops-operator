@@ -602,13 +602,15 @@ func (a *adapter) refreshSnapshot(ctx context.Context, source string, sess *haSe
 // health is the adapter's verification ladder over one source's snapshot.
 //
 //	rung 1  the integration has config entries -> is any of them still failing?
-//	rung 2  no predicate -> has the record occurred AGAIN since the window opened?
+//	rung 2  no predicate -> was the record STILL occurring as the window closed?
 //	rung 3  no snapshot at all -> cannot say
 //
 // Only integrations with config entries carry a predicate. Core loggers (and
 // YAML-configured integrations, which have no entries) fall to rung 2
 // deliberately: recurrence is what the log itself can prove, and inventing a
-// health check for the rest would mean guessing.
+// health check for the rest would mean guessing. Recurrence early in the window
+// that then stopped is a blip that healed, not a problem still live — which is
+// what `since` is for.
 //
 // `since` is the start of the window's closing part. A count that rose during
 // the window is the log saying it kept happening — but a count that rose in the
