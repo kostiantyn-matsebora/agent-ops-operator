@@ -26,7 +26,16 @@ COPY package.json package-lock.json /srv/
 # `npm ci` from the lockfile: the SDK and the CLI it drives are one artifact
 # released as two packages, and a floating range once installed a pair that
 # threw before any session existed (SDK 1.0.11 against CLI 1.0.81).
-RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+# npm@latest FIRST: the image scan gates on fixable CRITICAL/HIGH, and the npm
+# the base image ships carries old `tar` and `brace-expansion` under
+# /usr/local/lib/node_modules/npm — the same fix runtimes/claude applies.
+# THEN drop the CLI's bundled foundry-local-sdk: a Windows/macOS local-model
+# host this Linux pod can never use, whose vendored adm-zip is the one finding
+# npm cannot reach (it sits inside the platform package, not in the lockfile).
+RUN npm install -g npm@latest && \
+    npm ci --omit=dev --no-audit --no-fund && \
+    rm -rf /srv/node_modules/@github/copilot-linux-*/foundry-local-sdk && \
+    npm cache clean --force
 COPY runtime.js tools.js vocabulary.js mcp.js continuity.js /srv/
 
 ENV HOME=/data/context

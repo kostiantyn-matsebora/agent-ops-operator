@@ -12,7 +12,7 @@ type: application
 sources:
   - https://github.com/kostiantyn-matsebora/agent-ops-operator
 home: https://kostiantyn-matsebora.github.io/agent-ops-operator/
-version: 13.2.0
+version: 13.3.0
 appVersion: "0.54.0"
 dependencies:
   # embedded subchart (chart/charts/prometheus); templates are

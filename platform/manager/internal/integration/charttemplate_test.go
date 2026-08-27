@@ -2346,7 +2346,10 @@ func TestCopilotBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
 		"- .copilot/session-state/**\n",
 		"name: COPILOT_MODEL\n      value: gpt-5\n",
 		"name: COPILOT_MAX_AI_CREDITS\n      value: \"50\"\n",
-		"name: COPILOT_GITHUB_TOKEN\n      valueFrom:\n        secretKeyRef:\n          key: githubToken\n          name: agentops-copilot\n",
+		// No trailing newline: Helm 3 closes a document with `---` on the very next
+		// line, so the last line of a doc carries none after splitDocs; Helm 4
+		// leaves a blank line. An assertion on the last line must not care.
+		"name: COPILOT_GITHUB_TOKEN\n      valueFrom:\n        secretKeyRef:\n          key: githubToken\n          name: agentops-copilot",
 	} {
 		if !strings.Contains(rt, want) {
 			t.Errorf("copilot runtime lacks %q:\n%s", want, rt)
@@ -2380,7 +2383,7 @@ func TestCopilotBundleDefaultsAndBecomesDefault(t *testing.T) {
 					t.Errorf("unset %s must not render", absent)
 				}
 			}
-			if !strings.Contains(doc, "name: agentops-copilot\n") {
+			if !strings.Contains(doc, "name: agentops-copilot") {
 				t.Error("the runtime must reference the credential Secret by name")
 			}
 		}
