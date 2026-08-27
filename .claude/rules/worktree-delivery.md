@@ -123,10 +123,11 @@ artifacts, and `reconcile` resolves threads with no model. It runs by hand
 too: `gh workflow run claude-review.yml -f number=<pr>` (`-f dry_run=true`
 posts nothing). NOTHING THE REVIEW RUNS COMES FROM THE PULL REQUEST: `queue`
 restores `review-input.py`, `review-queue.py` and `components.sh` from the
-BASE branch before building the queue; `read` and `consolidate` restore the
-composite action, `review-prompt.py` and `review-reading-check.py`, then
-install the CLI through `.github/actions/claude-cli`, which restores the
-job's role file; `reconcile` checks out the base branch itself. So a pull
+BASE branch before building the queue; `read` restores the composite action,
+`review-prompt.py` and `review-reading-check.py`, and `consolidate` the
+action, `review-prompt.py` and `mark-thread-resolved.sh`; both then install
+the CLI through `.github/actions/claude-cli`, which restores the job's role
+file; `reconcile` checks out the base branch itself. So a pull
 request cannot rewrite the review that judges it, shrink its own queue, or
 resolve a thread it did not earn. The
 fan-out is the matrix and not a pool inside one session: `gotchas.md` has the
