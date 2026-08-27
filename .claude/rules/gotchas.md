@@ -219,17 +219,15 @@ rules loaded on demand.
   naming a rule file drops that file alone and leaves `CLAUDE.md` in place.
   Session-wide, so it fits a job whose every context wants the same subset;
   the review passes it as `--settings` inline, on the guarded side.
-- **`Agent` IS CALLED WITH `run_in_background: false`, ALL CALLS IN ONE MESSAGE.**
-  Foreground makes the turn wait; one message makes them concurrent. The
-  consolidator did the opposite twice — nine calls in nine messages, each
-  background — measured in the run's execution artifact.
-- **A BACKGROUND `Agent` RESULT NEVER ARRIVES AFTER THE TURN ENDS, AND UNDER
-  `claude -p` THE TURN IS THE PROCESS.** The consolidator on #74 spawned three
-  reviewers, wrote "I'll wait for them", ended its turn — and the run reported
-  `success` after 13 turns with nothing posted. Waiting is done by CALLING
-  something (`sleep 60` through Bash) until the results are in hand; a turn
-  that ends to wait has ended the run. The job now also fails without a
-  summary comment, so a review that stops short is red.
+- **THE REVIEW'S FAN-OUT IS A WORKFLOW SCRIPT, NOT A PROMPT, AND THE TWO RUNS
+  THAT DECIDED IT ARE ON RECORD.** When the consolidator held the plan, it
+  spawned readers as background `Agent` calls, one per message: on #74 it
+  ended its turn to "wait" — under `claude -p` the turn is the process, the
+  readers died, the run reported success with nothing posted — and on #77 it
+  slept seven of ten minutes. A dynamic workflow runs under `-p`, holds the
+  loop in code, runs `pipeline()` readers concurrently and returns their data
+  validated by schema. Agent teams were not an option: `-p` spawns no
+  teammates. If a plan must not be dropped, do not give it to a model turn.
 - **An inline `--agents` definition sits inside single quotes in `claude_args`,
   which is split like a shell line.** One apostrophe in the reviewer prompt
   ends the argument early and reads as a JSON error somewhere else. The suite

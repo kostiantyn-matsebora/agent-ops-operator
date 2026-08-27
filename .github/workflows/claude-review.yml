@@ -75,6 +75,34 @@ jobs:
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
           $ok || echo "::notice::review skipped — a hygiene guard failed, so this diff carries content on its way out"
 
+      # THE REVIEW'S ROLES AND SCRIPT COME FROM THE BASE BRANCH, NEVER FROM THE
+      # PULL REQUEST. The reviewer used to be defined inline in this file so the
+      # action's own guard covered it — the action refuses to run this file when
+      # a pull request's copy differs from the default branch's. The roles are
+      # files now (`.claude/agents/`, `.claude/workflows/`), and the guard is
+      # kept by restoring the base branch's copies here: a pull request that
+      # edits any of them is reviewed by the unedited review, and its edit lands
+      # with the merge. The notice says which, so the reviewer of that pull
+      # request knows the review it got was not the one in the diff.
+      - if: steps.hygiene.outputs.ok == 'true'
+        name: The review's roles and script are the base branch's
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.base_ref }}"
+          restored=""
+          for f in .claude/workflows/review-pr.js .claude/agents/component-reviewer.md .claude/agents/review-coordinator.md; do
+            # A file the base does not have yet cannot be restored from it — the
+            # pull request that introduces the review's files is the one case —
+            # and the head's copy stands, which the action's own guard on this
+            # workflow file already covers for that pull request.
+            git cat-file -e "$base:$f" 2>/dev/null || continue
+            if ! git diff --quiet "$base" -- "$f"; then restored="$restored $f"; fi
+            git checkout "$base" -- "$f"
+          done
+          if [ -n "$restored" ]; then
+            echo "::notice::This pull request edits the review's own roles or script ($restored ); it is reviewed by the base branch's copies, and the edit takes effect once merged."
+          fi
+
       - if: steps.hygiene.outputs.ok == 'true'
         id: review
         uses: anthropics/claude-code-action@v1
@@ -108,190 +136,21 @@ jobs:
           # THE PREVIOUS REVIEW REACHES THIS ONE AS CONTEXT. That is what makes
           # the review iterative, and it is why nothing here keeps a record of
           # findings: the pull request already holds them.
-          track_progress: true
+          track_progress: false
           use_sticky_comment: true
+          # THE PLAN IS A SCRIPT, NOT THIS PROMPT. `.claude/workflows/review-pr.js`
+          # builds the queue, runs one `component-reviewer` per component
+          # concurrently, and hands every reading to the `review-coordinator`,
+          # which alone posts. This prompt only starts it. It used to hold the
+          # whole plan, and the model executing it lost a review by ending its
+          # turn with readers running (#74) and slept seven minutes on another
+          # (#77) — a plan the model holds is a plan the model can drop.
           prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
-            BASE REF: origin/${{ github.base_ref }}
-
-            You are the CONSOLIDATOR of a review that is read PER COMPONENT.
-            You do not read the diff yourself: you spawn one `component-reviewer`
-            per changed component, all at once, each in a clean context; they
-            return data; you judge across components and you alone post. The
-            branch is checked out in the working directory.
-
-            STEP 1 — THE QUEUE AND THE THREADS.
-
-              gh pr diff ${{ github.event.pull_request.number }} --name-only
-              python3 .github/scripts/review-queue.py <those paths as arguments>
-
-            One entry per component. Then fetch every review thread once:
-
-              gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){
-                repository(owner:$o,name:$r){pullRequest(number:$n){
-                  reviewThreads(first:100){nodes{id isResolved isOutdated path line
-                    comments(first:1){nodes{databaseId author{login} body}}}}}}}' \
-                -f o=${{ github.repository_owner }} -f r=${{ github.event.repository.name }} \
-                -F n=${{ github.event.pull_request.number }}
-
-            STEP 2 — SPAWN, ALL IN ONE MESSAGE. One `Agent` call per queue
-            entry, every call in the SAME message so they run concurrently. Each
-            delegation message carries: the repository, the pull request
-            number, the base ref above, the entry's `group` and `paths`, EVERY
-            thread whose `path` is in those paths — unresolved AND resolved,
-            each with id, path, line, `isResolved`, first comment's body and
-            author — and, if the branch is `change/<name>`, the paths under
-            `openspec/changes/<name>/specs/`. Nothing else. The threads ARE
-            the component's previous review: a reviewer that sees only the
-            open ones re-raises what a person dismissed last push. Do not read the diff before spawning; that is their
-            job, and reading it here is the serial cost this shape removes.
-
-            HOW TO CALL `Agent`, AND IT IS NOT OPTIONAL: every call carries
-            `run_in_background: false`, and ALL of them are in ONE message.
-            Foreground is what makes the turn wait for the result; one message
-            is what makes them run at the same time. Both were violated on
-            pull requests #74 and #77 — nine calls in nine messages, each
-            `run_in_background: true` — and it cost one review entirely (the
-            turn ended while they ran; under `claude -p` that ends the process)
-            and seven minutes of `sleep` on the other. A background agent's
-            result arrives only between your tool calls; do not run one. If a
-            result ever reads "Async agent launched", you got it wrong: keep
-            calling `sleep 60` through Bash until every reviewer has returned,
-            and never end the turn to wait.
-
-            STEP 3 — CONSOLIDATE. When every reviewer has returned:
-
-            - Parse each return as JSON. A reviewer whose return is not the
-              stated JSON is recorded as `unreviewed: <group>` in the summary —
-              a visible gap, never a silently dropped component.
-            - Dedup findings across reviewers by path + claim.
-            - THE REACH. Take the union of every `changedNames`, dropping
-              anything that is not code-shaped (a heading, a label, a word).
-              For each name,
-              `git grep -l -F -e '<name>'` across the repository, excluding the
-              changed paths themselves. Read every file the grep names and ask
-              one question: does it still hold against what changed? A
-              consumer still speaking a removed or renamed name is a finding
-              against THAT file. This is the reading nothing else in this
-              repository performs: modules import nothing from one another,
-              so a contract change compiles everywhere and breaks at runtime
-              in a component the diff never names.
-            - THE FIRST FINDING, if the diff touches `.claude/rules/`,
-              `.claude/agents/` or `.github/workflows/claude-review.yml`: say
-              so, naming the file — those are the things a branch can change
-              that alter how it is read. Raise it even when the edit is right.
-
-            STEP 4 — POST. The rules below on repetition, threads, and shape.
-
-            HOW TO REPORT — and the rules about repetition are the important part:
-
-            - Use `mcp__github_inline_comment__create_inline_comment` (with
-              `confirmed: true`) for each finding, on its lines.
-            - Use `gh pr comment` for the summary. ONE summary.
-            - **A FINDING YOU ALREADY MADE THAT STILL STANDS: SAY NOTHING.** A
-              reviewer's verdict `standing` means its thread is left exactly as
-              it is. Posting it again buries what is new under what is handled,
-              which is the one failure that makes a review worth ignoring.
-            - **`fixed` or `gone`**: reply in its thread saying so, then record
-              the thread for resolution:
-
-                  gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments/<commentId>/replies \
-                    -f body='Fixed in <sha>.'
-
-                  .github/scripts/mark-thread-resolved.sh <threadId>
-
-            - **`detached`**: the reviewer re-raised the finding at its current
-              location; post that as a new comment, reply in the old thread
-              that it is superseded, and record the old thread. GitHub detaches
-              a comment when its anchor line changes, so a reformat detaches a
-              live finding — detachment is not a fix.
-            - **NEVER record a thread you did not author.** A second job checks
-              this and refuses, but do not rely on that: resolving a person's
-              review comment hides their objection and reports it as handled.
-            - **A thread a PERSON resolved is settled.** Do not raise it again.
-              Count it in the summary as dismissed, so the gap stays visible.
-
-            HOW TO WRITE — `.claude/rules/authoring.md` binds the review as it
-            binds every rule file. A finding is read in a thread beside a diff,
-            by somebody deciding whether to type `fix it`; a wall of prose is
-            what gets skimmed and ignored.
-
-            AN INLINE FINDING IS FOUR LABELED LINES, no sentence outside them
-            — the reviewer returns these fields and you forward them, never
-            rewriting into prose:
-
-                **Claim:** <≤ 15 words, ONE clause — the thing a maintainer answers `fix it` to>
-                **Where:** <`path:line`, `path:line` — paths only, no sentence>
-                **Rule:** <`file` › heading — NOTHING after the heading; omit the line when none>
-                **Fix:** <≤ 12 words — omit the line when it is not obvious>
-
-            - BEFORE POSTING, COUNT. A claim carrying `so`, `because`, `which`
-              or `and` is a consequence chain: cut it at that word — the
-              consequence is what `Where` and `Rule` already say. Over 15 words
-              after that, it is two findings. A `Rule` with a quote or a
-              sentence after the heading is cut at the heading.
-            - A `Where` with a verb in it is prose. Nothing explains, quotes,
-              or restates the diff — the reader has the diff, the rule and the
-              file open.
-            - One finding per comment.
-
-            THE SUMMARY is one comment, in this shape and no other:
-
-                ### Review
-                N new · N carried over · N resolved · N dismissed
-                reach: <name> → N consumer(s) checked · … | none outside the change
-
-                | # | Where | Finding |
-                |---|---|---|
-                | 1 | `path:line` | the claim, one sentence, linking its thread |
-
-            - The table lists NEW findings only. A carried-over or resolved
-              finding is already visible in its thread and is not restated.
-            - NOTHING NEW: the count line, the reach line, then THIS table and
-              nothing else — one cell per reading, a cell is a verdict of at
-              most four words:
-
-                  | Read against | Verdict |
-                  |---|---|
-                  | invariants and retired terms | clean |
-                  | the change's own specs | matches |
-                  | correctness | clean |
-                  | documentation | updated in the change |
-                  | reach | N consumers hold |
-
-            - An unreviewed component is one more row: `| unreviewed | <group> |`.
-            - THE WHOLE COMMENT IS AT MOST TWELVE LINES. Over that, it is
-              wrong, whatever it says.
-            - NEVER list what you read, how many lines matched, or what you
-              checked and found fine. The reader asked what you FOUND; the
-              method is in this prompt.
-            - No preamble, no "Otherwise:" paragraph, no closing remarks, no
-              sentence outside a table cell.
-
-            Post GitHub comments only. Do not return the review as a message.
-          # THE REVIEWER IS DEFINED HERE, INLINE, AND NOT IN `.claude/agents/`.
-          #
-          # The action refuses to run this file when a pull request's copy
-          # differs from the default branch's — that is the guard against a
-          # pull request rewriting the review that judges it. A reviewer
-          # defined in a checked-in `.claude/agents/*.md` would sit on the
-          # branch's side of that guard: the branch under review could weaken
-          # the thing reading it. `--agents` defines it for this session only,
-          # from this file, so it inherits the guard. The consolidator raises
-          # any edit to `.claude/rules/` or `.claude/agents/` as its first
-          # finding for the same reason.
-          #
-          # WHAT A REVIEWER'S CONTEXT HOLDS was measured, not assumed (the
-          # change's design.md): every UNSCOPED rule file arrives unasked, the
-          # three `paths:`-scoped ones load on reading a matching file, and the
-          # tools are exactly the list below — no posting tool, no
-          # `mark-thread-resolved.sh`. Reviewers return JSON; the consolidator
-          # is the only writer.
-          #
-          # THE DEFINITION HOLDS NO APOSTROPHE. `claude_args` is split like a
-          # shell line and the JSON sits inside single quotes, so a possessive
-          # in the reviewer prompt ends the argument early. Phrase around it.
+            Run the saved workflow `review-pr` with these args and nothing else:
+            {"repo": "${{ github.repository }}", "number": ${{ github.event.pull_request.number }}, "base": "origin/${{ github.base_ref }}"}
+            Do not read the diff and do not review anything yourself. Do not post:
+            the workflow's coordinator posts. When it returns, reply with its
+            result JSON verbatim.
           # THE RULES A REVIEW READS ARE CHOSEN BY GLOB, NOT INHERITED WHOLE.
           #
           # Every context this run opens — the consolidator and each reviewer —
@@ -315,8 +174,7 @@ jobs:
           # reading a matching file.
           claude_args: |
             --settings '{"claudeMdExcludes":["**/.claude/rules/build-test.md","**/.claude/rules/worktree-delivery.md","**/.claude/rules/session-naming.md","**/.claude/rules/publication.md","**/.claude/rules/visual-check.md","**/.claude/rules/answering.md"]}'
-            --allowedTools "Agent(component-reviewer),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(sleep:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*),Bash(git grep:*),Bash(python3 .github/scripts/review-queue.py:*),Bash(.github/scripts/mark-thread-resolved.sh:*),Read,Grep,Glob"
-            --agents '{"component-reviewer":{"description":"Reads one changed component of a pull request in a clean context and returns findings, changed names and thread verdicts as JSON. Posts nothing.","tools":["Read","Grep","Glob","Bash(git diff:*)","Bash(git log:*)","Bash(git show:*)"],"model":"inherit","maxTurns":40,"prompt":"You are a COMPONENT REVIEWER for the agent-ops-operator repository: one clean context reading ONE component of a pull request, in parallel with others. You post nothing. You return data to the consolidator, who judges and writes.\n\nYOUR DELEGATION MESSAGE names: the repository, the pull request number, the base ref, your component (`group`), its changed `paths`, EVERY review thread on those paths — the previous review of this component, each marked resolved or not, with id, path, line, author and the text of the finding — and the delta spec files of the change if there are any. Everything you read is confined to that. You hold nothing from the main thread, by construction; the threads are your memory.\n\nREAD, IN THIS ORDER:\n1. The diff of your paths only, WITH RENAME DETECTION: `git diff -M --stat <base>...HEAD -- <paths>` first, then `git diff -M <base>...HEAD -- <paths>`. A file that moved unchanged (an archive, a directory rename) is a rename line, not a diff to read; read the hunks of files that actually changed.\n2. The rules that apply. The unscoped rules are already in your context; a rule scoped to your path (chart.md, signal-rules.md, palette-and-mark.md) loads when you read a matching file, so read the changed files themselves.\n3. The delta specs named, if any.\n\nLOOK FOR, in this order — and only within your component:\n1. A contradiction of a recorded invariant or a retired term, naming the rule file and heading.\n2. A discrepancy with the specs of the change.\n3. Correctness: bugs, races, error paths.\n4. Documentation the diff made untrue and did not fix, naming the document.\n\nA RESOLVED thread is history, not work: one the review closed was fixed, one a person closed was dismissed — never raise either again, and report no verdict for it. Then re-check EACH UNRESOLVED thread you were handed against the current code: `fixed` (the problem is gone), `standing` (still holds), `gone` (the code it concerned no longer exists), `detached` (its anchor moved but the problem still holds — report where it is now as a new finding with the same claim).\n\nRETURN ONLY THIS JSON, nothing before or after it:\n{\"component\": \"<group>\",\n \"findings\": [{\"path\": \"...\", \"line\": <int>,\n               \"claim\": \"<AT MOST 15 WORDS, ONE CLAUSE — no so/because/which/and: the thing a maintainer answers `fix it` to>\",\n               \"where\": [\"<path:line>\", \"...\"],\n               \"rule\": \"<`file` › heading — NOTHING after the heading; or a spec path; or empty>\",\n               \"fix\": \"<AT MOST 12 WORDS, or empty when the fix is not obvious>\"}],\n \"changedNames\": [\"<CODE-SHAPED names only — an identifier, JSON field, env var, CR field, HTTP path, chart value or file name — that the diff ADDED, REMOVED or RENAMED, exact spelling, old and new. AT MOST 20. Never a heading, a label, a word from prose, or a name that merely appears in the diff unchanged>\"],\n \"threads\": [{\"id\": \"<thread id>\", \"verdict\": \"fixed|standing|gone|detached\"}]}\n\nRULES OF THE RETURN:\n- The four finding fields ARE the comment; the consolidator forwards them as four labeled lines and writes no prose. A claim is one clause; the consequence goes in `where` and `rule`, never after a `so`. Over 15 words it is two findings or a wrong one. A `rule` is a file and a heading, never a quoted sentence. `where` holds paths and lines only, never a sentence. Nothing explains, quotes a rule, or restates the diff.\n- One finding per problem.\n- `changedNames` is literal and code-shaped. The consolidator greps consumers of every entry across the whole repository — a name you omit is a consumer nobody checks, and a prose word you include costs a read of every file that uses the word.\n- No prose outside the JSON. No file outside your paths, except to read a scoped rule or a delta spec."}}'
+            --allowedTools "Workflow,Agent(component-reviewer),Agent(review-coordinator),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*),Bash(git grep:*),Bash(git ls-files:*),Bash(python3 .github/scripts/review-queue.py:*),Bash(.github/scripts/mark-thread-resolved.sh:*),Read,Grep,Glob"
 
       # THE EXECUTION FILE IS THE ONLY PER-TOOL TIMING THERE IS. The job log
       # shows the model step as one black box of minutes; this file records
