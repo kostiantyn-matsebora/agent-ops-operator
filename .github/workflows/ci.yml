@@ -388,7 +388,7 @@ jobs:
           key: cache-trivy-${{ steps.date.outputs.date }}
           lookup-only: true
       - if: steps.cached.outputs.cache-hit != 'true'
-        uses: oras-project/setup-oras@v1
+        uses: oras-project/setup-oras@v2
       - if: steps.cached.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
