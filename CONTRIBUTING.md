@@ -331,7 +331,10 @@ and it fails if any job that DID run failed.
 at any time and an unfinished one is unfinished correctly, so a gate judging all
 of them would fail every pull request for work it was not about.
 
-**Claude reviews the pull request** on open and on every push, commenting on
+**Claude reviews the pull request** on open and on every push — a saved
+workflow, `/review-pr`, that reads each changed component in its own context
+and consolidates once; the same command runs from a checkout, and
+`dryRun: true` returns the readings without posting — commenting on
 specific lines and leaving one summary. It reads **per component, in parallel**
 — one clean context per changed component — and then **across them**: every
 identifier, field, path or env var the change added, removed or renamed is
