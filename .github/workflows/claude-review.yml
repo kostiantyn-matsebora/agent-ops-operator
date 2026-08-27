@@ -148,9 +148,9 @@ jobs:
           prompt: |
             Run the saved workflow `review-pr` with these args and nothing else:
             {"repo": "${{ github.repository }}", "number": ${{ github.event.pull_request.number }}, "base": "origin/${{ github.base_ref }}"}
-            Do not read the diff, do not review anything yourself, and do not
-            post: the workflow's coordinator posts. When it returns, reply with
-            its result JSON verbatim.
+            Do not read the diff and do not review anything yourself. Do not post:
+            the workflow's coordinator posts. When it returns, reply with its
+            result JSON verbatim.
           # THE RULES A REVIEW READS ARE CHOSEN BY GLOB, NOT INHERITED WHOLE.
           #
           # Every context this run opens — the consolidator and each reviewer —
