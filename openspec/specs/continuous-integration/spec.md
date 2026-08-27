@@ -97,7 +97,7 @@ SHALL be derived from the Dockerfiles that exist rather than enumerated in
 prose.
 
 **IT SHALL BUILD WHAT CHANGED, NOT EVERYTHING.** A component SHALL be built when
-a file inside its own directory moved. Thirteen image builds and twelve module
+a file inside its own directory moved. Fourteen image builds and thirteen module
 builds on a documentation-only commit is cost with no signal, and the wait it
 adds is paid by every contributor on every push.
 
@@ -106,11 +106,13 @@ beside the component list is a second thing to keep in step, and the one that
 falls behind is the one nobody notices — which is the same argument that made
 the matrix derived in the first place.
 
-**THREE KINDS OF FILE SHALL REBUILD EVERYTHING**, and they are the ones that
+**FOUR KINDS OF FILE SHALL REBUILD EVERYTHING**, and they are the ones that
 touch no component directory while invalidating every component: the shared
 Dockerfile that is many components' recipe, the script that decides what
-components exist at all, and the workflow that decides how any of them is
-tested.
+components exist at all, the workflow that decides how any of them is tested,
+and the composite actions under `.github/actions/`, which is where the scan
+every image runs through lives. A change to the scan that scans nothing has not
+been tested, and reports success.
 
 **WHERE THE COMPARISON BASE CANNOT BE ESTABLISHED, EVERYTHING SHALL BUILD.** A
 branch's first push has nothing to compare against, and a shallow checkout makes
@@ -138,6 +140,11 @@ reports success while doing so.
 
 - **WHEN** a pull request touches no component directory
 - **THEN** no module or image job runs at all
+
+#### Scenario: The scan action changes
+
+- **WHEN** a pull request changes anything under `.github/actions/`
+- **THEN** every image is built and scanned on that pull request
 
 #### Scenario: The shared recipe changes
 
