@@ -4,11 +4,11 @@ The pull-request review reads a change per component "concurrently, bounded by
 a pool the runtime sizes" — and on the runner it runs on, that pool is TWO.
 The dynamic-workflow runtime caps concurrent `agent()` calls at
 `min(16, max(2, CPUs − 2))`, computed once from `os.availableParallelism()`
-with no override; `ubuntu-latest` has four vCPUs. On pull request #106 (nine
+with no override; `ubuntu-latest` has four vCPUs. On pull request #106 (eight
 components) the readers started in pairs — two at 2:16, one at 4:17, one at
 5:02, two at ~7:55, one at 9:29 — the run was stopped at exactly 600 s with two
-still reading and one never started, the coordinator never ran, and the check
-failed. A healthy run takes 6–10 minutes for the same reason, and grows with
+still reading and the eighth never started, the coordinator never ran, and the
+check failed. A healthy run takes 6–10 minutes for the same reason, and grows with
 every component a change touches.
 
 The other tenth of the time is spent on a model doing deterministic work: the

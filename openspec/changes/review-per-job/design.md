@@ -73,7 +73,7 @@ still runs and posts the empty summary. Needs no model and no secret beyond
 
 **The matrix is the CHANGED components only.** `review-queue.py` groups the
 paths `gh pr diff --name-only` returns, so a component the diff never names
-has no entry and no job — nine jobs on #106 because nine groups changed; a
+has no entry and no job — eight jobs on #106 because eight groups changed; a
 one-file docs fix is one job. Nothing enumerates the tree.
 
 Matrix size is bounded by GitHub at 256; `review-queue.py` produces at most
@@ -175,7 +175,7 @@ a JSON envelope with the JSON inside prose is extracted.
 
 ## Risks / Trade-offs
 
-- [Nine runners × ~40 s of checkout and install] → the cached install brings
+- [Eight runners × ~40 s of checkout and install] → the cached install brings
   the install to seconds; checkout with `fetch-depth: 0` is the real fixed
   cost. All in parallel; wall-clock unchanged.
 - [A reader job that fails does not fail the workflow] → it is the named

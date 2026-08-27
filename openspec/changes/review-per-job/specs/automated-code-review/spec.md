@@ -17,7 +17,7 @@ pull request.** A single context reading everything serially pays for every
 rule file whether or not the diff touches its subject, and for every component
 whether or not it changed — and a pool of two, which is what a four-processor
 runner sizes, is serial reading wearing a concurrent shape: on pull request
-#106 nine readings started in pairs over ten minutes and the last never
+#106 eight readings started in pairs over ten minutes and the last never
 started.
 
 **And a reading cannot be lost.** A reading started by a model's turn ends
@@ -67,6 +67,52 @@ never a silent gap.
   component
 - **THEN** no reading is started for that component — the queue holds only
   components with changed paths, so a one-file change is one reading
+
+### Requirement: The review is consolidated across components, on what changed
+
+After the per-component readings, the review SHALL check the whole change for
+compatibility: the names each reading reports as changed — identifiers,
+fields, paths, environment variables — SHALL be resolved to their consumers
+mechanically, and each consumer SHALL be checked against the change.
+
+The consolidation SHALL be a reading of its own — the COORDINATOR — that runs
+as its own job once every reading's job has finished, and is handed every
+reading's data as files: a reading whose job produced none is handed as
+absent, by name. It SHALL never wait on a running reading, and it is the only
+reading that writes to the pull request.
+
+**This repository's modules import nothing from one another**, so a contract
+change compiles everywhere, passes every module's tests, and breaks at runtime
+in a component the diff never names. The contract file reads as correct because
+it is; it is no longer what its consumers speak. Only a reading that follows
+the name to where it is used can see that.
+
+The summary SHALL state the reach that was checked, so a reader sees what the
+review considered rather than trusting that it considered everything.
+
+#### Scenario: A contract field is renamed
+
+- **WHEN** a pull request renames a field in an HTTP contract and updates the
+  manager's handler
+- **THEN** every adapter that speaks the old name is found and a finding is
+  raised against each that still does
+
+#### Scenario: A change reaches nothing outside itself
+
+- **WHEN** the changed names have no consumer outside the changed components
+- **THEN** the summary says so, and no cross-component finding is raised
+
+#### Scenario: The coordinator is the only writer
+
+- **WHEN** the readings have returned
+- **THEN** exactly one reading posts to the pull request, once, and a run in
+  which it posted no summary is reported as failed
+
+#### Scenario: A reading's job failed
+
+- **WHEN** a reading's job ended without a validated reading
+- **THEN** the coordinator still runs, with that component handed as absent,
+  and the summary names it as unreviewed
 
 ### Requirement: The reviewer's definition is part of the guarded review
 
