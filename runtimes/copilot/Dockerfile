@@ -27,7 +27,7 @@ COPY package.json package-lock.json /srv/
 # released as two packages, and a floating range once installed a pair that
 # threw before any session existed (SDK 1.0.11 against CLI 1.0.81).
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
-COPY runtime.js tools.js vocabulary.js mcp.js /srv/
+COPY runtime.js tools.js vocabulary.js mcp.js continuity.js /srv/
 
 ENV HOME=/data/context
 USER node

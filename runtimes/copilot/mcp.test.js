@@ -12,13 +12,19 @@ const { expand, translateServers, loadMcpServers } = require('./mcp');
 test('a stdio server carries command, args and env', () => {
   const { servers, failed } = translateServers({ mcpServers: { k8s: { command: 'mcp-k8s', args: ['--ro'], env: { A: '1' } } } }, {});
   assert.deepStrictEqual(failed, []);
-  assert.deepStrictEqual(servers.k8s, { type: 'stdio', command: 'mcp-k8s', args: ['--ro'], env: { A: '1' } });
+  assert.deepStrictEqual(servers.k8s, { type: 'stdio', tools: ['*'], command: 'mcp-k8s', args: ['--ro'], env: { A: '1' } });
 });
 
 test('an http server carries url and headers', () => {
   const { servers, failed } = translateServers({ mcpServers: { prom: { type: 'http', url: 'http://prom:8080/mcp', headers: { 'X-A': 'b' } } } }, {});
   assert.deepStrictEqual(failed, []);
-  assert.deepStrictEqual(servers.prom, { type: 'http', url: 'http://prom:8080/mcp', headers: { 'X-A': 'b' } });
+  assert.deepStrictEqual(servers.prom, { type: 'http', url: 'http://prom:8080/mcp', tools: ['*'], headers: { 'X-A': 'b' } });
+});
+
+test('every server includes all its tools — the allowlist decides what may be called', () => {
+  const { servers } = translateServers({ mcpServers: { a: { url: 'http://x/mcp' }, b: { command: 'c' } } }, {});
+  assert.deepStrictEqual(servers.a.tools, ['*']);
+  assert.deepStrictEqual(servers.b.tools, ['*']);
 });
 
 test('a url without a type is http', () => {

@@ -159,7 +159,11 @@ async function checkInventory(available) {
   inventoryChecked = true;
   try {
     const c = await getClient();
-    const list = await c.rpc.tools.list(COPILOT_MODEL ? { model: COPILOT_MODEL } : {});
+    // WITH A MODEL, always: the model-less catalog names `str_replace_editor`
+    // where every real session registers `view`/`create`/`edit`, and warned
+    // about a tool that was working — verified live. `auto` is what a session
+    // naming no model resolves to.
+    const list = await c.rpc.tools.list({ model: COPILOT_MODEL || 'auto' });
     const names = new Set((list && (list.tools || list)) .map((t) => t.name).filter(Boolean));
     for (const f of available) {
       if (!f.startsWith('builtin:')) continue;
@@ -187,13 +191,16 @@ function onEvent(ev, state) {
         return;
       case 'tool.execution_start': {
         const args = JSON.stringify(ev.data && ev.data.arguments !== undefined ? ev.data.arguments : {});
-        process.stdout.write(`[tool] ${ev.data && ev.data.toolName} ${args.length > 160 ? args.slice(0, 160) + '…' : args}\n`);
+        const name = ev.data && ev.data.toolName;
+        if (ev.data && ev.data.toolCallId) state.toolNames.set(ev.data.toolCallId, name);
+        process.stdout.write(`[tool] ${name} ${args.length > 160 ? args.slice(0, 160) + '…' : args}\n`);
         state.toolCalls++;
         return;
       }
       case 'tool.execution_complete':
         if (ev.data && ev.data.success === false && ev.data.error) {
-          process.stdout.write(`[tool] ${ev.data.toolCallId || ''} failed: ${String(ev.data.error.message || '').slice(0, 200)}\n`);
+          const name = state.toolNames.get(ev.data.toolCallId) || ev.data.toolCallId || '';
+          process.stdout.write(`[tool] ${name} failed: ${String(ev.data.error.message || '').slice(0, 200)}\n`);
         }
         return;
       case 'session.error':
@@ -276,7 +283,7 @@ async function openSession(c, unit, cfg) {
 }
 
 async function attempt(c, unit, cfg, prompt, denials = []) {
-  const state = { lastText: '', toolCalls: 0, turns: 0, errors: [] };
+  const state = { lastText: '', toolCalls: 0, turns: 0, errors: [], toolNames: new Map() };
   let opened;
   try {
     opened = await openSession(c, unit, cfg);
@@ -387,6 +394,21 @@ function finish(out, continuity) {
 }
 
 // ---- the loop ----------------------------------------------------------------
+
+// PID 1 GETS NO DEFAULT SIGNAL HANDLING. `node` is the container's entrypoint,
+// so a SIGTERM the kubelet sends on pod deletion is IGNORED unless handled —
+// and the pod then sits in Terminating for the whole grace period, holding its
+// conversation's slot and its name. Verified: 120 seconds, every deletion.
+// Exit promptly; an inflight run is lost either way, and the manager re-runs
+// its input on the next pod.
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    console.log(`[runtime] ${sig} — exiting`);
+    const done = () => process.exit(0);
+    if (client) client.stop().then(done, done); else done();
+    setTimeout(done, 5000).unref();
+  });
+}
 
 (async () => {
   console.log(`[runtime] copilot runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} state=${SESSIONS_DIR}`);

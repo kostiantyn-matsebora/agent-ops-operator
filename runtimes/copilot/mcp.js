@@ -54,7 +54,11 @@ function translateServers(parsed, env = process.env) {
       if (!s.url) { failed.push({ name, reason: 'http server without url' }); continue; }
       const headers = expandMap(s.headers, env);
       if (headers.missing) { failed.push({ name, reason: `unresolved placeholder in headers (${headers.missing.join(', ')})` }); continue; }
-      servers[name] = { type, url: s.url, ...(Object.keys(headers.value).length ? { headers: headers.value } : {}) };
+      // `tools: ["*"]` EXPLICITLY. The SDK documents an undefined list as
+      // "include all", and the runtime reports the server `not_configured` when
+      // it is undefined — verified live, CLI 1.0.80. Which tools the model may
+      // CALL is the allowlist's decision, made one layer up.
+      servers[name] = { type, url: s.url, tools: ['*'], ...(Object.keys(headers.value).length ? { headers: headers.value } : {}) };
       continue;
     }
     if (!s.command) { failed.push({ name, reason: 'stdio server without command' }); continue; }
@@ -62,6 +66,7 @@ function translateServers(parsed, env = process.env) {
     if (envMap.missing) { failed.push({ name, reason: `unresolved placeholder in env (${envMap.missing.join(', ')})` }); continue; }
     servers[name] = {
       type: 'stdio',
+      tools: ['*'],
       command: s.command,
       args: Array.isArray(s.args) ? s.args.map(String) : [],
       ...(Object.keys(envMap.value).length ? { env: envMap.value } : {}),
