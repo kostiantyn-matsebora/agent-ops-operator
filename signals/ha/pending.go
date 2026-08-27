@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -46,9 +47,12 @@ type pendingEntry struct {
 	// delayed because a lax one happened to arrive first.
 	deadline time.Time
 	rule     compiledRule
-	// recurred records whether any record arrived after the first. It is the
-	// whole basis of verification rung 2, where no health predicate exists.
-	recurred bool
+	// lastSeen is when the most recent record arrived. It is the whole basis
+	// of verification rung 2, where no health predicate exists: not WHETHER
+	// the record recurred, but whether it was still recurring as the window
+	// closed. A network blip that logs for thirty seconds and stops has
+	// recurred, and is the transient the dwell exists to drop.
+	lastSeen time.Time
 	// sample is the most recent signal, used as the emitted signal's base so
 	// labels, fingerprint and title stay exactly as normalize built them.
 	sample Signal
@@ -83,6 +87,37 @@ const minEscalationDwell = time.Minute
 // 10m rule reports a real outage in 2m30s and still outlasts a restart.
 const escalationDivisor = 4
 
+// closingWindowDivisor and minClosingWindow define the CLOSING part of a dwell
+// — the tail of the window a record must still be arriving in for the re-check
+// to believe it. A third of the window actually waited, floored at thirty
+// seconds, derived rather than configured. signals/k8s-events/pending.go
+// carries the same two numbers, and they are changed together.
+const closingWindowDivisor = 3
+const minClosingWindow = 30 * time.Second
+
+// closingWindow is how long before `now` the closing part of the window began.
+func closingWindow(waited time.Duration) time.Duration {
+	w := waited / closingWindowDivisor
+	if w < minClosingWindow {
+		w = minClosingWindow
+	}
+	return w
+}
+
+// closingSince is the instant the closing part of this entry's window began —
+// the `since` the health predicate is asked about.
+func (e *pendingEntry) closingSince(now time.Time) time.Time {
+	return now.Add(-closingWindow(now.Sub(e.firstSeen)))
+}
+
+// stillRecurring is rung 2: was the record still arriving as the window closed?
+func (e *pendingEntry) stillRecurring(now time.Time) bool {
+	if e.lastSeen.Equal(e.firstSeen) {
+		return false // never recurred at all
+	}
+	return !e.lastSeen.Before(e.closingSince(now))
+}
+
 type pendingQueue struct {
 	mu      sync.Mutex
 	entries map[string]*pendingEntry // key: source + "\x00" + integration
@@ -92,14 +127,17 @@ type pendingQueue struct {
 	// fresh one that escalation makes due at once.
 	emitted map[string]time.Time
 
-	// health answers the verification ladder.
-	health func(recordRef) verdict
+	// health answers the verification ladder: is this record's subject still
+	// broken, counting only what happened SINCE the given instant? The
+	// instant is the start of the window's closing part, so a log count that
+	// rose early in the window and then stopped rising is not "still broken".
+	health func(ref recordRef, since time.Time) verdict
 	// emit posts a batch for one source.
 	emit func(source string, sigs []Signal)
 	now  func() time.Time
 }
 
-func newPendingQueue(health func(recordRef) verdict, emit func(string, []Signal)) *pendingQueue {
+func newPendingQueue(health func(recordRef, time.Time) verdict, emit func(string, []Signal)) *pendingQueue {
 	return &pendingQueue{
 		entries: map[string]*pendingEntry{},
 		emitted: map[string]time.Time{},
@@ -145,12 +183,13 @@ func (q *pendingQueue) Add(source string, sig Signal, rule compiledRule, count i
 			members:     map[string]recordRef{},
 			levelCounts: map[string]int{},
 			firstSeen:   now,
+			lastSeen:    now,
 			deadline:    now.Add(rule.dwell),
 			rule:        rule,
 		}
 		q.entries[key] = e
 	} else {
-		e.recurred = true
+		e.lastSeen = now
 		if d := now.Add(rule.dwell); d.Before(e.deadline) {
 			e.deadline = d
 		}
@@ -240,15 +279,16 @@ func (q *pendingQueue) Flush(now time.Time) {
 // decide runs the verification ladder over an entry's members.
 //
 //	rung 1  the integration has a health predicate  -> is it still broken?
-//	rung 2  no predicate, but we can read the log   -> did the record RECUR?
+//	rung 2  no predicate, but we can read the log   -> was it STILL RECURRING at the close?
 //	rung 3  we cannot say at all                    -> EMIT (fail open)
 //
 // An entry survives if ANY member is still unhealthy: an integration with one
 // broken code path is a broken integration.
 func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 	anyUnhealthy, anyUnknown := false, false
+	since := e.closingSince(now)
 	for _, ref := range e.members {
-		switch q.health(ref) {
+		switch q.health(ref, since) {
 		case verdictUnhealthy:
 			anyUnhealthy = true
 		case verdictUnknown:
@@ -261,10 +301,14 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 	switch {
 	case anyUnhealthy:
 		// rung 1: confirmed still broken
-	case anyUnknown && e.recurred:
-		// rung 2: no predicate, but it kept happening — still live
-	case anyUnknown && !e.recurred:
-		// rung 2: no predicate and it went quiet — it stopped
+	case anyUnknown && e.stillRecurring(now):
+		// rung 2: no predicate, but it was still happening at the close — live
+	case anyUnknown:
+		// rung 2: no predicate and it went quiet before the close — it stopped.
+		// Logged because this drop looks exactly like the live case until the
+		// timeline is on the record.
+		log.Printf("dwell: %s dropped as quiet — last record %s before the window closed (waited %s)",
+			e.integration, now.Sub(e.lastSeen).Round(time.Second), now.Sub(e.firstSeen).Round(time.Second))
 		return Signal{}, false
 	default:
 		// every member recovered: churn
@@ -308,6 +352,7 @@ func (e *pendingEntry) evidence(now time.Time) string {
 	fmt.Fprintf(&b, "\n  places (%d): %s\n", len(places), strings.Join(places, ", "))
 	fmt.Fprintf(&b, "  first seen %s, still true at %s\n",
 		e.firstSeen.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "  last seen %s before the window closed\n", now.Sub(e.lastSeen).Round(time.Second))
 	if len(e.sample.Payload) > 0 {
 		fmt.Fprintf(&b, "\nmost recent record:\n%s\n", e.sample.Payload)
 	}

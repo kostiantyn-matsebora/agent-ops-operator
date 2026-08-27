@@ -234,7 +234,7 @@ INTEGRATION_DIAGRAMS: dict[str, dict] = {
                "house, one that repairs it.",
         "cols": [
             [("a log record", "from your house", "plain")],
-            [("your rules", "did it recur?", "yours")],
+            [("your rules", "live at the close?", "yours")],
             [("ha-control", "uses the house", "subject"),
              ("ha-ops", "repairs it", "subject")],
         ],

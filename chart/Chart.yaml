@@ -12,7 +12,7 @@ type: application
 sources:
   - https://github.com/kostiantyn-matsebora/agent-ops-operator
 home: https://kostiantyn-matsebora.github.io/agent-ops-operator/
-version: 13.1.1
+version: 13.2.0
 appVersion: "0.54.0"
 dependencies:
   # embedded subchart (chart/charts/prometheus); templates are
@@ -26,7 +26,7 @@ dependencies:
   # only the first existing path — it could never express the OR. Every template
   # self-gates instead.
   - name: kubernetes
-    version: 0.3.0
+    version: 0.3.1
     repository: ""
   # embedded subchart (chart/charts/telegram); templates are
   # additionally self-gated on telegram.enabled
@@ -37,7 +37,7 @@ dependencies:
   # embedded subchart (chart/charts/home-assistant); templates are additionally
   # self-gated on home-assistant.enabled
   - name: home-assistant
-    version: 0.1.0
+    version: 0.1.1
     repository: ""
     condition: home-assistant.enabled
   # embedded subchart (chart/charts/claude) — the REFERENCE RUNTIME, and the one

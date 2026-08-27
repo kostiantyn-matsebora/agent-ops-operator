@@ -8,4 +8,4 @@ description: >-
   chart's. Never enabled by demo mode: every component needs an endpoint and a
   credential no demo cluster has.
 type: application
-version: 0.1.0
+version: 0.1.1

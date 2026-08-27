@@ -239,19 +239,89 @@ func TestUninspectableKindThatWentQuietIsDropped(t *testing.T) {
 	}
 }
 
-// The same kind, still complaining: it recurred, so it is still happening.
-func TestUninspectableKindThatRecurredIsEmitted(t *testing.T) {
+// The same kind, still complaining right up to the deadline: it was still
+// recurring as the window closed, so it is still happening.
+func TestUninspectableKindStillRecurringAtTheCloseIsEmitted(t *testing.T) {
 	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	q, got := testQueue(t, fakeHealth{}, base)
 	rule := compiledRule{dwell: 3 * time.Minute, escalate: 99}
 
-	sig := sigFor("prod", "HorizontalPodAutoscaler/api", "HorizontalPodAutoscaler", "api", "FailedGetResourceMetric")
-	q.Add("src", sig, rule)
-	q.Add("src", sig, rule) // recurrence
-	q.Flush(base.Add(4 * time.Minute))
+	sig := sigFor("prod", "Volume/n8n", "Volume", "n8n", "FailedSnapshotPurge")
+	for _, at := range []time.Duration{0, 20 * time.Second, 60 * time.Second, 150 * time.Second, 170 * time.Second} {
+		q.now = func() time.Time { return base.Add(at) }
+		q.Add("src", sig, rule)
+	}
+	q.Flush(base.Add(3 * time.Minute))
 
 	if len(*got) != 1 {
-		t.Fatalf("a recurring warning on an uninspectable kind must be emitted: %+v", *got)
+		t.Fatalf("a warning still recurring at the close must be emitted: %+v", *got)
+	}
+	payload := (*got)[0].sigs[0].Payload
+	if !strings.Contains(payload, "last seen 10s before the window closed") {
+		t.Fatalf("evidence must name the gap to the last arrival:\n%s", payload)
+	}
+}
+
+// A burst that retried for forty seconds and then healed HAS recurred — and is
+// exactly the transient rung 2 exists to drop. Longhorn's snapshot purge
+// retries every few seconds while it is failing, so "did it recur" was true
+// for every blip that healed in under a minute, and each one opened a
+// conversation whose whole answer was "self-resolved".
+func TestUninspectableKindThatHealedBeforeTheCloseIsDropped(t *testing.T) {
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	q, got := testQueue(t, fakeHealth{}, base)
+	rule := compiledRule{dwell: 3 * time.Minute, escalate: 99}
+
+	sig := sigFor("prod", "Volume/n8n", "Volume", "n8n", "FailedSnapshotPurge")
+	for i := 0; i < 6; i++ {
+		at := time.Duration(i) * 8 * time.Second // six events over forty seconds
+		q.now = func() time.Time { return base.Add(at) }
+		q.Add("src", sig, rule)
+	}
+	q.Flush(base.Add(3 * time.Minute))
+
+	if len(*got) != 0 {
+		t.Fatalf("a burst that went quiet before the closing minute must be dropped: %+v", *got)
+	}
+}
+
+// The closing window follows the window actually waited, floored at 30s: a
+// dwell shortened to one minute believes an event from its last thirty
+// seconds and not from its first.
+func TestClosingWindowFollowsAShortenedDwell(t *testing.T) {
+	if got := closingWindow(3 * time.Minute); got != time.Minute {
+		t.Fatalf("closingWindow(3m) = %s, want 1m", got)
+	}
+	if got := closingWindow(time.Minute); got != 30*time.Second {
+		t.Fatalf("closingWindow(1m) = %s, want the 30s floor", got)
+	}
+	if got := closingWindow(10 * time.Minute); got != 200*time.Second {
+		t.Fatalf("closingWindow(10m) = %s, want 3m20s", got)
+	}
+
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	q, got := testQueue(t, fakeHealth{}, base)
+	lax := compiledRule{dwell: 3 * time.Minute, escalate: 99}
+	strict := compiledRule{dwell: time.Minute, escalate: 99}
+	sig := sigFor("prod", "Volume/n8n", "Volume", "n8n", "FailedSnapshotPurge")
+
+	q.Add("src", sig, lax)
+	q.now = func() time.Time { return base.Add(20 * time.Second) }
+	q.Add("src", sig, strict) // shortens the deadline to 1m20s
+	q.Flush(base.Add(80 * time.Second))
+	if len(*got) != 0 {
+		t.Fatalf("last event 60s before a 1m20s close is outside the 30s floor, must drop: %+v", *got)
+	}
+
+	q2, got2 := testQueue(t, fakeHealth{}, base)
+	q2.Add("src", sig, lax)
+	q2.now = func() time.Time { return base.Add(20 * time.Second) }
+	q2.Add("src", sig, strict)
+	q2.now = func() time.Time { return base.Add(65 * time.Second) }
+	q2.Add("src", sig, strict)
+	q2.Flush(base.Add(80 * time.Second))
+	if len(*got2) != 1 {
+		t.Fatalf("last event 15s before the close is inside the 30s floor, must emit: %+v", *got2)
 	}
 }
 
