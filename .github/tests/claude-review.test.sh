@@ -4,7 +4,7 @@
 #
 # THE PLAN IS THE WORKFLOW AND THE ROLES ARE FILES. `claude-review.yml` builds
 # the queue with a program, runs one read job per changed
-# component (two `file-reviewer` workers over its files), hands every reading to the `review-coordinator` in one job, and
+# component (two `file-reviewer` queue readers over its files), hands every reading to the `review-coordinator` in one job, and
 # resolves threads in a fourth that runs no model. Every job that runs a model
 # installs the CLI through one composite action and restores what it reads
 # from the base branch first. The tests here read the workflow, the action and
@@ -110,14 +110,14 @@ it "the file reader's tools are read-only git plus the file tools"
 tools=$(fm tools "$REVIEWER")
 for t in "Bash(git diff:*)" "Bash(git ls-files:*)" "Bash(git cat-file:*)" "Read" "Grep" "Glob"; do assert_contains "$tools" "$t"; done
 
-it "the saved workflow runs a fixed set of file-reader workers over queues of files, validates by schema, and merges"
+it "the saved workflow runs a fixed set of file-reader queue readers over queues of files, validates by schema, and merges"
 s=$(cat "$WF")
 assert_equals "export const meta = {" "$(grep -m1 '^export const meta' "$WF")"
 assert_contains "$s" "name: 'review-component'"
-assert_contains "$s" "const WORKERS = 2"
+assert_contains "$s" "const QUEUE_READERS = 2"
 assert_contains "$s" "pipeline(queues"
 assert_contains "$s" "agentType: 'file-reviewer'"
-assert_contains "$s" "schema: WORKER_RETURN"
+assert_contains "$s" "schema: READER_RETURN"
 assert_contains "$s" "RULE FILES TO READ ONCE"
 assert_contains "$s" "ONE AT A TIME"
 assert_contains "$s" "required: ['path', 'findings', 'declares', 'references', 'threads']"

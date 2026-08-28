@@ -138,7 +138,7 @@ returns, and merges.
   a file reader takes 44–221 s (median ~110 s) in a ~5–11 k-token context; a
   15-file component ran eight waves two-wide and the CLI stopped its workflow
   at 600 s — the ceiling is REAL, and the component went unreviewed. THE SPLIT
-  IS AT THE SUBAGENT LEVEL: a fixed set of WORKERS (the pool's width, two)
+  IS AT THE SUBAGENT LEVEL: a fixed set of QUEUE_READERS (the pool's width, two)
   each over a queue of the component's files, reading the rules once and
   the files one at a time — no per-file spawn and orientation, and no job
   per chunk (a chunk of two files was tried, 4:22 for the whole review with

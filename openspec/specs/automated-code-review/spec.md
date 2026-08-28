@@ -376,13 +376,13 @@ readings exist and what each is handed — SHALL be built by a program from the
 changed paths, never by a model.
 
 Within a component, the reading SHALL be made PER FILE by a fixed set of
-WORKERS over a queue of the changed files: each worker reads the rule files
+QUEUE_READERS over a queue of the changed files: each queue reader reads the rule files
 that apply to its files once — on demand, never inherited — and then takes
 its files one at a time, holding that file's diff, its own standing threads,
 the names of the component's other changed files and the change's delta
-specs, and returns one reading per file. The workers SHALL be started and
+specs, and returns one reading per file. The queue readers SHALL be started and
 collected by a script, their readings merged into the component's, with a
-file no worker returned named as unread rather than dropped. A component is
+file no queue reader returned named as unread rather than dropped. A component is
 one job, never split for width, since a job costs more to start than a
 reading.
 

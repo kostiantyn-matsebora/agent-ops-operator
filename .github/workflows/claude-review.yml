@@ -9,8 +9,8 @@
 # FOUR JOBS, AND THE FAN-OUT IS THE MATRIX. `queue` is a program: what changed,
 # grouped into components, plus every review thread. `read` is one job per
 # changed component, all started at once, each running a fixed set of
-# `file-reviewer` workers over a queue of its changed files (the base
-# branch's role, each worker reading its rules once and its files one at a
+# `file-reviewer` queue readers over a queue of its changed files (the base
+# branch's role, each queue reader reading its rules once and its files one at a
 # time) and uploading the merged reading. `consolidate` runs the `review-coordinator` over the readings — the
 # only role that posts, in a context holding the readings and the threads and
 # no rule file. `reconcile`
@@ -213,7 +213,7 @@ jobs:
 
   # ONE JOB PER CHANGED COMPONENT, ALL AT ONCE. The matrix is the queue's
   # entry list; a component the diff never touches has no entry and no job.
-  # The split is INSIDE the job — workers over a queue of files — because a
+  # The split is INSIDE the job — queue readers over a queue of files — because a
   # job costs ~30-40 s before it reads anything. Each job runs the base branch's `file-reviewer` role, once per file, in its own
   # `claude -p`, on its own runner, and uploads its reading as data.
   #

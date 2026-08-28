@@ -244,7 +244,7 @@ rules loaded on demand.
     ran. A bigger runner lifts the cap for money; a job per reading lifts it
     for free (twenty concurrent jobs on a public repository). So the unit of a
     reading is a JOB: `claude-review.yml`'s `read` matrix, one `claude -p` per
-    component on its own runner — inside it two `file-reviewer` workers over a
+    component on its own runner — inside it two `file-reviewer` queue readers over a
     queue of the files, the pool's width — readings as artifacts, the queue
     built by a program. The measurement is what settles "just add more agents": more
     `agent()` calls join the queue behind the two that run.

@@ -68,7 +68,7 @@ def component(d: dict, group: str, base: str) -> list[str]:
     a = pm.component_args(d, group)
     claude_md = size("CLAUDE.md")
     role = size(".claude/agents/file-reviewer.md")
-    lines = [f"CONTEXTS FOR {a['component']}{' chunk ' + a['chunk'] if a.get('chunk') else ''} ({len(a['files'])} file(s) over two workers; a worker's context is its rules once plus each file it reads in turn — per-file cost below). Bytes exact; tokens ≈ bytes/4.",
+    lines = [f"CONTEXTS FOR {a['component']}{' chunk ' + a['chunk'] if a.get('chunk') else ''} ({len(a['files'])} file(s) over two queue readers; a queue reader's context is its rules once plus each file it reads in turn — per-file cost below). Bytes exact; tokens ≈ bytes/4.",
              row("component session (runs the workflow)", {"CLAUDE.md": claude_md, "instruction": len(pm.reader(d, group).encode())})]
     for f in a["files"]:
         msg = len(json.dumps({k: v for k, v in f.items() if k != "rules"}).encode()) + 400
