@@ -6,6 +6,7 @@ require (
 	github.com/prometheus/client_golang v1.19.1
 	github.com/prometheus/client_model v0.6.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.56.0
 	k8s.io/api v0.31.4
 	k8s.io/apimachinery v0.31.4

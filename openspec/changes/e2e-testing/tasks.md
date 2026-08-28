@@ -91,17 +91,17 @@
 
 ## 12. Workflows
 
-- [ ] 12.1 `.github/workflows/e2e.yml`: PR tier — conformance plus the stub-runtime cluster smoke, no secret required; the gating jobs join `ci-green`'s `needs:` in `ci.yml`, never a new required check
-- [ ] 12.2 Full tier on `workflow_dispatch` (and a schedule once cadence is settled), including the real-runtime lane
-- [ ] 12.3 Fork pull requests report skipped tiers as skipped and are never failed for unavailable secrets
-- [ ] 12.4 The token-consuming tier gates no pull request
-- [ ] 12.5 Document the boundary with `continuous-integration` in both specs so "what CI runs" has one definition per tier
+- [x] 12.1 `.github/workflows/e2e.yml`: PR tier — conformance plus the stub-runtime cluster smoke, no secret required; the gating jobs join `ci-green`'s `needs:` in `ci.yml`, never a new required check — `e2e.yml` is a reusable workflow that `ci.yml` CALLS with `tier: pr`, which is what makes its jobs listable in `needs:`
+- [x] 12.2 Full tier on `workflow_dispatch` (and a schedule once cadence is settled), including the real-runtime lane
+- [x] 12.3 Fork pull requests report skipped tiers as skipped and are never failed for unavailable secrets
+- [x] 12.4 The token-consuming tier gates no pull request
+- [x] 12.5 Document the boundary with `continuous-integration` in both specs so "what CI runs" has one definition per tier
 
 ## 13. Resolve open questions
 
-- [ ] 13.1 Cadence for the real-runtime lane — dispatch-only to start, or a schedule
-- [ ] 13.2 Whether the e2e profile pins a smaller model, trading spend against exercising the shipped default
-- [ ] 13.3 Credentials for the local-registry pull test — per-run throwaway htpasswd
+- [x] 13.1 Cadence for the real-runtime lane — dispatch-only to start, or a schedule: DISPATCH-ONLY; the schedule block in `e2e.yml` is commented and `docs/testing.md` says when to uncomment it
+- [x] 13.2 Whether the e2e profile pins a smaller model, trading spend against exercising the shipped default: NO PIN — the lane exists to exercise the shipped default, and spend is bounded by a fixed conversation count and bounded retries instead
+- [x] 13.3 Credentials for the local-registry pull test — per-run throwaway htpasswd: YES, minted by the test into a `registry:2` container on the cluster network; the pull Secret rides on the floor ServiceAccount, the kubelet's own mechanism, never the GHCR token
 
 ## 14. Documentation
 

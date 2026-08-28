@@ -1,0 +1,110 @@
+# The end-to-end tiers.
+#
+# TWO TIERS, DEFINED BY WHAT GATES A PULL REQUEST:
+#
+#   pr    contract conformance + a thin k3s smoke on the stub runtime. No
+#         secret, deterministic, bounded in wall clock. ci.yml CALLS this
+#         workflow with tier=pr and lists that job in ci-green's `needs:` — the
+#         only required status check — so the gate is a line there, never a
+#         new required check somebody has to remember.
+#   full  the whole pack, the real-runtime lane included. Runs on manual
+#         dispatch (and on a schedule once the cadence is settled — see the
+#         commented block). It NEVER gates a pull request: its lane spends real
+#         tokens and its flakiness must not block work while it is tuned.
+#
+# A fork pull request runs every tier its secret access allows and is not
+# failed for the rest: the pr tier needs no secret at all, and the real-runtime
+# lane SKIPS itself when ANTHROPIC_API_KEY is absent.
+#
+# WHAT THIS WORKFLOW OWNS is the cluster-based jobs only. Per-module build, vet
+# and test, the envtest suite and chart lint stay in ci.yml — one definition
+# per tier, stated in both openspec capabilities.
+name: e2e
+
+on:
+  workflow_call:
+    inputs:
+      tier:
+        description: pr or full
+        type: string
+        default: pr
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: pr or full
+        type: choice
+        options: [pr, full]
+        default: full
+  # Cadence for the real-runtime lane: DISPATCH-ONLY to start. Tighten to a
+  # schedule once a few dispatched runs have shown what it costs — a schedule
+  # is easy to add and hard to walk back once people rely on it.
+  # schedule:
+  #   - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+env:
+  MANAGER_MODULE: platform/manager
+  K3D_VERSION: v5.9.0
+
+jobs:
+  # Adapters, black-box, against a fake manager. No cluster, no network beyond
+  # loopback, no credential: it gates every pull request, forks included.
+  conformance:
+    name: e2e / conformance
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.MANAGER_MODULE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.MANAGER_MODULE }}/go.mod
+          cache: true
+      # -count=1: a cached PASS can never stand in for binaries that did not run.
+      - run: go test -tags conformance -count=1 -timeout 20m -v ./test/conformance/
+
+  # The k3s pack. Images are built from THIS commit and imported into the
+  # node; the chart is installed from the working tree.
+  pack:
+    name: e2e / ${{ inputs.tier || 'full' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ${{ env.MANAGER_MODULE }}
+    env:
+      E2E_TIER: ${{ inputs.tier || 'full' }}
+      E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.MANAGER_MODULE }}/go.mod
+          cache: true
+      - name: Install k3d
+        run: |
+          curl -sfL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \
+            -o /usr/local/bin/k3d && chmod +x /usr/local/bin/k3d
+          k3d version
+          helm version --short
+          kubectl version --client
+      - name: Run the pack
+        env:
+          # Absent on a pull request and on a fork — the real-runtime lane
+          # then reports itself SKIPPED. Present only for a dispatched full
+          # run on this repository.
+          ANTHROPIC_API_KEY: ${{ inputs.tier == 'full' && secrets.ANTHROPIC_API_KEY || '' }}
+        run: |
+          go test -tags e2e -count=1 -timeout 55m -v ./test/e2e/
+      # Unconditional: a failure that did not capture its own context costs a
+      # full re-run to learn anything.
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ inputs.tier || 'full' }}-${{ github.run_id }}
+          path: ${{ github.workspace }}/e2e-artifacts
+          if-no-files-found: ignore

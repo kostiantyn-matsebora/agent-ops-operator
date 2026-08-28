@@ -75,26 +75,36 @@ type report struct {
 var directives = []string{"echo", "fail", "stale-context", "no-context", "die", "stall", "storage-outage"}
 
 // input extracts the task text a unit carries: USER_TASK when the manager
-// left rendering to the runtime, else the prompt itself.
+// left rendering to the runtime; else the task the manager's own template
+// quotes as a `> …` blockquote; else the whole prompt.
 func input(u unit) string {
 	if t := strings.TrimSpace(u.PromptVars["USER_TASK"]); t != "" {
 		return t
 	}
+	var quoted []string
+	for _, line := range strings.Split(u.PromptText, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, ">") {
+			quoted = append(quoted, strings.TrimSpace(strings.TrimLeft(line, "> ")))
+		} else if len(quoted) > 0 {
+			break
+		}
+	}
+	if len(quoted) > 0 {
+		return strings.TrimSpace(strings.Join(quoted, "\n"))
+	}
 	return strings.TrimSpace(u.PromptText)
 }
 
-// directive picks the behaviour: the first word of the input if it is one of
-// the vocabulary, else the first LINE of the input that starts with one — a
-// rendered prompt wraps the task in template prose — else echo.
+// directive picks the behaviour: the first word of the task if it is one of
+// the vocabulary, else the first LINE of the task that starts with one, else
+// echo of the whole task.
 func directive(text string) (string, string) {
-	for i, line := range strings.Split(text, "\n") {
+	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
 		word, rest, _ := strings.Cut(line, " ")
 		for _, d := range directives {
 			if word == d {
-				if i == 0 {
-					return d, strings.TrimSpace(rest)
-				}
 				return d, strings.TrimSpace(rest)
 			}
 		}

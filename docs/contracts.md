@@ -763,6 +763,17 @@ A `SignalSource` whose adapter nothing serves carries `Served=False`.
 **Reference implementation:** [`signals/cron/`](../signals/cron/), which replaced
 the old roadmap `cron` sub-struct.
 
+**How an adapter proves it:** the contract conformance suite,
+`platform/manager/test/conformance/`, runs every adapter's BUILT BINARY against
+a fake manager and asserts the obligations above — for a channel adapter the
+long-poll, the `contract=` declaration, typed-message rendering, ack-once under
+a redelivered op id, inbound push with a `threadId`, listing and status, and no
+relay loop; for a signal adapter normalized emission, the bearer, source
+scoping, and a rejected post that is retried or surfaced rather than dropped
+(a chat-originating adapter also the channel label on every signal). A new
+adapter joins by being listed there; nothing in its own source changes. See
+[Testing](testing.md).
+
 `config: {schedule, input, title?}` fires job-lane signals with
 `<source>@<tick>` fingerprints, restart-safe via the state API. The grouping
 window turns a recurring job into one conversation whose later runs resume the

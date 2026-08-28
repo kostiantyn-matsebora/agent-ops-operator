@@ -15,6 +15,39 @@ go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/.
 KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19 use 1.31.x --bin-dir ~/.envtest -p path) go test ./...
 ```
 
+**Two more tiers sit above `go test ./...`, behind build tags so the plain run
+never starts a cluster or builds seven binaries:**
+
+```sh
+cd platform/manager
+# contract conformance: every adapter's BUILT BINARY, black-box, against a fake
+# manager. Go toolchain only — no cluster, no network, no credential.
+go test -tags conformance -count=1 -v ./test/conformance/
+# the e2e pack: k3s under k3d, the chart from the working tree, images from
+# this commit. Needs docker, k3d, kubectl and helm. E2E_TIER=full adds the
+# real-runtime lane (ANTHROPIC_API_KEY) and the slow lanes; E2E_REUSE=1 keeps
+# the cluster between runs.
+go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
+```
+
+- **ON THIS WORKSTATION THE PACK RUNS FROM THE CONTAINER'S BUILD AND THE
+  HOST'S TOOLS.** The container has Go and no docker/k3d; the host has
+  docker, k3d, kubectl and helm and no Go. So compile the test binary inside
+  and run it outside — a static Go binary needs no toolchain:
+
+  ```sh
+  docker exec -i -w "$PWD/platform/manager" agentops-go125 \
+    sh -c 'CGO_ENABLED=0 go test -c -tags e2e -o /tmp/e2e.test ./test/e2e/'
+  docker cp agentops-go125:/tmp/e2e.test /tmp/e2e.test
+  (cd platform/manager/test/e2e && E2E_REUSE=1 /tmp/e2e.test -test.v -test.timeout 45m)
+  ```
+
+  `repoRoot()` is resolved from the compiled-in source path, which the
+  container mounts at its real host path — the reason `build-test.md` insists
+  on mounting the repository at its REAL path.
+- **`docs/testing.md` owns the tier model** — what each tier can and cannot
+  decide, and what gates a pull request.
+
 **The two Node runtimes test with `node --test`**, and no container is needed:
 
 - `cd runtimes/claude && node --test`, and the same in `runtimes/copilot`

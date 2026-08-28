@@ -1,0 +1,166 @@
+//go:build e2e
+
+package e2e
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// InstallValues is what the pack decides about the install; everything else
+// is the chart's default, because a pack that tunes the install tests an
+// install nobody runs.
+type InstallValues struct {
+	Tier         string
+	AdapterToken string
+	UIToken      string
+	BotToken     string
+	ChatID       string
+	// Runtime is the AgentRuntime the stub answers to.
+	Runtime string
+}
+
+// DefaultValues is the install the pack runs against.
+func DefaultValues(tier string) *InstallValues {
+	return &InstallValues{
+		Tier:         tier,
+		AdapterToken: "e2e-adapter-token-0123456789abcdef",
+		UIToken:      "e2e-ui-token-0123456789abcdef",
+		BotToken:     "1234567890:e2e-fake-bot-token",
+		ChatID:       "-1001234567890",
+		Runtime:      "stub",
+	}
+}
+
+// valuesYAML renders the values file. Images are the ones the pack built and
+// imported, tagged :e2e; the reference runtime bundle is OFF and the stub is
+// the release's default runtime, so a route naming nothing runs on it.
+func (v *InstallValues) valuesYAML() string {
+	claude := "false"
+	if v.Tier == "full" {
+		claude = "true"
+	}
+	return fmt.Sprintf(`# rendered by the e2e pack
+image:
+  repository: agentops-manager
+  tag: e2e
+adapterAuth:
+  token: %[1]q
+global:
+  agentops:
+    runtimeDefaults:
+      idleTtlMinutes: 1
+      contextSync:
+        image: agentops-context-sync:e2e
+      egressMediation:
+        image: agentops-egress-proxy:e2e
+claude:
+  enabled: %[2]s
+  image: agentops-runtime-claude:e2e
+runtimes:
+  - name: %[3]s
+    default: true
+    image: agentops-test-stub-runtime:e2e
+    contextStorage: volume
+# ONE NODE: k3s's local-path provisioner serves ReadWriteOnce only, and on a
+# single node that is exactly what a shared context volume needs. The chart's
+# ReadWriteMany default is for a real cluster with a real shared filesystem.
+persistence:
+  context:
+    accessModes: [ReadWriteOnce]
+console:
+  enabled: true
+  image:
+    repository: agentops-console
+    tag: e2e
+  auth:
+    uiToken: %[4]q
+telegram:
+  enabled: true
+  apiBase: http://agentops-test-fake-bot-api:8081
+  channelAdapter:
+    image: {repository: agentops-channel-telegram, tag: e2e}
+  signalAdapter:
+    image: {repository: agentops-signal-telegram, tag: e2e}
+  router:
+    image: {repository: agentops-gateway-telegram, tag: e2e}
+  surface:
+    enabled: true
+    name: tg-ops
+    chatId: %[5]q
+    credentials:
+      botToken: %[6]q
+kubernetes:
+  enabled: true
+  eventsAdapter:
+    enabled: true
+    image: {repository: agentops-signal-k8s-events, tag: e2e}
+  mcpServers:
+    enabled: false
+  mcp:
+    enabled: false
+  pipelines:
+    enabled: false
+prometheus:
+  enabled: true
+  alertmanager:
+    enabled: true
+    image: {repository: agentops-signal-alertmanager, tag: e2e}
+  pipelines:
+    enabled: false
+`, v.AdapterToken, claude, v.Runtime, v.UIToken, v.ChatID, v.BotToken)
+}
+
+// Install applies the CRDs, deploys the fake Bot API, and installs the chart
+// from the working tree.
+func Install(ctx context.Context, c *Cluster, v *InstallValues) error {
+	root := repoRoot()
+	// CRDs FIRST, always: helm installs a CRD only when absent and never
+	// upgrades one, and a cluster that carried an older CRD would prune every
+	// new field silently.
+	if out, err := c.Kubectl(ctx, "apply", "-f", filepath.Join(root, "chart", "crds")); err != nil {
+		return fmt.Errorf("applying CRDs: %v\n%s", err, out)
+	}
+	if out, err := c.Kubectl(ctx, "create", "namespace", Namespace); err != nil && !strings.Contains(out, "AlreadyExists") {
+		return fmt.Errorf("namespace: %v\n%s", err, out)
+	}
+	if out, err := c.Kubectl(ctx, "-n", Namespace, "apply", "-f", filepath.Join(root, "test", "fakebotapi", "deploy", "fake-bot-api.yaml")); err != nil {
+		return fmt.Errorf("fake bot api: %v\n%s", err, out)
+	}
+	values := filepath.Join(os.TempDir(), "agentops-e2e-values.yaml")
+	if err := os.WriteFile(values, []byte(v.valuesYAML()), 0o600); err != nil {
+		return err
+	}
+	if out, err := c.Helm(ctx, "dependency", "build", filepath.Join(root, "chart")); err != nil {
+		return fmt.Errorf("helm dependency build: %v\n%s", err, out)
+	}
+	// No --wait: the context claim binds on FIRST CONSUMER under k3s's
+	// local-path class, so it stays Pending until a runtime pod mounts it and
+	// helm's waiter would call that a failed install. Readiness is asserted
+	// per Deployment instead, by WaitReady.
+	out, err := c.Helm(ctx, "upgrade", "--install", Release, filepath.Join(root, "chart"),
+		"-n", Namespace, "-f", values, "--timeout", "10m")
+	if err != nil {
+		return fmt.Errorf("helm install: %v\n%s", err, out)
+	}
+	return nil
+}
+
+// WaitReady waits for the manager and every enabled adapter Deployment.
+func WaitReady(ctx context.Context, k *Kube, v *InstallValues) error {
+	deployments := []string{
+		"agentops-manager", "agentops-adapter-console", "agentops-test-fake-bot-api",
+		"agentops-adapter-telegram", "agentops-signal-telegram", "agentops-gateway-telegram",
+		"agentops-signal-k8s-events", "agentops-signal-alertmanager",
+	}
+	for _, d := range deployments {
+		if err := k.WaitDeploymentAvailable(ctx, d, 5*time.Minute); err != nil {
+			return err
+		}
+	}
+	return nil
+}

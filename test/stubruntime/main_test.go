@@ -20,7 +20,7 @@ func withHome(t *testing.T) {
 // varied between runs would turn every failure into a question about variance.
 func TestSameInputSameReport(t *testing.T) {
 	withHome(t)
-	u := unit{RunID: "r1", Convo: "c", PromptText: "some prose\n\necho hello there\n"}
+	u := unit{RunID: "r1", Convo: "c", PromptText: "# Direct task\n\nThe user sent this task:\n\n> echo hello there\n\nYou are running headless.\n"}
 	a, _ := perform(u)
 	b, _ := perform(u)
 	if !reflect.DeepEqual(a, b) {
