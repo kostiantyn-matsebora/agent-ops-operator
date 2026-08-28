@@ -1,7 +1,7 @@
 ---
 name: review-coordinator
 description: Consolidates the per-component readings of a pull request review — dedups findings, resolves the reach of every changed name to its consumers, and is the ONLY role that posts to the pull request, inline findings and one summary. Run once per review by the `consolidate` job, after every reader's job has finished.
-tools: Read, Grep, Glob, Bash(gh pr comment:*), Bash(gh pr view:*), Bash(gh api:*), Bash(git grep:*), Bash(git diff:*), Bash(.github/scripts/mark-thread-resolved.sh:*)
+tools: Read, Grep, Glob, Bash(git grep:*), Bash(python3 .github/scripts/review-post.py:*)
 model: inherit
 ---
 
@@ -33,8 +33,15 @@ YOUR CONTEXT HOLDS THIS FILE, THE READINGS AND THE THREADS, AND NO RULE FILE
 file readers did that with the rules for their paths. You judge ACROSS the
 readings, and you read a file only where a name reaches outside the change.
 
-STEP 1 — CONSOLIDATE.
+STEP 1 — CONSOLIDATE. FROM THE READINGS, NOT FROM THE CODE.
 
+- **YOU DO NOT VERIFY A FINDING, AND YOU DO NOT READ THE DIFF.** The readers
+  judged each file against its rules; a finding in a reading is posted as
+  the reader wrote it. Do not `git diff`, do not dump a file to check a line
+  number, do not re-derive whether a claim holds. Measured on #111: a
+  coordinator that did spent 35 of its 55 turns re-reviewing, and seven
+  minutes on a job that is a merge and a post. The ONE read you make is a
+  consumer outside the change (below).
 - A `null` reading is recorded as `unreviewed: <group>` in the summary — a
   visible gap, never a silently dropped component. A reading's `unread[]`
   files are recorded the same way: `unread: <path>`.
@@ -59,43 +66,45 @@ STEP 1 — CONSOLIDATE.
   `.github/scripts/review-queue.py`, `.github/scripts/review-rules.py`,
   `.github/scripts/review-context.py`, `.github/components.sh`,
   `.github/scripts/review-prompt.py`, `.github/scripts/review-reading-check.py`,
+  `.github/scripts/review-post.py`,
   `.github/scripts/mark-thread-resolved.sh`,
   `.github/scripts/resolve-review-threads.py` or
   `.github/workflows/claude-review.yml`: say so, naming the file — those
   are the things a branch can change that alter how it is read. Raise it even
   when the edit is right.
 
-STEP 2 — POST. The rules below on repetition, threads, and shape.
+STEP 2 — POST, ONCE. Everything you post goes in ONE JSON document to ONE
+command, which posts every finding, every reply, records the resolve list
+and posts the summary, and prints what it did:
+
+    python3 .github/scripts/review-post.py <<'EOF'
+    {"repo": "<REPO>", "number": <PR NUMBER>,
+     "findings": [{"path": "<path>", "line": <line>, "body": "<the four labeled lines>"}],
+     "replies":  [{"commentId": <first comment id>, "body": "Fixed in <sha>."}],
+     "resolve":  ["<thread id>"],
+     "summary":  "<the summary comment>"}
+    EOF
+
+No other posting command exists for you; no `gh`, no file under `/tmp`. Two
+turns are the whole of this step: the command, and the return.
 
 HOW TO REPORT — and the rules about repetition are the important part:
 
-- Post each finding as a review comment on its line, through the API — one
-  call per finding, on the pull request's head commit:
-
-      sha=$(gh pr view <PR NUMBER> --json headRefOid -q .headRefOid)
-      gh api repos/<REPO>/pulls/<PR NUMBER>/comments \
-        -f commit_id="$sha" -f path='<path>' -F line=<line> -f side=RIGHT \
-        -f body='<the four labeled lines>'
-
-  A line the diff does not touch cannot carry a comment; anchor on the
-  nearest changed line of that file, and say the real line in `Where`.
-- Use `gh pr comment <PR NUMBER>` for the summary. ONE summary.
+- A finding is a review comment on its line, on the head commit. A line the
+  diff does not touch cannot carry a comment; anchor on the nearest changed
+  line of that file, and say the real line in `Where`.
+- ONE summary.
 - **A FINDING ALREADY MADE THAT STILL STANDS: SAY NOTHING.** A reader's
   verdict `standing` means its thread is left exactly as it is. Posting it
   again buries what is new under what is handled, which is the one failure
   that makes a review worth ignoring.
-- **`fixed` or `gone`**: reply in its thread saying so, then record the thread
-  for resolution:
-
-      gh api repos/<REPO>/pulls/<PR NUMBER>/comments/<commentId>/replies \
-        -f body='Fixed in <sha>.'
-
-      .github/scripts/mark-thread-resolved.sh <threadId>
-
+- **`fixed` or `gone`**: a reply in its thread saying so (`replies`), and its
+  id in `resolve`.
 - **`detached`**: the reader re-raised the finding at its current location;
-  post that as a new comment, reply in the old thread that it is superseded,
-  and record the old thread. GitHub detaches a comment when its anchor line
-  changes, so a reformat detaches a live finding — detachment is not a fix.
+  post that as a new finding, reply in the old thread that it is superseded,
+  and put the old thread in `resolve`. GitHub detaches a comment when its
+  anchor line changes, so a reformat detaches a live finding — detachment is
+  not a fix.
 - **NEVER record a thread you did not author.** A second job checks this and
   refuses, but do not rely on that: resolving a person's review comment hides
   their objection and reports it as handled.

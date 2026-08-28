@@ -72,6 +72,13 @@ env:
   # readings and threads were a few thousand. A relative path in this list
   # matches nothing; `**/` globs do.
   CLAUDE_SETTINGS: '{"claudeMdExcludes":["**/.claude/rules/*.md"]}'
+  # THE MODEL AND ITS EFFORT ARE CHOSEN HERE, NOT INHERITED. A runner has no
+  # settings, so `claude -p` ran sonnet-5 at its default effort — measured on
+  # one 33-line file: 198 s and ~16 k thinking tokens for the same reading
+  # that takes 18 s and ~200 at low effort, with the same findings. Every
+  # role says `model: inherit`, so these two flags reach every subagent.
+  CLAUDE_MODEL: claude-sonnet-5
+  CLAUDE_EFFORT: low
 
 jobs:
   # WHAT THIS DIFF IS, AS DATA. Runs no model: the hygiene guards, the
@@ -307,7 +314,7 @@ jobs:
           prompt=$(python3 .github/scripts/review-prompt.py reader --input review-input.json --group "$ENTRY")
           claude -p "$prompt" \
             --output-format stream-json --verbose --json-schema "$READING_SCHEMA" \
-            --settings "$CLAUDE_SETTINGS" \
+            --model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT" --settings "$CLAUDE_SETTINGS" \
             --allowedTools "Workflow,Agent(file-reviewer)" \
             > read-execution.jsonl || true
           python3 .github/scripts/review-trace.py read-execution.jsonl --out reader-output.json
@@ -320,6 +327,17 @@ jobs:
           path: read-execution.jsonl
           retention-days: 1
           if-no-files-found: ignore
+      # THE FILE READERS' OWN TRANSCRIPTS — what each spent its turns on. The
+      # execution record above shows only the session; the subagents' turns
+      # are in the runner's project directory and were invisible until this.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: transcripts-${{ matrix.entry.slug }}
+          path: ~/.claude/projects
+          retention-days: 1
+          if-no-files-found: ignore
+          include-hidden-files: true
       - uses: actions/upload-artifact@v4
         with:
           # An artifact name may not carry a slash, so the queue supplies a
@@ -378,7 +396,7 @@ jobs:
         run: |
           set -euo pipefail
           restored=""
-          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/review-rules.py .github/scripts/review-context.py .github/scripts/review-trace.py .github/scripts/mark-thread-resolved.sh; do
+          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/review-rules.py .github/scripts/review-context.py .github/scripts/review-trace.py .github/scripts/review-post.py .github/scripts/mark-thread-resolved.sh; do
             git cat-file -e "$BASE:$f" 2>/dev/null || continue
             git diff --quiet "$BASE" -- "$f" || restored="$restored $f"
             git checkout "$BASE" -- "$f"
@@ -409,8 +427,8 @@ jobs:
           conclusion=success
           claude -p "$prompt" --agent review-coordinator \
             --output-format stream-json --verbose \
-            --settings "$CLAUDE_SETTINGS" \
-            --allowedTools "Read,Grep,Glob,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh api:*),Bash(git grep:*),Bash(git diff:*),Bash(.github/scripts/mark-thread-resolved.sh:*)" \
+            --model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT" --settings "$CLAUDE_SETTINGS" \
+            --allowedTools "Read,Grep,Glob,Bash(git grep:*),Bash(python3 .github/scripts/review-post.py:*)" \
             > "$out" || conclusion=failure
           echo "execution_file=$out" >> "$GITHUB_OUTPUT"
           last=$(grep '"type":"result"' "$out" | tail -1 || true)

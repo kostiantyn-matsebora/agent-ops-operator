@@ -193,6 +193,18 @@ assert_contains "$p" '"references"'
 assert_contains "$p" '"threads"'
 assert_contains "$p" '"findings"'
 
+it "the model and its effort are chosen by the workflow, on every claude -p, and reach the subagents by inherit"
+assert_equals "claude-sonnet-5" "$(py 'print(d["env"]["CLAUDE_MODEL"])')"
+assert_equals "low" "$(py 'print(d["env"]["CLAUDE_EFFORT"])')"
+for j in read consolidate; do
+  assert_contains "$(py "print(runs('$j'))")" '--model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT"'
+done
+assert_equals "inherit" "$(fm model "$REVIEWER")"
+assert_equals "inherit" "$(fm model "$COORD")"
+
+it "the file reader is told the cross-review lists are not optional"
+assert_contains "$(body "$REVIEWER")" "THEY ARE NOT OPTIONAL"
+
 it "the file reader judges against the rules it is told to read, and inherits none"
 assert_contains "$p" "RULE FILES TO READ"
 assert_contains "$p" "Nothing else about this project's doctrine is in your context"
@@ -213,10 +225,19 @@ assert_contains "$c" '**Claim:**'
 assert_contains "$c" '**Where:**'
 assert_contains "$c" '**Rule:**'
 assert_contains "$c" '**Fix:**'
-assert_contains "$(fm tools "$COORD")" "gh pr comment"
+assert_contains "$(fm tools "$COORD")" "review-post.py"
+assert_not_contains "$(fm tools "$COORD")" "gh "
+assert_not_contains "$(fm tools "$COORD")" "git diff"
 assert_not_contains "$(fm tools "$COORD")" "Agent"
 assert_not_contains "$(fm tools "$COORD")" "mcp__"
-assert_contains "$c" "pulls/<PR NUMBER>/comments"
+assert_contains "$c" "review-post.py <<'EOF'"
+assert_contains "$c" "YOU DO NOT VERIFY A FINDING, AND YOU DO NOT READ THE DIFF"
+
+it "the coordinator's allowlist in the job matches: one posting command, no gh"
+callowed=$(py 'print(re.search(r"--allowedTools \"([^\"]*)\"", runs("consolidate")).group(1))')
+assert_contains "$callowed" "Bash(python3 .github/scripts/review-post.py:*)"
+assert_not_contains "$callowed" "gh "
+assert_not_contains "$callowed" "git diff"
 
 it "consolidates in the coordinator: cross-review from readings, reach outside, unreviewed, and the first finding names the guarded files"
 assert_contains "$c" "git grep -l -F"
