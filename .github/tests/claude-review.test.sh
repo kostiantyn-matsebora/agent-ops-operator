@@ -94,7 +94,7 @@ assert_equals "" "$(grep -rl --fixed-strings "$(av)" "$ROOT/.github" | grep -v a
 it "the component session runs the saved workflow and may spawn only the file reader"
 r=$(py 'print(runs("read"))')
 assert_contains "$r" 'claude -p "$prompt"'
-assert_contains "$r" '--output-format json --json-schema'
+assert_contains "$r" '--json-schema "$READING_SCHEMA"'
 assert_contains "$r" 'review-prompt.py reader'
 assert_contains "$r" 'review-reading-check.py'
 allowed=$(py 'print(re.search(r"--allowedTools \"([^\"]*)\"", runs("read")).group(1))')
@@ -122,12 +122,20 @@ for k in changedNames files threads unread; do assert_contains "$s" "$k"; done
 assert_contains "$s" "RULE FILES TO READ FOR THIS PATH"
 assert_contains "$s" "resolved and unresolved alike"
 
-it "every model context in this job is measured and printed before it runs"
-assert_contains "$(py 'print(runs("read"))')" "review-context.py component"
-assert_contains "$(py 'print(runs("consolidate"))')" "review-context.py coordinator"
-idx_ctx=$(py 'print([i for i,s in enumerate(steps("read")) if "review-context.py" in s.get("run","")][0])')
-idx_read=$(py 'print([i for i,s in enumerate(steps("read")) if "claude -p" in s.get("run","")][0])')
-[ "$idx_ctx" -lt "$idx_read" ] && pass || fail "the measurement must precede the model"
+it "what each context holds is the first thing a model job says — before anything is installed or restored"
+for j in read consolidate; do
+  assert_contains "$(py "print(runs('$j'))")" "review-context.py"
+  idx_ctx=$(py "print([i for i,s in enumerate(steps('$j')) if 'review-context.py' in s.get('run','')][0])")
+  idx_cli=$(py "print([i for i,s in enumerate(steps('$j')) if s.get('uses','')=='./.github/actions/claude-cli'][0])")
+  idx_restore=$(py "print([i for i,s in enumerate(steps('$j')) if 'actions/claude-cli/action.yml' in s.get('run','')][0])")
+  [ "$idx_ctx" -lt "$idx_restore" ] && [ "$idx_ctx" -lt "$idx_cli" ] && pass || fail "$j: the measurement must precede the restore and the install"
+done
+
+it "every model step leaves a trace in the log: turns, tokens, and each file reader's duration"
+assert_contains "$(py 'print(runs("read"))')" "review-trace.py read-execution.jsonl --out reader-output.json"
+assert_contains "$(py 'print(runs("read"))')" "--output-format stream-json --verbose --json-schema"
+assert_contains "$(py 'print(runs("consolidate"))')" 'review-trace.py "$out"'
+assert_contains "$(py 'print(json.dumps([s.get("with",{}) for s in steps("read")]))')" 'read-execution-${{ matrix.entry.slug }}'
 
 it "the coordinator runs its role in consolidate, and holds the summary gate and the resolve list"
 c=$(py 'print(runs("consolidate"))')
