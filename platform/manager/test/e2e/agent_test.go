@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -122,7 +123,7 @@ func TestRealRuntime(t *testing.T) {
 		_ = e.K.Delete(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: first.Status.RuntimePod}})
 		waitFor(t, "the pod to be gone", 2*time.Minute, func() (bool, error) {
 			var p corev1.Pod
-			return e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: first.Status.RuntimePod}, &p) != nil, nil
+			return apierrors.IsNotFound(e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: first.Status.RuntimePod}, &p)), nil
 		})
 	}
 	answer := ask(t, e, conv.Name, "What was the token I asked you to remember? Reply with the token only.", 2)

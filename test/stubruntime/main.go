@@ -147,6 +147,11 @@ func perform(u unit) (report, bool) {
 		handle = u.ResumeSessionID
 	}
 	r := report{Convo: u.Convo, RunID: u.RunID, Status: "succeeded"}
+	// die and stall report NOTHING, whatever handle came with the unit: the
+	// directive is the script, and a lost-context report would be a report.
+	if d == "die" || d == "stall" {
+		return report{}, false
+	}
 	// A handle we were asked to continue that names nothing is a LOST context:
 	// promised-and-lost fails the run. The stale-context directive is how a
 	// test plants such a handle; the failure is on the NEXT unit.
@@ -171,10 +176,6 @@ func perform(u unit) (report, bool) {
 	case "no-context":
 		r.Result = resultPrefix + "no handle reported"
 		r.Continuity = "new"
-	case "die":
-		return report{}, false
-	case "stall":
-		return report{}, false
 	case "storage-outage":
 		code := int32(1)
 		r.Status, r.ExitCode = "failed", &code

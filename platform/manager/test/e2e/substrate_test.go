@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -163,8 +164,7 @@ func TestContextSurvivesLosingThePod(t *testing.T) {
 	}
 	waitFor(t, "the pod to be gone", 2*time.Minute, func() (bool, error) {
 		var p corev1.Pod
-		err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: pod.Name}, &p)
-		return err != nil, nil
+		return apierrors.IsNotFound(e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: pod.Name}, &p)), nil
 	})
 	// Continue through the console, the human path.
 	if code, out := e.ConsoleSend(t, conv.Name, "echo two"); code/100 != 2 {

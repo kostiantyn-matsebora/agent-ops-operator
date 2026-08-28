@@ -508,8 +508,8 @@ func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 		sigs = sigs[:maxBatchPerSrc]
 	}
 	allowed, clipped := a.cap.Allow(source, sigs)
-	a.reportClipping(ctx, source, clipped)
 	if len(allowed) == 0 {
+		a.reportClipping(ctx, source, clipped)
 		return false
 	}
 	if err := a.mgr.Inbound(ctx, source, allowed); err != nil {
@@ -519,7 +519,10 @@ func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 		}
 		return false
 	}
+	// Recovery FIRST, the clip AFTER: a window still clipping re-asserts
+	// EmitCapReached on top of the recovered condition rather than under it.
 	a.reportPostRecovered(ctx, source)
+	a.reportClipping(ctx, source, clipped)
 	log.Printf("posted %d log signal(s) for %s", len(allowed), source)
 	return true
 }
@@ -535,7 +538,8 @@ func (a *adapter) reportPostFailure(ctx context.Context, source string, err erro
 		return
 	}
 	msg := "signals could not be handed to the manager and were lost: " + err.Error()
-	go func() { _ = a.mgr.ReportStatus(ctx, source, false, "PostFailed", msg) }()
+	// Synchronous, so the failure and its recovery are ordered as they happened.
+	_ = a.mgr.ReportStatus(ctx, source, false, "PostFailed", msg)
 }
 
 // reportPostRecovered clears a reported post failure on the first success.
@@ -543,7 +547,7 @@ func (a *adapter) reportPostRecovered(ctx context.Context, source string) {
 	if _, failing := a.postFailing.LoadAndDelete(source); !failing {
 		return
 	}
-	go func() { _ = a.mgr.ReportStatus(ctx, source, true, "AdapterReady", "posting to the manager again") }()
+	_ = a.mgr.ReportStatus(ctx, source, true, "AdapterReady", "posting to the manager again")
 }
 
 // reportClipping surfaces a clipped window on the source's condition. Silent
