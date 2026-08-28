@@ -1,7 +1,8 @@
 {{- /*
 This bundle's ONE runtime, rendered through the PARENT's shared renderer so its
-CR cannot drift from a runtime the install declares itself — the exact shape of
-chart/charts/ollama/templates/runtime.yaml.
+CR cannot drift from a runtime the install declares itself. It follows
+chart/charts/ollama/templates/runtime.yaml for the env and the claude bundle's
+credential pattern for the Secret.
 
 `model`, `maxAiCredits` and the credential become the env the runtime reads,
 through the parent's `agentops.copilotRuntimeEntry` — the same helper the

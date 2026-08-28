@@ -827,9 +827,9 @@ obligations it made visible bind every runtime:
 
 | Obligation | Because |
 |---|---|
-| **an absent or unreadable definition contributes NOTHING**, whatever the vendor's own default | Copilot reads a definition with no `tools:` as "every tool"; the runtime passes the composed list explicitly, empty included, so that reading never applies |
-| **a pattern the runtime cannot honour is reported, never guessed at** | passing it through would hand the vendor a string it reads as some other tool; dropping it silently would widen or narrow a route with no record |
-| **what a narrowing pattern such as `Bash(kubectl:*)` does is the RUNTIME's fact** | `runtime-ollama` has no per-invocation hook and grants nothing on it; `runtime-copilot` has one and enforces the scope; each says so on its own page |
+| **an absent or unreadable definition contributes NOTHING**, whatever the vendor's own default | Copilot reads a definition with no `tools:` as "every tool". The runtime passes the composed list explicitly, empty included, so that reading never applies |
+| **a pattern the runtime cannot honour is reported, never guessed at** | passing it through would hand the vendor a string it reads as some other tool. Dropping it silently would widen or narrow a route with no record |
+| **what a narrowing pattern such as `Bash(kubectl:*)` does is the RUNTIME's fact** | `runtime-ollama` has no per-invocation hook and grants nothing on it. `runtime-copilot` has one and enforces the scope. Each says so on its own page |
 
 The context id is the runtime's to mint there — the SDK accepts a caller-chosen
 one — which is the first backend to exercise `runtimeContextId` as a handle the

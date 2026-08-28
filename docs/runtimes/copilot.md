@@ -96,7 +96,7 @@ this is the only runtime — so it is the default without the flag.
 
 | Value | Is |
 |---|---|
-| `copilot.credentialsSecret.token` | a GitHub token with Copilot access. Set, the Secret is created; empty, the named Secret is yours to create |
+| `copilot.credentialsSecret.token` | a GitHub token with Copilot access. Set, the Secret is created. Empty, the named Secret is yours to create |
 | `copilot.model` | the model, by Copilot's id. Optional: empty means Copilot's default for the account |
 | `copilot.maxAiCredits` | a hard ceiling on what one run may spend, in Copilot AI credits. Optional |
 | `copilot.env` | further knobs, as env entries — the run timeout, the SDK log level, a BYOK provider |
