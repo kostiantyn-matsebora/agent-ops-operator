@@ -204,7 +204,7 @@ paths. No ServiceAccount, no volume, no credential.
 ## Going deeper
 
 - [Run agents on your own backend]({{ '/guides/agent-runtime/' | relative_url }})
-  — the contract this runtime implements, for writing a third.
+  — the contract this runtime implements, for writing a fourth.
 - [GitHub Copilot]({{ '/runtimes/copilot/' | relative_url }}) — the vendor-SDK
   runtime, for the lanes a vendor's agent suits.
 - [Installation]({{ '/installation/' | relative_url }}) — the runtime defaults
