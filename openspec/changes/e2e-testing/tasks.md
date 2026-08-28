@@ -111,9 +111,9 @@ Reference docs:
 - [ ] 14.2 `docs/contracts.md`: the conformance suite as the stated way an adapter proves the contract
 - [ ] 14.3 `.claude/rules/build-test.md`: e2e and conformance entry points; `.claude/rules/structure.md`: the `test/` tree and its exclusion from `components.sh`
 - [ ] 14.4 Record the manual repository setup — the API-key secret and the cadence decision — as prerequisites, not as code
+- [ ] 14.5 `CONTRIBUTING.md`: the test tiers a pull request meets and how to run them before pushing — its own row in the routing table, neither half
 
 Adopter site:
 
-- [ ] 14.5 `CONTRIBUTING.md`: the test tiers a pull request meets and how to run them before pushing
-- [ ] 14.6 `docs/installation.md`: the `apiBase` value on the telegram bundle, if it is exposed as a value an operator decides
+- [ ] 14.6 `docs/integrations/telegram.md`: the `apiBase` value on the telegram bundle — a SUBCHART value belongs to its integration page, never `docs/installation.md`; and confirm the landing page, Introduction, Getting started and Installation say nothing this change makes untrue
 - [ ] 14.7 Confirm no `docs/CHANGELOG.md` entry is needed (nothing ships), and `python3 .github/scripts/docs-generate.py --check` passes
