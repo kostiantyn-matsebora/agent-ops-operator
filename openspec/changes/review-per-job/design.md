@@ -79,37 +79,113 @@ one-file docs fix is one job. Nothing enumerates the tree.
 Matrix size is bounded by GitHub at 256; `review-queue.py` produces at most
 one entry per component plus a handful of directory groups, far below it.
 
-### D3 — `read` is one `claude -p` per matrix entry, returning a file
+### D3 — `read` is one `claude -p` per matrix entry, which runs a FILE READER per changed file
 
 Each job: checkout (full depth, for `base...HEAD`), the composite action
-(D4) with `restore: .claude/agents/component-reviewer.md`, then:
+(D4) with `restore: .claude/agents/file-reviewer.md`, then one `claude -p`
+whose only work is to run the saved workflow `review-component` (D8) and
+return its merged reading:
 
 ```
-claude -p "$PROMPT" --agent component-reviewer --output-format json \
-  --settings "$EXCLUDES" --allowedTools "<the reader's tools>" > out.json
+claude -p "$PROMPT" --output-format json --json-schema "$READING" \
+  --settings "$SETTINGS" --allowedTools "Workflow,Agent(file-reviewer)" > out.json
 ```
 
-- The prompt is the same delegation message the script built: REPO, PR, BASE,
-  COMPONENT, PATHS, THREADS ON THESE PATHS, DELTA SPECS — assembled by a
-  Python step from `review-input.json` for `matrix.group`.
-- The reader is asked to return ONLY the JSON; `review-reading-check.py`
-  extracts the `result` from the CLI's JSON envelope, parses the first `{…}`
-  in it, validates against the reader's shape (the same four required keys
-  and enums the script's `FINDINGS` schema held), and writes
-  `reading-<group>.json` — or exits non-zero, which fails the job by name.
-  The job's failure does not fail the workflow (`continue-on-error: true`):
-  `consolidate` reads an absent artifact as `null`, the named `unreviewed`
-  gap, exactly the script's semantics.
-- `--agent` reapplies the role's `tools:` as an availability intersection.
-  That is the behaviour `wiring.md` bans for RUNTIME pods (it defeats
-  `overwrite`); here it is wanted — it is the allowlist.
-- Widened tools: `Bash(git ls-files:*)`, `Bash(git ls-tree:*)`,
-  `Bash(git cat-file:*)`. The role states what is unavailable — redirection,
-  paths outside the checkout, `helm`, `go`, `python3` — so a reader stops
-  probing.
+- The prompt is the component's delegation message — REPO, PR, BASE,
+  COMPONENT, PATHS, THREADS ON THESE PATHS, DELTA SPECS — assembled by
+  `review-prompt.py` from `review-input.json` for `matrix.entry.group`, and
+  the instruction to run the workflow with it and return the result verbatim.
+- `review-reading-check.py` validates the merged reading (D8's shape) and
+  writes `readings/reading.json` — or exits non-zero, which fails the job by
+  name. The job's failure does not fail the workflow (`continue-on-error:
+  true`): `consolidate` reads an absent artifact as `null`, the named
+  `unreviewed` gap.
 - `--output-format json` rather than `stream-json`: one job, one result; the
-  envelope's `result` is the return. The stream form is kept for
+  envelope's `structured_output` is the return. The stream form is kept for
   `consolidate`, whose transcript is the execution record the gate points at.
+
+### D8 — `review-component.js`: a file reader per file, two at a time, merged by the script
+
+The saved workflow holds the loop, for the reason on record (#74, #77): a
+plan in a model turn is dropped with the turn. It runs `pipeline()` over the
+component's changed files with `agentType: 'file-reviewer'`, schema-validated
+returns, and merges.
+
+- **A FILE READER's context is what that file needs and nothing else.** Its
+  delegation message names: the file, the component and the OTHER changed
+  files in it (names only — so a reference to a sibling is recognisable), the
+  threads on that file, the delta specs, and THE RULE FILES TO READ for that
+  path (D9). It reads its diff with `git diff -M <base>...HEAD -- <file>`,
+  reads the file itself, reads the named rules, and returns.
+- **The return is the reading plus the INTERFACE FACTS the cross-review
+  needs:**
+
+  ```
+  {"path": "...", "findings": [...as today...],
+   "declares":   ["<name added, removed or renamed — exact spelling, old and new>"],
+   "references": ["<name used from outside this file — an import, a call, a field, an env var, a chart key, a path>"],
+   "threads": [{"id": "...", "verdict": "fixed|standing|gone|detached"}]}
+  ```
+
+- **The script merges** into the component reading: `findings` concatenated,
+  `changedNames` = union of `declares` (so the coordinator's existing reach is
+  unchanged), a new `files[]` carrying each file's `declares` and
+  `references`, `threads` concatenated, and `unread[]` naming any file whose
+  reader returned nothing usable — a gap by name inside a component, the
+  same rule as `unreviewed` between components.
+- **Two at a time is the pool** on a four-core runner and it is not fought:
+  the width of the review is the matrix across components. A component with
+  many files is long; it is also read in bounded contexts instead of one that
+  grows with the diff. Whether the 600 s stop seen on #106 is a ceiling on
+  the CLI's wait is MEASURED before this is relied on (task 7.1); if it is,
+  the queue chunks a component into several matrix entries under it.
+- **Dedup is the coordinator's**, by path + claim, as before.
+
+### D9 — No job carries the rules; a reader is told which to read
+
+Every `claude -p` in the review passes
+`{"claudeMdExcludes":["**/.claude/rules/*.md"]}`. `CLAUDE.md` itself stays
+(a few kilobytes: the index and the two named exceptions). What a context then
+holds is its role file and its delegation message.
+
+- **The routing table is a program**, `review-rules.py`, mapping a path to
+  the rule files a reader of it must `Read`:
+
+  | Path | Rules |
+  |---|---|
+  | `platform/manager/**` | `invariants.md`, `terminology.md`, `wiring.md`, `adapters.md`, `structure.md` |
+  | `platform/manager/internal/ingest/**`, `signals/**` | the above plus `signal-rules.md` |
+  | `runtimes/**`, `channels/**`, `gateways/**`, `platform/*` (other) | `invariants.md`, `terminology.md`, `adapters.md`, `structure.md` |
+  | `chart/**` | `chart.md`, `wiring.md`, `invariants.md` |
+  | `docs/**` | `documentation.md`, `terminology.md`, and `docs/CLAUDE.md` |
+  | `platform/console/ui/src/theme/**`, `docs/assets/css/**` | `palette-and-mark.md` plus the row above |
+  | `.claude/**`, `openspec/**` | `authoring.md`, `retired-vocabulary.md`, `terminology.md` |
+  | `.github/**`, root files | `authoring.md`, `retired-vocabulary.md`, `structure.md` |
+
+  Every path gets `retired-vocabulary.md`; nothing gets the six
+  developer-session rules. The table is tested: every named file exists, and
+  every rule file is reachable from some path — a rule no path routes to is
+  one the review has silently stopped enforcing.
+- **The coordinator reads no rules.** It dedups, greps and posts; its role
+  file is its whole instruction.
+- **The measurement that decides this stays in the record** (proposal — What
+  Changes): 34 turns × ~76 k tokens on `consolidate`.
+
+### D10 — Two measurements before the mechanism is trusted
+
+Both run against this pull request, dispatched from the branch, and are
+recorded on the tracking issue with their run links. No number is claimed in
+any document before it is measured.
+
+1. **The ceiling.** A component job whose workflow has more file readers than
+   ten minutes at two-wide can finish. If the CLI stops the run at 600 s, the
+   queue chunks components (D1's matrix, one entry per chunk) so no job's
+   workflow exceeds what fits; if it does not, no chunking.
+2. **The readings.** The per-file readings' findings on this pull request
+   beside the per-component readings' findings already on it: what each found
+   that the other did not. The cross-review from `declares`/`references` must
+   catch the one cross-file finding the component reader made (the queue
+   scripts unrestored) or the design is not done.
 
 ### D4 — `.github/actions/claude-cli`: pinned, cached, and the restore
 

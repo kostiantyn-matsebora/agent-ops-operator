@@ -25,9 +25,29 @@
 - [x] 5.2a Add `.github/tests/review-input.test.sh`: `review-input.py` against a stubbed `gh` (the three calls, two pages of threads, the matrix output with slugs, the delta specs on a `change/` branch) and `review-prompt.py` over that input (a reader's message holds only its component; a missing reading is `null` and named `unreviewed`). Verify: `.github/tests/run.sh` passes.
 - [x] 5.3 Run the review by hand against an open pull request from the worktree's branch: push the branch, open the pull request, and dispatch `gh workflow run claude-review.yml --ref change/review-per-job -f number=<pr> -f dry_run=true`. Verify from the run: one `read` job per component, all started within the same minute, each uploading a reading or failing by name; then a non-dry run posts one summary with the count line and the "review actually ran" gate passes. Record the run's wall-clock in the tracking issue against #106's 10 min.
 
-## 6. Documentation
+## 7. The rules are routed, not inherited (design D9)
 
-### 6.1 Reference docs
+- [ ] 7.1 Add `.github/scripts/review-rules.py`: path → the rule files a reader of it must read (the table in D9); `--check` asserts every named file exists and every `.claude/rules/*.md` outside the six developer-session rules is reachable from some path. Verify: `.github/tests/review-rules.test.sh` — a manager path gets `invariants`/`terminology`/`wiring`; an ingest path adds `signal-rules`; a chart path gets `chart`; a docs path gets `documentation` and `docs/CLAUDE.md`; every path gets `retired-vocabulary`; no path gets `build-test`; `--check` fails on a fixture rule no path routes to.
+- [ ] 7.2 Every `claude -p` in `claude-review.yml` passes `{"claudeMdExcludes":["**/.claude/rules/*.md"]}`; the six-file list is gone. Verify: the review test asserts the glob on `read` and `consolidate` and that no rule file name appears in the settings.
+- [ ] 7.3 `review-coordinator.md` states it reads no rules; the "first finding" list adds `review-rules.py`, `review-component.js` and `file-reviewer.md`. Verify: the review test.
+
+## 8. A file reader per file, cross-reviewed from the readings (design D8)
+
+- [ ] 8.1 Add `.claude/agents/file-reviewer.md`: one file, its diff, the named rules read on demand, the return shape with `declares` and `references`; tools are the reader's read-only set. `component-reviewer.md` is deleted and its name added to retired vocabulary. Verify: the review test asserts the role's tools and return fields.
+- [ ] 8.2 Add `.claude/workflows/review-component.js`: `pipeline()` over the component's files with `agentType: 'file-reviewer'`, schema-validated, merged into the component reading (`findings`, `changedNames` = ∪ `declares`, `files[]`, `threads`, `unread[]`). Verify: `node --check`, and the review test asserts the meta name, the agent type, the schema's required keys and the merge fields.
+- [ ] 8.3 `review-prompt.py` gains `file` (a file reader's message, with the rules from 7.1 and the sibling file names) and the `reader` message becomes the component session's instruction to run the workflow; `review-reading-check.py` validates the merged shape. Verify: `review-input.test.sh` and `review-reading-check.test.sh` cover the new shapes.
+- [ ] 8.4 `read` job: `--allowedTools "Workflow,Agent(file-reviewer)"`, `--json-schema` for the merged reading, `restore:` names `file-reviewer.md` and `review-component.js`; `consolidate` restores `review-rules.py`. Verify: the review test.
+- [ ] 8.5 `review-coordinator.md` gains the cross-review from readings: every name in a file's `declares` that is removed or renamed, checked against every other reading's `references` — a hit is a finding against that file; the repo grep stays for consumers outside the change. Verify: the review test asserts the instruction.
+- [ ] 8.6 MEASURE (design D10.1): dispatch the review from the branch against this pull request; read the `.github` job's workflow record for the file readers' timings and whether the run was stopped at 600 s. Record on the issue. If a ceiling exists, add chunking to `review-queue.py` (one matrix entry per chunk, files partitioned by directory) with a test, and re-measure.
+- [ ] 8.7 MEASURE (design D10.2): put the per-file readings' findings beside the per-component findings already on this pull request; the cross-review must reproduce the queue-scripts-unrestored finding from `declares`/`references`. Record the comparison on the issue. If it does not, the return shape or the cross-review instruction is wrong, and the change is not done.
+
+## 9. Documentation
+
+### 9.1 Reference docs
+
+- [ ] 9.1.0 Every 6.x item below is re-checked against what sections 7–8 actually did, and the ones the readers changed are redone: CONTRIBUTING's paragraph says a component is read per file by subagents with routed rules and cross-reviewed from the readings; `worktree-delivery.md` names `file-reviewer`, `review-component.js` and `review-rules.py` in the restore list; `gotchas.md` gains the two measurements (the coordinator's 34 × 76 k tokens, and D10's results); `retired-vocabulary.json` gains `component-reviewer`. Verify: the guards pass and `git grep component-reviewer` outside archives and records is empty.
+
+### 6.1 Reference docs (as first done; re-checked by 9.1.0)
 
 - [x] 6.1.1 `CONTRIBUTING.md`: the "Claude reviews the pull request" paragraph describes the matrix — one job per component, consolidated once — and the by-hand path `gh workflow run claude-review.yml -f number=<pr>` with `dry_run`; no mention of a saved workflow or `/review-pr`. Verify: `git grep -n '/review-pr\|review-pr.js' CONTRIBUTING.md` is empty.
 - [x] 6.1.2 `.claude/rules/worktree-delivery.md` "THE REVIEW FOUND SOMETHING" — the review is four jobs, the roles are the two files, the fan-out is the matrix; the by-hand command. Verify: the section names no script.
@@ -35,6 +55,7 @@
 - [x] 6.1.4 `.claude/rules/retired-vocabulary.md` and `.github/retired-vocabulary.json` — add `review-pr.js` / `/review-pr` with `says` naming the workflow dispatch. Verify: `python3 .github/scripts/retired-vocabulary-guard.py` passes on the tree.
 - [x] 6.1.5 `docs/CHANGELOG.md` is NOT touched — this is repository tooling, not a release. Verify: `git diff --stat docs/` is empty, and `python3 .github/scripts/publication-guard.py` passes.
 
-### 6.2 Adopter site
+### 9.2 Adopter site
 
+- [ ] 9.2.1 Re-confirm after sections 7–8: `git grep -n 'review-pr\|claude-review\|component-reviewer\|file-reviewer\|review-coordinator' docs/` is empty, so no page changes. Verify: the grep is empty and this task records that.
 - [x] 6.2.1 Confirm the site says nothing the change made untrue: `git grep -n 'review-pr\|claude-review\|component-reviewer\|review-coordinator' docs/` is empty (it was at proposal time), so no page changes. Verify: the grep is empty and this task records that.
