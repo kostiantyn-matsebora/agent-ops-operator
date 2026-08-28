@@ -10,13 +10,16 @@ what to spawn next or how long to wait. The queue of components — which
 readings exist and what each is handed — SHALL be built by a program from the
 changed paths, never by a model.
 
-Within a component, the reading SHALL be made PER FILE: one reader per
-changed file, whose context holds that file's diff, its own standing threads,
-the names of the component's other changed files, and the rule files that
-apply to that path — read on demand, never inherited — and nothing else. The
-file readers SHALL be started and collected by a script, and their readings
-merged by it into the component's, with a file whose reader returned nothing
-usable named as unread rather than dropped.
+Within a component, the reading SHALL be made PER FILE by a fixed set of
+WORKERS over a queue of the changed files: each worker reads the rule files
+that apply to its files once — on demand, never inherited — and then takes
+its files one at a time, holding that file's diff, its own standing threads,
+the names of the component's other changed files and the change's delta
+specs, and returns one reading per file. The workers SHALL be started and
+collected by a script, their readings merged into the component's, with a
+file no worker returned named as unread rather than dropped. A component is
+one job, never split for width, since a job costs more to start than a
+reading.
 
 Each file reading SHALL return, beside its findings, the names the file
 DECLARES — added, removed or renamed — and the names it REFERENCES from
