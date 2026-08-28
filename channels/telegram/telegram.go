@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,8 +24,30 @@ type Telegram struct {
 	BaseURL string
 }
 
-// telegramAPIBase is the real Bot API root.
+// telegramAPIBase is the real Bot API root — the DEFAULT, never the only
+// value. An adapter's outbound base URL is configuration: TELEGRAM_API_BASE on
+// the process, or the `apiBase` key of a channel's credential Secret, so the
+// outbound half can be exercised against a local double with no bot token.
 const telegramAPIBase = "https://api.telegram.org"
+
+// apiBaseEnv names the process-level override. Deployment-level on purpose:
+// a per-surface field in Channel.spec.config would let anyone who can edit a
+// served channel redirect that channel's bot token to a host of their choosing.
+const apiBaseEnv = "TELEGRAM_API_BASE"
+
+// resolveAPIBase picks the Bot API root from the explicit value, then the
+// process environment, then the real host. A trailing slash is dropped so the
+// "/bot<token>/<method>" suffix joins cleanly whatever an operator typed.
+func resolveAPIBase(explicit string) string {
+	base := strings.TrimSpace(explicit)
+	if base == "" {
+		base = strings.TrimSpace(os.Getenv(apiBaseEnv))
+	}
+	if base == "" {
+		return telegramAPIBase
+	}
+	return strings.TrimRight(base, "/")
+}
 
 // apiBase returns the root this client posts to.
 func (t *Telegram) apiBase() string {
@@ -34,9 +57,10 @@ func (t *Telegram) apiBase() string {
 	return telegramAPIBase
 }
 
-// NewTelegram builds a client; the HTTP timeout leaves room for 20s long-polls.
-func NewTelegram(token string) *Telegram {
-	return &Telegram{Token: token, HTTP: &http.Client{Timeout: 35 * time.Second}}
+// NewTelegram builds a client posting to base (resolved through
+// resolveAPIBase); the HTTP timeout leaves room for 20s long-polls.
+func NewTelegram(token, base string) *Telegram {
+	return &Telegram{Token: token, HTTP: &http.Client{Timeout: 35 * time.Second}, BaseURL: resolveAPIBase(base)}
 }
 
 type tgResponse struct {

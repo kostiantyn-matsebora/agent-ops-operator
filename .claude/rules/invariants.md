@@ -433,6 +433,32 @@ Consequences that were each a real loss:
 - **A chat signal MUST carry `agentops.dev/channel`.** `/signal/inbound` refuses
   one it could not answer.
 
+### AN ADAPTER'S OUTBOUND BASE URL IS CONFIGURATION, NEVER A CONSTANT
+
+Every component that calls OUT — `channel-telegram`, `gateway-telegram`, and
+any adapter reaching a self-hosted upstream — resolves the host it calls from
+configuration, defaulting to the real one.
+
+- **`TELEGRAM_API_BASE` on both Telegram processes**, default
+  `https://api.telegram.org`; the bundle's `telegram.apiBase` value renders it —
+  as env on the chart-owned router Deployment, and as the `apiBase` key of the
+  bot Secret for the reconciler-owned channel adapter (projected as
+  `AGENTOPS_CRED_<CHANNEL>_apiBase`). UNSET RENDERS NOTHING, so a default
+  install is byte-identical.
+- **NEVER `Channel.spec.config`.** Anyone able to edit a served channel could
+  otherwise send that channel's bot token to a host of their choosing. The
+  Secret that already holds the token is the one place a redirect grants
+  nothing new — which is why the channel-adapter half rides there and not on a
+  CR field, since a `ChannelAdapter` carries no `env` (`adapters.md`).
+- **It exists so the outbound half can be tested against a local double** with
+  no bot token and no account. Both adapters parameterised the MANAGER url in
+  the same file and hardcoded the third party: an inconsistency, not a
+  decision. A self-hosted upstream (Home Assistant) has no fixed address, so
+  the rule costs nothing anywhere else.
+- **Redirecting the endpoint does not create a second consumer.** The
+  single-`getUpdates` rule is about how many pollers exist, not where they
+  point.
+
 ### HTTP API is NOT leader-gated
 
 `NeedLeaderElection()=false` — webhooks must serve during rollouts.

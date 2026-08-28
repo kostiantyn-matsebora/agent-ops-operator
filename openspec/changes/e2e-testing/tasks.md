@@ -1,10 +1,10 @@
 ## 1. Outbound endpoint becomes configuration
 
-- [ ] 1.1 `channel-telegram`: resolve the Bot API base from `TELEGRAM_API_BASE`, defaulting to `https://api.telegram.org`, and route every call through it — `sendMessage`, `sendDocument`, `createForumTopic`, `closeForumTopic`
-- [ ] 1.2 `gateway-telegram`: same resolution for the `getUpdates` poll loop; absent value takes the default silently, unlike the required forwarding targets and bot token
-- [ ] 1.3 Unit tests in both modules: default when unset, override honoured on every call, and `Channel.spec.config` cannot influence it
-- [ ] 1.4 `chart/charts/telegram/`: optional `apiBase` value rendering no env entry when unset; assert byte-identical default render in `platform/manager/internal/integration/charttemplate_test.go`
-- [ ] 1.5 Add the standing rule to `.claude/rules/invariants.md` — an adapter's outbound base URL is configuration, never a constant
+- [x] 1.1 `channel-telegram`: resolve the Bot API base from `TELEGRAM_API_BASE`, defaulting to `https://api.telegram.org`, and route every call through it — `sendMessage`, `sendDocument`, `createForumTopic`, `closeForumTopic`
+- [x] 1.2 `gateway-telegram`: same resolution for the `getUpdates` poll loop; absent value takes the default silently, unlike the required forwarding targets and bot token
+- [x] 1.3 Unit tests in both modules: default when unset, override honoured on every call, and `Channel.spec.config` cannot influence it
+- [x] 1.4 `chart/charts/telegram/`: optional `apiBase` value rendering no env entry when unset; assert byte-identical default render in `platform/manager/internal/integration/charttemplate_test.go` — the router gets env, the channel adapter gets an `apiBase` key on the bot Secret (a `ChannelAdapter` carries no `env`)
+- [x] 1.5 Add the standing rule to `.claude/rules/invariants.md` — an adapter's outbound base URL is configuration, never a constant
 
 ## 2. Fake Bot API server
 

@@ -231,7 +231,7 @@ func (a *adapter) syncCommands(ctx context.Context, revision string) {
 		if unchanged {
 			continue
 		}
-		if err := a.client(sc.token).SetCommands(ctx, chatID, cmds); err != nil {
+		if err := a.client(sc).SetCommands(ctx, chatID, cmds); err != nil {
 			log.Printf("register commands for chat %s: %v", chatID, err)
 			done = false // retry this revision on the next poll
 			continue

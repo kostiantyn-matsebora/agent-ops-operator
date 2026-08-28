@@ -61,6 +61,10 @@ type config struct {
 	ChannelTarget string
 	// Token is the bot whose stream this process owns, exclusively.
 	Token string
+	// APIBase is the Bot API root getUpdates is issued against. Optional:
+	// absent is the real host, and a missing value is a normal configuration
+	// rather than the misconfiguration the three above are.
+	APIBase string
 }
 
 type router struct {
@@ -78,6 +82,7 @@ func loadConfig() config {
 		SignalTarget:  strings.TrimSuffix(os.Getenv("SIGNAL_TARGET"), "/"),
 		ChannelTarget: strings.TrimSuffix(os.Getenv("CHANNEL_TARGET"), "/"),
 		Token:         os.Getenv("TELEGRAM_BOT_TOKEN"),
+		APIBase:       resolveAPIBase(),
 	}
 	// The chart projects the bot Secret with a prefix; accept either the plain
 	// name or exactly one projected AGENTOPS_CRED_*botToken.
@@ -108,7 +113,7 @@ func loadConfig() config {
 
 func main() {
 	cfg := loadConfig()
-	r := &router{cfg: cfg, down: NewDownstream(), tg: NewTelegram(cfg.Token)}
+	r := &router{cfg: cfg, down: NewDownstream(), tg: NewTelegram(cfg.Token, cfg.APIBase)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

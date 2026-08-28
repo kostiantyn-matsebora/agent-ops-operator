@@ -17,7 +17,12 @@ regardless — and without it the adapter's outbound half cannot be exercised
 without a real bot token and a real Telegram account.
 
 The value SHALL be an operator-level setting supplied through the deployment,
-NOT a field of `Channel.spec.config`. A per-surface override would let anyone
+NOT a field of `Channel.spec.config`. Because a `ChannelAdapter` CR carries no
+`env` and the reconciler owns the adapter's Deployment, the chart reaches the
+pod through the bot's credential Secret: an `apiBase` key beside `botToken`,
+projected as `AGENTOPS_CRED_<CHANNEL>_apiBase`, overrides the process default
+for that surface. The Secret already holds the token, so redirecting it there
+grants nothing the token did not — unlike a `spec.config` field. A per-surface override would let anyone
 who can edit a served channel's configuration redirect that channel's bot token
 to a host of their choosing, which turns a configuration edit into credential
 exfiltration.
@@ -33,3 +38,7 @@ exfiltration.
 #### Scenario: A channel cannot redirect its own token
 - **WHEN** a served `Channel`'s `spec.config` contains an API base or endpoint key
 - **THEN** it has no effect on where the adapter sends the bot token
+
+#### Scenario: The credential Secret may name the endpoint
+- **WHEN** a served `Channel`'s credential Secret carries an `apiBase` key
+- **THEN** that surface's token is sent to that root, since whoever can write the Secret already holds the token

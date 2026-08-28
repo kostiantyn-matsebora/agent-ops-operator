@@ -26,9 +26,12 @@
 // SAME Secret backs the router, which needs the token to poll.
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_BOT_TOKEN (optional
-// fallback), ADAPTER_NAME (default "telegram"), LISTEN_ADDR (default ":8080" —
-// in-cluster the reconciler injects it from ChannelAdapter.spec.port),
-// projected AGENTOPS_CRED_* vars.
+// fallback), TELEGRAM_API_BASE (optional, default https://api.telegram.org —
+// the Bot API root every call goes to; a credential Secret's `apiBase` key
+// overrides it per channel, and Channel.spec.config never can), ADAPTER_NAME
+// (default "telegram"), LISTEN_ADDR (default ":8080" — in-cluster the
+// reconciler injects it from ChannelAdapter.spec.port), projected
+// AGENTOPS_CRED_* vars.
 package main
 
 import (
@@ -42,6 +45,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -71,6 +75,11 @@ type channelConfig struct {
 type servedChannel struct {
 	cfg   channelConfig
 	token string
+	// apiBase is the Bot API root this surface's token is sent to. From the
+	// credential Secret's `apiBase` key, else the process default — the same
+	// Secret that holds the token, so redirecting it grants nothing the token
+	// itself did not already.
+	apiBase string
 }
 
 type adapter struct {
@@ -78,6 +87,8 @@ type adapter struct {
 	channelType   string
 	fallbackToken string
 	listen        string
+	// apiBase is the process-level Bot API root (TELEGRAM_API_BASE resolved).
+	apiBase string
 
 	// pace spreads outbound work across the Bot API's budgets. Telegram
 	// REJECTS rather than queues, so without this a burst is lost, not delayed.
@@ -146,6 +157,7 @@ func main() {
 		mgr:           NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
 		channelType:   channelType,
 		fallbackToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+		apiBase:       resolveAPIBase(""),
 		listen:        listen,
 		pace:          newPacer(),
 		menu:          newMenu(),
@@ -197,9 +209,10 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 	for _, info := range infos {
 		var cfg channelConfig
 		problem := ""
-		token := ""
+		token, apiBase := "", ""
 		if info.CredentialEnvPrefix != "" {
 			token = os.Getenv(info.CredentialEnvPrefix + "botToken")
+			apiBase = os.Getenv(info.CredentialEnvPrefix + "apiBase")
 		}
 		if token == "" {
 			token = a.fallbackToken
@@ -231,7 +244,7 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 			a.reported[info.Name] = "ok"
 			a.mu.Unlock()
 		}
-		next[info.Name] = servedChannel{cfg: cfg, token: token}
+		next[info.Name] = servedChannel{cfg: cfg, token: token, apiBase: a.baseFor(apiBase)}
 	}
 	a.mu.Lock()
 	a.channels = next
@@ -245,15 +258,36 @@ func (a *adapter) channel(name string) (servedChannel, bool) {
 	return sc, ok
 }
 
-// client returns (caching) the Bot API client for a token.
-func (a *adapter) client(token string) *Telegram {
+// baseFor resolves a channel's Bot API root: its credential Secret's value,
+// else the process default.
+func (a *adapter) baseFor(fromSecret string) string {
+	if b := strings.TrimRight(strings.TrimSpace(fromSecret), "/"); b != "" {
+		return b
+	}
+	if a.apiBase != "" {
+		return a.apiBase
+	}
+	return resolveAPIBase("")
+}
+
+// client returns (caching) the Bot API client for a served channel — one per
+// token at the default root, keyed token@root where a surface names its own.
+func (a *adapter) client(sc servedChannel) *Telegram {
+	base := sc.apiBase
+	if base == "" {
+		base = a.baseFor("")
+	}
+	key := sc.token
+	if base != a.baseFor("") {
+		key = sc.token + "@" + base
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if c := a.clients[token]; c != nil {
+	if c := a.clients[key]; c != nil {
 		return c
 	}
-	c := NewTelegram(token)
-	a.clients[token] = c
+	c := NewTelegram(sc.token, base)
+	a.clients[key] = c
 	return c
 }
 
@@ -322,7 +356,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			return "", fmt.Sprintf("channel %s is not served (missing/invalid config or credentials)", op.Channel)
 		}
 	}
-	tg := a.client(sc.token)
+	tg := a.client(sc)
 	switch op.Kind {
 	case "ensure-topic":
 		if op.Topic == nil {
