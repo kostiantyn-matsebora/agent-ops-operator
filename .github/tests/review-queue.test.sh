@@ -48,5 +48,8 @@ it "agrees with components.sh on the real tree"
 out=$(printf 'signals/cron/main.go\nchart/values.yaml\n' | python3 "$S" --root "$ROOT" 2>/dev/null | groups)
 assert_equals "chart:directory:1 signals/cron:component:1" "$out"
 
+it "every entry has the three keys a matrix entry and a reader need, and paths is a list"
+assert_equals "ok" "$(printf 'docs/a.md\nsignals/cron/x.go\nREADME.md\n' | q | python3 -c 'import json,sys; q=json.load(sys.stdin); print("ok" if all(set(g)=={"group","kind","paths"} and isinstance(g["paths"],list) and g["paths"] for g in q) else "bad")')"
+
 rm -rf "$tmp"
 summary
