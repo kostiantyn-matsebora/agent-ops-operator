@@ -329,16 +329,21 @@ func (s *Server) getUpdates(w http.ResponseWriter, r *http.Request, token string
 	}
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	// Wake the wait on a deadline or a client disconnect; cond has no timeout.
-	done := make(chan struct{})
+	// The waker is released as soon as the poll is answered.
+	served := make(chan struct{})
+	defer close(served)
 	go func() {
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
 		select {
 		case <-r.Context().Done():
-		case <-time.After(time.Until(deadline)):
+		case <-timer.C:
+		case <-served:
+			return
 		}
 		s.mu.Lock()
 		s.cond.Broadcast()
 		s.mu.Unlock()
-		close(done)
 	}()
 	for len(s.queue) == 0 && time.Now().Before(deadline) && r.Context().Err() == nil {
 		s.cond.Wait()

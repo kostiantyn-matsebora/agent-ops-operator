@@ -112,9 +112,9 @@ func TestContractLoopAndDie(t *testing.T) {
 	}))
 	defer srv.Close()
 	exited := make(chan int, 1)
-	done := make(chan struct{})
 	go func() {
-		_ = run(srv.URL, "c", "pod-1", time.Minute, func(code int) { exited <- code; close(done); select {} })
+		// exit only records: run returns right after calling it.
+		_ = run(srv.URL, "c", "pod-1", time.Minute, func(code int) { exited <- code })
 	}()
 	select {
 	case code := <-exited:

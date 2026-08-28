@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Section 9 — the conversation lifecycle through the console: a conforming
@@ -164,5 +162,4 @@ func TestFanOutToBothChannels(t *testing.T) {
 		run := c.Status.Runs[len(c.Status.Runs)-1]
 		return run.DeliveryTracked && len(run.Delivered) == 2, nil
 	})
-	_ = metav1.Now()
 }

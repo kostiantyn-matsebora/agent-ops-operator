@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -91,9 +90,5 @@ func TestChannelConfigCannotRedirectItsToken(t *testing.T) {
 	plain, _ := a.channel("plain")
 	if got := a.client(plain).BaseURL; got != "https://api.telegram.org" {
 		t.Fatalf("spec.config must never move the token; got %q", got)
-	}
-	var cfg channelConfig
-	if err := json.Unmarshal([]byte(`{"chatId":"1","apiBase":"x"}`), &cfg); err != nil {
-		t.Fatal(err)
 	}
 }

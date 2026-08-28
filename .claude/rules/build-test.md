@@ -36,9 +36,9 @@ go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
   and run it outside — a static Go binary needs no toolchain:
 
   ```sh
-  docker exec -i -w "$PWD/platform/manager" agentops-go125 \
+  docker exec -i -w "$PWD/platform/manager" agentops-go \
     sh -c 'CGO_ENABLED=0 go test -c -tags e2e -o /tmp/e2e.test ./test/e2e/'
-  docker cp agentops-go125:/tmp/e2e.test /tmp/e2e.test
+  docker cp agentops-go:/tmp/e2e.test /tmp/e2e.test
   (cd platform/manager/test/e2e && E2E_REUSE=1 /tmp/e2e.test -test.v -test.timeout 45m)
   ```
 

@@ -126,8 +126,8 @@ func saDir() string {
 }
 
 // NewInClusterKube builds a client from the pod's ServiceAccount mount and the
-// API server address the kubelet injects. Requires ChannelAdapter
-// spec.kubernetesAccess — without it there is no token to read.
+// API server address the kubelet injects. The token is the account the
+// ChannelAdapter names (`spec.serviceAccountName`), or the release floor.
 func NewInClusterKube(namespace string) (*Kube, error) {
 	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
 	if host == "" || port == "" {

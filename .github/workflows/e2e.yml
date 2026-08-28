@@ -66,8 +66,10 @@ jobs:
       # -count=1: a cached PASS can never stand in for binaries that did not run.
       - run: go test -tags conformance -count=1 -timeout 20m -v ./test/conformance/
 
-  # The k3s pack. Images are built from THIS commit and imported into the
-  # node; the chart is installed from the working tree.
+  # The k3s pack. THE PACK ITSELF creates the k3d cluster, builds every image
+  # from THIS commit and imports it into the node, installs the chart from the
+  # working tree and tears the cluster down — this job only supplies the tools
+  # and runs `go test`. See platform/manager/test/e2e/harness_test.go.
   pack:
     name: e2e / ${{ inputs.tier || 'full' }}
     runs-on: ubuntu-latest
