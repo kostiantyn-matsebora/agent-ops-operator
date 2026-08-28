@@ -28,12 +28,12 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 
-# Files per read job. A job costs ~30-40 s of checkout, cache and session
-# before any reading, so a component is ONE job unless it is big: readers
-# run two at a time and take 7-50 s each at low effort (measured, #111), and
-# the CLI stops a workflow at 600 s, so twelve files is six waves of well
-# under a minute. `--chunk` overrides it, for the tests.
-CHUNK = 12
+# ONE JOB PER COMPONENT. The split is at the subagent level — workers over a
+# queue of files inside the job (`review-component.js`) — because a job costs
+# ~30-40 s of checkout, cache and session before it reads anything. `--chunk
+# N` splits a component past N files into several jobs, for an install that
+# wants it or for the tests; 0 never splits.
+CHUNK = 0
 
 THREADS_QUERY = """
 query($o:String!,$r:String!,$n:Int!,$after:String){
@@ -96,7 +96,7 @@ def main() -> int:
     ap.add_argument("--out", type=pathlib.Path, default=pathlib.Path("review-input.json"))
     ap.add_argument("--chunk", type=int, default=CHUNK, help="files per read job")
     args = ap.parse_args()
-    chunk = max(1, args.chunk)
+    chunk = args.chunk if args.chunk > 0 else 10**9
 
     pr = json.loads(sh("gh", "pr", "view", str(args.number), "--json", "baseRefName,headRefName"))
     base, head = pr["baseRefName"], pr["headRefName"]
@@ -110,11 +110,8 @@ def main() -> int:
         "specPaths": spec_paths(head),
     }
 
-    # THE MATRIX ENTRIES: ONE JOB PER COMPONENT, CHUNKED ONLY WHEN BIG. A
-    # job's readers run two at a time and the CLI stops a workflow at 600 s
-    # (measured on #111: a 15-file component at default effort ran 8 waves,
-    # hit the ceiling, and was unreviewed), so a component over CHUNK files is
-    # split into matrix entries of CHUNK, every entry a job, all at once; the
+    # THE MATRIX ENTRIES: ONE JOB PER COMPONENT. Splitting past `--chunk`
+    # files exists for an install that wants it and for the tests; the
     # coordinator's input merges a component's chunks back into one reading.
     # `slug` is the artifact-safe name (no slash; the chunk index when split).
     groups = []
@@ -127,7 +124,7 @@ def main() -> int:
                            "chunk": f"{i + 1}/{n}" if n > 1 else "", "paths": chunk_paths})
     data["entries"] = groups
     args.out.write_text(json.dumps(data, indent=1) + "\n")
-    print(f"{len(queue)} component(s), {len(groups)} job(s) of up to {chunk} file(s), from {len(paths)} path(s), "
+    print(f"{len(queue)} component(s), {len(groups)} job(s), from {len(paths)} path(s), "
           f"{len(data['threads'])} thread(s), {len(data['specPaths'])} delta spec(s); base {base}, head {head}")
     gh_out = os.environ.get("GITHUB_OUTPUT")
     if gh_out:

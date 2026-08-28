@@ -137,12 +137,15 @@ returns, and merges.
   the width of the review is the matrix. MEASURED (D10.1, run 33147062866):
   a file reader takes 44–221 s (median ~110 s) in a ~5–11 k-token context; a
   15-file component ran eight waves two-wide and the CLI stopped its workflow
-  at 600 s — the ceiling is REAL, and the component went unreviewed. So the
-  queue splits a component OVER TWELVE FILES into matrix entries of twelve
-  (`review-input.py`, `CHUNK`): at low effort a reader is 7–50 s, six waves
-  stay well under the ceiling, and a job's own ~30–40 s of setup is paid
-  once per component rather than once per pair of files — a chunk of two
-  was tried and the jobs were mostly setup. A chunk's readers are told the whole component's
+  at 600 s — the ceiling is REAL, and the component went unreviewed. THE SPLIT
+  IS AT THE SUBAGENT LEVEL: a fixed set of WORKERS (the pool's width, two)
+  each over a queue of the component's files, reading the rules once and
+  the files one at a time — no per-file spawn and orientation, and no job
+  per chunk (a chunk of two files was tried, 4:22 for the whole review with
+  jobs that were mostly setup; a chunk of twelve likewise; both rejected).
+  The component is one job. A very large component can still meet the
+  ceiling and is then `unreviewed` by name; `--chunk N` remains for an
+  install that prefers job-level splitting. A chunk's readers are told the whole component's
   other file names as siblings; the coordinator's input merges a component's
   chunks into one reading, a chunk that produced none leaving its files in
   `unread` by name.

@@ -31,9 +31,9 @@ mkdir -p "$repo/openspec/changes/thing/specs/cap" "$repo/docs" "$repo/signals/cr
 echo spec > "$repo/openspec/changes/thing/specs/cap/spec.md"
 git -C "$repo" add -A && git -C "$repo" commit -qm specs
 
-it "builds the input from the three gh calls and the checkout, and emits the matrix: one job per two files"
+it "builds the input from the three gh calls and the checkout, and emits the matrix"
 out=$(cd "$repo" && PATH="$tmp/bin:$PATH" GITHUB_OUTPUT="$tmp/gho" python3 "$INPUT" --repo o/r --number 5 --chunk 2 --out "$tmp/input.json" 2>&1)
-assert_contains "$out" "3 component(s), 4 job(s) of up to 2 file(s), from 5 path(s), 2 thread(s), 1 delta spec(s)"
+assert_contains "$out" "3 component(s), 4 job(s), from 5 path(s), 2 thread(s), 1 delta spec(s)"
 assert_contains "$(cat "$tmp/gho")" 'count=4'
 assert_contains "$(cat "$tmp/gho")" 'base=master'
 assert_contains "$(cat "$tmp/gho")" '"group": "platform/manager", "slug": "platform__manager", "chunk": ""'
@@ -41,10 +41,16 @@ assert_contains "$(cat "$tmp/gho")" '"group": "platform/manager", "slug": "platf
 it "walks every page of threads — the second page's thread is there"
 assert_contains "$(cat "$tmp/input.json")" '"id": "PRRT_2"'
 
-it "a component over the chunk size is several jobs, named and slugged by chunk, its files split between them (chunk 2 here; 12 by default)"
+it "a component over the chunk size is several jobs, named and slugged by chunk, its files split between them (--chunk 2 here; never by default)"
 g=$(cat "$tmp/gho")
 assert_contains "$g" '"group": "signals/cron", "slug": "signals__cron__1-of-2", "chunk": "1/2", "paths": ["signals/cron/main.go", "signals/cron/x.go"]'
 assert_contains "$g" '"slug": "signals__cron__2-of-2", "chunk": "2/2", "paths": ["signals/cron/y.go"]'
+
+it "by default a component is one job, however many files"
+: > "$tmp/gho2"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" GITHUB_OUTPUT="$tmp/gho2" python3 "$INPUT" --repo o/r --number 5 --out "$tmp/input2.json" 2>&1)
+assert_contains "$out" "3 component(s), 3 job(s)"
+assert_contains "$(cat "$tmp/gho2")" '"group": "signals/cron", "slug": "signals__cron", "chunk": ""'
 
 it "the threads are flattened to the shape the roles read"
 assert_contains "$(cat "$tmp/input.json")" '"commentId": 7'

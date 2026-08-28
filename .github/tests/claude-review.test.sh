@@ -110,16 +110,18 @@ it "the file reader's tools are read-only git plus the file tools"
 tools=$(fm tools "$REVIEWER")
 for t in "Bash(git diff:*)" "Bash(git ls-files:*)" "Bash(git cat-file:*)" "Read" "Grep" "Glob"; do assert_contains "$tools" "$t"; done
 
-it "the saved workflow reads per file with the file reader, validates by schema, and merges"
+it "the saved workflow runs a fixed set of file-reader workers over queues of files, validates by schema, and merges"
 s=$(cat "$WF")
 assert_equals "export const meta = {" "$(grep -m1 '^export const meta' "$WF")"
 assert_contains "$s" "name: 'review-component'"
-assert_contains "$s" "pipeline(files"
+assert_contains "$s" "const WORKERS = 2"
+assert_contains "$s" "pipeline(queues"
 assert_contains "$s" "agentType: 'file-reviewer'"
-assert_contains "$s" "schema: FILE_READING"
+assert_contains "$s" "schema: WORKER_RETURN"
+assert_contains "$s" "RULE FILES TO READ ONCE"
+assert_contains "$s" "ONE AT A TIME"
 assert_contains "$s" "required: ['path', 'findings', 'declares', 'references', 'threads']"
 for k in changedNames files threads unread; do assert_contains "$s" "$k"; done
-assert_contains "$s" "RULE FILES TO READ FOR THIS PATH"
 assert_contains "$s" "resolved and unresolved alike"
 
 it "what each context holds is the first thing a model job says — before anything is installed or restored"
@@ -206,8 +208,9 @@ it "the file reader is told the cross-review lists are not optional"
 assert_contains "$(body "$REVIEWER")" "THEY ARE NOT OPTIONAL"
 
 it "the file reader judges against the rules it is told to read, and inherits none"
-assert_contains "$p" "RULE FILES TO READ"
+assert_contains "$p" "RULE FILES TO READ ONCE"
 assert_contains "$p" "Nothing else about this project's doctrine is in your context"
+assert_contains "$p" "ONE ENTRY PER FILE IN YOUR QUEUE"
 
 it "asks the reviewer for the four finding fields the inline comment is built from, with the caps"
 assert_contains "$p" '"where"'
