@@ -172,19 +172,20 @@ many. The transcript itself keeps everything.
 | **Small models answer less reliably** | The run is bounded by `maxTurns` and reports the limit. Choose the routes, per Pipeline. |
 | **A shell is a shell** | Same as the reference runtime. Bind `agentops-shell` where a shell is wanted. |
 
-## Choosing between the two
+## Choosing between the three
 
-| | Claude Code | Ollama |
-|---|---|---|
-| **Runs on** | Anthropic's API | a model you host |
-| **Data leaves the cluster** | yes | no |
-| **Agent quality** | the vendor's | the model's — an operator choice |
-| **Tools** | claude-code's, plus MCP | the same six, natively, plus MCP |
-| **Context** | claude-code's transcripts | the runtime's own |
-| **Cost per run** | tokens | your hardware |
+| | Claude Code | Ollama | GitHub Copilot |
+|---|---|---|---|
+| **Runs on** | Anthropic's API | a model you host | GitHub's API |
+| **Data leaves the cluster** | yes | no | yes |
+| **Agent quality** | the vendor's | the model's — an operator choice | the vendor's |
+| **Tools** | claude-code's, plus MCP | the same six, natively, plus MCP | Copilot's, translated, plus MCP |
+| **A scoped shell** | enforced by the CLI | grants nothing | enforced per call |
+| **Context** | claude-code's transcripts | the runtime's own | Copilot's context store |
+| **Cost per run** | tokens | your hardware | credits |
 
-**Both, on one install.** The hard lanes on the vendor, the routine lanes local.
-Each Pipeline's `runtimeRef` is the whole decision.
+**Any of them, on one install.** The hard lanes on a vendor, the routine lanes
+local. Each Pipeline's `runtimeRef` is the whole decision.
 
 ### What the bundle renders
 
@@ -203,7 +204,9 @@ paths. No ServiceAccount, no volume, no credential.
 ## Going deeper
 
 - [Run agents on your own backend]({{ '/guides/agent-runtime/' | relative_url }})
-  — the contract this runtime implements, for writing a third.
+  — the contract this runtime implements, for writing a fourth.
+- [GitHub Copilot]({{ '/runtimes/copilot/' | relative_url }}) — the vendor-SDK
+  runtime, for the lanes a vendor's agent suits.
 - [Installation]({{ '/installation/' | relative_url }}) — the runtime defaults
   every runtime inherits, and the storage they share.
 - [`docs/claude.md`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/claude.md)

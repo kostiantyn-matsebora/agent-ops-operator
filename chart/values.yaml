@@ -167,6 +167,19 @@ claude:
 ollama:
   enabled: false
 
+# The THIRD vendor this chart ships: GitHub Copilot, driven through its SDK
+# (chart/charts/copilot/values.yaml). OFF by default. It needs ONE value, a
+# GitHub token with Copilot access; the model and a credit ceiling are optional.
+# A route selects it with `pipelines[].runtimeRef: copilot`.
+#
+#   copilot:
+#     enabled: true
+#     credentialsSecret:
+#       token: ghp_placeholder
+#     model: gpt-5
+copilot:
+  enabled: false
+
 # THE RUNTIMES THIS INSTALL DECLARES — the second of the two runtime blocks.
 #
 # THE RULE SEPARATING THEM, in one line each:

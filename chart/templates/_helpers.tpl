@@ -173,6 +173,26 @@ and fails its runs naming the choices when there are several. */ -}}
 {{- toYaml $entry -}}
 {{- end -}}
 
+{{- /* THE COPILOT BUNDLE'S ENTRY. `model` and `maxAiCredits` become the env the
+runtime reads, and the credential rides in `env` too — as the valueFrom
+reference the shared renderer would otherwise write from `credentialsSecret`.
+The renderer refuses an entry stating both `env` and `credentialsSecret`, and
+this vendor needs env for its model, so the bundle's own template renders the
+Secret and this helper writes the reference. Same helper for the bundle's own
+CR and for the parent's `default` copy, so both carry identical env. */ -}}
+{{- define "agentops.copilotRuntimeEntry" -}}
+{{- $v := . -}}
+{{- $env := list -}}
+{{- if $v.model }}{{ $env = append $env (dict "name" "COPILOT_MODEL" "value" ($v.model | toString)) }}{{ end -}}
+{{- if $v.maxAiCredits }}{{ $env = append $env (dict "name" "COPILOT_MAX_AI_CREDITS" "value" ($v.maxAiCredits | toString)) }}{{ end -}}
+{{- range ($v.env | default list) }}{{ $env = append $env . }}{{ end -}}
+{{- $cred := $v.credentialsSecret | default dict -}}
+{{- if $cred.name }}{{ $env = append $env (dict "name" ($cred.envName | default "COPILOT_GITHUB_TOKEN") "valueFrom" (dict "secretKeyRef" (dict "name" $cred.name "key" ($cred.key | default "githubToken")))) }}{{ end -}}
+{{- $entry := omit $v "enabled" "global" "model" "maxAiCredits" "env" "credentialsSecret" -}}
+{{- $_ := set $entry "env" $env -}}
+{{- toYaml $entry -}}
+{{- end -}}
+
 {{- define "agentops.declaredRuntimes" -}}
 {{- $root := . -}}
 {{- $out := list -}}
@@ -184,11 +204,12 @@ discover them: a bundle whose runtime this list missed would render a CR the
 default-runtime guard could not see, and the manager's bootstrap env would miss
 the sidecar and proxy images that runtime asked for. `ollama` proved the point:
 its first render passed every test but this guard, which reported "(none)". */ -}}
-{{- range $key := list "claude" "ollama" -}}
+{{- range $key := list "claude" "ollama" "copilot" -}}
 {{- $bv := index $root.Values $key -}}
 {{- if and $bv $bv.enabled -}}
 {{- $entry := omit $bv "enabled" "global" -}}
 {{- if eq $key "ollama" -}}{{- $entry = fromYaml (include "agentops.ollamaRuntimeEntry" $bv) -}}{{- end -}}
+{{- if eq $key "copilot" -}}{{- $entry = fromYaml (include "agentops.copilotRuntimeEntry" $bv) -}}{{- end -}}
 {{- $out = append $out (fromYaml (include "agentops.mergedRuntime" (dict "root" $root "entry" $entry))) -}}
 {{- end -}}
 {{- end -}}

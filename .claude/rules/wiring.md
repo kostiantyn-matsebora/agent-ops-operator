@@ -57,8 +57,14 @@ Two optional stanzas of ordered refs:
 | `spec.mcpConfigs` | `MCPConfig` | the MCP servers |
 
 **`spec.toolsets.mode`** (`merge` | `overwrite`, default `merge`) composes
-against the **AGENT DEFINITION** — the `tools:` frontmatter of
-`.claude/agents/<agent>.md` in the profile's REPO.
+against the **AGENT DEFINITION** — the `tools:` frontmatter of the agent's file
+in the profile's REPO. WHERE that file is, is the RUNTIME's fact; the
+composition rule is the contract's and identical on all of them.
+
+| Runtime | Reads |
+|---|---|
+| claude, ollama | `.claude/agents/<agent>.md` |
+| copilot | `.github/agents/<agent>.agent.md` |
 
 - **Never against the profile**, which carries no capabilities. Mistaking the
   profile for the counterpart is what deleted this field once already.

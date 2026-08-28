@@ -14,6 +14,7 @@ A Kubernetes operator for agents you can address.
 - ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps-ready
 - ![]({{ '/assets/img/logos/claude.svg' | relative_url }}) Runs Claude Code
 - ![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) Runs Ollama
+- ![]({{ '/assets/img/logos/github-light.svg' | relative_url }}) Runs GitHub Copilot
 
 {: .ao-tabs #tour}
 - **How it works**
@@ -125,6 +126,7 @@ A Kubernetes operator for agents you can address.
   - [![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console]({{ '/console/' | relative_url }})
   - [![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) any MCP server]({{ '/guides/toolsets/' | relative_url }})
   - [![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) Ollama]({{ '/runtimes/ollama/' | relative_url }})
+  - [![]({{ '/assets/img/logos/github-light.svg' | relative_url }}) GitHub Copilot]({{ '/runtimes/copilot/' | relative_url }})
   - [your own]({{ '/guides/signal-adapter/' | relative_url }})
 
 ## Why agent-ops?
@@ -177,7 +179,7 @@ Documented HTTP contracts, no fork.
 
 - **Your own signal source** — Datadog, Dynatrace, Sentry, a sensor on your
   bench.
-- **Your own agent runtime** — Codex, Gemini, Copilot or a script of your own.
+- **Your own agent runtime** — Codex, Gemini or a script of your own.
   Swap the image. The work contract does not change.
 - **Your own channel** — Slack, Teams, Discord, e-mail. The operator sends
   meaning, your adapter renders it.

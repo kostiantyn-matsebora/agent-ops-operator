@@ -15,6 +15,16 @@ go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 crd paths=./api/.
 KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19 use 1.31.x --bin-dir ~/.envtest -p path) go test ./...
 ```
 
+**The two Node runtimes test with `node --test`**, and no container is needed:
+
+- `cd runtimes/claude && node --test`, and the same in `runtimes/copilot`
+  (`~/.local/bin/node`).
+- CI runs each in `node-runtimes` when its own directory changes.
+- **`runtimes/copilot` needs its SDK only to RUN, never to test.** The tests
+  import the modules beside `runtime.js`.
+- **That is deliberate.** The SDK bundles a 300 MB CLI, and a suite that needed
+  it would be a suite that does not run.
+
 ### No local Go: use a PERSISTENT container, not `docker run --rm`
 
 **This workstation has no Go toolchain**, so every command above runs in a

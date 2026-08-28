@@ -2268,34 +2268,20 @@ func TestDefaultRuntimeIsTheFlaggedOrFirstConfigured(t *testing.T) {
 		"--set", "ollama.endpoint=http://ollama.ollama.svc:11434",
 		"--set", "ollama.model=qwen2.5:14b",
 		"--set", "global.demo.enabled=true"} // a route naming no runtimeRef
-	defaultOf := func(out string) (string, string) {
-		for _, doc := range splitDocs(out) {
-			if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: default\n") {
-				src := ""
-				for _, line := range strings.Split(doc, "\n") {
-					if strings.Contains(line, "agentops.dev/default-of:") {
-						src = strings.Trim(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), `"`)
-					}
-				}
-				return doc, src
-			}
-		}
-		return "", ""
-	}
 	// ollama alone: it is the default, under its own name plus the copy
 	out := helmTemplate(t, append(ollama, "--set", "claude.enabled=false")...)
-	if doc, src := defaultOf(out); src != "ollama" || !strings.Contains(doc, "name: OLLAMA_URL") {
+	if doc, src := defaultRuntimeDoc(out); src != "ollama" || !strings.Contains(doc, "name: OLLAMA_URL") {
 		t.Errorf("ollama alone must be copied as default, got source %q", src)
 	}
 	if strings.Count(out, "\nkind: AgentRuntime\n") != 2 {
 		t.Error("ollama alone renders exactly ollama and default")
 	}
 	// both, none flagged: the first configured — claude — is the default
-	if _, src := defaultOf(helmTemplate(t, ollama...)); src != "claude" {
+	if _, src := defaultRuntimeDoc(helmTemplate(t, ollama...)); src != "claude" {
 		t.Errorf("with both and no flag the first configured is default, got %q", src)
 	}
 	// both, ollama flagged: the flag wins
-	if doc, src := defaultOf(helmTemplate(t, append(ollama, "--set", "ollama.default=true")...)); src != "ollama" || strings.Contains(doc, "kind: Secret") {
+	if doc, src := defaultRuntimeDoc(helmTemplate(t, append(ollama, "--set", "ollama.default=true")...)); src != "ollama" || strings.Contains(doc, "kind: Secret") {
 		t.Errorf("the flag must move the default, got %q", src)
 	}
 	// the copy carries no Secret of its own, even when the source has a token
@@ -2311,4 +2297,105 @@ func TestDefaultRuntimeIsTheFlaggedOrFirstConfigured(t *testing.T) {
 	if out := helmTemplateErr(t, "--set", "claude.enabled=false", "--set", "global.demo.enabled=true"); !strings.Contains(out, "Declared runtimes: (none)") {
 		t.Errorf("no runtime at all must fail, got %s", out)
 	}
+}
+
+// The copilot bundle is the THIRD vendor runtime, in the ollama bundle's exact
+// shape: off by default, one AgentRuntime through the parent's renderer, no
+// substrate. Enabled, it inherits the defaults and carries only what names the
+// vendor — the image, the credential as env, the model and credit ceiling as
+// env, and its own sync paths.
+func TestCopilotBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
+	out := helmTemplate(t, "--set", "copilot.enabled=true",
+		"--set", "copilot.credentialsSecret.token=ghp_placeholder",
+		"--set", "copilot.model=gpt-5",
+		"--set", "copilot.maxAiCredits=50")
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
+		t.Fatalf("want claude, copilot and the default copy, got %d", n)
+	}
+	var rt, secret string
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: copilot\n") {
+			rt = doc
+		}
+		if strings.Contains(doc, "kind: Secret\n") && strings.Contains(doc, "\n  name: agentops-copilot\n") {
+			secret = doc
+		}
+	}
+	if rt == "" {
+		t.Fatal("no AgentRuntime named copilot rendered")
+	}
+	for _, want := range []string{
+		`image: "ghcr.io/kostiantyn-matsebora/agentops-runtime-copilot:`,
+		"serviceAccountName: agentops-runtime\n", // the floor, inherited
+		"contextStorage: volume\n",
+		"idleTtlMinutes: 1\n", // the release default, not the CRD's 10
+		"- .copilot/session-state/**\n",
+		"name: COPILOT_MODEL\n      value: gpt-5\n",
+		"name: COPILOT_MAX_AI_CREDITS\n      value: \"50\"\n",
+		// No trailing newline: Helm 3 closes a document with `---` on the very next
+		// line, so the last line of a doc carries none after splitDocs; Helm 4
+		// leaves a blank line. An assertion on the last line must not care.
+		"name: COPILOT_GITHUB_TOKEN\n      valueFrom:\n        secretKeyRef:\n          key: githubToken\n          name: agentops-copilot",
+	} {
+		if !strings.Contains(rt, want) {
+			t.Errorf("copilot runtime lacks %q:\n%s", want, rt)
+		}
+	}
+	if strings.Contains(rt, ".claude/projects") {
+		t.Error("the copilot runtime must not inherit claude-code's sync paths")
+	}
+	if secret == "" || !strings.Contains(secret, "githubToken: \"ghp_placeholder\"") {
+		t.Errorf("a supplied token must render the credential Secret:\n%s", secret)
+	}
+	// no substrate: the ServiceAccount count is unchanged from the default render
+	if got, want := strings.Count(out, "kind: ServiceAccount\n"), strings.Count(helmTemplate(t), "kind: ServiceAccount\n"); got != want {
+		t.Errorf("the bundle must render no ServiceAccount: %d vs %d", got, want)
+	}
+}
+
+// Without a token the runtime references the Secret by name and creates
+// nothing; without a model or a credit ceiling neither env entry renders, so
+// the runtime's own defaults apply. The reference bundle off and this one on
+// makes it the default with no rename.
+func TestCopilotBundleDefaultsAndBecomesDefault(t *testing.T) {
+	out := helmTemplate(t, "--set", "copilot.enabled=true")
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: Secret\n") && strings.Contains(doc, "agentops-copilot") {
+			t.Error("no token supplied, so no Secret may render")
+		}
+		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: copilot\n") {
+			for _, absent := range []string{"COPILOT_MODEL", "COPILOT_MAX_AI_CREDITS"} {
+				if strings.Contains(doc, absent) {
+					t.Errorf("unset %s must not render", absent)
+				}
+			}
+			if !strings.Contains(doc, "name: agentops-copilot") {
+				t.Error("the runtime must reference the credential Secret by name")
+			}
+		}
+	}
+	alone := helmTemplate(t, "--set", "copilot.enabled=true", "--set", "claude.enabled=false")
+	if doc, src := defaultRuntimeDoc(alone); src != "copilot" || !strings.Contains(doc, "COPILOT_GITHUB_TOKEN") {
+		t.Errorf("copilot alone must be copied as default with its env, got source %q", src)
+	}
+	if strings.Count(alone, "\nkind: AgentRuntime\n") != 2 {
+		t.Error("copilot alone renders exactly copilot and default")
+	}
+}
+
+// defaultRuntimeDoc returns the rendered `default` AgentRuntime and the name of
+// the runtime it was copied from.
+func defaultRuntimeDoc(out string) (string, string) {
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: default\n") {
+			src := ""
+			for _, line := range strings.Split(doc, "\n") {
+				if strings.Contains(line, "agentops.dev/default-of:") {
+					src = strings.Trim(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), `"`)
+				}
+			}
+			return doc, src
+		}
+	}
+	return "", ""
 }

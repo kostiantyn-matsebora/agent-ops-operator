@@ -1,0 +1,128 @@
+// cd runtimes/copilot && node --test
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const {
+  MODE_MERGE, MODE_OVERWRITE,
+  parseFrontmatterTools, agentDeclaredTools, composeAllowedTools, definitionPath,
+} = require('./tools');
+
+// mkRepo builds a throwaway checkout containing the given agent definitions,
+// at the path THIS vendor reads.
+function mkRepo(defs = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-copilot-tools-'));
+  const agents = path.join(dir, '.github', 'agents');
+  fs.mkdirSync(agents, { recursive: true });
+  for (const [name, body] of Object.entries(defs)) {
+    fs.writeFileSync(path.join(agents, `${name}.agent.md`), body);
+  }
+  return dir;
+}
+
+// ---- reading the definition ------------------------------------------------
+
+test('inline comma list is read', () => {
+  assert.deepStrictEqual(
+    parseFrontmatterTools('---\nname: a\ntools: Read, Grep\n---\nbody\n').tools,
+    ['Read', 'Grep'],
+  );
+});
+
+test('flow list is read', () => {
+  assert.deepStrictEqual(
+    parseFrontmatterTools('---\ntools: [Read, "Bash(git *)"]\n---\n').tools,
+    ['Read', 'Bash(git *)'],
+  );
+});
+
+test('block list is read', () => {
+  assert.deepStrictEqual(
+    parseFrontmatterTools('---\nname: a\ntools:\n  - Read\n  - Grep\ndescription: x\n---\n').tools,
+    ['Read', 'Grep'],
+  );
+});
+
+test('a definition with no tools: key declares nothing — the vendor default of "everything" never applies', () => {
+  assert.deepStrictEqual(parseFrontmatterTools('---\nname: a\n---\nbody\n').tools, []);
+});
+
+test('a definition with no frontmatter declares nothing, and is not an error', () => {
+  const got = parseFrontmatterTools('# Just prose\n\nno frontmatter here\n');
+  assert.deepStrictEqual(got.tools, []);
+  assert.strictEqual(got.error, undefined);
+});
+
+test('an indented tools: belongs to another key and is not read', () => {
+  assert.deepStrictEqual(parseFrontmatterTools('---\nnested:\n  tools: Bash\n---\n').tools, []);
+});
+
+test('unclosed frontmatter is an error, reported not thrown', () => {
+  const got = parseFrontmatterTools('---\ntools: Read\nbody without closing\n');
+  assert.ok(got.error);
+  assert.strictEqual(got.tools, undefined);
+});
+
+test('an unclosed flow list is an error', () => {
+  assert.ok(parseFrontmatterTools('---\ntools: [Read, Grep\n---\n').error);
+});
+
+// ---- the path is this vendor's ----------------------------------------------
+
+test('the definition is read from .github/agents/<agent>.agent.md', () => {
+  assert.strictEqual(definitionPath('/ws', 'k8s'), path.join('/ws', '.github', 'agents', 'k8s.agent.md'));
+});
+
+test('a declared list is read from the checkout', () => {
+  const repo = mkRepo({ k8s: '---\nname: k8s\ntools: Read, Bash(kubectl:*)\n---\n' });
+  assert.deepStrictEqual(agentDeclaredTools(repo, 'k8s'), ['Read', 'Bash(kubectl:*)']);
+});
+
+test('a definition at the claude path is NOT read by this runtime', () => {
+  const repo = mkRepo({});
+  const claude = path.join(repo, '.claude', 'agents');
+  fs.mkdirSync(claude, { recursive: true });
+  fs.writeFileSync(path.join(claude, 'k8s.md'), '---\ntools: Bash\n---\n');
+  assert.deepStrictEqual(agentDeclaredTools(repo, 'k8s'), []);
+});
+
+test('no definition contributes nothing', () => {
+  assert.deepStrictEqual(agentDeclaredTools(mkRepo({}), 'missing'), []);
+  assert.deepStrictEqual(agentDeclaredTools('', 'x'), []);
+  assert.deepStrictEqual(agentDeclaredTools(mkRepo({}), ''), []);
+});
+
+test('unparseable frontmatter is logged and contributes nothing', () => {
+  const repo = mkRepo({ bad: '---\ntools: [Read\nnever closed\n' });
+  const logs = [];
+  assert.deepStrictEqual(agentDeclaredTools(repo, 'bad', (m) => logs.push(m)), []);
+  assert.strictEqual(logs.length, 1);
+  assert.match(logs[0], /bad\.agent\.md/);
+});
+
+// ---- composition ------------------------------------------------------------
+
+test('merge unions, agent first, deduped', () => {
+  assert.deepStrictEqual(
+    composeAllowedTools(['Read', 'Grep'], 'Grep,Bash', MODE_MERGE),
+    ['Read', 'Grep', 'Bash'],
+  );
+});
+
+test('overwrite passes the wiring alone', () => {
+  assert.deepStrictEqual(composeAllowedTools(['Read'], 'Bash', MODE_OVERWRITE), ['Bash']);
+});
+
+test('an unknown or absent mode reads as merge', () => {
+  assert.deepStrictEqual(composeAllowedTools(['Read'], 'Bash', undefined), ['Read', 'Bash']);
+  assert.deepStrictEqual(composeAllowedTools(['Read'], 'Bash', 'whatever'), ['Read', 'Bash']);
+});
+
+test('nothing composed stays nothing', () => {
+  assert.deepStrictEqual(composeAllowedTools([], '', MODE_MERGE), []);
+  assert.deepStrictEqual(composeAllowedTools(['Read'], '', MODE_OVERWRITE), []);
+});

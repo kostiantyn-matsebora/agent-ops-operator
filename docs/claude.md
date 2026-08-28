@@ -9,8 +9,12 @@ renders the `AgentRuntime` named `default` as a copy of it, unless another
 runtime is flagged `default: true`.
 
 **ON by default**, unlike every other bundle here. It is what a fresh install
-executes on. The other runtime bundle, `chart/charts/ollama/`, is the local-model
-one — see [runtimes/ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/).
+executes on. The other runtime bundles:
+
+- `chart/charts/ollama/`, the local-model one — see
+  [runtimes/ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/).
+- `chart/charts/copilot/`, GitHub Copilot through its SDK — see
+  [runtimes/copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/).
 
 | Renders | When |
 |---|---|

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: copilot
+description: >-
+  A GitHub Copilot agent runtime — the operator's work contract implemented over
+  the Copilot SDK — shipped as a bundle, off by default.
+type: application
+version: 0.1.0

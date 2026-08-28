@@ -337,6 +337,24 @@ RUNTIME_DIAGRAMS: dict[str, dict] = {
         # runtime's, and the page says so in words.
         "arrows": ["GET /work", "asks / keeps"],
     },
+    # For runtime-copilot the point is the opposite split: the vendor runs the
+    # loop and the tools, and what sits in the middle box is the TRANSLATION
+    # -- the route's patterns into Copilot's filters, and a permission callback
+    # every call passes through. The context store is the vendor's too.
+    "copilot": {
+        "dir": "runtimes",
+        "alt": "The manager hands a work unit to runtime-copilot, which "
+               "translates the route's tools and drives the Copilot SDK, and "
+               "Copilot runs the agent and its tools under the runtime's "
+               "permission callback.",
+        "cols": [
+            [("the manager", "one unit at a time", "plain")],
+            [("runtime-copilot", "translates and permits", "yours")],
+            [("Copilot", "the loop and the tools", "subject"),
+             ("the context", "one per conversation", "plain")],
+        ],
+        "arrows": ["GET /work", "drives / keeps"],
+    },
 }
 
 
