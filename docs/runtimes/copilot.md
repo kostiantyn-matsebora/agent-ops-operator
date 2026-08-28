@@ -36,7 +36,7 @@ where it did.
 | **The same tools** | `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash` are translated into Copilot's own, so `agentops-observe`, `agentops-shell` and `agentops-edit` mean the same thing here as on the other runtimes. |
 | **The same MCP servers** | Every `MCPConfig` a Pipeline binds is registered with Copilot from the same `mcp.json`, secrets resolved in the pod. |
 | **A scoped shell, enforced** | `Bash(kubectl:*)` approves `kubectl …` and denies everything else, per invocation. |
-| **Conversations that continue** | Each conversation is one Copilot session, under an id the runtime chose, so a follow-up sees what came before. |
+| **Conversations that continue** | Each conversation is one Copilot context, under an id the runtime chose, so a follow-up sees what came before. |
 | **A route-by-route choice** | `runtimeRef: copilot` on the Pipelines that suit it. The rest stay where they are. |
 
 **The vendor's vocabulary never reaches your wiring.** Copilot names its tools
@@ -148,7 +148,7 @@ runtimes, and it is why the toolsets ship risk-split — see
 
 ## Where its context lives
 
-One Copilot session per conversation, under an id the runtime minted, in the
+One Copilot context per conversation, under an id the runtime minted, in the
 SDK's own session store beneath the runtime's context directory. The bundle
 declares it to [context sync]({{ '/installation/#storage' | relative_url }}),
 so a run works on pod-local storage and the durable volume holds a snapshot.
