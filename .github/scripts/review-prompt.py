@@ -25,19 +25,47 @@ def header(d: dict) -> str:
     return f"REPO: {d['repo']}\nPR NUMBER: {d['number']}\nBASE REF: origin/{d['base']}\n"
 
 
-def reader(d: dict, group: str) -> str:
+def _load_rules_for():
+    """`review-rules.py` by path — a hyphenated file name is not a module name."""
+    import importlib.util
+    p = pathlib.Path(__file__).resolve().parent / "review-rules.py"
+    spec = importlib.util.spec_from_file_location("review_rules", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.rules_for
+
+
+def _entry(d: dict, group: str) -> dict:
     entry = next((g for g in d["queue"] if g["group"] == group), None)
     if entry is None:
         raise SystemExit(f"no such component in the queue: {group}")
-    own = [t for t in d["threads"] if t["path"] in entry["paths"]]
-    lines = [header(d).rstrip("\n"),
-             f"COMPONENT: {entry['group']} ({entry['kind']})",
-             "PATHS:", *("  " + p for p in entry["paths"]),
-             "THREADS ON THESE PATHS (your previous review — resolved and unresolved alike):",
-             json.dumps(own, indent=1) if own else "  none",
-             "DELTA SPECS OF THE CHANGE:",
-             *(("  " + p for p in d["specPaths"]) if d["specPaths"] else ("  none",))]
-    return "\n".join(lines) + "\n"
+    return entry
+
+
+def component_args(d: dict, group: str) -> dict:
+    """The `review-component` workflow's args: one entry per changed file with
+    its threads and THE RULE FILES TO READ for its path — routed by
+    `review-rules.py`, since no reader inherits any."""
+    rules_for = _load_rules_for()
+    entry = _entry(d, group)
+    files = [{"path": p,
+              "rules": rules_for(p),
+              "threads": [t for t in d["threads"] if t["path"] == p]}
+             for p in entry["paths"]]
+    return {"repo": d["repo"], "number": d["number"], "base": f"origin/{d['base']}",
+            "component": entry["group"], "kind": entry["kind"],
+            "files": files, "specPaths": d["specPaths"]}
+
+
+def reader(d: dict, group: str) -> str:
+    """The component session's whole instruction: run the saved workflow with
+    these args and return its result verbatim. It reads nothing itself."""
+    a = component_args(d, group)
+    return ("Run the saved workflow `review-component` with these args and nothing else:\n"
+            + json.dumps(a) + "\n"
+            "Do not read the diff and do not review anything yourself; the workflow's file readers do. "
+            "When it returns, return its result JSON verbatim — resolved and unresolved alike, "
+            "every field it produced.\n")
 
 
 def coordinator(d: dict, readings_dir: pathlib.Path) -> tuple[str, list[str]]:
@@ -60,7 +88,7 @@ def coordinator(d: dict, readings_dir: pathlib.Path) -> tuple[str, list[str]]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("role", choices=["reader", "coordinator"])
+    ap.add_argument("role", choices=["reader", "component", "coordinator"])
     ap.add_argument("--input", type=pathlib.Path, default=pathlib.Path("review-input.json"))
     ap.add_argument("--group", help="reader: the component")
     ap.add_argument("--readings", type=pathlib.Path, default=pathlib.Path("readings"),
@@ -68,10 +96,13 @@ def main() -> int:
     args = ap.parse_args()
     d = json.loads(args.input.read_text())
 
-    if args.role == "reader":
+    if args.role in ("reader", "component"):
         if not args.group:
-            ap.error("reader needs --group")
-        sys.stdout.write(reader(d, args.group))
+            ap.error(f"{args.role} needs --group")
+        if args.role == "component":
+            sys.stdout.write(json.dumps(component_args(d, args.group), indent=1) + "\n")
+        else:
+            sys.stdout.write(reader(d, args.group))
         return 0
     text, unreviewed = coordinator(d, args.readings)
     sys.stdout.write(text)

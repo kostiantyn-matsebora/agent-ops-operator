@@ -113,7 +113,10 @@ The consolidation SHALL be a reading of its own — the COORDINATOR — that run
 as its own job once every reading's job has finished, and is handed every
 reading's data as files: a reading whose job produced none is handed as
 absent, by name. It SHALL never wait on a running reading, and it is the only
-reading that writes to the pull request.
+reading that writes to the pull request. Its context SHALL hold its role, the
+readings and the threads, and no rule file; consumers inside the change SHALL
+be judged from the readings' declares and references, and a consumer outside
+it by reading that one file.
 
 **This repository's modules import nothing from one another**, so a contract
 change compiles everywhere, passes every module's tests, and breaks at runtime
@@ -142,11 +145,12 @@ review considered rather than trusting that it considered everything.
 - **THEN** exactly one reading posts to the pull request, once, and a run in
   which it posted no summary is reported as failed
 
-#### Scenario: A reading's job failed
+#### Scenario: A removed name is referenced by another changed file
 
-- **WHEN** a reading's job ended without a validated reading
-- **THEN** the coordinator still runs, with that component handed as absent,
-  and the summary names it as unreviewed
+- **WHEN** one file's reading declares a name removed or renamed and another
+  file's reading references it
+- **THEN** the coordinator raises a finding against the referencing file from
+  the two readings, without reading either file
 
 ### Requirement: The reviewer's definition is part of the guarded review
 

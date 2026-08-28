@@ -705,6 +705,24 @@
         "is now",
         "the matrix"
       ]
+    },
+    {
+      "id": "component-reviewer-role",
+      "pattern": "component-reviewer\\b",
+      "says": "a component is read per FILE by `file-reviewer` subagents that a saved workflow (`review-component.js`) starts inside the component's read job, each in a context holding that file and the rules routed to its path; the one reader holding a whole component's diff grew with the diff",
+      "allow": [
+        "removed",
+        "retired",
+        "deleted",
+        "delete",
+        "gone",
+        "replaced",
+        "used to",
+        "no longer",
+        "was",
+        "is now",
+        "became"
+      ]
     }
   ]
 }

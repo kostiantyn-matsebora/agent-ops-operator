@@ -13,8 +13,9 @@
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W="$ROOT/.github/workflows/claude-review.yml"
 A="$ROOT/.github/actions/claude-cli/action.yml"
-REVIEWER="$ROOT/.claude/agents/component-reviewer.md"
+REVIEWER="$ROOT/.claude/agents/file-reviewer.md"
 COORD="$ROOT/.claude/agents/review-coordinator.md"
+WF="$ROOT/.claude/workflows/review-component.js"
 
 py() { python3 -c "
 import sys, yaml, json, re
@@ -77,7 +78,8 @@ for j in read consolidate; do
 done
 
 it "each model job restores its own role from the base branch, through the action"
-assert_contains "$(py 'print(step("read","uses","./.github/actions/claude-cli")["with"]["restore"])')" ".claude/agents/component-reviewer.md"
+assert_contains "$(py 'print(step("read","uses","./.github/actions/claude-cli")["with"]["restore"])')" ".claude/agents/file-reviewer.md"
+assert_contains "$(py 'print(step("read","uses","./.github/actions/claude-cli")["with"]["restore"])')" ".claude/workflows/review-component.js"
 assert_contains "$(py 'print(step("consolidate","uses","./.github/actions/claude-cli")["with"]["restore"])')" ".claude/agents/review-coordinator.md"
 assert_contains "$(py 'print(step("read","uses","./.github/actions/claude-cli")["with"]["base-ref"])')" "needs.queue.outputs.base"
 
@@ -89,24 +91,43 @@ assert_contains "$(cat "$A")" 'claude --version'
 assert_contains "$(cat "$A")" 'git checkout "$BASE" -- "$f"'
 assert_equals "" "$(grep -rl --fixed-strings "$(av)" "$ROOT/.github" | grep -v actions/claude-cli || true)"
 
-it "the reader runs its role with read-only tools, structured output, and the validator"
+it "the component session runs the saved workflow and may spawn only the file reader"
 r=$(py 'print(runs("read"))')
-assert_contains "$r" 'claude -p "$prompt" --agent component-reviewer'
+assert_contains "$r" 'claude -p "$prompt"'
 assert_contains "$r" '--output-format json --json-schema'
 assert_contains "$r" 'review-prompt.py reader'
 assert_contains "$r" 'review-reading-check.py'
 allowed=$(py 'print(re.search(r"--allowedTools \"([^\"]*)\"", runs("read")).group(1))')
-for t in "Bash(git ls-files:*)" "Bash(git ls-tree:*)" "Bash(git cat-file:*)" "Bash(git diff:*)" "Read" "Grep" "Glob"; do
-  assert_contains "$allowed" "$t"
-done
-for t in Write Edit Agent gh mcp__ mark-thread-resolved; do
-  assert_not_contains "$allowed" "$t"
-done
+assert_equals "Workflow,Agent(file-reviewer)" "$allowed"
 assert_not_contains "$r" 'gh pr comment'
+assert_not_contains "$r" '--agent '
 
-it "the reader's allowlist and its role's tools agree"
+it "the merged reading's schema carries the cross-review facts"
+schema=$(py 'print(step("read","name","Read ${{ matrix.entry.group }}")["env"]["READING_SCHEMA"])')
+for k in '"files"' '"declares"' '"references"' '"unread"' '"changedNames"'; do assert_contains "$schema" "$k"; done
+
+it "the file reader's tools are read-only git plus the file tools"
 tools=$(fm tools "$REVIEWER")
-for t in $(printf '%s' "$allowed" | tr ',' ' '); do assert_contains "$tools" "$t"; done
+for t in "Bash(git diff:*)" "Bash(git ls-files:*)" "Bash(git cat-file:*)" "Read" "Grep" "Glob"; do assert_contains "$tools" "$t"; done
+
+it "the saved workflow reads per file with the file reader, validates by schema, and merges"
+s=$(cat "$WF")
+assert_equals "export const meta = {" "$(grep -m1 '^export const meta' "$WF")"
+assert_contains "$s" "name: 'review-component'"
+assert_contains "$s" "pipeline(files"
+assert_contains "$s" "agentType: 'file-reviewer'"
+assert_contains "$s" "schema: FILE_READING"
+assert_contains "$s" "required: ['path', 'findings', 'declares', 'references', 'threads']"
+for k in changedNames files threads unread; do assert_contains "$s" "$k"; done
+assert_contains "$s" "RULE FILES TO READ FOR THIS PATH"
+assert_contains "$s" "resolved and unresolved alike"
+
+it "every model context in this job is measured and printed before it runs"
+assert_contains "$(py 'print(runs("read"))')" "review-context.py component"
+assert_contains "$(py 'print(runs("consolidate"))')" "review-context.py coordinator"
+idx_ctx=$(py 'print([i for i,s in enumerate(steps("read")) if "review-context.py" in s.get("run","")][0])')
+idx_read=$(py 'print([i for i,s in enumerate(steps("read")) if "claude -p" in s.get("run","")][0])')
+[ "$idx_ctx" -lt "$idx_read" ] && pass || fail "the measurement must precede the model"
 
 it "the coordinator runs its role in consolidate, and holds the summary gate and the resolve list"
 c=$(py 'print(runs("consolidate"))')
@@ -158,10 +179,15 @@ p=$(body "$REVIEWER")
 assert_contains "$p" "NOT AVAILABLE"
 assert_contains "$p" "redirection"
 
-it "asks the reviewer for JSON with the three fields the coordinator reads"
-assert_contains "$p" '"changedNames"'
+it "asks the file reader for JSON with the fields the workflow merges and the coordinator cross-reviews"
+assert_contains "$p" '"declares"'
+assert_contains "$p" '"references"'
 assert_contains "$p" '"threads"'
 assert_contains "$p" '"findings"'
+
+it "the file reader judges against the rules it is told to read, and inherits none"
+assert_contains "$p" "RULE FILES TO READ"
+assert_contains "$p" "Nothing else about this project's doctrine is in your context"
 
 it "asks the reviewer for the four finding fields the inline comment is built from, with the caps"
 assert_contains "$p" '"where"'
@@ -169,9 +195,9 @@ assert_contains "$p" '"fix"'
 assert_contains "$p" 'AT MOST 15 WORDS, ONE CLAUSE'
 assert_contains "$p" 'AT MOST 12 WORDS'
 
-it "hands a reviewer the component's whole review history, resolved threads included"
+it "hands a reader its file's whole review history, resolved threads included"
 assert_contains "$p" "A RESOLVED thread is history, not work"
-assert_contains "$(cat "$ROOT/.github/scripts/review-prompt.py")" "resolved and unresolved alike"
+assert_contains "$(cat "$WF")" "resolved and unresolved alike"
 
 it "the coordinator is the only writer, and posts a finding as four labeled lines"
 c=$(body "$COORD")
@@ -184,32 +210,30 @@ assert_not_contains "$(fm tools "$COORD")" "Agent"
 assert_not_contains "$(fm tools "$COORD")" "mcp__"
 assert_contains "$c" "pulls/<PR NUMBER>/comments"
 
-it "consolidates in the coordinator: reach, unreviewed, and the first finding names the guarded files"
+it "consolidates in the coordinator: cross-review from readings, reach outside, unreviewed, and the first finding names the guarded files"
 assert_contains "$c" "git grep -l -F"
 assert_contains "$c" "unreviewed: <group>"
-assert_contains "$c" ".claude/rules/"
-assert_contains "$c" ".github/actions/claude-cli/"
-assert_contains "$c" "review-prompt.py"
+assert_contains "$c" "unread: <path>"
+assert_contains "$c" "THE CROSS-REVIEW FROM THE READINGS"
+assert_contains "$c" "Do not open"
+assert_contains "$c" "NO RULE FILE"
+for f in ".claude/rules/" ".claude/workflows/" ".github/actions/claude-cli/" "review-prompt.py" "review-rules.py" "review-context.py"; do assert_contains "$c" "$f"; done
 
-it "nothing names the deleted script"
-assert_equals "" "$(grep -l 'review-pr.js' "$W" "$A" "$REVIEWER" "$COORD" 2>/dev/null || true)"
+it "nothing names the deleted script or the retired component reader"
+assert_equals "" "$(grep -l 'review-pr.js\|component-reviewer' "$W" "$A" "$REVIEWER" "$COORD" "$WF" 2>/dev/null || true)"
 [ ! -e "$ROOT/.claude/workflows/review-pr.js" ] && pass || fail "the script must be gone"
+[ ! -e "$ROOT/.claude/agents/component-reviewer.md" ] && pass || fail "the component reader must be gone"
 
-it "excludes the developer-session rules by ** glob, and keeps the review's"
+it "no context inherits a rule file: every rule is excluded by one glob, and CLAUDE.md stays"
 excl=$(py 'print(" ".join(json.loads(d["env"]["CLAUDE_SETTINGS"])["claudeMdExcludes"]))')
-for f in build-test worktree-delivery session-naming publication visual-check answering; do
-  assert_contains "$excl" "**/.claude/rules/$f.md"
-done
-for f in invariants terminology wiring retired-vocabulary adapters structure authoring documentation gotchas; do
-  assert_not_contains "$excl" "$f.md"
-done
+assert_equals "**/.claude/rules/*.md" "$excl"
 assert_contains "$(py 'print(runs("read")+runs("consolidate"))')" '--settings "$CLAUDE_SETTINGS"'
-
-it "excludes only rule files, never CLAUDE.md"
 assert_not_contains "$excl" "CLAUDE.md"
 
-it "every excluded rule exists — a glob that matches nothing is a rule silently kept"
-for g in $excl; do [ -f "$ROOT/${g#**/}" ] && pass || fail "no such rule: $g"; done
+it "the rules a reader reads are routed by a program that reaches every review criterion"
+python3 "$ROOT/.github/scripts/review-rules.py" --check >/dev/null 2>&1
+assert_status 0 "$?"
+assert_contains "$(py 'print(runs("read"))')" "review-rules.py"
 
 it "still holds the privilege split: only reconcile has contents: write, and no model job does"
 assert_equals "reconcile" "$(py 'print(" ".join(j for j,v in jobs.items() if v.get("permissions",{}).get("contents")=="write"))')"

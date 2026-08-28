@@ -50,17 +50,27 @@ assert_contains "$(cat "$tmp/input.json")" 'openspec/changes/thing/specs/cap/spe
 
 # --- review-prompt.py, over that input --------------------------------------
 
-it "a reader's message carries its component, its paths, its threads and the specs — and no other component's"
-r=$(python3 "$PROMPT" reader --input "$tmp/input.json" --group docs)
-assert_contains "$r" "COMPONENT: docs (directory)"
-assert_contains "$r" "  docs/a.md"
-assert_contains "$r" '"id": "PRRT_1"'
-assert_contains "$r" "resolved and unresolved alike"
-assert_contains "$r" "openspec/changes/thing/specs/cap/spec.md"
-assert_not_contains "$r" "signals/cron"
+it "the component's workflow args carry one entry per file: its threads and the rules routed to its path — and no other component's files"
+c=$(python3 "$PROMPT" component --input "$tmp/input.json" --group docs)
+assert_contains "$c" '"component": "docs"'
+assert_contains "$c" '"path": "docs/a.md"'
+assert_contains "$c" '"id": "PRRT_1"'
+assert_contains "$c" ".claude/rules/documentation.md"
+assert_contains "$c" "docs/CLAUDE.md"
+assert_contains "$c" "openspec/changes/thing/specs/cap/spec.md"
+assert_not_contains "$c" "signals/cron"
 
-it "a component with no threads is told so"
-assert_contains "$(python3 "$PROMPT" reader --input "$tmp/input.json" --group platform/manager)" "  none"
+it "a file's threads are its own, not the component's"
+c=$(python3 "$PROMPT" component --input "$tmp/input.json" --group signals/cron)
+assert_contains "$c" '"id": "PRRT_2"'
+assert_not_contains "$c" '"id": "PRRT_1"'
+assert_contains "$c" ".claude/rules/signal-rules.md"
+
+it "the component session's instruction is to run the workflow with those args and read nothing"
+r=$(python3 "$PROMPT" reader --input "$tmp/input.json" --group platform/manager)
+assert_contains "$r" 'saved workflow `review-component`'
+assert_contains "$r" '"component": "platform/manager"'
+assert_contains "$r" "Do not read the diff"
 
 it "an unknown component is refused"
 python3 "$PROMPT" reader --input "$tmp/input.json" --group nope >/dev/null 2>&1

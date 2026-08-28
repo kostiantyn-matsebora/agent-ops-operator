@@ -8,9 +8,12 @@
 #
 # FOUR JOBS, AND THE FAN-OUT IS THE MATRIX. `queue` is a program: what changed,
 # grouped into components, plus every review thread. `read` is one job per
-# changed component, all started at once, each running the base branch's
-# `component-reviewer` role and uploading its reading. `consolidate` runs the
-# `review-coordinator` over the readings — the only role that posts. `reconcile`
+# changed component, all started at once, each running one `file-reviewer`
+# subagent per changed file (the base branch's role, in a context holding
+# that file and the rules routed to its path) and uploading the merged
+# reading. `consolidate` runs the `review-coordinator` over the readings — the
+# only role that posts, in a context holding the readings and the threads and
+# no rule file. `reconcile`
 # holds the one privilege, runs no model, and refuses any thread the review did
 # not author.
 #
@@ -61,10 +64,14 @@ env:
   # On the pull request event the checkout is the merge ref, as before; a
   # dispatch names the head explicitly, since there is no event to name it.
   CHECKOUT_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.number) || '' }}
-  # THE RULES A REVIEW READS ARE CHOSEN BY GLOB, NOT INHERITED WHOLE:
-  # `claudeMdExcludes` drops the six developer-session rule files. MEASURED: a
-  # relative path matches nothing; `**/` globs do, and CLAUDE.md itself stays.
-  CLAUDE_SETTINGS: '{"claudeMdExcludes":["**/.claude/rules/build-test.md","**/.claude/rules/worktree-delivery.md","**/.claude/rules/session-naming.md","**/.claude/rules/publication.md","**/.claude/rules/visual-check.md","**/.claude/rules/answering.md"]}'
+  # NO CONTEXT IN THE REVIEW INHERITS A RULE FILE. `claudeMdExcludes` drops
+  # every `.claude/rules/*.md`; CLAUDE.md itself stays (small: the index and
+  # two named exceptions). A file reader is TOLD which rules to read for its
+  # path (`review-rules.py`); the coordinator reads none. MEASURED before this:
+  # the coordinator re-sent ~76 k tokens on each of 34 turns, of which its
+  # readings and threads were a few thousand. A relative path in this list
+  # matches nothing; `**/` globs do.
+  CLAUDE_SETTINGS: '{"claudeMdExcludes":["**/.claude/rules/*.md"]}'
 
 jobs:
   # WHAT THIS DIFF IS, AS DATA. Runs no model: the hygiene guards, the
@@ -199,7 +206,7 @@ jobs:
 
   # ONE READING PER CHANGED COMPONENT, ALL AT ONCE. The matrix is the queue's
   # component list — a component the diff never touches has no entry and no
-  # job. Each job runs the base branch's `component-reviewer` role in its own
+  # job. Each job runs the base branch's `file-reviewer` role, once per file, in its own
   # `claude -p`, on its own runner, and uploads its reading as data.
   #
   # `continue-on-error`: a reading that fails is a red job under its
@@ -234,7 +241,7 @@ jobs:
         run: |
           set -euo pipefail
           restored=""
-          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/review-reading-check.py; do
+          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/review-reading-check.py .github/scripts/review-rules.py .github/scripts/review-context.py; do
             git cat-file -e "$BASE:$f" 2>/dev/null || continue
             git diff --quiet "$BASE" -- "$f" || restored="$restored $f"
             git checkout "$BASE" -- "$f"
@@ -244,43 +251,57 @@ jobs:
         uses: ./.github/actions/claude-cli
         with:
           base-ref: origin/${{ needs.queue.outputs.base }}
-          restore: .claude/agents/component-reviewer.md
+          restore: |
+            .claude/agents/file-reviewer.md
+            .claude/workflows/review-component.js
       - if: steps.cli.outputs.restored != ''
         env:
           RESTORED: ${{ steps.cli.outputs.restored }}
-        run: echo "::notice::This pull request edits the review's reader role ($RESTORED); it is reviewed by the base branch's copy, and the edit takes effect once merged."
+        run: echo "::notice::This pull request edits the review's reader ($RESTORED); it is reviewed by the base branch's copy, and the edit takes effect once merged."
 
       - uses: actions/download-artifact@v4
         with:
           name: review-input
 
+      # WHAT EVERY CONTEXT IN THIS JOB WILL HOLD, before any of them runs.
+      # A context's size is paid on every turn, so it is the number that
+      # explains a slow reading — printed here from the files, every run.
+      - name: What each context holds
+        env:
+          GROUP: ${{ matrix.entry.group }}
+          BASE: origin/${{ needs.queue.outputs.base }}
+        run: python3 .github/scripts/review-context.py component --input review-input.json --group "$GROUP" --base "$BASE"
+
       - name: Read ${{ matrix.entry.group }}
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GROUP: ${{ matrix.entry.group }}
-          # THE READER'S SHAPE, ASKED FOR AS STRUCTURED OUTPUT AND CHECKED AGAIN
-          # BY `review-reading-check.py` — the schema is what the CLI enforces,
-          # the check is what the job trusts.
-          READER_SCHEMA: >-
+          # THE COMPONENT READING'S SHAPE — the workflow's merged return —
+          # ASKED FOR AS STRUCTURED OUTPUT AND CHECKED AGAIN BY
+          # `review-reading-check.py`: the schema is what the CLI enforces, the
+          # check is what the job trusts.
+          READING_SCHEMA: >-
             {"type":"object","required":["component","findings","changedNames","threads"],
              "properties":{"component":{"type":"string"},
                "findings":{"type":"array","items":{"type":"object","required":["path","line","claim"],
                  "properties":{"path":{"type":"string"},"line":{"type":"integer"},"claim":{"type":"string"},
                    "where":{"type":"array","items":{"type":"string"}},"rule":{"type":"string"},"fix":{"type":"string"}}}},
                "changedNames":{"type":"array","items":{"type":"string"}},
+               "files":{"type":"array","items":{"type":"object","required":["path","declares","references"],
+                 "properties":{"path":{"type":"string"},"declares":{"type":"array","items":{"type":"string"}},"references":{"type":"array","items":{"type":"string"}}}}},
                "threads":{"type":"array","items":{"type":"object","required":["id","verdict"],
-                 "properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["fixed","standing","gone","detached"]}}}}}}
-        # THE ALLOWLIST IS THE ROLE'S `tools:` — read-only git plus the file
-        # tools. `--agent` re-applies the role as an availability intersection,
-        # which is exactly the behaviour wanted here: nothing posts, nothing
-        # writes, nothing spawns.
+                 "properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["fixed","standing","gone","detached"]}}}},
+               "unread":{"type":"array","items":{"type":"string"}}}}
+        # THE COMPONENT SESSION READS NOTHING. Its allowlist is the saved
+        # workflow and the one role it may spawn; the FILE READERS' allowlist is
+        # their role's `tools:` — read-only git plus the file tools.
         run: |
           set -euo pipefail
           prompt=$(python3 .github/scripts/review-prompt.py reader --input review-input.json --group "$GROUP")
-          claude -p "$prompt" --agent component-reviewer \
-            --output-format json --json-schema "$READER_SCHEMA" \
+          claude -p "$prompt" \
+            --output-format json --json-schema "$READING_SCHEMA" \
             --settings "$CLAUDE_SETTINGS" \
-            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git ls-files:*),Bash(git ls-tree:*),Bash(git cat-file:*)" \
+            --allowedTools "Workflow,Agent(file-reviewer)" \
             > reader-output.json || true
           python3 .github/scripts/review-reading-check.py reader-output.json --group "$GROUP" --out readings/reading.json
 
@@ -326,7 +347,7 @@ jobs:
         run: |
           set -euo pipefail
           restored=""
-          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/mark-thread-resolved.sh; do
+          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/review-rules.py .github/scripts/review-context.py .github/scripts/mark-thread-resolved.sh; do
             git cat-file -e "$BASE:$f" 2>/dev/null || continue
             git diff --quiet "$BASE" -- "$f" || restored="$restored $f"
             git checkout "$BASE" -- "$f"
@@ -354,6 +375,9 @@ jobs:
       # An empty queue uploaded no readings and the pattern matches nothing;
       # the directory must still exist for the prompt script.
       - run: mkdir -p readings
+
+      - name: What the coordinator's context holds
+        run: python3 .github/scripts/review-context.py coordinator --input review-input.json --readings readings
 
       - id: review
         name: Consolidate and post

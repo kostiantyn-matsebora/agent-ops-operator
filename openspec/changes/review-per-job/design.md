@@ -249,7 +249,29 @@ carries `number`. `review-reading-check.py` gets its own test: a valid
 reading passes, prose fails, a missing key fails, a bad verdict enum fails,
 a JSON envelope with the JSON inside prose is extracted.
 
+### D11 — The coordinator keeps its job, in a context that holds only its job
+
+The coordinator's execution record on #111: 34 turns, 268 s of API time,
+~76 k tokens re-sent per turn — of which the readings and threads were a few
+thousand. The cost was the CONTEXT, not that a model dedups, judges and
+posts; those are what a model is for, and a program doing them would be a
+second place for the summary's shape and the thread rules to rot.
+
+So the coordinator stays a role, and what changes is what it is handed:
+
+- its role file, the readings and the threads, and no rule file (D9);
+- the readings carry `files[].declares` / `files[].references`, and the role
+  gains one instruction: a name declared removed or renamed in one file and
+  referenced in another file's reading is a finding against that file, from
+  the readings alone;
+- for a consumer OUTSIDE the change (its `git grep`, as today) it reads that
+  one file — a bounded read, not a whole-repository context.
+
+Whether the remaining turns are slow is MEASURED after D9 (task 9.1), and
+not pre-empted.
+
 ## Risks / Trade-offs
+
 
 - [Eight runners × ~40 s of checkout and install] → the cached install brings
   the install to seconds; checkout with `fetch-depth: 0` is the real fixed

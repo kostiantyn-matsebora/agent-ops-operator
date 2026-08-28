@@ -48,6 +48,12 @@ it "a reading naming another component is recorded under the group it was asked 
 assert_status 0 "$(check '{"structured_output":{"component":"other","findings":[],"changedNames":[],"threads":[]}}')"
 assert_contains "$(cat "$tmp/out/reading.json")" '"component": "docs"'
 
+it "a merged component reading keeps its files and unread lists"
+merged='{"component":"docs","findings":[],"changedNames":["A -> B"],"files":[{"path":"docs/a.md","declares":["A -> B"],"references":["C"]}],"threads":[],"unread":["docs/b.md"]}'
+assert_status 0 "$(check "{\"structured_output\":$merged}")"
+assert_contains "$(cat "$tmp/out/reading.json")" '"references"'
+assert_contains "$(cat "$tmp/out/reading.json")" '"unread"'
+
 it "an unreadable envelope fails"
 printf 'not json' > "$tmp/env.json"
 python3 "$S" "$tmp/env.json" --group docs --out "$tmp/out/r.json" >/dev/null 2>&1
