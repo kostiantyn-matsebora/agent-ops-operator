@@ -62,6 +62,25 @@ matrix, where each reader gets its own four-core runner and its own process.
 - **Model concurrency is no longer a scenario.** The spec's "more components
   than the pool holds" scenario is replaced: every component is read at once,
   bounded only by the platform's job limit.
+- **A component is read PER FILE, by subagents, and cross-reviewed from the
+  readings.** Inside a component's job, a saved workflow runs one FILE READER
+  per changed file — a subagent whose context is that file's diff, its
+  standing threads and the two or three rule files that apply to its path,
+  read on demand — and merges their readings into the component's. Each
+  file reading returns, beside its findings, what the file DECLARES (names
+  added, removed, renamed) and what it REFERENCES (names it uses from
+  elsewhere). The coordinator cross-reviews from those results — a removed
+  name against every other reading's references, and against a repo grep for
+  consumers outside the change — without opening the files. Measured on the
+  first matrix run: a component's context grows with its diff, and the one
+  `.github` reader (10 files, 1,086 insertions) took four to nine minutes on
+  the same diff while the others took one to four.
+- **NO JOB CARRIES THE RULES AS CONTEXT.** Every `claude -p` in the review
+  excludes `**/.claude/rules/*.md`; a file reader is TOLD which rule files to
+  read for its path, and the coordinator reads none. Measured on the
+  coordinator: 273 s, of which 268 s API time over 34 turns, each re-sending
+  ~76 k tokens — readings and threads are a few thousand of those; the rest is
+  the fifteen rule files it inherited and never used.
 
 ## Capabilities
 

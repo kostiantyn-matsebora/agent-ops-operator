@@ -115,14 +115,36 @@ finding block the merge, below.
 ### THE REVIEW FOUND SOMETHING. NOW WHAT
 
 `claude-review.yml` posts findings as review threads, and an open thread blocks
-the merge. **The review is a saved workflow with two roles** —
-`.claude/workflows/review-pr.js` runs one `component-reviewer` per changed
-component, concurrently, and hands every reading to the `review-coordinator`,
-the only role that posts. It runs from a checkout too: `/review-pr` with
-`{repo, number, base}` (`dryRun: true` posts nothing). The job restores all
-three files from the BASE branch before running, so a pull request cannot
-rewrite the review that judges it. Triage happens IN THE THREAD, in a stated vocabulary, and one comment
-acts on everything accepted:
+the merge. **The review is four jobs and two roles** — `queue` is a program
+(`review-input.py` over `review-queue.py`), `read` is a matrix of one job per
+changed component, all at once, each running `review-component.js`: one
+`file-reviewer` subagent per changed file, two at a time, in a context holding
+that file, its threads and the rules `review-rules.py` routes to its path —
+NO context inherits a rule file, and `review-context.py` prints what each one
+holds at the top of the job. `consolidate` runs the `review-coordinator` —
+the only role that posts, holding the readings and threads and no rules —
+which cross-reviews from what the files declare and reference, never
+re-reads the diff, and posts everything through ONE command,
+`review-post.py`, which RECORDS each addressed thread with
+`mark-thread-resolved.sh` (a list, no privilege). The model and its effort
+are the workflow's (`--model`, `--effort` — `gotchas.md` has why);
+`reconcile` RESOLVES the recorded threads with no model and the one
+`contents: write`. It runs by hand too: `gh workflow run claude-review.yml -f
+number=<pr>` (`-f dry_run=true` posts nothing). NOTHING THE REVIEW RUNS COMES
+FROM THE PULL REQUEST: `queue` restores `review-input.py`, `review-queue.py`
+and `components.sh` from the BASE branch before building the queue; `read`
+restores the composite action, `review-prompt.py`, `review-reading-check.py`,
+`review-rules.py`, `review-context.py` and `review-trace.py`, and
+`consolidate` the action, `review-prompt.py`, `review-rules.py`,
+`review-context.py`, `review-trace.py`, `review-post.py` and
+`mark-thread-resolved.sh`; both then install the CLI through
+`.github/actions/claude-cli`, which restores the job's role file (and, for
+`read`, `review-component.js`); `reconcile` checks out the base branch
+itself. So a pull request cannot rewrite the review that judges it, shrink
+its own queue, or resolve a thread it did not earn. The
+fan-out is the matrix and not a pool inside one session: `gotchas.md` has the
+measurement. Triage happens IN THE THREAD, in a stated vocabulary, and one
+comment acts on everything accepted:
 
 | You type | Where | It means |
 |---|---|---|
