@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 )
@@ -102,15 +103,21 @@ func TestNoApproversMeansAnyone(t *testing.T) {
 // TestTopicMessageCarriesItsThreadID: the thread id is what makes this a
 // CONTINUATION — /channel/inbound now rejects a message without one.
 func TestTopicMessageCarriesItsThreadID(t *testing.T) {
-	a, got := testAdapter(t, map[string]channelConfig{"telegram-ops": {ChatID: "-1001"}})
-	a.dispatch(context.Background(), mustUpdate(t,
-		`{"update_id":1,"message":{"text":"more","chat":{"id":-1001},"from":{"id":1},"is_topic_message":true,"message_thread_id":4242}}`))
+	// The CANONICAL captured topic update, shared with the e2e pack: the fake
+	// Bot API replays exactly this and the router forwards it verbatim.
+	// Test-only relative read, no go.mod entry.
+	raw, err := os.ReadFile("../../test/fixtures/telegram-update-topic.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, got := testAdapter(t, map[string]channelConfig{"telegram-ops": {ChatID: "-1001234567890"}})
+	a.dispatch(context.Background(), mustUpdate(t, string(raw)))
 	if len(*got) != 1 {
 		t.Fatal("topic message should be delivered")
 	}
 	in := (*got)[0]
-	if in.ThreadID == nil || *in.ThreadID != "4242" {
-		t.Fatalf("threadId = %v, want 4242", in.ThreadID)
+	if in.ThreadID == nil || *in.ThreadID != "42" {
+		t.Fatalf("threadId = %v, want 42", in.ThreadID)
 	}
 	if in.Channel != "telegram-ops" {
 		t.Fatalf("channel = %q", in.Channel)

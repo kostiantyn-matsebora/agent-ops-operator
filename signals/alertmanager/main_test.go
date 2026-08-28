@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -71,10 +72,18 @@ func post(t *testing.T, h http.Handler, path, bearer, body string) *httptest.Res
 	return rec
 }
 
-const twoFiringOneResolved = `{"alerts":[
-  {"status":"firing","fingerprint":"fp-a","labels":{"alertname":"A","namespace":"ns1"},"annotations":{"summary":"s"},"startsAt":"2026-08-07T10:00:00Z","generatorURL":"http://vm/a"},
-  {"status":"resolved","fingerprint":"fp-b","labels":{"alertname":"B"}},
-  {"status":"firing","fingerprint":"fp-c","labels":{"alertname":"C"}}]}`
+// twoFiringOneResolved is the CANONICAL webhook body, shared with the e2e pack
+// so a single captured payload cannot drift between the two suites. Read by
+// relative path from this test file — a test-only read, no go.mod entry.
+var twoFiringOneResolved = mustFixture("../../test/fixtures/alertmanager-webhook.json")
+
+func mustFixture(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		panic("fixture: " + err.Error())
+	}
+	return string(b)
+}
 
 func TestWebhookRoutingAndFiringFilter(t *testing.T) {
 	f := &fakeManager{sources: []SourceInfo{{Name: "vm-alerts"}}}
@@ -103,7 +112,7 @@ func TestWebhookRoutingAndFiringFilter(t *testing.T) {
 	if first["fingerprint"] != "fp-a" || first["title"] != "🔍 A — ns1" {
 		t.Fatalf("normalization: %+v", first)
 	}
-	if !strings.Contains(first["payload"].(string), `"generatorURL": "http://vm/a"`) {
+	if !strings.Contains(first["payload"].(string), `"generatorURL": "http://alertmanager.example.com/a"`) {
 		t.Fatalf("payload shape: %s", first["payload"])
 	}
 	if _, hasKind := first["kind"]; hasKind {

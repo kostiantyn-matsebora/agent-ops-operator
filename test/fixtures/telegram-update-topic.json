@@ -1,0 +1,12 @@
+{
+  "update_id": 78,
+  "message": {
+    "message_id": 315,
+    "from": {"id": 1234567890, "is_bot": false, "first_name": "Operator", "username": "operator"},
+    "chat": {"id": -1001234567890, "title": "ops", "type": "supergroup", "is_forum": true},
+    "date": 1754560860,
+    "message_thread_id": 42,
+    "is_topic_message": true,
+    "text": "and the memory?"
+  }
+}

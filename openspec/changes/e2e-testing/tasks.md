@@ -8,17 +8,17 @@
 
 ## 2. Fake Bot API server
 
-- [ ] 2.1 `test/fakebotapi/`: HTTP server implementing `getUpdates`, `sendMessage`, `sendDocument`, `createForumTopic`, `closeForumTopic`
-- [ ] 2.2 Scriptable update queue (feed a captured `Update`, serve it once) plus a recorded-call log queryable by tests
-- [ ] 2.3 Dockerfile + in-cluster Deployment manifest for the e2e pack
-- [ ] 2.4 Self-test: the fake's own request/response shapes match the captured real ones
+- [x] 2.1 `test/fakebotapi/`: HTTP server implementing `getUpdates`, `sendMessage`, `sendDocument`, `createForumTopic`, `closeForumTopic`
+- [x] 2.2 Scriptable update queue (feed a captured `Update`, serve it once) plus a recorded-call log queryable by tests
+- [x] 2.3 Dockerfile + in-cluster Deployment manifest for the e2e pack
+- [x] 2.4 Self-test: the fake's own request/response shapes match the captured real ones
 
 ## 3. Fixture set
 
-- [ ] 3.1 `test/fixtures/`: scrubbed Alertmanager webhook body (firing + resolved)
-- [ ] 3.2 Scrubbed Telegram `Update` fixtures — general-surface message (origination) and topic message (continuation)
-- [ ] 3.3 Scrubbing: every identifier in a fixture is a placeholder the publication allowlist permits by name — a new kind is an entry in `.github/publication-allowlist.json` landed first; `python3 .github/scripts/publication-guard.py` passes
-- [ ] 3.4 Point `signal-alertmanager` and `signal-telegram` unit tests at the canonical fixtures by relative path (test-only read, no `go.mod` change)
+- [x] 3.1 `test/fixtures/`: scrubbed Alertmanager webhook body (firing + resolved)
+- [x] 3.2 Scrubbed Telegram `Update` fixtures — general-surface message (origination) and topic message (continuation)
+- [x] 3.3 Scrubbing: every identifier in a fixture is a placeholder the publication allowlist permits by name — a new kind is an entry in `.github/publication-allowlist.json` landed first; `python3 .github/scripts/publication-guard.py` passes
+- [x] 3.4 Point `signal-alertmanager` and `signal-telegram` unit tests at the canonical fixtures by relative path (test-only read, no `go.mod` change)
 
 ## 4. Contract conformance suite
 
@@ -33,12 +33,12 @@
 
 ## 5. Stub runtime
 
-- [ ] 5.1 `test/stubruntime/`: `/work` long-poll, `/work/done` report, idle-TTL exit — conforming, with no manager-side special case
-- [ ] 5.2 Scripted vocabulary keyed on input text: `echo`, `fail`, `stale-context`, `no-context`, `die`, `stall`, `storage-outage`
-- [ ] 5.3 Determinism check: identical input yields identical reported result
-- [ ] 5.4 Dockerfile; name it so its presence in a real deployment is obviously wrong
-- [ ] 5.5 Assert no chart default, sample CR or documented install path references it
-- [ ] 5.6 Exclude `test/` in `.github/components.sh` and assert `components.sh images` lists neither the stub nor the fake Bot API — the union of Dockerfile-bearing directories would otherwise publish them
+- [x] 5.1 `test/stubruntime/`: `/work` long-poll, `/work/done` report, idle-TTL exit — conforming, with no manager-side special case
+- [x] 5.2 Scripted vocabulary keyed on input text: `echo`, `fail`, `stale-context`, `no-context`, `die`, `stall`, `storage-outage`
+- [x] 5.3 Determinism check: identical input yields identical reported result
+- [x] 5.4 Dockerfile; name it so its presence in a real deployment is obviously wrong
+- [x] 5.5 Assert no chart default, sample CR or documented install path references it
+- [x] 5.6 Exclude `test/` in `.github/components.sh` and assert `components.sh images` lists neither the stub nor the fake Bot API — the union of Dockerfile-bearing directories would otherwise publish them
 
 ## 6. Cluster harness
 
