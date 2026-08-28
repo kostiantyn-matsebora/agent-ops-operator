@@ -34,7 +34,7 @@ refers to the ADR's decisions as D1–D6.
 - Replacing the inline Pipeline fields.
 - Synchronous invocation.
 - Summarising the root's context. (`brief`, D-I, is not that: it is what a
-  conversation is ABOUT, one paragraph, not a digest of its transcript.)
+  conversation is ABOUT, one or two sentences, not a digest of its transcript.)
 
 ## Decisions
 
