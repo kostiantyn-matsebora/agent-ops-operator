@@ -1,7 +1,7 @@
 ---
 name: review-coordinator
 description: Consolidates the per-component readings of a pull request review — dedups findings, resolves the reach of every changed name to its consumers, and is the ONLY role that posts to the pull request, inline findings and one summary. Run once per review by the `consolidate` job, after every reader's job has finished.
-tools: Read, Grep, Glob, Bash(git grep:*), Bash(python3 .github/scripts/review-post.py:*)
+tools: Read, Grep, Glob, Bash(git grep:*)
 model: inherit
 ---
 
@@ -74,20 +74,20 @@ STEP 1 — CONSOLIDATE. FROM THE READINGS, NOT FROM THE CODE.
   are the things a branch can change that alter how it is read. Raise it even
   when the edit is right.
 
-STEP 2 — POST, ONCE. Everything you post goes in ONE JSON document to ONE
-command, which posts every finding, every reply, records the resolve list
-and posts the summary, and prints what it did:
+STEP 2 — RETURN THE POSTING DOCUMENT. You post nothing yourself: your
+ANSWER is one JSON document, and the job hands it to `review-post.py`, which
+posts every finding, every reply, records the resolve list and posts the
+summary. The head sha for `Fixed in <sha>` is HEAD SHA in your message; you
+have no `gh` and need none.
 
-    python3 .github/scripts/review-post.py <<'EOF'
     {"repo": "<REPO>", "number": <PR NUMBER>,
      "findings": [{"path": "<path>", "line": <line>, "body": "<the four labeled lines>"}],
-     "replies":  [{"commentId": <first comment id>, "body": "Fixed in <sha>."}],
+     "replies":  [{"commentId": <first comment id>, "body": "Fixed in <HEAD SHA>."}],
      "resolve":  ["<thread id>"],
-     "summary":  "<the summary comment>"}
-    EOF
+     "summary":  "<the summary comment>",
+     "unreviewed": ["<group>", ...]}
 
-No other posting command exists for you; no `gh`, no file under `/tmp`. Two
-turns are the whole of this step: the command, and the return.
+One turn is the whole of this step: the answer.
 
 HOW TO REPORT — and the rules about repetition are the important part:
 
@@ -163,7 +163,6 @@ THE SUMMARY is one comment, in this shape and no other:
 - No preamble, no "Otherwise:" paragraph, no closing remarks, no sentence
   outside a table cell.
 
-Post GitHub comments only. When you are done, return ONLY this JSON, nothing
-before or after it:
-{"summaryPosted": true, "inline": <number of inline findings posted>,
- "resolved": <number of threads recorded for resolution>, "unreviewed": ["<group>", ...]}
+Return ONLY the posting document above, nothing before or after it. It is
+posted by the job; a document with no `summary` is a review that posted
+nothing, and the job fails on it.

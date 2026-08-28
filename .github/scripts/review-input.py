@@ -101,13 +101,13 @@ def main() -> int:
     args = ap.parse_args()
     chunk = args.chunk if args.chunk > 0 else 10**9
 
-    pr = json.loads(sh("gh", "pr", "view", str(args.number), "-R", args.repo, "--json", "baseRefName,headRefName"))
-    base, head = pr["baseRefName"], pr["headRefName"]
+    pr = json.loads(sh("gh", "pr", "view", str(args.number), "-R", args.repo, "--json", "baseRefName,headRefName,headRefOid"))
+    base, head, head_sha = pr["baseRefName"], pr["headRefName"], pr.get("headRefOid", "")
     paths = [p for p in sh("gh", "pr", "diff", str(args.number), "-R", args.repo, "--name-only").splitlines() if p.strip()]
     queue = json.loads(sh("python3", str(HERE / "review-queue.py"), *paths)) if paths else []
 
     data = {
-        "repo": args.repo, "number": args.number, "base": base, "head": head,
+        "repo": args.repo, "number": args.number, "base": base, "head": head, "headSha": head_sha,
         "paths": paths, "queue": queue,
         "threads": threads(args.repo, args.number),
         "specPaths": spec_paths(head),

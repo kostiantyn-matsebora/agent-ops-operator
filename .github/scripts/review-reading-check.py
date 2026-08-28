@@ -98,9 +98,22 @@ def problems(reading: dict) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("envelope", type=pathlib.Path, help="the CLI's json output")
-    ap.add_argument("--group", required=True, help="the component this reading is for")
+    ap.add_argument("--group", help="the component this reading is for")
     ap.add_argument("--out", type=pathlib.Path, required=True, help="where to write the validated reading")
+    ap.add_argument("--extract", action="store_true",
+                    help="only extract the JSON object from the envelope (the coordinator's posting document); no reading validation")
     args = ap.parse_args()
+    if args.extract:
+        try:
+            envelope = json.loads(args.envelope.read_text())
+            doc = extract(envelope) if isinstance(envelope, dict) else None
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(f"::error::no posting document in the envelope: {e}", file=sys.stderr)
+            return 1
+        args.out.write_text(json.dumps(doc) + "\n")
+        return 0
+    if not args.group:
+        ap.error("--group is required unless --extract")
 
     try:
         envelope = json.loads(args.envelope.read_text())

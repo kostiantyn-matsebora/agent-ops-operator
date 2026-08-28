@@ -15,7 +15,7 @@ mkdir -p "$tmp/bin"
 cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
-  "pr view"*)     echo '{"baseRefName":"master","headRefName":"change/thing"}' ;;
+  "pr view"*)     echo '{"baseRefName":"master","headRefName":"change/thing","headRefOid":"abc1234"}' ;;
   "pr diff"*)     printf 'docs/a.md\nsignals/cron/main.go\nsignals/cron/x.go\nsignals/cron/y.go\nplatform/manager/x.go\n' ;;
   # TWO PAGES. The first says there is another and hands a cursor; the call
   # that carries the cursor gets the second. A caller that stops at one page
@@ -113,6 +113,7 @@ assert_contains "$c" '"unread": [
     "signals/cron/y.go"
    ]'
 assert_contains "$c" '"path": "signals/cron/x.go"'
+assert_contains "$c" "HEAD SHA: abc1234"
 assert_contains "$c" "CHANGED PATHS:"
 assert_contains "$c" "REVIEW THREADS:"
 

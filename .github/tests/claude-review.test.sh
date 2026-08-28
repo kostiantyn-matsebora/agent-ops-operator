@@ -145,7 +145,7 @@ assert_contains "$c" ".github/scripts/mark-thread-resolved.sh"
 assert_contains "$c" 'claude -p "$prompt" --agent review-coordinator'
 assert_contains "$c" '--output-format stream-json'
 assert_contains "$c" 'review-prompt.py coordinator'
-assert_contains "$c" 'startswith("### Review")'
+assert_contains "$c" 'post-result.json'
 assert_contains "$c" 'touch "${{ github.workspace }}/.resolve-threads"'
 assert_contains "$(py 'print(step("consolidate","name","The review actually ran")["if"])')" "always()"
 
@@ -228,19 +228,24 @@ assert_contains "$c" '**Claim:**'
 assert_contains "$c" '**Where:**'
 assert_contains "$c" '**Rule:**'
 assert_contains "$c" '**Fix:**'
-assert_contains "$(fm tools "$COORD")" "review-post.py"
+assert_not_contains "$(fm tools "$COORD")" "review-post.py"
 assert_not_contains "$(fm tools "$COORD")" "gh "
 assert_not_contains "$(fm tools "$COORD")" "git diff"
 assert_not_contains "$(fm tools "$COORD")" "Agent"
 assert_not_contains "$(fm tools "$COORD")" "mcp__"
-assert_contains "$c" "review-post.py <<'EOF'"
+assert_contains "$c" "RETURN THE POSTING DOCUMENT"
+assert_contains "$c" "HEAD SHA"
 assert_contains "$c" "YOU DO NOT VERIFY A FINDING, AND YOU DO NOT READ THE DIFF"
 
-it "the coordinator's allowlist in the job matches: one posting command, no gh"
+it "the coordinator posts nothing itself: the job runs review-post.py on its structured answer, and the gate reads that result"
 callowed=$(py 'print(re.search(r"--allowedTools \"([^\"]*)\"", runs("consolidate")).group(1))')
-assert_contains "$callowed" "Bash(python3 .github/scripts/review-post.py:*)"
-assert_not_contains "$callowed" "gh "
-assert_not_contains "$callowed" "git diff"
+assert_equals "Read,Grep,Glob,Bash(git grep:*)" "$callowed"
+c2=$(py 'print(runs("consolidate"))')
+assert_contains "$c2" '--json-schema "$POST_SCHEMA"'
+assert_contains "$c2" 'review-post.py post.json | tee post-result.json'
+assert_contains "$c2" 'summaryPosted'
+assert_not_contains "$c2" 'startswith("### Review")'
+assert_contains "$(py 'print(step("consolidate","id","review")["env"]["POST_SCHEMA"])')" summary
 
 it "consolidates in the coordinator: cross-review from readings, reach outside, unreviewed, and the first finding names the guarded files"
 assert_contains "$c" "git grep -l -F"

@@ -22,7 +22,8 @@ import sys
 
 
 def header(d: dict) -> str:
-    return f"REPO: {d['repo']}\nPR NUMBER: {d['number']}\nBASE REF: origin/{d['base']}\n"
+    return (f"REPO: {d['repo']}\nPR NUMBER: {d['number']}\nBASE REF: origin/{d['base']}\n"
+            f"HEAD SHA: {d.get('headSha') or 'unknown'}\n")
 
 
 def _load_rules_for():

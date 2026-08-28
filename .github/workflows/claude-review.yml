@@ -418,6 +418,17 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RESOLVE_LIST: ${{ github.workspace }}/.resolve-threads
+          # THE POSTING DOCUMENT'S SHAPE — the coordinator's structured answer.
+          POST_SCHEMA: >-
+            {"type":"object","required":["repo","number","findings","replies","resolve","summary"],
+             "properties":{"repo":{"type":"string"},"number":{"type":"integer"},
+               "findings":{"type":"array","items":{"type":"object","required":["path","line","body"],
+                 "properties":{"path":{"type":"string"},"line":{"type":"integer"},"body":{"type":"string"}}}},
+               "replies":{"type":"array","items":{"type":"object","required":["commentId","body"],
+                 "properties":{"commentId":{"type":"integer"},"body":{"type":"string"}}}},
+               "resolve":{"type":"array","items":{"type":"string"}},
+               "summary":{"type":"string"},
+               "unreviewed":{"type":"array","items":{"type":"string"}}}}
         # The stream-json stdout is the execution record; the last `result`
         # event is the run's conclusion.
         run: |
@@ -426,16 +437,22 @@ jobs:
           prompt=$(python3 .github/scripts/review-prompt.py coordinator --input review-input.json --readings readings)
           conclusion=success
           claude -p "$prompt" --agent review-coordinator \
-            --output-format stream-json --verbose \
+            --output-format stream-json --verbose --json-schema "$POST_SCHEMA" \
             --model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT" --settings "$CLAUDE_SETTINGS" \
-            --allowedTools "Read,Grep,Glob,Bash(git grep:*),Bash(python3 .github/scripts/review-post.py:*)" \
+            --allowedTools "Read,Grep,Glob,Bash(git grep:*)" \
             > "$out" || conclusion=failure
           echo "execution_file=$out" >> "$GITHUB_OUTPUT"
           last=$(grep '"type":"result"' "$out" | tail -1 || true)
           [ -n "$last" ] || conclusion=failure
           echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
           echo "conclusion=$conclusion"
-          python3 .github/scripts/review-trace.py "$out"
+          python3 .github/scripts/review-trace.py "$out" --out coordinator-output.json
+          # THE JOB POSTS. The coordinator's answer is the posting document;
+          # `review-post.py` posts it and prints what it did, and that print is
+          # what the gate reads — never a count of comments already on the
+          # pull request, which is how a run that posted nothing once passed.
+          python3 .github/scripts/review-reading-check.py --extract coordinator-output.json --out post.json || true
+          python3 .github/scripts/review-post.py post.json | tee post-result.json || true
 
       - if: always() && steps.review.outputs.execution_file != ''
         uses: actions/upload-artifact@v4
@@ -457,10 +474,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          summaries=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
-            --jq '[.[] | select((.body | startswith("### Review")) and (.body | test(" new · ")))] | length')
-          if [ "${summaries:-0}" -lt 1 ]; then
-            echo "::error::The review ran (conclusion: ${CONCLUSION:-unreported}) but posted no summary — read the execution artifact."
+          posted=$(python3 -c 'import json; print(json.load(open("post-result.json")).get("summaryPosted", False))' 2>/dev/null || echo False)
+          if [ "$posted" != "True" ]; then
+            echo "::error::The review ran (conclusion: ${CONCLUSION:-unreported}) but posted no summary THIS RUN — read the execution artifact."
             exit 1
           fi
           echo "the review ran and posted its summary (conclusion: ${CONCLUSION:-unreported})"
