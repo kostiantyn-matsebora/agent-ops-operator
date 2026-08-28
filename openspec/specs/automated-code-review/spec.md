@@ -519,7 +519,7 @@ review considered rather than trusting that it considered everything.
 
 ### Requirement: The reviewer's definition is part of the guarded review
 
-The definitions of the review's roles — the per-component reviewer and the
+The definitions of the review's roles — the file reader and the
 coordinator, each its instructions and the tools it may use — and the steps
 that install the model's tooling and hand each role its input SHALL be taken
 from the DEFAULT BRANCH when the review runs, never from the pull request's
