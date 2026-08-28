@@ -182,7 +182,7 @@ undo.
 | **Agent quality** | the vendor's | the model's — an operator choice | the vendor's |
 | **Tools** | claude-code's, plus MCP | the same six, natively, plus MCP | Copilot's, translated, plus MCP |
 | **A scoped shell** | enforced by the CLI | grants nothing | enforced per call |
-| **Context** | claude-code's transcripts | the runtime's own | Copilot's sessions |
+| **Context** | claude-code's transcripts | the runtime's own | Copilot's context store |
 | **Cost per run** | tokens | your hardware | credits |
 
 **Any of them, on one install.** Each Pipeline's `runtimeRef` is the whole

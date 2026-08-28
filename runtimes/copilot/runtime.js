@@ -288,7 +288,13 @@ async function attempt(c, unit, cfg, prompt, denials = []) {
   try {
     opened = await openSession(c, unit, cfg);
   } catch (e) {
-    return { status: 'failed', exitCode: 1, sessionId: contextIdOf(unit) || null, result: '', openError: String(e.message || e) };
+    // The open itself failed — auth, the CLI, a resume of a handle that is
+    // gone. Logged AND carried as the result, so a fresh session that cannot
+    // open reports why instead of an empty failure; the resume path reads
+    // `openError` to tell "not found" from everything else.
+    const msg = String(e.message || e);
+    console.log(`[runtime] could not open the Copilot session: ${msg}`);
+    return { status: 'failed', exitCode: 1, sessionId: contextIdOf(unit) || null, result: `could not open the Copilot session: ${msg}`, openError: msg };
   }
   const { session, id } = opened;
   const off = session.on((ev) => onEvent(ev, state));
