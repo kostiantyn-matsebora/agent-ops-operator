@@ -112,6 +112,10 @@ after it, with the addressing decided in between by `message-addressing`.
 - `docs/installation.md`: `voice.*`, `console.voice.*`, the Google
   credential Secret.
 - `docs/CHANGELOG.md`: the components.
+- `CLAUDE.md` — its "A DIRECTORY IS A COMPONENT" line becomes "a directory is
+  a CONTAINER, which may hold several components", with `structure.md` named
+  for the detail, since this change modifies the `repository-layout`
+  requirement that line summarises.
 - `.claude/rules/structure.md`, `adapters.md` (two more adapter kinds),
   `terminology.md` (surface, utterance, recognizer, synthesizer),
   `invariants.md` (no adapter exposes a port; the receiver delivers under the
