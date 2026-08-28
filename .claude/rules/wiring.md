@@ -58,10 +58,13 @@ Two optional stanzas of ordered refs:
 
 **`spec.toolsets.mode`** (`merge` | `overwrite`, default `merge`) composes
 against the **AGENT DEFINITION** — the `tools:` frontmatter of the agent's file
-in the profile's REPO. WHERE that file is, is the RUNTIME's fact:
-`.claude/agents/<agent>.md` on claude and ollama,
-`.github/agents/<agent>.agent.md` on copilot. The composition rule is the
-contract's and identical on all of them.
+in the profile's REPO. WHERE that file is, is the RUNTIME's fact; the
+composition rule is the contract's and identical on all of them.
+
+| Runtime | Reads |
+|---|---|
+| claude, ollama | `.claude/agents/<agent>.md` |
+| copilot | `.github/agents/<agent>.agent.md` |
 
 - **Never against the profile**, which carries no capabilities. Mistaking the
   profile for the counterpart is what deleted this field once already.

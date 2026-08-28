@@ -206,7 +206,7 @@ tools; the runtime translates, permits and reports.
 - **A denial is `{kind: "reject", feedback}`.** A bare `reject` ENDS THE TURN
   with no text; `deny` is refused as malformed. The feedback is what the model
   reads, which is `--permission-mode dontAsk` one vendor over.
-- **The session id is MINTED here** (`crypto.randomUUID()`), state under
+- **The context handle is MINTED here** (`crypto.randomUUID()`), state under
   `$HOME/.copilot/session-state/<id>/` — `session.db`, `events.jsonl` — which
   the bundle declares to `context-sync`. `Session not found` is the resume
   failure the ladder in `continuity.js` keys on.

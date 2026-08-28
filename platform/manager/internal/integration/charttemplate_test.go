@@ -2268,34 +2268,20 @@ func TestDefaultRuntimeIsTheFlaggedOrFirstConfigured(t *testing.T) {
 		"--set", "ollama.endpoint=http://ollama.ollama.svc:11434",
 		"--set", "ollama.model=qwen2.5:14b",
 		"--set", "global.demo.enabled=true"} // a route naming no runtimeRef
-	defaultOf := func(out string) (string, string) {
-		for _, doc := range splitDocs(out) {
-			if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: default\n") {
-				src := ""
-				for _, line := range strings.Split(doc, "\n") {
-					if strings.Contains(line, "agentops.dev/default-of:") {
-						src = strings.Trim(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), `"`)
-					}
-				}
-				return doc, src
-			}
-		}
-		return "", ""
-	}
 	// ollama alone: it is the default, under its own name plus the copy
 	out := helmTemplate(t, append(ollama, "--set", "claude.enabled=false")...)
-	if doc, src := defaultOf(out); src != "ollama" || !strings.Contains(doc, "name: OLLAMA_URL") {
+	if doc, src := defaultRuntimeDoc(out); src != "ollama" || !strings.Contains(doc, "name: OLLAMA_URL") {
 		t.Errorf("ollama alone must be copied as default, got source %q", src)
 	}
 	if strings.Count(out, "\nkind: AgentRuntime\n") != 2 {
 		t.Error("ollama alone renders exactly ollama and default")
 	}
 	// both, none flagged: the first configured — claude — is the default
-	if _, src := defaultOf(helmTemplate(t, ollama...)); src != "claude" {
+	if _, src := defaultRuntimeDoc(helmTemplate(t, ollama...)); src != "claude" {
 		t.Errorf("with both and no flag the first configured is default, got %q", src)
 	}
 	// both, ollama flagged: the flag wins
-	if doc, src := defaultOf(helmTemplate(t, append(ollama, "--set", "ollama.default=true")...)); src != "ollama" || strings.Contains(doc, "kind: Secret") {
+	if doc, src := defaultRuntimeDoc(helmTemplate(t, append(ollama, "--set", "ollama.default=true")...)); src != "ollama" || strings.Contains(doc, "kind: Secret") {
 		t.Errorf("the flag must move the default, got %q", src)
 	}
 	// the copy carries no Secret of its own, even when the source has a token

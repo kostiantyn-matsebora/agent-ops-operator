@@ -340,7 +340,7 @@ RUNTIME_DIAGRAMS: dict[str, dict] = {
     # For runtime-copilot the point is the opposite split: the vendor runs the
     # loop and the tools, and what sits in the middle box is the TRANSLATION
     # -- the route's patterns into Copilot's filters, and a permission callback
-    # every call passes through. The session store is the vendor's too.
+    # every call passes through. The context store is the vendor's too.
     "copilot": {
         "dir": "runtimes",
         "alt": "The manager hands a work unit to runtime-copilot, which "
