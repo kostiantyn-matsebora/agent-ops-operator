@@ -204,9 +204,11 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  # ONE READING PER CHANGED COMPONENT, ALL AT ONCE. The matrix is the queue's
-  # component list — a component the diff never touches has no entry and no
-  # job. Each job runs the base branch's `file-reviewer` role, once per file, in its own
+  # ONE JOB PER TWO CHANGED FILES, ALL AT ONCE. The matrix is the queue's
+  # entry list: a component, or a chunk of one — a component the diff never
+  # touches has no entry and no job, and a 15-file one is eight jobs rather
+  # than eight waves inside one (measured on #111: eight waves hit the 600 s
+  # ceiling and the component went unreviewed). Each job runs the base branch's `file-reviewer` role, once per file, in its own
   # `claude -p`, on its own runner, and uploads its reading as data.
   #
   # `continue-on-error`: a reading that fails is a red job under its
@@ -223,7 +225,7 @@ jobs:
       fail-fast: false
       matrix:
         entry: ${{ fromJSON(needs.queue.outputs.groups) }}
-    name: read (${{ matrix.entry.group }})
+    name: read (${{ matrix.entry.group }}${{ matrix.entry.chunk && format(' {0}', matrix.entry.chunk) || '' }})
     steps:
       - uses: actions/checkout@v4
         with:
@@ -239,9 +241,9 @@ jobs:
       # is installed or restored.
       - name: What each context holds
         env:
-          GROUP: ${{ matrix.entry.group }}
+          ENTRY: ${{ matrix.entry.slug }}
           BASE: origin/${{ needs.queue.outputs.base }}
-        run: python3 .github/scripts/review-context.py component --input review-input.json --group "$GROUP" --base "$BASE"
+        run: python3 .github/scripts/review-context.py component --input review-input.json --group "$ENTRY" --base "$BASE"
 
       # THE ACTION IS RESTORED BEFORE `uses:` RESOLVES IT. A composite action
       # is a file in the checkout, so a pull request could edit it; the role
@@ -276,6 +278,7 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GROUP: ${{ matrix.entry.group }}
+          ENTRY: ${{ matrix.entry.slug }}
           # THE COMPONENT READING'S SHAPE — the workflow's merged return —
           # ASKED FOR AS STRUCTURED OUTPUT AND CHECKED AGAIN BY
           # `review-reading-check.py`: the schema is what the CLI enforces, the
@@ -301,7 +304,7 @@ jobs:
         # final result to the validator.
         run: |
           set -euo pipefail
-          prompt=$(python3 .github/scripts/review-prompt.py reader --input review-input.json --group "$GROUP")
+          prompt=$(python3 .github/scripts/review-prompt.py reader --input review-input.json --group "$ENTRY")
           claude -p "$prompt" \
             --output-format stream-json --verbose --json-schema "$READING_SCHEMA" \
             --settings "$CLAUDE_SETTINGS" \

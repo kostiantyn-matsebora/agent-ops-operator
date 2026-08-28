@@ -134,11 +134,22 @@ returns, and merges.
   reader returned nothing usable — a gap by name inside a component, the
   same rule as `unreviewed` between components.
 - **Two at a time is the pool** on a four-core runner and it is not fought:
-  the width of the review is the matrix across components. A component with
-  many files is long; it is also read in bounded contexts instead of one that
-  grows with the diff. Whether the 600 s stop seen on #106 is a ceiling on
-  the CLI's wait is MEASURED before this is relied on (task 7.1); if it is,
-  the queue chunks a component into several matrix entries under it.
+  the width of the review is the matrix. MEASURED (D10.1, run 33147062866):
+  a file reader takes 44–221 s (median ~110 s) in a ~5–11 k-token context; a
+  15-file component ran eight waves two-wide and the CLI stopped its workflow
+  at 600 s — the ceiling is REAL, and the component went unreviewed. So the
+  queue emits ONE MATRIX ENTRY PER TWO FILES (`review-input.py`, `CHUNK`):
+  every reader in a job runs at once, no job nears the ceiling, and the
+  width is the platform's. A chunk's readers are told the whole component's
+  other file names as siblings; the coordinator's input merges a component's
+  chunks into one reading, a chunk that produced none leaving its files in
+  `unread` by name.
+- **A session made to answer before its workflow finishes invents a
+  reading.** Seen on the same run: with `--json-schema` the component
+  session emitted an empty reading on its first turn, then the real one after
+  the completion notification. `review-trace.py` accepts only a result that
+  follows that notification, and the instruction says not to answer before
+  it.
 - **Dedup is the coordinator's**, by path + claim, as before.
 
 ### D9 — No job carries the rules; a reader is told which to read

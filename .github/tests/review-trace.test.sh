@@ -13,8 +13,10 @@ cat > "$tmp/exec.jsonl" <<'EOF'
 {"type":"system","subtype":"task_progress","usage":{"duration_ms":61000},"workflow_progress":[{"type":"workflow_agent","index":1,"label":"docs/a.md","state":"done","startedAt":5000},{"type":"workflow_agent","index":2,"label":"docs/b.md","state":"start","startedAt":65000}]}
 {"type":"system","subtype":"task_progress","usage":{"duration_ms":150000},"workflow_progress":[{"type":"workflow_agent","index":1,"label":"docs/a.md","state":"done","startedAt":5000},{"type":"workflow_agent","index":2,"label":"docs/b.md","state":"done","startedAt":65000}]}
 {"type":"system","subtype":"permission_denied","tool_name":"Bash"}
+{"type":"result","subtype":"success","num_turns":1,"duration_ms":4000,"duration_api_ms":3000,"usage":{},"structured_output":{"component":"docs","findings":[],"changedNames":[],"threads":[],"invented":true}}
+{"type":"system","subtype":"task_notification","task_id":"w1","status":"completed"}
 {"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}
-{"type":"result","subtype":"success","num_turns":2,"duration_ms":160000,"duration_api_ms":150000,"usage":{"input_tokens":10,"cache_read_input_tokens":2000,"cache_creation_input_tokens":500,"output_tokens":300},"structured_output":{"component":"docs","findings":[],"changedNames":[],"threads":[]}}
+{"type":"result","subtype":"success","num_turns":2,"duration_ms":160000,"duration_api_ms":150000,"usage":{"input_tokens":10,"cache_read_input_tokens":2000,"cache_creation_input_tokens":500,"output_tokens":300},"structured_output":{"component":"docs","findings":[],"changedNames":["X"],"threads":[]}}
 EOF
 
 it "reports the session: turns, wall, api, tokens, tool calls, denials"
@@ -30,14 +32,16 @@ assert_contains "$out" "docs/a.md"
 assert_contains "$out" "start    +0s  dur   61s"
 assert_contains "$out" "start   +60s  dur   90s"
 
-it "hands the final result to the validator"
-assert_contains "$(cat "$tmp/r.json")" '"structured_output"'
+it "hands the result that FOLLOWED the workflow's completion to the validator, and discards one invented before it"
+assert_contains "$(cat "$tmp/r.json")" '"X"'
+assert_not_contains "$(cat "$tmp/r.json")" '"invented"'
+assert_contains "$out" "::warning::1 result(s) before the workflow completed were discarded"
 assert_status 0 "$(python3 "$ROOT/.github/scripts/review-reading-check.py" "$tmp/r.json" --group docs --out "$tmp/reading.json" >/dev/null 2>&1; echo $?)"
 
-it "a record with no result says so, and writes an empty envelope"
-head -3 "$tmp/exec.jsonl" > "$tmp/partial.jsonl"
+it "a record whose workflow never completed yields no reading, whatever the session answered"
+grep -v task_notification "$tmp/exec.jsonl" > "$tmp/partial.jsonl"
 out=$(python3 "$S" "$tmp/partial.jsonl" --out "$tmp/p.json")
-assert_contains "$out" "NO RESULT EVENT"
+assert_contains "$out" "NO RESULT AFTER THE WORKFLOW COMPLETED"
 assert_equals "{}" "$(cat "$tmp/p.json")"
 
 rm -rf "$tmp"

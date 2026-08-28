@@ -61,7 +61,22 @@ def main() -> int:
     ap.add_argument("--out", type=pathlib.Path, help="write the final result envelope here")
     args = ap.parse_args()
     ev = load(args.execution)
-    results = [e for e in ev if e.get("type") == "result"]
+    # THE RESULT IS THE ONE AFTER THE WORKFLOW FINISHED. With --json-schema the
+    # session is made to answer on its first turn, and on #111 it invented an
+    # empty reading while the workflow was still running, then gave the real
+    # one after the completion notification. A result before that notification
+    # is not a reading of anything; it is discarded and said so.
+    done_at = next((i for i, e in enumerate(ev)
+                    if e.get("subtype") == "task_notification" and e.get("status") == "completed"), None)
+    all_results = [(i, e) for i, e in enumerate(ev) if e.get("type") == "result"]
+    if done_at is None:
+        premature = all_results
+        results = []
+    else:
+        premature = [(i, e) for i, e in all_results if i < done_at]
+        results = [e for i, e in all_results if i > done_at]
+    if premature:
+        print(f"::warning::{len(premature)} result(s) before the workflow completed were discarded — a session answering before its readers finish is inventing a reading")
     turns = sum(1 for e in ev if e.get("type") == "assistant")
     tools: dict[str, int] = {}
     for e in ev:
@@ -80,7 +95,7 @@ def main() -> int:
         print(f"  tokens in {u.get('input_tokens')} · cache read {u.get('cache_read_input_tokens')} · "
               f"cache write {u.get('cache_creation_input_tokens')} · out {u.get('output_tokens')}")
     else:
-        print(f"  NO RESULT EVENT — the session ended without a result; assistant messages {turns}")
+        print(f"  NO RESULT AFTER THE WORKFLOW COMPLETED — the session ended without a reading; assistant messages {turns}")
     print(f"  tool calls {tools}; permission denials {denied}")
 
     ag = agents(ev)

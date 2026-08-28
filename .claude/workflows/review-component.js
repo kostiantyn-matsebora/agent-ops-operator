@@ -27,7 +27,7 @@ export const meta = {
 }
 
 const input = typeof args === 'string' ? JSON.parse(args) : (args || {})
-const { repo, number, base, component, kind, files = [], specPaths = [] } = input
+const { repo, number, base, component, kind, chunk = '', siblings = [], files = [], specPaths = [] } = input
 if (!repo || !number || !component) throw new Error('review-component needs args {repo, number, base, component, files}')
 
 const FILE_READING = {
@@ -50,9 +50,9 @@ const readings = await pipeline(files, f => agent(
 PR NUMBER: ${number}
 BASE REF: ${base}
 FILE: ${f.path}
-COMPONENT: ${component} (${kind})
+COMPONENT: ${component} (${kind})${chunk ? ` — chunk ${chunk}` : ''}
 OTHER CHANGED FILES IN THIS COMPONENT (names only — do not read them):
-${files.filter(o => o.path !== f.path).map(o => '  ' + o.path).join('\n') || '  none'}
+${[...files.filter(o => o.path !== f.path).map(o => o.path), ...siblings].map(p => '  ' + p).join('\n') || '  none'}
 THREADS ON THIS FILE (your previous review — resolved and unresolved alike):
 ${f.threads && f.threads.length ? JSON.stringify(f.threads, null, 1) : '  none'}
 DELTA SPECS OF THE CHANGE:
