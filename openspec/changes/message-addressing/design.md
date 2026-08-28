@@ -45,7 +45,7 @@
 
 ### D-B — The reader token is the caller's, forwarded
 
-- The request carries the caller's `channel-reader:<surface>` token; the
+- The request carries the caller's `channel-reader:<channel>` token; the
   analyzer forwards it to `mcp-aops` `list_conversations` and holds nothing.
   Same thin-forwarder shape as `mcp-aops` itself (coordinated-agents D-F).
 - The chart renders that token into each calling adapter beside its other

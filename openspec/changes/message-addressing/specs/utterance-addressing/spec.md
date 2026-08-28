@@ -35,7 +35,7 @@ otherwise.
 To resolve which conversation a speaker means, the analyzer SHALL read only
 the `{name, title, brief, phase, pipeline}` projection of conversations bound
 to the utterance's surface, obtained from the aops MCP server with the
-CALLER-SUPPLIED `channel-reader:<surface>` token. The analyzer SHALL hold no
+CALLER-SUPPLIED `channel-reader:<channel>` token. The analyzer SHALL hold no
 token of its own for the manager or the MCP server, and SHALL read no run,
 input or transcript.
 
