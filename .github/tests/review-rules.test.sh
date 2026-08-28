@@ -38,6 +38,14 @@ it "the theme gets the palette rule beside the console's"
 assert_contains "$(r platform/console/ui/src/theme/tokens.ts)" ".claude/rules/palette-and-mark.md"
 assert_contains "$(r platform/console/ui/src/theme/tokens.ts)" ".claude/rules/terminology.md"
 
+it "every path a scoped rule's own frontmatter names routes to that rule"
+for f in palette-and-mark signal-rules chart; do
+  for pat in $(sed -n '2,/^---$/p' "$ROOT/.claude/rules/$f.md" | grep -oE '"[^"]+"' | tr -d '"'); do
+    sample=$(printf '%s' "$pat" | sed 's#/\*\*#/x/y.go#; s#\*\*#x/y.go#')
+    assert_contains "$(r "$sample")" ".claude/rules/$f.md"
+  done
+done
+
 it "a root file gets the authoring rules"
 assert_contains "$(r README.md)" ".claude/rules/authoring.md"
 

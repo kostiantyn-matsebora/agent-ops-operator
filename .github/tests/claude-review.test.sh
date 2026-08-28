@@ -3,8 +3,8 @@
 # each of which could be "simplified" away with every run still green.
 #
 # THE PLAN IS THE WORKFLOW AND THE ROLES ARE FILES. `claude-review.yml` builds
-# the queue with a program, runs one `component-reviewer` job per changed
-# component, hands every reading to the `review-coordinator` in one job, and
+# the queue with a program, runs one read job per changed
+# component (two `file-reviewer` workers over its files), hands every reading to the `review-coordinator` in one job, and
 # resolves threads in a fourth that runs no model. Every job that runs a model
 # installs the CLI through one composite action and restores what it reads
 # from the base branch first. The tests here read the workflow, the action and

@@ -217,9 +217,10 @@ jobs:
   # job costs ~30-40 s before it reads anything. Each job runs the base branch's `file-reviewer` role, once per file, in its own
   # `claude -p`, on its own runner, and uploads its reading as data.
   #
-  # `continue-on-error`: a reading that fails is a red job under its
-  # component's name and an `unreviewed` row in the summary — never a silently
-  # dropped component, and never a reason to skip the readings that succeeded.
+  # `continue-on-error`: a reading that fails is reported as failed under its
+  # component's name (the workflow itself stays green) and is an `unreviewed`
+  # row in the summary — never a silently dropped component, and never a
+  # reason to skip the readings that succeeded.
   read:
     needs: queue
     if: needs.queue.outputs.run == 'true' && needs.queue.outputs.count != '0'

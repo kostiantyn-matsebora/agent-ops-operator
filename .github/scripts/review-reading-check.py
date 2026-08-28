@@ -71,6 +71,19 @@ def problems(reading: dict) -> list[str]:
                     out.append(f"findings[{i}].{key} missing or not {typ.__name__}")
     if not isinstance(reading["changedNames"], list) or not all(isinstance(n, str) for n in reading["changedNames"]):
         out.append("changedNames is not a list of strings")
+    if "files" in reading:
+        if not isinstance(reading["files"], list):
+            out.append("files is not a list")
+        else:
+            for i, f in enumerate(reading["files"]):
+                if not isinstance(f, dict) or not isinstance(f.get("path"), str):
+                    out.append(f"files[{i}] has no string path")
+                for key in ("declares", "references"):
+                    v = f.get(key) if isinstance(f, dict) else None
+                    if not isinstance(v, list) or not all(isinstance(n, str) for n in v):
+                        out.append(f"files[{i}].{key} is not a list of strings")
+    if "unread" in reading and (not isinstance(reading["unread"], list) or not all(isinstance(n, str) for n in reading["unread"])):
+        out.append("unread is not a list of strings")
     if not isinstance(reading["threads"], list):
         out.append("threads is not a list")
     else:

@@ -46,8 +46,9 @@ STEP 1 — CONSOLIDATE. FROM THE READINGS, NOT FROM THE CODE.
   visible gap, never a silently dropped component. A reading's `unread[]`
   files are recorded the same way: `unread: <path>`.
 - Dedup findings across readings by path + claim.
-- THE CROSS-REVIEW FROM THE READINGS. For every name in any file's
-  `declares` that is REMOVED or RENAMED (`old -> new`): every OTHER file —
+- THE CROSS-REVIEW FROM THE READINGS. A reading's `declares` says what
+  happened to each name: `+name` added, `-name` removed, `old -> new`
+  renamed. For every name REMOVED or RENAMED: every OTHER file —
   in any component — whose `references` holds the old name is a finding
   against that file, from the two readings and nothing else:
   `Claim: still speaks <old>, removed in <declaring path>`. Do not open

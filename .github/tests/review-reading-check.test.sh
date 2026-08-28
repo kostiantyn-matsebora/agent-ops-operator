@@ -53,6 +53,11 @@ merged='{"component":"docs","findings":[],"changedNames":["A -> B"],"files":[{"p
 assert_status 0 "$(check "{\"structured_output\":$merged}")"
 assert_contains "$(cat "$tmp/out/reading.json")" '"references"'
 assert_contains "$(cat "$tmp/out/reading.json")" '"unread"'
+assert_contains "$(cat "$tmp/out/reading.json")" '"A -> B"'
+
+it "a malformed files entry fails"
+assert_status 1 "$(check '{"structured_output":{"component":"docs","findings":[],"changedNames":[],"files":[{"path":"docs/a.md","declares":"A"}],"threads":[]}}')"
+assert_contains "$(cat "$tmp/err")" "files[0].declares"
 
 it "an unreadable envelope fails"
 printf 'not json' > "$tmp/env.json"

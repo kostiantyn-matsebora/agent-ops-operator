@@ -40,6 +40,10 @@ NOT_REVIEW = {"build-test", "worktree-delivery", "session-naming", "publication"
 # Every path gets these.
 ALWAYS = ["retired-vocabulary"]
 
+# THE SCOPED RULES' OWN `paths:` FRONTMATTER IS THE AUTHORITY for where they
+# apply — chart.md, signal-rules.md, palette-and-mark.md each name theirs, and
+# the rows below repeat them; `review-rules.test.sh` holds them to it.
+#
 # Rows ADD to the set — a path matching several rows gets the union. What a
 # row names is what a reader of that path judges a diff AGAINST, and nothing
 # more: doctrine for the operator's code, the chart rule for the chart, the
@@ -54,6 +58,11 @@ TABLE: list[tuple[str, list[str]]] = [
     ("runtimes/**", ["invariants", "terminology", "wiring"]),
     ("platform/console/ui/src/theme/**", ["palette-and-mark"]),
     ("platform/console/ui/src/components/Logo.tsx", ["palette-and-mark"]),
+    ("docs/assets/js/**", ["palette-and-mark"]),
+    ("docs/_includes/logo.svg", ["palette-and-mark"]),
+    ("docs/assets/img/logos/**", ["palette-and-mark"]),
+    ("chart/charts/kubernetes/**", ["signal-rules"]),
+    ("chart/charts/home-assistant/**", ["signal-rules"]),
     ("platform/**", ["invariants", "terminology", "adapters"]),
     ("chart/**", ["chart", "wiring", "invariants", "terminology"]),
     ("docs/assets/css/**", ["palette-and-mark"]),

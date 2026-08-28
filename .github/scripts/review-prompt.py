@@ -41,7 +41,9 @@ def _entry(d: dict, slug: str) -> dict:
     entry = next((e for e in d.get("entries", []) if e["slug"] == slug), None)
     if entry is None:
         raise SystemExit(f"no such entry in the queue: {slug}")
-    comp = next(g for g in d["queue"] if g["group"] == entry["group"])
+    comp = next((g for g in d["queue"] if g["group"] == entry["group"]), None)
+    if comp is None:
+        raise SystemExit(f"entry {slug} names a component not in the queue: {entry['group']}")
     return {**entry, "kind": comp["kind"], "all_paths": comp["paths"]}
 
 

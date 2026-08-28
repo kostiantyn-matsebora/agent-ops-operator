@@ -46,7 +46,10 @@ query($o:String!,$r:String!,$n:Int!,$after:String){
 
 
 def sh(*cmd: str) -> str:
-    return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise SystemExit(f"{' '.join(cmd[:3])} failed ({p.returncode}): {p.stderr.strip()[:400]}")
+    return p.stdout
 
 
 def threads(repo: str, number: int) -> list[dict]:
@@ -98,9 +101,9 @@ def main() -> int:
     args = ap.parse_args()
     chunk = args.chunk if args.chunk > 0 else 10**9
 
-    pr = json.loads(sh("gh", "pr", "view", str(args.number), "--json", "baseRefName,headRefName"))
+    pr = json.loads(sh("gh", "pr", "view", str(args.number), "-R", args.repo, "--json", "baseRefName,headRefName"))
     base, head = pr["baseRefName"], pr["headRefName"]
-    paths = [p for p in sh("gh", "pr", "diff", str(args.number), "--name-only").splitlines() if p.strip()]
+    paths = [p for p in sh("gh", "pr", "diff", str(args.number), "-R", args.repo, "--name-only").splitlines() if p.strip()]
     queue = json.loads(sh("python3", str(HERE / "review-queue.py"), *paths)) if paths else []
 
     data = {
