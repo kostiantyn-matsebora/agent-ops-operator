@@ -22,14 +22,14 @@
 
 ## 4. Contract conformance suite
 
-- [ ] 4.1 `platform/manager/test/conformance/`: fake manager serving `/channel/*` and `/signal/inbound`, extracted from the inline server in `platform/console/adapter_test.go`
-- [ ] 4.2 Binary runner — build an adapter, start it with contract env, wait for readiness, tear down; adapters are listed, never imported
-- [ ] 4.3 Channel set: long-poll, `contract=` declaration and refusal without it, typed-message handling, ack-once under duplicate delivery, inbound push with `threadId`, channel listing, config error as status not crash
-- [ ] 4.4 Channel set: no relay loop — an outbound post never returns as inbound
-- [ ] 4.5 Signal set: normalized emission, bearer auth, source scoping, rejected post retried or surfaced rather than dropped
-- [ ] 4.6 Signal set: a chat-originating adapter always carries the channel label
-- [ ] 4.7 Run `channel-telegram`, `console`, `signal-cron`, `signal-alertmanager`, `signal-telegram`, `signal-k8s-events`, `signal-ha` through the suite; fix what it finds
-- [ ] 4.8 Verify no module's `go.mod` but `platform/manager/` changed, over the list `.github/components.sh modules` prints
+- [x] 4.1 `platform/manager/test/conformance/`: fake manager serving `/channel/*` and `/signal/inbound`, extracted from the inline server in `platform/console/adapter_test.go`
+- [x] 4.2 Binary runner — build an adapter, start it with contract env, wait for readiness, tear down; adapters are listed, never imported
+- [x] 4.3 Channel set: long-poll, `contract=` declaration and refusal without it, typed-message handling, ack-once under duplicate delivery, inbound push with `threadId`, channel listing, config error as status not crash
+- [x] 4.4 Channel set: no relay loop — an outbound post never returns as inbound
+- [x] 4.5 Signal set: normalized emission, bearer auth, source scoping, rejected post retried or surfaced rather than dropped
+- [x] 4.6 Signal set: a chat-originating adapter always carries the channel label
+- [x] 4.7 Run `channel-telegram`, `console`, `signal-cron`, `signal-alertmanager`, `signal-telegram`, `signal-k8s-events`, `signal-ha` through the suite; fix what it finds — found and fixed: `channel-telegram` acted on a redelivered op id twice (now a bounded completed-id set); `signal-k8s-events` and `signal-ha` dropped a rejected post silently (now reported on the source condition as `PostFailed`, cleared on recovery); the console and `signal-k8s-events` gained a `KUBERNETES_SERVICEACCOUNT_DIR` override so the built binary can be driven against a fake API server
+- [x] 4.8 Verify no module's `go.mod` but `platform/manager/` changed, over the list `.github/components.sh modules` prints
 
 ## 5. Stub runtime
 

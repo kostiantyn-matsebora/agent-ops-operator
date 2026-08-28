@@ -103,6 +103,47 @@ type adapter struct {
 	channels map[string]servedChannel // validated, by channel name
 	reported map[string]string        // last status message per channel (avoid spam)
 	clients  map[string]*Telegram     // bot client per token
+
+	// completed remembers the op ids this process already acted on. Ops are
+	// at-least-once — a completion the manager never received comes back
+	// under the SAME id — and a message posted twice cannot be unposted, so
+	// a redelivery is acknowledged again and acted on NOT AT ALL. Bounded:
+	// the manager reclaims within minutes, so a few hundred ids cover it.
+	completed *completedOps
+}
+
+// completedOps is a bounded FIFO set of op ids.
+type completedOps struct {
+	mu    sync.Mutex
+	ids   map[string]string // op id → thread id it completed with
+	order []string
+	limit int
+}
+
+func newCompletedOps(limit int) *completedOps {
+	return &completedOps{ids: map[string]string{}, limit: limit}
+}
+
+// seen reports whether id already completed, and the threadId it answered.
+func (c *completedOps) seen(id string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tid, ok := c.ids[id]
+	return tid, ok
+}
+
+func (c *completedOps) add(id, threadID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.ids[id]; ok {
+		return
+	}
+	c.ids[id] = threadID
+	c.order = append(c.order, id)
+	for len(c.order) > c.limit {
+		delete(c.ids, c.order[0])
+		c.order = c.order[1:]
+	}
 }
 
 // servedChannelList snapshots the validated channels, deduplicated by chat: one
@@ -164,6 +205,7 @@ func main() {
 		channels:      map[string]servedChannel{},
 		reported:      map[string]string{},
 		clients:       map[string]*Telegram{},
+		completed:     newCompletedOps(1024),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -323,7 +365,19 @@ func (a *adapter) opsLoop(ctx context.Context) {
 		// The claim window is the manager's to state and ours to respect: every
 		// Bot API call this op makes shares one retry budget, bounded well
 		// inside it.
+		// A redelivered id is answered as it was answered before, and the
+		// transport is not touched again: the effect happened once.
+		if tid, done := a.completed.seen(op.ID); done {
+			log.Printf("op %s redelivered; acknowledging without repeating it", op.ID)
+			if err := a.mgr.CompleteOp(ctx, op.ID, tid, ""); err != nil && ctx.Err() == nil {
+				log.Printf("complete op %s: %v", op.ID, err)
+			}
+			continue
+		}
 		threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
+		if opErr == "" {
+			a.completed.add(op.ID, threadID)
+		}
 		if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
 			log.Printf("complete op %s: %v", op.ID, err)
 		}
