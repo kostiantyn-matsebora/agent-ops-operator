@@ -57,7 +57,7 @@
 
 - [x] 8.1 `runtimes/copilot/Dockerfile` on `node:22-bookworm-slim`: git, openssh-client, curl, jq, ca-certificates, procps; install the SDK; `HOME=/data/context`; non-root; the `org.opencontainers.image.source` LABEL; multi-arch — build `linux/arm64` locally and run `--version` before believing it
 - [x] 8.2 Carry the runtime-claude comment forbidding domain tooling, naming the derive-your-own-image escape hatch
-- [ ] 8.3 Publish by tag: `git tag runtime-copilot-v0.1.0 && git push origin runtime-copilot-v0.1.0`; confirm the run passed the Trivy gate, then the package's Actions access and visibility flip (UI, once), and check the REGISTRY rather than the tag
+- [x] 8.3 Publish by tag: `git tag runtime-copilot-v0.1.0 && git push origin runtime-copilot-v0.1.0`; confirm the run passed the Trivy gate, then the package's Actions access and visibility flip (UI, once), and check the REGISTRY rather than the tag
 
 ## 9. Chart: the `copilot` bundle
 
