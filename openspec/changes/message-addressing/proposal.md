@@ -39,8 +39,8 @@ the manager, which composes meaning and never guesses, and not a transport.
 
 ### New Capabilities
 
-- `utterance-addressing`: the analyzer — the utterance contract, the four
-  decision kinds, the question loop and its lossy state, what it reads and
+- `utterance-addressing`: the analyzer — the utterance contract, the five
+  decision kinds (`refuse` included), the question loop and its lossy state, what it reads and
   through whose token, and that it delivers nothing itself.
 
 ### Modified Capabilities
