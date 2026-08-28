@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# The two programs that stand between the queue and the model: the one that
+# builds the review's input (no model, no network here — `gh` is stubbed), and
+# the one that assembles each role's delegation message from it.
+. "$(dirname "$0")/lib.sh"
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+INPUT="$ROOT/.github/scripts/review-input.py"
+PROMPT="$ROOT/.github/scripts/review-prompt.py"
+
+tmp=$(mktemp -d)
+
+# --- review-input.py, against a stubbed gh ----------------------------------
+# A `gh` that answers the three calls the program makes, from fixtures.
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "pr view"*)     echo '{"baseRefName":"master","headRefName":"change/thing","headRefOid":"abc1234"}' ;;
+  "pr diff"*)     printf 'docs/a.md\nsignals/cron/main.go\nsignals/cron/x.go\nsignals/cron/y.go\nplatform/manager/x.go\n' ;;
+  # TWO PAGES. The first says there is another and hands a cursor; the call
+  # that carries the cursor gets the second. A caller that stops at one page
+  # sees one thread and the test says so.
+  "api graphql"*"after=CUR"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"PRRT_2","isResolved":true,"isOutdated":false,"path":"signals/cron/main.go","line":1,"comments":{"nodes":[{"databaseId":8,"author":{"login":"bot"},"body":"**Claim:** y"}]}}]}}}}}' ;;
+  "api graphql"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"CUR"},"nodes":[{"id":"PRRT_1","isResolved":false,"isOutdated":false,"path":"docs/a.md","line":3,"comments":{"nodes":[{"databaseId":7,"author":{"login":"bot"},"body":"**Claim:** x"}]}}]}}}}}' ;;
+esac
+STUB
+chmod +x "$tmp/bin/gh"
+
+repo=$(make_repo)
+mkdir -p "$repo/openspec/changes/thing/specs/cap" "$repo/docs" "$repo/signals/cron" "$repo/platform/manager"
+echo spec > "$repo/openspec/changes/thing/specs/cap/spec.md"
+git -C "$repo" add -A && git -C "$repo" commit -qm specs
+
+it "builds the input from the three gh calls and the checkout, and emits the matrix"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" GITHUB_OUTPUT="$tmp/gho" python3 "$INPUT" --repo o/r --number 5 --chunk 2 --out "$tmp/input.json" 2>&1)
+assert_contains "$out" "3 component(s), 4 job(s), from 5 path(s), 2 thread(s), 1 delta spec(s)"
+assert_contains "$(cat "$tmp/gho")" 'count=4'
+assert_contains "$(cat "$tmp/gho")" 'base=master'
+assert_contains "$(cat "$tmp/gho")" '"group": "platform/manager", "slug": "platform__manager", "chunk": ""'
+
+it "walks every page of threads — the second page's thread is there"
+assert_contains "$(cat "$tmp/input.json")" '"id": "PRRT_2"'
+
+it "a component over the chunk size is several jobs, named and slugged by chunk, its files split between them (--chunk 2 here; never by default)"
+g=$(cat "$tmp/gho")
+assert_contains "$g" '"group": "signals/cron", "slug": "signals__cron__1-of-2", "chunk": "1/2", "paths": ["signals/cron/main.go", "signals/cron/x.go"]'
+assert_contains "$g" '"slug": "signals__cron__2-of-2", "chunk": "2/2", "paths": ["signals/cron/y.go"]'
+
+it "by default a component is one job, however many files"
+: > "$tmp/gho2"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" GITHUB_OUTPUT="$tmp/gho2" python3 "$INPUT" --repo o/r --number 5 --out "$tmp/input2.json" 2>&1)
+assert_contains "$out" "3 component(s), 3 job(s)"
+assert_contains "$(cat "$tmp/gho2")" '"group": "signals/cron", "slug": "signals__cron", "chunk": ""'
+
+it "the threads are flattened to the shape the roles read"
+assert_contains "$(cat "$tmp/input.json")" '"commentId": 7'
+assert_contains "$(cat "$tmp/input.json")" '"author": "bot"'
+
+it "the delta specs are the head change's, and only on a change/ branch"
+assert_contains "$(cat "$tmp/input.json")" 'openspec/changes/thing/specs/cap/spec.md'
+
+# --- review-prompt.py, over that input --------------------------------------
+
+it "the component's workflow args carry one entry per file: its threads and the rules routed to its path — and no other component's files"
+c=$(python3 "$PROMPT" component --input "$tmp/input.json" --group docs)
+assert_contains "$c" '"component": "docs"'
+assert_contains "$c" '"path": "docs/a.md"'
+assert_contains "$c" '"id": "PRRT_1"'
+assert_contains "$c" ".claude/rules/documentation.md"
+assert_contains "$c" "docs/CLAUDE.md"
+assert_contains "$c" "openspec/changes/thing/specs/cap/spec.md"
+assert_not_contains "$c" "signals/cron"
+
+it "a file's threads are its own, not the component's"
+c=$(python3 "$PROMPT" component --input "$tmp/input.json" --group signals__cron__1-of-2)
+assert_contains "$c" '"id": "PRRT_2"'
+assert_not_contains "$c" '"id": "PRRT_1"'
+assert_contains "$c" ".claude/rules/signal-rules.md"
+
+it "a chunk's args carry its own files, the chunk index, and the rest of the component as siblings"
+assert_contains "$c" '"chunk": "1/2"'
+assert_contains "$c" '"siblings": [
+  "signals/cron/y.go"
+ ]'
+assert_not_contains "$c" '"path": "signals/cron/y.go"'
+
+it "the component session's instruction is to run the workflow with those args and read nothing"
+r=$(python3 "$PROMPT" reader --input "$tmp/input.json" --group platform__manager)
+assert_contains "$r" 'saved workflow `review-component`'
+assert_contains "$r" '"component": "platform/manager"'
+assert_contains "$r" "Do not read the diff"
+assert_contains "$r" "do NOT produce structured output, until its completion notification"
+
+it "an unknown component is refused"
+python3 "$PROMPT" reader --input "$tmp/input.json" --group nope >/dev/null 2>&1
+assert_status 1 "$?"
+
+it "the coordinator's message holds one reading per queued component, null where none was produced"
+mkdir -p "$tmp/readings/reading-docs" "$tmp/readings/reading-signals__cron__1-of-2"
+echo '{"component":"docs","findings":[],"changedNames":["A"],"files":[{"path":"docs/a.md","declares":["A"],"references":[]}],"threads":[]}' > "$tmp/readings/reading-docs/reading.json"
+echo '{"component":"signals/cron","findings":[{"path":"signals/cron/main.go","line":1,"claim":"x"}],"changedNames":["B"],"files":[{"path":"signals/cron/main.go","declares":["B"],"references":["A"]},{"path":"signals/cron/x.go","declares":[],"references":[]}],"threads":[],"unread":[]}' > "$tmp/readings/reading-signals__cron__1-of-2/reading.json"
+c=$(python3 "$PROMPT" coordinator --input "$tmp/input.json" --readings "$tmp/readings" 2>"$tmp/err")
+assert_contains "$c" '"group": "platform/manager",
+  "reading": null'
+assert_contains "$c" '"changedNames": [
+    "A"
+   ]'
+assert_contains "$(cat "$tmp/err")" "unreviewed: platform/manager"
+
+it "a component read in chunks is ONE reading, and a chunk that produced none leaves its files unread by name"
+assert_equals "1" "$(printf '%s' "$c" | grep -c '"component": "signals/cron"')"
+assert_contains "$c" '"unread": [
+    "signals/cron/y.go"
+   ]'
+assert_contains "$c" '"path": "signals/cron/x.go"'
+assert_contains "$c" "HEAD SHA: abc1234"
+assert_contains "$c" "CHANGED PATHS:"
+assert_contains "$c" "REVIEW THREADS:"
+
+it "a readings directory that does not exist is every component unreviewed, not a crash"
+c=$(python3 "$PROMPT" coordinator --input "$tmp/input.json" --readings "$tmp/nowhere" 2>"$tmp/err")
+assert_contains "$(cat "$tmp/err")" "unreviewed: docs, platform/manager, signals/cron"
+
+rm -rf "$tmp" "$repo"
+summary
