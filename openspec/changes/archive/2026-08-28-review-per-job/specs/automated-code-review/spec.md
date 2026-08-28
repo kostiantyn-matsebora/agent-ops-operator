@@ -3,14 +3,28 @@
 ### Requirement: A change is reviewed per component, each in isolation
 
 The review SHALL read a pull request as one reading per changed component,
-each in a context that holds that component's diff, the rules that apply to
-its path, and its own standing threads — and nothing from any other component.
-Each reading SHALL run as its own CI job, on its own runner, in its own
-process, all started at once and bounded only by the platform's job limit —
-never by a pool sized from one runner's processors, and never by a model
-deciding, turn by turn, what to spawn next or how long to wait. The queue of
-components — which readings exist and what each is handed — SHALL be built by
-a program from the changed paths, never by a model.
+each in its own CI job, on its own runner, in its own process, all started at
+once and bounded only by the platform's job limit — never by a pool sized
+from one runner's processors, and never by a model deciding, turn by turn,
+what to spawn next or how long to wait. The queue of components — which
+readings exist and what each is handed — SHALL be built by a program from the
+changed paths, never by a model.
+
+Within a component, the reading SHALL be made PER FILE by a fixed set of
+QUEUE_READERS over a queue of the changed files: each queue reader reads the rule files
+that apply to its files once — on demand, never inherited — and then takes
+its files one at a time, holding that file's diff, its own standing threads,
+the names of the component's other changed files and the change's delta
+specs, and returns one reading per file. The queue readers SHALL be started and
+collected by a script, their readings merged into the component's, with a
+file no queue reader returned named as unread rather than dropped. A component is
+one job, never split for width, since a job costs more to start than a
+reading.
+
+Each file reading SHALL return, beside its findings, the names the file
+DECLARES — added, removed or renamed — and the names it REFERENCES from
+outside itself, so that what happens between files is judged from the
+readings and not by a context that holds every file at once.
 
 **The cost of a review is then the largest component changed, not the whole
 pull request.** A single context reading everything serially pays for every
@@ -23,7 +37,14 @@ started.
 **And a reading cannot be lost.** A reading started by a model's turn ends
 with that turn; on pull request #74 three readings were abandoned that way and
 the review reported success having posted nothing. A reading that is a job
-either produces its data or is a failed job with a name.
+either produces its data or is a failed job with a name; a file reading a
+script started is returned to the script or named as unread.
+
+**And a context does not grow with the diff.** A component reader holding
+every changed file paid for all of them on every turn: on the first matrix
+run one component of ten files and a thousand changed lines took four to nine
+minutes on the same diff while the others took one to four. A file reader's
+context is bounded by its file.
 
 A per-component reading SHALL post nothing. It returns what it found as
 DATA, in a stated shape a program validates before it is consolidated; a
@@ -61,6 +82,20 @@ never a silent gap.
   delta specs are produced by a program without a model call, and the readings
   start only once that queue exists
 
+#### Scenario: A component with many changed files
+
+- **WHEN** a component's diff spans many files
+- **THEN** each file is read by its own reader in a context bounded by that
+  file, the readings are merged by the script, and a file whose reader
+  returned nothing usable is named as unread in the component's reading
+
+#### Scenario: A name removed in one file is still used in another
+
+- **WHEN** one file's reading declares a name removed or renamed and another
+  file's reading references it
+- **THEN** the review raises a finding against the referencing file, from the
+  two readings, without a context that held both files
+
 #### Scenario: A component the pull request does not touch
 
 - **WHEN** the review runs on a pull request whose diff names no path in a
@@ -73,13 +108,18 @@ never a silent gap.
 After the per-component readings, the review SHALL check the whole change for
 compatibility: the names each reading reports as changed — identifiers,
 fields, paths, environment variables — SHALL be resolved to their consumers
-mechanically, and each consumer SHALL be checked against the change.
+mechanically, and each consumer SHALL be checked against the change. Consumers
+INSIDE the change SHALL be found from the readings' own references, and
+consumers outside it by searching the repository.
 
 The consolidation SHALL be a reading of its own — the COORDINATOR — that runs
 as its own job once every reading's job has finished, and is handed every
 reading's data as files: a reading whose job produced none is handed as
 absent, by name. It SHALL never wait on a running reading, and it is the only
-reading that writes to the pull request.
+reading that writes to the pull request. Its context SHALL hold its role, the
+readings and the threads, and no rule file; consumers inside the change SHALL
+be judged from the readings' declares and references, and a consumer outside
+it by reading that one file.
 
 **This repository's modules import nothing from one another**, so a contract
 change compiles everywhere, passes every module's tests, and breaks at runtime
@@ -108,6 +148,13 @@ review considered rather than trusting that it considered everything.
 - **THEN** exactly one reading posts to the pull request, once, and a run in
   which it posted no summary is reported as failed
 
+#### Scenario: A removed name is referenced by another changed file
+
+- **WHEN** one file's reading declares a name removed or renamed and another
+  file's reading references it
+- **THEN** the coordinator raises a finding against the referencing file from
+  the two readings, without reading either file
+
 #### Scenario: A reading's job failed
 
 - **WHEN** a reading's job ended without a validated reading
@@ -116,7 +163,7 @@ review considered rather than trusting that it considered everything.
 
 ### Requirement: The reviewer's definition is part of the guarded review
 
-The definitions of the review's roles — the per-component reviewer and the
+The definitions of the review's roles — the file reader and the
 coordinator, each its instructions and the tools it may use — and the steps
 that install the model's tooling and hand each role its input SHALL be taken
 from the DEFAULT BRANCH when the review runs, never from the pull request's
@@ -147,3 +194,37 @@ copy of it to keep in step.
   own checkout
 - **THEN** the same jobs run, with the same roles, and MAY stop after the
   readings without posting when asked to
+
+## ADDED Requirements
+
+### Requirement: No reading carries the project's rules as inherited context
+
+No context the review runs — a file reader, the component's script session,
+the coordinator — SHALL inherit the project's rule files. A file reader SHALL
+be told which rule files apply to its path and SHALL read those; the
+coordinator SHALL read none. The routing from a path to its rules SHALL be a
+program, and every rule file SHALL be reachable from some path — a rule no
+path routes to is a rule the review has stopped enforcing, silently.
+
+**The rules are what a reading is measured against, not what it thinks with.**
+A context that inherits every rule file pays for all of them on every turn:
+the coordinator, which reads no rules at all, spent 268 of its 273 seconds in
+34 turns each re-sending some 76 thousand tokens, of which its readings and
+threads were a few thousand.
+
+#### Scenario: A file under the chart is read
+
+- **WHEN** a file reader is started for a path under `chart/`
+- **THEN** it is told to read the chart rule and the rules the chart depends
+  on, reads those, and inherits no rule file
+
+#### Scenario: The coordinator runs
+
+- **WHEN** the consolidation starts
+- **THEN** its context holds its role, the readings and the threads, and no
+  rule file
+
+#### Scenario: A rule file no path routes to
+
+- **WHEN** a rule file exists that the routing program maps from no path
+- **THEN** the routing program's test fails, naming the rule

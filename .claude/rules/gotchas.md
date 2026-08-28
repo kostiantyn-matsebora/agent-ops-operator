@@ -234,6 +234,48 @@ rules loaded on demand.
   loop in code, runs `pipeline()` readers concurrently and returns their data
   validated by schema. Agent teams were not an option: `-p` spawns no
   teammates. If a plan must not be dropped, do not give it to a model turn.
+  - **THAT SCRIPT IS GONE, AND THE LOOP IS THE ACTIONS MATRIX NOW — the plan
+    still is not a model turn.** The dynamic-workflow runtime pools concurrent
+    `agent()` calls at `Math.min(16, Math.max(2, availableParallelism() - 2))`,
+    computed once at process start with NO override (read out of CLI 2.1.247);
+    `ubuntu-latest` has four vCPUs, so the pool was TWO. On #106 eight readers
+    started in pairs — 2:16, 2:16, 4:17, 5:02, 7:54, 7:57, 9:29 — the run was
+    stopped at 600 s with the eighth never started, and the coordinator never
+    ran. A bigger runner lifts the cap for money; a job per reading lifts it
+    for free (twenty concurrent jobs on a public repository). So the unit of a
+    reading is a JOB: `claude-review.yml`'s `read` matrix, one `claude -p` per
+    component on its own runner — inside it two `file-reviewer` queue readers over a
+    queue of the files, the pool's width — readings as artifacts, the queue
+    built by a program. The measurement is what settles "just add more agents": more
+    `agent()` calls join the queue behind the two that run.
+- **A RUNNER HAS NO CLAUDE SETTINGS, SO `claude -p` THERE RUNS WHATEVER THE
+  DEFAULT IS — AND THAT WAS THE CAUSE OF EVERY SLOW REVIEW NUMBER.** Every
+  CI session and every subagent ran sonnet-5 at its DEFAULT EFFORT. The same
+  file reader, same prompt, same tools, on one machine: sonnet-5 default
+  **198 s and ~16 k thinking tokens**; sonnet-5 `--effort low` **18 s and
+  ~200**; fable-5 default 20 s; opus-5 default 83 s; sonnet-5 medium 79 s —
+  same findings. Between its last read at +50 s and its answer at +191 s the
+  default-effort reader emitted ~13 k thinking tokens and no action; not
+  throttling. The coordinator's seven minutes were 55 turns of the same.
+  - **The workflow sets `--model` and `--effort` on every `claude -p`, and
+    the roles say `model: inherit`**, so the choice reaches every subagent.
+    Do not remove the flags to "use the default": the default is the
+    runner's, and the runner has none.
+  - **ISOLATE THE VARIABLE BEFORE RESTRUCTURING.** A day was spent on the
+    matrix, per-file readers, chunking and rule routing — each defensible,
+    none the cause — before one local run with `--model` reproduced the CI
+    time. The 20-second version of a reader was one flag away throughout.
+  - **A SESSION FORCED TO ANSWER BEFORE ITS BACKGROUND WORKFLOW FINISHES
+    INVENTS THE ANSWER.** With `--json-schema` the component session emitted
+    an empty reading on its first turn, then the real one after the
+    completion notification. `review-trace.py` takes only a result after
+    that notification; a session that ran no workflow keeps its last.
+  - **The CLI stops a background workflow at 600 s**, measured twice (#106,
+    and a 15-file component two-wide). The queue emits one read job per two
+    files so no job approaches it.
+  - **Thread verdicts vary between runs of the same file** — `standing`,
+    `fixed`, `gone` for the same five threads at every effort level. Not
+    a speed problem; open.
 - **`claude-code-action` EXITS AFTER THE MODEL'S FIRST TURN, SO A BACKGROUND
   `Workflow` NEVER RUNS UNDER IT.** The tool launches the run and returns at
   once; the CLI stays alive and gives the model a second turn with the result
@@ -241,7 +283,9 @@ rules loaded on demand.
   ended the process nine seconds after the first turn on #94 — the run never
   started and the step read "success". The review therefore runs `claude -p`
   itself, with the credential as env and the stream-json stdout as the
-  execution file. The gate on the summary comment is what caught it.
+  execution file. The gate on the summary comment is what caught it. Still
+  true with no background workflow left: each job is one `claude -p` whose
+  one turn IS the reading, and the summary gate is unchanged.
 - **An inline `--agents` definition sits inside single quotes in `claude_args`,
   which is split like a shell line.** One apostrophe in the reviewer prompt
   ends the argument early and reads as a JSON error somewhere else. The suite
