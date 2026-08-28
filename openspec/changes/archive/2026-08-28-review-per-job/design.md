@@ -196,6 +196,11 @@ a JSON envelope with the JSON inside prose is extracted.
 
 ## Open Questions
 
-- Whether `--json-schema` on `claude -p` (if present in the pinned version)
-  can replace `review-reading-check.py`'s extraction. It does not change the
-  shape of any job; the check stays as the validator either way.
+- ~~Whether `--json-schema` on `claude -p` (if present in the pinned version)
+  can replace `review-reading-check.py`'s extraction.~~ SETTLED during apply:
+  CLI 2.1.247 lists `--json-schema <schema>` in `--help`, the `read` job
+  passes the reader's shape through it, and every reading on #111 arrived in
+  the envelope's `structured_output`. `review-reading-check.py` still
+  validates — the schema is what the CLI enforces, the check is what the job
+  trusts — and still accepts a text `result` so a CLI that drops the field
+  does not fail every review.

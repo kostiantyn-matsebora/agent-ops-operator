@@ -119,7 +119,9 @@ the merge. **The review is four jobs and two roles** — `queue` is a program
 (`review-input.py` over `review-queue.py`), `read` is a matrix of one
 `component-reviewer` job per changed component, all at once, `consolidate`
 runs the `review-coordinator` — the only role that posts — over the readings'
-artifacts, and `reconcile` resolves threads with no model. It runs by hand
+artifacts and RECORDS each addressed thread with `mark-thread-resolved.sh` (a
+list, no privilege), and `reconcile` RESOLVES the recorded threads with no
+model and the one `contents: write`. It runs by hand
 too: `gh workflow run claude-review.yml -f number=<pr>` (`-f dry_run=true`
 posts nothing). NOTHING THE REVIEW RUNS COMES FROM THE PULL REQUEST: `queue`
 restores `review-input.py`, `review-queue.py` and `components.sh` from the

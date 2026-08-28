@@ -57,6 +57,11 @@ for f in .github/scripts/review-input.py .github/scripts/review-queue.py .github
 assert_contains "$q" 'git checkout "$BASE" -- "$f"'
 python3 -c 'import sys; s=sys.argv[1]; sys.exit(0 if s.index("git checkout") < s.index("python3 .github/scripts/review-input.py") else 1)' "$q" && pass || fail "the restore must precede the program it restores"
 
+it "every restore of tooling says so when the pull request's copy differed"
+for j in queue read consolidate; do
+  assert_contains "$(py "print(runs('$j'))")" '[ -z "$restored" ] || echo "::notice::'
+done
+
 it "the read matrix is the queue's component list, one job each, and a failed reading fails alone"
 assert_contains "$(py 'print(jobs["read"]["strategy"]["matrix"]["entry"])')" "fromJSON(needs.queue.outputs.groups)"
 assert_equals "False" "$(py 'print(jobs["read"]["strategy"]["fail-fast"])')"

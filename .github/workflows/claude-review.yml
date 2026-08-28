@@ -180,9 +180,13 @@ jobs:
           BASE: origin/${{ steps.guard.outputs.base }}
         run: |
           set -euo pipefail
+          restored=""
           for f in .github/scripts/review-input.py .github/scripts/review-queue.py .github/components.sh; do
-            if git cat-file -e "$BASE:$f" 2>/dev/null; then git checkout "$BASE" -- "$f"; fi
+            git cat-file -e "$BASE:$f" 2>/dev/null || continue
+            git diff --quiet "$BASE" -- "$f" || restored="$restored $f"
+            git checkout "$BASE" -- "$f"
           done
+          [ -z "$restored" ] || echo "::notice::This pull request edits the review's queue builder ($restored ); the queue is built by the base branch's copy, and the edit takes effect once merged."
           python3 .github/scripts/review-input.py --repo "${{ github.repository }}" --number "$PR" --out review-input.json
 
       - if: steps.decide.outputs.run == 'true'
@@ -229,9 +233,13 @@ jobs:
           BASE: origin/${{ needs.queue.outputs.base }}
         run: |
           set -euo pipefail
+          restored=""
           for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/review-reading-check.py; do
-            if git cat-file -e "$BASE:$f" 2>/dev/null; then git checkout "$BASE" -- "$f"; fi
+            git cat-file -e "$BASE:$f" 2>/dev/null || continue
+            git diff --quiet "$BASE" -- "$f" || restored="$restored $f"
+            git checkout "$BASE" -- "$f"
           done
+          [ -z "$restored" ] || echo "::notice::This pull request edits the review's tooling ($restored ); the reading uses the base branch's copy, and the edit takes effect once merged."
       - id: cli
         uses: ./.github/actions/claude-cli
         with:
@@ -317,9 +325,13 @@ jobs:
           BASE: origin/${{ needs.queue.outputs.base }}
         run: |
           set -euo pipefail
+          restored=""
           for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/mark-thread-resolved.sh; do
-            if git cat-file -e "$BASE:$f" 2>/dev/null; then git checkout "$BASE" -- "$f"; fi
+            git cat-file -e "$BASE:$f" 2>/dev/null || continue
+            git diff --quiet "$BASE" -- "$f" || restored="$restored $f"
+            git checkout "$BASE" -- "$f"
           done
+          [ -z "$restored" ] || echo "::notice::This pull request edits the review's tooling ($restored ); the consolidation uses the base branch's copy, and the edit takes effect once merged."
       - id: cli
         uses: ./.github/actions/claude-cli
         with:
