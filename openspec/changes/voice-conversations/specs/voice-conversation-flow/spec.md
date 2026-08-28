@@ -21,7 +21,9 @@ surface.
 The receiver SHALL post each utterance's transcript, speaker, surface,
 language and thread hint to the analyzer with the surface's
 `channel-reader` token, and SHALL deliver the decision itself: `originate` as
-a `kind: chat` signal on the surface's SignalSource, `reply` and `command` as
+a `kind: chat` signal on the surface's SignalSource, carrying the
+`agentops.dev/channel` label that names the surface's Channel — a chat signal
+without it is refused by `/signal/inbound` — and `reply` and `command` as
 `/channel/inbound` on the surface's Channel. The manager SHALL see one
 message, from the surface's adapters, and nothing of recognition or of the
 question loop.

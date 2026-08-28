@@ -85,8 +85,8 @@ after it, with the addressing decided in between by `message-addressing`.
 
 **Code**
 
-- `platform/voice-receiver/`, `platform/voice-recognizer/`,
-  `platform/voice-synthesizer/`, `platform/voice-sender/`: new standard-library
+- `signals/voice-receiver/`, `platform/voice-recognizer/`,
+  `platform/voice-synthesizer/`, `channels/voice-sender/`: new standard-library
   modules on the shared recipe.
 - `recognizers/google/`, `recognizers/stub/`, `synthesizers/google/`,
   `synthesizers/stub/`: new groups, derived names `recognizer-google` etc.

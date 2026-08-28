@@ -6,9 +6,9 @@ defaults resolve master and report success against it. Depends on
 
 ## 1. Phase 1 — receiver, sender, the surface contract (D-A, D-B, D-F, D-H)
 
-- [ ] 1.1 `platform/voice-receiver/` and `platform/voice-sender/`: two new
+- [ ] 1.1 `signals/voice-receiver/` and `channels/voice-sender/`: two new
       standard-library modules on the shared recipe; `.github/components.sh`
-      derives `voice-receiver` and `voice-sender`; build and vet green.
+      derives `signal-voice-receiver` and `channel-voice-sender`; build and vet green.
 - [ ] 1.2 Receiver `POST /audio`: clip, chunked and WebSocket forms; `text`
       short-circuit; `voice-surface:<name>` token check; 429 past `MAX_JOBS`;
       tests for each form and each refusal.

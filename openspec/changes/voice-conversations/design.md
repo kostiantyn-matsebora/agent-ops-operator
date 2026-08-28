@@ -40,9 +40,13 @@
 
 ### D-A — Four owners, four directories, four containers, poll everywhere
 
-- `platform/voice-receiver`, `platform/voice-recognizer`,
-  `platform/voice-synthesizer`, `platform/voice-sender`: standard-library
-  Go, shared recipe, derived names `voice-*`.
+- `signals/voice-receiver`, `platform/voice-recognizer`,
+  `platform/voice-synthesizer`, `channels/voice-sender`: standard-library
+  Go, shared recipe. The receiver pushes to `/signal/inbound` and the sender
+  serves `/channel/*`, so they sit in the groups `structure.md` gives those
+  contracts and derive `signal-voice-receiver` and `channel-voice-sender`;
+  the recognizer and synthesizer speak no agent-ops contract and stay under
+  `platform/`, deriving `voice-recognizer` and `voice-synthesizer`.
 - Every edge between a vendor or surface and an owner is initiated by the
   vendor or surface; owners are the only listeners. Alternative rejected:
   owners pushing to adapters' Services — a port per adapter and an ingress
