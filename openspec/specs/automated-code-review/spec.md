@@ -465,6 +465,7 @@ never a silent gap.
 - **THEN** no reading is started for that component — the queue holds only
   components with changed paths, so a one-file change is one reading
 
+
 ### Requirement: The review is consolidated across components, on what changed
 
 After the per-component readings, the review SHALL check the whole change for
@@ -517,6 +518,13 @@ review considered rather than trusting that it considered everything.
 - **THEN** the coordinator raises a finding against the referencing file from
   the two readings, without reading either file
 
+
+#### Scenario: A reading's job failed
+
+- **WHEN** a reading's job ended without a validated reading
+- **THEN** the coordinator still runs, with that component handed as absent,
+  and the summary names it as unreviewed
+
 ### Requirement: The reviewer's definition is part of the guarded review
 
 The definitions of the review's roles — the file reader and the
@@ -551,6 +559,9 @@ copy of it to keep in step.
 - **THEN** the same jobs run, with the same roles, and MAY stop after the
   readings without posting when asked to
 
+## ADDED Requirements
+
+
 ### Requirement: No reading carries the project's rules as inherited context
 
 No context the review runs — a file reader, the component's script session,
@@ -582,3 +593,4 @@ threads were a few thousand.
 
 - **WHEN** a rule file exists that the routing program maps from no path
 - **THEN** the routing program's test fails, naming the rule
+

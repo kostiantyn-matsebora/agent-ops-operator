@@ -152,6 +152,12 @@ review considered rather than trusting that it considered everything.
 - **THEN** the coordinator raises a finding against the referencing file from
   the two readings, without reading either file
 
+#### Scenario: A reading's job failed
+
+- **WHEN** a reading's job ended without a validated reading
+- **THEN** the coordinator still runs, with that component handed as absent,
+  and the summary names it as unreviewed
+
 ### Requirement: The reviewer's definition is part of the guarded review
 
 The definitions of the review's roles — the file reader and the
