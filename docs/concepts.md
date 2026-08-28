@@ -6,7 +6,8 @@ The full CRD reference, and how an agent's capabilities are resolved.
 
 ### AgentProfile
 
-**Who the agent is.** Identity only:
+**Who the agent is and how it behaves.** Behaviour, never reach — the tools,
+MCP servers and channels are the Pipeline's:
 
 - **Git repository** — private OK, SSH key or HTTPS PAT via `secretRef`.
 - **Agent role file** in that repo — `.claude/agents/<name>.md` for the claude and ollama runtimes, `.github/agents/<name>.agent.md` for copilot.
