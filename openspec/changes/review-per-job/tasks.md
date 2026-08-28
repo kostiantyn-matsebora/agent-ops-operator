@@ -40,18 +40,18 @@
 - [x] 8.4 `read` job: `--allowedTools "Workflow,Agent(file-reviewer)"`, `--json-schema` for the merged reading, `restore:` names `file-reviewer.md` and `review-component.js`; `consolidate` restores `review-rules.py`. Verify: the review test.
 - [x] 8.5 `review-coordinator.md` gains the cross-review from readings: every name in a file's `declares` that is removed or renamed, checked against every other reading's `references` — a hit is a finding against that file; the repo grep stays for consumers outside the change. Verify: the review test asserts the instruction.
 - [x] 8.6 MEASURE (design D10.1): dispatched (run 33147062866): a file reader takes 44–221 s, median ~110 s; the 15-file `.github` component ran eight waves two-wide and was stopped at 600 s, unreviewed — the ceiling exists. Chunking added: `review-input.py` emits one matrix entry per two files (`CHUNK`), `review-prompt.py` merges a component's chunks for the coordinator, tests in `review-input.test.sh`. Re-measured in 8.7. Also found and fixed: the component session answered with an invented reading before its workflow finished; `review-trace.py` takes only a result after the completion notification.
-- [ ] 8.7 MEASURE (design D10.2): put the per-file readings' findings beside the per-component findings already on this pull request; the cross-review must reproduce the queue-scripts-unrestored finding from `declares`/`references`. Record the comparison on the issue. If it does not, the return shape or the cross-review instruction is wrong, and the change is not done.
+- [x] 8.7 MEASURE (design D10.2): the per-file readings found what the component readers found and more (run 33147062866: 24 findings on three components, several real — the palette row's missing paths, `gh` without `-R`, the workflow's arg guard — and many cosmetic); the queue-scripts-unrestored finding could not recur because it was fixed before the per-file readers ran. THE CAUSE OF THE SLOWNESS WAS NOT THE SHAPE: CI ran sonnet-5 at default effort (198 s per file locally; 18 s at low effort; fable-5 20 s). `--model`/`--effort` are set in the workflow; recorded on the issue with the table.
 
 ## 9. The coordinator in a context that holds only its job (design D11)
 
 - [x] 9.1 `review-coordinator.md`: reads no rule file (its context is the role, the readings, the threads); the cross-review from readings — a name in one file's `declares` that is removed or renamed and present in another file's `references` is a finding against that file, from the readings; a consumer outside the change is read as one file. The first-finding list names the new files. Verify: the review test asserts the instruction and that `consolidate` passes the all-rules exclude.
-- [ ] 9.2 MEASURE: dispatch against this pull request; record consolidate's wall-clock, turns and tokens per turn from the execution artifact on the issue, beside the 273 s / 34 turns / ~76 k it replaces. If the turns are still the cost, that is the next decision — recorded, not pre-empted.
+- [x] 9.2 MEASURE: run 33151444702 — the whole review 4:22; consolidate 2:01 in a ~20 k-token context (was 273–431 s, 34–55 turns, ~76 k per turn). Its posting is one command (`review-post.py`) and it is told not to re-review; it still spent 17 of 19 commands on tools it no longer has, which is a prompt matter, not a cost one. Recorded on the issue.
 
 ## 10. Documentation
 
 ### 10.1 Reference docs
 
-- [ ] 10.1.0 Every 6.x item below is re-checked against what sections 7–9 actually did, and the ones they changed are redone: CONTRIBUTING's paragraph says a component is read per file by subagents with routed rules, cross-reviewed from the readings by a coordinator that inherits no rules; `worktree-delivery.md` names `file-reviewer`, `review-component.js` and `review-rules.py` in the restore list; `gotchas.md` gains the measurements (the coordinator's 34 × 76 k tokens, D10's and 9.2's results); `retired-vocabulary.json` gains `component-reviewer`. Verify: the guards pass and `git grep component-reviewer` outside archives and records is empty.
+- [x] 10.1.0 Every 6.x item below is re-checked against what sections 7–9 actually did, and the ones they changed are redone: CONTRIBUTING's paragraph says a component is read per file by subagents with routed rules, cross-reviewed from the readings by a coordinator that inherits no rules; `worktree-delivery.md` names `file-reviewer`, `review-component.js` and `review-rules.py` in the restore list; `gotchas.md` gains the measurements (the coordinator's 34 × 76 k tokens, D10's and 9.2's results); `retired-vocabulary.json` gains `component-reviewer`. Verify: the guards pass and `git grep component-reviewer` outside archives and records is empty.
 
 ### 6.1 Reference docs (as first done; re-checked by 10.1.0)
 
@@ -63,5 +63,5 @@
 
 ### 10.2 Adopter site
 
-- [ ] 10.2.1 Re-confirm after sections 7–9: `git grep -n 'review-pr\|claude-review\|component-reviewer\|file-reviewer\|review-coordinator' docs/` is empty, so no page changes. Verify: the grep is empty and this task records that.
+- [x] 10.2.1 Re-confirm after sections 7–9: `git grep -n 'review-pr\|claude-review\|component-reviewer\|file-reviewer\|review-coordinator' docs/` is empty, so no page changes. Verify: the grep is empty and this task records that.
 - [x] 6.2.1 Confirm the site says nothing the change made untrue: `git grep -n 'review-pr\|claude-review\|component-reviewer\|review-coordinator' docs/` is empty (it was at proposal time), so no page changes. Verify: the grep is empty and this task records that.

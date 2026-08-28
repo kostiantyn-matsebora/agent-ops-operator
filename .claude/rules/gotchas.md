@@ -247,6 +247,34 @@ rules loaded on demand.
     component on its own runner, readings as artifacts, the queue built by a
     program. The measurement is what settles "just add more agents": more
     `agent()` calls join the queue behind the two that run.
+- **A RUNNER HAS NO CLAUDE SETTINGS, SO `claude -p` THERE RUNS WHATEVER THE
+  DEFAULT IS — AND THAT WAS THE CAUSE OF EVERY SLOW REVIEW NUMBER.** Every
+  CI session and every subagent ran sonnet-5 at its DEFAULT EFFORT. The same
+  file reader, same prompt, same tools, on one machine: sonnet-5 default
+  **198 s and ~16 k thinking tokens**; sonnet-5 `--effort low` **18 s and
+  ~200**; fable-5 default 20 s; opus-5 default 83 s; sonnet-5 medium 79 s —
+  same findings. Between its last read at +50 s and its answer at +191 s the
+  default-effort reader emitted ~13 k thinking tokens and no action; not
+  throttling. The coordinator's seven minutes were 55 turns of the same.
+  - **The workflow sets `--model` and `--effort` on every `claude -p`, and
+    the roles say `model: inherit`**, so the choice reaches every subagent.
+    Do not remove the flags to "use the default": the default is the
+    runner's, and the runner has none.
+  - **ISOLATE THE VARIABLE BEFORE RESTRUCTURING.** A day was spent on the
+    matrix, per-file readers, chunking and rule routing — each defensible,
+    none the cause — before one local run with `--model` reproduced the CI
+    time. The 20-second version of a reader was one flag away throughout.
+  - **A SESSION FORCED TO ANSWER BEFORE ITS BACKGROUND WORKFLOW FINISHES
+    INVENTS THE ANSWER.** With `--json-schema` the component session emitted
+    an empty reading on its first turn, then the real one after the
+    completion notification. `review-trace.py` takes only a result after
+    that notification; a session that ran no workflow keeps its last.
+  - **The CLI stops a background workflow at 600 s**, measured twice (#106,
+    and a 15-file component two-wide). The queue emits one read job per two
+    files so no job approaches it.
+  - **Thread verdicts vary between runs of the same file** — `standing`,
+    `fixed`, `gone` for the same five threads at every effort level. Not
+    a speed problem; open.
 - **`claude-code-action` EXITS AFTER THE MODEL'S FIRST TURN, SO A BACKGROUND
   `Workflow` NEVER RUNS UNDER IT.** The tool launches the run and returns at
   once; the CLI stays alive and gives the model a second turn with the result

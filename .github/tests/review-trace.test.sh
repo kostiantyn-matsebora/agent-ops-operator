@@ -9,6 +9,7 @@ tmp=$(mktemp -d)
 cat > "$tmp/exec.jsonl" <<'EOF'
 {"type":"system","subtype":"init"}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Workflow","input":{}}]}}
+{"type":"system","subtype":"task_started","task_id":"w1"}
 {"type":"system","subtype":"task_progress","usage":{"duration_ms":1000},"workflow_progress":[{"type":"workflow_agent","index":1,"label":"docs/a.md","state":"start","startedAt":5000}]}
 {"type":"system","subtype":"task_progress","usage":{"duration_ms":61000},"workflow_progress":[{"type":"workflow_agent","index":1,"label":"docs/a.md","state":"done","startedAt":5000},{"type":"workflow_agent","index":2,"label":"docs/b.md","state":"start","startedAt":65000}]}
 {"type":"system","subtype":"task_progress","usage":{"duration_ms":150000},"workflow_progress":[{"type":"workflow_agent","index":1,"label":"docs/a.md","state":"done","startedAt":5000},{"type":"workflow_agent","index":2,"label":"docs/b.md","state":"done","startedAt":65000}]}
@@ -38,8 +39,18 @@ assert_not_contains "$(cat "$tmp/r.json")" '"invented"'
 assert_contains "$out" "::warning::1 result(s) before the workflow completed were discarded"
 assert_status 0 "$(python3 "$ROOT/.github/scripts/review-reading-check.py" "$tmp/r.json" --group docs --out "$tmp/reading.json" >/dev/null 2>&1; echo $?)"
 
+it "a session that ran no workflow (the coordinator) keeps its last result"
+cat > "$tmp/plain.jsonl" <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{}}]}}
+{"type":"result","subtype":"success","num_turns":3,"duration_ms":5000,"duration_api_ms":4000,"usage":{},"result":"{\"summaryPosted\": true}"}
+EOF
+out=$(python3 "$S" "$tmp/plain.jsonl" --out "$tmp/plain-out.json")
+assert_contains "$out" "turns 3"
+assert_not_contains "$out" "discarded"
+assert_contains "$(cat "$tmp/plain-out.json")" "summaryPosted"
+
 it "a record whose workflow never completed yields no reading, whatever the session answered"
-grep -v task_notification "$tmp/exec.jsonl" > "$tmp/partial.jsonl"
+{ echo '{"type":"system","subtype":"task_started","task_id":"w1"}'; grep -v task_notification "$tmp/exec.jsonl"; } > "$tmp/partial.jsonl"
 out=$(python3 "$S" "$tmp/partial.jsonl" --out "$tmp/p.json")
 assert_contains "$out" "NO RESULT AFTER THE WORKFLOW COMPLETED"
 assert_equals "{}" "$(cat "$tmp/p.json")"

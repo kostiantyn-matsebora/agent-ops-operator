@@ -68,8 +68,14 @@ def main() -> int:
     # is not a reading of anything; it is discarded and said so.
     done_at = next((i for i, e in enumerate(ev)
                     if e.get("subtype") == "task_notification" and e.get("status") == "completed"), None)
+    started = any(e.get("subtype") == "task_started" for e in ev)
     all_results = [(i, e) for i, e in enumerate(ev) if e.get("type") == "result"]
-    if done_at is None:
+    if not started:
+        # No workflow was run (the coordinator): the session's last result is
+        # its answer, and there is nothing to have answered before.
+        premature = []
+        results = [e for _, e in all_results]
+    elif done_at is None:
         premature = all_results
         results = []
     else:

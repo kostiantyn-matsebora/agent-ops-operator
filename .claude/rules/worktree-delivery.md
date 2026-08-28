@@ -123,16 +123,20 @@ that file, its threads and the rules `review-rules.py` routes to its path —
 NO context inherits a rule file, and `review-context.py` prints what each one
 holds at the top of the job. `consolidate` runs the `review-coordinator` —
 the only role that posts, holding the readings and threads and no rules —
-which cross-reviews from what the files declare and reference, and RECORDS
-each addressed thread with `mark-thread-resolved.sh` (a list, no privilege);
+which cross-reviews from what the files declare and reference, never
+re-reads the diff, and posts everything through ONE command,
+`review-post.py`, which RECORDS each addressed thread with
+`mark-thread-resolved.sh` (a list, no privilege). The model and its effort
+are the workflow's (`--model`, `--effort` — `gotchas.md` has why);
 `reconcile` RESOLVES the recorded threads with no model and the one
 `contents: write`. It runs by hand too: `gh workflow run claude-review.yml -f
 number=<pr>` (`-f dry_run=true` posts nothing). NOTHING THE REVIEW RUNS COMES
 FROM THE PULL REQUEST: `queue` restores `review-input.py`, `review-queue.py`
 and `components.sh` from the BASE branch before building the queue; `read`
 restores the composite action, `review-prompt.py`, `review-reading-check.py`,
-`review-rules.py` and `review-context.py`, and `consolidate` the action,
-`review-prompt.py`, `review-rules.py`, `review-context.py` and
+`review-rules.py`, `review-context.py` and `review-trace.py`, and
+`consolidate` the action, `review-prompt.py`, `review-rules.py`,
+`review-context.py`, `review-trace.py`, `review-post.py` and
 `mark-thread-resolved.sh`; both then install the CLI through
 `.github/actions/claude-cli`, which restores the job's role file (and, for
 `read`, `review-component.js`); `reconcile` checks out the base branch
