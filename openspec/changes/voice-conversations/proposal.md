@@ -13,7 +13,9 @@ after it, with the addressing decided in between by `message-addressing`.
 ## What Changes
 
 - **Four new voice components, each one responsibility, one contract, one
-  dependency class**, in `platform/`:
+  dependency class** — the receiver under `signals/` and the sender under
+  `channels/` (they speak those contracts), the recognizer and synthesizer
+  under `platform/`:
 
   | component | owns | talks to | depends on |
   |---|---|---|---|
