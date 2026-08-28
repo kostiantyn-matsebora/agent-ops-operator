@@ -43,6 +43,23 @@ token naming only the Coordinator could not scope to one of them.
 - **WHEN** roots A and B of one Coordinator are open and A's token asks to close a member of B
 - **THEN** the manager refuses it as out of scope
 
+### Requirement: A channel-reader token reaches a projection and no verb
+
+A token derived with context `channel-reader:<channel>` SHALL reach, through
+`list_conversations` and `get_conversation`, only the projection `{name,
+title, brief, phase, pipeline}` of conversations bound to that Channel. Every
+verb SHALL be refused for it, and no run, input or tree SHALL be returned. The
+MANAGER SHALL decide this from the token context; the server SHALL forward the
+token and decide nothing, exactly as for a coordinator's.
+
+#### Scenario: A reader picks a conversation without reading one
+- **WHEN** a caller holding `channel-reader:voice-desk` lists conversations
+- **THEN** it receives name, title, brief, phase and pipeline for each conversation with a thread on `voice-desk`, and nothing for any other
+
+#### Scenario: A reader cannot act
+- **WHEN** a caller holding a channel-reader token calls `invoke`, `close`, `escalate` or `read`
+- **THEN** the manager refuses it, and the server has made no decision
+
 ### Requirement: The server sits behind the component wall
 
 The server SHALL be reachable only from runtime pods and the manager under the
