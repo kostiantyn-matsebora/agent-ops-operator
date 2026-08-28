@@ -39,7 +39,9 @@ closed-form rather than judged:
 - a nonce stated in one turn and asked back after a pod restart
 - a pod name the test already knows
 - a mutation asked for outside the bound toolset, asserted on the OBJECT
-  staying unchanged rather than on whatever the agent said about refusing Every agent-dependent assertion carries
+  staying unchanged rather than on whatever the agent said about refusing
+
+Every agent-dependent assertion carries
 a bounded retry whose count is reported, so a lane that passes while retrying
 constantly is visible rather than quietly degrading.
 

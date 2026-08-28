@@ -24,10 +24,13 @@ projected as `AGENTOPS_CRED_<CHANNEL>_apiBase`, overrides the process default
 for that surface. The Secret already holds the token, so redirecting it there
 grants nothing the token did not — unlike a `spec.config` field. Precedence is
 the Secret's key, then `TELEGRAM_API_BASE`, then the real host: a surface that
-names a root is served at that root whatever the process default says. A per-surface override would let anyone
-who can edit a served channel's configuration redirect that channel's bot token
-to a host of their choosing, which turns a configuration edit into credential
-exfiltration.
+names a root is served at that root whatever the process default says.
+
+What is forbidden is an override in `Channel.spec.config`. That field is
+editable by anyone who may edit a served channel, and an endpoint there would
+let them redirect that channel's bot token to a host of their choosing — a
+configuration edit turned into credential exfiltration. The Secret key is not
+that: whoever can write the Secret already holds the token.
 
 #### Scenario: Default installs are unchanged
 - **WHEN** the adapter runs with `TELEGRAM_API_BASE` unset

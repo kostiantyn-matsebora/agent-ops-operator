@@ -763,6 +763,11 @@ A `SignalSource` whose adapter nothing serves carries `Served=False`.
 **Reference implementation:** [`signals/cron/`](../signals/cron/), which replaced
 the old roadmap `cron` sub-struct.
 
+`config: {schedule, input, title?}` fires job-lane signals with
+`<source>@<tick>` fingerprints, restart-safe via the state API. The grouping
+window turns a recurring job into one conversation whose later runs resume the
+agent session.
+
 **How an adapter proves it:** the contract conformance suite,
 `platform/manager/test/conformance/`, runs every adapter's BUILT BINARY against
 a fake manager and asserts the obligations above.
@@ -784,11 +789,6 @@ For a signal adapter:
 
 A new adapter joins by being listed there. Nothing in its own source changes.
 See [Testing](testing.md).
-
-`config: {schedule, input, title?}` fires job-lane signals with
-`<source>@<tick>` fingerprints, restart-safe via the state API. The grouping
-window turns a recurring job into one conversation whose later runs resume the
-agent session.
 
 ## The work contract
 

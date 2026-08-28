@@ -516,6 +516,7 @@ func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 		if ctx.Err() == nil {
 			log.Printf("posting %d signals for %s: %v", len(allowed), source, err)
 			a.reportPostFailure(ctx, source, err)
+			a.reportClipping(ctx, source, clipped)
 		}
 		return false
 	}
