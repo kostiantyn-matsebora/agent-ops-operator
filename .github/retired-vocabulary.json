@@ -4,26 +4,26 @@
     "",
     "THIS IS A DENYLIST, AND HERE THAT IS THE RIGHT SHAPE. The publication guard is an",
     "allowlist because naming a private thing in a guard publishes it. Everything below is",
-    "PUBLIC BY CONSTRUCTION \u2014 a removed CRD field, a withdrawn tiebreak, a superseded",
-    "command \u2014 so listing it costs nothing, and the list IS the value: it is the record of",
+    "PUBLIC BY CONSTRUCTION — a removed CRD field, a withdrawn tiebreak, a superseded",
+    "command — so listing it costs nothing, and the list IS the value: it is the record of",
     "what this project stopped doing, in the one place that fails a build when it comes back.",
     "",
     "Each entry: `pattern` (Python regex, searched case-insensitively unless `case` is true),",
-    "`says` (what to write instead \u2014 printed on a hit), and `allow` (regexes that mark a line",
+    "`says` (what to write instead — printed on a hit), and `allow` (regexes that mark a line",
     "as RECORDING the removal rather than asserting the thing). The allow list is what lets a",
     "spec say 'spec.type is removed' while failing one that says 'required spec.type'.",
     "",
     "A MIGRATION-TABLE ROW IS A RECORD, and several `allow` entries below say so by",
     "matching the REPLACEMENT name rather than a marker word. A line reading",
     "`| persistence.enabled | persistence.context.enabled |` states what to write",
-    "instead, which is the whole test \u2014 and a wide table cannot carry 'removed' on",
+    "instead, which is the whole test — and a wide table cannot carry 'removed' on",
     "every row without becoming unreadable. The window is one line either side, so",
     "a header word does not reach row four.",
     "",
     "`skip` names files inside `scan` that are NOT checked. There is exactly one, and it",
     "is the CHANGELOG: its job is to record what each version removed, so it accumulates",
     "every name this guard exists to catch. An entry for a RELEASED version must also not",
-    "be edited to satisfy a guard added afterwards \u2014 somebody may be following it. The",
+    "be edited to satisfy a guard added afterwards — somebody may be following it. The",
     "archives under docs/changelog/ were never scanned for the same reason: `docs/*.md`",
     "does not recurse."
   ],
@@ -225,8 +225,8 @@
       ],
       "$comment": [
         "THE IMAGE IS NOT THE SERVICE, AND THE STRING IS IDENTICAL.",
-        "channels/telegram publishes agentops-channel-telegram \u2014 the path IS the",
-        "published name, per .claude/rules/structure.md \u2014 so an image reference",
+        "channels/telegram publishes agentops-channel-telegram — the path IS the",
+        "published name, per .claude/rules/structure.md — so an image reference",
         "spells the retired Service name exactly. The lookbehind is what tells them",
         "apart: an image is written under its registry path, a Service name is not.",
         "Found when archiving sdlc-setup folded a release spec naming that image",
@@ -275,7 +275,7 @@
     {
       "id": "sibling-channels",
       "pattern": "sibling channels?|to its siblings",
-      "says": "delivery is per DESTINATION \u2014 every bound channel that has not already displayed it",
+      "says": "delivery is per DESTINATION — every bound channel that has not already displayed it",
       "allow": [
         "NOT be scoped",
         "not scoped",
@@ -297,7 +297,7 @@
     {
       "id": "home-volume",
       "pattern": "home volume|home PVC|home claim",
-      "says": "the CONTEXT volume \u2014 it is named for what it HOLDS, a conversation's accumulated context, not for the filesystem path one runtime image happens to mount it at",
+      "says": "the CONTEXT volume — it is named for what it HOLDS, a conversation's accumulated context, not for the filesystem path one runtime image happens to mount it at",
       "allow": [
         "removed",
         "retired",
@@ -376,7 +376,7 @@
     {
       "id": "home-pvc-env",
       "pattern": "HOME_PVC",
-      "says": "CONTEXT_PVC \u2014 and it is not dual-read, because the concept moved to another CR",
+      "says": "CONTEXT_PVC — and it is not dual-read, because the concept moved to another CR",
       "allow": [
         "removed",
         "retired",
@@ -401,7 +401,7 @@
     {
       "id": "home-claim-name",
       "pattern": "agentops-home",
-      "says": "agentops-context \u2014 the default claim was renamed with the volume, and the chart FAILS the render rather than silently provisioning a second, empty one",
+      "says": "agentops-context — the default claim was renamed with the volume, and the chart FAILS the render rather than silently provisioning a second, empty one",
       "allow": [
         "removed",
         "retired",
@@ -459,7 +459,7 @@
     {
       "id": "data-home-path",
       "pattern": "/data/home",
-      "says": "/data/context \u2014 the mount path moved with the name. /data/workspace is the load-bearing path and it did NOT move",
+      "says": "/data/context — the mount path moved with the name. /data/workspace is the load-bearing path and it did NOT move",
       "allow": [
         "removed",
         "retired",
@@ -484,7 +484,7 @@
     {
       "id": "runtime-rbac-mode",
       "pattern": "rbacMode|rbac[ -]?mode",
-      "says": "an account STATES ITS RULES \u2014 clusterRoles, bindClusterRoles or namespaced \u2014 or holds nothing. There is no preset posture at ANY level: a mode name is a grant nobody reviewed, and declaring the account rather than defaulting it release-wide does not make the word readable",
+      "says": "an account STATES ITS RULES — clusterRoles, bindClusterRoles or namespaced — or holds nothing. There is no preset posture at ANY level: a mode name is a grant nobody reviewed, and declaring the account rather than defaulting it release-wide does not make the word readable",
       "allow": [
         "removed",
         "retired",
@@ -499,7 +499,7 @@
         "became",
         "deleted",
         "->",
-        "\u2192",
+        "→",
         "clusterRoles",
         "preset",
         "fails the render",
@@ -525,7 +525,7 @@
         "became",
         "deleted",
         "->",
-        "\u2192",
+        "→",
         "serviceAccounts",
         "declare",
         "declared"
@@ -549,7 +549,7 @@
         "became",
         "deleted",
         "->",
-        "\u2192",
+        "→",
         "runtimeDefaults",
         "runtimes:"
       ]
@@ -557,7 +557,7 @@
     {
       "id": "global-runtime-keys",
       "pattern": "global\\.agentops\\.runtime\\.",
-      "says": "global.agentops.runtimeDefaults.* \u2014 the block was renamed when it became a complete runtime configuration",
+      "says": "global.agentops.runtimeDefaults.* — the block was renamed when it became a complete runtime configuration",
       "allow": [
         "removed",
         "retired",
@@ -572,7 +572,7 @@
         "became",
         "deleted",
         "->",
-        "\u2192",
+        "→",
         "runtimeDefaults"
       ]
     },
@@ -594,14 +594,14 @@
         "became",
         "deleted",
         "->",
-        "\u2192",
+        "→",
         "serviceAccounts"
       ]
     },
     {
       "id": "release-idle-ttl-key",
       "pattern": "(?<![\\w.])runtimeIdleTtlMinutes\\b",
-      "says": "global.agentops.runtimeDefaults.idleTtlMinutes \u2014 a bundle-shipped runtime cannot read a parent-scope value",
+      "says": "global.agentops.runtimeDefaults.idleTtlMinutes — a bundle-shipped runtime cannot read a parent-scope value",
       "allow": [
         "removed",
         "retired",
@@ -616,14 +616,14 @@
         "became",
         "deleted",
         "->",
-        "\u2192",
+        "→",
         "runtimeDefaults"
       ]
     },
     {
       "id": "bundle-suffixed-keys",
       "pattern": "(?<![\\w-])(k8s|ha|telegram|prometheus)-bundle(?=[.:/])",
-      "says": "every subchart is named for the SYSTEM it integrates, with no suffix \u2014 the VALUES KEY and the chart directory are `kubernetes`, `home-assistant`, `telegram`, `prometheus`. (The openspec CAPABILITY names are unchanged, which is why this matches only a key, a path or a values line.)",
+      "says": "every subchart is named for the SYSTEM it integrates, with no suffix — the VALUES KEY and the chart directory are `kubernetes`, `home-assistant`, `telegram`, `prometheus`. (The openspec CAPABILITY names are unchanged, which is why this matches only a key, a path or a values line.)",
       "allow": [
         "removed",
         "retired",
@@ -638,7 +638,7 @@
         "became",
         "deleted",
         "->",
-        "\u2192",
+        "→",
         "kubernetes",
         "home-assistant",
         "prometheus",
@@ -648,7 +648,7 @@
     {
       "id": "adapter-kubernetes-access",
       "pattern": "(?<![\\w.])kubernetesAccess\\b",
-      "says": "an adapter names the ServiceAccount it runs as \u2014 `spec.serviceAccountName`, a reference the chart creates \u2014 and naming one is what mounts its token. Absent means the release floor, denied every verb",
+      "says": "an adapter names the ServiceAccount it runs as — `spec.serviceAccountName`, a reference the chart creates — and naming one is what mounts its token. Absent means the release floor, denied every verb",
       "allow": [
         "removed",
         "retired",
@@ -663,7 +663,7 @@
         "became",
         "deleted",
         "->",
-        "\u2192",
+        "→",
         "serviceAccountName",
         "DELETED",
         "fails the render",
@@ -686,6 +686,42 @@
         "stopped",
         "rewritten",
         "never branch"
+      ]
+    },
+    {
+      "id": "review-pr-saved-workflow",
+      "pattern": "review-pr\\.js|(?<![\\w/])/review-pr\\b|saved workflow[, ]+`?/?review-pr",
+      "says": "the review is the four jobs of .github/workflows/claude-review.yml — a program builds the queue, one `read` job per changed component, `consolidate` runs the coordinator, `reconcile` resolves — dispatched by hand with `gh workflow run claude-review.yml -f number=<pr>`; the in-session dynamic workflow was retired because its reader pool was two on a four-core runner",
+      "allow": [
+        "removed",
+        "retired",
+        "deleted",
+        "delete",
+        "gone",
+        "replaced",
+        "used to",
+        "no longer",
+        "was",
+        "is now",
+        "the matrix"
+      ]
+    },
+    {
+      "id": "component-reviewer-role",
+      "pattern": "component-reviewer\\b",
+      "says": "a component is read per FILE by `file-reviewer` subagents that a saved workflow (`review-component.js`) starts inside the component's read job, each in a context holding that file and the rules routed to its path; the one reader holding a whole component's diff grew with the diff",
+      "allow": [
+        "removed",
+        "retired",
+        "deleted",
+        "delete",
+        "gone",
+        "replaced",
+        "used to",
+        "no longer",
+        "was",
+        "is now",
+        "became"
       ]
     }
   ]
