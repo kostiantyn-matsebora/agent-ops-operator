@@ -35,8 +35,8 @@ on an omission rather than a field.
 - **New component `platform/mcp-aops`** — the aops MCP server: read tools over
   the agentops kinds, and async `invoke` / `close` / `escalate` / `read`; reach
   bounded per derived token to the calling Coordinator's `agents[]`.
-- **`Conversation.status.brief`** — what a conversation is about, one
-  paragraph, reported by the runtime in `/work/done`, latest-wins. It is what a
+- **`Conversation.status.brief`** — what a conversation is about, one or two
+  sentences, reported by the runtime in `/work/done`, latest-wins. It is what a
   caller reads to pick a conversation without reading any transcript.
 - **A second reach class on the aops MCP server** — a token derived with
   context `channel-reader:<channel>` reads the `{name, title, brief, phase,
