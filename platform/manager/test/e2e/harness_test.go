@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,6 +131,19 @@ func run(m *testing.M) int {
 		if out, err := cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", "deployment/agentops-manager", "--timeout=3m"); err != nil {
 			fmt.Fprintln(os.Stderr, "manager restart:", err, out)
 			return 1
+		}
+		// The restarted manager re-applies every adapter Deployment and their
+		// pods roll shortly after — a port-forward opened before that lands
+		// on a pod about to die. Roll them NOW, deliberately, and wait.
+		out, _ := cluster.Kubectl(ctx, "-n", Namespace, "get", "deployments", "-l", "app.kubernetes.io/name in (agentops-adapter, agentops-signal-adapter)", "-o", "name")
+		for _, d := range strings.Fields(out) {
+			_, _ = cluster.Kubectl(ctx, "-n", Namespace, "rollout", "restart", d)
+		}
+		for _, d := range strings.Fields(out) {
+			if out, err := cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", d, "--timeout=3m"); err != nil {
+				fmt.Fprintln(os.Stderr, "adapter restart:", d, err, out)
+				return 1
+			}
 		}
 	}
 	if err := SetupWiring(ctx, k); err != nil {

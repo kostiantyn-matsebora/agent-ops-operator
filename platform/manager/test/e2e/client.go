@@ -142,7 +142,21 @@ func waitFor(t *testing.T, what string, timeout time.Duration, cond func() (bool
 func mustCreate(t *testing.T, k *Kube, obj client.Object) {
 	t.Helper()
 	obj.SetNamespace(k.Namespace)
-	if err := k.Create(context.Background(), obj); err != nil {
+	err := k.Create(context.Background(), obj)
+	if apierrors.IsAlreadyExists(err) {
+		// Left behind by a run interrupted before its cleanup. Test-owned
+		// objects carry the e2e- prefix, so reclaiming one is safe.
+		_ = k.Delete(context.Background(), obj)
+		deadline := time.Now().Add(2 * time.Minute)
+		for time.Now().Before(deadline) {
+			obj.SetResourceVersion("")
+			if err = k.Create(context.Background(), obj); !apierrors.IsAlreadyExists(err) {
+				break
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}
+	if err != nil {
 		t.Fatalf("creating %T %s: %v", obj, obj.GetName(), err)
 	}
 	t.Cleanup(func() {

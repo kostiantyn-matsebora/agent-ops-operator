@@ -113,6 +113,14 @@ const ReclaimAfter = 5 * time.Minute
 
 var sendSeq atomic.Int64
 
+// sendEpoch makes a fire-and-forget send id unique ACROSS manager restarts,
+// not merely within one process. Adapters dedup by op id, as the contract
+// tells them to, so a counter that restarted at 1 handed a fresh notice the
+// id of one already acknowledged — and the adapter, correctly, refused to
+// repeat it. Found by the conformance suite's ack-once rule meeting the e2e
+// pack's manager restart.
+var sendEpoch = strconv.FormatInt(time.Now().UnixNano(), 36)
+
 // OpQueue holds pending outbound ops per channel type. In-memory by design and
 // NEVER the record of what is owed: every op is either DERIVED from CR state —
 // ensure-topic from a missing thread binding, an input card from an unposted
@@ -253,7 +261,7 @@ func (q *OpQueue) Settled(id string) bool {
 // string-valued form on purpose, because that is what let transport markup back
 // into the manager.
 func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID *string, msg Message) {
-	q.enqueueMessage(ctx, "send:"+strconv.FormatInt(sendSeq.Add(1), 36), ch, "", threadID, msg, false)
+	q.enqueueMessage(ctx, "send:"+sendEpoch+":"+strconv.FormatInt(sendSeq.Add(1), 36), ch, "", threadID, msg, false)
 }
 
 // EnqueueFarewell posts a conversation's closing notice with a STABLE id, so a
@@ -609,7 +617,7 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 		if conv.Status.ThreadArchived(channel) {
 			return nil
 		}
-		patch := client.MergeFrom(conv.DeepCopy())
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		conv.Status.ThreadsArchived = append(conv.Status.ThreadsArchived, channel)
 		err := q.Client.Status().Patch(ctx, &conv, patch)
 		if err == nil {
@@ -625,6 +633,15 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 // markDelivered records that a run's reply reached one channel's thread, so
 // reconciliation stops re-deriving it. Retried on conflict: the reply and the
 // next run's status write compete for the same subresource.
+//
+// THE PATCH IS OPTIMISTICALLY LOCKED, AND WITHOUT THAT THE RETRY WAS THEATRE.
+// A merge patch on `status.runs` replaces the whole array, and a plain merge
+// patch carries no resourceVersion — so two threads' completions milliseconds
+// apart each wrote the array they had read, the last one won, and the other
+// channel's mark was gone with nothing left to re-derive it. The e2e pack's
+// fan-out test found it: console plus Telegram bound to one conversation,
+// `delivered: [tg-ops]` forever. With the lock the second write is a 409 and
+// this loop does what it always claimed to.
 func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 	_, channel, runID, ok := ParseRunReplyOpID(op.ID)
 	if !ok || q.Client == nil {
@@ -638,7 +655,7 @@ func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: q.Namespace, Name: op.Conversation}, &conv); err != nil {
 			return client.IgnoreNotFound(err)
 		}
-		patch := client.MergeFrom(conv.DeepCopy())
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		found := false
 		for i := range conv.Status.Runs {
 			run := &conv.Status.Runs[i]
@@ -667,12 +684,28 @@ func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 	return fmt.Errorf("conflict marking run %s delivered on %s", runID, channel)
 }
 
+// finishEnsureTopic records the thread an adapter created. Optimistically
+// locked and retried, for the reason markDelivered gives: two channels'
+// topics complete within milliseconds of each other on a multi-channel
+// conversation, and a plain merge patch on `status.threads` let the second
+// binding overwrite the first — the fan-out then had one thread forever.
 func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) error {
+	for attempt := 0; attempt < 5; attempt++ {
+		done, err := q.tryFinishEnsureTopic(ctx, op, res)
+		if done || err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("conflict recording the %s thread of %s", op.Channel, op.Conversation)
+}
+
+// tryFinishEnsureTopic is one attempt; a false, nil result is a conflict.
+func (q *OpQueue) tryFinishEnsureTopic(ctx context.Context, op *Op, res OpResult) (bool, error) {
 	var conv agentopsv1alpha1.Conversation
 	if err := q.Client.Get(ctx, types.NamespacedName{Namespace: q.Namespace, Name: op.Conversation}, &conv); err != nil {
-		return client.IgnoreNotFound(err)
+		return true, client.IgnoreNotFound(err)
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
+	patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	cond := metav1.Condition{Type: ConditionTopicReady, Status: metav1.ConditionTrue, Reason: "TopicCreated",
 		Message: "channel " + op.Channel}
 	if res.Error != "" {
@@ -725,12 +758,15 @@ func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) e
 	}
 	apimeta.SetStatusCondition(&conv.Status.Conditions, cond)
 	if err := q.Client.Status().Patch(ctx, &conv, patch); err != nil {
-		return err
+		if apierrors.IsConflict(err) {
+			return false, nil
+		}
+		return true, err
 	}
 	if cond.Status == metav1.ConditionFalse {
-		return fmt.Errorf("ensure-topic for %s: %s", op.Conversation, cond.Message)
+		return true, fmt.Errorf("ensure-topic for %s: %s", op.Conversation, cond.Message)
 	}
-	return nil
+	return true, nil
 }
 
 // Pending reports whether an op is queued or claimed (used by tests).

@@ -104,10 +104,24 @@ func (r *Registry) Push(ctx context.Context, localTag, name string) (string, err
 		return "", err
 	}
 	hostRef := r.HostPort + "/" + name
-	if out, err := exec.CommandContext(ctx, "docker", "tag", localTag, hostRef).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("docker tag: %v\n%s", err, out)
+	// A DERIVED image, so the pushed one has its OWN image id. The kubelet
+	// (KubeletEnsureSecretPulledImages) remembers an image id as pulled WITH
+	// credentials and makes every later pod that lacks them re-pull it — so
+	// pushing the imported stub as-is poisoned that stub for the rest of the
+	// run: identical id, and the re-pull went to Docker Hub.
+	build := exec.CommandContext(ctx, "docker", "build", "-t", hostRef, "--label", "agentops.dev/e2e-pulled=true", "-")
+	build.Stdin = strings.NewReader("FROM " + localTag + "\nLABEL agentops.dev/e2e-pulled=true\n")
+	if out, err := build.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("docker build (derived): %v\n%s", err, out)
 	}
-	if out, err := exec.CommandContext(ctx, "docker", "--config", cfgDir, "push", hostRef).CombinedOutput(); err != nil {
+	// A private config dir also drops the CURRENT CONTEXT — on a desktop
+	// daemon that is how the socket is found — so the daemon's host is
+	// resolved from the user's context and handed over explicitly.
+	push := exec.CommandContext(ctx, "docker", "--config", cfgDir, "push", hostRef)
+	if host, err := exec.Command("docker", "context", "inspect", "-f", `{{(index .Endpoints "docker").Host}}`).Output(); err == nil && strings.TrimSpace(string(host)) != "" {
+		push.Env = append(os.Environ(), "DOCKER_HOST="+strings.TrimSpace(string(host)))
+	}
+	if out, err := push.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("docker push: %v\n%s", err, out)
 	}
 	// The node reaches it by the container name, not the published port.

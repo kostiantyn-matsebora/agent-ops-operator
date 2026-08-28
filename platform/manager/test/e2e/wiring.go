@@ -34,6 +34,7 @@ const (
 	PipelineFanout   = "e2e-fanout"    // claims e2e-fanout, delivers to console + tg-ops
 	PipelineChat     = "e2e-chat"      // claims tg-ops, delivers to tg-ops
 	PipelineEvents   = "e2e-events"    // claims cluster-events + vm-alerts, delivers to console
+	PipelineCron     = "e2e-cron"      // claims e2e-cron alone, so a test can pause that lane
 	ChannelConsole   = "console"
 	ChannelTelegram  = "tg-ops"
 	SourceConsole    = "console"
@@ -90,7 +91,8 @@ func SetupWiring(ctx context.Context, k *Kube) error {
 		source(SourceUnclaimed, "e2e", nil),
 		source(SourceAlerts, AdapterAlertmngr, map[string]any{}),
 		source(SourceCron, AdapterCron, map[string]any{"schedule": "* * * * *", "input": "echo cron tick", "title": "e2e cron"}),
-		pipeline(PipelineConsole, ProfileStub, []string{SourceTasks, SourceConsole, SourceCron}, []string{ChannelConsole}),
+		pipeline(PipelineConsole, ProfileStub, []string{SourceTasks, SourceConsole}, []string{ChannelConsole}),
+		pipeline(PipelineCron, ProfileStub, []string{SourceCron}, []string{ChannelConsole}),
 		pipeline(PipelineFanout, ProfileStub, []string{SourceFanout}, []string{ChannelConsole, ChannelTelegram}),
 		pipeline(PipelineChat, ProfileStub, []string{SourceTelegram}, []string{ChannelTelegram}),
 		pipeline(PipelineEvents, ProfileStub, []string{SourceEvents, SourceAlerts}, []string{ChannelConsole}),
@@ -99,7 +101,7 @@ func SetupWiring(ctx context.Context, k *Kube) error {
 			return fmt.Errorf("creating %s: %w", obj.GetName(), err)
 		}
 	}
-	for _, name := range []string{PipelineConsole, PipelineFanout, PipelineChat, PipelineEvents} {
+	for _, name := range []string{PipelineConsole, PipelineFanout, PipelineChat, PipelineEvents, PipelineCron} {
 		if err := waitPipelineReady(ctx, k, name, 2*time.Minute); err != nil {
 			return err
 		}
@@ -239,7 +241,18 @@ func (e *Env) do(t *testing.T, method, url string, body []byte, auth string) (in
 		req.Header.Set("Authorization", auth)
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
+	var resp *http.Response
+	var err error
+	// One retry on a transport error: a port-forward whose pod just rolled
+	// answers EOF once and is fine again a moment later.
+	for attempt := 0; attempt < 3; attempt++ {
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		time.Sleep(3 * time.Second)
+	}
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
 	}

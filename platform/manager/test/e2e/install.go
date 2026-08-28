@@ -28,8 +28,8 @@ type InstallValues struct {
 func DefaultValues(tier string) *InstallValues {
 	return &InstallValues{
 		Tier:         tier,
-		AdapterToken: "e2e-adapter-token-0123456789abcdef",
-		UIToken:      "e2e-ui-token-0123456789abcdef",
+		AdapterToken: "e2e-adapter-token-not-a-secret",
+		UIToken:      "e2e-ui-token-not-a-secret",
 		BotToken:     "1234567890:e2e-fake-bot-token",
 		ChatID:       "-1001234567890",
 		Runtime:      "stub",
