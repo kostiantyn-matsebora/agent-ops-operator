@@ -2,7 +2,7 @@
 
 ## Why
 
-The test estate stops exactly where the kubelet starts. `internal/integration/`
+The test estate stops exactly where the kubelet starts. `platform/manager/internal/integration/`
 runs 22 files against a real API server, but envtest schedules nothing — its own
 suite file documents pods from earlier tests sitting Pending forever. Every
 invariant whose enforcement belongs to the kubelet, the scheduler, or a live
@@ -17,18 +17,18 @@ guarding it and no test that can run them, because reproducing it requires a
 real pod that really fails.
 
 The obstacle was assumed to be the third parties. It is not. Auditing egress
-across every module: only `gateway-telegram`, `channel-telegram`, the planned
-`signal-ha`, and `runtime-claude` call *out*. Every adapter the question was
-asked about — vmalertmanager, telegram ingest, k8s-events, cron — is
-**inbound**: it hosts a port and waits. Driving it needs a POST, not a fake. And
-`console/` is already a `ChannelAdapter` with no third-party dependency at all,
+across every module: only `gateway-telegram`, `channel-telegram`, `signal-ha` and the three
+runtimes (`claude`, `ollama`, `copilot`) call *out*. Every other adapter —
+alertmanager, telegram ingest, k8s-events, cron — is **inbound**: it hosts a port and waits. Driving it needs a POST, not a fake. And
+`platform/console/` is already a `ChannelAdapter` with no third-party dependency at all,
 so the full conversation lifecycle runs through production code with nothing
 simulated.
 
 ## What Changes
 
-- **A `test/e2e/` pack running against k3s** (k3d in CI, in the root Go module so
-  it inherits the existing client-go dependency and adds no ninth module). It
+- **A `test/e2e/` pack running against k3s** (k3d in CI, inside `platform/manager/` — the one
+  module with dependencies — so it inherits the existing client-go dependency
+  and adds no new module). It
   installs the chart from the working tree, waits for readiness, and asserts
   against the live cluster. Its subject is the **substrate**: `envFrom`
   credential projection under prefix `AGENTOPS_CRED_<CHANNEL>_`, RBAC as
@@ -70,21 +70,21 @@ simulated.
 - **The outbound Bot API base URL becomes configuration.** `channel-telegram`
   and `gateway-telegram` hardcode `https://api.telegram.org` while parameterizing
   the *manager* URL in the same files. Both gain `TELEGRAM_API_BASE`, defaulting
-  to the real host, surfaced as an optional `telegram-bundle` value that renders
+  to the real host, surfaced as an optional `chart/charts/telegram/` value that renders
   nothing when unset. The standing rule this establishes — **an adapter's
   outbound base URL is configuration, never a constant** — costs nothing
   anywhere else and is a prerequisite `signal-ha` will need regardless, since
   Home Assistant is self-hosted by definition.
 - **A contract conformance suite, needing no cluster and no Go import.** The
-  fake manager already built inline in `console/adapter_test.go` becomes a
-  harness in the root module that runs each adapter as a **built binary** —
+  fake manager already built inline in `platform/console/adapter_test.go` becomes a
+  harness in `platform/manager/` that runs each adapter as a **built binary** —
   black-box, over HTTP — and asserts long-poll, ack idempotency, inbound push,
   channel listing, status reporting, and the `contract=` refusal. Driving the
   binary rather than importing a package is not a compromise: importing a shared
   package would put a dependency outside their own directory into every adapter
   module, which the project forbids, and the black-box form tests the artifact
   that actually ships. A new adapter joins by being listed, not by importing.
-  This half has no dependency on k3s or on `sdlc-setup` and can land first.
+  This half has no dependency on k3s and can land first.
 - **Two CI tiers.** Pull requests run conformance plus a thin k3s smoke on the
   stub runtime; a nightly and manually-dispatchable job runs the full pack
   including the real-Claude lane. Fork PRs get the tiers their secret access
@@ -117,25 +117,35 @@ have made it untestable).
 
 ## Impact
 
-- **New**: `test/e2e/` (root module), `test/stubruntime/` (+ Dockerfile),
-  `test/fakebotapi/`, `test/fixtures/`, `test/conformance/` (root module, drives
-  adapter binaries black-box), and `.github/workflows/e2e.yml`. **No adapter
-  module gains a dependency** — the eight-module boundary is preserved.
+- **New**: `platform/manager/test/e2e/`, `test/stubruntime/` (+ Dockerfile),
+  `test/fakebotapi/`, `test/fixtures/`, `platform/manager/test/conformance/`
+  (drives adapter binaries black-box), and `.github/workflows/e2e.yml`. **No
+  adapter module gains a dependency** — every module but the manager stays at
+  zero requires; the count comes from `.github/components.sh modules`.
+- **The stub and the fake MUST NOT be discovered as components.**
+  `.github/components.sh` takes the union of every Dockerfile-bearing and
+  `go.mod`-bearing directory, so a `test/stubruntime/Dockerfile` publishes
+  `agentops-stubruntime` on the next release tag and doubles a CI matrix. `test/`
+  is excluded there explicitly, and the exclusion is asserted.
 - **Go changes are two lines of substance**: the Bot API base URL in
   `channels/telegram/telegram.go` and `gateways/telegram/telegram.go`. **No CRD,
   API, or manager change** — the pack asserts existing behavior.
-- **Chart**: `telegram-bundle` gains an optional `apiBase`; the stub runtime is
+- **Chart**: `chart/charts/telegram/` gains an optional `apiBase`; the stub runtime is
   selected through the existing `runtime.image` value, so no new template logic.
-- **`CLAUDE.md`**: the outbound-base-URL rule joins the invariants, and the
-  build/test section gains the e2e entry points.
+- **`.claude/rules/`**: the outbound-base-URL rule joins `invariants.md`,
+  `build-test.md` gains the e2e entry points, `structure.md` the `test/` tree.
+  `CLAUDE.md` is an index and takes no rule.
 - **Docs**: a testing page owning the tier model and how to run the pack
   locally; `CHANGELOG.md` gets no entry (no behavior ships).
-- **Sequencing — depends on `sdlc-setup`, which is 0/38 tasks done.** The k3s
-  tiers need its workflows and its published images to install a chart at all.
-  The conformance half does not, and should land ahead of it. Where
-  `sdlc-setup`'s `continuous-integration` capability owns per-module build/vet/
-  test and chart lint, `end-to-end-testing` owns the e2e jobs only; the boundary
-  is stated in both so the two specs do not both claim to define what CI runs.
+- **CI wiring.** `ci.yml` exists and branch protection names ONE check,
+  `ci-green`; every e2e job that gates a pull request joins that job's `needs:`
+  and reports through it, never as a new required check. Where the
+  `continuous-integration` capability owns per-module build/vet/test and chart
+  lint, `end-to-end-testing` owns the e2e jobs only; the boundary is stated in
+  both so the two specs do not both claim to define what CI runs.
+- **Fixtures are scrubbed by the publication guard**, not a bespoke check: a
+  new placeholder kind is an allowlist entry in
+  `.github/publication-allowlist.json`, landed first.
 - **Repo settings (manual, outside the diff)**: an `ANTHROPIC_API_KEY` repo
   secret, and a decision on whether the nightly real-Claude lane runs on a
   schedule or only on dispatch. Its spend is real and recurring.
