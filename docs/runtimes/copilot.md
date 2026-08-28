@@ -21,8 +21,8 @@ surface. It is what EXECUTES an agent — and the third one this chart ships.
 conversation gets a `runtime-copilot` pod, and the manager hands it work.
 
 The pod drives Copilot's own agent through the Copilot SDK, in process. Copilot
-runs the loop and the tools; the runtime decides what it may reach, keeps the
-session, and reports the run.
+runs the loop and the tools. The runtime decides what it may reach, keeps the
+context, and reports the run.
 
 A route opts in with `runtimeRef: copilot`. Every other route keeps running
 where it did.
@@ -40,7 +40,7 @@ where it did.
 | **A route-by-route choice** | `runtimeRef: copilot` on the Pipelines that suit it. The rest stay where they are. |
 
 **The vendor's vocabulary never reaches your wiring.** Copilot names its tools
-`view`, `bash`, `mcp:<server>-<tool>`; a Pipeline goes on binding `Read`,
+`view`, `bash`, `mcp:<server>-<tool>`. A Pipeline goes on binding `Read`,
 `Bash`, `mcp__<server>__<tool>`. The translation happens inside the runtime,
 once. That is why no manager, CRD or toolset change was needed to add it.
 
@@ -102,7 +102,7 @@ this is the only runtime — so it is the default without the flag.
 | `copilot.env` | further knobs, as env entries — the run timeout, the SDK log level, a BYOK provider |
 
 **`maxTurns` is not a Copilot control.** A Pipeline's profile bounds a claude
-run and an ollama loop by turns; Copilot's nearest control is a credit budget.
+run and an ollama loop by turns. Copilot's nearest control is a credit budget.
 The runtime logs the turns it was asked for and enforces `maxAiCredits`
 instead. Without it, a run is bounded by its timeout (`COPILOT_RUN_TIMEOUT_S`,
 default an hour) and the pod's idle TTL.
@@ -121,7 +121,7 @@ One allowlist, translated into two Copilot layers:
 | anything else | nothing | denied, and logged |
 
 **An empty allowlist stays empty.** Copilot reads an agent definition with no
-`tools:` as "every tool"; this runtime passes the composed list explicitly,
+`tools:` as "every tool". This runtime passes the composed list explicitly,
 even when it is empty, so the vendor's default never applies.
 
 **A denial is an answer, not a hang.** Every permission request is decided

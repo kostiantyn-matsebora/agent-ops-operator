@@ -235,11 +235,16 @@ jobs:
       matrix:
         runtime: [claude, copilot]
     steps:
+      # Each entry runs only when ITS directory changed; the job-level `if`
+      # admits the matrix, this one admits the runtime.
       - uses: actions/checkout@v4
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
       - uses: actions/setup-node@v4
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
         with:
           node-version: 22
       - run: node --test
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
         working-directory: runtimes/${{ matrix.runtime }}
 
   # Render AND validate. A lint proves the templates parse; only rendering

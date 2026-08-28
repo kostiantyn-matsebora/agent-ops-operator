@@ -37,7 +37,7 @@ Writing a runtime is appropriate when:
 
 - The **backend** is different — another vendor's CLI, your own harness. A
   local model over Ollama is [already shipped]({{ '/runtimes/ollama/' | relative_url }}),
-  and is the worked example of a runtime that is its own harness;
+  and is the worked example of a runtime that is its own harness.
   [GitHub Copilot]({{ '/runtimes/copilot/' | relative_url }}) is the worked
   example of a vendor SDK whose tool vocabulary has to be translated.
 - You need behaviour the contract allows but `runtimes/claude` does not

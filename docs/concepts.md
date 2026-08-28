@@ -808,7 +808,7 @@ The `toolsets` stanza carries a `mode`, and the thing it composes against is the
 **agent's own definition**: the `tools:` frontmatter of the agent's file in the
 profile's repository — `.claude/agents/<agent>.md` on the claude and ollama
 runtimes, `.github/agents/<agent>.agent.md` on copilot. The path is the
-runtime's fact; the composition rule is the same on all of them.
+runtime's fact. The composition rule is the same on all of them.
 
 **Not the profile** — the profile carries no capabilities at all.
 

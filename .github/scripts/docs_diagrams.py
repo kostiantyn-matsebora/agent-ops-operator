@@ -351,7 +351,7 @@ RUNTIME_DIAGRAMS: dict[str, dict] = {
             [("the manager", "one unit at a time", "plain")],
             [("runtime-copilot", "translates and permits", "yours")],
             [("Copilot", "the loop and the tools", "subject"),
-             ("the session", "one per conversation", "plain")],
+             ("the context", "one per conversation", "plain")],
         ],
         "arrows": ["GET /work", "drives / keeps"],
     },
