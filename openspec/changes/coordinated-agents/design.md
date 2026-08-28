@@ -33,7 +33,8 @@ refers to the ADR's decisions as D1–D6.
 - A member that is itself a Coordinator.
 - Replacing the inline Pipeline fields.
 - Synchronous invocation.
-- Summarising the root's context.
+- Summarising the root's context. (`brief`, D-I, is not that: it is what a
+  conversation is ABOUT, one or two sentences, not a digest of its transcript.)
 
 ## Decisions
 
@@ -130,12 +131,48 @@ refers to the ADR's decisions as D1–D6.
   `/coordinate/*` surface. The server never decides reach.
 - Tools: `list_agents`, `list_conversations`, `get_conversation`, `get_tree`,
   `invoke`, `close`, `escalate`, `read`. All complete within the request.
+  `list_conversations` returns each conversation's `brief` (D-I) beside name,
+  title, phase and pipeline, so a caller deciding WHICH conversation it means
+  never has to `read` one.
+- **A SECOND REACH CLASS, decided by the manager from the token context alone.**
+  A token derived with context `channel-reader:<channel>` reaches the
+  projection `{name, title, brief, phase, pipeline}` of conversations bound to
+  that Channel — `list_conversations` and `get_conversation` return that
+  projection and nothing else, and every verb is refused. The server forwards
+  the token exactly as it does a coordinator's; it learns nothing about
+  channels. First caller: the voice lane's analyzer (a separate change), which
+  must pick the conversation a spoken reply belongs to without reading any
+  conversation's transcript. The bound is the Channel because "a conversation
+  you could mean" is one that has a thread where you are speaking — the same
+  bound `conversation-close` uses for who may end one.
 - Wired as an `MCPConfig` the chart renders, bound through
   `global.builtinToolsets.agentops-coordinate`; a Coordinator's capability
   binds it as any MCPConfig. Reach through the egress proxy is unchanged.
 - Alternative rejected: the server holding the manager's adapter token and
   enforcing reach itself. Two places deciding reach, and a credential stronger
   than any caller's in a component every coordinator reaches.
+
+### D-I — `brief` is what a conversation is about, written by the agent
+
+- `Conversation.status.brief` — a `MaxLength=512` string: what the conversation
+  CONCERNS — the objects, the ask — one or two sentences somebody could
+  recognise the conversation by. NOT where it stands: status flips per run,
+  a brief accretes.
+- Reported by the runtime as `brief` in `/work/done`, beside `result`.
+  **Latest-wins**, the same rule as `runtimeContextId`: the agent restates
+  what the conversation is about, having read the whole context. A report
+  omitting it leaves the stored one; a runtime that never sends it leaves
+  `title` as the only description, which is today.
+- `dispatch/templates/format.md` asks for it in one sentence; the runtime
+  extracts it from the run as it extracts the context handle. It is a contract
+  field, not a parsed section of the answer — the manager parses nothing.
+- Callers: the coordinator's `list_conversations` (D-F), the channel-reader
+  projection (D-F), the console's conversation list.
+- Alternative rejected: the manager or a reader deriving it from
+  `status.runs[]`. Deriving requires reading the transcript, which is exactly
+  the reach the projection exists to withhold.
+- Named `brief`, not `summary` (a digest of what happened) and not `context`
+  (`runtimeContextId` and the context volume already own the word).
 
 ### D-G — Console reads two more kinds and derives the tree client-side
 
@@ -151,7 +188,7 @@ refers to the ADR's decisions as D1–D6.
 | Phase | Ships | Master consistent because |
 |---|---|---|
 | 1 | `AgentCapability`, `AgentCapabilitySpec`, `capabilityRef`, resolver | pure addition |
-| 2 | `Coordinator`, `causedBy`, routing, budget, escalation, `closeReason` | a Coordinator nobody applies changes nothing |
+| 2 | `Coordinator`, `causedBy`, routing, budget, escalation, `closeReason`, `brief` | a Coordinator nobody applies changes nothing; a runtime not reporting `brief` changes nothing |
 | 3 | `mcp-aops`, chart wiring, toolset | the verb surface behind the wall |
 | 4 | console | view only |
 | 5 | docs, rules, generators, screenshots | last, per `documentation.md` |
@@ -171,8 +208,12 @@ refers to the ADR's decisions as D1–D6.
   thread until it escalates. The person sees nothing until then; the source's
   `Wired` count says a claimant exists. Documented, not hidden.
 - **Two CRDs to `kubectl apply`** on upgrade, per `gotchas.md`. CHANGELOG.
-- **Token derivation contexts** now have four families; the derivation is one
-  function, listed in `contracts.md`.
+- **Token derivation contexts** now have five families —
+  `coordinator:<name>:<conversation>` and `channel-reader:<channel>` join
+  `signal-adapter:<name>`, `channel-adapter:<name>` and `mcp-aops`; the
+  derivation is one function, listed in `contracts.md`.
+- **`brief` is agent-written and unverified.** A wrong brief misroutes a
+  reader's choice, never the manager's: nothing in the manager reads it.
 
 ## Migration Plan
 

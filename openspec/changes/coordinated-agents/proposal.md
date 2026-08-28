@@ -35,6 +35,13 @@ on an omission rather than a field.
 - **New component `platform/mcp-aops`** — the aops MCP server: read tools over
   the agentops kinds, and async `invoke` / `close` / `escalate` / `read`; reach
   bounded per derived token to the calling Coordinator's `agents[]`.
+- **`Conversation.status.brief`** — what a conversation is about, one or two
+  sentences, reported by the runtime in `/work/done`, latest-wins. It is what a
+  caller reads to pick a conversation without reading any transcript.
+- **A second reach class on the aops MCP server** — a token derived with
+  context `channel-reader:<channel>` reads the `{name, title, brief, phase,
+  pipeline}` projection of conversations bound to that Channel, and no verb.
+  The manager decides it from the token context; the server forwards.
 - **Loop guard**: `/channel/inbound` refuses an input whose origin surface is its
   own target conversation.
 - **Console**: a tree/timeline view rooted at the uncaused conversation;
@@ -61,8 +68,9 @@ on an omission rather than a field.
   `/channel/inbound`; the three limits and `budget-exceeded` closure.
 - `coordination-escalation`: late binding of the coordinator's channels on
   decision, the synthesised first message, `closeReason` on close and drop.
-- `aops-mcp-server`: the component — tools, async verbs, per-token reach,
-  placement behind the ADR 0001 wall, `invoke` reporting attach vs create.
+- `aops-mcp-server`: the component — tools, async verbs, per-token reach in
+  two classes (coordinator, channel-reader), placement behind the ADR 0001
+  wall, `invoke` reporting attach vs create.
 - `console-coordination-view`: the tree/timeline rooted at the uncaused
   conversation; incidents closed without escalation are visible there.
 
@@ -78,7 +86,8 @@ on an omission rather than a field.
 - `chat-signal-origination`: a Coordinator is a claimant of a source beside
   Pipelines; fan-out counts both.
 - `state-durability`: the restart-resilience matrix gains `causedBy`, the
-  root's budget counters and the pending escalation.
+  root's budget counters, the pending escalation and `brief` — agent-written,
+  latest-wins, surviving every restart with the status it lives on.
 - `console-topology`: `AgentCapability` and `Coordinator` are graph nodes; a Coordinator's
   member edges are drawn from `agents[]`.
 - `chat-addressing-discovery`: `/pipelines` and the choice list name Pipelines
@@ -91,12 +100,14 @@ on an omission rather than a field.
 
 - `platform/manager/api/v1alpha1/`: `agentcapability_types.go`, `coordinator_types.go`,
   `Pipeline.spec.capabilityRef` + CEL, `Conversation.spec.causedBy`,
-  `status.closeReason`; deepcopy and CRDs regenerated.
+  `status.closeReason`, `status.brief`; deepcopy and CRDs regenerated.
 - `platform/manager/internal/`: `controller/` (AgentCapability, Coordinator reconcilers;
   budget enforcement; late binding), `httpapi/` (root routing on `/work/done`,
   `causedBy` reuse scope, self-input refusal, `PipelinesForSource` gains
-  Coordinators), `dispatch/` (one `AgentCapabilitySpec` resolver), `chat/` (escalation
-  op, `closeReason`).
+  Coordinators, `brief` recorded from `/work/done`, the channel-reader
+  projection on `/coordinate/*`), `dispatch/` (one `AgentCapabilitySpec`
+  resolver; `format.md` asks for the brief), `chat/` (escalation op,
+  `closeReason`).
 - `platform/mcp-aops/`: new component, own Dockerfile-free Go module on the
   shared recipe; its own token context `mcp-aops`; callers forward a per-conversation token the manager validates.
 - `platform/console/`: watch of two more kinds; tree view; inventory rows.
@@ -108,9 +119,10 @@ on an omission rather than a field.
 **Documents made untrue — reference docs**
 
 - `docs/concepts.md`: the kind table (eleven → thirteen), wiring precedence,
-  provenance, the coordination loop, budget.
-- `docs/contracts.md`: `/work/done` root routing, `/channel/inbound` refusal,
-  the aops MCP tool contract.
+  provenance, the coordination loop, budget, `status.brief`.
+- `docs/contracts.md`: `/work/done` root routing and the `brief` field,
+  `/channel/inbound` refusal, the aops MCP tool contract and its two reach
+  classes.
 - `docs/cr-reference.md` and every generated block: regenerated.
 - `docs/console.md`, `docs/console-guide.md`: the tree view.
 - `docs/security.md`: a new trust flow — an agent invoking agents — and the
