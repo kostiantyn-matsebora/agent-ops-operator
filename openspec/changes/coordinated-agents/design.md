@@ -209,9 +209,9 @@ refers to the ADR's decisions as D1–D6.
   `Wired` count says a claimant exists. Documented, not hidden.
 - **Two CRDs to `kubectl apply`** on upgrade, per `gotchas.md`. CHANGELOG.
 - **Token derivation contexts** now have five families —
-  `coordinator:<name>:<conversation>` and `channel-reader:<channel>` join the
-  adapter and `mcp-aops` contexts; the derivation is one function, listed in
-  `contracts.md`.
+  `coordinator:<name>:<conversation>` and `channel-reader:<channel>` join
+  `signal-adapter:<name>`, `channel-adapter:<name>` and `mcp-aops`; the
+  derivation is one function, listed in `contracts.md`.
 - **`brief` is agent-written and unverified.** A wrong brief misroutes a
   reader's choice, never the manager's: nothing in the manager reads it.
 
