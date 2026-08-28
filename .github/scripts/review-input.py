@@ -28,9 +28,12 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 
-# Files per read job: the width of the runtime's agent pool on the runner, so
-# every reader in a job runs at once and no job approaches the 600 s ceiling.
-CHUNK = 2
+# Files per read job. A job costs ~30-40 s of checkout, cache and session
+# before any reading, so a component is ONE job unless it is big: readers
+# run two at a time and take 7-50 s each at low effort (measured, #111), and
+# the CLI stops a workflow at 600 s, so twelve files is six waves of well
+# under a minute. `--chunk` overrides it, for the tests.
+CHUNK = 12
 
 THREADS_QUERY = """
 query($o:String!,$r:String!,$n:Int!,$after:String){
@@ -91,7 +94,9 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--number", required=True, type=int)
     ap.add_argument("--out", type=pathlib.Path, default=pathlib.Path("review-input.json"))
+    ap.add_argument("--chunk", type=int, default=CHUNK, help="files per read job")
     args = ap.parse_args()
+    chunk = max(1, args.chunk)
 
     pr = json.loads(sh("gh", "pr", "view", str(args.number), "--json", "baseRefName,headRefName"))
     base, head = pr["baseRefName"], pr["headRefName"]
@@ -105,24 +110,24 @@ def main() -> int:
         "specPaths": spec_paths(head),
     }
 
-    # THE MATRIX ENTRIES: ONE JOB PER TWO FILES. A job's file readers run two
-    # at a time (the runtime's pool on a four-core runner, and the CLI stops a
-    # workflow at 600 s — measured on #111: a 15-file component ran 8 waves,
-    # hit the ceiling, and was unreviewed). So a component is CHUNKED into
-    # matrix entries of CHUNK files, every entry a job, all at once; the
+    # THE MATRIX ENTRIES: ONE JOB PER COMPONENT, CHUNKED ONLY WHEN BIG. A
+    # job's readers run two at a time and the CLI stops a workflow at 600 s
+    # (measured on #111: a 15-file component at default effort ran 8 waves,
+    # hit the ceiling, and was unreviewed), so a component over CHUNK files is
+    # split into matrix entries of CHUNK, every entry a job, all at once; the
     # coordinator's input merges a component's chunks back into one reading.
     # `slug` is the artifact-safe name (no slash; the chunk index when split).
     groups = []
     for g in queue:
-        n = max(1, -(-len(g["paths"]) // CHUNK))
+        n = max(1, -(-len(g["paths"]) // chunk))
         for i in range(n):
-            chunk_paths = g["paths"][i * CHUNK:(i + 1) * CHUNK]
+            chunk_paths = g["paths"][i * chunk:(i + 1) * chunk]
             slug = g["group"].replace("/", "__") + (f"__{i + 1}-of-{n}" if n > 1 else "")
             groups.append({"group": g["group"], "slug": slug,
                            "chunk": f"{i + 1}/{n}" if n > 1 else "", "paths": chunk_paths})
     data["entries"] = groups
     args.out.write_text(json.dumps(data, indent=1) + "\n")
-    print(f"{len(queue)} component(s), {len(groups)} job(s) of up to {CHUNK} file(s), from {len(paths)} path(s), "
+    print(f"{len(queue)} component(s), {len(groups)} job(s) of up to {chunk} file(s), from {len(paths)} path(s), "
           f"{len(data['threads'])} thread(s), {len(data['specPaths'])} delta spec(s); base {base}, head {head}")
     gh_out = os.environ.get("GITHUB_OUTPUT")
     if gh_out:

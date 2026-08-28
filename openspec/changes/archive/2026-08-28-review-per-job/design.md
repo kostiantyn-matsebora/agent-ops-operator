@@ -138,9 +138,11 @@ returns, and merges.
   a file reader takes 44–221 s (median ~110 s) in a ~5–11 k-token context; a
   15-file component ran eight waves two-wide and the CLI stopped its workflow
   at 600 s — the ceiling is REAL, and the component went unreviewed. So the
-  queue emits ONE MATRIX ENTRY PER TWO FILES (`review-input.py`, `CHUNK`):
-  every reader in a job runs at once, no job nears the ceiling, and the
-  width is the platform's. A chunk's readers are told the whole component's
+  queue splits a component OVER TWELVE FILES into matrix entries of twelve
+  (`review-input.py`, `CHUNK`): at low effort a reader is 7–50 s, six waves
+  stay well under the ceiling, and a job's own ~30–40 s of setup is paid
+  once per component rather than once per pair of files — a chunk of two
+  was tried and the jobs were mostly setup. A chunk's readers are told the whole component's
   other file names as siblings; the coordinator's input merges a component's
   chunks into one reading, a chunk that produced none leaving its files in
   `unread` by name.

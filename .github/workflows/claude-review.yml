@@ -211,11 +211,11 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  # ONE JOB PER TWO CHANGED FILES, ALL AT ONCE. The matrix is the queue's
-  # entry list: a component, or a chunk of one — a component the diff never
-  # touches has no entry and no job, and a 15-file one is eight jobs rather
-  # than eight waves inside one (measured on #111: eight waves hit the 600 s
-  # ceiling and the component went unreviewed). Each job runs the base branch's `file-reviewer` role, once per file, in its own
+  # ONE JOB PER CHANGED COMPONENT, ALL AT ONCE — CHUNKED ONLY WHEN BIG. The
+  # matrix is the queue's entry list: a component, or a chunk of one over
+  # twelve files. A component the diff never touches has no entry and no job.
+  # A job costs ~30-40 s before it reads, so a component is not split for
+  # parallelism; it is split so no job's workflow nears the CLI's 600 s stop. Each job runs the base branch's `file-reviewer` role, once per file, in its own
   # `claude -p`, on its own runner, and uploads its reading as data.
   #
   # `continue-on-error`: a reading that fails is a red job under its
