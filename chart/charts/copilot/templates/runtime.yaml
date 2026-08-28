@@ -26,13 +26,13 @@ context volume: a bundle contributes domain, and a vendor's runtime is domain.
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ $cred.name }}
+  name: {{ $cred.name | required "copilot.credentialsSecret.name is required when a token is supplied — it is the Secret this bundle creates and the runtime references" }}
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-runtime
 type: Opaque
 stringData:
-  {{ $cred.key }}: {{ $cred.token | quote }}
+  {{ $cred.key | required "copilot.credentialsSecret.key is required when a token is supplied — the key the runtime's env reads from the Secret" }}: {{ $cred.token | quote }}
 {{- end }}
 {{- include "agentops.renderRuntime" (dict "root" $ "entry" (fromYaml (include "agentops.copilotRuntimeEntry" .Values))) }}
 {{- end }}
