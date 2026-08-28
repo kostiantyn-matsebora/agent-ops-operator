@@ -31,7 +31,8 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       deadline}`; status with `Ready`.
 - [ ] 2.2 `ConversationSpec.CausedBy *Provenance{root, entry}`,
       `spec.coordinatorRef`; `ConversationStatus.budget{maxAgents, maxTurns,
-      deadline, agentsInvoked, turns}`, `escalatedAt`, `closeReason`.
+      deadline, agentsInvoked, turns}`, `escalatedAt`, `closeReason`,
+      `brief` (MaxLength=512, D-I).
 - [ ] 2.3 `PipelinesForSource` → claimants of both kinds (D-B); every call site
       iterates claimants; `Wired` counts both; bare-chat choice list names
       both.
@@ -47,7 +48,10 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 2.6 Manager `/coordinate/*` surface: `invoke`, `close`, `escalate`,
       `read`; caller token context `coordinator:<name>:<conversation>`;
       `agents[]` list and root scope enforced HERE (D-F). `invoke` returns
-      created|attached.
+      created|attached. A `channel-reader:<channel>` token gets the
+      `{name, title, brief, phase, pipeline}` projection of conversations
+      bound to that channel and is refused every verb — decided here, from
+      the context alone.
 - [ ] 2.7 Member creation: `causedBy` set, no channels, capability from the
       listed AgentCapability, reuse scoped by `causedBy` in `reusableBy`.
 - [ ] 2.8 `handleWorkDone` on a member appends the result input on the root in
@@ -63,7 +67,15 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 2.12 Regenerate deepcopy and CRDs; `chart/crds/coordinators…yaml`.
 - [ ] 2.13 Tests: envtest — fan-out counts a Coordinator; member result lands
       on root exactly once across a simulated restart; self-input refused;
-      each of the three limits closes with reason and members; reuse scope.
+      each of the three limits closes with reason and members; reuse scope;
+      a channel-reader token sees only its channel's projection and no verb.
+- [ ] 2.14 `brief` (D-I): `/work/done` accepts `brief`; `handleWorkDone`
+      records it latest-wins in the run's status write, leaving it alone when
+      absent; `dispatch/templates/format.md` asks the agent for one sentence
+      of what the conversation is about; `runtimes/claude` and
+      `runtimes/ollama` extract and report it as they do the context handle.
+      Tests: absent leaves stored; present replaces; never parsed from
+      `result`.
 
 ## 3. Phase 2 — escalation (design D-D)
 
@@ -86,6 +98,9 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 4.2 MCP over streamable HTTP; tools `list_agents`, `list_conversations`,
       `get_conversation`, `get_tree`, `invoke`, `close`, `escalate`, `read`;
       each forwards the caller's `AOPS_MCP_TOKEN` to `/coordinate/*`.
+      `list_conversations` carries `brief`; under a channel-reader token the
+      server returns whatever projection the manager answered with and adds
+      nothing.
 - [ ] 4.3 Runtime pod build injects `AOPS_MCP_TOKEN` for conversations whose
       capability binds the aops MCPConfig; derived, never stored.
 - [ ] 4.4 Chart: Deployment, Service, NetworkPolicy under the ADR 0001 wall,
@@ -139,10 +154,11 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 ### 8a. Reference docs
 
 - [ ] 8a.1 `docs/concepts.md`: kind table (thirteen), `AgentCapability`, `Coordinator`,
-      `causedBy`, the loop, escalation, budget, the state matrix rows.
-- [ ] 8a.2 `docs/contracts.md`: `/coordinate/*`, `/work/done` root routing,
-      `/channel/inbound` refusal, the aops MCP tool contract, the four token
-      derivation contexts.
+      `causedBy`, the loop, escalation, budget, `status.brief`, the state
+      matrix rows.
+- [ ] 8a.2 `docs/contracts.md`: `/coordinate/*`, `/work/done` root routing and
+      `brief`, `/channel/inbound` refusal, the aops MCP tool contract with its
+      two reach classes, the five token derivation contexts.
 - [ ] 8a.3 `docs/console.md` and `docs/console-guide.md`: the incident view.
 - [ ] 8a.4 `docs/security.md`: the agent-invokes-agents flow; re-run
       `python3 docs/diagrams/threat-model.py`.
