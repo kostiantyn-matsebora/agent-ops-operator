@@ -1,22 +1,24 @@
 ## Context
 
 The repository tests two layers well and a third not at all. Per-module unit
-tests cover rendering, parsing and scheduling; `internal/integration/` runs 22
-files against a real API server. Neither reaches the substrate, because envtest
+tests cover rendering, parsing and scheduling;
+`platform/manager/internal/integration/` runs 22 files against a real API server. Neither reaches the substrate, because envtest
 starts an API server and nothing else — no kubelet, no scheduler, no CSI, no
 authorizer decisions exercised by real subjects. The suite's own comments record
 the consequence: pods created by earlier tests remain Pending forever, so
 capacity tests need their own reconciler with an explicit cap.
 
-The change is also constrained by rules that are not negotiable here: eight Go
-modules with the seven adapters holding no dependency outside their own
-directory; the manager reading no Secrets; exactly one `getUpdates` consumer per
+The change is also constrained by rules that are not negotiable here: every Go
+module but `platform/manager/` holds no dependency outside its own directory
+(`.github/components.sh modules` is the list); the manager reading no Secrets; exactly one `getUpdates` consumer per
 bot token. A test harness that violates any of them to make testing easier would
 be testing a system that is not the one that ships.
 
-One external fact shapes the plan: `sdlc-setup` is 0/38 tasks done, and there is
-no `.github/` directory at all. Anything needing a workflow or a published image
-is blocked behind it; anything that runs as a plain `go test` is not.
+Two external facts shape the plan. `.github/` carries `ci.yml`, `release.yml`
+and `build-image.yml`, and branch protection names one check, `ci-green` — so an
+e2e gate is a line in that job's `needs:`. And `.github/components.sh` discovers
+components from every Dockerfile and `go.mod` in the tree, so a test image
+placed carelessly becomes a published component.
 
 ## Goals / Non-Goals
 
@@ -74,10 +76,10 @@ That test is the pull path; everything else uses imports.
 more uniform but pays registry round-trips on every image in every run for
 coverage a single test already provides.
 
-### The e2e pack is Go in the root module, behind a build tag
+### The e2e pack is Go inside `platform/manager/`, behind a build tag
 
-`test/e2e/` lives in the root module, which already depends on client-go and
-controller-runtime, so the pack costs no new dependency anywhere and can use the
+`platform/manager/test/e2e/` lives in the manager module, which already depends
+on client-go and controller-runtime, so the pack costs no new dependency anywhere and can use the
 project's own API types for assertions rather than unstructured YAML. A build
 tag keeps it out of `go test ./...`.
 
@@ -85,8 +87,9 @@ tag keeps it out of `go test ./...`.
 assertions on CR status and `SubjectAccessReview` are far clearer with typed
 clients, and because the existing integration suite is Go and reviewers should
 not switch languages to read the next layer. **Its own Go module** — rejected;
-it would be a ninth module for no isolation benefit, since the root module's
-dependencies are exactly the ones it wants.
+it would be a new module for no isolation benefit, since the manager module's
+dependencies are exactly the ones it wants, and `components.sh` would discover
+its `go.mod` as a component.
 
 ### Conformance drives built binaries, not an imported package
 
@@ -164,6 +167,21 @@ binary depends on nothing outside its directory.
 Equivalent in outcome, more machinery. If the module rule is later read
 strictly enough to forbid the relative read, this is the fallback.
 
+### The stub and the fake live under `test/`, and `components.sh` excludes it
+
+Both need a Dockerfile to run in-cluster, and `components.sh` unions every
+Dockerfile-bearing directory into the component list. Without an explicit
+`-not -path './test/*'` the next release tag publishes `agentops-stubruntime`
+and the review matrix grows by two — which is exactly the tell
+`worktree-delivery.md` warns reads as a new component. The exclusion is one
+line; a test asserts `components.sh images` never lists either.
+
+### Egress mediation stays on
+
+The runtime pod's `NET_ADMIN` init container is on by default. k3d admits it,
+so the pack runs the default posture and does not disable mediation to make the
+cluster simpler — a pack that turns off the wall tests a pod that does not ship.
+
 ### Failure diagnostics are collected unconditionally
 
 On any failure the pack dumps manager logs, adapter logs, the pod list, cluster
@@ -192,9 +210,9 @@ capture its own context costs a full re-run to learn anything.
   facts (kubelet resolution, authorizer decisions, PVC binding, informers) that
   are conformance-level, not distribution-specific; it does not claim
   multi-node or CNI-specific behavior, and should not be extended to.
-- **Blocked behind `sdlc-setup` (0/38)** → the conformance suite and the fake
-  Bot API need no workflow and no published image, so they land first and
-  deliver value while the workflow work proceeds.
+- **A test image is published as a component** → `test/` is excluded in
+  `components.sh` and the exclusion is asserted, so the release list and the
+  review matrix are unchanged.
 - **The `TELEGRAM_API_BASE` change touches shipping code for a test's benefit**
   → it defaults to the current constant and renders nothing when unset, so a
   default install is byte-identical; and it is a prerequisite `signal-ha` needs
@@ -210,7 +228,8 @@ entry. Sequencing is by dependency, not by risk:
 2. **The e2e pack against the stub runtime.** Needs a cluster but no secret.
 3. **The real-runtime lane.** Needs the repository secret and a decision on
    cadence.
-4. **Workflows.** Lands after `sdlc-setup`, wiring 1–3 into the two tiers.
+4. **Workflows.** `e2e.yml` wires 1–3 into the two tiers, reporting the
+   gating tier through `ci-green`.
 
 Rollback is deletion: no production code path depends on any of it, and the one
 shipping-code change is inert when its environment variable is unset.
@@ -227,4 +246,4 @@ shipping-code change is inert when its environment variable is unset.
   htpasswd generated per run is simplest; confirm that is acceptable rather
   than reusing the GHCR token.
 - **Whether `signal-ha` adopts the outbound-base-URL rule as a spec requirement
-  when it is written**, or inherits it as a `CLAUDE.md` invariant only.
+  when it is written**, or inherits it as an `invariants.md` rule only.

@@ -4,8 +4,9 @@
 An end-to-end pack SHALL exist that provisions a real single-node Kubernetes
 cluster (k3s), installs the chart built from the working tree, waits for the
 manager and every enabled adapter to become Ready, and asserts against the live
-cluster. It SHALL live in the root Go module so it inherits the existing
-Kubernetes client dependency, and SHALL NOT introduce a ninth Go module.
+cluster. It SHALL live in the manager's Go module (`platform/manager/`) so it inherits
+the existing Kubernetes client dependency, and SHALL NOT introduce a new Go
+module.
 
 The pack's subject is the **substrate** — the layer the existing envtest suite
 structurally cannot reach, because envtest runs no kubelet, no scheduler and no
@@ -38,7 +39,7 @@ today because it is decided by a component envtest does not run:
    manager's ServiceAccount, so an `resources:` entry miscased to a Go type name
    fails the pack instead of producing a silent forbidden loop.
 4. **Context continuity across a pod restart** — with
-   `contextStorage: volume` and a home PVC, a conversation's
+   `contextStorage: volume` and a context volume, a conversation's
    `runtimeContextId` survives deletion of its runtime pod and is handed back on
    the next work unit.
 5. **Image pull** — every image the chart references pulls in-cluster,
@@ -169,7 +170,8 @@ The pack SHALL be split into tiers with an explicit gating rule:
 
 - **Pull requests** SHALL be gated by contract conformance and a thin
   cluster smoke running on the stub runtime — deterministic, no API token, and
-  bounded in wall-clock time.
+  bounded in wall-clock time — reported through `ci-green`'s `needs:`, never as
+  a separately required check.
 - **The full pack, including the real-runtime lane,** SHALL run on a schedule
   and on manual dispatch, and SHALL NOT gate pull requests.
 - **Pull requests from forks** SHALL run every tier their secret access allows

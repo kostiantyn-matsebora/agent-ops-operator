@@ -56,3 +56,7 @@ that its presence in a running deployment is obviously wrong.
 #### Scenario: No shipped default points at the stub
 - **WHEN** the chart is rendered with default values, or a sample CR is applied
 - **THEN** no `AgentRuntime` references the stub image
+
+#### Scenario: The stub is not discovered as a component
+- **WHEN** `.github/components.sh images` runs
+- **THEN** neither the stub runtime nor the fake Bot API is listed, so no release tag publishes them and no CI matrix grows
