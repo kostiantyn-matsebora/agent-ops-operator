@@ -20,18 +20,12 @@ jobs:
           set -u
           api() { curl -s -u "$SONAR_TOKEN:" "$@"; }
           mask() { sed "s/$SONAR_ORG/ORG/g"; }
-          keys=$(./.github/components.sh images | jq -r --arg o "$SONAR_ORG" '[.[] | $o + "_agent-ops-operator_" + .component] | join(",")')
-          echo "== bulk delete of the derived keys"
-          api -o /dev/null -w '%{http_code}\n' -X POST "https://sonarcloud.io/api/projects/bulk_delete" --data-urlencode "organization=$SONAR_ORG" --data-urlencode "projects=$keys"
-          echo "== internal: repositories the org can provision from"
-          repos=$(api "https://sonarcloud.io/api/alm_integration/list_repositories?organization=$SONAR_ORG&alm=github")
-          echo "$repos" | mask | head -c 800; echo
-          inst=$(echo "$repos" | jq -r '.repositories[]? | select(.label|test("agent-ops-operator")) | .installationKey // .key // empty' | head -1)
-          echo "installationKey present: $([ -n "$inst" ] && echo yes || echo no)"
-          echo "== internal: provision_monorepo_projects"
+          inst="${SONAR_ORG}/agent-ops-operator|1324376362"
           projects=$(./.github/components.sh images | jq -c --arg o "$SONAR_ORG" '[.[] | {projectKey: ($o + "_agent-ops-operator_" + .component), projectName: ("agentops-" + .component)}]')
-          api -w '\nhttp %{http_code}\n' -X POST "https://sonarcloud.io/api/alm_integration/provision_monorepo_projects" \
-            --data-urlencode "organization=$SONAR_ORG" --data-urlencode "installationKey=$inst" \
-            --data-urlencode "projects=$projects" | mask | head -c 1200; echo
+          echo "== is the repository listed / already linked"
+          api "https://sonarcloud.io/api/alm_integration/list_repositories?organization=$SONAR_ORG&alm=github&ps=100" | jq -c '.repositories[] | select(.label=="agent-ops-operator")' | mask
+          try() { echo "-- $1"; api -w '\nhttp %{http_code}\n' -X POST -H 'Content-Type: application/json' "https://sonarcloud.io/api/alm_integration/provision_monorepo_projects" --data "$2" | mask | head -c 1500; echo; }
+          try A "$(jq -nc --arg o "$SONAR_ORG" --arg i "$inst" --argjson p "$projects" '{organization:$o, installationKey:$i, projects:$p}')"
+          try B "$(jq -nc --arg o "$SONAR_ORG" --arg i "$inst" --argjson p "$projects" '{organization:$o, installationKeys:[$i], projects:($p|map({key:.projectKey,name:.projectName}))}')"
           echo "== projects now"
           api "https://sonarcloud.io/api/projects/search?organization=$SONAR_ORG&ps=100" | jq -r '.components[] | "\(.key)\t\(.name)"' | mask
