@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: A failed submission fails the pull request, a failed quality gate does not`
+- TO: `### Requirement: A failed submission fails the pull request, and so does a failed quality gate`
+
 ## MODIFIED Requirements
 
 ### Requirement: A failed submission fails the pull request, and so does a failed quality gate
