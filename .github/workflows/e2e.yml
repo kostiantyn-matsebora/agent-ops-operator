@@ -3,9 +3,6 @@
 # This workflow is the definition and is only ever CALLED (workflow_call). The
 # entry points are thin workflows that name a tier:
 #
-#   ci.yml         calls it with tier=pr on every pull request, and lists the
-#                  job in ci-green's `needs:` — the only required status check,
-#                  so the gate is a line there, never a new required check.
 #   release.yml    calls it with tier=pr on the tagged commit, and publishes
 #                  nothing until it passes.
 #   e2e-smoke.yml  the pr tier on demand, on any branch.
@@ -15,7 +12,9 @@
 #                  not block work while it is tuned.
 #
 #   pr    contract conformance + a thin k3s smoke on the stub runtime. No
-#         secret, deterministic, bounded in wall clock.
+#         secret, deterministic, bounded in wall clock. A PULL REQUEST RUNS
+#         NONE OF THIS: ci.yml runs conformance on its own (a minute, no
+#         cluster), and the cluster is for releases and on-demand runs.
 #   full  the whole pack. The real-runtime lane SKIPS itself when
 #         CLAUDE_CODE_OAUTH_TOKEN is absent, so a fork or a repository without the
 #         secret runs every tier its access allows and fails for none of the rest.
@@ -42,7 +41,9 @@ env:
 
 jobs:
   # Adapters, black-box, against a fake manager. No cluster, no network beyond
-  # loopback, no credential: it gates every pull request, forks included.
+  # loopback, no credential. ci.yml runs the same command on every pull
+  # request; here it runs beside the pack so a release or an on-demand run
+  # reports the whole tier in one place.
   conformance:
     name: e2e / conformance
     runs-on: ubuntu-latest
@@ -78,6 +79,9 @@ jobs:
         with:
           go-version-file: ${{ env.MANAGER_MODULE }}/go.mod
           cache: true
+      # helm, kubectl and docker (with buildx) are preinstalled on
+      # ubuntu-latest; k3d is the one tool the runner lacks. The version
+      # lines below are the record of what this run used.
       - name: Install k3d
         run: |
           curl -sfL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \

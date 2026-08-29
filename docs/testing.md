@@ -17,10 +17,13 @@ it structurally cannot decide.
 
 ## What gates a pull request
 
-**Contract conformance and a thin cluster smoke on the stub runtime.** Both
-are deterministic, need no secret and are bounded in wall clock, so they run
-for every pull request — from a fork too — and report through `ci-green`, the
-one required check.
+**Contract conformance, and nothing that needs a cluster.** It is a minute of
+`go test`, deterministic, with no secret, so it runs for every pull request —
+from a fork too — and reports through `ci-green`, the one required check.
+
+The cluster smoke — conformance plus a thin k3s run on the stub runtime —
+gates a **release** instead: it runs on the tagged commit before an image or
+the chart is published, and on demand against any branch.
 
 The full pack, including the lane that drives the real agent runtime with a
 real credential, gates nothing:
@@ -84,10 +87,18 @@ Conformance needs a Go toolchain and nothing else:
 cd platform/manager && go test -tags conformance -count=1 -v ./test/conformance/
 ```
 
+```powershell
+cd platform/manager; go test -tags conformance -count=1 -v ./test/conformance/
+```
+
 The pack needs Docker, `k3d`, `kubectl` and `helm` on the PATH:
 
 ```sh
 cd platform/manager && go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
+```
+
+```powershell
+cd platform/manager; go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
 ```
 
 | Variable | Does |
@@ -105,16 +116,21 @@ context costs a full re-run to learn anything.
 
 ## What the repository must hold
 
-Four workflows share one definition, `.github/workflows/e2e.yml`:
+Three workflows share one definition, `.github/workflows/e2e.yml`, and `ci.yml` runs conformance on its own:
 
 | Workflow | Runs | When |
 |---|---|---|
-| `ci.yml` | the pr tier | every pull request, reporting through `ci-green` |
+| `ci.yml` | contract conformance only — no cluster | every pull request, reporting through `ci-green` |
 | `release.yml` | the pr tier | on the tagged commit, before anything is published |
 | `e2e-smoke.yml` | the pr tier | on demand, on any branch |
 | `e2e-full.yml` | the full tier, real-runtime lane included | nightly at 03:17 UTC when master moved since its last successful run, and on demand |
 
 ```sh
+gh workflow run e2e-smoke.yml --ref my-branch
+gh workflow run e2e-full.yml
+```
+
+```powershell
 gh workflow run e2e-smoke.yml --ref my-branch
 gh workflow run e2e-full.yml
 ```

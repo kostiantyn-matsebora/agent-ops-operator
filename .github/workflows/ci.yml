@@ -782,21 +782,29 @@ jobs:
             --range "$BASE_SHA..$GITHUB_SHA" \
             --root .
 
-  # THE END-TO-END GATE: contract conformance plus the k3s smoke on the stub
-  # runtime, defined in e2e.yml and CALLED here so that its jobs are jobs of
-  # this workflow — which is what lets ci-green list them. No secret is passed:
-  # the pr tier needs none, and that is what makes it run for a fork.
-  e2e:
+  # CONTRACT CONFORMANCE: every adapter's built binary, black-box, against a
+  # fake manager — a minute, no cluster, no secret. It is the one thing from
+  # the e2e change that gates a pull request. The k3s smoke does NOT: it runs
+  # before a release (release.yml) and on demand on any branch (e2e-smoke.yml).
+  conformance:
     needs: discover
     if: needs.discover.outputs.e2e == 'true'
-    uses: ./.github/workflows/e2e.yml
-    with:
-      tier: pr
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.ENVTEST_MODULE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.ENVTEST_MODULE }}/go.mod
+          cache: true
+      - run: go test -tags conformance -count=1 -timeout 20m -v ./test/conformance/
 
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, e2e]
+    needs: [discover, operator, modules, console-ui, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, conformance]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

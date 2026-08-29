@@ -92,7 +92,7 @@
 ## 12. Workflows
 
 - [x] 12.1 `.github/workflows/e2e.yml`: PR tier — conformance plus the stub-runtime cluster smoke, no secret required; the gating jobs join `ci-green`'s `needs:` in `ci.yml`, never a new required check — `e2e.yml` is a reusable workflow that `ci.yml` CALLS with `tier: pr`, which is what makes its jobs listable in `needs:`
-- [x] 12.2 Full tier on `workflow_dispatch` (and a schedule once cadence is settled), including the real-runtime lane — the one definition in `e2e.yml` has four callers: `ci.yml` (pr tier, every PR), `release.yml` (pr tier on the tagged commit, gating publish), `e2e-smoke.yml` (pr tier on demand on any branch), `e2e-full.yml` (full tier nightly when master moved, and on demand)
+- [x] 12.2 Full tier on `workflow_dispatch` (and a schedule once cadence is settled), including the real-runtime lane — REVISED by the maintainer after the first review: no pull request provisions a cluster. `ci.yml` runs conformance on its own and lists it in `ci-green`; `e2e.yml` (conformance + the k3s smoke) is called by `release.yml` on the tagged commit before publishing and by `e2e-smoke.yml` on demand on any branch; `e2e-full.yml` runs the full tier nightly when master moved, and on demand
 - [x] 12.3 Fork pull requests report skipped tiers as skipped and are never failed for unavailable secrets
 - [x] 12.4 The token-consuming tier gates no pull request
 - [x] 12.5 Document the boundary with `continuous-integration` in both specs so "what CI runs" has one definition per tier

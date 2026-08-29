@@ -1,14 +1,14 @@
 ## ADDED Requirements
 
-### Requirement: The end-to-end tiers report through the always-present check, and own only the cluster-based jobs
-The pull-request tier of the end-to-end pack — contract conformance and the
-k3s smoke on the stub runtime — SHALL be a job of the `ci` workflow, reached
-by CALLING `e2e.yml` as a reusable workflow, and SHALL be listed in
-`ci-green`'s `needs:`. It SHALL NOT be a separately required status check:
-branch protection names one check, and adding a gate is a line in that job's
-`needs:`.
+### Requirement: Contract conformance reports through the always-present check, and the cluster jobs live elsewhere
+Contract conformance — every adapter's built binary against a fake manager —
+SHALL be a job of the `ci` workflow and SHALL be listed in `ci-green`'s
+`needs:`. It SHALL NOT be a separately required status check: branch
+protection names one check, and adding a gate is a line in that job's
+`needs:`. The `ci` workflow SHALL provision no cluster: the k3s smoke belongs
+to the release workflow and to on-demand runs, both calling `e2e.yml`.
 
-The tier SHALL run only when the diff touches what a running install is built
+The job SHALL run only when the diff touches what a running install is built
 from — a component group, the chart, the test doubles under `test/`, or the
 e2e workflow itself — and a job that did not run reports through `ci-green` as
 skipped, exactly as every other path-filtered job does.
@@ -20,13 +20,13 @@ guards; `end-to-end-testing` owns the cluster-based jobs and the conformance
 suite. Neither restates the other's jobs, so "what CI runs" has exactly one
 definition per tier.
 
-#### Scenario: The pull-request tier gates through ci-green
+#### Scenario: Conformance gates through ci-green
 - **WHEN** a pull request changes a component, the chart or the test doubles
-- **THEN** the `e2e` job runs the pr tier, and `ci-green` fails if it failed
+- **THEN** the `conformance` job runs, and `ci-green` fails if it failed
 
-#### Scenario: A docs-only pull request runs no cluster
+#### Scenario: A docs-only pull request runs nothing of it
 - **WHEN** a pull request changes only pages under `docs/`
-- **THEN** the `e2e` job is skipped and `ci-green` treats it as skipped, not failed
+- **THEN** the `conformance` job is skipped and `ci-green` treats it as skipped, not failed
 
 #### Scenario: A per-module job is not duplicated in the e2e workflow
 - **WHEN** a change adds a per-module build, vet or lint step

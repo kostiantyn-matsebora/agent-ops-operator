@@ -199,11 +199,13 @@ go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
 ```
 
 CI runs all of it on every pull request, plus `kubeconform` over each rendered
-chart permutation and the two guards over the published tree, below. The pull
-request meets conformance and the pack's `pr` tier (the stub-runtime smoke);
-the `full` tier — the real agent runtime with a real credential — runs nightly
-when master moved, and on dispatch (`e2e-full.yml`), and gates nothing. A
-release runs the `pr` tier again on the tagged commit before publishing.
+chart permutation and the two guards over the published tree, below. Of the
+two tiers above, a pull request meets CONFORMANCE only — no pull request
+provisions a cluster. The cluster smoke gates a release (on the tagged commit,
+before anything is published) and runs on demand on any branch
+(`e2e-smoke.yml`); the `full` tier — the real agent runtime with a real
+credential — runs nightly when master moved, and on dispatch
+(`e2e-full.yml`), and gates nothing.
 
 `platform/manager/` and `runtimes/ollama/` need Go 1.25; the others declare
 1.23 and build under either. Every image is built with `golang:1.25`, because
@@ -343,8 +345,7 @@ and it fails if any job that DID run failed.
 | `docs-task` | a change your diff touched does not end in a finished documentation section |
 | `pr-title` | the title would not read as a commit subject |
 | `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |
-| `e2e / conformance` | an adapter's built binary does not speak the adapter contracts to a fake manager |
-| `e2e / pr` | the chart from your diff, on a real single-node cluster with the stub runtime, fails a substrate assertion — or the gating tier ran past its wall-clock budget |
+| `conformance` | an adapter's built binary does not speak the adapter contracts to a fake manager |
 
 `openspec` and `docs-task` judge only what your pull request TOUCHED. A dozen changes are open
 at any time and an unfinished one is unfinished correctly, so a gate judging all

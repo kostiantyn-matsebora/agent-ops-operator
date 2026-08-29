@@ -168,15 +168,15 @@ replayed `Update` is byte-identical to what the real API would have produced.
 ### Requirement: Tiers are defined by what gates a pull request
 The pack SHALL be split into tiers with an explicit gating rule:
 
-- **Pull requests** SHALL be gated by contract conformance and a thin
-  cluster smoke running on the stub runtime — deterministic, no API token, and
-  bounded in wall-clock time — reported through `ci-green`'s `needs:`, never as
-  a separately required check.
-- **A release** SHALL run the same pull-request tier again on the tagged
-  commit and SHALL publish nothing until it passes: a tag can land on a
-  commit CI proved days earlier against a different cluster.
-- **The pull-request tier** SHALL also be runnable on demand against any
-  branch, so it can be met before a pull request exists.
+- **Pull requests** SHALL be gated by contract conformance alone — a minute,
+  no cluster, no secret — reported through `ci-green`'s `needs:`, never as a
+  separately required check. No pull request provisions a cluster.
+- **The cluster smoke** — the pr tier: conformance plus a thin k3s run on the
+  stub runtime, deterministic, no secret, bounded in wall-clock time — SHALL
+  gate a RELEASE and SHALL be runnable on demand against any branch.
+- **A release** SHALL publish nothing until the cluster smoke passed on the
+  tagged commit: a tag can land on a commit CI proved days earlier against a
+  different cluster.
 - **The full pack, including the real-runtime lane,** SHALL run nightly when
   the default branch moved since its last successful run — a night with no
   change is a night with nothing to learn and tokens to spend — and on manual
@@ -189,9 +189,13 @@ The pack SHALL be split into tiers with an explicit gating rule:
 - **WHEN** a pull request originates from a fork and the API token is unavailable
 - **THEN** the real-runtime tier is skipped and reported as skipped, and the pull request is not marked failed on that account
 
+#### Scenario: A pull request runs no cluster
+- **WHEN** a pull request changes a component or the chart
+- **THEN** contract conformance runs and gates it through `ci-green`, and no cluster is provisioned
+
 #### Scenario: A release is gated by the smoke on the tagged commit
 - **WHEN** a `<component>-v<semver>` or `chart-v<semver>` tag is pushed
-- **THEN** the pull-request tier runs on that commit, and the image or chart is published only if it passed
+- **THEN** the cluster smoke runs on that commit, and the image or chart is published only if it passed
 
 #### Scenario: An unchanged night runs nothing
 - **WHEN** the nightly full run finds the default branch at the commit its last successful run tested

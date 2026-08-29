@@ -144,6 +144,11 @@ func (c *completedOps) add(id, threadID string) {
 		delete(c.ids, c.order[0])
 		c.order = c.order[1:]
 	}
+	// Re-slicing from the front keeps the whole backing array alive; copy it
+	// down once it has grown to twice what is kept.
+	if cap(c.order) > 2*c.limit {
+		c.order = append(make([]string, 0, c.limit), c.order...)
+	}
 }
 
 // servedChannelList snapshots the validated channels, deduplicated by chat: one
