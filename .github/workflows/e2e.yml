@@ -11,10 +11,10 @@
 #                  request: its lane spends real tokens and its flakiness must
 #                  not block work while it is tuned.
 #
-#   smoke contract conformance + a thin k3s smoke on the stub runtime. No
-#         secret, deterministic, bounded in wall clock. A PULL REQUEST RUNS
-#         NONE OF THIS: ci.yml runs conformance on its own (a minute, no
-#         cluster), and the cluster is for releases and on-demand runs.
+#   smoke a thin k3s run on the stub runtime. No secret, deterministic,
+#         bounded in wall clock. Contract conformance is NOT here: ci.yml owns
+#         that job (a minute, no cluster), a pull request meets it there, and
+#         a release requires that commit's ci to be green before this runs.
 #   full  the whole pack. The real-runtime lane SKIPS itself when
 #         CLAUDE_CODE_OAUTH_TOKEN is absent, so a fork or a repository without the
 #         secret runs every tier its access allows and fails for none of the rest.
@@ -40,25 +40,6 @@ env:
   K3D_VERSION: v5.9.0
 
 jobs:
-  # Adapters, black-box, against a fake manager. No cluster, no network beyond
-  # loopback, no credential. ci.yml runs the same command on every pull
-  # request; here it runs beside the pack so a release or an on-demand run
-  # reports the whole tier in one place.
-  conformance:
-    name: e2e / conformance
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ env.MANAGER_MODULE }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: ${{ env.MANAGER_MODULE }}/go.mod
-          cache: true
-      # -count=1: a cached PASS can never stand in for binaries that did not run.
-      - run: go test -tags conformance -count=1 -timeout 20m -v ./test/conformance/
-
   # The k3s pack. THE PACK ITSELF creates the k3d cluster, builds every image
   # from THIS commit and imports it into the node, installs the chart from the
   # working tree and tears the cluster down — this job only supplies the tools

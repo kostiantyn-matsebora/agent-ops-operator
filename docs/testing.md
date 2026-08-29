@@ -21,8 +21,8 @@ it structurally cannot decide.
 `go test`, deterministic, with no secret, so it runs for every pull request —
 from a fork too — and reports through `ci-green`, the one required check.
 
-The cluster smoke — conformance plus a thin k3s run on the stub runtime —
-gates a **release** instead: it runs on the tagged commit before an image or
+The cluster smoke — a thin k3s run on the stub runtime — gates a **release**
+instead: it runs on the tagged commit before an image or
 the chart is published, and on demand against any branch.
 
 The full pack, including the lane that drives the real agent runtime with a
