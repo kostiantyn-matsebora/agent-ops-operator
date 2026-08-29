@@ -55,7 +55,7 @@ def gh(*args: str, stdin: str | None = None) -> tuple[int, str]:
         wait = 30 * (2 ** attempt)
         print(f"::warning::secondary rate limit; waiting {wait}s before retrying", file=sys.stderr)
         time.sleep(wait)
-    return p.returncode, out
+    raise AssertionError("unreachable: the last attempt returns")
 
 
 def main() -> int:
