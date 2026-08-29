@@ -198,10 +198,10 @@ go test -tags conformance -count=1 -v ./test/conformance/
 go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
 ```
 
-CI runs all of it on every pull request, plus `kubeconform` over each rendered
-chart permutation and the two guards over the published tree, below. Of the
-two tiers above, a pull request meets CONFORMANCE only — no pull request
-provisions a cluster. The cluster smoke gates a release (on the tagged commit,
+On every pull request CI runs the module, operator, UI and chart checks above,
+plus `kubeconform` over each rendered chart permutation and the two guards
+over the published tree, below. Of the two tiers, a pull request meets
+CONFORMANCE only — no pull request provisions a cluster. The cluster smoke gates a release (on the tagged commit,
 before anything is published) and runs on demand on any branch
 (`e2e-smoke.yml`); the `full` tier — the real agent runtime with a real
 credential — runs nightly when master moved, and on dispatch
