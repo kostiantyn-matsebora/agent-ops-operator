@@ -1,0 +1,46 @@
+# TEMPORARY. Creates the per-component subprojects inside the monorepo binding
+# of the project SONAR_PROJECT_KEY names. Removed before merge.
+name: sonar-setup
+on:
+  push:
+    branches: [change/sonarcloud-analysis]
+    paths: [.github/workflows/sonar-setup.yml]
+permissions:
+  contents: read
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORG: ${{ secrets.SONAR_ORG }}
+          SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+        run: |
+          set -u
+          api() { curl -s -u "$SONAR_TOKEN:" "$@"; }
+          echo "== binding of the monorepo project"
+          binding=$(api "https://sonarcloud.io/api/alm_settings/get_binding?project=$SONAR_PROJECT_KEY")
+          echo "$binding" | jq -c 'del(.url)'
+          alm=$(echo "$binding" | jq -r '.key // empty')
+          repo=$(echo "$binding" | jq -r '.repository // empty')
+          echo "== creating and binding subprojects"
+          for c in $(./.github/components.sh images | jq -r '.[].component'); do
+            key="${SONAR_ORG}_agent-ops-operator_${c}"
+            create=$(api -o /dev/null -w '%{http_code}' -X POST "https://sonarcloud.io/api/projects/create" \
+              --data-urlencode "organization=$SONAR_ORG" --data-urlencode "project=$key" \
+              --data-urlencode "name=agentops-$c")
+            bind="skipped"
+            if [ -n "$alm" ] && [ -n "$repo" ]; then
+              bind=$(api -o /tmp/bind.json -w '%{http_code}' -X POST "https://sonarcloud.io/api/alm_settings/set_github_binding" \
+                --data-urlencode "almSetting=$alm" --data-urlencode "project=$key" \
+                --data-urlencode "repository=$repo" --data-urlencode "monorepo=true" \
+                --data-urlencode "summaryCommentEnabled=true")
+              [ "$bind" = "204" ] || { echo "   bind error: $(jq -c . /tmp/bind.json 2>/dev/null | head -c 300)"; }
+            fi
+            echo "create=$create bind=$bind  ORG_agent-ops-operator_$c"
+          done
+          echo "== verify"
+          for c in manager console; do
+            api "https://sonarcloud.io/api/alm_settings/get_binding?project=${SONAR_ORG}_agent-ops-operator_$c" | jq -c 'del(.url)'
+          done
