@@ -28,13 +28,32 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 
 
 def gh(*args: str, stdin: str | None = None) -> tuple[int, str]:
-    p = subprocess.run(["gh", *args], capture_output=True, text=True, input=stdin)
-    return p.returncode, (p.stdout + p.stderr).strip()
+    """One gh call, retried on GitHub's SECONDARY rate limit.
+
+    A review posts dozens of comments in a burst, and after a day of review
+    runs on one pull request GitHub answered every reply with
+    `{"code":"abuse"}` — nothing was posted, and the gate failed a review that
+    had run. That limit is the abuse detector asking for a pause, so a pause
+    is what it gets: a short one between every post, and a growing one on the
+    refusal itself, three times before giving up.
+    """
+    for attempt in range(4):
+        p = subprocess.run(["gh", *args], capture_output=True, text=True, input=stdin)
+        out = (p.stdout + p.stderr).strip()
+        limited = p.returncode != 0 and ('"code":"abuse"' in out or "secondary rate limit" in out.lower())
+        if not limited or attempt == 3:
+            time.sleep(1)  # the pause between posts, whatever the answer
+            return p.returncode, out
+        wait = 30 * (2 ** attempt)
+        print(f"::warning::secondary rate limit; waiting {wait}s before retrying", file=sys.stderr)
+        time.sleep(wait)
+    return p.returncode, out
 
 
 def main() -> int:
