@@ -18,9 +18,11 @@ import (
 type Telegram struct {
 	Token string
 	HTTP  *http.Client
-	// BaseURL is the Bot API root. Empty means the real one; tests point it at
-	// a local server, because a Bot API call with no seam to exercise it is one
-	// that ships unverified.
+	// BaseURL is the Bot API root, resolved by NewTelegram from the explicit
+	// value, then TELEGRAM_API_BASE, then the real host. A literal built
+	// without one falls back to the real host at the point of use — the seam
+	// the tests use, because a Bot API call with no seam to exercise it is
+	// one that ships unverified.
 	BaseURL string
 }
 

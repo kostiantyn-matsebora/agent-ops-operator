@@ -33,6 +33,7 @@
 //
 // Environment (all required except where noted):
 //
+//	TELEGRAM_API_BASE   optional: the Bot API root, default https://api.telegram.org
 //	TELEGRAM_BOT_TOKEN  the bot to poll; or AGENTOPS_CRED_<PREFIX>botToken
 //	SIGNAL_TARGET       base URL of signal-telegram  (originations)
 //	CHANNEL_TARGET      base URL of channel-telegram (continuations + offset)
