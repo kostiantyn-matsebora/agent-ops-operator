@@ -281,20 +281,22 @@ could do about it and nothing you should.
 
 **Coverage locally**, with the flags CI uses, is in `.claude/rules/build-test.md`.
 
-**A NEW COMPONENT OWES A PROJECT, AND CI WILL NOT CREATE IT.** The analysis
-step asserts the project exists before it scans, and fails naming the
-component otherwise — deliberately: the scanner would
-otherwise create one on the spot, bound to no repository, which decorates no
-pull request while looking exactly like a project somebody set up. Create it
-INSIDE the repository's monorepo binding instead:
+**A NEW COMPONENT'S PROJECT IS CREATED BY ITS FIRST RUN, INSIDE THE MONOREPO
+BINDING.** The analysis step looks the project up before it scans and, when
+it is absent, provisions it through the script below with the job's own
+token — deliberately, rather than letting the scanner do it: the scanner
+would create one on the spot bound to no repository, which decorates no pull
+request while looking exactly like a project somebody set up. The same
+script provisions everything at once when run by hand:
 
 ```sh
-SONAR_TOKEN=<user token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh
+SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh            # all
+SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh <name>...  # some
 ```
 
 It derives every component's key and name from `components.sh`, appends the
-`scripts` unit, and is idempotent, so running it after adding a directory
-creates the one project that is missing. The script posts the monorepo wizard's own request; if
+`scripts` unit, and is idempotent; a name that is neither is refused rather
+than provisioned. The script posts the monorepo wizard's own request; if
 SonarCloud changes it, the wizard's *Import JSON* takes the same `projects`
 array.
 

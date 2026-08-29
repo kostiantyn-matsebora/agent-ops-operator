@@ -50,5 +50,20 @@ assert_equals "agentops-scripts" "$(jq -r '.projects[] | select(.projectKey | en
 it "binds it to the same installation as every component"
 assert_equals "1" "$(jq -r '[.projects[].installationKey] | unique | length' "$CURL_BODY")"
 
+it "provisions only the named projects when given names — what CI asks for"
+out=$(cd "$ROOT" && SONAR_TOKEN=t SONAR_ORG=org sh "$S" scripts 2>&1)
+assert_equals "1" "$(jq -r '.projects | length' "$CURL_BODY")"
+
+it "and names the right one"
+assert_equals "org_agent-ops-operator_scripts" "$(jq -r '.projects[0].projectKey' "$CURL_BODY")"
+
+it "a name that is not a project of this repository provisions nothing"
+: > "$CURL_BODY"
+(cd "$ROOT" && SONAR_TOKEN=t SONAR_ORG=org sh "$S" somebody-elses >/dev/null 2>&1); status=$?
+assert_status 64 "$status"
+
+it "and sends no request at all"
+assert_equals "" "$(cat "$CURL_BODY")"
+
 rm -rf "$tmp"
 summary

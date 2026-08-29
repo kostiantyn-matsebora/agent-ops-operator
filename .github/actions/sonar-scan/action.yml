@@ -52,22 +52,32 @@ runs:
         name=$("$GITHUB_WORKSPACE"/.github/components.sh images | jq -r --arg c "./${{ inputs.dir }}" '.[] | select(.context == $c) | .component')
         [ -n "$name" ] || { echo "::error::${{ inputs.dir }} is not a component components.sh lists"; exit 1; }
         echo "name=$name" >> "$GITHUB_OUTPUT"
-    # THE PROJECT MUST ALREADY EXIST, AND THIS STEP NEVER CREATES ONE. The
-    # scanner auto-provisions any key it cannot find when the token may
-    # create projects, and a project created that way is bound to no
-    # repository — no pull request decoration, no monorepo membership — while
-    # looking exactly like one that was set up. Fifteen of those were created,
-    # deleted, and created again by the next push before this check existed.
-    # .github/scripts/sonar-provision.sh is how one is created, once.
+    # A MISSING PROJECT IS CREATED INSIDE THE MONOREPO BINDING, NEVER BY THE
+    # SCANNER. Left to itself the scanner auto-provisions any key it cannot
+    # find, and a project created that way is bound to no repository — no
+    # pull request decoration, no monorepo membership — while looking exactly
+    # like one that was set up. Fifteen of those were created, deleted, and
+    # created again by the next push before this step existed. So the project
+    # is looked up first, and when absent it is provisioned through
+    # .github/scripts/sonar-provision.sh — the monorepo wizard's own call,
+    # with this job's token — and looked up again before the scan runs.
     - name: The SonarCloud project exists
       shell: bash
       env:
         SONAR_TOKEN: ${{ inputs.token }}
-        ORG: ${{ inputs.organization }}
-        KEY: ${{ inputs.organization }}_agent-ops-operator_${{ steps.component.outputs.name }}
+        SONAR_ORG: ${{ inputs.organization }}
+        NAME: ${{ steps.component.outputs.name }}
       run: |
-        n=$(curl -sf -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/projects/search?organization=$ORG&projects=$KEY" | jq '.components | length')
-        [ "$n" = "1" ] || { echo "::error::no SonarCloud project for ${{ steps.component.outputs.name }} — run .github/scripts/sonar-provision.sh (CONTRIBUTING.md, Code analysis)"; exit 1; }
+        set -euo pipefail
+        exists() {
+          n=$(curl -sf -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/projects/search?organization=$SONAR_ORG&projects=${SONAR_ORG}_agent-ops-operator_$NAME" | jq '.components | length')
+          [ "$n" = "1" ]
+        }
+        if ! exists; then
+          echo "::notice::no SonarCloud project for $NAME yet; provisioning it inside the monorepo binding"
+          "$GITHUB_WORKSPACE"/.github/scripts/sonar-provision.sh "$NAME"
+          exists || { echo "::error::provisioning $NAME reported success and the project is still absent — run .github/scripts/sonar-provision.sh by hand (CONTRIBUTING.md, Code analysis)"; exit 1; }
+        fi
     # PROPERTIES ARE ARGUMENTS, NOT FIFTEEN PROPERTIES FILES. Test files are
     # DECLARED as tests rather than excluded, so test rules apply and test code
     # is not counted as uncovered source; a component takes the defaults, and

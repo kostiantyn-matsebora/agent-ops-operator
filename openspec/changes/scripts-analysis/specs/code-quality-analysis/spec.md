@@ -37,5 +37,6 @@ suite.
 #### Scenario: The project is missing
 
 - **WHEN** the unit's project does not exist on the analysis service
-- **THEN** the job fails naming the unit and the provisioning script, and
-  creates nothing
+- **THEN** the job creates it inside the repository's monorepo binding before
+  analysing — bound to the repository, so it decorates pull requests — and
+  never leaves it to the scanner's own provisioning, which binds to nothing

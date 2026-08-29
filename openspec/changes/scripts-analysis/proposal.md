@@ -23,9 +23,12 @@ analysed; the code that judges the pull requests is not.
   `components.sh` does not list, and overrides for what counts as sources and
   tests; its defaults gain the Python coverage report path. Every existing
   call site is unchanged.
-- **The provisioning script provisions the extra project** `scripts`, under
-  the same key and name pattern (`agentops-scripts`), beside the component
-  list — so the "project must exist" assertion holds for it too.
+- **A missing project is created by CI, inside the monorepo binding.** The
+  provisioning script takes names as a filter over its list — the components
+  plus the `scripts` unit, same key and name pattern — and the analysis step
+  calls it with the job's token when the project it is about to analyse does
+  not exist. The scanner's own auto-provisioning, which binds to nothing, is
+  still never reached.
 
 ## Capabilities
 
