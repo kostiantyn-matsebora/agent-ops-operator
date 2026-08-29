@@ -1,19 +1,79 @@
 #!/usr/bin/env bash
-# The analysis organisation's quality gate is PROVISIONED, and this is what
-# says the provisioning is idempotent.
+# The project list the provisioning call carries, and the quality gate it is
+# asked for separately.
 #
-# A GATE SET IN A DASHBOARD IS STATE NOBODY CAN READ FROM THE REPOSITORY. This
-# script is the record of what every component's project is judged by, so the
-# thing worth testing is not that it can create a gate once — it is that the
-# second run creates NOTHING, and that a metric the gate already carries is
-# updated in place instead of gaining a twin. A duplicate condition is how a
-# threshold somebody deliberately relaxed gets tightened again by a re-run,
-# silently.
-#
-# NO NETWORK. `curl` is stubbed from fixtures and `components.sh` is a stub of
-# two components, so the suite reaches neither sonarcloud.io nor the real tree.
+# Every component is a project, and so is ONE thing that is not a component:
+# the workflow's own scripts. The list is what ci.yml's "project must exist"
+# assertion is measured against, so a name missing here fails a job later with
+# a message pointing back at this script.
 . "$(dirname "$0")/lib.sh"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+S="$ROOT/.github/scripts/sonar-provision.sh"
+
+tmp=$(mktemp -d)
+# A curl that answers with what it was asked to send, keeping the raw body for
+# the test to read — and never reaches SonarCloud.
+mkdir -p "$tmp/bin"; export CURL_BODY="$tmp/body"
+cat > "$tmp/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do
+  case "$1" in --data) printf '%s' "$2" > "$CURL_BODY"; printf '%s' "$2"; exit 0 ;; esac
+  shift
+done
+echo '{}'
+STUB
+chmod +x "$tmp/bin/curl"
+export PATH="$tmp/bin:$PATH"
+
+out=$(cd "$ROOT" && SONAR_TOKEN=t SONAR_ORG=org sh "$S" 2>&1); status=$?
+components=$("$ROOT/.github/components.sh" images | jq -r '.[].component')
+n_components=$(printf '%s\n' "$components" | wc -l | tr -d ' ')
+
+it "runs, and prints one key per project"
+assert_status 0 "$status"
+
+it "carries every component components.sh lists"
+missing=""
+for c in $components; do
+  case "$out" in *"_agent-ops-operator_$c"*) ;; *) missing="$missing $c" ;; esac
+done
+assert_equals "" "$missing"
+
+it "carries the scripts unit, which is not a component"
+assert_contains "$out" "org_agent-ops-operator_scripts"
+
+it "carries exactly the components plus that one"
+assert_equals "$((n_components + 1))" "$(printf '%s\n' "$out" | grep -c '_agent-ops-operator_')"
+
+it "names it by the component pattern, inside the monorepo binding"
+assert_equals "agentops-scripts" "$(jq -r '.projects[] | select(.projectKey | endswith("_scripts")) | .projectName' "$CURL_BODY")"
+
+it "binds it to the same installation as every component"
+assert_equals "1" "$(jq -r '[.projects[].installationKey] | unique | length' "$CURL_BODY")"
+
+it "provisions only the named projects when given names — what CI asks for"
+out=$(cd "$ROOT" && SONAR_TOKEN=t SONAR_ORG=org sh "$S" scripts 2>&1)
+assert_equals "1" "$(jq -r '.projects | length' "$CURL_BODY")"
+
+it "and names the right one"
+assert_equals "org_agent-ops-operator_scripts" "$(jq -r '.projects[0].projectKey' "$CURL_BODY")"
+
+it "a name that is not a project of this repository provisions nothing"
+: > "$CURL_BODY"
+(cd "$ROOT" && SONAR_TOKEN=t SONAR_ORG=org sh "$S" somebody-elses >/dev/null 2>&1); status=$?
+assert_status 64 "$status"
+
+it "and sends no request at all"
+assert_equals "" "$(cat "$CURL_BODY")"
+
+
+# ============================================================================
+# THE GATE STAGE, which the runs above never reach: they pass no `--gate`, and
+# that is the assertion rather than an omission. CI calls this script itself
+# for a missing project, and the scan step fails a component's job on the
+# gate's verdict — so provisioning a threshold has to be something a person
+# asks for.
+# ============================================================================
 
 # --- a tree the script can be run from --------------------------------------
 #
@@ -107,10 +167,11 @@ agentops_gate() {  # agentops_gate <isDefault> [extra conditions json]
 
 # run <fixtures-dir> — the script, against the stubs. Output and exit code.
 OUT=""; RC=0
-run() {
+run() {  # run <fixtures-dir> [args...] — the gate scenarios pass --gate
   local tree; tree=$(make_tree)
-  CURL_CALLS="$CALLS" CURL_FIXTURES="$1" SONAR_TOKEN=t SONAR_ORG=o \
-    sh "$tree/.github/scripts/sonar-provision.sh" > "$TMP/out" 2>&1 && RC=0 || RC=$?
+  local fx="$1"; shift
+  CURL_CALLS="$CALLS" CURL_FIXTURES="$fx" SONAR_TOKEN=t SONAR_ORG=o \
+    sh "$tree/.github/scripts/sonar-provision.sh" "$@" > "$TMP/out" 2>&1 && RC=0 || RC=$?
   OUT=$(cat "$TMP/out")
 }
 
@@ -122,7 +183,7 @@ stub_curl "$BIN"
 
 CALLS="$TMP/calls-fresh"; : > "$CALLS"
 F="$TMP/fx-fresh"; fixtures "$F" '{"qualitygates":[{"id":9,"name":"Sonar way","isDefault":true,"isBuiltIn":true,"conditions":[]}]}' '{"qualityGate":{"id":"9","name":"Sonar way","default":true}}'
-run "$F"
+run "$F" --gate
 
 it "creates the gate when the organisation has none"
 assert_contains "$OUT" "gate created: agentops"
@@ -150,7 +211,7 @@ assert_equals "0" "$RC"
 
 CALLS="$TMP/calls-six"; : > "$CALLS"
 F="$TMP/fx-six"; fixtures "$F" "$(agentops_gate true)" '{"qualityGate":{"id":"777","name":"agentops","default":true}}'
-run "$F"
+run "$F" --gate
 
 it "creates no second gate when one is already there"
 assert_contains "$OUT" "gate present: agentops"
@@ -175,7 +236,7 @@ CALLS="$TMP/calls-done"; : > "$CALLS"
 F="$TMP/fx-done"
 fixtures "$F" "$(agentops_gate true ',{"id":107,"metric":"coverage","op":"LT","error":"80"}')" \
   '{"qualityGate":{"id":"777","name":"agentops","default":false}}'
-run "$F"
+run "$F" --gate
 
 it "creates nothing on a second run"
 assert_not_contains "$(cat "$CALLS")" "qualitygates/create"
@@ -204,7 +265,7 @@ CALLS="$TMP/calls-drift"; : > "$CALLS"
 F="$TMP/fx-drift"
 fixtures "$F" "$(agentops_gate true ',{"id":107,"metric":"coverage","op":"LT","error":"50"}')" \
   '{"qualityGate":{"id":"777","name":"agentops","default":true}}'
-run "$F"
+run "$F" --gate
 
 it "updates a condition whose threshold differs, in place"
 assert_contains "$OUT" "condition updated: coverage LT 50 -> LT 80"
@@ -216,7 +277,7 @@ assert_not_contains "$(cat "$CALLS")" "create_condition"
 
 CALLS="$TMP/calls-403"; : > "$CALLS"
 F="$TMP/fx-403"; fixtures "$F" '{"qualitygates":[]}' '{}'
-CURL_403=qualitygates run "$F"
+CURL_403=qualitygates run "$F" --gate
 unset CURL_403
 
 it "fails when the token cannot administer quality gates"
@@ -241,7 +302,7 @@ assert_contains "$OUT" "o_agent-ops-operator_manager"
 
 CALLS="$TMP/calls-mid"; : > "$CALLS"
 F="$TMP/fx-mid"; fixtures "$F" "$(agentops_gate true)" '{"qualityGate":{"name":"agentops"}}'
-CURL_403=create_condition run "$F"
+CURL_403=create_condition run "$F" --gate
 unset CURL_403
 
 it "fails when a condition cannot be written, rather than reporting a half gate"
@@ -253,4 +314,31 @@ assert_contains "$OUT" "gate present: agentops"
 it "assigns no project after a condition failed"
 assert_not_contains "$OUT" "assigned"
 
+# --- WITHOUT --gate, the organisation's gate is not touched -----------------
+#
+# THE CASE THE FLAG EXISTS FOR, and the one CI exercises on every run: the scan
+# step calls this script for a project that does not exist. If that call also
+# provisioned the gate, a missing project would turn an 80% threshold on for
+# the whole organisation from inside a job — and the verdict now fails the
+# component's job, so it would block every component under it.
+
+CALLS="$TMP/calls-nogate"; : > "$CALLS"
+F="$TMP/fx-nogate"; fixtures "$F" '{"qualitygates":[]}' '{}'
+run "$F"
+
+it "provisions the projects with no --gate"
+assert_contains "$OUT" "o_agent-ops-operator_manager"
+
+it "makes NO quality-gate call at all"
+assert_not_contains "$(cat "$CALLS")" "qualitygates"
+
+it "succeeds"
+assert_equals "0" "$RC"
+
+it "refuses an option it does not know, rather than ignoring it"
+run "$F" --gates
+assert_equals "2" "$RC"
+assert_contains "$OUT" "unknown option"
+
+rm -rf "$tmp"
 summary

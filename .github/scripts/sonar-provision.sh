@@ -1,18 +1,17 @@
 #!/usr/bin/env sh
 # Provisions the SonarCloud project for every component, INSIDE the monorepo
 # binding of this repository — which is the only way a project decorates pull
-# requests — and then the quality gate every one of those projects is held to.
-# Idempotent throughout: a project key that already exists is left alone by the
-# server, and the gate stage writes only what a lookup says is missing or wrong.
+# requests. Idempotent: a key that already exists is left alone by the server.
 #
-#   SONAR_TOKEN=<user token> SONAR_ORG=<org key> \
-#     .github/scripts/sonar-provision.sh
+#   SONAR_TOKEN=<token with Create Projects> SONAR_ORG=<org key> \
+#     .github/scripts/sonar-provision.sh            # every project
+#     .github/scripts/sonar-provision.sh scripts    # only the named ones
 #
-# THE TOKEN NEEDS TWO PERMISSIONS, AND EACH STAGE FAILS NAMING ITS OWN:
-# *Create Projects* for the projects, *Administer Quality Gates* for the gate.
-# A token carrying only the first provisions the projects and then stops on a
-# 403 saying which permission it lacks — a legible half, rather than a silent
-# one that leaves the organisation judged by the built-in gate forever.
+# CI CALLS THE SECOND FORM ITSELF (.github/actions/sonar-scan) when the
+# project it is about to analyse does not exist, so a new component's first
+# run creates its project inside the monorepo binding — bound to the
+# repository, decorating pull requests — rather than the scanner's own
+# auto-provisioning creating one that is bound to nothing.
 #
 # THIS IS THE WEB APP'S OWN CALL, NOT A DOCUMENTED API. SonarCloud's public
 # api/projects/create makes a project bound to NO repository; the scanner's
@@ -23,20 +22,33 @@
 # installation key sits inside each project entry). If it stops working, the
 # wizard's "Import JSON" accepts the same projects array.
 #
-# THE GATE STAGE IS THE PUBLIC API, unlike the call above it. Its conditions
-# are COPIED FROM THE BUILT-IN `Sonar way` BY LOOKUP rather than hard-coded, so
-# a re-run tracks whatever upstream currently ships and the only condition this
-# repository states is the one it is adding: OVERALL `coverage LT 80`. The
-# built-in gate is read-only and judges NEW code alone, which is what let a
-# component sit at 27% and one at 79% pass identically.
+# ONE PROJECT IS NOT A COMPONENT: `scripts`, the workflow's own scripts under
+# .github/, analysed by ci.yml's `scripts` job under the same key and name
+# pattern. It is appended here rather than taught to components.sh, because a
+# directory that program lists is a directory the release tags.
 #
-# RESPONSE SHAPES, read off sonarcloud.io on 2026-08-29 against a public
-# organisation: `list` answers {qualitygates:[{id,name,isDefault,isBuiltIn,
-# conditions:[{id,metric,op,error}]}]}, `show` the same for one gate, and
-# `get_by_project` {qualityGate:{id,name,default}}.
+# THE GATE STAGE IS OPT-IN (`--gate`), AND UNDER THE PARAGRAPH ABOVE IT HAS TO
+# BE. CI calls this script ITSELF for a project that does not exist, and the
+# scan step now FAILS the component's job on the gate's verdict — so a script
+# that always provisioned the gate would let a missing project turn the whole
+# organisation's threshold on, from inside a job, with nobody asking. Creating
+# a project and deciding what the tree is judged by are two acts, and only the
+# first is automatic.
+#
+#   .github/scripts/sonar-provision.sh --gate     # and the gate as well
 set -eu
 : "${SONAR_TOKEN:?}" "${SONAR_ORG:?}"
 cd "$(dirname "$0")/../.."
+with_gate=false
+_n=$#; _i=0
+while [ "$_i" -lt "$_n" ]; do
+  case "$1" in
+    --gate) with_gate=true ;;
+    -*) echo "sonar-provision: unknown option '$1' (only --gate)" >&2; exit 2 ;;
+    *) set -- "$@" "$1" ;;
+  esac
+  shift; _i=$((_i + 1))
+done
 
 API=https://sonarcloud.io/api
 GATE=agentops
@@ -77,21 +89,31 @@ sq() {
   esac
 }
 
+
 # --- stage 1: the projects --------------------------------------------------
 
 inst="${SONAR_ORG}/agent-ops-operator|1324376362"
-components=$(.github/components.sh images)
-body=$(printf '%s' "$components" | jq -c --arg o "$SONAR_ORG" --arg i "$inst" '{
+# The whole list, then the arguments as a filter over it — so a name that is
+# not a project this repository owns cannot be provisioned by typing it.
+wanted='[]'; [ $# -eq 0 ] || wanted=$(printf '%s\n' "$@" | jq -R . | jq -sc .)
+body=$(.github/components.sh images | jq -c --arg o "$SONAR_ORG" --arg i "$inst" --argjson w "$wanted" '{
   addAsFavorite: false, newCodeDefinitionType: "days", newCodeDefinitionValue: "30",
   organization: $o,
-  projects: [.[] | {installationKey: $i,
-                    projectKey: ($o + "_agent-ops-operator_" + .component),
-                    projectName: ("agentops-" + .component)}]}')
+  projects: [(.[] | .component), "scripts"
+             | select(($w | length) == 0 or IN($w[]))
+             | {installationKey: $i,
+                projectKey: ($o + "_agent-ops-operator_" + .),
+                projectName: ("agentops-" + .)}]}')
+[ "$(printf '%s' "$body" | jq '.projects | length')" -gt 0 ] || { echo "nothing to provision: $*" >&2; exit 64; }
 curl -sf -u "$SONAR_TOKEN:" -X POST -H 'Content-Type: application/json' \
   "$API/alm_integration/provision_monorepo_projects" --data "$body" \
   | jq -r '.projects[].projectKey'
 
 # --- stage 2: the gate ------------------------------------------------------
+
+if [ "$with_gate" != true ]; then
+  exit 0
+fi
 
 gates=$(sq GET qualitygates/list "organization=$SONAR_ORG")
 gate_id=$(printf '%s' "$gates" | jq -r --arg n "$GATE" \
@@ -156,8 +178,12 @@ fi
 # only catches projects nobody has assigned, so a project moved onto another
 # gate by hand would keep it and report green against conditions this
 # repository never chose.
-printf '%s' "$components" | jq -r --arg o "$SONAR_ORG" \
-  '.[] | $o + "_agent-ops-operator_" + .component' | while read -r key; do
+# EVERY project, never the `$@` filter: the filter says which projects to
+# CREATE, and a gate assigned to the one component somebody happened to name
+# would leave the rest judged by whatever they were on. Same list stage 1
+# builds from, `scripts` included.
+.github/components.sh images | jq -r --arg o "$SONAR_ORG" \
+  '(.[] | .component), "scripts" | $o + "_agent-ops-operator_" + .' | while read -r key; do
   current=$(sq GET qualitygates/get_by_project "organization=$SONAR_ORG" "project=$key" \
     | jq -r '.qualityGate.name // empty')
   if [ "$current" = "$GATE" ]; then

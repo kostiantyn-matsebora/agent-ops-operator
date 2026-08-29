@@ -257,6 +257,14 @@ analysis is the LAST STEP of the job that built and tested the component —
 tests left it and no suite runs twice. The dashboards are the organisation's
 page on [sonarcloud.io](https://sonarcloud.io/), one project per component.
 
+**One project is not a component: `agentops-scripts`**, the workflow's own
+scripts under `.github/scripts/`. The `scripts` job runs their suite
+(`.github/tests/run.sh`), collects Python coverage in every process the
+suite spawns, and analyses them the same way — named explicitly at that one
+call, because `components.sh` lists what publishes an image and the scripts
+publish none. It runs when the scripts, their tests or the hooks they
+exercise change, and on every path that rebuilds everything.
+
 **What fails your pull request:** the scanner not running or not submitting,
 AND the quality gate's verdict on the submitted analysis. The scan step waits
 on the gate (`sonar.qualitygate.wait`) and fails the component's job on
@@ -270,24 +278,25 @@ pull request, per component, for reading; nothing in branch protection names
 that check, so a hand run of `ci.yml` (`gh workflow run ci.yml -f pr=<n>`)
 carries the same gate.
 
-**WHAT THE GATE REQUIRES:** every project is assigned a gate named `agentops`
-— the built-in `Sonar way` new-code conditions, copied verbatim, plus one
-this repository adds: **the component's OVERALL line coverage at or above
-80%**. It is created, conditioned, made the organisation default and assigned
-per project by `sonar-provision.sh` (below), not clicked in a dashboard, so
-what every component is judged by is one `git show` away.
+**WHICH GATE — TODAY, THE BUILT-IN ONE.** Every project is judged by the
+organisation's default gate, whose conditions are all on NEW code.
+`sonar-provision.sh --gate` is what replaces it with `agentops`: those same
+new-code conditions, copied verbatim from the built-in gate, plus one this
+repository adds — **the component's OVERALL line coverage at or above 80%**.
+Written as a script rather than clicked in a dashboard, so what every
+component is judged by is one `git show` away.
 
-**AND THAT CONDITION IS NOT PROVISIONED YET, DELIBERATELY.** Since the
-verdict fails the component's job, a coverage condition added before a
-component reaches the threshold does not turn its dashboard red — it holds
-every pull request that touches it. Twelve of the fifteen components are
-under 80% today. So the gate stage of `sonar-provision.sh` is an act somebody
-takes when the tree is ready for it, not a side effect of adding a project,
-and until then the organisation's gate carries the new-code conditions alone.
-A gate on new code alone let a component sit at 27% and one at 79% pass
-identically, which is why the number the tree is asked to reach has to become
-a condition something evaluates — but making it evaluate before anything meets
-it is a different thing from measuring.
+**IT HAS NOT BEEN RUN, AND THAT IS THE POINT OF THE FLAG.** Since the verdict
+fails the component's job, a coverage condition added before a component
+reaches the threshold does not turn its dashboard red — it holds every pull
+request that touches it, and twelve of the fifteen components are under 80%
+today. So turning it on is an act somebody takes when the tree is ready,
+never a side effect of provisioning a project — which is also why CI, which
+calls this script itself for a missing project, cannot turn it on. A gate on
+new code alone let a component sit at 27% and one at 79% pass identically,
+which is why the number the tree is asked to reach has to become a condition
+something evaluates; making it evaluate before anything meets it is a
+different thing from measuring.
 
 **A pull request from a fork is analysed by nothing**, shown as a SKIPPED job:
 the scanner's token is withheld from fork workflows, so there is nothing you
@@ -295,26 +304,29 @@ could do about it and nothing you should.
 
 **Coverage locally**, with the flags CI uses, is in `.claude/rules/build-test.md`.
 
-**A NEW COMPONENT OWES A PROJECT, AND CI WILL NOT CREATE IT.** The analysis
-step asserts the project exists before it scans, and fails naming the
-component otherwise — deliberately: the scanner would
-otherwise create one on the spot, bound to no repository, which decorates no
-pull request while looking exactly like a project somebody set up. Create it
-INSIDE the repository's monorepo binding instead:
+**A NEW COMPONENT'S PROJECT IS CREATED BY ITS FIRST RUN, INSIDE THE MONOREPO
+BINDING.** The analysis step looks the project up before it scans and, when
+it is absent, provisions it through the script below with the job's own
+token — deliberately, rather than letting the scanner do it: the scanner
+would create one on the spot bound to no repository, which decorates no pull
+request while looking exactly like a project somebody set up. The same
+script provisions everything at once when run by hand:
 
 ```sh
-SONAR_TOKEN=<user token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh
+SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh            # all
+SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh <name>...  # some
+SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh --gate     # and the gate
 ```
 
-It derives every component's key and name from `components.sh` and is
-idempotent, so running it after adding a directory creates the one project
-that is missing — and assigns it the `agentops` gate, which is the second
-thing a new component owes and the one nothing else would notice was absent.
+It derives every component's key and name from `components.sh`, appends the
+`scripts` unit, and is idempotent; a name that is neither is refused rather
+than provisioned.
 
-**THE TOKEN NEEDS TWO PERMISSIONS**, *Create Projects* and *Administer
-Quality Gates*, and each stage fails naming its own: a token holding only the
-first provisions the projects and stops on a 403 that says which one is
-missing. The script posts the monorepo wizard's own request; if
+**IT DOES NOT TOUCH THE QUALITY GATE UNLESS ASKED** — that is `--gate`, and
+the separation is why CI can call this script itself for a missing project
+without deciding what the whole organisation is judged by. Provisioning the
+gate needs a second permission, *Administer Quality Gates*, and fails on a
+403 naming it. The script posts the monorepo wizard's own request; if
 SonarCloud changes it, the wizard's *Import JSON* takes the same `projects`
 array.
 
@@ -422,10 +434,11 @@ and it fails if any job that DID run failed.
 | `retired-vocabulary` | it asserts a name this project stopped using |
 | `openspec` | a published specification is invalid, or a change your diff touched is |
 | `docs-task` | a change your diff FINISHES does not end in unit tests, e2e tests and documentation — three sections, in that order, every task ticked |
+| `scripts` | the workflow's own scripts fail their suite, or their analysis could not be submitted or fails its quality gate — see *Code analysis* |
 | `pr-title` | the title would not read as a commit subject |
 | `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |
 | `conformance` | an adapter's built binary does not speak the adapter contracts to a fake manager |
-| `operator`, `modules (<path>)`, `node-runtimes (<runtime>)` — the analysis step | the SonarCloud analysis could not be submitted, or its quality gate is `ERROR`; see *Code analysis* under Build and test |
+| `operator`, `modules (<path>)`, `node-runtimes (<runtime>)`, `scripts` — the analysis step | the SonarCloud analysis could not be submitted, or its quality gate is `ERROR`; see *Code analysis* under Build and test |
 
 `openspec` and `docs-task` judge only what your pull request TOUCHED. A dozen changes are open
 at any time and an unfinished one is unfinished correctly, so a gate judging all
