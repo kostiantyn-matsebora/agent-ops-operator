@@ -25,7 +25,7 @@ import (
 // retry whose count is reported, so a lane that passes while retrying
 // constantly is visible rather than quietly degrading.
 //
-// FULL TIER, and SKIPPED without ANTHROPIC_API_KEY: a fork pull request has
+// FULL TIER, and SKIPPED without CLAUDE_CODE_OAUTH_TOKEN: a fork pull request has
 // no secrets, and that is the intended access boundary.
 
 const (
@@ -43,8 +43,8 @@ func requireAgent(t *testing.T) *Env {
 	t.Helper()
 	fullTier(t)
 	e := requireEnv(t)
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		t.Skip("ANTHROPIC_API_KEY is not set — the real-runtime lane is skipped, not failed")
+	if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
+		t.Skip("CLAUDE_CODE_OAUTH_TOKEN is not set — the real-runtime lane is skipped, not failed")
 	}
 	return e
 }
@@ -54,7 +54,7 @@ func setupAgent(t *testing.T, e *Env) {
 	t.Helper()
 	ctx := context.Background()
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: "agentops-claude"},
-		StringData: map[string]string{"oauthToken": os.Getenv("ANTHROPIC_API_KEY")}}
+		StringData: map[string]string{"oauthToken": os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")}}
 	if err := ensure(ctx, e.K, secret); err != nil {
 		t.Fatal(err)
 	}

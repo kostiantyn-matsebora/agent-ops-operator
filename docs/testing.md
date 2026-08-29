@@ -90,7 +90,7 @@ cd platform/manager && go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
 | `E2E_SKIP_BUILD=1` | with `E2E_REUSE`, images are already built and imported |
 | `E2E_ARTIFACT_DIR` | where failure diagnostics land — manager and adapter logs, the pod list, cluster events, every agentops CR as YAML |
 | `E2E_BUDGET` | wall-clock budget of the gating tier (default `20m`) — exceeding it fails the run, so growth is visible rather than gradual |
-| `ANTHROPIC_API_KEY` | the real-runtime lane's credential — absent, that lane reports itself skipped |
+| `CLAUDE_CODE_OAUTH_TOKEN` | the real-runtime lane's credential — absent, that lane reports itself skipped |
 
 On any failure the diagnostics are written unconditionally: a cluster that no
 longer exists is unreproducible, and a failure that did not capture its own
@@ -111,11 +111,13 @@ gh workflow run e2e-smoke.yml
 gh workflow run e2e-full.yml
 ```
 
-Two things are set up by hand, outside any diff:
+One thing exists already and one is a decision:
 
-1. **A repository secret `ANTHROPIC_API_KEY`**, read only by `e2e-full.yml`.
-   Pull requests never see it. Without it the real-runtime lane reports
-   itself skipped and every other lane still runs.
+1. **The repository secret `CLAUDE_CODE_OAUTH_TOKEN`** — the same Claude Code
+   token the review workflow already runs on, and the credential the claude
+   bundle projects into the runtime. Read only by `e2e-full.yml`; pull
+   requests never see it. Without it the real-runtime lane reports itself
+   skipped and every other lane still runs.
 2. **The cadence.** Both crons live in their own workflow file and nowhere
    else. The full tier's spend is real and recurring — tighten or loosen it
    there.

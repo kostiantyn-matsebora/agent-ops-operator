@@ -15,7 +15,7 @@
 #   pr    contract conformance + a thin k3s smoke on the stub runtime. No
 #         secret, deterministic, bounded in wall clock.
 #   full  the whole pack. The real-runtime lane SKIPS itself when
-#         ANTHROPIC_API_KEY is absent, so a fork or a repository without the
+#         CLAUDE_CODE_OAUTH_TOKEN is absent, so a fork or a repository without the
 #         secret runs every tier its access allows and fails for none of the rest.
 #
 # WHAT THIS WORKFLOW OWNS is the cluster-based jobs only. Per-module build, vet
@@ -88,7 +88,7 @@ jobs:
           # Absent on a pull request and on a fork — the real-runtime lane
           # then reports itself SKIPPED. Present only when the full tier is
           # called by e2e-full.yml, which inherits the repository's secrets.
-          ANTHROPIC_API_KEY: ${{ inputs.tier == 'full' && secrets.ANTHROPIC_API_KEY || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.tier == 'full' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: |
           go test -tags e2e -count=1 -timeout 55m -v ./test/e2e/
       # Unconditional: a failure that did not capture its own context costs a

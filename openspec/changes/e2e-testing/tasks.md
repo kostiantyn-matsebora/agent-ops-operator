@@ -87,7 +87,7 @@
 - [x] 11.2 Closed-form correctness question with a test-known answer
 - [x] 11.3 Toolset enforcement asserted on **effect**: ask for a mutation outside the bound toolset, read the cluster to confirm it did not happen; then a bound read succeeds, so the first is evidence of a boundary
 - [x] 11.4 Bounded retries on every agent-dependent assertion, with the retry count reported
-- [x] 11.5 Fixed, small conversation count; fail fast on a broken deployment rather than burning turns — the lane is implemented and skips itself without `ANTHROPIC_API_KEY`; it has NOT been run against a real credential yet: that is the repository secret and the first dispatched full run
+- [x] 11.5 Fixed, small conversation count; fail fast on a broken deployment rather than burning turns — the lane is implemented and skips itself without `CLAUDE_CODE_OAUTH_TOKEN`; it has NOT been run against a real credential yet: the credential is `CLAUDE_CODE_OAUTH_TOKEN` — the secret the review workflow already holds, and what the claude bundle projects — so the first `e2e-full.yml` run is all that is owed
 
 ## 12. Workflows
 

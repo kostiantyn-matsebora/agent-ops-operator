@@ -18,7 +18,7 @@
 //	E2E_ARTIFACT_DIR   where failure diagnostics are written (default $TMPDIR/agentops-e2e)
 //	E2E_TIER           pr (default) or full — full adds the real-runtime lane
 //	E2E_BUDGET         wall-clock budget of the gating tier (default 20m)
-//	ANTHROPIC_API_KEY  the real-runtime lane's credential; absent, the lane is SKIPPED
+//	CLAUDE_CODE_OAUTH_TOKEN  the real-runtime lane's credential; absent, the lane is SKIPPED
 package e2e
 
 import (

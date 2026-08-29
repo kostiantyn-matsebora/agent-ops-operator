@@ -25,7 +25,7 @@ cd platform/manager
 go test -tags conformance -count=1 -v ./test/conformance/
 # the e2e pack: k3s under k3d, the chart from the working tree, images from
 # this commit. Needs docker, k3d, kubectl and helm. E2E_TIER=full adds the
-# real-runtime lane (ANTHROPIC_API_KEY) and the slow lanes; E2E_REUSE=1 keeps
+# real-runtime lane (CLAUDE_CODE_OAUTH_TOKEN) and the slow lanes; E2E_REUSE=1 keeps
 # the cluster between runs.
 go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
 ```

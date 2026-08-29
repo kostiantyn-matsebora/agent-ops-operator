@@ -1,8 +1,10 @@
 # The full tier: every lane, the real agent runtime with a real credential
 # included, nightly and on demand. It gates NOTHING — its lane spends tokens
 # and its flakiness must not block work while it is tuned. The credential is
-# the ANTHROPIC_API_KEY repository secret; without it the real-runtime lane
-# reports itself skipped and everything else still runs.
+# CLAUDE_CODE_OAUTH_TOKEN — the repository secret the review workflow already
+# runs on, and what the claude bundle projects into the runtime; there is no
+# second credential kind. Without it the real-runtime lane reports itself
+# skipped and everything else still runs.
 #
 # Cadence: nightly, an hour after the smoke. Change the cron here and nowhere
 # else; docs/testing.md names this file as the place.
