@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -42,7 +43,20 @@ def main() -> int:
     args = ap.parse_args()
     text = pathlib.Path(args.file).read_text() if args.file else sys.stdin.read()
     d = json.loads(text)
-    repo, number = d["repo"], int(d["number"])
+    # THE ADDRESS IS THE WORKFLOW'S FACT, NOT THE MODEL'S. The schema asks the
+    # coordinator for `repo` and `number`, and one run answered without them —
+    # a thin answer, two tool calls — so this crashed with KeyError, posted
+    # nothing, and the gate failed a review that had actually run. The input
+    # document the job built already names both; the model's copy is only
+    # ever a restatement of it, so it is read second.
+    address = pathlib.Path("review-input.json")
+    fallback = json.loads(address.read_text()) if address.is_file() else {}
+    repo = d.get("repo") or fallback.get("repo") or os.environ.get("GITHUB_REPOSITORY", "")
+    number = d.get("number") or fallback.get("number")
+    if not repo or number is None:
+        print("::error::the posting document names no pull request, and review-input.json is absent", file=sys.stderr)
+        return 1
+    number = int(number)
 
     rc, sha = gh("pr", "view", str(number), "-R", repo, "--json", "headRefOid", "-q", ".headRefOid")
     if rc != 0:
