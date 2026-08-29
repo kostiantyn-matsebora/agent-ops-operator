@@ -51,7 +51,8 @@ jobs:
   # WHAT EXISTS, asked once and answered for every matrix below.
   discover:
     # A DRAFT PULL REQUEST RUNS NOTHING — not one component, not one gate.
-    # Every job below needs this one, so skipping it skips them all, and
+    # Every job below needs this one (the path-independent gates too, for
+    # exactly this reason), so skipping it skips them all, and
     # `ci-green` stays "expected" until the pull request is marked ready,
     # which it cannot merge before anyway. A hand run (`workflow_dispatch`)
     # is a person asking, and runs on a draft.
@@ -580,6 +581,7 @@ jobs:
   # them to the audience it exists to protect the tree from. `--show` prints
   # matches locally, where the fixing happens.
   publication:
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -612,6 +614,7 @@ jobs:
   # Two guards, opposite shapes, each following from its subject. Neither is a
   # template for the other.
   retired-vocabulary:
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -640,6 +643,7 @@ jobs:
   # them would fail every pull request for work it was not about, and the job
   # would be switched off within a day.
   openspec:
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -700,6 +704,7 @@ jobs:
   # agree. Two enforcement points asking one question is safe only while they
   # give one answer.
   docs-task:
+    needs: discover
     runs-on: ubuntu-latest
     # Reading the pull request, its threads and its workflow runs is what the
     # archive guard needs; nothing here writes.
@@ -762,6 +767,7 @@ jobs:
   # Push events skip this: there is no title to check, and `ci-green` treats a
   # skipped job as passed by having nothing to do.
   pr-title:
+    needs: discover
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
@@ -824,6 +830,7 @@ jobs:
   # The template now writes `Refs #` — but a template is a suggestion at the
   # moment somebody is typing quickly, and this failure is silent and days late.
   pr-closes:
+    needs: discover
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # READING THE PULL REQUEST IS A PERMISSION, and the workflow's default is
@@ -894,7 +901,9 @@ jobs:
 
   ci-green:
     name: ci-green
-    if: always()
+    # Never reports on a draft: a green required check on a pull request that
+    # ran nothing would be a claim.
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, conformance]
     runs-on: ubuntu-latest
     steps:
