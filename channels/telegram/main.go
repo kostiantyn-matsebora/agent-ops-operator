@@ -312,10 +312,7 @@ func (a *adapter) baseFor(fromSecret string) string {
 // client returns (caching) the Bot API client for a served channel — one per
 // token at the default root, keyed token@root where a surface names its own.
 func (a *adapter) client(sc servedChannel) *Telegram {
-	base := sc.apiBase
-	if base == "" {
-		base = a.baseFor("")
-	}
+	base := sc.apiBase // resolved by baseFor when the channel was admitted
 	key := sc.token
 	if base != a.baseFor("") {
 		key = sc.token + "@" + base

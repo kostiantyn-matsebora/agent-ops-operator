@@ -17,13 +17,17 @@ it structurally cannot decide.
 
 ## What gates a pull request
 
-**Contract conformance and a thin cluster smoke on the stub runtime.** Both are
-deterministic, need no secret and are bounded in wall clock, so they run for
-every pull request — from a fork too — and report through `ci-green`, the one
-required check. The full pack, including the lane that drives the real agent
-runtime with a real credential, runs nightly when master moved and on demand,
-and never gates a pull request: its lane spends real tokens, and its flakiness must not block work
-while it is tuned.
+**Contract conformance and a thin cluster smoke on the stub runtime.** Both
+are deterministic, need no secret and are bounded in wall clock, so they run
+for every pull request — from a fork too — and report through `ci-green`, the
+one required check.
+
+The full pack, including the lane that drives the real agent runtime with a
+real credential, gates nothing:
+
+- it runs nightly when master moved, and on demand
+- its lane spends real tokens
+- its flakiness must not block work while it is tuned
 
 A fork pull request runs every tier its secret access allows and is not failed
 for the rest. Secrets being unavailable to forks is the intended access
@@ -45,14 +49,17 @@ Every agent-dependent assertion carries
 a bounded retry whose count is reported, so a lane that passes while retrying
 constantly is visible rather than quietly degrading.
 
-**A stub runtime exists for what no agent exhibits on cue** — a handle that
+**A stub runtime exists for what no agent exhibits on cue.** A handle that
 names nothing, a crash that reports nothing, a stall past the idle TTL, a
-storage outage. These are manager mechanisms, and the stub is an instrument for
-them, not a cost workaround: a test that could have been written against the
-real runtime is. Its behaviour is scripted by the first word of the input
-(`echo`, `fail`, `stale-context`, `no-context`, `die`, `stall`,
-`storage-outage`), identical input giving an identical report. It is built by
-the pack only, published by no release, and referenced by no chart default.
+storage outage — these are manager mechanisms, and the stub is an instrument
+for them, not a cost workaround. A test that could have been written against
+the real runtime is.
+
+- Its behaviour is scripted by the first word of the input: `echo`, `fail`,
+  `stale-context`, `no-context`, `die`, `stall`, `storage-outage`.
+- Identical input gives an identical report.
+- It is built by the pack only, published by no release, and referenced by
+  no chart default.
 
 ## No third party is deployed
 
