@@ -6,7 +6,7 @@
 
 ## 2. Unit tests
 
-- [x] 2.1 Cover the thing
+- [ ] 2.1 Cover the thing
 
 ## 3. E2E tests
 
@@ -15,4 +15,4 @@
 ## 4. Documentation
 
 - [x] 4.1 The reference docs
-- [ ] 4.2 The adopter site
+- [x] 4.2 The adopter site

@@ -683,7 +683,7 @@ jobs:
       # and touches no real repository.
       - name: The workflow's own scripts
         run: ./.github/tests/run.sh
-      - name: Every change this pull request touches carries a finished documentation task
+      - name: Every change this pull request finishes ends in finished test and documentation tasks
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |

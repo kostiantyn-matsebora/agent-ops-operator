@@ -22,8 +22,10 @@ operator is `platform/manager/`. See `.claude/rules/structure.md`.
 **DOCUMENTATION IS PART OF EVERY CHANGE, AND IT IS NOT OPTIONAL.** Both halves —
 the reference docs AND the adopter site — are updated to match what the change
 did, before the change is finished. **Every openspec change carries a DEDICATED
-documentation task, and it is the LAST task before the change is done.** Not a
-line inside another task, not a follow-up, not "docs later".
+documentation task, and it is the LAST task before the change is done — and the
+TWO before it are UNIT TESTS, then E2E TESTS (or one ticked line saying why e2e
+does not apply).** Not a line inside another task, not a follow-up, not "docs
+later", not "tests later".
 
 **IT IS ENFORCED, NOT TRUSTED** — `openspec/config.yaml` injects it when a tasks
 file is written, and a `PreToolUse` hook REFUSES `openspec archive` while the
