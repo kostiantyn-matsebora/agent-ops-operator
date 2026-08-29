@@ -37,7 +37,6 @@ jobs:
       modules: ${{ steps.list.outputs.modules }}
       images: ${{ steps.list.outputs.images }}
       operator: ${{ steps.list.outputs.operator }}
-      ui: ${{ steps.list.outputs.ui }}
       chart: ${{ steps.list.outputs.chart }}
       docs: ${{ steps.list.outputs.docs }}
       site: ${{ steps.list.outputs.site }}
@@ -83,7 +82,7 @@ jobs:
             echo "building everything: base=${BASE_SHA:-none}" >&2
             echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
             echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
-            for j in operator ui chart docs site e2e; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
+            for j in operator chart docs site e2e; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
 
@@ -109,7 +108,6 @@ jobs:
           m() { grep -qE "$1" /tmp/changed.txt && echo true; }
           {
             echo "operator=$(m '^(platform/manager/|chart/)')"
-            echo "ui=$(m '^platform/console/ui/')"
             echo "chart=$(m '^(chart/|platform/manager/api/)')"
             echo "docs=$(m '^(docs/|chart/|platform/manager/api/|\.github/scripts/docs-generate)')"
             echo "site=$(m '^docs/')"
@@ -133,7 +131,11 @@ jobs:
       run:
         working-directory: ${{ env.ENVTEST_MODULE }}
     steps:
+      # FULL HISTORY for the analysis step: new-code detection and blame read
+      # it, and a shallow clone makes every line "new" on every pull request.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: ${{ env.ENVTEST_MODULE }}/go.mod
@@ -152,13 +154,26 @@ jobs:
       - run: go vet ./...
       # -count=1 so a cached PASS can never stand in for a run that did not
       # happen; the integration suite must actually execute.
-      - run: go test -count=1 ./...
+      # -coverprofile because THIS is the one run of the envtest suite, and the
+      # analysis step below reads the profile from where it landed.
+      - run: go test -count=1 -coverprofile=coverage.out ./...
       # The suite FAILS without assets rather than skipping (verified: envtest
       # start returns an error and the package reports FAIL), so `go test ./...`
       # above already proves it ran. This only catches provisioning that
       # silently produced an empty path.
       - name: Assert envtest was provisioned
         run: test -n "$KUBEBUILDER_ASSETS" || { echo "envtest assets were never provisioned"; exit 1; }
+      # STATIC ANALYSIS AND COVERAGE, here, where the checkout and the profile
+      # already are. A FORK'S PULL REQUEST SKIPS IT, visibly: SONAR_TOKEN is
+      # withheld from fork workflows and the scanner's 401 would read as a
+      # broken workflow. The step fails on SUBMISSION only; the quality gate is
+      # SonarCloud's own check and not required — .github/actions/sonar-scan.
+      - uses: ./.github/actions/sonar-scan
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        with:
+          dir: ${{ env.ENVTEST_MODULE }}
+          token: ${{ secrets.SONAR_TOKEN }}
+          organization: ${{ secrets.SONAR_ORG }}
 
   # Every OTHER module. Dependency-free by design, so these are seconds each,
   # and separate from `operator` so a module break is legible without reading an
@@ -175,7 +190,10 @@ jobs:
       run:
         working-directory: ${{ matrix.module }}
     steps:
+      # FULL HISTORY for the analysis step, as in `operator`.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # THE CONSOLE'S GO BUILD EMBEDS ITS BROWSER BUNDLE — `go:embed all:ui/dist`
       # — and that bundle is build output, so it is absent from a fresh
       # checkout. Without this step the module does not COMPILE, in a job about
@@ -200,32 +218,26 @@ jobs:
           cache-dependency-path: ${{ matrix.module }}/go.sum
       - run: go build ./...
       - run: go vet ./...
-      - run: go test -count=1 ./...
-
-  # The console's browser application. The only non-Go job, and it exists
-  # because these tests run nowhere today: a broken bundle currently surfaces
-  # inside the console IMAGE build, at the end of a long log, and a failing
-  # component test surfaces for nobody.
-  #
-  # Screenshots are deliberately out: they need a browser, and they are
-  # regenerated when the UI changes, not on every pull request.
-  console-ui:
-    needs: discover
-    if: needs.discover.outputs.ui == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
+      - run: go test -count=1 -coverprofile=coverage.out ./...
+      # THE CONSOLE IS ONE COMPONENT WITH TWO TOOLCHAINS, and one project, and
+      # THIS IS THE UI SUITE'S ONE RUN. It had a job of its own (`console-ui`)
+      # that ran the same suite a second time once coverage had to be produced
+      # here beside the Go profile; the step is named so a failing UI test
+      # names the UI in this job's log. The lcov names files relative to ui/
+      # and the analysis is rooted one level up, so the paths are re-anchored —
+      # without it every UI file is reported unmatched and coverage reads zero.
+      - name: Console UI tests, with coverage
+        if: matrix.module == 'platform/console'
         working-directory: platform/console/ui
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+        run: |
+          npm run test:coverage
+          sed -i 's#^SF:#SF:ui/#' coverage/lcov.info
+      - uses: ./.github/actions/sonar-scan
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: platform/console/ui/package-lock.json
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
+          dir: ${{ matrix.module }}
+          token: ${{ secrets.SONAR_TOKEN }}
+          organization: ${{ secrets.SONAR_ORG }}
 
   # The Node runtimes' unit suites. Neither ran in CI until the copilot runtime
   # arrived with 55 tests nothing executed. No npm install: the suites import
@@ -243,13 +255,26 @@ jobs:
       # admits the matrix, this one admits the runtime.
       - uses: actions/checkout@v4
         if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
         with:
           node-version: 22
-      - run: node --test
+      # Two reporters: spec to the log, lcov to a file the analysis step reads.
+      # Naming only lcov would leave the log with no test output at all.
+      - run: >-
+          node --test --experimental-test-coverage
+          --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=lcov --test-reporter-destination=coverage.lcov
         if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
         working-directory: runtimes/${{ matrix.runtime }}
+      - uses: ./.github/actions/sonar-scan
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime)) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        with:
+          dir: runtimes/${{ matrix.runtime }}
+          token: ${{ secrets.SONAR_TOKEN }}
+          organization: ${{ secrets.SONAR_ORG }}
 
   # Render AND validate. A lint proves the templates parse; only rendering
   # every meaningful permutation and validating the result proves they produce
@@ -804,7 +829,7 @@ jobs:
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, conformance]
+    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, conformance]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed
