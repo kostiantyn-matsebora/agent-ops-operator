@@ -54,6 +54,11 @@ spec:
                   # the SAME Secret the Channel sends with: one bot, one token
                   name: {{ include "telegram.secretName" . }}
                   key: botToken
+            {{- with .Values.apiBase }}
+            # optional: absent takes the real host silently, unlike the three above
+            - name: TELEGRAM_API_BASE
+              value: {{ . | quote }}
+            {{- end }}
             {{- with $r.env }}
 {{ toYaml . | indent 12 }}
             {{- end }}

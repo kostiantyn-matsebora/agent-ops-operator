@@ -1,0 +1,31 @@
+{
+  "receiver": "agentops",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "fingerprint": "fp-a",
+      "labels": {"alertname": "A", "namespace": "ns1", "severity": "warning"},
+      "annotations": {"summary": "s"},
+      "startsAt": "2026-08-07T10:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://alertmanager.example.com/a"
+    },
+    {
+      "status": "resolved",
+      "fingerprint": "fp-b",
+      "labels": {"alertname": "B"},
+      "startsAt": "2026-08-07T09:00:00Z",
+      "endsAt": "2026-08-07T09:30:00Z"
+    },
+    {
+      "status": "firing",
+      "fingerprint": "fp-c",
+      "labels": {"alertname": "C"},
+      "startsAt": "2026-08-07T10:05:00Z"
+    }
+  ],
+  "groupLabels": {"alertname": "A"},
+  "commonLabels": {},
+  "externalURL": "http://alertmanager.example.com"
+}

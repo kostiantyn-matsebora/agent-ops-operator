@@ -67,6 +67,20 @@ router:
   env: []
   resources: {}
 
+# Bot API root BOTH outbound components call — the router to poll, the channel
+# adapter to send. Empty renders NOTHING and the binaries use the real host
+# (https://api.telegram.org), so a default install is byte-identical. Set it to
+# point the whole lane at a self-hosted Bot API or a test double.
+#
+# DEPLOYMENT-LEVEL ON PURPOSE. It reaches the router as TELEGRAM_API_BASE and
+# the channel adapter as the `apiBase` key of the bot Secret this bundle
+# renders — the same Secret that holds the token, so redirecting it grants
+# nothing the token did not already. It is never a Channel.spec.config field:
+# anyone able to edit a served channel could otherwise send its bot token to a
+# host of their choosing. With surface.credentials.existingSecret, add the
+# `apiBase` key to that Secret yourself.
+apiBase: ""
+
 # ---- the chat surface -------------------------------------------------------
 # Channel + chat SignalSource + the router's credential source.
 #

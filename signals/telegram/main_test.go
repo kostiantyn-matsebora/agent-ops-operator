@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -30,11 +31,18 @@ func mustUpdate(t *testing.T, raw string) tgUpdate {
 // the chat lane, a per-update fingerprint, and the reserved labels that let a
 // reply find its way back to the surface the message came from.
 func TestNormalizeChatSignal(t *testing.T) {
+	// The CANONICAL captured update, shared with the e2e pack (test-only
+	// relative read, no go.mod entry): the fake Bot API replays this exact
+	// payload and the router forwards it verbatim, so what this test pins is
+	// what the pack sends.
 	a := testAdapter(map[string]sourceConfig{
-		"tg-chat": {ChatID: "-1001", Channel: "telegram-ops"},
+		"tg-chat": {ChatID: "-1001234567890", Channel: "telegram-ops"},
 	})
-	upd := mustUpdate(t, `{"update_id":77,"message":{"text":"check the disk",
-		"chat":{"id":-1001},"from":{"id":42,"username":"operator"}}}`)
+	raw, err := os.ReadFile("../../test/fixtures/telegram-update-message.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd := mustUpdate(t, string(raw))
 
 	source, sig, ok := a.normalize(upd)
 	if !ok {

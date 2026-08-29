@@ -768,6 +768,28 @@ the old roadmap `cron` sub-struct.
 window turns a recurring job into one conversation whose later runs resume the
 agent session.
 
+**How an adapter proves it:** the contract conformance suite,
+`platform/manager/test/conformance/`, runs every adapter's BUILT BINARY against
+a fake manager and asserts the obligations above.
+
+For a channel adapter:
+
+- the long-poll and the `contract=` declaration
+- typed-message rendering
+- ack-once under a redelivered op id
+- inbound push with a `threadId`
+- listing and status
+- no relay loop
+
+For a signal adapter:
+
+- normalized emission, the bearer, and source scoping
+- a rejected post that is retried or surfaced rather than dropped
+- for a chat-originating adapter, the channel label on every signal
+
+A new adapter joins by being listed there. Nothing in its own source changes.
+See [Testing](testing.md).
+
 ## The work contract
 
 An `AgentRuntime` image must:

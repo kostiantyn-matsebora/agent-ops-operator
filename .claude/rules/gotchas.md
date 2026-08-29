@@ -112,6 +112,21 @@ all.
 - **Check the OBJECT, not the release**, when the cluster disagrees with the
   values.
 
+**AN IMAGE ID PULLED ONCE WITH CREDENTIALS MUST BE PULLED WITH THEM FOREVER
+— THE KUBELET REMEMBERS.** `KubeletEnsureSecretPulledImages` (on by default
+from Kubernetes 1.35 as k3s ships it): once an image ID was pulled through an
+`imagePullSecret`, a later pod referencing the SAME ID without matching
+credentials is made to pull it again, whatever its `imagePullPolicy` says and
+however present the image is.
+
+- **An IMPORTED image shares its ID with a pushed copy of itself**, so the e2e
+  pack's registry test pushing the stub as-is made every later stub pod pull
+  `docker.io/library/agentops-test-stub-runtime` — and fail — while `crictl
+  images` listed the image and `IfNotPresent` was set. The test pushes a
+  DERIVED image (one `LABEL` on top) with its own ID.
+- **The tell is `ErrImagePull` on an image the node visibly holds.** Before
+  suspecting the import, ask whether that ID was ever pulled with a Secret.
+
 **CILIUM ANSWERS A BACKEND-LESS SERVICE WITH EPERM, NOT ECONNREFUSED.**
 
 Under `kube-proxy-replacement: strict` the socket load balancer fails

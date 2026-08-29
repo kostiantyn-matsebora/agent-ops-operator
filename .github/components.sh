@@ -91,8 +91,13 @@ images() {
   # taken here so neither list has to restate the other, and the CONTEXT is the
   # directory in both cases — the shared recipe is reached with `-f`, so nothing
   # ever copies across a component boundary.
-  dirs="$( { find . -name Dockerfile -not -path '*/node_modules/*' -not -path './.github/*' -printf '%h\n'
-             find . -name go.mod    -not -path '*/node_modules/*' -mindepth 2 -printf '%h\n'
+  # `test/` is EXCLUDED, explicitly. The stub runtime and the fake Bot API
+  # under it carry a Dockerfile and a go.mod because they run in a cluster
+  # during the e2e pack — and the union above would otherwise publish
+  # `agentops-stubruntime` on the next release tag and hand every matrix two
+  # more components. The exclusion is asserted by a test, not trusted.
+  dirs="$( { find . -name Dockerfile -not -path '*/node_modules/*' -not -path './.github/*' -not -path './test/*' -printf '%h\n'
+             find . -name go.mod    -not -path '*/node_modules/*' -not -path './test/*' -mindepth 2 -printf '%h\n'
            } | sed 's|^\./|./|' | sort -u )"
   while IFS= read -r dir; do
     [ -n "$dir" ] || continue
@@ -119,7 +124,9 @@ images() {
 }
 
 modules() {
-  find . -name go.mod -not -path '*/node_modules/*' -mindepth 2 \
+  # test/ is excluded here too: its modules are built by the e2e pack and the
+  # conformance suite, never by the per-module CI matrix.
+  find . -name go.mod -not -path '*/node_modules/*' -not -path './test/*' -mindepth 2 \
     | sed 's|/go.mod$||; s|^\./||' | sort | jq -Rsc 'split("\n") | map(select(length > 0))'
 }
 

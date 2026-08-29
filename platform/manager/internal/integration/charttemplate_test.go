@@ -2399,3 +2399,55 @@ func defaultRuntimeDoc(out string) (string, string) {
 	}
 	return "", ""
 }
+
+// The Bot API root is configuration on the telegram bundle, and UNSET renders
+// nothing: the default install must be byte-identical to the one before the
+// value existed, or a render test on the router would be the only thing that
+// noticed an env entry appearing on every install.
+func TestTelegramAPIBaseRendersOnlyWhenSet(t *testing.T) {
+	surface := []string{
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.surface.enabled=true",
+		"--set", "telegram.surface.chatId=-100",
+		"--set", "telegram.surface.credentials.botToken=x",
+	}
+	base := helmTemplate(t, surface...)
+	if strings.Contains(base, "TELEGRAM_API_BASE") || strings.Contains(base, "apiBase:") {
+		t.Fatalf("an unset apiBase must render no env entry and no Secret key")
+	}
+	// Generated credentials differ per render, so compare the telegram
+	// bundle's own documents rather than the whole output.
+	telegramDocs := func(out string) string {
+		var keep []string
+		for _, doc := range strings.Split(out, "\n---") {
+			if strings.Contains(doc, "/charts/telegram/templates/") {
+				keep = append(keep, doc)
+			}
+		}
+		return strings.Join(keep, "\n---")
+	}
+	explicitEmpty := helmTemplate(t, append(append([]string{}, surface...), "--set", "telegram.apiBase=")...)
+	if telegramDocs(explicitEmpty) != telegramDocs(base) || telegramDocs(base) == "" {
+		t.Fatalf("an explicit empty apiBase must render the telegram bundle byte-identically to the default")
+	}
+	set := helmTemplate(t, append(append([]string{}, surface...), "--set", "telegram.apiBase=http://fake-bot-api:8081/")...)
+	for _, needle := range []string{
+		"- name: TELEGRAM_API_BASE\n              value: \"http://fake-bot-api:8081/\"",
+		"apiBase: \"http://fake-bot-api:8081/\"",
+	} {
+		if !strings.Contains(set, needle) {
+			t.Errorf("a set apiBase must render %q", needle)
+		}
+	}
+	// Never a Channel.spec.config key — that would let a channel edit move its
+	// own token.
+	if i := strings.Index(set, "kind: Channel"); i >= 0 {
+		doc := set[i:]
+		if j := strings.Index(doc, "\n---"); j >= 0 {
+			doc = doc[:j]
+		}
+		if strings.Contains(doc, "apiBase") {
+			t.Fatalf("the Channel must not carry apiBase in spec.config:\n%s", doc)
+		}
+	}
+}

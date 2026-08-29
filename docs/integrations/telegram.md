@@ -105,6 +105,17 @@ Everything below is under `telegram:`.
 | `surface.credentials.botToken` | empty | the token inline, which then lives in your values *and* the release |
 | `surface.approvers` | none | numeric user ids allowed to approve, never `@names` |
 | `surface.feedThreadId` | none | an existing topic to post unthreaded notices into |
+| `apiBase` | empty | the Bot API root both the router and the channel adapter call — a self-hosted Bot API server or a test double. Empty renders nothing and the real host is used |
+
+**`apiBase` is deployment-level on purpose.** It reaches the router as an
+environment variable and the channel adapter as the `apiBase` key of the bot
+Secret this bundle renders — never a `Channel` field, which would let a channel
+edit redirect its own token. With `existingSecret`, add the same value as the
+Secret's `apiBase` key yourself.
+
+Precedence on the channel adapter: the Secret's `apiBase` key, then this value,
+then the real host. The router polls `TELEGRAM_API_BASE` alone — it serves no
+surface and holds no Secret key.
 
 ### What things are called
 

@@ -113,6 +113,9 @@ type adapter struct {
 	mu       sync.Mutex
 	sources  map[string]*servedSource
 	reported map[string]string // last reported status per source (avoid spam)
+	// postFailing marks sources whose last post to the manager failed, so the
+	// failure is reported once and its recovery once.
+	postFailing sync.Map
 	// sessions holds the live Home Assistant session per source, for the
 	// health snapshot refresh.
 	sessions map[string]*haSession
@@ -505,18 +508,49 @@ func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 		sigs = sigs[:maxBatchPerSrc]
 	}
 	allowed, clipped := a.cap.Allow(source, sigs)
-	a.reportClipping(ctx, source, clipped)
 	if len(allowed) == 0 {
+		a.reportClipping(ctx, source, clipped)
 		return false
 	}
 	if err := a.mgr.Inbound(ctx, source, allowed); err != nil {
 		if ctx.Err() == nil {
 			log.Printf("posting %d signals for %s: %v", len(allowed), source, err)
+			// The clip first, the lost post LAST: both write the same Ready
+			// condition, and the one that stands must be the graver fact.
+			a.reportClipping(ctx, source, clipped)
+			a.reportPostFailure(ctx, source, err)
 		}
 		return false
 	}
+	// Recovery FIRST, the clip AFTER: a window still clipping re-asserts
+	// EmitCapReached on top of the recovered condition rather than under it.
+	a.reportPostRecovered(ctx, source)
+	a.reportClipping(ctx, source, clipped)
 	log.Printf("posted %d log signal(s) for %s", len(allowed), source)
 	return true
+}
+
+// reportPostFailure surfaces a rejected or unreachable manager on the source's
+// Ready condition. A signal this adapter could not hand over is otherwise a
+// silent drop behind a process that looks healthy — the one outcome the
+// contract forbids — and the emission is not replayable: the event stream
+// has moved on. So the loss is REPORTED, once per outage, where an operator
+// reads conditions; the next successful post clears it.
+func (a *adapter) reportPostFailure(ctx context.Context, source string, err error) {
+	if _, failing := a.postFailing.LoadOrStore(source, true); failing {
+		return
+	}
+	msg := "signals could not be handed to the manager and were lost: " + err.Error()
+	// Synchronous, so the failure and its recovery are ordered as they happened.
+	_ = a.mgr.ReportStatus(ctx, source, false, "PostFailed", msg)
+}
+
+// reportPostRecovered clears a reported post failure on the first success.
+func (a *adapter) reportPostRecovered(ctx context.Context, source string) {
+	if _, failing := a.postFailing.LoadAndDelete(source); !failing {
+		return
+	}
+	_ = a.mgr.ReportStatus(ctx, source, true, "AdapterReady", "posting to the manager again")
 }
 
 // reportClipping surfaces a clipped window on the source's condition. Silent
@@ -533,7 +567,8 @@ func (a *adapter) reportClipping(ctx context.Context, source string, clipped int
 	msg := fmt.Sprintf("emit cap reached: %d signal(s) clipped in the last minute — "+
 		"something is logging far faster than an agent can act on it", clipped)
 	log.Printf("%s: %s", source, msg)
-	go func() { _ = a.mgr.ReportStatus(ctx, source, false, "EmitCapReached", msg) }()
+	// Synchronous: post() orders this AFTER a recovery report on purpose.
+	_ = a.mgr.ReportStatus(ctx, source, false, "EmitCapReached", msg)
 }
 
 // runDwellFlusher refreshes each source's health view and decides pending

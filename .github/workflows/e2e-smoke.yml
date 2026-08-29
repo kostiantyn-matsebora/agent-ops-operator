@@ -1,0 +1,22 @@
+# The smoke tier ON DEMAND, ON ANY BRANCH: contract conformance and the k3s
+# smoke on the stub runtime. The same tier gates every release through
+# release.yml. A pull request runs conformance alone (ci.yml) and no cluster —
+# this is the way to run the cluster against a branch before a release.
+#
+#   gh workflow run e2e-smoke.yml --ref <branch>
+#
+# (GitHub offers a workflow for dispatch once its file is on the default
+# branch; from then on --ref runs the copy on the branch you name.)
+name: e2e-smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    uses: ./.github/workflows/e2e.yml
+    with:
+      tier: smoke

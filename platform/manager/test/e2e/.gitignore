@@ -1,0 +1,3 @@
+# per-run artifacts of the pack, never committed
+.registry/
+*.test

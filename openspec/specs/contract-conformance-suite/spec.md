@@ -1,10 +1,16 @@
-## ADDED Requirements
+# contract-conformance-suite Specification
+
+## Purpose
+TBD - created by archiving change e2e-testing. Update Purpose after archive.
+
+## Requirements
 
 ### Requirement: Adapter conformance is verified black-box, against the built binary
 A conformance suite SHALL exist that verifies an adapter implementation against
 the adapter contracts by running its **built binary** and speaking HTTP to it,
 with a fake manager standing in for the real one. The suite SHALL live in the
-root Go module.
+manager's Go module (`platform/manager/`) — the one module with dependencies,
+so it adds none and is not discovered as a component.
 
 It SHALL NOT be a package that adapter modules import. Every adapter module is
 required to have no dependency outside its own directory, and a shared test
