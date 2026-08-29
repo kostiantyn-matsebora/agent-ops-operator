@@ -28,7 +28,7 @@
 ### 6.1 Reference docs
 
 - [x] 6.1.1 `.claude/rules/build-test.md`, "Coverage, with the flags CI uses": a Python row (the `.github/scripts` unit — the venv, the `.pth` hook, the two env vars, `combine` and `xml`) and one bullet on why start-up hooking rather than `coverage run`. Verify: the table has four rows.
-- [ ] 6.1.2 The delta spec is archived into `openspec/specs/code-quality-analysis/spec.md` by `/opsx:archive` on the branch; `openspec validate --all` passes. Verify: the command exits 0.
+- [x] 6.1.2 The delta spec is archived into `openspec/specs/code-quality-analysis/spec.md` by `/opsx:archive` on the branch; `openspec validate --all` passes. Verify: the command exits 0.
 
 ### 6.2 Adopter site
 
