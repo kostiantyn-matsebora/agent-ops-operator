@@ -118,3 +118,24 @@ per commit exists and it is the one carrying coverage.
 - **WHEN** a push to `master` touches a component
 - **THEN** exactly one analysis of that commit exists for that component, and
   it carries coverage
+
+### Requirement: A component without a project fails its analysis job rather than creating one
+
+The analysis job SHALL verify that the component's project exists before
+submitting, and SHALL fail naming the component when it does not. CI SHALL
+never create a project: a project created by a submission is bound to no
+repository and decorates nothing, while being indistinguishable from one set
+up deliberately. Projects are created by a deliberate step inside the
+repository's monorepo binding.
+
+#### Scenario: A new component has no project yet
+
+- **WHEN** a component directory is added and no project exists for it
+- **THEN** its analysis job fails, the message names the component and the
+  step that creates the project, and no project is created
+
+#### Scenario: A project is created deliberately
+
+- **WHEN** the provisioning step is run for the repository
+- **THEN** every component has a project bound to the repository's monorepo,
+  and running it again creates nothing new

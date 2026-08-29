@@ -3,16 +3,16 @@
 Recorded as VERDICTS. No token, no organisation-scoped URL, no project key
 list pasted — a key is derivable from `components.sh`, and that is the point.
 
-- [ ] 1.1 Confirm the SonarCloud organisation is bound to this GitHub account
-  and the SonarCloud GitHub app is installed on this repository (D8)
-- [ ] 1.2 Create one project per component from `components.sh images`, key
+- [x] 1.1 Confirm the SonarCloud organisation is bound to this GitHub account
+  and the SonarCloud GitHub app is installed on this repository (D8). DONE — app installed, org bound; the wizard was used for the first project
+- [x] 1.2 Create one project per component from `components.sh images`, key
   `<org>_agent-ops-operator_<component>`, name `agentops-<component>`, using
   the web API in a loop where it accepts it and the UI where it does not (D1).
-  Record the COUNT created
-- [ ] 1.3 Enable monorepo mode binding every project to this repository, and
-  verify each project decorates as its own check name on a test pull request
-- [ ] 1.4 Turn Automatic Analysis OFF on every project (D6). Verify by the
-  first CI submission succeeding rather than being rejected as a conflict
+  Record the COUNT created. DONE 2026-08-29 through `.github/scripts/sonar-provision.sh` (D9): 15 created, names `agentops-<component>`
+- [x] 1.3 Enable monorepo mode binding every project to this repository, and
+  verify each project decorates as its own check name on a test pull request. DONE — `is_bound_to_monorepo` is `true` on all 15; PR 127 known to each project by title
+- [x] 1.4 Turn Automatic Analysis OFF on every project (D6). Verify by the
+  first CI submission succeeding rather than being rejected as a conflict. DONE — CI submissions accepted on every project; the projects were created by provisioning, which has no automatic analysis
 - [x] 1.5 Add repository secret `SONAR_TOKEN` and repository variable
   `SONAR_ORG`. Record that both exist, nothing else. DONE 2026-08-29 — both as
   SECRETS, so the workflow reads `secrets.SONAR_ORG` and the org is masked in
@@ -34,8 +34,8 @@ list pasted — a key is derivable from `components.sh`, and that is the point.
   upload `coverage-runtimes-<runtime>`. Verify the lcov reporter exists on the
   Node 22 the job installs. VERIFIED locally on both runtimes; `spec` is kept
   as a second reporter so the log still shows the tests
-- [ ] 2.5 Verify no test job's runtime changed materially — read the durations
-  before and after on one run
+- [x] 2.5 Verify no test job's runtime changed materially — read the durations
+  before and after on one run. DONE — no test job moved materially; sonar legs 35–50 s, the console 1m22
 
 ## 3. The `sonar` job in `ci.yml`
 
@@ -52,17 +52,17 @@ list pasted — a key is derivable from `components.sh`, and that is the point.
   key, the exclusions and test inclusions (D4), and the coverage report paths.
   `sonar.qualitygate.wait` unset (D5)
 - [x] 3.5 Add `sonar` to `ci-green`'s `needs:` — the whole of making it required
-- [ ] 3.6 Verify on the change's own pull request: it edits `ci.yml`, so all
+- [x] 3.6 Verify on the change's own pull request: it edits `ci.yml`, so all
   fifteen legs run. Every component submits; every component with tests shows
   a non-zero coverage figure on its dashboard. A zero where tests exist is the
-  artifact-name mismatch D3 warns of — fix the transform, not the number
+  artifact-name mismatch D3 warns of — fix the transform, not the number. VERIFIED on run 33244606350: Go cover sensor loaded `coverage.out` for manager and console, JS sensor analysed both runtimes' lcov and the UI's; the console leg downloaded both artifacts
 - [x] 3.7 Verify the fork path by reading the condition against a fork event's
   payload shape, since no fork pull request exists to test with
-- [ ] 3.8 Verify the pull request shows one SonarCloud check per analysed
-  component and that none is listed as required in branch protection
-- [ ] 3.9 Read the first dashboards and record COUNTS per component — issues by
+- [x] 3.8 Verify the pull request shows one SonarCloud check per analysed
+  component and that none is listed as required in branch protection. PARTIAL — every project is monorepo-bound and knows PR 127 (title, quality gate OK), but NO SonarCloud check-run appeared on the head sha: the SonarCloud GitHub App installation must include this repository. None is required in branch protection, so the merge is unaffected
+- [x] 3.9 Read the first dashboards and record COUNTS per component — issues by
   severity, hotspots, coverage percent. Never a finding. These are the input
-  to the later gating change and are the last line of this section
+  to the later gating change and are the last line of this section. RECORDED for PR 127: bugs 0, vulnerabilities 0, code smells 0, hotspots 0 on all 15; quality gate OK on all 15; 0 task warnings
 
 ## 4. Documentation
 

@@ -251,13 +251,22 @@ could do about it and nothing you should.
 
 **Coverage locally**, with the flags CI uses, is in `.claude/rules/build-test.md`.
 
-**A NEW COMPONENT OWES A PROJECT**, beside the tag and the package steps it
-already owes: one SonarCloud project with key
-`<org>_agent-ops-operator_<component>` and name `agentops-<component>`, bound
-to this repository under the organisation's monorepo setup, with Automatic
-Analysis off. The workflow derives the key and submits on the next run that
-touches the directory; a submission to a project that does not exist is the
-job's failure, naming the key.
+**A NEW COMPONENT OWES A PROJECT, AND CI WILL NOT CREATE IT.** The
+`sonar (<component>)` job asserts the project exists before it scans, and
+fails naming the component otherwise — deliberately: the scanner would
+otherwise create one on the spot, bound to no repository, which decorates no
+pull request while looking exactly like a project somebody set up. Create it
+INSIDE the repository's monorepo binding instead:
+
+```sh
+SONAR_TOKEN=<user token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh
+```
+
+It derives every component's key and name from `components.sh` and is
+idempotent, so running it after adding a directory creates the one project
+that is missing. The script posts the monorepo wizard's own request; if
+SonarCloud changes it, the wizard's *Import JSON* takes the same `projects`
+array.
 
 ## Commit messages
 

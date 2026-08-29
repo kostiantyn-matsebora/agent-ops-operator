@@ -185,6 +185,21 @@ the scanner needs no GitHub permission, and the app's are its own.
 `fetch-depth: 0` on the checkout, because new-code detection and blame need
 the history; the `discover` job carries the same comment for the same reason.
 
+### D9. The job refuses a project that does not exist, and never provisions one
+
+Found on the first run, not planned. The scanner auto-provisions any key it
+cannot find when the token may create projects — and a project created that
+way is bound to NO repository: no pull request decoration, no monorepo
+membership, while looking exactly like one that was set up. Fifteen of those
+were created by the first run, deleted, and created again by the next push
+before the check existed.
+
+So the job asserts the project exists before scanning and fails naming the
+component otherwise. Creation is a deliberate step, `.github/scripts/sonar-provision.sh`,
+which posts the monorepo wizard's own request — the public
+`api/projects/create` makes the same unbound project the scanner does.
+`is_bound_to_monorepo` is how the result was verified: `true` on all fifteen.
+
 ## Risks / Trade-offs
 
 - **[Fifteen projects to create by hand]** → SonarCloud's web API
