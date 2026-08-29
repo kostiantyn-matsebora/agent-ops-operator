@@ -1,6 +1,59 @@
 ## 1. Coverage across packages (design D1)
 
 - [ ] 1.1 Record the BEFORE: every component's coverage from `api/measures/component?metricKeys=coverage`, as a table of numbers in this file's task 1.1 (no identifier, no url — the org is a secret). Verify: fourteen rows, one per component `components.sh images` lists.
+
+  **OPEN — the API read needs the user's token.** `SONAR_TOKEN` and
+  `SONAR_ORG` exist as repository secrets and are write-only, so no session
+  can read the dashboard's numbers without being handed one. What follows is
+  the LOCAL measurement of the same runs CI feeds the analysis from, produced
+  in the `golang:1.25` container on 2026-08-29, and it is not a substitute
+  for the read-back: SonarCloud applies its own exclusions and counts a file
+  absent from the profile as uncovered, so its per-component figure is at or
+  below each of these.
+
+  **`components.sh images` lists FIFTEEN, not fourteen.** The verify clause
+  is off by one — the archived `sonarcloud-analysis` recorded fifteen
+  projects created — and is corrected here rather than met by dropping a row.
+
+  | Component | Toolchain | Before | With `-coverpkg` |
+  |---|---|---|---|
+  | `channel-telegram` | Go | 70.9% | 70.9% |
+  | `console` | Go | 74.8% | 74.8% |
+  | `console` | vitest (lcov, 2088/2519 lines) | 82.9% | — |
+  | `context-sync` | Go | 68.6% | 68.6% |
+  | `egress-proxy` | Go | 62.3% | 62.3% |
+  | `gateway-telegram` | Go | 56.2% | 56.2% |
+  | `housekeeping` | Go | 41.7% | 41.7% |
+  | `manager` | Go | **21.7%** | **70.7%** |
+  | `runtime-claude` | `node --test` | 99.2% of LOADED files | — |
+  | `runtime-copilot` | `node --test` | 99.6% of LOADED files | — |
+  | `runtime-ollama` | Go | 68.5% | 68.5% |
+  | `signal-alertmanager` | Go | 74.0% | 74.0% |
+  | `signal-cron` | Go | 28.7% | 28.7% |
+  | `signal-ha` | Go | 72.2% | 72.2% |
+  | `signal-k8s-events` | Go | 78.1% | 78.1% |
+  | `signal-telegram` | Go | 56.2% | 56.2% |
+
+  **THE FLAG MOVES EXACTLY ONE COMPONENT, WHICH IS THE DESIGN'S CLAIM
+  MEASURED RATHER THAN ARGUED.** Every other Go module is a single-package
+  suite, so `-coverpkg=./...` names the package it already recorded and the
+  number is byte-identical. D1's "the flag costs them nothing and stops being
+  a special case the manager alone carries" is the whole justification for
+  putting it on both steps, and this table is it.
+
+  **THE TWO NODE RUNTIMES' FIGURES ARE NOT COMPARABLE TO THE REST.**
+  `node --test --experimental-test-coverage` reports only files the suite
+  LOADED, so a module no test imports is absent rather than 0% — which is why
+  both read over 99% while their projects will not. The lcov CI submits has
+  the same shape, so the dashboard's number for these two is the one that
+  matters and this row cannot stand in for it.
+
+  **The gap the follow-up changes start from**, against the 80% condition:
+  `signal-cron` (28.7%), `housekeeping` (41.7%), `gateway-telegram` and
+  `signal-telegram` (56.2%), `egress-proxy` (62.3%), `runtime-ollama` (68.5%),
+  `context-sync` (68.6%), `channel-telegram` (70.9%), `signal-ha` (72.2%),
+  `signal-alertmanager` (74.0%), `console` (74.8% Go), `signal-k8s-events`
+  (78.1%). The manager clears it on the corrected number.
 - [x] 1.2 `.github/workflows/ci.yml`: the `operator` and `modules` test steps run `go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...`; the comment above each says why the flag is there. Verify: `grep -c 'coverpkg=./...' .github/workflows/ci.yml` prints 2.
 - [x] 1.3 In the worktree's build container, run the manager's suite with the new flags and read `go tool cover -func=coverage.out | tail -1` before and after `-coverpkg`, recording both totals in this task. Verify: the after number is higher, and packages absent from the old profile appear in the new one.
 
@@ -48,7 +101,7 @@
 ## 2. The gate, provisioned (design D2)
 
 - [x] 2.1 `.github/scripts/sonar-provision.sh`: a second stage — find or create the gate `agentops` (`api/qualitygates/list`/`create`), copy every condition of the built-in `Sonar way` from its `show` response, add `coverage LT 80`, update rather than duplicate an existing condition on the same metric, `set_as_default`, and `select` every component project from the same `components.sh` list. A 403 fails naming the permission the token lacks (*Administer Quality Gates*); the header lists it. Verify: a dry read of the script shows each step keyed by lookup, and `sh -n` passes. DONE — `sh -n` passes; every write is preceded by its lookup (`list` for the gate, the gate's own `conditions[]` for each metric, `get_by_project` for each project), and `sq` reads the status with `-w` rather than `curl -sf` so a 403 can be told from anything else and name the permission.
-- [ ] 2.2 Run the script against the organisation with the user token, then read back `api/qualitygates/show?name=agentops` and one project's `api/qualitygates/get_by_project`. Verify: seven conditions, default, every project assigned; a second run creates nothing new.
+- [ ] 2.2 **OPEN — needs the user's token, and is theirs to run.** Running the script writes to their SonarCloud organisation: it creates a gate, makes it the organisation DEFAULT and reassigns every project. That is an outward-facing change to a live service, so it is not something a session does on its own even with a credential in hand. Run the script against the organisation with the user token, then read back `api/qualitygates/show?name=agentops` and one project's `api/qualitygates/get_by_project`. Verify: seven conditions, default, every project assigned; a second run creates nothing new.
 
 ## 3. Unit tests
 
