@@ -8,7 +8,9 @@ one `mark-thread-resolved.sh` per thread, then the summary — some fifteen
 model turns, four of them re-trying a summary whose heredoc to /tmp was
 blocked. Posting is not judgement; the judgement is in the JSON this reads.
 
-stdin or a file:
+stdin or a file (`repo` and `number` may be omitted: they are read from
+`review-input.json` beside the file, in $GITHUB_WORKSPACE, or in the working
+directory, and last from $GITHUB_REPOSITORY):
   {"repo": "owner/name", "number": 111,
    "findings": [{"path": "...", "line": 12, "body": "**Claim:** ..."}],
    "replies":  [{"commentId": 123, "body": "Fixed in abc123."}],
@@ -68,8 +70,16 @@ def main() -> int:
     # nothing, and the gate failed a review that had actually run. The input
     # document the job built already names both; the model's copy is only
     # ever a restatement of it, so it is read second.
-    address = pathlib.Path("review-input.json")
-    fallback = json.loads(address.read_text()) if address.is_file() else {}
+    # The input document lives where the job wrote it: beside the posting
+    # document when one was given as a file, else the workflow's workspace,
+    # else the working directory. Named here so nothing has to guess.
+    here = pathlib.Path(args.file).resolve().parent if args.file else pathlib.Path.cwd()
+    fallback: dict = {}
+    for base in (here, pathlib.Path(os.environ.get("GITHUB_WORKSPACE", "")), pathlib.Path.cwd()):
+        address = base / "review-input.json"
+        if str(base) and address.is_file():
+            fallback = json.loads(address.read_text())
+            break
     repo = d.get("repo") or fallback.get("repo") or os.environ.get("GITHUB_REPOSITORY", "")
     number = d.get("number") or fallback.get("number")
     if not repo or number is None:
