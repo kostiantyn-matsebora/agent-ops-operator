@@ -8,9 +8,27 @@
 name: ci
 
 on:
+  # A DRAFT RUNS NOTHING. `ready_for_review` is listed because the default
+  # types do not include it, and a pull request marked ready would otherwise
+  # carry no CI until its next push. The gate is on `discover`, below, which
+  # every job needs.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [master]
+  # BY HAND, AGAINST A PULL REQUEST — the way the automatic fixing loop gets
+  # this workflow onto a commit the workflow token pushed. GitHub withholds
+  # `pull_request: synchronize` from such a push, and `workflow_dispatch` is
+  # the documented exception; the check runs it produces attach to the sha of
+  # the ref dispatched, which for a branch of this repository IS the pull
+  # request's head. The jobs that need the pull request's number read it from
+  # this input where the event would have carried it.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: The pull request number this run stands in for
+        required: true
+        type: number
 
 permissions:
   contents: read
@@ -32,6 +50,13 @@ env:
 jobs:
   # WHAT EXISTS, asked once and answered for every matrix below.
   discover:
+    # A DRAFT PULL REQUEST RUNS NOTHING — not one component, not one gate.
+    # Every job below needs this one (the path-independent gates too, for
+    # exactly this reason), so skipping it skips them all, and
+    # `ci-green` stays "expected" until the pull request is marked ready,
+    # which it cannot merge before anyway. A hand run (`workflow_dispatch`)
+    # is a person asking, and runs on a draft.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     outputs:
       modules: ${{ steps.list.outputs.modules }}
@@ -171,14 +196,17 @@ jobs:
       # STATIC ANALYSIS AND COVERAGE, here, where the checkout and the profile
       # already are. A FORK'S PULL REQUEST SKIPS IT, visibly: SONAR_TOKEN is
       # withheld from fork workflows and the scanner's 401 would read as a
-      # broken workflow. The step fails on SUBMISSION only; the quality gate is
-      # SonarCloud's own check and not required — .github/actions/sonar-scan.
+      # broken workflow. The step fails on submission AND on the quality gate's
+      # verdict, which reaches `ci-green` through this job — the gate is
+      # required, and it is the fixing loop's termination signal for the
+      # analysis half. .github/actions/sonar-scan.
       - uses: ./.github/actions/sonar-scan
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         with:
           dir: ${{ env.ENVTEST_MODULE }}
           token: ${{ secrets.SONAR_TOKEN }}
           organization: ${{ secrets.SONAR_ORG }}
+          pr: ${{ inputs.pr }}
 
   # Every OTHER module. Dependency-free by design, so these are seconds each,
   # and separate from `operator` so a module break is legible without reading an
@@ -248,6 +276,7 @@ jobs:
           dir: ${{ matrix.module }}
           token: ${{ secrets.SONAR_TOKEN }}
           organization: ${{ secrets.SONAR_ORG }}
+          pr: ${{ inputs.pr }}
 
   # The Node runtimes' unit suites. Neither ran in CI until the copilot runtime
   # arrived with 55 tests nothing executed. No npm install: the suites import
@@ -285,6 +314,7 @@ jobs:
           dir: runtimes/${{ matrix.runtime }}
           token: ${{ secrets.SONAR_TOKEN }}
           organization: ${{ secrets.SONAR_ORG }}
+          pr: ${{ inputs.pr }}
 
   # Render AND validate. A lint proves the templates parse; only rendering
   # every meaningful permutation and validating the result proves they produce
@@ -561,6 +591,7 @@ jobs:
   # them to the audience it exists to protect the tree from. `--show` prints
   # matches locally, where the fixing happens.
   publication:
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -593,6 +624,7 @@ jobs:
   # Two guards, opposite shapes, each following from its subject. Neither is a
   # template for the other.
   retired-vocabulary:
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -621,6 +653,7 @@ jobs:
   # them would fail every pull request for work it was not about, and the job
   # would be switched off within a day.
   openspec:
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -681,7 +714,14 @@ jobs:
   # agree. Two enforcement points asking one question is safe only while they
   # give one answer.
   docs-task:
+    needs: discover
     runs-on: ubuntu-latest
+    # Reading the pull request, its threads and its workflow runs is what the
+    # archive guard needs; nothing here writes.
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -699,17 +739,33 @@ jobs:
       # guard turns master red for work nobody can act on from master. The
       # squash of #127 did exactly that on 2026-08-29.
       - name: Every change this pull request finishes ends in finished test and documentation tasks
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # A hand run against a pull request carries no base sha; ask for it.
+          if [ -z "$BASE_SHA" ] && [ -n "${PR_NUMBER:-}" ]; then
+            BASE_SHA=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json baseRefOid --jq .baseRefOid || true)
+          fi
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ] \
              || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
             echo "no base commit to diff against; nothing to check"
             exit 0
           fi
           python3 .github/scripts/docs-task-guard.py --range "$BASE_SHA..$GITHUB_SHA"
+      # THE SAME QUESTION THE ARCHIVE HOOK ASKS, where the hook can be skipped:
+      # a change archived in this pull request while its automatic fixing loop
+      # is still running, or over a dispute nobody has answered, is judged
+      # here too. Fail-open where there is nothing to ask about.
+      - name: No change is archived while its fixing loop is open
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/autofix-guard.py --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER"
 
   # THE TITLE IS THE COMMIT SUBJECT, BECAUSE THE MERGE IS A SQUASH.
   #
@@ -721,14 +777,22 @@ jobs:
   # Push events skip this: there is no title to check, and `ci-green` treats a
   # skipped job as passed by having nothing to do.
   pr-title:
-    if: github.event_name == 'pull_request'
+    needs: discover
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: The title follows the commit convention
         env:
           TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ inputs.pr }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # A hand run has no event title; the pull request it stands in for does.
+          [ -n "$TITLE" ] || TITLE=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json title --jq .title)
           if printf '%s' "$TITLE" \
              | grep -qE '^(feat|fix|docs|chore|refactor|test|ci)(\([a-z0-9._/-]+\))?!?: .+'; then
             echo "ok: $TITLE"
@@ -776,7 +840,8 @@ jobs:
   # The template now writes `Refs #` — but a template is a suggestion at the
   # moment somebody is typing quickly, and this failure is silent and days late.
   pr-closes:
-    if: github.event_name == 'pull_request'
+    needs: discover
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # READING THE PULL REQUEST IS A PERMISSION, and the workflow's default is
     # `contents: read` alone. Stated here rather than inherited, so the fetch
@@ -804,11 +869,13 @@ jobs:
           # A guard whose subject is the body has to read the body. The payload
           # remains the fallback for anything without a number to ask about.
           FALLBACK_BODY: ${{ github.event.pull_request.body }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # A hand run carries no base sha; the pull request it stands in for does.
+          [ -n "$BASE_SHA" ] || BASE_SHA=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json baseRefOid --jq .baseRefOid)
           body="$RUNNER_TEMP/pr-body.md"
           if [ -n "${PR_NUMBER:-}" ] && gh pr view "$PR_NUMBER" --json body --jq .body > "$body" 2>/dev/null; then
             echo "read the pull request body as it stands now"
@@ -844,7 +911,9 @@ jobs:
 
   ci-green:
     name: ci-green
-    if: always()
+    # Never reports on a draft: a green required check on a pull request that
+    # ran nothing would be a claim.
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, conformance]
     runs-on: ubuntu-latest
     steps:

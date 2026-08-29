@@ -135,5 +135,59 @@ assert_contains "$out" "accept vocabulary: ship it"
 it "sends nothing but the thread query"
 assert_not_contains "$(cat "$GH_CALLS")" "mutation"
 
+# --mode all: THE LABELLED PULL REQUEST. Every open finding of the review's is
+# accepted by the label; a thread a previous round disputed waits for the person.
+cat > "$GH_FIXTURE.all" <<'JSON'
+{"data":{"repository":{"pullRequest":{"reviewThreads":{
+  "pageInfo":{"hasNextPage":false,"endCursor":null},
+  "nodes":[
+    {"id":"PRRT_unanswered","isResolved":false,"isOutdated":false,"path":"c.go","line":40,
+     "comments":{"nodes":[
+       {"databaseId":301,"body":"Unchecked error.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}}]}},
+    {"id":"PRRT_argued","isResolved":false,"isOutdated":false,"path":"b.go","line":3,
+     "comments":{"nodes":[
+       {"databaseId":201,"body":"Off by one.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}},
+       {"databaseId":202,"body":"No, the slice is half-open here.","authorAssociation":"OWNER","author":{"login":"a-maintainer","__typename":"User"}}]}},
+    {"id":"PRRT_disputed","isResolved":false,"isOutdated":false,"path":"d.go","line":7,
+     "comments":{"nodes":[
+       {"databaseId":401,"body":"Missing nil check.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}},
+       {"databaseId":402,"body":"<!-- autofix:disputed -->\nDisputed by the fixing step: the pointer cannot be nil here.","authorAssociation":"NONE","author":{"login":"github-actions","__typename":"Bot"}}]}},
+    {"id":"PRRT_human","isResolved":false,"isOutdated":false,"path":"e.go","line":9,
+     "comments":{"nodes":[
+       {"databaseId":501,"body":"I would rename this.","authorAssociation":"OWNER","author":{"login":"a-maintainer","__typename":"User"}}]}},
+    {"id":"PRRT_resolved","isResolved":true,"isOutdated":false,"path":"f.go","line":1,
+     "comments":{"nodes":[
+       {"databaseId":601,"body":"Dead code.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}}]}}
+  ]}}}}}
+JSON
+
+GH_FIXTURE="$GH_FIXTURE.all" out=$(run --mode all --approver an-approver)
+
+it "in --mode all, lists every open finding of the review's — unanswered and argued alike — on the strength of the label"
+assert_equals "PRRT_unanswered PRRT_argued" "$(ids)"
+assert_contains "$out" "mode: all — every open finding is accepted by the label (placed by an-approver)"
+
+it "in --mode all, each item carries id, source: review and the approver, with no reply"
+assert_contains "$(cat "$tmp/out.json")" '"id": "PRRT_unanswered"'
+assert_contains "$(cat "$tmp/out.json")" '"source": "review"'
+assert_contains "$(cat "$tmp/out.json")" '"acceptedBy": "an-approver"'
+assert_contains "$(cat "$tmp/out.json")" '"reply": ""'
+
+it "in --mode all, skips a thread a previous round disputed, counting it as awaiting the person"
+assert_contains "$out" "PRRT_disputed (d.go:7): disputed by a previous round, awaiting the person"
+
+it "in --mode all, still ignores a person's thread and a resolved one"
+assert_contains "$out" "PRRT_human (e.go:9): first comment by 'a-maintainer', not the review"
+assert_contains "$out" "PRRT_resolved (f.go:1): already resolved"
+
+it "in the default mode, the same fixture yields nothing — the label is not read here"
+GH_FIXTURE="$GH_FIXTURE.all" out=$(run)
+assert_equals "" "$(ids)"
+
+it "in every mode an item carries id and source, so the lander keys on one field"
+GH_FIXTURE="$tmp/threads.json"; out=$(run)
+assert_contains "$(cat "$tmp/out.json")" '"id": "PRRT_accepted"'
+assert_contains "$(cat "$tmp/out.json")" '"source": "review"'
+
 rm -rf "$tmp"
 summary

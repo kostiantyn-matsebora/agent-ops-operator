@@ -257,15 +257,18 @@ analysis is the LAST STEP of the job that built and tested the component —
 tests left it and no suite runs twice. The dashboards are the organisation's
 page on [sonarcloud.io](https://sonarcloud.io/), one project per component.
 
-**What fails your pull request:** the scanner not running or not submitting.
-That fails the component's job, which reports through `ci-green` like every
-gate.
-
-**What does not:** the quality gate's verdict on the submitted analysis. It
-is SonarCloud's own check on the pull request, per component, and branch
-protection does not require it — a gate that goes red for whoever opens the
-next unrelated pull request is one somebody switches off. Gating it is a
-later change.
+**What fails your pull request:** the scanner not running or not submitting,
+AND the quality gate's verdict on the submitted analysis. The scan step waits
+on the gate (`sonar.qualitygate.wait`) and fails the component's job on
+`ERROR`, which reports through `ci-green` like every gate. It was measured
+before it was required — the first change that submitted analyses deferred
+the gate until the counts were known — and it is required now because it is
+the termination signal of the automatic fixing loop (below, *Pull requests*):
+a loop that ended while the gate was red would end with the merge blocked by
+the one check it never read. The verdict is also SonarCloud's own check on the
+pull request, per component, for reading; nothing in branch protection names
+that check, so a hand run of `ci.yml` (`gh workflow run ci.yml -f pr=<n>`)
+carries the same gate.
 
 **WHAT THE GATE REQUIRES:** every project is assigned a gate named `agentops`
 — the built-in `Sonar way` new-code conditions, copied verbatim, plus one
@@ -274,14 +277,17 @@ this repository adds: **the component's OVERALL line coverage at or above
 per project by `sonar-provision.sh` (below), not clicked in a dashboard, so
 what every component is judged by is one `git show` away.
 
-**A COMPONENT UNDER 80% IS RED, AND THAT IS THE POINT.** Its gate fails on
-its dashboard and on every pull request that touches it, until the change
-that brings its coverage up lands. Nothing is blocked by it — see *what does
-not*, above — so a red gate on a component you did not write tests for is
-expected, and is the backlog made visible rather than a fault in your pull
-request. A gate on NEW code alone let a component sit at 27% and one at 79%
-pass identically, which is why the number the tree is asked to reach had to
-become a condition something evaluates.
+**AND THAT CONDITION IS NOT PROVISIONED YET, DELIBERATELY.** Since the
+verdict fails the component's job, a coverage condition added before a
+component reaches the threshold does not turn its dashboard red — it holds
+every pull request that touches it. Twelve of the fifteen components are
+under 80% today. So the gate stage of `sonar-provision.sh` is an act somebody
+takes when the tree is ready for it, not a side effect of adding a project,
+and until then the organisation's gate carries the new-code conditions alone.
+A gate on new code alone let a component sit at 27% and one at 79% pass
+identically, which is why the number the tree is asked to reach has to become
+a condition something evaluates — but making it evaluate before anything meets
+it is a different thing from measuring.
 
 **A pull request from a fork is analysed by nothing**, shown as a SKIPPED job:
 the scanner's token is withheld from fork workflows, so there is nothing you
@@ -391,6 +397,10 @@ The template asks three things, and they are the review:
 3. **Whether the documentation the change made untrue was updated in the same
    commit.** See above; this is not a follow-up.
 
+**A DRAFT RUNS NOTHING.** CI and the review both wait until the pull request
+is marked ready; a hand run (`gh workflow run ci.yml -f pr=<n>`) is the way to
+get CI on a draft on purpose.
+
 **CI RUNS WHAT YOUR DIFF TOUCHED, AND `ci-green` IS THE REQUIRED CHECK.** The
 jobs are derived from the tree, not listed: a change under one component builds
 and tests that component alone, and a paragraph in a markdown file runs neither
@@ -415,7 +425,7 @@ and it fails if any job that DID run failed.
 | `pr-title` | the title would not read as a commit subject |
 | `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |
 | `conformance` | an adapter's built binary does not speak the adapter contracts to a fake manager |
-| `operator`, `modules (<path>)`, `node-runtimes (<runtime>)` — the analysis step | the SonarCloud analysis could not be submitted — never on its verdict; see *Code analysis* under Build and test |
+| `operator`, `modules (<path>)`, `node-runtimes (<runtime>)` — the analysis step | the SonarCloud analysis could not be submitted, or its quality gate is `ERROR`; see *Code analysis* under Build and test |
 
 `openspec` and `docs-task` judge only what your pull request TOUCHED. A dozen changes are open
 at any time and an unfinished one is unfinished correctly, so a gate judging all
@@ -465,6 +475,18 @@ matched mechanically; dispatching needs write access; and the step that writes
 the fix cannot push, only the model-free step after it can. The full rule,
 including what the landed commit still needs from you, is
 `.claude/rules/worktree-delivery.md`.
+
+**Or approve the whole pull request for fixing, once.** The `autofix` label
+(placed by someone with write access — anyone else's is removed with a
+comment) is change-level consent: every open review finding and every open
+SonarCloud issue on the pull request is on the work list, and each is FIXED or
+DISPUTED — a dispute is a reply that stays open and mentions you. The landed
+commit is pushed through a write deploy key, so CI and the review run on it
+and the review's completion starts the next round, up to three; a round that
+changes nothing ends the loop early, and every ending is one summary comment.
+The loop never marks anything in SonarCloud, and it cannot merge. Removing the
+label stops it at the next round; an unanswered dispute holds both the merge
+and `/opsx:archive`.
 
 **Releases are the maintainer's, and they are chart-shaped.** A component tag
 (`<component>-v<semver>`) publishes one image and creates no GitHub Release; a

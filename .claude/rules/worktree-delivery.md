@@ -152,6 +152,8 @@ comment acts on everything accepted:
 | anything else, or nothing | the thread | not accepted; the thread and the code stay as they are |
 | `/fix-accepted` | a comment on the pull request | DISPATCH — one run, one commit, over everything accepted |
 | resolve the thread yourself | the thread | dismissed; the review counts it and does not raise it again |
+| the `autofix` LABEL | the pull request | APPROVED AS A WHOLE — every open finding and every open SonarCloud issue is fixed or DISPUTED by CI, round after round, no reply and no dispatch needed. Placed by the session on the OWNER's word (`gh pr edit <n> --add-label autofix`), never by default |
+| a reply under `<!-- autofix:disputed -->` | a thread (or a pull request comment, for a Sonar issue) | THE LOOP DISAGREES — the code is untouched, the thread stays open, you are mentioned. Answer it (a reply, or resolve to dismiss); nothing re-disputes it |
 
 - **THE VOCABULARY IS A FILE, MATCHED BY A PROGRAM** —
   `.github/review-triage.json`, read by `accepted-findings.py`. Whole reply,
@@ -173,10 +175,34 @@ comment acts on everything accepted:
 - **AN UNTRIAGED FINDING KEEPS ITS THREAD OPEN, AND THE MERGE BLOCKED.** That
   is the feature: a finding nobody accepted and nobody dismissed is a decision
   still owed.
-- **THE LANDED COMMIT HAS NO CI AND NO REVIEW UNTIL YOU PUSH AGAIN.** A push
-  made with the workflow token starts no workflow — GitHub withholds
-  `synchronize` from it — so the dispatch says so on the pull request. An empty
-  commit is enough.
+- **ON AN UNLABELLED PULL REQUEST THE LANDED COMMIT HAS NO CI AND NO REVIEW
+  UNTIL YOU PUSH AGAIN.** A push made with the workflow token starts no
+  `pull_request` workflow — GitHub withholds `synchronize` from it — so the
+  dispatch says so on the pull request. An empty commit is enough.
+- **ON A LABELLED ONE THE LOOP PUSHES FOR YOU, THROUGH A WRITE DEPLOY KEY.**
+  `land` pushes over SSH with `AUTOFIX_DEPLOY_KEY` — repository-scoped,
+  `contents` only, read by that model-free job and no other — so the commit
+  is an ordinary push: `ci-green` and the review run on it, and the review's
+  completion is the next round's trigger. Self-dispatching `ci.yml` was
+  measured first and REJECTED: a `workflow_dispatch` run's check runs never
+  reach the merge box (#131, `gotchas.md`). Without the secret the round
+  lands with the token and the summary says the loop cannot go on.
+- **THE LOOP IS BOUNDED AND EVERY ENDING IS ONE SUMMARY.** `MAX_ROUNDS: 3` in
+  `review-dispatch.yml`, counted from the landing comments' `<!-- autofix:round
+  N -->` markers since the label was placed — so removing and re-adding the
+  label starts the count afresh. A round that changes nothing (every item
+  disputed, or a stale patch) ends it early. The summary names what was fixed,
+  what was disputed, the rounds used and the approver.
+- **THE SECOND REVIEWER IS SONARCLOUD, AND ITS GATE IS REQUIRED.** `collect`
+  reads its open issues per component project (`sonar-issues.py`, the token in
+  the model-free job only) beside the threads; the scan step waits on the
+  quality gate and fails the component's job on `ERROR`, so it reports through
+  `ci-green`. The loop never marks anything in Sonar — a disputed issue is a
+  comment for you, and the service's state is yours to change in its UI.
+- **`/opsx:archive` IS REFUSED WHILE THE LOOP IS OPEN** — a round running, or
+  a dispute no person has answered. `autofix-guard.py`, in the same hook as
+  the documentation gate and the same CI job; it fails open on anything it
+  cannot read.
 
 ### WHAT THE MAIN CHECKOUT IS STILL FOR
 

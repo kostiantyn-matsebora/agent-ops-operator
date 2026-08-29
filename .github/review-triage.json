@@ -15,9 +15,30 @@
     "",
     "`dispatch` is the pull-request comment that starts one run over everything",
     "accepted. It is a TRIGGER: the work list is derived from the threads, and",
-    "no other text in the dispatch comment is read."
+    "no other text in the dispatch comment is read.",
+    "",
+    "`approve_label` is CHANGE-LEVEL consent, and it is the one thing here that",
+    "is not a phrase. Placed on a pull request, it means every finding the",
+    "review raises there — now and after every later push — is accepted without",
+    "a reply in its thread, and the analysis service's open issues join the work",
+    "list beside them. Who may place it is the same gate as a dispatch: write",
+    "access, read from the label event's sender; a label placed by anyone else is",
+    "removed with a visible comment. The session working the change places it on",
+    "the owner's explicit word (.claude/skills/openspec-apply-change), never by",
+    "default. WITHOUT the label nothing changes: per-thread `accept` and the",
+    "`dispatch` comment are the only consent, exactly as before.",
+    "",
+    "`dispute_marker` is the line the landing step writes at the top of a reply",
+    "when the fixing step DISPUTED a finding instead of fixing it. A later round",
+    "skips a thread carrying it (never disputed twice), and the archive guard",
+    "refuses an archive while a thread carrying it has no later comment by a",
+    "person. `round_marker` prefixes the landing step's own comments so rounds",
+    "can be counted from the pull request rather than from a store."
   ],
   "accept": ["fix it", "fix", "fix this", "agreed, fix"],
   "dispatch": ["/fix-accepted"],
-  "trailing_punctuation": ".!,"
+  "trailing_punctuation": ".!,",
+  "approve_label": "autofix",
+  "dispute_marker": "<!-- autofix:disputed -->",
+  "round_marker": "<!-- autofix:round"
 }

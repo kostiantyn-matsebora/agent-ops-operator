@@ -91,6 +91,30 @@ Implement tasks from an OpenSpec change.
    - If all done: suggest archive
    - If paused: explain why and wait for guidance
 
+8. **Once the pull request exists, ASK whether it is approved for automatic fixing — THIS REPOSITORY'S STEP**
+
+   The review posts findings as threads and SonarCloud reports issues; a pull
+   request carrying the `autofix` label has both fixed or disputed by CI, round
+   after round, with no per-thread `fix it` and no hand push
+   (`.claude/rules/worktree-delivery.md`, "The review found something").
+
+   - **The label is the OWNER'S decision about the change, given ONCE.** Ask,
+     in so many words: "Is this change approved for automatic fixing — shall I
+     label the pull request `autofix`?" Never place it by default, never infer
+     it from a green run or from the owner's silence.
+   - **On the owner's explicit word**, place it under their credentials and
+     say so:
+
+     ```bash
+     gh pr edit <n> --add-label autofix
+     ```
+
+   - **Without that word**, leave the pull request unlabelled; it is triaged
+     per thread as before.
+   - **A dispute the loop posts is a decision owed to the owner.** It arrives
+     as a thread reply (or a pull request comment, for an analysis issue)
+     mentioning them; `/opsx:archive` is refused until each is answered.
+
 **Output During Implementation**
 
 ```

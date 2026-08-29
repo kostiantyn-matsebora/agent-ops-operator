@@ -178,8 +178,22 @@ an image ships — are reported by SonarCloud, one project per component. They
 appear on that service's dashboard and in its check on the pull request, not
 in the security tab.
 
-They are reported and not gated. A hotspot is a place to review rather than a
-finding, and nothing in this project's merge protection reads the verdict.
+Hotspots are reported and not gated: a hotspot is a place to review rather
+than a finding. The quality gate's verdict IS gated — the scan step waits on
+it and fails the component's job, which reports through the required check.
+
+### The fixing loop's push credential
+
+`review-dispatch.yml` fixes review findings and SonarCloud issues on a pull
+request its owner has labelled `autofix`. The step that writes a fix runs a
+model under a read-only token and holds no other secret; the model-free step
+after it pushes the commit through a WRITE DEPLOY KEY (`AUTOFIX_DEPLOY_KEY`),
+repository-scoped and `contents` only, because a push made with the workflow
+token starts no workflow and a `workflow_dispatch` run's checks never reach
+the merge box. What that key can do is push to a branch of this repository;
+it cannot approve, merge, resolve a review thread, or change anything in
+SonarCloud. It is read by that one job, the label is the only thing that
+makes the job run, and only a person with write access can place the label.
 
 ### Context isolation
 
