@@ -47,3 +47,7 @@ that: whoever can write the Secret already holds the token.
 #### Scenario: The credential Secret may name the endpoint
 - **WHEN** a served `Channel`'s credential Secret carries an `apiBase` key
 - **THEN** that surface's token is sent to that root, since whoever can write the Secret already holds the token
+
+#### Scenario: The Secret's root wins over the process default
+- **WHEN** `TELEGRAM_API_BASE` is set AND a served `Channel`'s credential Secret carries a different `apiBase` key
+- **THEN** that surface's calls go to the Secret's root, and every other surface's to `TELEGRAM_API_BASE`

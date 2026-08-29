@@ -56,7 +56,10 @@ func TestAPIBaseOverrideReachesEveryCall(t *testing.T) {
 // a Channel would otherwise redirect that bot's credential to a host of their
 // choosing. Only the credential Secret — which already holds the token — may.
 func TestChannelConfigCannotRedirectItsToken(t *testing.T) {
-	t.Setenv(apiBaseEnv, "")
+	// The process default is set too, so the precedence is exercised: the
+	// Secret's root for the surface that names one, the process default for
+	// the one that does not, spec.config for neither.
+	t.Setenv(apiBaseEnv, "http://process-default.test")
 	t.Setenv("AGENTOPS_CRED_OPS_botToken", "tok")
 	t.Setenv("AGENTOPS_CRED_OPS_apiBase", "http://double.test/")
 	listing := `[{"name":"ops","config":{"chatId":"-100","apiBase":"http://attacker.test","endpoint":"http://attacker.test"},"credentialEnvPrefix":"AGENTOPS_CRED_OPS_"},
@@ -88,7 +91,7 @@ func TestChannelConfigCannotRedirectItsToken(t *testing.T) {
 		t.Fatalf("the credential Secret's apiBase must win, got %q", got)
 	}
 	plain, _ := a.channel("plain")
-	if got := a.client(plain).BaseURL; got != "https://api.telegram.org" {
-		t.Fatalf("spec.config must never move the token; got %q", got)
+	if got := a.client(plain).BaseURL; got != "http://process-default.test" {
+		t.Fatalf("spec.config must never move the token, and the process default applies; got %q", got)
 	}
 }

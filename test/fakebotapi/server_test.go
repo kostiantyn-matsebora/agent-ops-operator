@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -104,13 +105,11 @@ func TestGetUpdatesOffsetProtocolAndVerbatimReplay(t *testing.T) {
 	if len(updates) != 1 {
 		t.Fatalf("one queued update, got %v", updates)
 	}
-	got, _ := json.Marshal(updates[0])
-	var want, have any
+	var want any
 	_ = json.Unmarshal(fixture, &want)
-	_ = json.Unmarshal(got, &have)
-	wb, _ := json.Marshal(want)
-	if string(got) != string(wb) {
-		t.Fatalf("replayed update must be byte-identical to the fixture:\n%s\n%s", got, wb)
+	if !reflect.DeepEqual(updates[0], want) {
+		got, _ := json.Marshal(updates[0])
+		t.Fatalf("replayed update must be identical to the fixture:\n%s\n%s", got, fixture)
 	}
 	// Not yet confirmed: the same offset serves it again, as Telegram does.
 	_, out = call(t, srv, "getUpdates", map[string]any{"offset": 0, "timeout": 0})
