@@ -30,6 +30,12 @@ metadata:
 type: Opaque
 stringData:
   botToken: {{ $s.credentials.botToken | quote }}
+  {{- with .Values.apiBase }}
+  # Bot API root the channel adapter sends this token to (projected as
+  # AGENTOPS_CRED_<CHANNEL>_apiBase). Beside the token because only whoever
+  # already holds the token may decide where it goes.
+  apiBase: {{ . | quote }}
+  {{- end }}
 ---
 {{- end }}
 # The Channel CARRIES conversations — it never starts one. No wiring lives

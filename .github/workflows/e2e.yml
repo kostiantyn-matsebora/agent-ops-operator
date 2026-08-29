@@ -1,0 +1,89 @@
+# The end-to-end tiers — ONE definition, three entry points.
+#
+# This workflow is the definition and is only ever CALLED (workflow_call). The
+# entry points are thin workflows that name a tier:
+#
+#   release.yml    calls it with tier=smoke on the tagged commit, and publishes
+#                  nothing until it passes.
+#   e2e-smoke.yml  the smoke tier on demand, on any branch.
+#   e2e-full.yml   the full tier — the real-runtime lane included — nightly
+#                  when master moved, and on demand. It NEVER gates a pull
+#                  request: its lane spends real tokens and its flakiness must
+#                  not block work while it is tuned.
+#
+#   smoke a thin k3s run on the stub runtime. No secret, deterministic,
+#         bounded in wall clock. Contract conformance is NOT here: ci.yml owns
+#         that job (a minute, no cluster), a pull request meets it there, and
+#         a release requires that commit's ci to be green before this runs.
+#   full  the whole pack. The real-runtime lane SKIPS itself when
+#         CLAUDE_CODE_OAUTH_TOKEN is absent, so a fork or a repository without the
+#         secret runs every tier its access allows and fails for none of the rest.
+#
+# WHAT THIS WORKFLOW OWNS is the cluster-based jobs only. Per-module build, vet
+# and test, the envtest suite and chart lint stay in ci.yml — one definition
+# per tier, stated in both openspec capabilities.
+name: e2e
+
+on:
+  workflow_call:
+    inputs:
+      tier:
+        description: smoke or full
+        type: string
+        default: smoke
+
+permissions:
+  contents: read
+
+env:
+  MANAGER_MODULE: platform/manager
+  K3D_VERSION: v5.9.0
+
+jobs:
+  # The k3s pack. THE PACK ITSELF creates the k3d cluster, builds every image
+  # from THIS commit and imports it into the node, installs the chart from the
+  # working tree and tears the cluster down — this job only supplies the tools
+  # and runs `go test`. See platform/manager/test/e2e/harness_test.go.
+  pack:
+    name: e2e / ${{ inputs.tier }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ${{ env.MANAGER_MODULE }}
+    env:
+      E2E_TIER: ${{ inputs.tier }}
+      E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.MANAGER_MODULE }}/go.mod
+          cache: true
+      # helm, kubectl and docker (with buildx) are preinstalled on
+      # ubuntu-latest; k3d is the one tool the runner lacks. The version
+      # lines below are the record of what this run used.
+      - name: Install k3d
+        run: |
+          curl -sfL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \
+            -o /usr/local/bin/k3d && chmod +x /usr/local/bin/k3d
+          k3d version
+          helm version --short
+          kubectl version --client
+      - name: Run the pack
+        env:
+          # Absent on a pull request and on a fork — the real-runtime lane
+          # then reports itself SKIPPED. Present only when the full tier is
+          # called by e2e-full.yml, which inherits the repository's secrets.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.tier == 'full' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+        run: |
+          go test -tags e2e -count=1 -timeout 55m -v ./test/e2e/
+      # Unconditional: a failure that did not capture its own context costs a
+      # full re-run to learn anything.
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ inputs.tier }}-${{ github.run_id }}
+          path: ${{ github.workspace }}/e2e-artifacts
+          if-no-files-found: ignore

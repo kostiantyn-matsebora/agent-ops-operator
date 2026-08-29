@@ -11,6 +11,7 @@ container IS at runtime.
 | `signals/` | `cron` `alertmanager` `k8s-events` `ha` `telegram` | push to `/signal/inbound` |
 | `channels/` | `telegram` | serve `/channel/*` |
 | `gateways/` | `telegram` | speaks no agent-ops contract at all |
+| `test/` | `stubruntime` `fakebotapi` `fixtures` | **NOT components** — the e2e pack's doubles and captured payloads; `components.sh` EXCLUDES the directory, and a test asserts it |
 
 - **THE PATH IS THE PUBLISHED IDENTITY.** A PLURAL group names a kind and lends
   its singular as a prefix; a SINGULAR group is a namespace and lends nothing:
@@ -55,6 +56,22 @@ container IS at runtime.
 - **Grouping is by component type, never by what installs it.** The chart is the
   allocation view and carries that; a component moving between the parent chart
   and a bundle must not move its source.
+
+**`test/` IS OUTSIDE COMPONENT DISCOVERY, BY AN EXPLICIT `-not -path` IN
+`components.sh`.** The stub runtime and the fake Bot API each carry a
+`Dockerfile` and a `go.mod` because they run in a cluster during the e2e pack,
+and the union `components.sh` takes would otherwise publish
+`agentops-stubruntime` on the next release tag and hand every matrix two more
+components — which reads as a new component rather than as a double.
+`TestComponentsDiscoveryExcludesTheTestTree` fails the moment either is listed.
+
+- **The suites themselves live in the manager's module** —
+  `platform/manager/test/conformance/` (build tag `conformance`) and
+  `platform/manager/test/e2e/` (build tag `e2e`) — because it is the one module
+  with dependencies, and a second module would be discovered as a component.
+- **`test/fixtures/` is read by relative path from `_test.go` files** in the
+  owning modules. A test-only read adds no `go.mod` entry, so every module stays
+  self-contained in the sense that matters.
 
 **THERE IS EXACTLY ONE `docs/`, AT THE ROOT.** No component owns a docs
 directory, and a second one appearing is a broken relative path, never a new

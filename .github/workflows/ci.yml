@@ -41,6 +41,7 @@ jobs:
       chart: ${{ steps.list.outputs.chart }}
       docs: ${{ steps.list.outputs.docs }}
       site: ${{ steps.list.outputs.site }}
+      e2e: ${{ steps.list.outputs.e2e }}
     steps:
       # FULL HISTORY, because the filter below diffs against a base commit.
       # fetch-depth: 1 makes every diff report the whole tree as changed, which
@@ -82,7 +83,7 @@ jobs:
             echo "building everything: base=${BASE_SHA:-none}" >&2
             echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
             echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
-            for j in operator ui chart docs site; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
+            for j in operator ui chart docs site e2e; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
 
@@ -112,6 +113,9 @@ jobs:
             echo "chart=$(m '^(chart/|platform/manager/api/)')"
             echo "docs=$(m '^(docs/|chart/|platform/manager/api/|\.github/scripts/docs-generate)')"
             echo "site=$(m '^docs/')"
+            # Anything a running install is built from: every component
+            # group, the chart, the test doubles and the pack itself.
+            echo "e2e=$(m '^(platform/|runtimes/|signals/|channels/|gateways/|chart/|test/|\.github/workflows/e2e\.yml)')"
           } >> "$GITHUB_OUTPUT"
 
           echo "images=$(echo "$ALL_IMAGES" | jq -c --rawfile c /tmp/changed.txt '
@@ -778,10 +782,29 @@ jobs:
             --range "$BASE_SHA..$GITHUB_SHA" \
             --root .
 
+  # CONTRACT CONFORMANCE: every adapter's built binary, black-box, against a
+  # fake manager — a minute, no cluster, no secret. It is the one thing from
+  # the e2e change that gates a pull request. The k3s smoke does NOT: it runs
+  # before a release (release.yml) and on demand on any branch (e2e-smoke.yml).
+  conformance:
+    needs: discover
+    if: needs.discover.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.ENVTEST_MODULE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.ENVTEST_MODULE }}/go.mod
+          cache: true
+      - run: go test -tags conformance -count=1 -timeout 20m -v ./test/conformance/
+
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
+    needs: [discover, operator, modules, console-ui, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, conformance]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

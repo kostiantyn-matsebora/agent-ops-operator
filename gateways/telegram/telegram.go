@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -22,12 +24,33 @@ type Telegram struct {
 	BaseURL string
 }
 
-// telegramAPIBase is the real Bot API root.
+// telegramAPIBase is the real Bot API root — the DEFAULT. An adapter's
+// outbound base URL is configuration, never a constant: TELEGRAM_API_BASE
+// points this one poller at a local double, and the single-consumer rule is
+// unaffected by where it points.
 const telegramAPIBase = "https://api.telegram.org"
 
-// NewTelegram builds a client; the HTTP timeout leaves room for 20s long-polls.
-func NewTelegram(token string) *Telegram {
-	return &Telegram{Token: token, HTTP: &http.Client{Timeout: 35 * time.Second}}
+// apiBaseEnv is optional, unlike the forwarding targets and the bot token:
+// absent takes the default without comment.
+const apiBaseEnv = "TELEGRAM_API_BASE"
+
+// resolveAPIBase reads the override from the environment, defaulting to the
+// real host; a trailing slash is dropped so the method path joins cleanly.
+func resolveAPIBase() string {
+	base := strings.TrimSpace(os.Getenv(apiBaseEnv))
+	if base == "" {
+		return telegramAPIBase
+	}
+	return strings.TrimRight(base, "/")
+}
+
+// NewTelegram builds a client for the configured Bot API root; the HTTP
+// timeout leaves room for 20s long-polls.
+func NewTelegram(token, base string) *Telegram {
+	if base == "" {
+		base = telegramAPIBase
+	}
+	return &Telegram{Token: token, HTTP: &http.Client{Timeout: 35 * time.Second}, BaseURL: strings.TrimRight(base, "/")}
 }
 
 type tgResponse struct {

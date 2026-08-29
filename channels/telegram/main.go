@@ -26,9 +26,12 @@
 // SAME Secret backs the router, which needs the token to poll.
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_BOT_TOKEN (optional
-// fallback), ADAPTER_NAME (default "telegram"), LISTEN_ADDR (default ":8080" —
-// in-cluster the reconciler injects it from ChannelAdapter.spec.port),
-// projected AGENTOPS_CRED_* vars.
+// fallback), TELEGRAM_API_BASE (optional, default https://api.telegram.org —
+// the Bot API root every call goes to; a credential Secret's `apiBase` key
+// overrides it per channel, and Channel.spec.config never can), ADAPTER_NAME
+// (default "telegram"), LISTEN_ADDR (default ":8080" — in-cluster the
+// reconciler injects it from ChannelAdapter.spec.port), projected
+// AGENTOPS_CRED_* vars.
 package main
 
 import (
@@ -42,6 +45,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -71,6 +75,11 @@ type channelConfig struct {
 type servedChannel struct {
 	cfg   channelConfig
 	token string
+	// apiBase is the Bot API root this surface's token is sent to. From the
+	// credential Secret's `apiBase` key, else the process default — the same
+	// Secret that holds the token, so redirecting it grants nothing the token
+	// itself did not already.
+	apiBase string
 }
 
 type adapter struct {
@@ -78,6 +87,8 @@ type adapter struct {
 	channelType   string
 	fallbackToken string
 	listen        string
+	// apiBase is the process-level Bot API root (TELEGRAM_API_BASE resolved).
+	apiBase string
 
 	// pace spreads outbound work across the Bot API's budgets. Telegram
 	// REJECTS rather than queues, so without this a burst is lost, not delayed.
@@ -92,6 +103,52 @@ type adapter struct {
 	channels map[string]servedChannel // validated, by channel name
 	reported map[string]string        // last status message per channel (avoid spam)
 	clients  map[string]*Telegram     // bot client per token
+
+	// completed remembers the op ids this process already acted on. Ops are
+	// at-least-once — a completion the manager never received comes back
+	// under the SAME id — and a message posted twice cannot be unposted, so
+	// a redelivery is acknowledged again and acted on NOT AT ALL. Bounded:
+	// the manager reclaims within minutes, so a few hundred ids cover it.
+	completed *completedOps
+}
+
+// completedOps is a bounded FIFO set of op ids.
+type completedOps struct {
+	mu    sync.Mutex
+	ids   map[string]string // op id → thread id it completed with
+	order []string
+	limit int
+}
+
+func newCompletedOps(limit int) *completedOps {
+	return &completedOps{ids: map[string]string{}, limit: limit}
+}
+
+// seen reports whether id already completed, and the threadId it answered.
+func (c *completedOps) seen(id string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tid, ok := c.ids[id]
+	return tid, ok
+}
+
+func (c *completedOps) add(id, threadID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.ids[id]; ok {
+		return
+	}
+	c.ids[id] = threadID
+	c.order = append(c.order, id)
+	for len(c.order) > c.limit {
+		delete(c.ids, c.order[0])
+		c.order = c.order[1:]
+	}
+	// Re-slicing from the front keeps the whole backing array alive; copy it
+	// down once it has grown to twice what is kept.
+	if cap(c.order) > 2*c.limit {
+		c.order = append(make([]string, 0, c.limit), c.order...)
+	}
 }
 
 // servedChannelList snapshots the validated channels, deduplicated by chat: one
@@ -146,12 +203,14 @@ func main() {
 		mgr:           NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
 		channelType:   channelType,
 		fallbackToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+		apiBase:       resolveAPIBase(""),
 		listen:        listen,
 		pace:          newPacer(),
 		menu:          newMenu(),
 		channels:      map[string]servedChannel{},
 		reported:      map[string]string{},
 		clients:       map[string]*Telegram{},
+		completed:     newCompletedOps(1024),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -197,9 +256,10 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 	for _, info := range infos {
 		var cfg channelConfig
 		problem := ""
-		token := ""
+		token, apiBase := "", ""
 		if info.CredentialEnvPrefix != "" {
 			token = os.Getenv(info.CredentialEnvPrefix + "botToken")
+			apiBase = os.Getenv(info.CredentialEnvPrefix + "apiBase")
 		}
 		if token == "" {
 			token = a.fallbackToken
@@ -231,7 +291,7 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 			a.reported[info.Name] = "ok"
 			a.mu.Unlock()
 		}
-		next[info.Name] = servedChannel{cfg: cfg, token: token}
+		next[info.Name] = servedChannel{cfg: cfg, token: token, apiBase: a.baseFor(apiBase)}
 	}
 	a.mu.Lock()
 	a.channels = next
@@ -245,15 +305,30 @@ func (a *adapter) channel(name string) (servedChannel, bool) {
 	return sc, ok
 }
 
-// client returns (caching) the Bot API client for a token.
-func (a *adapter) client(token string) *Telegram {
+// baseFor resolves a channel's Bot API root: its credential Secret's value,
+// else the process default.
+func (a *adapter) baseFor(fromSecret string) string {
+	if b := strings.TrimRight(strings.TrimSpace(fromSecret), "/"); b != "" {
+		return b
+	}
+	return a.apiBase
+}
+
+// client returns (caching) the Bot API client for a served channel — one per
+// token at the default root, keyed token@root where a surface names its own.
+func (a *adapter) client(sc servedChannel) *Telegram {
+	base := sc.apiBase // resolved by baseFor when the channel was admitted
+	key := sc.token
+	if base != a.baseFor("") {
+		key = sc.token + "@" + base
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if c := a.clients[token]; c != nil {
+	if c := a.clients[key]; c != nil {
 		return c
 	}
-	c := NewTelegram(token)
-	a.clients[token] = c
+	c := NewTelegram(sc.token, base)
+	a.clients[key] = c
 	return c
 }
 
@@ -289,7 +364,19 @@ func (a *adapter) opsLoop(ctx context.Context) {
 		// The claim window is the manager's to state and ours to respect: every
 		// Bot API call this op makes shares one retry budget, bounded well
 		// inside it.
+		// A redelivered id is answered as it was answered before, and the
+		// transport is not touched again: the effect happened once.
+		if tid, done := a.completed.seen(op.ID); done {
+			log.Printf("op %s redelivered; acknowledging without repeating it", op.ID)
+			if err := a.mgr.CompleteOp(ctx, op.ID, tid, ""); err != nil && ctx.Err() == nil {
+				log.Printf("complete op %s: %v", op.ID, err)
+			}
+			continue
+		}
 		threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
+		if opErr == "" {
+			a.completed.add(op.ID, threadID)
+		}
 		if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
 			log.Printf("complete op %s: %v", op.ID, err)
 		}
@@ -322,7 +409,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			return "", fmt.Sprintf("channel %s is not served (missing/invalid config or credentials)", op.Channel)
 		}
 	}
-	tg := a.client(sc.token)
+	tg := a.client(sc)
 	switch op.Kind {
 	case "ensure-topic":
 		if op.Topic == nil {

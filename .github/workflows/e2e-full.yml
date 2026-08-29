@@ -1,0 +1,68 @@
+# The full tier: every lane, the real agent runtime with a real credential
+# included. NIGHTLY IF MASTER MOVED, and on demand. It gates NOTHING — its
+# lane spends tokens and its flakiness must not block work while it is tuned.
+#
+# The credential is CLAUDE_CODE_OAUTH_TOKEN — the repository secret the review
+# workflow already runs on, and what the claude bundle projects into the
+# runtime; there is no second credential kind. Without it the real-runtime
+# lane reports itself skipped and everything else still runs.
+#
+# "If master moved": a scheduled run compares the commit it would test with
+# the one the last SUCCESSFUL full run tested, and skips when they are the
+# same — a night with no change is a night with nothing to learn and tokens
+# to spend. A dispatched run always runs.
+#
+#   gh workflow run e2e-full.yml
+#
+# Cadence: the cron below and nowhere else; docs/testing.md names this file.
+name: e2e-full
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-full
+  cancel-in-progress: false
+
+jobs:
+  changed:
+    name: master moved since the last full run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then
+            echo "dispatched: running regardless" >&2
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/e2e-full.yml/runs?status=success&branch=${GITHUB_REF_NAME}&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""')
+          if [ "$last" = "$GITHUB_SHA" ]; then
+            echo "master is still at $GITHUB_SHA, which the last successful full run tested — nothing to learn tonight" >&2
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "master moved: last tested ${last:-nothing}, now $GITHUB_SHA" >&2
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  full:
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
+    uses: ./.github/workflows/e2e.yml
+    with:
+      tier: full
+    secrets: inherit
