@@ -19,11 +19,11 @@ jobs:
         run: |
           set -u
           api() { curl -s -u "$SONAR_TOKEN:" "$@"; }
-          mask() { sed "s/$SONAR_ORG/ORG/g"; }
-          echo "== monorepo membership and PR #127 measures (bound, coverage, bugs, vulns, smells, hotspots)"
-          for key in "$SONAR_PROJECT_KEY" $(./.github/components.sh images | jq -r --arg o "$SONAR_ORG" '.[] | $o + "_agent-ops-operator_" + .component); do
+          F='[.component.measures[]? | .metric + "=" + (.value // .period.value // "-")] | join(",")'
+          echo "== monorepo membership and PR 127 measures"
+          keys="$SONAR_PROJECT_KEY $(./.github/components.sh images | jq -r --arg o "$SONAR_ORG" '.[] | $o + "_agent-ops-operator_" + .component' | tr '\n' ' ')"
+          for key in $keys; do
             bound=$(api "https://sonarcloud.io/api/alm_integration/is_bound_to_monorepo?project=$key" | jq -r '.isBoundToMonorepo')
-            m=$(api "https://sonarcloud.io/api/measures/component?component=$key&pullRequest=127&metricKeys=new_coverage,coverage,bugs,vulnerabilities,code_smells,security_hotspots,new_lines" \
-              | jq -r '[.component.measures[]? | "\(.metric)=\(.value // .period.value // "-")"] | join(" ")')
-            printf '%s\t%s\t%s\n' "$bound" "$(echo "$key" | mask)" "$m"
+            m=$(api "https://sonarcloud.io/api/measures/component?component=$key&pullRequest=127&metricKeys=new_coverage,bugs,vulnerabilities,code_smells,security_hotspots,new_lines" | jq -r "$F")
+            echo "$bound $key $m" | sed "s/$SONAR_ORG/ORG/g"
           done
