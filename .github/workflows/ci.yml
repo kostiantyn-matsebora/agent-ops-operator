@@ -8,7 +8,12 @@
 name: ci
 
 on:
+  # A DRAFT RUNS NOTHING. `ready_for_review` is listed because the default
+  # types do not include it, and a pull request marked ready would otherwise
+  # carry no CI until its next push. The gate is on `discover`, below, which
+  # every job needs.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [master]
   # BY HAND, AGAINST A PULL REQUEST — the way the automatic fixing loop gets
@@ -45,6 +50,12 @@ env:
 jobs:
   # WHAT EXISTS, asked once and answered for every matrix below.
   discover:
+    # A DRAFT PULL REQUEST RUNS NOTHING — not one component, not one gate.
+    # Every job below needs this one, so skipping it skips them all, and
+    # `ci-green` stays "expected" until the pull request is marked ready,
+    # which it cannot merge before anyway. A hand run (`workflow_dispatch`)
+    # is a person asking, and runs on a draft.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     outputs:
       modules: ${{ steps.list.outputs.modules }}

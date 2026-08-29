@@ -372,6 +372,10 @@ The template asks three things, and they are the review:
 3. **Whether the documentation the change made untrue was updated in the same
    commit.** See above; this is not a follow-up.
 
+**A DRAFT RUNS NOTHING.** CI and the review both wait until the pull request
+is marked ready; a hand run (`gh workflow run ci.yml -f pr=<n>`) is the way to
+get CI on a draft on purpose.
+
 **CI RUNS WHAT YOUR DIFF TOUCHED, AND `ci-green` IS THE REQUIRED CHECK.** The
 jobs are derived from the tree, not listed: a change under one component builds
 and tests that component alone, and a paragraph in a markdown file runs neither
