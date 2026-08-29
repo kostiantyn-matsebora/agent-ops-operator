@@ -93,11 +93,28 @@ func (c *Cluster) Helm(ctx context.Context, args ...string) (string, error) {
 }
 
 // Import loads locally built images into the node so they are never pulled.
+//
+// ONE IMAGE PER CALL, RETRIED. k3d 5.9 importing a dozen images in one call
+// deadlocked inside itself on a hosted runner ("all goroutines are asleep")
+// after passing three times with the same list; per-image calls keep a
+// single hang from taking the whole run, and a retry rides out the flake.
 func (c *Cluster) Import(ctx context.Context, images ...string) error {
-	args := append([]string{"image", "import", "-c", c.Name, "-m", "direct"}, images...)
-	cmd := exec.CommandContext(ctx, "k3d", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("k3d image import: %v\n%s", err, out)
+	for _, image := range images {
+		var last error
+		for attempt := 0; attempt < 3; attempt++ {
+			cmd := exec.CommandContext(ctx, "k3d", "image", "import", "-c", c.Name, "-m", "direct", image)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				last = nil
+				break
+			}
+			last = fmt.Errorf("k3d image import %s (attempt %d): %v\n%s", image, attempt+1, err, out)
+			fmt.Fprintln(os.Stderr, last)
+			time.Sleep(5 * time.Second)
+		}
+		if last != nil {
+			return last
+		}
 	}
 	return nil
 }
@@ -177,8 +194,14 @@ func (c *Cluster) Dump(dir string) {
 		"agentprofiles,agentruntimes,channels,channeladapters,conversations,mcpconfigs,mcptoolsets,pipelines,signaladapters,signalsources",
 		"-o", "yaml")
 	write("helm-values.yaml", "-n", Namespace, "get", "secret", "-l", "owner=helm", "-o", "name")
-	out, _ := c.Kubectl(ctx, "-n", Namespace, "get", "pods", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
-	for _, pod := range strings.Fields(out) {
+	// Pod NAMES only: kubectl's combined output can carry a warning line, and
+	// an artifact upload refuses a filename with a colon in it.
+	out, _ := c.Kubectl(ctx, "-n", Namespace, "get", "pods", "-o", "name")
+	for _, line := range strings.Fields(out) {
+		pod, ok := strings.CutPrefix(line, "pod/")
+		if !ok || strings.ContainsAny(pod, ":/ ") {
+			continue
+		}
 		write("log-"+pod+".txt", "-n", Namespace, "logs", pod, "--all-containers", "--tail=2000")
 		write("log-"+pod+"-previous.txt", "-n", Namespace, "logs", pod, "--all-containers", "--previous", "--tail=500")
 	}
