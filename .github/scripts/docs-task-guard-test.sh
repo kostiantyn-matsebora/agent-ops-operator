@@ -123,10 +123,12 @@ mkdir -p "$r/.github/scripts"; cp "$guard" "$r/.github/scripts/"
 echo seed > "$r/README.md"; git -C "$r" add .; git -C "$r" commit -qm seed
 base=$(git -C "$r" rev-parse HEAD)
 
-plan() {  # plan <name> <implementation-state> <docs-state>
+plan() {  # plan <name> <implementation-state> <docs-state> [test-state]
   local d="$r/openspec/changes/$1"; mkdir -p "$d"
   { printf '## 1. The work\n\n- [%s] 1.1 do the thing\n\n' "$2"
-    printf '## 2. Documentation\n\n- [%s] 2.1 docs/concepts.md\n' "$3"; } > "$d/tasks.md"
+    printf '## 2. Unit tests\n\n- [%s] 2.1 cover it\n\n' "${4:-x}"
+    printf '## 3. E2E tests\n\n- [%s] 3.1 not applicable, nothing a cluster decides\n\n' "${4:-x}"
+    printf '## 4. Documentation\n\n- [%s] 4.1 docs/concepts.md\n' "$3"; } > "$d/tasks.md"
 }
 
 ci() { (cd "$r" && python3 .github/scripts/docs-task-guard.py --range "$base..HEAD" --root . 2>&1); }
@@ -151,10 +153,33 @@ plan proposed ' ' ' '
 git -C "$r" add -A; git -C "$r" commit -qm "propose"
 check "a proposal is pending, not failed" 0 "pending  proposed"
 
+# THE WORK IS DONE AND THE TESTS ARE NOT. Tests are owed one section up from
+# documentation and the gate reads them the same way -- and a change that has
+# only its tests left is still pending, not failed, because tests ARE work.
+plan proposed 'x' ' ' ' '
+git -C "$r" add -A; git -C "$r" commit -qm "implement"
+check "a change with its tests still open is pending, not failed" 0 "pending  proposed"
+
 # THE WORK IS DONE AND THE DOCS ARE NOT. This is what the rule is for.
 plan proposed 'x' ' '
-git -C "$r" add -A; git -C "$r" commit -qm "implement"
+git -C "$r" add -A; git -C "$r" commit -qm "test"
 check "a finished change with unticked docs FAILS" 1 "FAILED   proposed"
+
+# Finish it, so the cumulative range stops carrying its failure.
+plan proposed 'x' 'x'
+git -C "$r" add -A; git -C "$r" commit -qm "document"
+check "a finished change with everything ticked is ok" 0 "ok       proposed"
+
+# A FINISHED CHANGE PLANNED WITHOUT TEST SECTIONS FAILS AT FINISH, and only
+# there: a proposal in the old shape is pending, because ten changes were in
+# flight in that shape when the test sections were added.
+d="$r/openspec/changes/untested"; mkdir -p "$d"
+printf '## 1. The work\n\n- [ ] 1.1 x\n\n## 2. Documentation\n\n- [ ] 2.1 docs\n' > "$d/tasks.md"
+git -C "$r" add -A; git -C "$r" commit -qm "untested proposal"
+check "a proposal in the pre-tests shape is pending" 0 "pending  untested"
+printf '## 1. The work\n\n- [x] 1.1 x\n\n## 2. Documentation\n\n- [x] 2.1 docs\n' > "$d/tasks.md"
+git -C "$r" add -A; git -C "$r" commit -qm "untested finished"
+check "a finished change with no test sections FAILS" 1 "FAILED   untested"
 
 # STRUCTURE IS JUDGED WHATEVER THE PHASE: a task list whose last section is not
 # documentation is malformed on the day it is written, and that is the cheapest

@@ -55,6 +55,23 @@ rules:
 
   tasks:
     - >-
+      THE TWO SECTIONS BEFORE THE LAST ONE MUST BE TESTS, in this order: a
+      dedicated UNIT TESTS section, then a dedicated E2E TESTS section. Each is
+      its own numbered section, not a bullet under the task it verifies — a
+      test line appended to "implement X" is ticked with X and never written.
+    - >-
+      The unit-test section covers what the change did: `go test ./...` in
+      every module it touched, `node --test` in a Node runtime, the chart's
+      render tests for a template, the script suite for a workflow script.
+    - >-
+      The e2e-test section is owed EVEN WHERE IT DOES NOT APPLY. Where a
+      cluster decides something the change touched — the kubelet, RBAC, an
+      informer, a pod's lifecycle, context continuity — the section adds or
+      extends a lane in platform/manager/test/e2e/ and runs the pack. Where
+      nothing a cluster decides changed, the section holds ONE task stating
+      why, and it is ticked. An absent section and a forgotten one look
+      identical; a stated "not applicable" is a claim a reviewer can dispute.
+    - >-
       THE LAST SECTION MUST BE A DEDICATED DOCUMENTATION SECTION. Not a bullet
       inside another task, not a follow-up, not "docs later" — its own numbered
       section, and the final one before the change is finished.

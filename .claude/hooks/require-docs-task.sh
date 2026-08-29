@@ -2,7 +2,9 @@
 # REFUSE TO ARCHIVE A CHANGE WHOSE DOCUMENTATION TASK IS NOT DONE.
 #
 # `.claude/rules/documentation.md` says every change ends with a dedicated
-# documentation section covering BOTH the reference docs and the adopter site.
+# documentation section covering BOTH the reference docs and the adopter site,
+# and `.claude/rules/change-tests.md` says the two sections before it are unit
+# tests and e2e tests, ticked. One gate, three sections, one script below.
 # A rule stated in prose is followed until the evening someone is tired, and the
 # cost lands on a reader weeks later meeting a page describing behaviour that no
 # longer exists.
@@ -94,7 +96,7 @@ $message
 
 Archiving is the point of no return — the deltas fold into the specs and nobody
 revisits the change. Finish these, or say explicitly that you are archiving with
-documentation outstanding and why.
-See .claude/rules/documentation.md.
+tests or documentation outstanding and why.
+See .claude/rules/documentation.md and .claude/rules/change-tests.md.
 EOF
 exit 2

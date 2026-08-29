@@ -68,7 +68,7 @@ TABLE: list[tuple[str, list[str]]] = [
     ("docs/assets/css/**", ["palette-and-mark"]),
     ("docs/**", ["documentation", "terminology", "docs/CLAUDE.md"]),
     (".claude/**", ["authoring", "terminology"]),
-    ("openspec/**", ["authoring", "terminology", "documentation"]),
+    ("openspec/**", ["authoring", "terminology", "documentation", "change-tests"]),
     (".github/components.sh", ["structure"]),
     (".github/workflows/**", ["structure"]),
     ("**/Dockerfile", ["structure"]),
