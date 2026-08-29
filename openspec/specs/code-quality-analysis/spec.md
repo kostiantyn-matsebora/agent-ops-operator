@@ -122,20 +122,30 @@ per commit exists and it is the one carrying coverage.
 - **THEN** exactly one analysis of that commit exists for that component, and
   it carries coverage
 
-### Requirement: A component without a project fails its analysis job rather than creating one
+### Requirement: A missing project is created inside the monorepo binding, never by a submission
 
 The analysis step SHALL verify that the component's project exists before
-submitting, and SHALL fail naming the component when it does not. CI SHALL
-never create a project: a project created by a submission is bound to no
-repository and decorates nothing, while being indistinguishable from one set
-up deliberately. Projects are created by a deliberate step inside the
-repository's monorepo binding.
+submitting. When it does not, the step SHALL create it through the same
+deliberate provisioning path a person would use — inside the repository's
+monorepo binding, so it is bound to the repository and decorates pull
+requests — and SHALL verify it exists before submitting. A project SHALL
+never be created by the submission itself: one created that way is bound to
+no repository and decorates nothing, while being indistinguishable from one
+set up deliberately. Provisioning SHALL accept only names the repository
+owns — its components and its named non-image units — so a mistyped name
+creates nothing.
 
 #### Scenario: A new component has no project yet
 
 - **WHEN** a component directory is added and no project exists for it
-- **THEN** the job that tested it fails, the message names the component and
-  the step that creates the project, and no project is created
+- **THEN** the job that tested it provisions the project inside the monorepo
+  binding, says so, and analyses the component under it
+
+#### Scenario: Provisioning did not produce the project
+
+- **WHEN** the provisioning call returns and the project still does not exist
+- **THEN** the job fails naming the component and the provisioning script,
+  and nothing is submitted
 
 #### Scenario: A project is created deliberately
 

@@ -38,5 +38,32 @@ suite.
 
 - **WHEN** the unit's project does not exist on the analysis service
 - **THEN** the job creates it inside the repository's monorepo binding before
-  analysing — bound to the repository, so it decorates pull requests — and
-  never leaves it to the scanner's own provisioning, which binds to nothing
+  analysing, exactly as for a component (the MODIFIED requirement below) —
+  never through the scanner's own provisioning, which binds to nothing
+
+## MODIFIED Requirements
+
+### Requirement: A component without a project fails its analysis job rather than creating one
+
+The analysis step SHALL verify that the component's project exists before
+submitting. When it does not, the step SHALL create it through the same
+deliberate provisioning path a person would use — inside the repository's
+monorepo binding, so it is bound to the repository and decorates pull
+requests — and SHALL verify it exists before submitting. A project SHALL
+never be created by the submission itself: one created that way is bound to
+no repository and decorates nothing, while being indistinguishable from one
+set up deliberately. Provisioning SHALL accept only names the repository
+owns — its components and its named non-image units — so a mistyped name
+creates nothing.
+
+#### Scenario: A new component has no project yet
+
+- **WHEN** a component directory is added and no project exists for it
+- **THEN** the job that tested it provisions the project inside the monorepo
+  binding, says so, and analyses the component under it
+
+#### Scenario: Provisioning did not produce the project
+
+- **WHEN** the provisioning call returns and the project still does not exist
+- **THEN** the job fails naming the component and the provisioning script,
+  and nothing is submitted

@@ -70,8 +70,16 @@ baseline per push to master wants.
 **D5 — `docs-task` loses the suite and nothing else.** The guard step is the
 job's purpose; the suite was there because it had no home.
 
-**D6 — provisioning appends one entry.** The `projects` array is the
-component list plus `{scripts}`; the same call, same idempotence.
+**D6 — provisioning appends one entry, and CI calls it for a missing
+project.** `sonar-provision.sh` takes names as a filter over its own list —
+the components plus `scripts` — and the analysis step, finding no project,
+runs it with the job's token and checks again before scanning. The
+published requirement "CI never creates a project" is MODIFIED to "never by
+a submission": what it guarded against was the scanner's auto-provisioning,
+which binds to nothing, and the monorepo call from CI is the same deliberate
+path a person takes. Alternative rejected: a person running the script once
+per new unit — the first run of every new component failed on it, and a
+failure whose fix is "somebody with a token" is a step somebody forgets.
 
 ## Risks / Trade-offs
 
@@ -82,6 +90,6 @@ component list plus `{scripts}`; the same call, same idempotence.
   different hunks; the second to land rebases. Stated in the proposal.
 - [A fork's pull request has no token] → the analysis step carries the same
   fork guard as every other; the suite still runs.
-- [The first run finds no project] → the assertion fails naming
-  `sonar-provision.sh`, which is the documented path; the script is run once
-  with the user token before the pull request is expected to be green.
+- [The first run finds no project] → the step provisions it inside the
+  binding and re-checks; only a provisioning that returned without producing
+  the project fails, naming `sonar-provision.sh` for a run by hand.

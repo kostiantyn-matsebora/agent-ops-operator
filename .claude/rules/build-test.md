@@ -69,7 +69,14 @@ so a local number matches the dashboard's only when produced the same way:
 | Go | `go test -count=1 -coverprofile=coverage.out ./...` | `coverage.out` |
 | vitest (console UI) | `npm run test:coverage` | `coverage/lcov.info`, `src/**` only |
 | `node --test` (runtimes) | `node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage.lcov` | `coverage.lcov` |
-| Python (`.github/scripts`) | `pip install coverage`, a site-packages `.pth` reading `import coverage; coverage.process_startup()`, then `COVERAGE_PROCESS_START=$PWD/.github/.coveragerc COVERAGE_FILE=$PWD/.github/.coverage .github/tests/run.sh`, then in `.github/`: `python3 -m coverage combine && python3 -m coverage xml` | `.github/coverage.xml` |
+| Python (`.github/scripts`) | the four steps below — the suite is bash driving Python, so there is no single command | `.github/coverage.xml` |
+
+The Python row, step by step (what ci.yml's `scripts` job does):
+
+1. `pip install coverage pyyaml`.
+2. A `.pth` in site-packages reading `import coverage; coverage.process_startup()`.
+3. `COVERAGE_PROCESS_START=$PWD/.github/.coveragerc COVERAGE_FILE=$PWD/.github/.coverage .github/tests/run.sh`.
+4. In `.github/`: `python3 -m coverage combine && python3 -m coverage xml`.
 
 - **The analysis runs IN the test job**, as its last step
   (`.github/actions/sonar-scan`) — no artifact, no second checkout. A separate
@@ -77,12 +84,15 @@ so a local number matches the dashboard's only when produced the same way:
   that could fail GREEN; folding it in deleted all three.
 - **The scripts are measured at INTERPRETER START-UP, never by `coverage run`.**
   The suite is bash driving Python as child processes, so `coverage run` over
-  any one command measures the shell. The `.pth` hook starts coverage in
-  every interpreter the suite spawns; `.github/.coveragerc` says why its
-  `include` is an absolute glob and why `[paths]` folds the throwaway copies
-  the tests run back onto `scripts/`. No venv on this workstation: `pip
-  install --target <dir> coverage`, a `sitecustomize.py` there with the same
-  line, and `PYTHONPATH=<dir>` — a `.pth` is honoured only in a site dir.
+  any one command measures the shell; the `.pth` hook starts coverage in
+  every interpreter the suite spawns.
+  - **`.github/.coveragerc` is the shape it is for two reasons it states:**
+    `include` is an absolute glob because `source` is cwd-relative and the
+    tests run from throwaway repositories, and `[paths]` folds the copies
+    those tests run back onto `scripts/`.
+  - **No venv on this workstation:** `pip install --target <dir> coverage`, a
+    `sitecustomize.py` there with the same line, and `PYTHONPATH=<dir>`. A
+    `.pth` is honoured only in a site dir, and `PYTHONPATH` is not one.
 - **The UI's lcov is re-anchored to `ui/`** in CI, because the console is one
   component rooted one level above its browser application.
 - **All four outputs are ignored by git.** They are artifacts, never commits.

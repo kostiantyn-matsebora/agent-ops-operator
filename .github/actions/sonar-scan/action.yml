@@ -45,6 +45,7 @@ runs:
       env:
         NAMED: ${{ inputs.name }}
       run: |
+        set -euo pipefail
         if [ -n "$NAMED" ]; then
           echo "name=$NAMED" >> "$GITHUB_OUTPUT"
           exit 0
