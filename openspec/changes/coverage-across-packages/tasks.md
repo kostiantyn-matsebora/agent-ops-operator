@@ -23,8 +23,7 @@
   | Component | Toolchain | Before | With `-coverpkg` |
   |---|---|---|---|
   | `channel-telegram` | Go | 70.9% | 70.9% |
-  | `console` | Go | 74.8% | 74.8% |
-  | `console` | vitest (lcov, 2088/2519 lines) | 82.9% | — |
+  | `console` | Go **and** vitest | 74.8% Go, 82.9% lcov (2088/2519 lines) | 74.8% Go |
   | `context-sync` | Go | 68.6% | 68.6% |
   | `egress-proxy` | Go | 62.3% | 62.3% |
   | `gateway-telegram` | Go | 56.2% | 56.2% |
@@ -38,6 +37,12 @@
   | `signal-ha` | Go | 72.2% | 72.2% |
   | `signal-k8s-events` | Go | 78.1% | 78.1% |
   | `signal-telegram` | Go | 56.2% | 56.2% |
+
+  **FIFTEEN ROWS, AND THE CONSOLE IS ONE OF THEM.** It is one component with
+  two toolchains and ONE project, so its Go and vitest figures share a row
+  rather than making a sixteenth: SonarCloud combines both reports into a
+  single coverage number for `agentops-console`. Splitting it looked tidier
+  and made the table disagree with its own verify clause.
 
   **THE FLAG MOVES EXACTLY ONE COMPONENT, WHICH IS THE DESIGN'S CLAIM
   MEASURED RATHER THAN ARGUED.** Every other Go module is a single-package

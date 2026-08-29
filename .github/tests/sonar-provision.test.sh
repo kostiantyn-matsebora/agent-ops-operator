@@ -82,7 +82,10 @@ assert_equals "" "$(cat "$CURL_BODY")"
 # components. Fifteen real ones would make every assertion about call counts a
 # statement about the current shape of this repository.
 make_tree() {
-  local dir; dir=$(mktemp -d)
+  # UNDER $TMP, so one rm at the end takes every one of them. A bare `mktemp -d`
+  # here leaks a tree per scenario into /tmp, and a suite that litters is a
+  # suite somebody stops running locally.
+  local dir; dir=$(mktemp -d "${TMP:-${TMPDIR:-/tmp}}/tree.XXXXXX")
   mkdir -p "$dir/.github/scripts"
   cp "$ROOT/.github/scripts/sonar-provision.sh" "$dir/.github/scripts/"
   cat > "$dir/.github/components.sh" <<'CS'
@@ -363,5 +366,7 @@ assert_contains "$OUT" "assigned: o_agent-ops-operator_console"
 it "writes every condition too, not just the first"
 assert_equals "7" "$(printf '%s\n' "$OUT" | grep -c 'condition added')"
 
-rm -rf "$tmp"
+# BOTH roots: the project-list section's and the gate section's, the latter
+# holding every tree make_tree built.
+rm -rf "$tmp" "$TMP"
 summary
