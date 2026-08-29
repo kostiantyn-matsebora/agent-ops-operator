@@ -94,6 +94,7 @@
       "sil.org", "*.sil.org",
       "mozilla.org", "*.mozilla.org",
       "shields.io", "*.shields.io",
+      "sonarcloud.io", "*.sonarcloud.io",
       "contributor-covenant.org", "*.contributor-covenant.org"
     ]
   },

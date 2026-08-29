@@ -18,42 +18,43 @@ list pasted — a key is derivable from `components.sh`, and that is the point.
 
 ## 2. Coverage from the existing test jobs (D3)
 
-- [ ] 2.1 `operator`: add `-coverprofile=coverage.out` to its `go test`, upload
+- [x] 2.1 `operator`: add `-coverprofile=coverage.out` to its `go test`, upload
   as `coverage-platform-manager`
-- [ ] 2.2 `modules`: the same per matrix leg, artifact name derived from the
+- [x] 2.2 `modules`: the same per matrix leg, artifact name derived from the
   module path by the ONE transform, written where both this job and the sonar
   job read it
-- [ ] 2.3 `console-ui`: add `@vitest/coverage-v8` matching the installed vitest
+- [x] 2.3 `console-ui`: add `@vitest/coverage-v8` matching the installed vitest
   major, run `vitest run --coverage --coverage.reporter=lcov`, upload
   `coverage-platform-console-ui`. Verify `npm test` locally still passes
   without coverage flags
-- [ ] 2.4 `node-runtimes`: `node --test --experimental-test-coverage
+- [x] 2.4 `node-runtimes`: `node --test --experimental-test-coverage
   --test-reporter=lcov --test-reporter-destination=coverage.lcov` per runtime,
   upload `coverage-runtimes-<runtime>`. Verify the lcov reporter exists on the
-  Node 22 the job installs
+  Node 22 the job installs. VERIFIED locally on both runtimes; `spec` is kept
+  as a second reporter so the log still shows the tests
 - [ ] 2.5 Verify no test job's runtime changed materially — read the durations
   before and after on one run
 
 ## 3. The `sonar` job in `ci.yml`
 
-- [ ] 3.1 Add the job: `needs: [discover, operator, modules, console-ui,
+- [x] 3.1 Add the job: `needs: [discover, operator, modules, console-ui,
   node-runtimes]`, `if: !cancelled()` plus the discover-succeeded and
   non-empty-images conditions the `images` job uses, plus the fork guard (D7),
   `strategy.fail-fast: false`, matrix from `discover.outputs.images`, name
   `sonar (<component>)`
-- [ ] 3.2 Checkout with `fetch-depth: 0`, with the comment saying why
-- [ ] 3.3 Download the component's coverage artifact(s) by derived name,
+- [x] 3.2 Checkout with `fetch-depth: 0`, with the comment saying why
+- [x] 3.3 Download the component's coverage artifact(s) by derived name,
   tolerating absence; the console downloads two
-- [ ] 3.4 Run `SonarSource/sonarqube-scan-action` pinned to a version, with
+- [x] 3.4 Run `SonarSource/sonarqube-scan-action` pinned to a version, with
   `projectBaseDir` from the matrix context and `args` carrying the project
   key, the exclusions and test inclusions (D4), and the coverage report paths.
   `sonar.qualitygate.wait` unset (D5)
-- [ ] 3.5 Add `sonar` to `ci-green`'s `needs:` — the whole of making it required
+- [x] 3.5 Add `sonar` to `ci-green`'s `needs:` — the whole of making it required
 - [ ] 3.6 Verify on the change's own pull request: it edits `ci.yml`, so all
   fifteen legs run. Every component submits; every component with tests shows
   a non-zero coverage figure on its dashboard. A zero where tests exist is the
   artifact-name mismatch D3 warns of — fix the transform, not the number
-- [ ] 3.7 Verify the fork path by reading the condition against a fork event's
+- [x] 3.7 Verify the fork path by reading the condition against a fork event's
   payload shape, since no fork pull request exists to test with
 - [ ] 3.8 Verify the pull request shows one SonarCloud check per analysed
   component and that none is listed as required in branch protection
@@ -67,23 +68,24 @@ Written last, from what the change actually did.
 
 ### 4.1 Reference docs
 
-- [ ] 4.1.1 `CONTRIBUTING.md`: a "Code analysis" subsection beside "The image
+- [x] 4.1.1 `CONTRIBUTING.md`: a "Code analysis" subsection beside "The image
   scan" — what is analysed, per component, where the dashboard is, what fails
   the pull request (the scanner) and what does not (the quality gate), what a
   fork gets, and what a NEW component owes: one project created the way 1.2
   did it. Add the `sonar (<component>)` row to the "What reports through it"
   table
-- [ ] 4.1.2 `docs/security.md`: the paragraph naming the two Trivy scans as the
+- [x] 4.1.2 `docs/security.md`: the paragraph naming the two Trivy scans as the
   security tab's reporters; add that security hotspots are reported on the
   analysis dashboard, per component, and are not a gate
-- [ ] 4.1.3 `.claude/rules/build-test.md`: the local coverage invocations,
+- [x] 4.1.3 `.claude/rules/build-test.md`: the local coverage invocations,
   matching the flags CI uses for Go, vitest and `node --test`
-- [ ] 4.1.4 `docs/CHANGELOG.md`: confirm no entry is owed — nothing an
+- [x] 4.1.4 `docs/CHANGELOG.md`: confirm no entry is owed — nothing an
   installed release does changed
 
 ### 4.2 Adopter site
 
-- [ ] 4.2.1 Re-read the landing page, `introduction.md`, `getting-started.md`,
+- [x] 4.2.1 Re-read the landing page, `introduction.md`, `getting-started.md`,
   `installation.md`, the integration pages and the guides for any sentence
   about CI, code quality or coverage. Expected: none, per the proposal's
-  Impact. Record that it was checked; if one exists, fix it here
+  Impact. Record that it was checked; if one exists, fix it here. CHECKED
+  2026-08-29: no page names CI, coverage or code quality; nothing to change

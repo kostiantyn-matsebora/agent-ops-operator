@@ -149,6 +149,12 @@ until the image is re-released.
 On a pull request from a fork the gate blocks without reporting — a fork's
 token cannot write there.
 
+Security hotspots in the code itself — as opposed to vulnerabilities in what
+an image ships — are reported by SonarCloud, one project per component, on
+that service's own dashboard rather than the security tab. They are reported
+and not gated: a hotspot is a place to review, not a finding, and nothing in
+this project's merge protection reads the verdict.
+
 **A finding with no available fix does not block**, knowingly. An unfixable
 upstream vulnerability is information rather than a task, and a gate that
 cannot be made green is one that gets switched off.

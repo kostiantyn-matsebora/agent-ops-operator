@@ -226,6 +226,39 @@ the pull-request gate fails on, so the README's published-images badge goes
 red. The fix is a re-release of the image it names — a component tag, three
 per push at most.
 
+### Code analysis
+
+Every component a pull request touches is analysed by SonarCloud under its own
+project, named for the image it publishes (`agentops-<component>`) — the
+`sonar (<component>)` matrix in `ci.yml`, over the same derived component list
+the image build uses. Coverage comes from the tests CI already ran: each test
+job uploads its profile as an artifact and the analysis reads it, so no suite
+runs twice. The dashboards are the organisation's page on
+[sonarcloud.io](https://sonarcloud.io/), one project per component.
+
+**What fails your pull request:** the scanner not running or not submitting.
+That job reports through `ci-green` like every gate.
+
+**What does not:** the quality gate's verdict on the submitted analysis. It
+is SonarCloud's own check on the pull request, per component, and branch
+protection does not require it — the tree has not been measured against it
+yet, and a gate that goes red for whoever opens the next unrelated pull
+request is one somebody switches off. Gating it is a later change.
+
+**A pull request from a fork is analysed by nothing**, shown as a SKIPPED job:
+the scanner's token is withheld from fork workflows, so there is nothing you
+could do about it and nothing you should.
+
+**Coverage locally**, with the flags CI uses, is in `.claude/rules/build-test.md`.
+
+**A NEW COMPONENT OWES A PROJECT**, beside the tag and the package steps it
+already owes: one SonarCloud project with key
+`<org>_agent-ops-operator_<component>` and name `agentops-<component>`, bound
+to this repository under the organisation's monorepo setup, with Automatic
+Analysis off. The workflow derives the key and submits on the next run that
+touches the directory; a submission to a project that does not exist is the
+job's failure, naming the key.
+
 ## Commit messages
 
 **`type(scope): what the commit does, as a sentence.`**
@@ -328,6 +361,7 @@ and it fails if any job that DID run failed.
 | `docs-task` | a change your diff touched does not end in a finished documentation section |
 | `pr-title` | the title would not read as a commit subject |
 | `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |
+| `sonar (<component>)` | the analysis could not be submitted — never on its verdict; see *Code analysis* under Build and test |
 
 `openspec` and `docs-task` judge only what your pull request TOUCHED. A dozen changes are open
 at any time and an unfinished one is unfinished correctly, so a gate judging all

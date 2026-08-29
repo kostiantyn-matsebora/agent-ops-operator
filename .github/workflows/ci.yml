@@ -148,13 +148,22 @@ jobs:
       - run: go vet ./...
       # -count=1 so a cached PASS can never stand in for a run that did not
       # happen; the integration suite must actually execute.
-      - run: go test -count=1 ./...
+      # -coverprofile because THIS is the one run of the envtest suite: the
+      # sonar job reads the profile from the artifact rather than running the
+      # suite a second time for a number.
+      - run: go test -count=1 -coverprofile=coverage.out ./...
       # The suite FAILS without assets rather than skipping (verified: envtest
       # start returns an error and the package reports FAIL), so `go test ./...`
       # above already proves it ran. This only catches provisioning that
       # silently produced an empty path.
       - name: Assert envtest was provisioned
         run: test -n "$KUBEBUILDER_ASSETS" || { echo "envtest assets were never provisioned"; exit 1; }
+      - id: artifact
+        run: echo "name=$("$GITHUB_WORKSPACE"/.github/scripts/coverage-artifact.sh "$ENVTEST_MODULE")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ env.ENVTEST_MODULE }}/coverage.out
 
   # Every OTHER module. Dependency-free by design, so these are seconds each,
   # and separate from `operator` so a module break is legible without reading an
@@ -196,7 +205,15 @@ jobs:
           cache-dependency-path: ${{ matrix.module }}/go.sum
       - run: go build ./...
       - run: go vet ./...
-      - run: go test -count=1 ./...
+      - run: go test -count=1 -coverprofile=coverage.out ./...
+      # The artifact name comes from ONE script, shared with the sonar job that
+      # downloads it — see .github/scripts/coverage-artifact.sh for why.
+      - id: artifact
+        run: echo "name=$("$GITHUB_WORKSPACE"/.github/scripts/coverage-artifact.sh "${{ matrix.module }}")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ matrix.module }}/coverage.out
 
   # The console's browser application. The only non-Go job, and it exists
   # because these tests run nowhere today: a broken bundle currently surfaces
@@ -220,8 +237,20 @@ jobs:
           cache: npm
           cache-dependency-path: platform/console/ui/package-lock.json
       - run: npm ci
-      - run: npm test
+      - run: npx vitest run --coverage --coverage.reporter=lcov
+      # The lcov names files relative to ui/, and the console's analysis is
+      # rooted one level up at the COMPONENT (one directory, one project — the
+      # Go module and the browser application it embeds). Re-anchoring here is
+      # what lets the analyser find `ui/src/...`; without it every UI file is
+      # reported unmatched and coverage reads 0 %.
+      - run: sed -i 's#^SF:#SF:ui/#' coverage/lcov.info
       - run: npm run build
+      - id: artifact
+        run: echo "name=$("$GITHUB_WORKSPACE"/.github/scripts/coverage-artifact.sh platform/console/ui)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: platform/console/ui/coverage/lcov.info
 
   # The Node runtimes' unit suites. Neither ran in CI until the copilot runtime
   # arrived with 55 tests nothing executed. No npm install: the suites import
@@ -243,9 +272,22 @@ jobs:
         if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
         with:
           node-version: 22
-      - run: node --test
+      # Two reporters: spec to the log, lcov to a file the sonar job reads.
+      # Naming only lcov would leave the log with no test output at all.
+      - run: >-
+          node --test --experimental-test-coverage
+          --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=lcov --test-reporter-destination=coverage.lcov
         if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
         working-directory: runtimes/${{ matrix.runtime }}
+      - id: artifact
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
+        run: echo "name=$("$GITHUB_WORKSPACE"/.github/scripts/coverage-artifact.sh "runtimes/${{ matrix.runtime }}")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: runtimes/${{ matrix.runtime }}/coverage.lcov
 
   # Render AND validate. A lint proves the templates parse; only rendering
   # every meaningful permutation and validating the result proves they produce
@@ -486,6 +528,81 @@ jobs:
           image-ref: agentops-${{ matrix.image.component }}:scan
           category: trivy-${{ matrix.image.component }}
           upload: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+
+  # STATIC ANALYSIS AND COVERAGE, one SonarCloud project per COMPONENT. The
+  # matrix is `discover`'s image list — the components, filtered to what the
+  # diff touched — so a component is analysed under the same condition it is
+  # built, and a new directory gets a project with no edit here. The project
+  # key and name are derived from the component name the same way its image
+  # name is.
+  #
+  # COVERAGE COMES FROM THE TEST JOBS, as artifacts, because the operator's
+  # envtest suite is minutes and a job that ran it again for a number is the
+  # job somebody switches off. `!cancelled()` runs this whatever those jobs
+  # did: a skipped test job means a component analysed WITHOUT coverage, which
+  # is the true statement, not a component skipped.
+  #
+  # TWO FAILURES, AND ONLY ONE IS A GATE. A scanner that cannot submit fails
+  # this job, and this job reports through `ci-green`. The QUALITY GATE's
+  # verdict on a submitted analysis is SonarCloud's own check on the pull
+  # request and is not required by branch protection — `sonar.qualitygate.wait`
+  # is deliberately unset. Measure first; gating is a later change.
+  #
+  # A FORK'S PULL REQUEST IS SKIPPED, visibly: `SONAR_TOKEN` is withheld from
+  # fork workflows, and the scanner's 401 would read as a broken workflow.
+  sonar:
+    needs: [discover, operator, modules, console-ui, node-runtimes]
+    if: >-
+      ${{ !cancelled()
+          && needs.discover.result == 'success'
+          && needs.discover.outputs.images != '[]'
+          && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.discover.outputs.images) }}
+    name: sonar (${{ matrix.image.component }})
+    steps:
+      # FULL HISTORY: new-code detection and blame read it, and a shallow clone
+      # makes every line of a component "new" on every pull request.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: artifact
+        run: echo "name=$(.github/scripts/coverage-artifact.sh "${{ matrix.image.context }}")" >> "$GITHUB_OUTPUT"
+      # A PATTERN, NOT A NAME. `name:` fails on a missing artifact, and a
+      # component whose tests were skipped or which has none must still be
+      # analysed. The trailing `*` is also what folds the console's two
+      # profiles — `coverage-platform-console` (Go) and `-ui` (lcov) — into one
+      # directory: one component, two toolchains, one project.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ steps.artifact.outputs.name }}*
+          path: ${{ matrix.image.context }}/.coverage
+          merge-multiple: true
+      # PROPERTIES ARE ARGUMENTS, NOT FIFTEEN PROPERTIES FILES. Byte-identical
+      # files per component were the state nine Dockerfiles were in, and the
+      # tell was an edit that had to be scripted across all of them. Test
+      # files are DECLARED as tests rather than excluded, so test-specific
+      # rules apply and test code is not counted as uncovered source. A missing
+      # coverage report path is a warning to the scanner, never an error.
+      - uses: SonarSource/sonarqube-scan-action@v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectBaseDir: ${{ matrix.image.context }}
+          args: >-
+            -Dsonar.organization=${{ vars.SONAR_ORG }}
+            -Dsonar.projectKey=${{ vars.SONAR_ORG }}_agent-ops-operator_${{ matrix.image.component }}
+            -Dsonar.projectName=agentops-${{ matrix.image.component }}
+            -Dsonar.sources=.
+            -Dsonar.exclusions=**/zz_generated.deepcopy.go,**/node_modules/**,**/dist/**,**/.coverage/**,ui/e2e/**,ui/screenshots/**,ui/demo/**
+            -Dsonar.tests=.
+            -Dsonar.test.inclusions=**/*_test.go,**/*.test.ts,**/*.test.tsx,**/*.test.js
+            -Dsonar.go.coverage.reportPaths=.coverage/coverage.out
+            -Dsonar.javascript.lcov.reportPaths=.coverage/lcov.info,.coverage/coverage.lcov
+            -Dsonar.typescript.lcov.reportPaths=.coverage/lcov.info
 
   # THE SITE BUILDS. GitHub Pages builds `docs/` natively on merge, which means
   # nothing checks it BEFORE merge: a bad Liquid tag, a missing include or a
@@ -781,7 +898,7 @@ jobs:
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
+    needs: [discover, operator, modules, console-ui, node-runtimes, sonar, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

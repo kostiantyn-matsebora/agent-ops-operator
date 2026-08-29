@@ -25,6 +25,24 @@ KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@r
 - **That is deliberate.** The SDK bundles a 300 MB CLI, and a suite that needed
   it would be a suite that does not run.
 
+### Coverage, with the flags CI uses
+
+CI uploads every test job's profile and the `sonar (<component>)` job reads it,
+so a local number matches the dashboard's only when produced the same way:
+
+| Toolchain | Command | Writes |
+|---|---|---|
+| Go | `go test -count=1 -coverprofile=coverage.out ./...` | `coverage.out` |
+| vitest (console UI) | `npx vitest run --coverage --coverage.reporter=lcov` | `coverage/lcov.info`, `src/**` only |
+| `node --test` (runtimes) | `node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage.lcov` | `coverage.lcov` |
+
+- **The artifact name is ONE script**, `.github/scripts/coverage-artifact.sh
+  <path>`, called by the uploading job and the downloading one. A name spelled
+  twice fails GREEN — the analysis submits and coverage reads 0 %.
+- **The UI's lcov is re-anchored to `ui/`** in CI, because the console is one
+  component rooted one level above its browser application.
+- **All three outputs are ignored by git.** They are artifacts, never commits.
+
 ### No local Go: use a PERSISTENT container, not `docker run --rm`
 
 **This workstation has no Go toolchain**, so every command above runs in a
