@@ -13,12 +13,12 @@ from — a component group, the chart, the test doubles under `test/`, or the
 e2e workflow itself — and a job that did not run reports through `ci-green` as
 skipped, exactly as every other path-filtered job does.
 
-The boundary with the `end-to-end-testing` capability is stated on both sides:
-`continuous-integration` owns per-module build, vet and unit test, the envtest
-suite, chart lint and render, the image builds and scans, the site and the
-guards; `end-to-end-testing` owns the cluster-based jobs and the conformance
-suite. Neither restates the other's jobs, so "what CI runs" has exactly one
-definition per tier.
+The boundary is stated on every side: `continuous-integration` owns per-module
+build, vet and unit test, the envtest suite, chart lint and render, the image
+builds and scans, the site, the guards, and the job that RUNS the conformance
+suite on a pull request; `contract-conformance-suite` owns what that suite
+asserts; `end-to-end-testing` owns the cluster-based jobs only. No capability
+restates another's jobs, so "what CI runs" has exactly one definition per tier.
 
 #### Scenario: Conformance gates through ci-green
 - **WHEN** a pull request changes a component, the chart or the test doubles
