@@ -247,8 +247,10 @@ per push at most.
 
 ### Code analysis
 
-Every component a pull request touches is analysed by SonarCloud under its own
-project, named for the image it publishes (`agentops-<component>`). The
+Every component a pull request touches — and every component a push to
+`master` touches, which is what sets each project's baseline — is analysed by
+SonarCloud under its own project, named for the image it publishes
+(`agentops-<component>`). The
 analysis is the LAST STEP of the job that built and tested the component —
 `operator`, `modules (<path>)`, `node-runtimes (<runtime>)` — through
 `.github/actions/sonar-scan`, so it reads the coverage profile from where the

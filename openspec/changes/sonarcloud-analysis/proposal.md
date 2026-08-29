@@ -71,7 +71,8 @@ describes how a new job reports through the gate; adding one is a line in its
   workflow.
 - SonarCloud, outside the tree: an organisation, fifteen projects in monorepo
   mode, Automatic Analysis off on each, the GitHub app installed on this
-  repository, and one repository secret `SONAR_TOKEN`. UI-only steps are
+  repository, and two repository secrets, `SONAR_TOKEN` and `SONAR_ORG`.
+  UI-only steps are
   recorded as verdicts in `tasks.md`, never as values.
 - `platform/console/ui/package.json` — a coverage reporter dev dependency for
   vitest, if one is not already transitively present.

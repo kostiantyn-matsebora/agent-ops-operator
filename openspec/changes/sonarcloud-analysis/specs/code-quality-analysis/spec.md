@@ -11,7 +11,7 @@ CI SHALL submit a static analysis of each component that a pull request or a
 push to `master` touched, and each component SHALL be analysed under its OWN
 project whose name is the component's published image name. The component set
 SHALL be derived from the same list that names the images, never enumerated in
-the workflow, so a new component is analysed by existing.
+the workflow, so a new component is analysed once it exists.
 
 A component holding more than one language SHALL still be one project.
 
