@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage --coverage.reporter=lcov",
     "typecheck": "tsc -b --noEmit",
     "test:e2e": "playwright test",
     "screenshots": "npm run build && playwright test --config screenshots/playwright.config.ts",

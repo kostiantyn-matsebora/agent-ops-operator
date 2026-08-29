@@ -25,8 +25,8 @@ Each test invocation gains its coverage flag, and the analysis step (section
 - [x] 2.1 `operator`: `go test -count=1 -coverprofile=coverage.out ./...`
 - [x] 2.2 `modules`: the same per matrix leg
 - [x] 2.3 the console's UI coverage, in its `modules` leg: `@vitest/coverage-v8`
-  matching the installed vitest major, `vitest run --coverage
-  --coverage.reporter=lcov`, `SF:` re-anchored to `ui/`. `console-ui` stays
+  matching the installed vitest major, `npm run test:coverage` (lcov), `SF:`
+  re-anchored to `ui/`. `console-ui` stays
   `npm test`. VERIFIED locally that `npm test` passes without coverage flags
 - [x] 2.4 `node-runtimes`: `node --test --experimental-test-coverage
   --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov

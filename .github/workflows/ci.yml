@@ -230,7 +230,7 @@ jobs:
         if: matrix.module == 'platform/console'
         working-directory: platform/console/ui
         run: |
-          npx vitest run --coverage --coverage.reporter=lcov
+          npm run test:coverage
           sed -i 's#^SF:#SF:ui/#' coverage/lcov.info
       - uses: ./.github/actions/sonar-scan
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false

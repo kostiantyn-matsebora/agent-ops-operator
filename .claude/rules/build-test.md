@@ -67,7 +67,7 @@ so a local number matches the dashboard's only when produced the same way:
 | Toolchain | Command | Writes |
 |---|---|---|
 | Go | `go test -count=1 -coverprofile=coverage.out ./...` | `coverage.out` |
-| vitest (console UI) | `npx vitest run --coverage --coverage.reporter=lcov` | `coverage/lcov.info`, `src/**` only |
+| vitest (console UI) | `npm run test:coverage` | `coverage/lcov.info`, `src/**` only |
 | `node --test` (runtimes) | `node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage.lcov` | `coverage.lcov` |
 
 - **The analysis runs IN the test job**, as its last step
