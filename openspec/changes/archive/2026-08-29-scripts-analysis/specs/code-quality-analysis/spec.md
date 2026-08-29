@@ -41,9 +41,14 @@ suite.
   analysing, exactly as for a component (the MODIFIED requirement below) —
   never through the scanner's own provisioning, which binds to nothing
 
+## RENAMED Requirements
+
+- FROM: `### Requirement: A component without a project fails its analysis job rather than creating one`
+- TO: `### Requirement: A missing project is created inside the monorepo binding, never by a submission`
+
 ## MODIFIED Requirements
 
-### Requirement: A component without a project fails its analysis job rather than creating one
+### Requirement: A missing project is created inside the monorepo binding, never by a submission
 
 The analysis step SHALL verify that the component's project exists before
 submitting. When it does not, the step SHALL create it through the same
