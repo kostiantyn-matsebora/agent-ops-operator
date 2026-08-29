@@ -19,4 +19,4 @@ jobs:
   smoke:
     uses: ./.github/workflows/e2e.yml
     with:
-      tier: pr
+      tier: smoke

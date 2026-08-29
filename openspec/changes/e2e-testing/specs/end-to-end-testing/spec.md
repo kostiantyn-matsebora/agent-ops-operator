@@ -171,7 +171,7 @@ The pack SHALL be split into tiers with an explicit gating rule:
 - **Pull requests** SHALL be gated by contract conformance alone — a minute,
   no cluster, no secret — reported through `ci-green`'s `needs:`, never as a
   separately required check. No pull request provisions a cluster.
-- **The cluster smoke** — the pr tier: conformance plus a thin k3s run on the
+- **The cluster smoke** — the smoke tier: conformance plus a thin k3s run on the
   stub runtime, deterministic, no secret, bounded in wall-clock time — SHALL
   gate a RELEASE and SHALL be runnable on demand against any branch.
 - **A release** SHALL publish nothing until the cluster smoke passed on the

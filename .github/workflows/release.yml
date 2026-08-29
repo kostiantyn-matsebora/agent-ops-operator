@@ -127,7 +127,7 @@ jobs:
   # rendered and its REFERENCES asserted — so one file each.
   # THE SMOKE GATES A RELEASE. ci proved the tagged commit's modules, chart and
   # images in isolation; this proves the chart installs and answers on a real
-  # single-node cluster with the stub runtime — the same pr tier every pull
+  # single-node cluster with the stub runtime — the same smoke tier every pull
   # request meets, run again on the exact commit being published, because a
   # tag can land on a commit that ci passed days ago against a different k3s.
   smoke:
@@ -137,7 +137,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/e2e.yml
     with:
-      tier: pr
+      tier: smoke
 
   image:
     name: image (${{ needs.determine.outputs.component }})

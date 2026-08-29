@@ -103,7 +103,7 @@ cd platform/manager; go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
 
 | Variable | Does |
 |---|---|
-| `E2E_TIER` | `pr` (default) or `full` — `full` adds the real-runtime lane and the slow lanes |
+| `E2E_TIER` | `smoke` (default) or `full` — `full` adds the real-runtime lane and the slow lanes |
 | `E2E_REUSE=1` | keep an existing cluster and leave it running afterwards — the loop for local iteration |
 | `E2E_SKIP_BUILD=1` | with `E2E_REUSE`, images are already built and imported |
 | `E2E_ARTIFACT_DIR` | where failure diagnostics land — manager and adapter logs, the pod list, cluster events, every agentops CR as YAML |
@@ -121,8 +121,8 @@ Three workflows share one definition, `.github/workflows/e2e.yml`, and `ci.yml` 
 | Workflow | Runs | When |
 |---|---|---|
 | `ci.yml` | contract conformance only — no cluster | every pull request, reporting through `ci-green` |
-| `release.yml` | the pr tier | on the tagged commit, before anything is published |
-| `e2e-smoke.yml` | the pr tier | on demand, on any branch |
+| `release.yml` | the smoke tier | on the tagged commit, before anything is published |
+| `e2e-smoke.yml` | the smoke tier | on demand, on any branch |
 | `e2e-full.yml` | the full tier, real-runtime lane included | nightly at 03:17 UTC when master moved since its last successful run, and on demand |
 
 ```sh

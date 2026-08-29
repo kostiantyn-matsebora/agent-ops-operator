@@ -16,7 +16,7 @@
 //	E2E_REUSE=1        keep an existing cluster and leave it running afterwards
 //	E2E_SKIP_BUILD=1   images are already built and imported (with E2E_REUSE)
 //	E2E_ARTIFACT_DIR   where failure diagnostics are written (default $TMPDIR/agentops-e2e)
-//	E2E_TIER           pr (default) or full — full adds the real-runtime lane
+//	E2E_TIER           smoke (default) or full — full adds the real-runtime lane
 //	E2E_BUDGET         wall-clock budget of the gating tier (default 20m)
 //	CLAUDE_CODE_OAUTH_TOKEN  the real-runtime lane's credential; absent, the lane is SKIPPED
 package e2e
@@ -64,7 +64,7 @@ func TestMain(m *testing.M) {
 func run(m *testing.M) int {
 	tier = os.Getenv("E2E_TIER")
 	if tier == "" {
-		tier = "pr"
+		tier = "smoke"
 	}
 	artifact := os.Getenv("E2E_ARTIFACT_DIR")
 	if artifact == "" {
@@ -166,7 +166,7 @@ func run(m *testing.M) int {
 	code = m.Run()
 	// The budget is asserted for the gating tier only: growth must be visible
 	// rather than gradual, and the nightly pack is allowed to be slow.
-	if tier == "pr" {
+	if tier == "smoke" {
 		budget := 20 * time.Minute
 		if v := os.Getenv("E2E_BUDGET"); v != "" {
 			if d, err := time.ParseDuration(v); err == nil {

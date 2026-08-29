@@ -3,15 +3,15 @@
 # This workflow is the definition and is only ever CALLED (workflow_call). The
 # entry points are thin workflows that name a tier:
 #
-#   release.yml    calls it with tier=pr on the tagged commit, and publishes
+#   release.yml    calls it with tier=smoke on the tagged commit, and publishes
 #                  nothing until it passes.
-#   e2e-smoke.yml  the pr tier on demand, on any branch.
+#   e2e-smoke.yml  the smoke tier on demand, on any branch.
 #   e2e-full.yml   the full tier — the real-runtime lane included — nightly
 #                  when master moved, and on demand. It NEVER gates a pull
 #                  request: its lane spends real tokens and its flakiness must
 #                  not block work while it is tuned.
 #
-#   pr    contract conformance + a thin k3s smoke on the stub runtime. No
+#   smoke contract conformance + a thin k3s smoke on the stub runtime. No
 #         secret, deterministic, bounded in wall clock. A PULL REQUEST RUNS
 #         NONE OF THIS: ci.yml runs conformance on its own (a minute, no
 #         cluster), and the cluster is for releases and on-demand runs.
@@ -28,9 +28,9 @@ on:
   workflow_call:
     inputs:
       tier:
-        description: pr or full
+        description: smoke or full
         type: string
-        default: pr
+        default: smoke
 
 permissions:
   contents: read
