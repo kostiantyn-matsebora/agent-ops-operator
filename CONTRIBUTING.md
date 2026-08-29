@@ -263,9 +263,25 @@ gate.
 
 **What does not:** the quality gate's verdict on the submitted analysis. It
 is SonarCloud's own check on the pull request, per component, and branch
-protection does not require it — the tree has not been measured against it
-yet, and a gate that goes red for whoever opens the next unrelated pull
-request is one somebody switches off. Gating it is a later change.
+protection does not require it — a gate that goes red for whoever opens the
+next unrelated pull request is one somebody switches off. Gating it is a
+later change.
+
+**WHAT THE GATE REQUIRES:** every project is assigned a gate named `agentops`
+— the built-in `Sonar way` new-code conditions, copied verbatim, plus one
+this repository adds: **the component's OVERALL line coverage at or above
+80%**. It is created, conditioned, made the organisation default and assigned
+per project by `sonar-provision.sh` (below), not clicked in a dashboard, so
+what every component is judged by is one `git show` away.
+
+**A COMPONENT UNDER 80% IS RED, AND THAT IS THE POINT.** Its gate fails on
+its dashboard and on every pull request that touches it, until the change
+that brings its coverage up lands. Nothing is blocked by it — see *what does
+not*, above — so a red gate on a component you did not write tests for is
+expected, and is the backlog made visible rather than a fault in your pull
+request. A gate on NEW code alone let a component sit at 27% and one at 79%
+pass identically, which is why the number the tree is asked to reach had to
+become a condition something evaluates.
 
 **A pull request from a fork is analysed by nothing**, shown as a SKIPPED job:
 the scanner's token is withheld from fork workflows, so there is nothing you
@@ -286,7 +302,13 @@ SONAR_TOKEN=<user token> SONAR_ORG=<organisation key> .github/scripts/sonar-prov
 
 It derives every component's key and name from `components.sh` and is
 idempotent, so running it after adding a directory creates the one project
-that is missing. The script posts the monorepo wizard's own request; if
+that is missing — and assigns it the `agentops` gate, which is the second
+thing a new component owes and the one nothing else would notice was absent.
+
+**THE TOKEN NEEDS TWO PERMISSIONS**, *Create Projects* and *Administer
+Quality Gates*, and each stage fails naming its own: a token holding only the
+first provisions the projects and stops on a 403 that says which one is
+missing. The script posts the monorepo wizard's own request; if
 SonarCloud changes it, the wizard's *Import JSON* takes the same `projects`
 array.
 
