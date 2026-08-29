@@ -33,3 +33,6 @@ runtimes/*/[!.]*[!.]
 # Coverage profiles CI uploads as artifacts; never committed.
 coverage.out
 coverage.lcov
+.github/coverage.xml
+.github/.coverage
+.github/.coverage.*
