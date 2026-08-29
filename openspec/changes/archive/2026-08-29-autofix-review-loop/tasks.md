@@ -2,7 +2,7 @@
 
 - [x] 1.1 On a throwaway pull request from this worktree's branch, push a commit with `GITHUB_TOKEN` from a scratch job, then `gh workflow run ci.yml` (with a temporary `workflow_dispatch` input checking out `refs/pull/<n>/head`) and `gh workflow run claude-review.yml -f number=<n>`; record in `design.md` D4 whether the merge box shows `ci-green` satisfied on that head and whether SonarCloud's own check attaches
 - [x] 1.2 Write the outcome as a decision in `design.md` — self-dispatch, or the App — and strike the other; the remaining tasks in sections 4 and 6 follow that decision
-- [ ] 1.3 The credential: the spike ruled out self-dispatch (D4, measured), and the App is replaced by a WRITE DEPLOY KEY read by `land` alone; `docs/security.md` records what holds it and what it cannot do. **OWNER'S STEP, not done by the session:** `ssh-keygen -t ed25519 -N '' -f autofix && gh repo deploy-key add autofix.pub --allow-write --title autofix-land && gh secret set AUTOFIX_DEPLOY_KEY < autofix && shred -u autofix autofix.pub` — until then a labelled round lands and the summary says the loop cannot go on
+- [x] 1.3 The credential: the spike ruled out self-dispatch (D4, measured), and the App is replaced by a WRITE DEPLOY KEY read by `land` alone — created by the owner after #131 merged (`gh repo deploy-key add --allow-write`, secret `AUTOFIX_DEPLOY_KEY`); `docs/security.md` records what holds it and what it cannot do
 
 ## 2. Consent: the label and the gate (D1, D2)
 
