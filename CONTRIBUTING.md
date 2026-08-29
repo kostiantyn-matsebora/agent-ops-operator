@@ -257,6 +257,14 @@ analysis is the LAST STEP of the job that built and tested the component —
 tests left it and no suite runs twice. The dashboards are the organisation's
 page on [sonarcloud.io](https://sonarcloud.io/), one project per component.
 
+**One project is not a component: `agentops-scripts`**, the workflow's own
+scripts under `.github/scripts/`. The `scripts` job runs their suite
+(`.github/tests/run.sh`), collects Python coverage in every process the
+suite spawns, and analyses them the same way — named explicitly at that one
+call, because `components.sh` lists what publishes an image and the scripts
+publish none. It runs when the scripts, their tests or the hooks they
+exercise change, and on every path that rebuilds everything.
+
 **What fails your pull request:** the scanner not running or not submitting.
 That fails the component's job, which reports through `ci-green` like every
 gate.
@@ -284,9 +292,9 @@ INSIDE the repository's monorepo binding instead:
 SONAR_TOKEN=<user token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh
 ```
 
-It derives every component's key and name from `components.sh` and is
-idempotent, so running it after adding a directory creates the one project
-that is missing. The script posts the monorepo wizard's own request; if
+It derives every component's key and name from `components.sh`, appends the
+`scripts` unit, and is idempotent, so running it after adding a directory
+creates the one project that is missing. The script posts the monorepo wizard's own request; if
 SonarCloud changes it, the wizard's *Import JSON* takes the same `projects`
 array.
 
@@ -390,10 +398,11 @@ and it fails if any job that DID run failed.
 | `retired-vocabulary` | it asserts a name this project stopped using |
 | `openspec` | a published specification is invalid, or a change your diff touched is |
 | `docs-task` | a change your diff FINISHES does not end in unit tests, e2e tests and documentation — three sections, in that order, every task ticked |
+| `scripts` | the workflow's own scripts fail their suite, or their analysis could not be submitted — see *Code analysis* |
 | `pr-title` | the title would not read as a commit subject |
 | `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |
 | `conformance` | an adapter's built binary does not speak the adapter contracts to a fake manager |
-| `operator`, `modules (<path>)`, `node-runtimes (<runtime>)` — the analysis step | the SonarCloud analysis could not be submitted — never on its verdict; see *Code analysis* under Build and test |
+| `operator`, `modules (<path>)`, `node-runtimes (<runtime>)`, `scripts` — the analysis step | the SonarCloud analysis could not be submitted — never on its verdict; see *Code analysis* under Build and test |
 
 `openspec` and `docs-task` judge only what your pull request TOUCHED. A dozen changes are open
 at any time and an unfinished one is unfinished correctly, so a gate judging all

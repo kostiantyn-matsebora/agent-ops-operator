@@ -41,6 +41,7 @@ jobs:
       docs: ${{ steps.list.outputs.docs }}
       site: ${{ steps.list.outputs.site }}
       e2e: ${{ steps.list.outputs.e2e }}
+      scripts: ${{ steps.list.outputs.scripts }}
     steps:
       # FULL HISTORY, because the filter below diffs against a base commit.
       # fetch-depth: 1 makes every diff report the whole tree as changed, which
@@ -82,7 +83,7 @@ jobs:
             echo "building everything: base=${BASE_SHA:-none}" >&2
             echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
             echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
-            for j in operator chart docs site e2e; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
+            for j in operator chart docs site e2e scripts; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
 
@@ -114,6 +115,9 @@ jobs:
             # Anything a running install is built from: every component
             # group, the chart, the test doubles and the pack itself.
             echo "e2e=$(m '^(platform/|runtimes/|signals/|channels/|gateways/|chart/|test/|\.github/workflows/e2e\.yml)')"
+            # The workflow's own scripts, their suite, and the hooks the suite
+            # exercises. The workflow files are the everything case above.
+            echo "scripts=$(m '^(\.github/scripts/|\.github/tests/|\.github/\.coveragerc|\.claude/hooks/)')"
           } >> "$GITHUB_OUTPUT"
 
           echo "images=$(echo "$ALL_IMAGES" | jq -c --rawfile c /tmp/changed.txt '
@@ -667,22 +671,15 @@ jobs:
   # every session whose harness is not installed, and for automation -- and this
   # repository is public, so "every other contributor" is a real population now.
   #
-  # The hook and this job call the SAME script, and a third step proves they
-  # agree. Two enforcement points asking one question is safe only while they
-  # give one answer.
+  # The hook and this job call the SAME script, and the script suite in the
+  # `scripts` job proves they agree. Two enforcement points asking one
+  # question is safe only while they give one answer.
   docs-task:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # EVERY SCRIPT THIS WORKFLOW DEPENDS ON, not only the documentation gate.
-      # They decide things — refusing a commit, refusing to resolve somebody's
-      # review thread, opening an issue — and each was originally verified once
-      # by hand. `gh` and `openspec` are stubbed, so the suite reaches no network
-      # and touches no real repository.
-      - name: The workflow's own scripts
-        run: ./.github/tests/run.sh
       # PULL REQUESTS ONLY. A push to master is the merge the pull request
       # already gated, so there is nothing left to refuse there — and a change
       # planned under an older shape that merges and THEN meets a stricter
@@ -700,6 +697,63 @@ jobs:
             exit 0
           fi
           python3 .github/scripts/docs-task-guard.py --range "$BASE_SHA..$GITHUB_SHA"
+
+  # THE SCRIPTS THAT JUDGE PULL REQUESTS ARE TESTED AND MEASURED LIKE A
+  # COMPONENT. They decide things — refusing a commit, refusing to resolve
+  # somebody's review thread, building the review's queue, opening an issue —
+  # and each was originally verified once by hand. `gh` and `openspec` are
+  # stubbed, so the suite reaches no network and touches no real repository.
+  #
+  # THE UNIT IS NAMED, NOT DERIVED. components.sh answers "what publishes an
+  # image", and the scripts publish none; teaching it a second kind of thing
+  # would put a directory on the release's list. So the analysis step is told
+  # the name here, the one call site that is not a component.
+  #
+  # COVERAGE IS COLLECTED AT INTERPRETER START-UP. The suite is bash driving
+  # Python as child processes, so `coverage run` over any command would
+  # measure the shell. A site-packages .pth calls coverage.process_startup()
+  # in every interpreter that starts while COVERAGE_PROCESS_START names the
+  # config; each writes its own data file, and combine folds them. The
+  # config (.github/.coveragerc) says why the paths are the shape they are.
+  scripts:
+    needs: discover
+    if: needs.discover.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: coverage.py, hooked into every interpreter start
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet coverage
+          site=$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+          echo 'import coverage; coverage.process_startup()' > "$site/coverage-startup.pth"
+      - name: The workflow's own scripts
+        env:
+          COVERAGE_PROCESS_START: ${{ github.workspace }}/.github/.coveragerc
+          COVERAGE_FILE: ${{ github.workspace }}/.github/.coverage
+        run: ./.github/tests/run.sh
+      - name: One coverage report from every process the suite started
+        working-directory: .github
+        run: |
+          set -euo pipefail
+          python -m coverage combine --quiet
+          python -m coverage xml --quiet
+          python -m coverage report
+      - uses: ./.github/actions/sonar-scan
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        with:
+          dir: .github
+          name: scripts
+          sources: scripts
+          tests: scripts,tests
+          test-inclusions: "**/*.test.sh,**/*-test.sh"
+          token: ${{ secrets.SONAR_TOKEN }}
+          organization: ${{ secrets.SONAR_ORG }}
 
   # THE TITLE IS THE COMMIT SUBJECT, BECAUSE THE MERGE IS A SQUASH.
   #
@@ -835,7 +889,7 @@ jobs:
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, conformance]
+    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, scripts, pr-title, pr-closes, conformance]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed
