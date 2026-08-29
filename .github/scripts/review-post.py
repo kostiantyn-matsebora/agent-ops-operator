@@ -81,7 +81,7 @@ def main() -> int:
             fallback = json.loads(address.read_text())
             break
     repo = d.get("repo") or fallback.get("repo") or os.environ.get("GITHUB_REPOSITORY", "")
-    number = d.get("number") or fallback.get("number")
+    number = d.get("number") if d.get("number") is not None else fallback.get("number")
     if not repo or number is None:
         print("::error::the posting document names no pull request, and review-input.json is absent", file=sys.stderr)
         return 1
