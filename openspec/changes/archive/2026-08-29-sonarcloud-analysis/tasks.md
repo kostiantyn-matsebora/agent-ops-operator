@@ -72,29 +72,51 @@ Each test invocation gains its coverage flag, and the analysis step (section
   named for the UI. Verified green on the pull request
   with every scanner's coverage sensor loading its report
 
-## 4. Documentation
+## 4. Unit tests
+
+What the change did is a workflow, a composite action and a shell script, so
+the unit tier is the tests CI already runs plus the scripts' own checks.
+
+- [x] 4.1 `go test -count=1 -coverprofile=coverage.out ./...` in every Go
+  module, `npm run test:coverage` for the console UI (195 tests), `node
+  --test` with the lcov reporter in both Node runtimes — all green on PR 127's
+  final run, each producing the profile the analysis read
+- [x] 4.2 `.github/scripts/sonar-provision.sh` parses (`sh -n`) and was run
+  once against the live organisation: 15 keys returned, all
+  `isBoundToMonorepo: true`, a second run creates nothing
+- [x] 4.3 `.github/workflows/ci.yml` and `.github/actions/sonar-scan/action.yml`
+  parse as YAML; the existence gate was exercised on a real run (the first
+  push after the strays were deleted) and named the component
+
+## 5. E2E tests
+
+- [x] 5.1 Not applicable: nothing here is decided by a cluster. The change is
+  CI workflow, a scanner call and a SaaS binding; no kubelet, RBAC, informer or
+  pod lifecycle is involved
+
+## 6. Documentation
 
 Written last, from what the change actually did.
 
-### 4.1 Reference docs
+### 6.1 Reference docs
 
-- [x] 4.1.1 `CONTRIBUTING.md`: a "Code analysis" subsection beside "The image
+- [x] 6.1.1 `CONTRIBUTING.md`: a "Code analysis" subsection beside "The image
   scan" — what is analysed, per component, where the dashboard is, what fails
   the pull request (the scanner) and what does not (the quality gate), what a
   fork gets, and what a NEW component owes: one project created the way 1.2
   did it. Add the analysis step's row to the "What reports through it"
   table
-- [x] 4.1.2 `docs/security.md`: the paragraph naming the two Trivy scans as the
+- [x] 6.1.2 `docs/security.md`: the paragraph naming the two Trivy scans as the
   security tab's reporters; add that security hotspots are reported on the
   analysis dashboard, per component, and are not a gate
-- [x] 4.1.3 `.claude/rules/build-test.md`: the local coverage invocations,
+- [x] 6.1.3 `.claude/rules/build-test.md`: the local coverage invocations,
   matching the flags CI uses for Go, vitest and `node --test`
-- [x] 4.1.4 `docs/CHANGELOG.md`: confirm no entry is owed — nothing an
+- [x] 6.1.4 `docs/CHANGELOG.md`: confirm no entry is owed — nothing an
   installed release does changed
 
-### 4.2 Adopter site
+### 6.2 Adopter site
 
-- [x] 4.2.1 Re-read the landing page, `introduction.md`, `getting-started.md`,
+- [x] 6.2.1 Re-read the landing page, `introduction.md`, `getting-started.md`,
   `installation.md`, the integration pages and the guides for any sentence
   about CI, code quality or coverage. Expected: none, per the proposal's
   Impact. Record that it was checked; if one exists, fix it here. CHECKED

@@ -683,9 +683,15 @@ jobs:
       # and touches no real repository.
       - name: The workflow's own scripts
         run: ./.github/tests/run.sh
+      # PULL REQUESTS ONLY. A push to master is the merge the pull request
+      # already gated, so there is nothing left to refuse there — and a change
+      # planned under an older shape that merges and THEN meets a stricter
+      # guard turns master red for work nobody can act on from master. The
+      # squash of #127 did exactly that on 2026-08-29.
       - name: Every change this pull request finishes ends in finished test and documentation tasks
+        if: github.event_name == 'pull_request'
         env:
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ] \
