@@ -70,14 +70,22 @@ runs:
         NAME: ${{ steps.component.outputs.name }}
       run: |
         set -euo pipefail
-        exists() {
-          n=$(curl -sf -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/projects/search?organization=$SONAR_ORG&projects=${SONAR_ORG}_agent-ops-operator_$NAME" | jq '.components | length')
-          [ "$n" = "1" ]
+        # A lookup that FAILED is not a project that is ABSENT. The two are
+        # separated so a rejected token or an unreachable service fails here,
+        # naming the lookup, rather than reading as "no project" and starting
+        # a provisioning call with the same token.
+        count() {
+          local out
+          out=$(curl -sf -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/projects/search?organization=$SONAR_ORG&projects=${SONAR_ORG}_agent-ops-operator_$NAME") \
+            || { echo "::error::the SonarCloud project lookup for $NAME failed (token, organisation or service)"; return 1; }
+          printf '%s' "$out" | jq '.components | length'
         }
-        if ! exists; then
+        n=$(count)
+        if [ "$n" != "1" ]; then
           echo "::notice::no SonarCloud project for $NAME yet; provisioning it inside the monorepo binding"
           "$GITHUB_WORKSPACE"/.github/scripts/sonar-provision.sh "$NAME"
-          exists || { echo "::error::provisioning $NAME reported success and the project is still absent — run .github/scripts/sonar-provision.sh by hand (CONTRIBUTING.md, Code analysis)"; exit 1; }
+          n=$(count)
+          [ "$n" = "1" ] || { echo "::error::provisioning $NAME reported success and the project is still absent — run .github/scripts/sonar-provision.sh by hand (CONTRIBUTING.md, Code analysis)"; exit 1; }
         fi
     # PROPERTIES ARE ARGUMENTS, NOT FIFTEEN PROPERTIES FILES. Test files are
     # DECLARED as tests rather than excluded, so test rules apply and test code
