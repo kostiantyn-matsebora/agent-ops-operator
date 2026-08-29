@@ -117,7 +117,13 @@
 ### 5.1 Reference docs
 
 - [x] 5.1.1 `.claude/rules/build-test.md`, "Coverage, with the flags CI uses": the Go row's command carries `-coverpkg=./...`, and one bullet says what the flag changes and what the 27% was. Verify: the table and the bullet are there. DONE — the Go row carries the flag, and the bullet above the analysis one states what `-coverpkg` records, the 27% dashboard / 21.7% local number it replaces, that a package no test reaches now reads 0% rather than absent, and the build-time cost.
-- [ ] 5.1.2 Record the AFTER per component beside task 1.1's table, from the first master analysis after merge. Verify: fourteen rows, and the manager's row moved.
+- [ ] 5.1.2 Record the AFTER per component beside task 1.1's table, from the first master analysis after merge. Verify: **fifteen** rows, and the manager's row moved.
+
+  **The count is corrected here for the same reason it is in 1.1**, which
+  measured it: `components.sh images` lists fifteen components, and the
+  archived `sonarcloud-analysis` recorded fifteen projects created. Two
+  clauses saying fourteen would have been one correction that only took in
+  half the file.
 - [ ] 5.1.3 The delta spec is archived into `openspec/specs/code-quality-analysis/spec.md` by `/opsx:archive` on the branch; `openspec validate --all` passes. Verify: the command exits 0.
 
 ### 5.2 Adopter site
