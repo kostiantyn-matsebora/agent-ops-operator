@@ -8,7 +8,9 @@ one `mark-thread-resolved.sh` per thread, then the summary — some fifteen
 model turns, four of them re-trying a summary whose heredoc to /tmp was
 blocked. Posting is not judgement; the judgement is in the JSON this reads.
 
-stdin or a file:
+stdin or a file (`repo` and `number` may be omitted: they are read from
+`review-input.json` beside the file, in $GITHUB_WORKSPACE, or in the working
+directory, and last from $GITHUB_REPOSITORY):
   {"repo": "owner/name", "number": 111,
    "findings": [{"path": "...", "line": 12, "body": "**Claim:** ..."}],
    "replies":  [{"commentId": 123, "body": "Fixed in abc123."}],
@@ -24,16 +26,36 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 
 
 def gh(*args: str, stdin: str | None = None) -> tuple[int, str]:
-    p = subprocess.run(["gh", *args], capture_output=True, text=True, input=stdin)
-    return p.returncode, (p.stdout + p.stderr).strip()
+    """One gh call, retried on GitHub's SECONDARY rate limit.
+
+    A review posts dozens of comments in a burst, and after a day of review
+    runs on one pull request GitHub answered every reply with
+    `{"code":"abuse"}` — nothing was posted, and the gate failed a review that
+    had run. That limit is the abuse detector asking for a pause, so a pause
+    is what it gets: a short one between every post, and a growing one on the
+    refusal itself, three times before giving up.
+    """
+    for attempt in range(4):
+        p = subprocess.run(["gh", *args], capture_output=True, text=True, input=stdin)
+        out = (p.stdout + p.stderr).strip()
+        limited = p.returncode != 0 and ('"code":"abuse"' in out or "secondary rate limit" in out.lower())
+        if not limited or attempt == 3:
+            time.sleep(1)  # the pause between posts, whatever the answer
+            return p.returncode, out
+        wait = 30 * (2 ** attempt)
+        print(f"::warning::secondary rate limit; waiting {wait}s before retrying", file=sys.stderr)
+        time.sleep(wait)
+    raise AssertionError("unreachable: the last attempt returns")
 
 
 def main() -> int:
@@ -42,7 +64,32 @@ def main() -> int:
     args = ap.parse_args()
     text = pathlib.Path(args.file).read_text() if args.file else sys.stdin.read()
     d = json.loads(text)
-    repo, number = d["repo"], int(d["number"])
+    # THE ADDRESS IS THE WORKFLOW'S FACT, NOT THE MODEL'S. The schema asks the
+    # coordinator for `repo` and `number`, and one run answered without them —
+    # a thin answer, two tool calls — so this crashed with KeyError, posted
+    # nothing, and the gate failed a review that had actually run. The input
+    # document the job built already names both; the model's copy is only
+    # ever a restatement of it, so it is read second.
+    # The input document lives where the job wrote it: beside the posting
+    # document when one was given as a file, else the workflow's workspace,
+    # else the working directory. Named here so nothing has to guess.
+    here = pathlib.Path(args.file).resolve().parent if args.file else pathlib.Path.cwd()
+    fallback: dict = {}
+    candidates = [here]
+    if ws := os.environ.get("GITHUB_WORKSPACE"):
+        candidates.append(pathlib.Path(ws))
+    candidates.append(pathlib.Path.cwd())
+    for base in candidates:
+        address = base / "review-input.json"
+        if address.is_file():
+            fallback = json.loads(address.read_text())
+            break
+    repo = d.get("repo") or fallback.get("repo") or os.environ.get("GITHUB_REPOSITORY", "")
+    number = d.get("number") if d.get("number") is not None else fallback.get("number")
+    if not repo or number is None:
+        print("::error::the posting document names no pull request, and review-input.json is absent", file=sys.stderr)
+        return 1
+    number = int(number)
 
     rc, sha = gh("pr", "view", str(number), "-R", repo, "--json", "headRefOid", "-q", ".headRefOid")
     if rc != 0:
