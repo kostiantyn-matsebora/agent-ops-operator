@@ -4,11 +4,8 @@ description: >-
   it — the checkout, the coverage profile and the toolchain are already there,
   so nothing is uploaded, downloaded or renamed.
 inputs:
-  component:
-    description: The component name components.sh publishes (agentops-<component> is the image and the project)
-    required: true
   dir:
-    description: The component directory, which is the analysis base directory
+    description: The component directory — the analysis base directory, and what names the component
     required: true
   token:
     description: SONAR_TOKEN
@@ -19,6 +16,15 @@ inputs:
 runs:
   using: composite
   steps:
+    # THE COMPONENT NAME IS DERIVED FROM THE DIRECTORY, by the one program that
+    # names images — never typed at a call site. A directory components.sh does
+    # not list is a failure here, not an analysis under a made-up name.
+    - id: component
+      shell: bash
+      run: |
+        name=$("$GITHUB_WORKSPACE"/.github/components.sh images | jq -r --arg c "./${{ inputs.dir }}" '.[] | select(.context == $c) | .component')
+        [ -n "$name" ] || { echo "::error::${{ inputs.dir }} is not a component components.sh lists"; exit 1; }
+        echo "name=$name" >> "$GITHUB_OUTPUT"
     # THE PROJECT MUST ALREADY EXIST, AND THIS STEP NEVER CREATES ONE. The
     # scanner auto-provisions any key it cannot find when the token may
     # create projects, and a project created that way is bound to no
@@ -31,10 +37,10 @@ runs:
       env:
         SONAR_TOKEN: ${{ inputs.token }}
         ORG: ${{ inputs.organization }}
-        KEY: ${{ inputs.organization }}_agent-ops-operator_${{ inputs.component }}
+        KEY: ${{ inputs.organization }}_agent-ops-operator_${{ steps.component.outputs.name }}
       run: |
         n=$(curl -sf -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/projects/search?organization=$ORG&projects=$KEY" | jq '.components | length')
-        [ "$n" = "1" ] || { echo "::error::no SonarCloud project for ${{ inputs.component }} — run .github/scripts/sonar-provision.sh (CONTRIBUTING.md, Code analysis)"; exit 1; }
+        [ "$n" = "1" ] || { echo "::error::no SonarCloud project for ${{ steps.component.outputs.name }} — run .github/scripts/sonar-provision.sh (CONTRIBUTING.md, Code analysis)"; exit 1; }
     # PROPERTIES ARE ARGUMENTS, NOT FIFTEEN PROPERTIES FILES. Test files are
     # DECLARED as tests rather than excluded, so test rules apply and test code
     # is not counted as uncovered source. Coverage paths name every shape a
@@ -50,8 +56,8 @@ runs:
         projectBaseDir: ${{ inputs.dir }}
         args: >-
           -Dsonar.organization=${{ inputs.organization }}
-          -Dsonar.projectKey=${{ inputs.organization }}_agent-ops-operator_${{ inputs.component }}
-          -Dsonar.projectName=agentops-${{ inputs.component }}
+          -Dsonar.projectKey=${{ inputs.organization }}_agent-ops-operator_${{ steps.component.outputs.name }}
+          -Dsonar.projectName=agentops-${{ steps.component.outputs.name }}
           -Dsonar.sources=.
           -Dsonar.exclusions=**/zz_generated.deepcopy.go,**/node_modules/**,**/dist/**,**/coverage/**,ui/e2e/**,ui/screenshots/**,ui/demo/**
           -Dsonar.tests=.

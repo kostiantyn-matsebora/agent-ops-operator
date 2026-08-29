@@ -173,7 +173,6 @@ jobs:
       - uses: ./.github/actions/sonar-scan
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         with:
-          component: manager
           dir: ${{ env.ENVTEST_MODULE }}
           token: ${{ secrets.SONAR_TOKEN }}
           organization: ${{ secrets.SONAR_ORG }}
@@ -233,16 +232,9 @@ jobs:
         run: |
           npx vitest run --coverage --coverage.reporter=lcov
           sed -i 's#^SF:#SF:ui/#' coverage/lcov.info
-      # THE COMPONENT NAME IS DERIVED, from the same list that names the image.
-      - id: component
-        run: |
-          name=$("$GITHUB_WORKSPACE"/.github/components.sh images | jq -r --arg c "./${{ matrix.module }}" '.[] | select(.context == $c) | .component')
-          [ -n "$name" ] || { echo "::error::${{ matrix.module }} is a module but not a component components.sh lists"; exit 1; }
-          echo "name=$name" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/sonar-scan
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         with:
-          component: ${{ steps.component.outputs.name }}
           dir: ${{ matrix.module }}
           token: ${{ secrets.SONAR_TOKEN }}
           organization: ${{ secrets.SONAR_ORG }}
@@ -305,7 +297,6 @@ jobs:
       - uses: ./.github/actions/sonar-scan
         if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime)) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
         with:
-          component: runtime-${{ matrix.runtime }}
           dir: runtimes/${{ matrix.runtime }}
           token: ${{ secrets.SONAR_TOKEN }}
           organization: ${{ secrets.SONAR_ORG }}

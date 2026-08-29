@@ -18,8 +18,10 @@ list a program produces rather than one somebody types.
 ## What Changes
 
 - **One SonarCloud project per component, under SonarCloud's monorepo mode.**
-  The project key and display name are derived from the component name
-  `components.sh` publishes (`agentops-<component>`), so the tree, the image
+  The project NAME is the image name `components.sh` publishes,
+  `agentops-<component>`, and the project KEY is
+  `<org>_agent-ops-operator_<component>` (SonarCloud keys are global, so the
+  organisation and repository prefix it) — so the tree, the image
   registry and the analysis dashboard agree on what exists. Fifteen projects
   today; a sixteenth appears when a directory does, and the workflow never
   lists them.
