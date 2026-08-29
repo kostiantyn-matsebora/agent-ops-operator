@@ -50,7 +50,6 @@ jobs:
       modules: ${{ steps.list.outputs.modules }}
       images: ${{ steps.list.outputs.images }}
       operator: ${{ steps.list.outputs.operator }}
-      ui: ${{ steps.list.outputs.ui }}
       chart: ${{ steps.list.outputs.chart }}
       docs: ${{ steps.list.outputs.docs }}
       site: ${{ steps.list.outputs.site }}
@@ -96,7 +95,7 @@ jobs:
             echo "building everything: base=${BASE_SHA:-none}" >&2
             echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
             echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
-            for j in operator ui chart docs site e2e; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
+            for j in operator chart docs site e2e; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
 
@@ -122,7 +121,6 @@ jobs:
           m() { grep -qE "$1" /tmp/changed.txt && echo true; }
           {
             echo "operator=$(m '^(platform/manager/|chart/)')"
-            echo "ui=$(m '^platform/console/ui/')"
             echo "chart=$(m '^(chart/|platform/manager/api/)')"
             echo "docs=$(m '^(docs/|chart/|platform/manager/api/|\.github/scripts/docs-generate)')"
             echo "site=$(m '^docs/')"
@@ -237,12 +235,14 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test -count=1 -coverprofile=coverage.out ./...
-      # THE CONSOLE IS ONE COMPONENT WITH TWO TOOLCHAINS, and one project. Its
-      # UI coverage is produced here, beside the Go profile, so the analysis
-      # below carries both. The lcov names files relative to ui/ and the
-      # analysis is rooted one level up, so the paths are re-anchored — without
-      # it every UI file is reported unmatched and coverage reads zero.
-      - name: Console UI coverage
+      # THE CONSOLE IS ONE COMPONENT WITH TWO TOOLCHAINS, and one project, and
+      # THIS IS THE UI SUITE'S ONE RUN. It had a job of its own (`console-ui`)
+      # that ran the same suite a second time once coverage had to be produced
+      # here beside the Go profile; the step is named so a failing UI test
+      # names the UI in this job's log. The lcov names files relative to ui/
+      # and the analysis is rooted one level up, so the paths are re-anchored —
+      # without it every UI file is reported unmatched and coverage reads zero.
+      - name: Console UI tests, with coverage
         if: matrix.module == 'platform/console'
         working-directory: platform/console/ui
         run: |
@@ -255,31 +255,6 @@ jobs:
           token: ${{ secrets.SONAR_TOKEN }}
           organization: ${{ secrets.SONAR_ORG }}
           pr: ${{ inputs.pr }}
-
-  # The console's browser application. The only non-Go job, and it exists
-  # because these tests run nowhere today: a broken bundle currently surfaces
-  # inside the console IMAGE build, at the end of a long log, and a failing
-  # component test surfaces for nobody.
-  #
-  # Screenshots are deliberately out: they need a browser, and they are
-  # regenerated when the UI changes, not on every pull request.
-  console-ui:
-    needs: discover
-    if: needs.discover.outputs.ui == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: platform/console/ui
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: platform/console/ui/package-lock.json
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
 
   # The Node runtimes' unit suites. Neither ran in CI until the copilot runtime
   # arrived with 55 tests nothing executed. No npm install: the suites import
@@ -732,7 +707,13 @@ jobs:
       # and touches no real repository.
       - name: The workflow's own scripts
         run: ./.github/tests/run.sh
+      # PULL REQUESTS ONLY. A push to master is the merge the pull request
+      # already gated, so there is nothing left to refuse there — and a change
+      # planned under an older shape that merges and THEN meets a stricter
+      # guard turns master red for work nobody can act on from master. The
+      # squash of #127 did exactly that on 2026-08-29.
       - name: Every change this pull request finishes ends in finished test and documentation tasks
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
@@ -903,7 +884,7 @@ jobs:
   ci-green:
     name: ci-green
     if: always()
-    needs: [discover, operator, modules, console-ui, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, conformance]
+    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title, pr-closes, conformance]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed
