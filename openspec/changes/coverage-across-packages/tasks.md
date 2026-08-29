@@ -1,6 +1,6 @@
 ## 1. Coverage across packages (design D1)
 
-- [ ] 1.1 Record the BEFORE: every component's coverage from `api/measures/component?metricKeys=coverage`, as a table of numbers in this file's task 1.1 (no identifier, no url — the org is a secret). Verify: fourteen rows, one per component `components.sh images` lists.
+- [ ] 1.1 Record the BEFORE: every component's coverage from `api/measures/component?metricKeys=coverage`, as a table of numbers in this file's task 1.1 (no identifier, no url — the org is a secret). Verify: **fifteen** rows, one per component `components.sh images` lists.
 
   **OPEN — the API read needs the user's token.** `SONAR_TOKEN` and
   `SONAR_ORG` exist as repository secrets and are write-only, so no session
@@ -11,9 +11,14 @@
   absent from the profile as uncovered, so its per-component figure is at or
   below each of these.
 
-  **`components.sh images` lists FIFTEEN, not fourteen.** The verify clause
-  is off by one — the archived `sonarcloud-analysis` recorded fifteen
-  projects created — and is corrected here rather than met by dropping a row.
+  **THE VERIFY CLAUSE ABOVE SAID `fourteen`, AND WAS CORRECTED IN PLACE.**
+  `components.sh images` lists fifteen, and the archived `sonarcloud-analysis`
+  recorded fifteen projects created, so the plan was off by one. Keeping the
+  wrong number visible "as the plan wrote it" was tried and reverted: two
+  review rounds read it as an inconsistency, and a task file is an instruction
+  to the next session before it is a record of what the last one found. The
+  finding is kept here, in prose, where it cannot be mistaken for a count to
+  meet.
 
   | Component | Toolchain | Before | With `-coverpkg` |
   |---|---|---|---|

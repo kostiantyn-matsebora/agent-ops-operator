@@ -70,10 +70,16 @@ sq() {
   while [ "$_i" -lt "$_n" ]; do
     set -- "$@" --data-urlencode "$1"; shift; _i=$((_i + 1))
   done
+  # STDIN IS CLOSED ON EVERY CALL. Both loops below are `... | while read`, so
+  # the loop body inherits the PIPE as its stdin — and a command in that body
+  # that reads stdin eats the rest of the list, silently provisioning half of
+  # it. curl does not read stdin today; `</dev/null` is what stops a later
+  # `--data @-` or a swapped tool from making that a one-character bug nobody
+  # would look for here.
   if [ "$_method" = GET ]; then
-    _code=$(curl -s -o "$BODY" -w '%{http_code}' -u "$SONAR_TOKEN:" -G "$@" "$API/$_path")
+    _code=$(curl -s -o "$BODY" -w '%{http_code}' -u "$SONAR_TOKEN:" -G "$@" "$API/$_path" </dev/null)
   else
-    _code=$(curl -s -o "$BODY" -w '%{http_code}' -u "$SONAR_TOKEN:" -X POST "$@" "$API/$_path")
+    _code=$(curl -s -o "$BODY" -w '%{http_code}' -u "$SONAR_TOKEN:" -X POST "$@" "$API/$_path" </dev/null)
   fi
   case "$_code" in
     2*) cat "$BODY"; return 0 ;;
@@ -106,7 +112,7 @@ body=$(.github/components.sh images | jq -c --arg o "$SONAR_ORG" --arg i "$inst"
                 projectName: ("agentops-" + .)}]}')
 [ "$(printf '%s' "$body" | jq '.projects | length')" -gt 0 ] || { echo "nothing to provision: $*" >&2; exit 64; }
 curl -sf -u "$SONAR_TOKEN:" -X POST -H 'Content-Type: application/json' \
-  "$API/alm_integration/provision_monorepo_projects" --data "$body" \
+  "$API/alm_integration/provision_monorepo_projects" --data "$body" </dev/null \
   | jq -r '.projects[].projectKey'
 
 # --- stage 2: the gate ------------------------------------------------------

@@ -103,6 +103,15 @@ stub_curl() {  # stub_curl <bindir>
   cat > "$bin/curl" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${CURL_CALLS:-/dev/null}"
+# A curl that DRAINS ITS STDIN, on demand. The script's two provisioning loops
+# are `... | while read`, so the body inherits the pipe: a command in it that
+# reads stdin swallows the rest of the list and the run provisions the first
+# item only, reporting success. `sq` passes `</dev/null` to stop that, and this
+# is what proves it does. The harness gives the SCRIPT /dev/null as stdin, so a
+# drain outside a loop reads EOF at once and only the loops can be truncated —
+# without that the regression shows up as a hang, which reads as a broken test
+# rather than as the bug it is.
+[ -n "${CURL_DRAINS_STDIN:-}" ] && cat >/dev/null
 out=""; url=""; want_code=""; prev=""
 for a in "$@"; do
   [ "$prev" = "-o" ] && out="$a"
@@ -171,7 +180,7 @@ run() {  # run <fixtures-dir> [args...] — the gate scenarios pass --gate
   local tree; tree=$(make_tree)
   local fx="$1"; shift
   CURL_CALLS="$CALLS" CURL_FIXTURES="$fx" SONAR_TOKEN=t SONAR_ORG=o \
-    sh "$tree/.github/scripts/sonar-provision.sh" "$@" > "$TMP/out" 2>&1 && RC=0 || RC=$?
+    sh "$tree/.github/scripts/sonar-provision.sh" "$@" > "$TMP/out" 2>&1 </dev/null && RC=0 || RC=$?
   OUT=$(cat "$TMP/out")
 }
 
@@ -339,6 +348,20 @@ it "refuses an option it does not know, rather than ignoring it"
 run "$F" --gates
 assert_equals "2" "$RC"
 assert_contains "$OUT" "unknown option"
+
+# --- a tool in the loop that reads stdin must not truncate the list ---------
+
+CALLS="$TMP/calls-drain"; : > "$CALLS"
+F="$TMP/fx-drain"; fixtures "$F" '{"qualitygates":[{"id":9,"name":"Sonar way","isDefault":true,"conditions":[]}]}' '{"qualityGate":{"name":"Sonar way"}}'
+CURL_DRAINS_STDIN=1 run "$F" --gate
+unset CURL_DRAINS_STDIN
+
+it "assigns EVERY project even when the API call consumes stdin"
+assert_contains "$OUT" "assigned: o_agent-ops-operator_manager"
+assert_contains "$OUT" "assigned: o_agent-ops-operator_console"
+
+it "writes every condition too, not just the first"
+assert_equals "7" "$(printf '%s\n' "$OUT" | grep -c 'condition added')"
 
 rm -rf "$tmp"
 summary
