@@ -85,11 +85,8 @@ guard="$root/.github/scripts/docs-task-guard.py"
 command -v python3 >/dev/null 2>&1 || exit 0
 [ -r "$guard" ] || exit 0
 
-if message=$(python3 "$guard" --tasks "$tasks" 2>&1); then
-  exit 0
-fi
-
-cat >&2 <<EOF
+if ! message=$(python3 "$guard" --tasks "$tasks" 2>&1); then
+  cat >&2 <<EOF
 BLOCKED: '$name' cannot be archived yet.
 
 $message
@@ -98,5 +95,28 @@ Archiving is the point of no return — the deltas fold into the specs and nobod
 revisits the change. Finish these, or say explicitly that you are archiving with
 tests or documentation outstanding and why.
 See .claude/rules/documentation.md and .claude/rules/change-tests.md.
+EOF
+  exit 2
+fi
+
+# THE SECOND QUESTION: IS THE PULL REQUEST'S FIXING LOOP STILL OPEN. A change
+# whose pull request carries the `autofix` label may have a round about to land
+# a commit, or a dispute the fixing step posted that no person has answered.
+# `.github/scripts/autofix-guard.py` reads that off the pull request of the
+# worktree's branch, fails open on everything it cannot read (no gh, no pull
+# request, no label), and CI's docs-task job asks the same script.
+autofix="$root/.github/scripts/autofix-guard.py"
+[ -r "$autofix" ] || exit 0
+if message=$(cd "$root" && python3 "$autofix" 2>&1); then
+  exit 0
+fi
+
+cat >&2 <<EOF
+BLOCKED: '$name' cannot be archived while its automatic fixing loop is open.
+
+$message
+
+Wait for the round to land, or answer the dispute in its thread (reply, or
+resolve it to dismiss). See .claude/rules/worktree-delivery.md.
 EOF
 exit 2

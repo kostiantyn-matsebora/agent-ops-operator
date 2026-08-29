@@ -291,6 +291,25 @@ rules loaded on demand.
   - **Thread verdicts vary between runs of the same file** — `standing`,
     `fixed`, `gone` for the same five threads at every effort level. Not
     a speed problem; open.
+- **A `workflow_dispatch` RUN'S CHECK RUNS NEVER REACH THE MERGE BOX —
+  MEASURED ON #131, 2026-08-29, AND IT IS WHY THE FIXING LOOP PUSHES WITH A
+  DEPLOY KEY.** A commit pushed with `[skip ci]` (so no `pull_request` run
+  existed for it), then `gh workflow run ci.yml --ref <branch> -f pr=131`:
+  the run's `ci-green` check run attached to the head sha (the commit's
+  check-runs API listed 44 from github-actions, its check suite even listed
+  the pull request), yet `gh pr checks` and the pull request's status rollup
+  showed NONE of them — only SonarCloud's own sixteen. Branch protection
+  reads the rollup, so the required check stays "expected" forever. With
+  both a `pull_request` run and a dispatched run on one sha the rollup shows
+  the `pull_request` one alone, which is the same fact seen from the other
+  side. So a token push cannot be repaired by self-dispatch; the loop pushes
+  through `AUTOFIX_DEPLOY_KEY` and lets ordinary events fire.
+  - **Sonar analysed the dispatched run as pull request 131 only because the
+    action was handed the number** (`-Dsonar.pullrequest.key`); without it a
+    hand run submits a BRANCH analysis that decorates and gates nothing.
+    That is why the sonar action waits on the quality gate itself
+    (`sonar.qualitygate.wait`) instead of relying on Sonar's own check, and
+    why `ci.yml`'s `workflow_dispatch` input is kept for hand runs.
 - **`claude-code-action` EXITS AFTER THE MODEL'S FIRST TURN, SO A BACKGROUND
   `Workflow` NEVER RUNS UNDER IT.** The tool launches the run and returns at
   once; the CLI stays alive and gives the model a second turn with the result
