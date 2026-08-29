@@ -19,24 +19,24 @@ list pasted — a key is derivable from `components.sh`, and that is the point.
 
 ## 2. Coverage from the existing test jobs (D3)
 
-- [x] 2.1 `operator`: add `-coverprofile=coverage.out` to its `go test`, upload
-  as `coverage-platform-manager`
-- [x] 2.2 `modules`: the same per matrix leg, artifact name derived from the
-  module path by the ONE transform, written where both this job and the sonar
-  job read it
-- [x] 2.3 `console-ui`: add `@vitest/coverage-v8` matching the installed vitest
-  major, run `vitest run --coverage --coverage.reporter=lcov`, upload
-  `coverage-platform-console-ui`. Verify `npm test` locally still passes
-  without coverage flags
-- [x] 2.4 `node-runtimes`: `node --test --experimental-test-coverage
-  --test-reporter=lcov --test-reporter-destination=coverage.lcov` per runtime,
-  upload `coverage-runtimes-<runtime>`. Verify the lcov reporter exists on the
-  Node 22 the job installs. VERIFIED locally on both runtimes; `spec` is kept
-  as a second reporter so the log still shows the tests
-- [x] 2.5 Verify no test job's runtime changed materially — read the durations
-  before and after on one run. DONE — no test job moved materially; sonar legs 35–50 s, the console 1m22
+Each test invocation gains its coverage flag, and the analysis step (section
+3) reads the profile from where the tests wrote it. Nothing is uploaded.
 
-## 3. The `sonar` job in `ci.yml`
+- [x] 2.1 `operator`: `go test -count=1 -coverprofile=coverage.out ./...`
+- [x] 2.2 `modules`: the same per matrix leg
+- [x] 2.3 the console's UI coverage, in its `modules` leg: `@vitest/coverage-v8`
+  matching the installed vitest major, `vitest run --coverage
+  --coverage.reporter=lcov`, `SF:` re-anchored to `ui/`. `console-ui` stays
+  `npm test`. VERIFIED locally that `npm test` passes without coverage flags
+- [x] 2.4 `node-runtimes`: `node --test --experimental-test-coverage
+  --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov
+  --test-reporter-destination=coverage.lcov` per runtime. VERIFIED locally on
+  both runtimes; `spec` is kept so the log still shows the tests
+- [x] 2.5 Verify no test job's runtime changed materially — read the durations
+  before and after on one run. DONE — the analysis step adds 35–50 s to a
+  module leg, 1m22 to the console's
+
+## 3. The analysis step in `ci.yml`
 
 - [x] 3.1 Add the job: `needs: [discover, operator, modules, console-ui,
   node-runtimes]`, `if: !cancelled()` plus the discover-succeeded and
