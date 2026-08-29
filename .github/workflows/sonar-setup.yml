@@ -20,12 +20,16 @@ jobs:
           set -u
           api() { curl -s -u "$SONAR_TOKEN:" "$@"; }
           mask() { sed "s/$SONAR_ORG/ORG/g"; }
-          inst="${SONAR_ORG}/agent-ops-operator|1324376362"
           projects=$(./.github/components.sh images | jq -c --arg o "$SONAR_ORG" '[.[] | {projectKey: ($o + "_agent-ops-operator_" + .component), projectName: ("agentops-" + .component)}]')
-          echo "== is the repository listed / already linked"
-          api "https://sonarcloud.io/api/alm_integration/list_repositories?organization=$SONAR_ORG&alm=github&ps=100" | jq -c '.repositories[] | select(.label=="agent-ops-operator")' | mask
+          echo "== repositories (label, installationKey, linkedProjects) — every page"
+          for pg in 1 2 3 4; do
+            api "https://sonarcloud.io/api/alm_integration/list_repositories?organization=$SONAR_ORG&alm=github&ps=100&p=$pg" | jq -r '.repositories[]? | "\(.label)\t\(.installationKey)\t\(.linkedProjects|length)"' | mask
+          done | sort -u
+          inst=$(for pg in 1 2 3 4; do api "https://sonarcloud.io/api/alm_integration/list_repositories?organization=$SONAR_ORG&alm=github&ps=100&p=$pg"; done | jq -r '.repositories[]? | select(.label=="agent-ops-operator") | .installationKey' | head -1)
+          echo "installationKey from list: $([ -n "$inst" ] && echo found || echo MISSING)"
+          [ -n "$inst" ] || inst="${SONAR_ORG}/agent-ops-operator|$(curl -s https://api.github.com/repos/${SONAR_ORG}/agent-ops-operator | jq -r .id)"
           try() { echo "-- $1"; api -w '\nhttp %{http_code}\n' -X POST -H 'Content-Type: application/json' "https://sonarcloud.io/api/alm_integration/provision_monorepo_projects" --data "$2" | mask | head -c 1500; echo; }
-          try A "$(jq -nc --arg o "$SONAR_ORG" --arg i "$inst" --argjson p "$projects" '{organization:$o, installationKey:$i, projects:$p}')"
-          try B "$(jq -nc --arg o "$SONAR_ORG" --arg i "$inst" --argjson p "$projects" '{organization:$o, installationKeys:[$i], projects:($p|map({key:.projectKey,name:.projectName}))}')"
+          try C "$(jq -nc --arg o "$SONAR_ORG" --arg i "$inst" --argjson p "$projects" '{organization:$o, installationKeys:[$i], projects:$p}')"
+          try D "$(jq -nc --arg o "$SONAR_ORG" --arg i "$inst" --argjson p "$projects" '{organization:$o, installationKey:$i, projects:$p, newCodeDefinitionType:"PREVIOUS_VERSION"}')"
           echo "== projects now"
           api "https://sonarcloud.io/api/projects/search?organization=$SONAR_ORG&ps=100" | jq -r '.components[] | "\(.key)\t\(.name)"' | mask
