@@ -289,8 +289,9 @@ component is judged by is one `git show` away.
 **IT HAS NOT BEEN RUN, AND THAT IS THE POINT OF THE FLAG.** Since the verdict
 fails the component's job, a coverage condition added before a component
 reaches the threshold does not turn its dashboard red — it holds every pull
-request that touches it, and twelve of the fifteen components are under 80%
-today. So turning it on is an act somebody takes when the tree is ready,
+request that touches it, and NO component is over 80% today — the thirteen
+measured locally run 28.7% to 78.1%, and the two Node runtimes report only
+the files their suites loaded, so their real figure is not known here. So turning it on is an act somebody takes when the tree is ready,
 never a side effect of provisioning a project — which is also why CI, which
 calls this script itself for a missing project, cannot turn it on. A gate on
 new code alone let a component sit at 27% and one at 79% pass identically,

@@ -58,12 +58,21 @@
   the same shape, so the dashboard's number for these two is the one that
   matters and this row cannot stand in for it.
 
-  **The gap the follow-up changes start from**, against the 80% condition:
+  **The gap the follow-up changes start from**, against the 80% condition —
+  and it is EVERY Go component, the manager included:
   `signal-cron` (28.7%), `housekeeping` (41.7%), `gateway-telegram` and
   `signal-telegram` (56.2%), `egress-proxy` (62.3%), `runtime-ollama` (68.5%),
-  `context-sync` (68.6%), `channel-telegram` (70.9%), `signal-ha` (72.2%),
-  `signal-alertmanager` (74.0%), `console` (74.8% Go), `signal-k8s-events`
-  (78.1%). The manager clears it on the corrected number.
+  `context-sync` (68.6%), **`manager` (70.7%)**, `channel-telegram` (70.9%),
+  `signal-ha` (72.2%), `signal-alertmanager` (74.0%), `console` (74.8% Go),
+  `signal-k8s-events` (78.1%).
+
+  **THIS PARAGRAPH SAID "the manager clears it on the corrected number", AND
+  IT WAS WRONG.** 70.7% is under 80%; being the component the flag rescued
+  from 21.7% is not the same as meeting the threshold, and writing it up as a
+  success story is exactly how the one number this change exists to correct
+  would have been mis-stated in its own record. Not one component is over the
+  line today, which is the fact the sequencing question in design D3 turns
+  on.
 - [x] 1.2 `.github/workflows/ci.yml`: the `operator` and `modules` test steps run `go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...`; the comment above each says why the flag is there. Verify: `grep -c 'coverpkg=./...' .github/workflows/ci.yml` prints 2.
 - [x] 1.3 In the worktree's build container, run the manager's suite with the new flags and read `go tool cover -func=coverage.out | tail -1` before and after `-coverpkg`, recording both totals in this task. Verify: the after number is higher, and packages absent from the old profile appear in the new one.
 
