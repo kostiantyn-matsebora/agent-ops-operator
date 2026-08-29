@@ -19,28 +19,12 @@ jobs:
         run: |
           set -u
           api() { curl -s -u "$SONAR_TOKEN:" "$@"; }
-          echo "== binding of the monorepo project"
-          binding=$(api "https://sonarcloud.io/api/alm_settings/get_binding?project=$SONAR_PROJECT_KEY")
-          echo "$binding" | jq -c 'del(.url)'
-          alm=$(echo "$binding" | jq -r '.key // empty')
-          repo=$(echo "$binding" | jq -r '.repository // empty')
-          echo "== creating and binding subprojects"
-          for c in $(./.github/components.sh images | jq -r '.[].component'); do
-            key="${SONAR_ORG}_agent-ops-operator_${c}"
-            create=$(api -o /dev/null -w '%{http_code}' -X POST "https://sonarcloud.io/api/projects/create" \
-              --data-urlencode "organization=$SONAR_ORG" --data-urlencode "project=$key" \
-              --data-urlencode "name=agentops-$c")
-            bind="skipped"
-            if [ -n "$alm" ] && [ -n "$repo" ]; then
-              bind=$(api -o /tmp/bind.json -w '%{http_code}' -X POST "https://sonarcloud.io/api/alm_settings/set_github_binding" \
-                --data-urlencode "almSetting=$alm" --data-urlencode "project=$key" \
-                --data-urlencode "repository=$repo" --data-urlencode "monorepo=true" \
-                --data-urlencode "summaryCommentEnabled=true")
-              [ "$bind" = "204" ] || { echo "   bind error: $(jq -c . /tmp/bind.json 2>/dev/null | head -c 300)"; }
-            fi
-            echo "create=$create bind=$bind  ORG_agent-ops-operator_$c"
-          done
-          echo "== verify"
-          for c in manager console; do
-            api "https://sonarcloud.io/api/alm_settings/get_binding?project=${SONAR_ORG}_agent-ops-operator_$c" | jq -c 'del(.url)'
-          done
+          echo "== projects now"
+          api "https://sonarcloud.io/api/projects/search?organization=$SONAR_ORG&ps=100" | jq -r '.components[] | "\(.lastAnalysisDate // "never")\t\(.key | sub("^[^_]+_"; "ORG_"))\t\(.name | sub("^[^_]+_"; "ORG_"))"'
+          echo "== create error body"
+          api -X POST "https://sonarcloud.io/api/projects/create" --data-urlencode "organization=$SONAR_ORG" --data-urlencode "project=${SONAR_ORG}_agent-ops-operator_probe" --data-urlencode "name=probe" | sed "s/$SONAR_ORG/ORG/g" | head -c 600; echo
+          api -X POST "https://sonarcloud.io/api/projects/delete" --data-urlencode "project=${SONAR_ORG}_agent-ops-operator_probe" -o /dev/null -w 'probe delete %{http_code}\n'
+          echo "== web services mentioning alm / monorepo / provision"
+          api "https://sonarcloud.io/api/webservices/list" | jq -r '.webServices[] | .path as $p | .actions[] | "\($p)/\(.key)\t\((.params // []) | map(.key) | join(","))"' | grep -iE "alm|monorepo|provision|projects/create|navigation/component" 
+          echo "== monorepo project navigation"
+          api "https://sonarcloud.io/api/navigation/component?component=$SONAR_PROJECT_KEY" | jq -c '{key: (.key|sub("^[^_]+_"; "ORG_")), alm: .alm, almRepository: .almRepository, isMonorepo: .isMonorepo, monorepo: .monorepo, qualifier: .qualifier}' 2>/dev/null | sed "s/$SONAR_ORG/ORG/g"
