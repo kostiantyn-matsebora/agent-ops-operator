@@ -444,7 +444,9 @@ configuration, defaulting to the real one.
   as env on the chart-owned router Deployment, and as the `apiBase` key of the
   bot Secret for the reconciler-owned channel adapter (projected as
   `AGENTOPS_CRED_<CHANNEL>_apiBase`). UNSET RENDERS NOTHING, so a default
-  install is byte-identical.
+  install is byte-identical. Precedence on the channel adapter: the Secret's
+  key, then `TELEGRAM_API_BASE`, then the real host; the router has no
+  per-surface key and reads `TELEGRAM_API_BASE` alone.
 - **NEVER `Channel.spec.config`.** Anyone able to edit a served channel could
   otherwise send that channel's bot token to a host of their choosing. The
   Secret that already holds the token is the one place a redirect grants

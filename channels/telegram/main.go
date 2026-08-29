@@ -306,10 +306,7 @@ func (a *adapter) baseFor(fromSecret string) string {
 	if b := strings.TrimRight(strings.TrimSpace(fromSecret), "/"); b != "" {
 		return b
 	}
-	if a.apiBase != "" {
-		return a.apiBase
-	}
-	return resolveAPIBase("")
+	return a.apiBase
 }
 
 // client returns (caching) the Bot API client for a served channel — one per

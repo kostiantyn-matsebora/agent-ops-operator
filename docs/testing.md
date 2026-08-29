@@ -116,7 +116,7 @@ One thing exists already and one is a decision:
 
 1. **The repository secret `CLAUDE_CODE_OAUTH_TOKEN`** — the same Claude Code
    token the review workflow already runs on, and the credential the claude
-   bundle projects into the runtime. Read only by `e2e-full.yml`; pull
+   bundle projects into the runtime. Read only by `e2e-full.yml`. Pull
    requests never see it. Without it the real-runtime lane reports itself
    skipped and every other lane still runs.
 2. **The cadence.** The cron lives in `e2e-full.yml` and nowhere else. A
