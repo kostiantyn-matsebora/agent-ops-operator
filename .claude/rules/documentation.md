@@ -31,7 +31,7 @@ in prose is followed until the evening somebody is tired.
 | Where | Does |
 |---|---|
 | `openspec/config.yaml` — `rules.tasks` / `rules.proposal` | injected into the instructions each time a tasks or proposal file is GENERATED, so the section is written in the first place |
-| `.claude/hooks/require-docs-task.sh` — a `PreToolUse` hook on Bash | **REFUSES `openspec archive`** when the last section is not documentation, when the two before it are not unit tests then e2e tests, or when any task in the three is unticked — through `.github/scripts/docs-task-guard.py`, which CI's `docs-task` job calls too |
+| `.claude/hooks/require-docs-task.sh` — a `PreToolUse` hook on Bash | **REFUSES `openspec archive`** when the last section is not documentation, when the two before it are not unit tests then e2e tests, or when any task in the three is unticked — through `.github/scripts/docs-task-guard.py`, which CI's `docs-task` job calls too. **The same hook then asks `.github/scripts/autofix-guard.py`** whether the change's pull request has a fixing round running or a dispute no person has answered, and refuses on either; fail-open without `gh`, a pull request or the `autofix` label. See `worktree-delivery.md` |
 | `.claude/hooks/require-release-docs.sh` — a `PreToolUse` hook on Bash | **REFUSES `git push` of a `chart-v<semver>` tag** unless `chart/Chart.yaml`, a `## [<semver>]` changelog entry and every version the docs print agree on the number. A CHANGE's docs and a RELEASE's docs are two events, and only the first had a gate until 13.1.0 shipped saying 13.0.1 |
 
 - **The config half reaches the model at the moment it writes the file**, where

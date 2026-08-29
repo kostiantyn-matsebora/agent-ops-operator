@@ -16,6 +16,16 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [Unreleased]
+
+### Changed
+
+- **The SonarCloud quality gate is a required check.** The scan step in CI
+  waits on the gate and fails the component's job on `ERROR`, reported
+  through `ci-green`. Contributor-facing only; nothing in the chart or the
+  operator changes. See `CONTRIBUTING.md`, *Code analysis* and *Pull
+  requests* (the `autofix` label).
+
 ## [13.3.0] — 2026-08-28
 
 **A third runtime: `agentops-runtime-copilot` 0.1.0, shipped as the `copilot`

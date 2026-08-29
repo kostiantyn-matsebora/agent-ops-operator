@@ -69,6 +69,21 @@ Archive a completed change in the experimental workflow.
 
    If user chooses sync, use Task tool (subagent_type: "general-purpose", prompt: "Use Skill tool to invoke openspec-sync-specs for change '<name>'. Delta spec analysis: <include the analyzed delta spec summary>"). Proceed to archive regardless of choice.
 
+4.5 **The fixing loop must be closed — THIS REPOSITORY'S REFUSAL**
+
+   A `PreToolUse` hook (`.claude/hooks/require-docs-task.sh`, through
+   `.github/scripts/autofix-guard.py`) REFUSES `openspec archive` while the
+   change's pull request carries the `autofix` label and either a
+   `review-dispatch` round is still running or a dispute the loop posted has no
+   reply from a person. CI's `docs-task` job asks the same script.
+
+   - **A running round**: wait for it to land (the pull request shows the
+     landing comment), then archive.
+   - **An unanswered dispute**: the owner answers it in its thread — a reply,
+     or resolving the thread to dismiss it — and then archive.
+   - **The guard fails open** without `gh`, without a pull request for the
+     branch, or without the label; a refusal names what it is waiting for.
+
 5. **Perform the archive**
 
    Create an `archive` directory under `planningHome.changesDir` if it doesn't exist:

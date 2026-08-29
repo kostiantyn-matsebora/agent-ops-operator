@@ -183,6 +183,157 @@ out=$(cd "$tmp/work" && : > "$GH_CALLS" && python3 "$S" --repo o/r --pr 7 --bran
 assert_contains "$out" "REFUSED  PRRT_human: authored by 'a-maintainer', not the review"
 assert_not_contains "$(cat "$GH_CALLS")" "resolveReviewThread"
 
+# --mode all: THE LABELLED PULL REQUEST. Fix or dispute, a dispute is a marked
+# reply that stays open, analysis issues are on the list, rounds are counted
+# from the pull request, every ending is ONE summary naming the approver, and
+# a landed round dispatches CI and the review.
+export GH_COMMENTS="$tmp/comments.json"
+printf '[]' > "$GH_COMMENTS"
+cat > "$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+# One call per LINE, a multi-line body flattened, so a test can read a whole
+# comment with one grep.
+call="${*//$'\n'/ }"
+case "$*" in
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "$call" "$(git -C "$ORIGIN" rev-parse --short "$BRANCH" 2>/dev/null || echo none)" >> "$GH_CALLS" ;;
+  *) printf '%s\n' "$call" >> "$GH_CALLS" ;;
+esac
+case "$*" in
+  "api graphql"*) cat "$GH_FIXTURE" ;;
+  "api repos/"*"/issues/"*"/comments --paginate") cat "$GH_COMMENTS" ;;
+  "workflow run"*) [ -z "${GH_DISPATCH_FAILS:-}" ] || { echo "HTTP 422" >&2; exit 1; } ;;
+esac
+exit 0
+STUB
+cat > "$tmp/sonar.json" <<'JSON'
+{"consulted":true,"stale":[],"projects":[],"issues":[]}
+JSON
+cat > "$tmp/work-all.json" <<'JSON'
+[{"id":"PRRT_a","source":"review","threadId":"PRRT_a","commentId":11,"path":"a.go","line":3,"finding":"A returns nothing.","acceptedBy":"an-approver","reply":""},
+ {"id":"PRRT_b","source":"review","threadId":"PRRT_b","commentId":22,"path":"b.go","line":3,"finding":"B is unused.","acceptedBy":"an-approver","reply":""},
+ {"id":"sonar:AZ1","source":"sonar","key":"AZ1","rule":"go:S1234","severity":"MAJOR","path":"b.go","line":1,"message":"Remove the unused function."}]
+JSON
+printf '{"items":[{"id":"PRRT_a","action":"fixed","reason":""},{"id":"PRRT_b","action":"disputed","reason":"B is exported and used by the tests"},{"id":"sonar:AZ1","action":"disputed","reason":"the function is the package API"}]}' > "$tmp/report-all.json"
+
+land_all() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
+             (cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
+                --work-list "${WORK:-$tmp/work-all.json}" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report-all.json}" \
+                --dispatched-by github-actions --mode all --approver an-approver --since 2026-08-29T10:00:00Z \
+                --max-rounds 3 --sonar "$tmp/sonar.json" ${STARTS---push-starts-workflows} 2>&1); }
+
+fresh_repo
+out=$(land_all); rc=$?
+sha=$(git -C "$ORIGIN" rev-parse --short "$BRANCH")
+
+it "labelled: fixes what the patch fixes and pushes one commit naming the round"
+assert_status 0 "$rc"
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(git -C "$ORIGIN" log -1 --format=%s "$BRANCH")" "fix(review): address 1 review finding (autofix round 1)"
+
+it "labelled: a disputed thread gets a MARKED reply naming the approver, and is not resolved"
+assert_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- autofix:disputed -->"
+assert_contains "$(cat "$GH_CALLS")" "Disputed by the fixing step: B is exported and used by the tests"
+assert_contains "$(cat "$GH_CALLS")" "Left open for @an-approver"
+assert_equals "PRRT_a" "$(cat "$tmp/work/.resolve-threads")"
+
+it "labelled: disputed analysis issues go in ONE pull request comment under the marker, naming the key, and nothing touches the service"
+assert_equals "1" "$(grep -c 'The fixing step disputes 1 analysis issue' "$GH_CALLS")"
+assert_contains "$(grep 'disputes 1 analysis issue' "$GH_CALLS")" "<!-- autofix:disputed -->"
+assert_contains "$(cat "$GH_CALLS")" "\`AZ1\` (go:S1234, \`b.go:1\`): the function is the package API"
+assert_not_contains "$(cat "$GH_CALLS")" "sonarcloud"
+
+it "labelled: the landing comment carries the round marker, and dispatches nothing — the push itself is what starts CI and the review"
+assert_contains "$(cat "$GH_CALLS")" "<!-- autofix:round 1 -->"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_contains "$out" "the push starts CI and the review, and the review's completion starts the next round"
+
+it "labelled: a round that goes on posts NO summary — the summary is the ending's"
+assert_not_contains "$(cat "$GH_CALLS")" "<!-- autofix:summary -->"
+assert_not_contains "$(cat "$GH_CALLS")" "Push again"
+
+# ENDING: the cap. Two rounds already on the pull request since the label.
+it "labelled: counts rounds from its own marked comments since the label, and at the cap posts ONE summary mentioning the approver instead of re-triggering"
+fresh_repo
+printf '[{"body":"<!-- autofix:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- autofix:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- autofix:round 9 -->\\nfrom before the label","created_at":"2026-08-28T12:00:00Z"}]' > "$GH_COMMENTS"
+out=$(land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "<!-- autofix:round 3 -->"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
+summary_line=$(grep '<!-- autofix:summary -->' "$GH_CALLS")
+assert_contains "$summary_line" "round cap reached** — @an-approver"
+assert_contains "$summary_line" "Rounds used: 3 of 3"
+assert_contains "$summary_line" "Disputed (2)"
+printf '[]' > "$GH_COMMENTS"
+
+# ENDING: disputes only.
+it "labelled: with everything disputed, commits nothing, posts the disputes, and ONE summary saying so"
+fresh_repo
+printf '{"items":[{"id":"PRRT_a","action":"disputed","reason":"A is fine"},{"id":"PRRT_b","action":"disputed","reason":"so is B"},{"id":"sonar:AZ1","action":"disputed","reason":"API"}]}' > "$tmp/report-disp.json"
+: > "$tmp/empty.patch"
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-disp.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_equals "2" "$(grep -c 'replies -f body=<!-- autofix:disputed -->' "$GH_CALLS")"
+assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "disputes only** — @an-approver"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_not_contains "$(cat "$GH_CALLS")" "resolveReviewThread"
+
+# ENDING: clean.
+it "labelled: with nothing to do, posts ONE summary saying the pull request is clean"
+fresh_repo
+printf '[]' > "$tmp/none.json"
+out=$(WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "clean** — @an-approver"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
+
+it "labelled: says when the analysis was not consulted"
+printf '{"consulted":false,"stale":["manager"],"projects":[],"issues":[]}' > "$tmp/sonar.json"
+out=$(WORK="$tmp/none.json" land_all)
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "The analysis service was NOT consulted this round"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "(stale for manager)"
+printf '{"consulted":true,"stale":[],"projects":[],"issues":[]}' > "$tmp/sonar.json"
+
+# ENDING: stale patch.
+it "labelled: a stale patch lands nothing, resolves nothing, and ends the loop with ONE summary"
+fresh_repo
+printf 'package a\n\n// moved\nfunc A() string { return "" }\n' > "$tmp/work/a.go"
+git -C "$tmp/work" commit -qam "moved" && git -C "$tmp/work" push -q origin "$BRANCH"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(land_all); rc=$?
+assert_status 1 "$rc"
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "stale patch** — @an-approver"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+
+it "labelled: an item the report neither fixed nor disputed is DISPUTED as unaddressed, never dropped"
+fresh_repo
+printf '{"items":[{"id":"PRRT_a","action":"fixed","reason":""}]}' > "$tmp/report-partial.json"
+out=$(REPORT="$tmp/report-partial.json" land_all)
+assert_contains "$out" "disputed PRRT_b (b.go): not addressed by the fixing step"
+assert_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- autofix:disputed -->"
+
+# THE TOKEN PUSHED IT. Without the push credential the workflow does not pass
+# --push-starts-workflows, and a landed round cannot be followed by another.
+it "labelled: without the push credential, lands the round and ends the loop with ONE summary naming the missing secret"
+fresh_repo
+out=$(STARTS="" land_all); rc=$?
+assert_status 1 "$rc"
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "could not start the next round** — @an-approver"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "AUTOFIX_DEPLOY_KEY"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "Push again"
+
+it "never dispatches a workflow: a dispatched run's checks never reach the merge box"
+assert_not_contains "$(cat "$S")" "workflow run"
+
 it "contains no model invocation of its own"
 assert_not_contains "$(cat "$S")" "claude"
 
