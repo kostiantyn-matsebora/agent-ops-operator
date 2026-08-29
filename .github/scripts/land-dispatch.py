@@ -40,9 +40,15 @@ TWO MODES, ONE PROGRAM.
             DISPUTED, never dropped: a disputed thread gets a reply under the
             dispute marker and stays open, disputed analysis issues get ONE
             pull request comment under the same marker, and the person who
-            placed the label is mentioned. The landed commit RE-TRIGGERS
-            `ci.yml` and the review by `workflow_dispatch` -- the documented
-            exception to the token rule -- so the next round starts by itself.
+            placed the label is mentioned. The landed commit is pushed with a
+            credential that is NOT the workflow token -- a write deploy key
+            the workflow configures on the remote before calling this -- so
+            the push is an ordinary push, CI and the review run on it, and
+            the review's completion starts the next round. (A check run from
+            a `workflow_dispatch` never reaches the merge box: measured on
+            #131, the gotchas rule file.) `--push-starts-workflows` is
+            how the workflow says that credential was in place; without it a
+            landed round ends the loop, saying so.
             Rounds are counted from this program's own round-marked comments
             since the label was placed (state on the pull request, derivable,
             no store), capped at `--max-rounds`, and every ending posts ONE
@@ -225,22 +231,6 @@ class Round:
         pr_comment(a.repo, a.pr, "\n".join(lines))
         print(f"summary posted: {ending}")
 
-    def retrigger(self, sha: str) -> list[str]:
-        """The next round: CI on the branch (its check runs attach to the head
-        sha) and the review from the default branch's copy, both by
-        `workflow_dispatch`, which a workflow-token push may start."""
-        started = []
-        for wf, ref, inp in ((self.args.ci_workflow, self.args.branch, f"pr={self.args.pr}"),
-                             (self.args.review_workflow, self.args.default_branch, f"number={self.args.pr}")):
-            r = sh("gh", "workflow", "run", wf, "--repo", self.args.repo, "--ref", ref, "-f", inp, check=False)
-            if r.returncode == 0:
-                started.append(wf)
-                print(f"dispatched {wf} on {ref} for {sha[:7]}")
-            else:
-                print(f"could not dispatch {wf}: {r.stderr.strip()}", file=sys.stderr)
-        return started
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo", required=True, help="owner/name")
@@ -262,9 +252,9 @@ def main() -> int:
     ap.add_argument("--max-rounds", type=int, default=3)
     ap.add_argument("--sonar", type=pathlib.Path, help="--mode all: sonar-issues.py output, for the summary")
     ap.add_argument("--vocabulary", type=pathlib.Path, default=DEFAULT_VOCABULARY)
-    ap.add_argument("--ci-workflow", default="ci.yml")
-    ap.add_argument("--review-workflow", default="", help="--mode all: the review workflow to dispatch (named by the workflow, not here)")
-    ap.add_argument("--default-branch", default="master")
+    ap.add_argument("--push-starts-workflows", action="store_true",
+                    help="--mode all: the push goes through a credential that starts CI and the review "
+                         "(a deploy key on the remote), so a landed round is followed by the next")
     args = ap.parse_args()
     if args.mode == "all" and not args.approver:
         args.approver = args.dispatched_by
@@ -429,15 +419,19 @@ def main() -> int:
             rnd.summary("round cap reached", fixed, disputed, sha=sha,
                         note=f"{args.max_rounds} rounds have run; no further round starts. "
                              "Remove and re-add the label to run more.")
+        elif not args.push_starts_workflows:
+            # THE TOKEN PUSHED IT, so nothing runs on it. The loop cannot
+            # continue by itself; say so rather than wait for a round that
+            # will never be triggered.
+            rnd.summary("could not start the next round", fixed, disputed, sha=sha,
+                        note="The commit was pushed with the workflow token, which starts no workflow: "
+                             "no push credential (`AUTOFIX_DEPLOY_KEY`) is configured. Push again (an "
+                             "empty commit will do) to get CI and the review — and, with the label still "
+                             "on, the next round.")
+            return 1
         else:
-            started = rnd.retrigger(sha)
-            if len(started) < 2:
-                rnd.summary("could not start the next round", fixed, disputed, sha=sha,
-                            note="The landed commit could not be re-checked: dispatching "
-                                 f"{'CI' if args.ci_workflow not in started else 'the review'} failed. "
-                                 "Push again (an empty commit will do) to get CI and the review.")
-                return 1
-            print(f"round {rnd.number} landed; the next starts when the review completes")
+            print(f"round {rnd.number} landed; the push starts CI and the review, "
+                  "and the review's completion starts the next round")
     else:
         # A PUSH MADE WITH THE WORKFLOW TOKEN STARTS NO WORKFLOW. GitHub
         # withholds `synchronize` from it, so this commit has neither CI nor a

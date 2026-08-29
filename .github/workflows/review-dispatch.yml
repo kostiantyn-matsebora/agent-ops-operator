@@ -13,8 +13,8 @@
 # placed by a person with write access: every open finding of the review's and
 # every open issue the analysis service reports are on the work list, each is
 # FIXED or DISPUTED (a dispute is a reply that stays open and names the
-# approver), the landed commit re-triggers CI and the review by
-# `workflow_dispatch`, and the review's completion starts the next round —
+# approver), the landed commit is pushed so that CI and the review run on it,
+# and the review's completion starts the next round —
 # bounded by MAX_ROUNDS, every ending summarised in ONE comment. Without the
 # label, nothing here changes.
 #
@@ -25,7 +25,7 @@
 #            (and the analysis service)                              service; NO model
 #   fix      a PATCH, from a model                contents: read   -- it CANNOT push
 #   land     apply, push, reply, resolve          contents: write  -- it runs NO model
-#            and, labelled, re-trigger            actions: write
+#            and, labelled, the push credential   AUTOFIX_DEPLOY_KEY
 #
 # The vocabulary — what counts as an acceptance, what the dispatch form is, the
 # label, the markers — lives in `.github/review-triage.json`, read by the
@@ -39,12 +39,14 @@
 # holds the privilege at all. A CI assertion pins the trigger set.
 #
 # A PUSH MADE WITH `GITHUB_TOKEN` STARTS NO WORKFLOW. GitHub withholds
-# `pull_request: synchronize` from commits the workflow token pushes; what it
-# does NOT withhold is `workflow_dispatch`. So an UNLABELLED dispatch's commit
-# gets neither `ci-green` nor a review until somebody pushes again, and the
-# landing comment says so; a LABELLED one dispatches `ci.yml` on the branch
-# (its check runs attach to the head sha, which is what branch protection
-# reads — measured on #131) and the review from the default branch's copy.
+# `pull_request: synchronize` from commits the workflow token pushes, so an
+# UNLABELLED dispatch's commit gets neither `ci-green` nor a review until
+# somebody pushes again, and the landing comment says so. A LABELLED one is
+# pushed through a WRITE DEPLOY KEY (`AUTOFIX_DEPLOY_KEY`, repository-scoped,
+# contents only, read by `land` alone): an ordinary push, so CI and the review
+# run on it and the review's completion is the next round. Self-dispatching
+# `ci.yml` was measured first and rejected — a `workflow_dispatch` run's check
+# runs attach to the sha and never reach the merge box (#131, gotchas.md).
 name: review-dispatch
 
 # The run's name carries the pull request, so a listing — and the archive
@@ -100,9 +102,6 @@ concurrency:
 permissions: {}
 
 env:
-  # The review workflow the landing job re-dispatches. Named here, once, so
-  # the landing job itself names no model.
-  REVIEW_WORKFLOW: claude-review.yml
   # THE BOUND. The reviewer's verdicts vary between runs and it reviews the
   # fixer's own commits, so an unbounded loop could argue with itself at a
   # cost nobody approved. Three rounds; a third round still disagreeing is a
@@ -451,7 +450,8 @@ jobs:
 
   # THE PRIVILEGE LIVES HERE, AND NO MODEL DOES. One program: apply, commit,
   # push, reply, then resolve through the resolver that already refuses any
-  # thread the review did not author — and, labelled, dispatch the next round.
+  # thread the review did not author — and, labelled, push through the one
+  # credential that makes the next round start.
   land:
     needs: [gate, collect, fix]
     if: >-
@@ -462,9 +462,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      # `workflow_dispatch` of ci.yml and the review, on a labelled pull
-      # request. The one write the loop adds, and it is held here alone.
-      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -502,18 +499,42 @@ jobs:
             git show "origin/$SOURCE:.github/scripts/$s" > "$RUNNER_TEMP/$s"
           done
           git show "origin/$SOURCE:.github/review-triage.json" > "$RUNNER_TEMP/review-triage.json"
-      - name: Apply, push, reply, resolve — and, labelled, start the next round
+      # THE PUSH CREDENTIAL, ON A LABELLED PULL REQUEST ONLY. A write deploy
+      # key for this repository, stored as `AUTOFIX_DEPLOY_KEY`: pushed
+      # through it, the commit is an ordinary push and every trigger fires —
+      # `ci-green` on the head, the review, and so the next round. The key
+      # reaches this job and no other; the model's job cannot name it. Absent,
+      # the token pushes as before and the lander says the loop cannot go on.
+      - id: cred
+        name: The push credential
+        if: needs.gate.outputs.mode == 'all'
+        env:
+          KEY: ${{ secrets.AUTOFIX_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY" ]; then
+            echo "::warning::AUTOFIX_DEPLOY_KEY is not set; the round lands with the workflow token and the loop stops after it"
+            echo "starts=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/autofix && chmod 600 ~/.ssh/autofix
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git remote set-url --push origin "git@github.com:$GITHUB_REPOSITORY.git"
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/autofix -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+          echo "starts=true" >> "$GITHUB_OUTPUT"
+      - name: Apply, push, reply, resolve
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODE: ${{ needs.gate.outputs.mode }}
           APPROVER: ${{ needs.gate.outputs.approver }}
           SINCE: ${{ needs.gate.outputs.since }}
-          DEFAULT: ${{ github.event.repository.default_branch }}
+          STARTS: ${{ steps.cred.outputs.starts == 'true' && '--push-starts-workflows' || '' }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          python3 "$RUNNER_TEMP/land-dispatch.py" \
+          # shellcheck disable=SC2086 -- STARTS is one flag or nothing
+          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS \
             --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" \
             --branch "${{ needs.gate.outputs.branch }}" \
             --work-list "$RUNNER_TEMP/dispatch/work-list.json" \
@@ -524,5 +545,4 @@ jobs:
             --dispatched-by "${{ needs.gate.outputs.dispatcher }}" \
             --mode "$MODE" --approver "$APPROVER" --since "$SINCE" \
             --max-rounds "$MAX_ROUNDS" --sonar "$RUNNER_TEMP/dispatch/sonar.json" \
-            --review-workflow "$REVIEW_WORKFLOW" --default-branch "$DEFAULT" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

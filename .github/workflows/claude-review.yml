@@ -35,7 +35,7 @@ name: claude-review
 # round when this workflow completes, and a run started by `workflow_dispatch`
 # carries no pull request in its event — the number in this name is how the
 # dispatch's gate learns which pull request was reviewed.
-run-name: Review of #${{ github.event.pull_request.number || inputs.number }}
+run-name: "Review of #${{ github.event.pull_request.number || inputs.number }}"
 
 on:
   pull_request:

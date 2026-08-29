@@ -104,7 +104,42 @@ review | sonar`.
 
 ### D4 — The re-trigger: spike first, App second
 
-**Task 1 is a spike with a written outcome**, on a throwaway pull request:
+**OUTCOME (2026-08-29, on #131): SELF-DISPATCH DOES NOT SATISFY PROTECTION.
+The push goes through a WRITE DEPLOY KEY instead — not an App.**
+
+- The spike, as written below, was run twice. On a head that also had a
+  `pull_request` run, the check-runs API listed both runs' `ci-green` on the
+  sha while the pull request's rollup showed the `pull_request` one alone.
+  On a head pushed with `[skip ci]` (`04326a5`, no `pull_request` run at
+  all) and `gh workflow run ci.yml --ref <branch> -f pr=131`: 44 check runs
+  from github-actions on the sha, the check suite listing the pull request —
+  and `gh pr checks` / `statusCheckRollup` showing NONE of them, only
+  SonarCloud's own sixteen. The merge box would show `ci-green` as expected
+  forever. `gotchas.md` records it.
+- **So the landed commit must be an ORDINARY push.** The design's second
+  outcome named a GitHub App; an App can only be created in a browser by the
+  owner, and what the design wanted from it — a repository's credential, not
+  a person's, scoped and not expiring — a write **deploy key** gives with
+  fewer permissions (`contents` only; comments and replies stay on
+  `GITHUB_TOKEN`). `land` reads `AUTOFIX_DEPLOY_KEY`, pushes over SSH, and
+  every ordinary trigger fires: `ci-green` on the head, the review, and the
+  review's completion is the next round. Absent, `land` pushes with the
+  token and the summary says the loop cannot go on.
+- **The key is the owner's to create**, in one command each (`ssh-keygen`,
+  `gh repo deploy-key add --allow-write`, `gh secret set
+  AUTOFIX_DEPLOY_KEY`), and was NOT created by the session that built this:
+  a push credential on the repository is a decision, not a task.
+- `ci.yml`'s `workflow_dispatch` input, built for the spike, is KEPT as a
+  hand tool: it runs the pull request's own gates (title, closes, docs-task,
+  the analysis as that pull request) against any head. It is not the loop's
+  mechanism.
+- **D7 follows without waiting for D4**: the sonar action waits on the
+  quality gate (`sonar.qualitygate.wait=true`) and fails the component's job
+  on `ERROR`, so the verdict reaches `ci-green` on every event shape. Sonar's
+  own check attaches only when the analysis is submitted AS the pull request
+  (`-Dsonar.pullrequest.key`), which the action now passes on a hand run.
+
+The spike, as planned:
 
 1. `land` pushes with `GITHUB_TOKEN`, then `gh workflow run ci.yml -f pr=<n>`
    and `gh workflow run claude-review.yml -f number=<n>` (`ci.yml` gains a
@@ -167,13 +202,14 @@ whom to mention).
 
 ### D7 — Sonar's gate becomes required
 
-`ci-green`'s `needs:` gains the gate — either `sonar (<component>)` waiting
-on `api/qualitygates/project_status?pullRequest=` after submission (the
-spike's self-dispatch outcome, where Sonar's own check may not attach), or
-Sonar's own check named in branch protection (the App outcome, where a
-normal push makes it attach). The spec requires the verdict through the
-always-present check; the design leaves which mechanism to the spike's
-result, and the task records it.
+**DECIDED: the scan step waits on the gate.** `.github/actions/sonar-scan`
+passes `sonar.qualitygate.wait=true` (timeout 600 s), so the step — the last
+of the job that tested the component — fails on `ERROR` and the job reports
+through `ci-green`. Branch protection names no Sonar check: a hand run of
+`ci.yml` submits the analysis as the pull request only because the action is
+handed the number, and a check named in protection would be "expected" on
+any head Sonar never decorated. Measured on #131: `QUALITY GATE STATUS:
+PASSED` in both the `pull_request` run and the dispatched one.
 
 - **Ordering:** this change's `code-quality-analysis` delta modifies a
   requirement #127 publishes. #127 archives first; if it has not by apply
