@@ -13,8 +13,10 @@ list pasted — a key is derivable from `components.sh`, and that is the point.
   verify each project decorates as its own check name on a test pull request
 - [ ] 1.4 Turn Automatic Analysis OFF on every project (D6). Verify by the
   first CI submission succeeding rather than being rejected as a conflict
-- [ ] 1.5 Add repository secret `SONAR_TOKEN` and repository variable
-  `SONAR_ORG`. Record that both exist, nothing else
+- [x] 1.5 Add repository secret `SONAR_TOKEN` and repository variable
+  `SONAR_ORG`. Record that both exist, nothing else. DONE 2026-08-29 — both as
+  SECRETS, so the workflow reads `secrets.SONAR_ORG` and the org is masked in
+  logs; moving it to a variable is a one-line follow-up
 
 ## 2. Coverage from the existing test jobs (D3)
 

@@ -593,8 +593,8 @@ jobs:
         with:
           projectBaseDir: ${{ matrix.image.context }}
           args: >-
-            -Dsonar.organization=${{ vars.SONAR_ORG }}
-            -Dsonar.projectKey=${{ vars.SONAR_ORG }}_agent-ops-operator_${{ matrix.image.component }}
+            -Dsonar.organization=${{ secrets.SONAR_ORG }}
+            -Dsonar.projectKey=${{ secrets.SONAR_ORG }}_agent-ops-operator_${{ matrix.image.component }}
             -Dsonar.projectName=agentops-${{ matrix.image.component }}
             -Dsonar.sources=.
             -Dsonar.exclusions=**/zz_generated.deepcopy.go,**/node_modules/**,**/dist/**,**/.coverage/**,ui/e2e/**,ui/screenshots/**,ui/demo/**
