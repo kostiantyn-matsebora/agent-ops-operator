@@ -71,7 +71,7 @@ jobs:
       # FULL HISTORY, because the filter below diffs against a base commit.
       # fetch-depth: 1 makes every diff report the whole tree as changed, which
       # is the failure that looks like the filter simply not working.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: list
@@ -162,7 +162,7 @@ jobs:
     steps:
       # FULL HISTORY for the analysis step: new-code detection and blame read
       # it, and a shallow clone makes every line "new" on every pull request.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v5
@@ -223,7 +223,7 @@ jobs:
         working-directory: ${{ matrix.module }}
     steps:
       # FULL HISTORY for the analysis step, as in `operator`.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       # THE CONSOLE'S GO BUILD EMBEDS ITS BROWSER BUNDLE — `go:embed all:ui/dist`
@@ -286,7 +286,7 @@ jobs:
     steps:
       # Each entry runs only when ITS directory changed; the job-level `if`
       # admits the matrix, this one admits the runtime.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
         with:
           fetch-depth: 0
@@ -318,7 +318,7 @@ jobs:
     if: needs.discover.outputs.chart == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: azure/setup-helm@v4
       - uses: actions/setup-python@v5
         with:
@@ -418,7 +418,7 @@ jobs:
     if: needs.discover.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: azure/setup-helm@v4
       - uses: actions/setup-python@v5
         with:
@@ -523,7 +523,7 @@ jobs:
         image: ${{ fromJSON(needs.discover.outputs.images) }}
     name: images (${{ matrix.image.component }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
@@ -562,7 +562,7 @@ jobs:
     if: needs.discover.outputs.site == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # NO `configure-pages` STEP. That action exists to prepare a DEPLOYMENT —
       # it reads the repository's Pages configuration and fails without one,
       # which is a deployment concern this job does not have. Building the site
@@ -588,7 +588,7 @@ jobs:
     needs: discover
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The message scan needs the range under review, so the shallow
           # default clone is not enough.
@@ -621,7 +621,7 @@ jobs:
     needs: discover
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # A published spec is READ AS THE CURRENT CONTRACT. A retired name
       # asserted there tells a stranger the project does something it stopped
@@ -650,7 +650,7 @@ jobs:
     needs: discover
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The change filter diffs against a base commit, exactly as `discover`
           # does, so the shallow default clone is not enough.
@@ -717,7 +717,7 @@ jobs:
       pull-requests: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       # PULL REQUESTS ONLY. A push to master is the merge the pull request
@@ -776,7 +776,7 @@ jobs:
     if: needs.discover.outputs.scripts == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v5
@@ -898,7 +898,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: A tracking issue is not closed by the pull request that proposes it
@@ -949,7 +949,7 @@ jobs:
       run:
         working-directory: ${{ env.ENVTEST_MODULE }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version-file: ${{ env.ENVTEST_MODULE }}/go.mod

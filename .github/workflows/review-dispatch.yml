@@ -144,7 +144,7 @@ jobs:
       # itself may be editing. The default branch on every event but the hand
       # run, which is a maintainer dispatching a ref on purpose. `land` reads
       # its programs from the same place.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
       - id: who
@@ -270,7 +270,7 @@ jobs:
     outputs:
       accepted: ${{ steps.list.outputs.accepted }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
       # THE WORK LIST IS DERIVED FROM THE THREADS — and, on a labelled pull
@@ -330,7 +330,7 @@ jobs:
       issues: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.branch }}
           fetch-depth: 0
@@ -463,7 +463,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.branch }}
           fetch-depth: 0
