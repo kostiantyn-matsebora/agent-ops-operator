@@ -231,4 +231,26 @@ assert_contains "$OUT" "Permissions"
 it "still provisioned the projects first, so the half that worked is legible"
 assert_contains "$OUT" "o_agent-ops-operator_manager"
 
+# --- a failure PART WAY THROUGH the conditions ------------------------------
+#
+# THE CONDITION LOOP IS A PIPELINE, SO IT RUNS IN A SUBSHELL, and a `set -e`
+# abort inside one is exactly the kind of failure a script swallows and reports
+# success for. A half-written gate reported as provisioned is worse than no
+# gate: the next run finds a gate present and adds only what is missing, so the
+# damage would be invisible on every run after the first.
+
+CALLS="$TMP/calls-mid"; : > "$CALLS"
+F="$TMP/fx-mid"; fixtures "$F" "$(agentops_gate true)" '{"qualityGate":{"name":"agentops"}}'
+CURL_403=create_condition run "$F"
+unset CURL_403
+
+it "fails when a condition cannot be written, rather than reporting a half gate"
+assert_equals "1" "$RC"
+
+it "got as far as the gate before failing, so the log says where it stopped"
+assert_contains "$OUT" "gate present: agentops"
+
+it "assigns no project after a condition failed"
+assert_not_contains "$OUT" "assigned"
+
 summary
