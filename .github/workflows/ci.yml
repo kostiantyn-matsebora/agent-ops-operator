@@ -185,7 +185,12 @@ jobs:
       # happen; the integration suite must actually execute.
       # -coverprofile because THIS is the one run of the envtest suite, and the
       # analysis step below reads the profile from where it landed.
-      - run: go test -count=1 -coverprofile=coverage.out ./...
+      # -coverpkg because a profile otherwise records only the package the
+      # test binary belongs to, so the envtest suite's exercise of the
+      # controller, the HTTP API, the chat core and the pod builder counted for
+      # none of them and the operator reported 27%. The flag names the packages
+      # whose coverage is RECORDED, whichever binary reached them.
+      - run: go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
       # The suite FAILS without assets rather than skipping (verified: envtest
       # start returns an error and the package reports FAIL), so `go test ./...`
       # above already proves it ran. This only catches provisioning that
@@ -250,7 +255,12 @@ jobs:
           cache-dependency-path: ${{ matrix.module }}/go.sum
       - run: go build ./...
       - run: go vet ./...
-      - run: go test -count=1 -coverprofile=coverage.out ./...
+      # -coverpkg for the same reason the operator carries it: coverage is
+      # attributed to every package a test exercises, not only to the package
+      # the test belongs to. These modules are single-package suites today, so
+      # the flag costs them nothing and stops being a special case one module
+      # alone carries.
+      - run: go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
       # THE CONSOLE IS ONE COMPONENT WITH TWO TOOLCHAINS, and one project, and
       # THIS IS THE UI SUITE'S ONE RUN. It had a job of its own (`console-ui`)
       # that ran the same suite a second time once coverage had to be produced

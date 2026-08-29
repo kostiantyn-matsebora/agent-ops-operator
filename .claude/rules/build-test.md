@@ -66,7 +66,7 @@ so a local number matches the dashboard's only when produced the same way:
 
 | Toolchain | Command | Writes |
 |---|---|---|
-| Go | `go test -count=1 -coverprofile=coverage.out ./...` | `coverage.out` |
+| Go | `go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...` | `coverage.out` |
 | vitest (console UI) | `npm run test:coverage` | `coverage/lcov.info`, `src/**` only |
 | `node --test` (runtimes) | `node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage.lcov` | `coverage.lcov` |
 | Python (`.github/scripts`) | the four steps below — the suite is bash driving Python, so there is no single command | `.github/coverage.xml` |
@@ -78,6 +78,20 @@ The Python row, step by step (what ci.yml's `scripts` job does):
 3. `COVERAGE_PROCESS_START=$PWD/.github/.coveragerc COVERAGE_FILE=$PWD/.github/.coverage .github/tests/run.sh`.
 4. In `.github/`: `python3 -m coverage combine && python3 -m coverage xml`.
 
+- **`-coverpkg=./...` NAMES THE PACKAGES WHOSE COVERAGE IS RECORDED**, whichever
+  test binary reached them. Without it a profile records only the package its
+  own test binary belongs to, so the manager's forty-four envtest files drove
+  `internal/controller`, `internal/httpapi` and `internal/chat` and counted for
+  none of them: the operator reported **27%** on the dashboard and 21.7%
+  locally, against **70.7%** with the flag. Nothing was tested that was not
+  tested before — the number was simply attributed to the wrong packages.
+  - **A package no test reaches is now reported at 0% rather than absent**,
+    which is the honest number and moves the LOCAL summary rather than the
+    dashboard: an analysis already counted a file missing from the profile as
+    uncovered.
+  - **The cost is build time**, since every test binary is instrumented for the
+    whole module. Not measurable on a warm cache; the module big enough to
+    notice is the manager, whose job already runs envtest for minutes.
 - **The analysis runs IN the test job**, as its last step
   (`.github/actions/sonar-scan`) — no artifact, no second checkout. A separate
   job was built first and needed an upload, a download and a name transform

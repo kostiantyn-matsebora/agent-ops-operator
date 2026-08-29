@@ -278,6 +278,27 @@ pull request, per component, for reading; nothing in branch protection names
 that check, so a hand run of `ci.yml` (`gh workflow run ci.yml -f pr=<n>`)
 carries the same gate.
 
+**WHICH GATE — TODAY, THE BUILT-IN ONE.** Every project is judged by the
+organisation's default gate, whose conditions are all on NEW code.
+`sonar-provision.sh --gate` is what replaces it with `agentops`: those same
+new-code conditions, copied verbatim from the built-in gate, plus one this
+repository adds — **the component's OVERALL line coverage at or above 80%**.
+Written as a script rather than clicked in a dashboard, so what every
+component is judged by is one `git show` away.
+
+**IT HAS NOT BEEN RUN, AND THAT IS THE POINT OF THE FLAG.** Since the verdict
+fails the component's job, a coverage condition added before a component
+reaches the threshold does not turn its dashboard red — it holds every pull
+request that touches it, and NO component is over 80% today — the thirteen
+measured locally run 28.7% to 78.1%, and the two Node runtimes report only
+the files their suites loaded, so their real figure is not known here. So turning it on is an act somebody takes when the tree is ready,
+never a side effect of provisioning a project — which is also why CI, which
+calls this script itself for a missing project, cannot turn it on. A gate on
+new code alone let a component sit at 27% and one at 79% pass identically,
+which is why the number the tree is asked to reach has to become a condition
+something evaluates; making it evaluate before anything meets it is a
+different thing from measuring.
+
 **A pull request from a fork is analysed by nothing**, shown as a SKIPPED job:
 the scanner's token is withheld from fork workflows, so there is nothing you
 could do about it and nothing you should.
@@ -295,11 +316,18 @@ script provisions everything at once when run by hand:
 ```sh
 SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh            # all
 SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh <name>...  # some
+SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh --gate     # and the gate
 ```
 
 It derives every component's key and name from `components.sh`, appends the
 `scripts` unit, and is idempotent; a name that is neither is refused rather
-than provisioned. The script posts the monorepo wizard's own request; if
+than provisioned.
+
+**IT DOES NOT TOUCH THE QUALITY GATE UNLESS ASKED** — that is `--gate`, and
+the separation is why CI can call this script itself for a missing project
+without deciding what the whole organisation is judged by. Provisioning the
+gate needs a second permission, *Administer Quality Gates*, and fails on a
+403 naming it. The script posts the monorepo wizard's own request; if
 SonarCloud changes it, the wizard's *Import JSON* takes the same `projects`
 array.
 

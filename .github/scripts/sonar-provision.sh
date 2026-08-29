@@ -26,9 +26,78 @@
 # .github/, analysed by ci.yml's `scripts` job under the same key and name
 # pattern. It is appended here rather than taught to components.sh, because a
 # directory that program lists is a directory the release tags.
+#
+# THE GATE STAGE IS OPT-IN (`--gate`), AND UNDER THE PARAGRAPH ABOVE IT HAS TO
+# BE. CI calls this script ITSELF for a project that does not exist, and the
+# scan step now FAILS the component's job on the gate's verdict — so a script
+# that always provisioned the gate would let a missing project turn the whole
+# organisation's threshold on, from inside a job, with nobody asking. Creating
+# a project and deciding what the tree is judged by are two acts, and only the
+# first is automatic.
+#
+#   .github/scripts/sonar-provision.sh --gate     # and the gate as well
 set -eu
 : "${SONAR_TOKEN:?}" "${SONAR_ORG:?}"
 cd "$(dirname "$0")/../.."
+with_gate=false
+_n=$#; _i=0
+while [ "$_i" -lt "$_n" ]; do
+  case "$1" in
+    --gate) with_gate=true ;;
+    -*) echo "sonar-provision: unknown option '$1' (only --gate)" >&2; exit 2 ;;
+    *) set -- "$@" "$1" ;;
+  esac
+  shift; _i=$((_i + 1))
+done
+
+API=https://sonarcloud.io/api
+GATE=agentops
+BUILTIN='Sonar way'
+COVERAGE_THRESHOLD=80
+
+BODY=$(mktemp)
+trap 'rm -f "$BODY"' EXIT INT TERM
+
+# sq <GET|POST> <path> [<key>=<value> ...] — the answer on stdout.
+#
+# NOT `curl -sf`: -f prints nothing and reports one exit code for every HTTP
+# error, and the whole point here is to tell a 403 (the token lacks the
+# permission, and which one) from anything else. So the status is read with -w
+# and the body kept, and a failure names both.
+sq() {
+  _method=$1; _path=$2; shift 2
+  _n=$#; _i=0
+  while [ "$_i" -lt "$_n" ]; do
+    set -- "$@" --data-urlencode "$1"; shift; _i=$((_i + 1))
+  done
+  # STDIN IS CLOSED ON EVERY CALL. Both loops below are `... | while read`, so
+  # the loop body inherits the PIPE as its stdin — and a command in that body
+  # that reads stdin eats the rest of the list, silently provisioning half of
+  # it. curl does not read stdin today; `</dev/null` is what stops a later
+  # `--data @-` or a swapped tool from making that a one-character bug nobody
+  # would look for here.
+  if [ "$_method" = GET ]; then
+    _code=$(curl -s -o "$BODY" -w '%{http_code}' -u "$SONAR_TOKEN:" -G "$@" "$API/$_path" </dev/null)
+  else
+    _code=$(curl -s -o "$BODY" -w '%{http_code}' -u "$SONAR_TOKEN:" -X POST "$@" "$API/$_path" </dev/null)
+  fi
+  case "$_code" in
+    2*) cat "$BODY"; return 0 ;;
+    403)
+      echo "sonar-provision: 403 on $_path — the token lacks *Administer Quality Gates*." >&2
+      echo "  Grant it in the organisation's Administration > Permissions, or use a token" >&2
+      echo "  belonging to a member who holds it. The projects stage needs *Create Projects*." >&2
+      return 1 ;;
+    *)
+      echo "sonar-provision: HTTP $_code on $_path" >&2
+      sed -n '1,5p' "$BODY" >&2
+      return 1 ;;
+  esac
+}
+
+
+# --- stage 1: the projects --------------------------------------------------
+
 inst="${SONAR_ORG}/agent-ops-operator|1324376362"
 # The whole list, then the arguments as a filter over it — so a name that is
 # not a project this repository owns cannot be provisioned by typing it.
@@ -43,5 +112,90 @@ body=$(.github/components.sh images | jq -c --arg o "$SONAR_ORG" --arg i "$inst"
                 projectName: ("agentops-" + .)}]}')
 [ "$(printf '%s' "$body" | jq '.projects | length')" -gt 0 ] || { echo "nothing to provision: $*" >&2; exit 64; }
 curl -sf -u "$SONAR_TOKEN:" -X POST -H 'Content-Type: application/json' \
-  https://sonarcloud.io/api/alm_integration/provision_monorepo_projects --data "$body" \
+  "$API/alm_integration/provision_monorepo_projects" --data "$body" </dev/null \
   | jq -r '.projects[].projectKey'
+
+# --- stage 2: the gate ------------------------------------------------------
+
+if [ "$with_gate" != true ]; then
+  exit 0
+fi
+
+gates=$(sq GET qualitygates/list "organization=$SONAR_ORG")
+gate_id=$(printf '%s' "$gates" | jq -r --arg n "$GATE" \
+  'first(.qualitygates[] | select(.name == $n) | .id) // empty')
+
+if [ -z "$gate_id" ]; then
+  gate_id=$(sq POST qualitygates/create "organization=$SONAR_ORG" "name=$GATE" | jq -r '.id')
+  echo "gate created: $GATE ($gate_id)"
+  existing=''
+  is_default=false
+else
+  echo "gate present: $GATE ($gate_id)"
+  # The conditions ride in the `list` answer, so the gate's current state costs
+  # no second read. Kept as "<metric> <condition id> <op> <error>".
+  existing=$(printf '%s' "$gates" | jq -r --arg n "$GATE" \
+    '.qualitygates[] | select(.name == $n) | .conditions[]? | "\(.metric) \(.id) \(.op) \(.error)"')
+  is_default=$(printf '%s' "$gates" | jq -r --arg n "$GATE" \
+    'first(.qualitygates[] | select(.name == $n) | .isDefault) // false')
+fi
+
+# WANTED = every condition of the built-in gate, verbatim, plus overall
+# coverage. Copied rather than listed here so upstream's set can change without
+# this script describing a gate contributors no longer see.
+wanted=$(sq GET qualitygates/show "organization=$SONAR_ORG" "name=$BUILTIN" \
+  | jq -r '.conditions[] | "\(.metric) \(.op) \(.error)"')
+wanted="$wanted
+coverage LT $COVERAGE_THRESHOLD"
+
+printf '%s\n' "$wanted" | while read -r metric op error; do
+  [ -n "$metric" ] || continue
+  have=$(printf '%s\n' "$existing" | awk -v m="$metric" '$1 == m {print; exit}')
+  if [ -z "$have" ]; then
+    sq POST qualitygates/create_condition "organization=$SONAR_ORG" "gateId=$gate_id" \
+      "metric=$metric" "op=$op" "error=$error" >/dev/null
+    echo "  condition added: $metric $op $error"
+    continue
+  fi
+  # ONE CONDITION PER METRIC, UPDATED IN PLACE. A second create_condition on a
+  # metric the gate already carries is accepted by the server and leaves the
+  # gate with two conditions on it, which is how a re-run would tighten a
+  # threshold somebody deliberately relaxed and never say so.
+  cond_id=$(printf '%s' "$have" | awk '{print $2}')
+  cond_op=$(printf '%s' "$have" | awk '{print $3}')
+  cond_error=$(printf '%s' "$have" | awk '{print $4}')
+  if [ "$cond_op" = "$op" ] && [ "$cond_error" = "$error" ]; then
+    echo "  condition present: $metric $op $error"
+  else
+    sq POST qualitygates/update_condition "organization=$SONAR_ORG" "id=$cond_id" \
+      "metric=$metric" "op=$op" "error=$error" >/dev/null
+    echo "  condition updated: $metric $cond_op $cond_error -> $op $error"
+  fi
+done
+
+if [ "$is_default" = true ]; then
+  echo "gate is already the organisation default"
+else
+  sq POST qualitygates/set_as_default "organization=$SONAR_ORG" "id=$gate_id" >/dev/null
+  echo "gate set as the organisation default"
+fi
+
+# EVERY PROJECT IS ASSIGNED EXPLICITLY, not left to the default. The default
+# only catches projects nobody has assigned, so a project moved onto another
+# gate by hand would keep it and report green against conditions this
+# repository never chose.
+# EVERY project, never the `$@` filter: the filter says which projects to
+# CREATE, and a gate assigned to the one component somebody happened to name
+# would leave the rest judged by whatever they were on. Same list stage 1
+# builds from, `scripts` included.
+.github/components.sh images | jq -r --arg o "$SONAR_ORG" \
+  '(.[] | .component), "scripts" | $o + "_agent-ops-operator_" + .' | while read -r key; do
+  current=$(sq GET qualitygates/get_by_project "organization=$SONAR_ORG" "project=$key" \
+    | jq -r '.qualityGate.name // empty')
+  if [ "$current" = "$GATE" ]; then
+    echo "  assigned already: $key"
+  else
+    sq POST qualitygates/select "organization=$SONAR_ORG" "gateId=$gate_id" "projectKey=$key" >/dev/null
+    echo "  assigned: $key"
+  fi
+done
