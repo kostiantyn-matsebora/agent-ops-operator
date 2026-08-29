@@ -1,0 +1,89 @@
+## 1. The projects, outside the tree
+
+Recorded as VERDICTS. No token, no organisation-scoped URL, no project key
+list pasted — a key is derivable from `components.sh`, and that is the point.
+
+- [ ] 1.1 Confirm the SonarCloud organisation is bound to this GitHub account
+  and the SonarCloud GitHub app is installed on this repository (D8)
+- [ ] 1.2 Create one project per component from `components.sh images`, key
+  `<org>_agent-ops-operator_<component>`, name `agentops-<component>`, using
+  the web API in a loop where it accepts it and the UI where it does not (D1).
+  Record the COUNT created
+- [ ] 1.3 Enable monorepo mode binding every project to this repository, and
+  verify each project decorates as its own check name on a test pull request
+- [ ] 1.4 Turn Automatic Analysis OFF on every project (D6). Verify by the
+  first CI submission succeeding rather than being rejected as a conflict
+- [ ] 1.5 Add repository secret `SONAR_TOKEN` and repository variable
+  `SONAR_ORG`. Record that both exist, nothing else
+
+## 2. Coverage from the existing test jobs (D3)
+
+- [ ] 2.1 `operator`: add `-coverprofile=coverage.out` to its `go test`, upload
+  as `coverage-platform-manager`
+- [ ] 2.2 `modules`: the same per matrix leg, artifact name derived from the
+  module path by the ONE transform, written where both this job and the sonar
+  job read it
+- [ ] 2.3 `console-ui`: add `@vitest/coverage-v8` matching the installed vitest
+  major, run `vitest run --coverage --coverage.reporter=lcov`, upload
+  `coverage-platform-console-ui`. Verify `npm test` locally still passes
+  without coverage flags
+- [ ] 2.4 `node-runtimes`: `node --test --experimental-test-coverage
+  --test-reporter=lcov --test-reporter-destination=coverage.lcov` per runtime,
+  upload `coverage-runtimes-<runtime>`. Verify the lcov reporter exists on the
+  Node 22 the job installs
+- [ ] 2.5 Verify no test job's runtime changed materially — read the durations
+  before and after on one run
+
+## 3. The `sonar` job in `ci.yml`
+
+- [ ] 3.1 Add the job: `needs: [discover, operator, modules, console-ui,
+  node-runtimes]`, `if: !cancelled()` plus the discover-succeeded and
+  non-empty-images conditions the `images` job uses, plus the fork guard (D7),
+  `strategy.fail-fast: false`, matrix from `discover.outputs.images`, name
+  `sonar (<component>)`
+- [ ] 3.2 Checkout with `fetch-depth: 0`, with the comment saying why
+- [ ] 3.3 Download the component's coverage artifact(s) by derived name,
+  tolerating absence; the console downloads two
+- [ ] 3.4 Run `SonarSource/sonarqube-scan-action` pinned to a version, with
+  `projectBaseDir` from the matrix context and `args` carrying the project
+  key, the exclusions and test inclusions (D4), and the coverage report paths.
+  `sonar.qualitygate.wait` unset (D5)
+- [ ] 3.5 Add `sonar` to `ci-green`'s `needs:` — the whole of making it required
+- [ ] 3.6 Verify on the change's own pull request: it edits `ci.yml`, so all
+  fifteen legs run. Every component submits; every component with tests shows
+  a non-zero coverage figure on its dashboard. A zero where tests exist is the
+  artifact-name mismatch D3 warns of — fix the transform, not the number
+- [ ] 3.7 Verify the fork path by reading the condition against a fork event's
+  payload shape, since no fork pull request exists to test with
+- [ ] 3.8 Verify the pull request shows one SonarCloud check per analysed
+  component and that none is listed as required in branch protection
+- [ ] 3.9 Read the first dashboards and record COUNTS per component — issues by
+  severity, hotspots, coverage percent. Never a finding. These are the input
+  to the later gating change and are the last line of this section
+
+## 4. Documentation
+
+Written last, from what the change actually did.
+
+### 4.1 Reference docs
+
+- [ ] 4.1.1 `CONTRIBUTING.md`: a "Code analysis" subsection beside "The image
+  scan" — what is analysed, per component, where the dashboard is, what fails
+  the pull request (the scanner) and what does not (the quality gate), what a
+  fork gets, and what a NEW component owes: one project created the way 1.2
+  did it. Add the `sonar (<component>)` row to the "What reports through it"
+  table
+- [ ] 4.1.2 `docs/security.md`: the paragraph naming the two Trivy scans as the
+  security tab's reporters; add that security hotspots are reported on the
+  analysis dashboard, per component, and are not a gate
+- [ ] 4.1.3 `.claude/rules/build-test.md`: the local coverage invocations,
+  matching the flags CI uses for Go, vitest and `node --test`
+- [ ] 4.1.4 `docs/CHANGELOG.md`: confirm no entry is owed — nothing an
+  installed release does changed
+
+### 4.2 Adopter site
+
+- [ ] 4.2.1 Re-read the landing page, `introduction.md`, `getting-started.md`,
+  `installation.md`, the integration pages and the guides for any sentence
+  about CI, code quality or coverage. Expected: none, per the proposal's
+  Impact. Record that it was checked; if one exists, fix it here
