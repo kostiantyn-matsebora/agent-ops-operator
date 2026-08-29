@@ -622,7 +622,8 @@ func (a *adapter) reportClipping(ctx context.Context, source string, clipped int
 	msg := fmt.Sprintf("emit cap reached: %d signal(s) clipped in the last minute — "+
 		"something is producing events far faster than an agent can act on them", clipped)
 	log.Printf("%s: %s", source, msg)
-	go func() { _ = a.mgr.ReportStatus(ctx, source, false, "EmitCapReached", msg) }()
+	// Synchronous: post() orders this AFTER a recovery report on purpose.
+	_ = a.mgr.ReportStatus(ctx, source, false, "EmitCapReached", msg)
 }
 
 // runDwellFlusher decides pending entries whose window has closed.
