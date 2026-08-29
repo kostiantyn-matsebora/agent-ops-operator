@@ -64,6 +64,15 @@ list pasted — a key is derivable from `components.sh`, and that is the point.
   severity, hotspots, coverage percent. Never a finding. These are the input
   to the later gating change and are the last line of this section. RECORDED for PR 127: bugs 0, vulnerabilities 0, code smells 0, hotspots 0 on all 15; quality gate OK on all 15; 0 task warnings
 
+### 3.10 Restructured after review (D2): a step, not a job
+
+- [x] 3.10 The separate `sonar` job, the four artifact uploads, the pattern
+  download and `coverage-artifact.sh` are DELETED; `.github/actions/sonar-scan`
+  runs as the last step of `operator`, each `modules` leg and each
+  `node-runtimes` leg; the console's UI coverage is produced in its `modules`
+  leg; `console-ui` is back to `npm test`. Verified green on the pull request
+  with every scanner's coverage sensor loading its report
+
 ## 4. Documentation
 
 Written last, from what the change actually did.
@@ -74,7 +83,7 @@ Written last, from what the change actually did.
   scan" — what is analysed, per component, where the dashboard is, what fails
   the pull request (the scanner) and what does not (the quality gate), what a
   fork gets, and what a NEW component owes: one project created the way 1.2
-  did it. Add the `sonar (<component>)` row to the "What reports through it"
+  did it. Add the analysis step's row to the "What reports through it"
   table
 - [x] 4.1.2 `docs/security.md`: the paragraph naming the two Trivy scans as the
   security tab's reporters; add that security hotspots are reported on the

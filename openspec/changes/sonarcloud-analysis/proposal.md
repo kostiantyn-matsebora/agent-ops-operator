@@ -23,18 +23,17 @@ list a program produces rather than one somebody types.
   registry and the analysis dashboard agree on what exists. Fifteen projects
   today; a sixteenth appears when a directory does, and the workflow never
   lists them.
-- **A `sonar` matrix job in `ci.yml`**, over the same `discover` output the
-  `images` matrix reads, so it follows the changed-only filter: a pull request
-  touching one component analyses that one. It reports through `ci-green` like
-  every other gate — a scanner that fails to run is red — while the QUALITY
-  GATE verdict is SonarCloud's own check on the pull request and is NOT
-  required by branch protection. See `design.md` D5: measure before gating, the
-  same order the image scan took.
-- **Coverage reaches the analysis.** The existing `operator`, `modules`,
-  `console-ui` and `node-runtimes` jobs emit a coverage profile as a workflow
-  artifact named for the component, and the `sonar` job downloads its own. No
-  test runs twice: the operator's envtest suite is minutes, and a job that
-  re-ran it for a coverage number would be the job somebody switches off.
+- **The analysis is the last step of the job that tests the component** —
+  `operator`, each `modules` leg, each `node-runtimes` leg — through one
+  composite action, so it follows the changed-only filter those jobs already
+  follow and reads the coverage profile from where the tests left it. A
+  scanner that fails to submit fails that job, which reports through
+  `ci-green` like every other gate; the QUALITY GATE verdict is SonarCloud's
+  own check on the pull request and is NOT required by branch protection. See
+  `design.md` D5: measure before gating, the same order the image scan took.
+- **No test runs twice and nothing is uploaded.** The operator's envtest suite
+  is minutes, and a job that re-ran it for a coverage number would be the job
+  somebody switches off.
 - **CI-based analysis only.** SonarCloud's Automatic Analysis is turned off for
   every project: it is incompatible with CI-submitted analysis, reads no
   coverage, and does not understand a monorepo.
@@ -64,9 +63,9 @@ describes how a new job reports through the gate; adding one is a line in its
 ## Impact
 
 **Code and workflows:**
-- `.github/workflows/ci.yml` — the `sonar` matrix job; coverage-emitting steps
-  and artifact uploads in `operator`, `modules`, `console-ui`, `node-runtimes`;
-  `sonar` added to `ci-green`'s `needs:`.
+- `.github/workflows/ci.yml` — coverage-emitting test invocations and the
+  `sonar-scan` step in `operator`, `modules` and `node-runtimes`;
+  `.github/actions/sonar-scan`; `.github/scripts/sonar-provision.sh`.
 - `.github/components.sh` — unchanged. The job derives everything from
   `images`; if a field is missing it is added THERE, never typed in the
   workflow.
@@ -80,7 +79,7 @@ describes how a new job reports through the gate; adding one is a line in its
 **Documentation made untrue — reference half:**
 - `CONTRIBUTING.md` — the "Build and test" section gains a "Code analysis"
   subsection beside "The image scan", and the table under "What reports
-  through it" gains the `sonar (<component>)` row. It currently says the image
+  through it" gains the analysis step's row. It currently says the image
   scan is the only analysis a pull request gets.
 - `docs/security.md` — the paragraph naming the two Trivy scans as what
   reports to the security tab; SonarCloud's security hotspots are a third

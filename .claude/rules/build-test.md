@@ -27,7 +27,7 @@ KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@r
 
 ### Coverage, with the flags CI uses
 
-CI uploads every test job's profile and the `sonar (<component>)` job reads it,
+CI's analysis step reads each test job's profile from where the tests left it,
 so a local number matches the dashboard's only when produced the same way:
 
 | Toolchain | Command | Writes |
@@ -36,9 +36,10 @@ so a local number matches the dashboard's only when produced the same way:
 | vitest (console UI) | `npx vitest run --coverage --coverage.reporter=lcov` | `coverage/lcov.info`, `src/**` only |
 | `node --test` (runtimes) | `node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage.lcov` | `coverage.lcov` |
 
-- **The artifact name is ONE script**, `.github/scripts/coverage-artifact.sh
-  <path>`, called by the uploading job and the downloading one. A name spelled
-  twice fails GREEN — the analysis submits and coverage reads 0 %.
+- **The analysis runs IN the test job**, as its last step
+  (`.github/actions/sonar-scan`) — no artifact, no second checkout. A separate
+  job was built first and needed an upload, a download and a name transform
+  that could fail GREEN; folding it in deleted all three.
 - **The UI's lcov is re-anchored to `ui/`** in CI, because the console is one
   component rooted one level above its browser application.
 - **All three outputs are ignored by git.** They are artifacts, never commits.

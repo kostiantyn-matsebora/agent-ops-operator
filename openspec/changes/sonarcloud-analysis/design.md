@@ -70,54 +70,48 @@ the name are derived from `components.sh`:**
 
 `<org>` is a repository variable, never typed in the workflow.
 
-### D2. The job derives its matrix from `discover.outputs.images`, not `modules`
+### D2. The analysis is a STEP of the job that tests the component, not a job
 
-`images` is the list of COMPONENTS — it includes the two Node runtimes, which
-have no `go.mod` and are absent from `modules`. It is also already filtered to
-what the diff touched. The sonar job reads it exactly as the `images` job does,
-so a component is analysed under the same condition it is built.
+The first version was a `sonar` matrix job over `discover.outputs.images`,
+fed by coverage artifacts the test jobs uploaded. It worked, and it was
+deleted for what it needed: an upload in four jobs, a download with a
+pattern, a script transforming a path into an artifact name that both sides
+had to call, a second full checkout per component — and a failure mode that
+fails GREEN (a name mismatch submits an analysis with coverage at zero).
 
-**A pull request that touches nothing in a component gets no analysis for that
-project**, and SonarCloud shows no check for it. Acceptable: the check is not
-required (D5), and the master baseline for that component is untouched.
+The job that built and tested a component already has the checkout, the
+toolchain and the profile on disk. `.github/actions/sonar-scan` is called as
+that job's last step:
 
-**A push to `master` follows the same filter**, so a component's baseline moves
-only when the component did. The four paths that rebuild everything —
-`.github/docker/`, `components.sh`, `ci.yml`, `.github/actions/` — analyse
-everything, which is what makes the first run after this change land a
-baseline for all fifteen.
-
-### D3. Coverage travels as a workflow artifact, from the job that ran the tests
-
-The alternative — the sonar job running the tests itself with coverage on —
-was rejected on the operator alone: envtest is minutes, and the job would be
-the second place the suite runs. It would also be a second place the test
-INVOCATION is written, and the two would drift.
-
-Instead each test job adds coverage output and uploads it under a name derived
-from the component's context:
-
-| Job | Emits | Uploads as |
+| Job | Component | Coverage on disk |
 |---|---|---|
-| `operator` | `go test -coverprofile=coverage.out ./...` | `coverage-platform-manager` |
-| `modules` (per module) | the same, in the module | `coverage-<path with / → ->` |
-| `console-ui` | `vitest run --coverage` (lcov) | `coverage-platform-console-ui` |
-| `node-runtimes` (per runtime) | `node --test --experimental-test-coverage --test-reporter=lcov …` | `coverage-runtimes-<runtime>` |
+| `operator` | `manager` | `coverage.out` |
+| `modules (<path>)` | derived from the path through `components.sh images` | `coverage.out`; for the console also `ui/coverage/lcov.info`, produced in the same leg |
+| `node-runtimes (<runtime>)` | `runtime-<runtime>` | `coverage.lcov` |
 
-The sonar job `needs:` all four, runs under `!cancelled()` so a skipped test
-job does not skip it, and downloads the artifact matching its component's
-context. **A missing artifact is not a failure**: a component whose test job
-was skipped, or which has no tests, is still analysed — with no coverage
-figure, which is the true statement.
+So the changed-only filter is inherited rather than re-derived, a skipped test
+job means a skipped analysis (nothing to measure), and a failed submission
+fails the job that would have been green — which is the gate.
 
-`platform/console` downloads two — the Go profile and the UI's lcov — because
-it is one component with two toolchains (Context).
+**`console-ui` stays a plain test-and-build job.** The console is ONE
+component and one project; its UI coverage is produced in the `modules` leg
+for `platform/console`, beside the Go profile, so one analysis carries both.
+The UI suite therefore runs twice per pull request (seconds); the alternative
+was two analyses of one project per commit, the second overwriting the first.
 
-**The path → artifact-name transform is written ONCE**, in a step both sides
-call or in `components.sh` as a new field, never spelled in two jobs. The
-`modules` matrix carries the path and the sonar matrix carries the context;
-they are the same string with a `./` prefix difference that `discover` already
-normalises.
+### D3. Coverage is read from where the tests wrote it
+
+Each test invocation gains its coverage flag and nothing else changes:
+
+| Toolchain | Invocation | Writes |
+|---|---|---|
+| Go | `go test -count=1 -coverprofile=coverage.out ./...` | `coverage.out` |
+| vitest | `vitest run --coverage --coverage.reporter=lcov` | `ui/coverage/lcov.info`, then `SF:` re-anchored to `ui/` |
+| `node --test` | `--experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage.lcov`, with `spec` kept for the log | `coverage.lcov` |
+
+The action names every report path a component can have; a path that is not
+there is a scanner INFO line, so a component without tests is analysed with no
+coverage figure — the true statement.
 
 ### D4. Properties are passed as arguments, not fifteen `sonar-project.properties` files
 
@@ -144,7 +138,7 @@ Two different failures, and only one reports through `ci-green`:
 
 | Failure | Reports as | Blocks the merge |
 |---|---|---|
-| the scanner did not run, or could not submit | `sonar (<component>)` red, through `ci-green` | yes — a gate that silently did nothing is the failure `ci-green` exists to catch |
+| the scanner did not run, or could not submit | the component's test job red, through `ci-green` | yes — a gate that silently did nothing is the failure `ci-green` exists to catch |
 | the quality gate failed on the submitted analysis | SonarCloud's own check on the pull request | **no** |
 
 The default "Sonar way" gate requires ≥ 80 % coverage on new code and zero new
@@ -156,7 +150,7 @@ later change that names what it enforces. `sonar.qualitygate.wait` stays
 false so the job's exit code means "submitted".
 
 **Enabling it later is a one-line change** — `sonar.qualitygate.wait=true`
-makes the job fail with the gate, and it already reports through `ci-green`.
+makes the step fail with the gate, and the job already reports through `ci-green`.
 
 ### D6. CI-based analysis, with Automatic Analysis off per project
 
@@ -165,12 +159,12 @@ for every project because it is exclusive with CI-submitted analysis (both on
 is a hard error at submission), reads no coverage report, and has no monorepo
 mode. It is a per-project setting in the UI; the task records that it was done.
 
-### D7. A fork's pull request skips, visibly
+### D7. A fork's pull request skips the step, visibly
 
 `if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false`
-on the job, so a fork's pull request shows `sonar (<component>)` as SKIPPED.
-The secret is absent there and the scanner would fail on a 401 that reads as a
-broken workflow. The review workflow's rule, one job over.
+on the step, so a fork's pull request runs the tests and shows the analysis
+step as skipped. The secret is absent there and the scanner would fail on a
+401 that reads as a broken workflow. The review workflow's rule, one step over.
 
 `pull_request_target` would have handed the secret to fork code and was not
 considered further.
@@ -208,10 +202,9 @@ which posts the monorepo wizard's own request — the public
   more call — noted in `CONTRIBUTING.md` beside the tag-and-package steps a
   new component already owes. Monorepo binding and Automatic Analysis are UI,
   once each.
-- **[The Go artifact name and the sonar matrix disagree]** → one transform
-  (D3), and task 3 verifies every component's coverage figure is non-empty on
-  the dashboard after the first full run. A wrong name fails GREEN: the
-  analysis submits, coverage reads 0 %, nothing errors.
+- **[A coverage path is wrong]** → it fails GREEN: the analysis submits with
+  coverage at zero. Task 3 reads the scanner's own coverage-sensor lines on a
+  real run, per toolchain, rather than trusting a green job.
 - **[A component with no tests reports 0 % and looks broken]**
   `gateways/telegram`, `signals/telegram` and `platform/context-sync` may have
   no `_test.go`. Accepted: 0 % is the fact, and the gate is not required.
@@ -221,10 +214,10 @@ which posts the monorepo wizard's own request — the public
 - **[Coverage instrumentation slows the test jobs]** → `-coverprofile` on
   Go is a few percent; vitest's v8 provider is native. The operator job is
   dominated by envtest provisioning either way.
-- **[`fetch-depth: 0` on fifteen legs]** → the repository is small; the
+- **[`fetch-depth: 0` on every test job]** → the repository is small; the
   `discover` job already pays it once per run.
-- **[SonarCloud outage fails every pull request]** → the job reports through
-  `ci-green`, so an outage is red. Accepted over the alternative (`continue-on-error`),
+- **[SonarCloud outage fails every pull request]** → the step fails the test
+  job, so an outage is red. Accepted over the alternative (`continue-on-error`),
   which would make a scanner that never runs indistinguishable from one that
   did — the image scan's `trivy-db` is best-effort because a MISS still scans;
   here a miss submits nothing.

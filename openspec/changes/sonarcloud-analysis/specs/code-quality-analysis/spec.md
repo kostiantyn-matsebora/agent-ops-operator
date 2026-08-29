@@ -59,7 +59,8 @@ still be analysed, reporting no coverage figure rather than failing.
 ### Requirement: A failed submission fails the pull request, a failed quality gate does not
 
 A scanner that did not run or could not submit its analysis SHALL fail the
-component's job, and that job SHALL report through the always-present check.
+job that tested the component, and that job SHALL report through the
+always-present check.
 The quality gate's verdict on a submitted analysis SHALL be reported on the
 pull request by the analysis service and SHALL NOT be a check branch
 protection requires.
@@ -68,8 +69,8 @@ protection requires.
 
 - **WHEN** the analysis cannot be submitted — a scanner error, an unreachable
   service, a rejected token
-- **THEN** the component's job fails, and the always-present check fails naming
-  it
+- **THEN** the job that tested the component fails, and the always-present
+  check fails naming it
 
 #### Scenario: The quality gate fails
 
@@ -96,15 +97,16 @@ test-specific rules apply and test code is not counted as source.
 
 ### Requirement: A pull request from a fork is analysed by nothing, visibly
 
-A pull request whose head is a fork SHALL skip the analysis job, and the skip
-SHALL be visible as a skipped check rather than a failed one. The credential
+A pull request whose head is a fork SHALL skip the analysis step while its
+tests still run, and the skip SHALL be visible as a skipped step rather than a
+failed one. The credential
 that submits an analysis SHALL never be exposed to code from a fork.
 
 #### Scenario: A fork opens a pull request
 
 - **WHEN** a pull request from a fork touches a component
-- **THEN** that component's analysis job is skipped
-- **AND** the always-present check passes with it skipped
+- **THEN** that component's tests run and its analysis step is skipped
+- **AND** the always-present check passes
 - **AND** no analysis credential is available to the run
 
 ### Requirement: The analysis service performs no analysis of its own
@@ -121,7 +123,7 @@ per commit exists and it is the one carrying coverage.
 
 ### Requirement: A component without a project fails its analysis job rather than creating one
 
-The analysis job SHALL verify that the component's project exists before
+The analysis step SHALL verify that the component's project exists before
 submitting, and SHALL fail naming the component when it does not. CI SHALL
 never create a project: a project created by a submission is bound to no
 repository and decorates nothing, while being indistinguishable from one set
@@ -131,8 +133,8 @@ repository's monorepo binding.
 #### Scenario: A new component has no project yet
 
 - **WHEN** a component directory is added and no project exists for it
-- **THEN** its analysis job fails, the message names the component and the
-  step that creates the project, and no project is created
+- **THEN** the job that tested it fails, the message names the component and
+  the step that creates the project, and no project is created
 
 #### Scenario: A project is created deliberately
 
