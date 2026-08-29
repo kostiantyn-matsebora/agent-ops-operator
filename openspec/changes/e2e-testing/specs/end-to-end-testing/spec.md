@@ -172,8 +172,15 @@ The pack SHALL be split into tiers with an explicit gating rule:
   cluster smoke running on the stub runtime — deterministic, no API token, and
   bounded in wall-clock time — reported through `ci-green`'s `needs:`, never as
   a separately required check.
-- **The full pack, including the real-runtime lane,** SHALL run on a schedule
-  and on manual dispatch, and SHALL NOT gate pull requests.
+- **A release** SHALL run the same pull-request tier again on the tagged
+  commit and SHALL publish nothing until it passes: a tag can land on a
+  commit CI proved days earlier against a different cluster.
+- **The pull-request tier** SHALL also be runnable on demand against any
+  branch, so it can be met before a pull request exists.
+- **The full pack, including the real-runtime lane,** SHALL run nightly when
+  the default branch moved since its last successful run — a night with no
+  change is a night with nothing to learn and tokens to spend — and on manual
+  dispatch, and SHALL NOT gate pull requests.
 - **Pull requests from forks** SHALL run every tier their secret access allows
   and SHALL NOT be failed for tiers they cannot run. Secrets being unavailable
   to forks is the intended access boundary and SHALL NOT be worked around.
@@ -181,6 +188,14 @@ The pack SHALL be split into tiers with an explicit gating rule:
 #### Scenario: A fork pull request is not failed for missing secrets
 - **WHEN** a pull request originates from a fork and the API token is unavailable
 - **THEN** the real-runtime tier is skipped and reported as skipped, and the pull request is not marked failed on that account
+
+#### Scenario: A release is gated by the smoke on the tagged commit
+- **WHEN** a `<component>-v<semver>` or `chart-v<semver>` tag is pushed
+- **THEN** the pull-request tier runs on that commit, and the image or chart is published only if it passed
+
+#### Scenario: An unchanged night runs nothing
+- **WHEN** the nightly full run finds the default branch at the commit its last successful run tested
+- **THEN** it skips, and a dispatched run in the same state still runs
 
 #### Scenario: A token-consuming tier never gates a pull request
 - **WHEN** the real-runtime tier fails

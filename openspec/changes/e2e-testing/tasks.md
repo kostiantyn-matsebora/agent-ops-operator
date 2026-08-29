@@ -92,14 +92,14 @@
 ## 12. Workflows
 
 - [x] 12.1 `.github/workflows/e2e.yml`: PR tier — conformance plus the stub-runtime cluster smoke, no secret required; the gating jobs join `ci-green`'s `needs:` in `ci.yml`, never a new required check — `e2e.yml` is a reusable workflow that `ci.yml` CALLS with `tier: pr`, which is what makes its jobs listable in `needs:`
-- [x] 12.2 Full tier on `workflow_dispatch` (and a schedule once cadence is settled), including the real-runtime lane — TWO entry-point workflows, `e2e-smoke.yml` (pr tier) and `e2e-full.yml` (full tier), each nightly and on demand, both calling the one definition in `e2e.yml`
+- [x] 12.2 Full tier on `workflow_dispatch` (and a schedule once cadence is settled), including the real-runtime lane — the one definition in `e2e.yml` has four callers: `ci.yml` (pr tier, every PR), `release.yml` (pr tier on the tagged commit, gating publish), `e2e-smoke.yml` (pr tier on demand on any branch), `e2e-full.yml` (full tier nightly when master moved, and on demand)
 - [x] 12.3 Fork pull requests report skipped tiers as skipped and are never failed for unavailable secrets
 - [x] 12.4 The token-consuming tier gates no pull request
 - [x] 12.5 Document the boundary with `continuous-integration` in both specs so "what CI runs" has one definition per tier
 
 ## 13. Resolve open questions
 
-- [x] 13.1 Cadence for the real-runtime lane — dispatch-only to start, or a schedule: NIGHTLY (04:17 UTC in `e2e-full.yml`, the smoke an hour earlier in `e2e-smoke.yml`) and on demand — decided by the maintainer after the first review; each cron lives in its own file and `docs/testing.md` names it
+- [x] 13.1 Cadence for the real-runtime lane — dispatch-only to start, or a schedule: NIGHTLY WHEN MASTER MOVED (03:17 UTC in `e2e-full.yml`, skipped when the last successful full run tested the same commit) and on demand — decided by the maintainer after the first review; the smoke has no clock of its own, it gates releases and runs on demand on any branch
 - [x] 13.2 Whether the e2e profile pins a smaller model, trading spend against exercising the shipped default: NO PIN — the lane exists to exercise the shipped default, and spend is bounded by a fixed conversation count and bounded retries instead
 - [x] 13.3 Credentials for the local-registry pull test — per-run throwaway htpasswd: YES, minted by the test into a `registry:2` container on the cluster network; the pull Secret rides on the floor ServiceAccount, the kubelet's own mechanism, never the GHCR token
 

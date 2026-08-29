@@ -21,8 +21,8 @@ it structurally cannot decide.
 deterministic, need no secret and are bounded in wall clock, so they run for
 every pull request — from a fork too — and report through `ci-green`, the one
 required check. The full pack, including the lane that drives the real agent
-runtime with a real credential, runs nightly and on demand and never gates a
-pull request: its lane spends real tokens, and its flakiness must not block work
+runtime with a real credential, runs nightly when master moved and on demand,
+and never gates a pull request: its lane spends real tokens, and its flakiness must not block work
 while it is tuned.
 
 A fork pull request runs every tier its secret access allows and is not failed
@@ -98,16 +98,17 @@ context costs a full re-run to learn anything.
 
 ## What the repository must hold
 
-Three workflows share one definition, `.github/workflows/e2e.yml`:
+Four workflows share one definition, `.github/workflows/e2e.yml`:
 
 | Workflow | Runs | When |
 |---|---|---|
 | `ci.yml` | the pr tier | every pull request, reporting through `ci-green` |
-| `e2e-smoke.yml` | the pr tier | nightly at 03:17 UTC, and on demand |
-| `e2e-full.yml` | the full tier, real-runtime lane included | nightly at 04:17 UTC, and on demand |
+| `release.yml` | the pr tier | on the tagged commit, before anything is published |
+| `e2e-smoke.yml` | the pr tier | on demand, on any branch |
+| `e2e-full.yml` | the full tier, real-runtime lane included | nightly at 03:17 UTC when master moved since its last successful run, and on demand |
 
 ```sh
-gh workflow run e2e-smoke.yml
+gh workflow run e2e-smoke.yml --ref my-branch
 gh workflow run e2e-full.yml
 ```
 
@@ -118,6 +119,6 @@ One thing exists already and one is a decision:
    bundle projects into the runtime. Read only by `e2e-full.yml`; pull
    requests never see it. Without it the real-runtime lane reports itself
    skipped and every other lane still runs.
-2. **The cadence.** Both crons live in their own workflow file and nowhere
-   else. The full tier's spend is real and recurring — tighten or loosen it
-   there.
+2. **The cadence.** The cron lives in `e2e-full.yml` and nowhere else. A
+   night on which master did not move is skipped, so the spend tracks the
+   change rate rather than the calendar.

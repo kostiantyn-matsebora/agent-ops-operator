@@ -6,9 +6,11 @@
 #   ci.yml         calls it with tier=pr on every pull request, and lists the
 #                  job in ci-green's `needs:` — the only required status check,
 #                  so the gate is a line there, never a new required check.
-#   e2e-smoke.yml  the pr tier on a nightly schedule and on demand
-#   e2e-full.yml   the full tier — the real-runtime lane included — on a
-#                  nightly schedule and on demand. It NEVER gates a pull
+#   release.yml    calls it with tier=pr on the tagged commit, and publishes
+#                  nothing until it passes.
+#   e2e-smoke.yml  the pr tier on demand, on any branch.
+#   e2e-full.yml   the full tier — the real-runtime lane included — nightly
+#                  when master moved, and on demand. It NEVER gates a pull
 #                  request: its lane spends real tokens and its flakiness must
 #                  not block work while it is tuned.
 #

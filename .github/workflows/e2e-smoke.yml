@@ -1,20 +1,19 @@
-# The pr tier on its own clock: contract conformance and the k3s smoke on the
-# stub runtime, nightly and on demand. The same jobs gate every pull request
-# through ci.yml; this run is what says the gate still passes on master when
-# nobody has pushed — a k3d release, a base image, a runner change.
+# The pr tier ON DEMAND, ON ANY BRANCH: contract conformance and the k3s
+# smoke on the stub runtime. The same jobs gate every pull request through
+# ci.yml and every release through release.yml; this is the way to run them
+# against a branch before either.
+#
+#   gh workflow run e2e-smoke.yml --ref <branch>
+#
+# (GitHub offers a workflow for dispatch once its file is on the default
+# branch; from then on --ref runs the copy on the branch you name.)
 name: e2e-smoke
 
 on:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: e2e-smoke
-  cancel-in-progress: false
 
 jobs:
   smoke:

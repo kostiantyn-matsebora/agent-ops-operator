@@ -202,7 +202,8 @@ CI runs all of it on every pull request, plus `kubeconform` over each rendered
 chart permutation and the two guards over the published tree, below. The pull
 request meets conformance and the pack's `pr` tier (the stub-runtime smoke);
 the `full` tier — the real agent runtime with a real credential — runs nightly
-and on dispatch (`e2e-full.yml`) and gates nothing.
+when master moved, and on dispatch (`e2e-full.yml`), and gates nothing. A
+release runs the `pr` tier again on the tagged commit before publishing.
 
 `platform/manager/` and `runtimes/ollama/` need Go 1.25; the others declare
 1.23 and build under either. Every image is built with `golang:1.25`, because

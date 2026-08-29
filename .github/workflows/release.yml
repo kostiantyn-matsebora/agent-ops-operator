@@ -125,9 +125,23 @@ jobs:
   # The chart is the OTHER artifact kind and gets its own called workflow below.
   # They share no step — an image is built and its MANIFEST asserted, a chart is
   # rendered and its REFERENCES asserted — so one file each.
+  # THE SMOKE GATES A RELEASE. ci proved the tagged commit's modules, chart and
+  # images in isolation; this proves the chart installs and answers on a real
+  # single-node cluster with the stub runtime — the same pr tier every pull
+  # request meets, run again on the exact commit being published, because a
+  # tag can land on a commit that ci passed days ago against a different k3s.
+  smoke:
+    name: smoke
+    needs: [determine, ci_is_green]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/e2e.yml
+    with:
+      tier: pr
+
   image:
     name: image (${{ needs.determine.outputs.component }})
-    needs: [determine, ci_is_green]
+    needs: [determine, ci_is_green, smoke]
     permissions:
       contents: read
       packages: write
@@ -144,7 +158,7 @@ jobs:
 
   chart:
     name: chart
-    needs: [determine, ci_is_green]
+    needs: [determine, ci_is_green, smoke]
     permissions:
       contents: read
       packages: write
