@@ -344,7 +344,7 @@ and it fails if any job that DID run failed.
 | `publication` | the tree names a private deployment |
 | `retired-vocabulary` | it asserts a name this project stopped using |
 | `openspec` | a published specification is invalid, or a change your diff touched is |
-| `docs-task` | a change your diff touched does not end in a finished documentation section |
+| `docs-task` | a change your diff FINISHES does not end in unit tests, e2e tests and documentation — three sections, in that order, every task ticked |
 | `pr-title` | the title would not read as a commit subject |
 | `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |
 | `conformance` | an adapter's built binary does not speak the adapter contracts to a fake manager |

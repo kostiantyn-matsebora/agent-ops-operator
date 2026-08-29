@@ -15,6 +15,12 @@ it structurally cannot decide.
 | **Contract conformance** | every adapter's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — long-poll, `contract=`, ack-once, inbound push, listing, status, no relay loop for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter | anything about the cluster |
 | **End to end** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start | answer *quality* — that is an eval harness, a different project |
 
+**Every change declares its first and third tiers in its own task list.** An
+openspec change's `tasks.md` ends with a unit-test section, an e2e-test section
+and a documentation section, in that order; the e2e one states in a single
+ticked line when nothing a cluster decides was touched. `docs-task` in CI refuses
+to finish a change missing any of the three — see `CONTRIBUTING.md`.
+
 ## What gates a pull request
 
 **Contract conformance, and nothing that needs a cluster.** It is a minute of
