@@ -82,7 +82,7 @@ jobs:
             echo "building everything: base=${BASE_SHA:-none}" >&2
             echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
             echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
-            for j in operator ui chart docs site e2e; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
+            for j in operator chart docs site e2e; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
 
