@@ -581,6 +581,21 @@ jobs:
           pattern: ${{ steps.artifact.outputs.name }}*
           path: ${{ matrix.image.context }}/.coverage
           merge-multiple: true
+      # THE PROJECT MUST ALREADY EXIST, AND THIS JOB NEVER CREATES ONE. The
+      # scanner auto-provisions any key it cannot find when the token may
+      # create projects, and a project created that way is bound to no
+      # repository — no pull request decoration, no monorepo membership — while
+      # looking exactly like one that was set up. Fifteen of those were
+      # created, deleted, and created again by the next push before this
+      # check existed. A component's project is created through SonarCloud's
+      # monorepo setup, once, and a new component owes that step.
+      - name: The project exists
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          KEY: ${{ secrets.SONAR_ORG }}_agent-ops-operator_${{ matrix.image.component }}
+        run: |
+          n=$(curl -sf -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/projects/search?organization=${{ secrets.SONAR_ORG }}&projects=$KEY" | jq '.components | length')
+          [ "$n" = "1" ] || { echo "::error::no SonarCloud project for ${{ matrix.image.component }} — create it through the monorepo setup (CONTRIBUTING.md, Code analysis)"; exit 1; }
       # PROPERTIES ARE ARGUMENTS, NOT FIFTEEN PROPERTIES FILES. Byte-identical
       # files per component were the state nine Dockerfiles were in, and the
       # tell was an edit that had to be scripted across all of them. Test
