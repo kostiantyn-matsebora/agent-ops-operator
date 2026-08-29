@@ -26,8 +26,7 @@ Each test invocation gains its coverage flag, and the analysis step (section
 - [x] 2.2 `modules`: the same per matrix leg
 - [x] 2.3 the console's UI coverage, in its `modules` leg: `@vitest/coverage-v8`
   matching the installed vitest major, `npm run test:coverage` (lcov), `SF:`
-  re-anchored to `ui/`. `console-ui` stays
-  `npm test`. VERIFIED locally that `npm test` passes without coverage flags
+  re-anchored to `ui/`. `console-ui` is deleted (3.10). VERIFIED locally that `npm test` passes without coverage flags
 - [x] 2.4 `node-runtimes`: `node --test --experimental-test-coverage
   --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov
   --test-reporter-destination=coverage.lcov` per runtime. VERIFIED locally on
@@ -69,7 +68,8 @@ Each test invocation gains its coverage flag, and the analysis step (section
   download and `coverage-artifact.sh` are DELETED; `.github/actions/sonar-scan`
   runs as the last step of `operator`, each `modules` leg and each
   `node-runtimes` leg; the console's UI coverage is produced in its `modules`
-  leg; `console-ui` is back to `npm test`. Verified green on the pull request
+  leg; `console-ui` is DELETED — that leg is the UI suite's one run, its step
+  named for the UI. Verified green on the pull request
   with every scanner's coverage sensor loading its report
 
 ## 4. Documentation

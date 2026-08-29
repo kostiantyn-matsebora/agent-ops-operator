@@ -93,11 +93,14 @@ So the changed-only filter is inherited rather than re-derived, a skipped test
 job means a skipped analysis (nothing to measure), and a failed submission
 fails the job that would have been green — which is the gate.
 
-**`console-ui` stays a plain test-and-build job.** The console is ONE
-component and one project; its UI coverage is produced in the `modules` leg
-for `platform/console`, beside the Go profile, so one analysis carries both.
-The UI suite therefore runs twice per pull request (seconds); the alternative
-was two analyses of one project per commit, the second overwriting the first.
+**`console-ui` is DELETED, and the `modules` leg for `platform/console` is
+the UI suite's one run.** The console is ONE component and one project; its
+UI coverage has to be produced beside the Go profile so one analysis carries
+both, and that leg already ran `npm ci` and the build to embed the bundle.
+Keeping the separate job meant the suite ran twice per pull request, which
+the spec forbids. The step is named `Console UI tests, with coverage`, so a
+failing UI test still names the UI — the property `console-ui` existed for —
+and `continuous-integration`'s requirement is modified to say so.
 
 ### D3. Coverage is read from where the tests wrote it
 

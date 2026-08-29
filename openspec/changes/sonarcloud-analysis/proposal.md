@@ -35,11 +35,13 @@ list a program produces rather than one somebody types.
   `design.md` D5: measure before gating, the same order the image scan took.
 - **No test runs twice and nothing is uploaded.** The operator's envtest suite
   is minutes, and a job that re-ran it for a coverage number would be the job
-  somebody switches off.
+  somebody switches off. The same rule folds the `console-ui` job into the
+  console's `modules` leg, which is where its coverage has to be.
 - **CI-based analysis only.** SonarCloud's Automatic Analysis is turned off for
   every project: it is incompatible with CI-submitted analysis, reads no
   coverage, and does not understand a monorepo.
-- **A fork's pull request is analysed by nothing**, shown as a SKIPPED job. The
+- **A fork's pull request is analysed by nothing**, shown as a skipped STEP
+  while its tests still run. The
   scanner needs `SONAR_TOKEN`, and repository secrets are withheld from fork
   workflows — the same rule, the same visible shape, as the review workflow.
 - **Nothing outside a component is analysed.** The chart, `.github/scripts/`
@@ -57,10 +59,10 @@ list a program produces rather than one somebody types.
   merge and what only reports, and what a fork's pull request gets.
 
 ### Modified Capabilities
-
-None. `continuous-integration`'s always-present-check requirement already
-describes how a new job reports through the gate; adding one is a line in its
-`needs:`, which is what that requirement exists for.
+- `continuous-integration`: "The console UI is built and tested" — the UI
+  suite runs once, inside the console component's own job, because its
+  coverage must sit beside the Go profile for one analysis; the separate
+  `console-ui` job is deleted.
 
 ## Impact
 
