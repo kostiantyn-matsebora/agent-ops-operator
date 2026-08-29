@@ -1,0 +1,28 @@
+# The full tier: every lane, the real agent runtime with a real credential
+# included, nightly and on demand. It gates NOTHING — its lane spends tokens
+# and its flakiness must not block work while it is tuned. The credential is
+# the ANTHROPIC_API_KEY repository secret; without it the real-runtime lane
+# reports itself skipped and everything else still runs.
+#
+# Cadence: nightly, an hour after the smoke. Change the cron here and nowhere
+# else; docs/testing.md names this file as the place.
+name: e2e-full
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-full
+  cancel-in-progress: false
+
+jobs:
+  full:
+    uses: ./.github/workflows/e2e.yml
+    with:
+      tier: full
+    secrets: inherit

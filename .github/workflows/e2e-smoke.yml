@@ -1,0 +1,23 @@
+# The pr tier on its own clock: contract conformance and the k3s smoke on the
+# stub runtime, nightly and on demand. The same jobs gate every pull request
+# through ci.yml; this run is what says the gate still passes on master when
+# nobody has pushed — a k3d release, a base image, a runner change.
+name: e2e-smoke
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    uses: ./.github/workflows/e2e.yml
+    with:
+      tier: pr

@@ -21,8 +21,8 @@ it structurally cannot decide.
 deterministic, need no secret and are bounded in wall clock, so they run for
 every pull request — from a fork too — and report through `ci-green`, the one
 required check. The full pack, including the lane that drives the real agent
-runtime with a real credential, runs on manual dispatch and never gates a pull
-request: its lane spends real tokens, and its flakiness must not block work
+runtime with a real credential, runs nightly and on demand and never gates a
+pull request: its lane spends real tokens, and its flakiness must not block work
 while it is tuned.
 
 A fork pull request runs every tier its secret access allows and is not failed
@@ -98,11 +98,24 @@ context costs a full re-run to learn anything.
 
 ## What the repository must hold
 
+Three workflows share one definition, `.github/workflows/e2e.yml`:
+
+| Workflow | Runs | When |
+|---|---|---|
+| `ci.yml` | the pr tier | every pull request, reporting through `ci-green` |
+| `e2e-smoke.yml` | the pr tier | nightly at 03:17 UTC, and on demand |
+| `e2e-full.yml` | the full tier, real-runtime lane included | nightly at 04:17 UTC, and on demand |
+
+```sh
+gh workflow run e2e-smoke.yml
+gh workflow run e2e-full.yml
+```
+
 Two things are set up by hand, outside any diff:
 
-1. **A repository secret `ANTHROPIC_API_KEY`**, read only by a dispatched full
-   run. Pull requests never see it.
-2. **The cadence of the full run.** It starts dispatch-only. The schedule block
-   in `.github/workflows/e2e.yml` is the one to uncomment once a few dispatched
-   runs have shown what the lane costs. A schedule is easy to add and hard to
-   walk back.
+1. **A repository secret `ANTHROPIC_API_KEY`**, read only by `e2e-full.yml`.
+   Pull requests never see it. Without it the real-runtime lane reports
+   itself skipped and every other lane still runs.
+2. **The cadence.** Both crons live in their own workflow file and nowhere
+   else. The full tier's spend is real and recurring — tighten or loosen it
+   there.

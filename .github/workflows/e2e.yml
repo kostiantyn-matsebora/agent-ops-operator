@@ -1,20 +1,22 @@
-# The end-to-end tiers.
+# The end-to-end tiers — ONE definition, three entry points.
 #
-# TWO TIERS, DEFINED BY WHAT GATES A PULL REQUEST:
+# This workflow is the definition and is only ever CALLED (workflow_call). The
+# entry points are thin workflows that name a tier:
+#
+#   ci.yml         calls it with tier=pr on every pull request, and lists the
+#                  job in ci-green's `needs:` — the only required status check,
+#                  so the gate is a line there, never a new required check.
+#   e2e-smoke.yml  the pr tier on a nightly schedule and on demand
+#   e2e-full.yml   the full tier — the real-runtime lane included — on a
+#                  nightly schedule and on demand. It NEVER gates a pull
+#                  request: its lane spends real tokens and its flakiness must
+#                  not block work while it is tuned.
 #
 #   pr    contract conformance + a thin k3s smoke on the stub runtime. No
-#         secret, deterministic, bounded in wall clock. ci.yml CALLS this
-#         workflow with tier=pr and lists that job in ci-green's `needs:` — the
-#         only required status check — so the gate is a line there, never a
-#         new required check somebody has to remember.
-#   full  the whole pack, the real-runtime lane included. Runs on manual
-#         dispatch (and on a schedule once the cadence is settled — see the
-#         commented block). It NEVER gates a pull request: its lane spends real
-#         tokens and its flakiness must not block work while it is tuned.
-#
-# A fork pull request runs every tier its secret access allows and is not
-# failed for the rest: the pr tier needs no secret at all, and the real-runtime
-# lane SKIPS itself when ANTHROPIC_API_KEY is absent.
+#         secret, deterministic, bounded in wall clock.
+#   full  the whole pack. The real-runtime lane SKIPS itself when
+#         ANTHROPIC_API_KEY is absent, so a fork or a repository without the
+#         secret runs every tier its access allows and fails for none of the rest.
 #
 # WHAT THIS WORKFLOW OWNS is the cluster-based jobs only. Per-module build, vet
 # and test, the envtest suite and chart lint stay in ci.yml — one definition
@@ -28,18 +30,6 @@ on:
         description: pr or full
         type: string
         default: pr
-  workflow_dispatch:
-    inputs:
-      tier:
-        description: pr or full
-        type: choice
-        options: [pr, full]
-        default: full
-  # Cadence for the real-runtime lane: DISPATCH-ONLY to start. Tighten to a
-  # schedule once a few dispatched runs have shown what it costs — a schedule
-  # is easy to add and hard to walk back once people rely on it.
-  # schedule:
-  #   - cron: "17 3 * * *"
 
 permissions:
   contents: read
@@ -71,14 +61,14 @@ jobs:
   # working tree and tears the cluster down — this job only supplies the tools
   # and runs `go test`. See platform/manager/test/e2e/harness_test.go.
   pack:
-    name: e2e / ${{ inputs.tier || 'full' }}
+    name: e2e / ${{ inputs.tier }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     defaults:
       run:
         working-directory: ${{ env.MANAGER_MODULE }}
     env:
-      E2E_TIER: ${{ inputs.tier || 'full' }}
+      E2E_TIER: ${{ inputs.tier }}
       E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
     steps:
       - uses: actions/checkout@v4
@@ -96,8 +86,8 @@ jobs:
       - name: Run the pack
         env:
           # Absent on a pull request and on a fork — the real-runtime lane
-          # then reports itself SKIPPED. Present only for a dispatched full
-          # run on this repository.
+          # then reports itself SKIPPED. Present only when the full tier is
+          # called by e2e-full.yml, which inherits the repository's secrets.
           ANTHROPIC_API_KEY: ${{ inputs.tier == 'full' && secrets.ANTHROPIC_API_KEY || '' }}
         run: |
           go test -tags e2e -count=1 -timeout 55m -v ./test/e2e/
@@ -107,6 +97,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-${{ inputs.tier || 'full' }}-${{ github.run_id }}
+          name: e2e-${{ inputs.tier }}-${{ github.run_id }}
           path: ${{ github.workspace }}/e2e-artifacts
           if-no-files-found: ignore
