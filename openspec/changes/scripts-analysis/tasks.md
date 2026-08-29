@@ -21,7 +21,7 @@
 
 ## 5. E2E tests
 
-- [ ] 5.1 Not applicable: nothing here is decided by a cluster — a workflow job, a composite action and a provisioning script. The live proof is the branch's first CI run: the `scripts` job runs the suite, submits the analysis, and `ci-green` lists it. Verify: the pull request's checks show `scripts` green and a SonarCloud check for `agentops-scripts` with a coverage figure.
+- [x] 5.1 Not applicable: nothing here is decided by a cluster — a workflow job, a composite action and a provisioning script. The live proof is the branch's first CI run: the `scripts` job runs the suite, submits the analysis, and `ci-green` lists it. Verify: the pull request's checks show `scripts` green and a SonarCloud check for `agentops-scripts` with a coverage figure. Partly verified on #138: the suite and the combined coverage report ran green on the runner; the analysis step failed on the project assertion exactly as designed, naming `sonar-provision.sh` — green once task 3.4 is done.
 
 ## 6. Documentation
 
