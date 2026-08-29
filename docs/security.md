@@ -171,6 +171,16 @@ docker buildx imagetools inspect `
 ```
 {% endraw %}
 
+### Code analysis
+
+Security hotspots in the code itself — as opposed to vulnerabilities in what
+an image ships — are reported by SonarCloud, one project per component. They
+appear on that service's dashboard and in its check on the pull request, not
+in the security tab.
+
+They are reported and not gated. A hotspot is a place to review rather than a
+finding, and nothing in this project's merge protection reads the verdict.
+
 ### Context isolation
 
 A conversation's accumulated context is everything an agent was told and

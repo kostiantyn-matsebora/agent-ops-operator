@@ -17,5 +17,9 @@ export default defineConfig({
     // here in turn, and each made a clean tree report a failing suite: vitest
     // collected a Playwright spec and choked on test.describe.configure().
     exclude: ['node_modules/**', 'dist/**', 'e2e/**', 'screenshots/**', 'demo/**'],
+    // Coverage is the APPLICATION's, so only src/. Without `include` the lcov
+    // reports the Playwright configs and every harness as uncovered source,
+    // which is what the analysis dashboard would then count.
+    coverage: { include: ['src/**'] },
   },
 })

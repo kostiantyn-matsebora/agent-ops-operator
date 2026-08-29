@@ -1,0 +1,67 @@
+name: sonar-scan
+description: >-
+  Analyse one component on SonarCloud, from the job that just built and tested
+  it — the checkout, the coverage profile and the toolchain are already there,
+  so nothing is uploaded, downloaded or renamed.
+inputs:
+  dir:
+    description: The component directory — the analysis base directory, and what names the component
+    required: true
+  token:
+    description: SONAR_TOKEN
+    required: true
+  organization:
+    description: SONAR_ORG
+    required: true
+runs:
+  using: composite
+  steps:
+    # THE COMPONENT NAME IS DERIVED FROM THE DIRECTORY, by the one program that
+    # names images — never typed at a call site. A directory components.sh does
+    # not list is a failure here, not an analysis under a made-up name.
+    - id: component
+      shell: bash
+      run: |
+        name=$("$GITHUB_WORKSPACE"/.github/components.sh images | jq -r --arg c "./${{ inputs.dir }}" '.[] | select(.context == $c) | .component')
+        [ -n "$name" ] || { echo "::error::${{ inputs.dir }} is not a component components.sh lists"; exit 1; }
+        echo "name=$name" >> "$GITHUB_OUTPUT"
+    # THE PROJECT MUST ALREADY EXIST, AND THIS STEP NEVER CREATES ONE. The
+    # scanner auto-provisions any key it cannot find when the token may
+    # create projects, and a project created that way is bound to no
+    # repository — no pull request decoration, no monorepo membership — while
+    # looking exactly like one that was set up. Fifteen of those were created,
+    # deleted, and created again by the next push before this check existed.
+    # .github/scripts/sonar-provision.sh is how one is created, once.
+    - name: The SonarCloud project exists
+      shell: bash
+      env:
+        SONAR_TOKEN: ${{ inputs.token }}
+        ORG: ${{ inputs.organization }}
+        KEY: ${{ inputs.organization }}_agent-ops-operator_${{ steps.component.outputs.name }}
+      run: |
+        n=$(curl -sf -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/projects/search?organization=$ORG&projects=$KEY" | jq '.components | length')
+        [ "$n" = "1" ] || { echo "::error::no SonarCloud project for ${{ steps.component.outputs.name }} — run .github/scripts/sonar-provision.sh (CONTRIBUTING.md, Code analysis)"; exit 1; }
+    # PROPERTIES ARE ARGUMENTS, NOT FIFTEEN PROPERTIES FILES. Test files are
+    # DECLARED as tests rather than excluded, so test rules apply and test code
+    # is not counted as uncovered source. Coverage paths name every shape a
+    # component can produce — Go profile, node --test lcov, the console UI's
+    # lcov — and a report that is not there is a scanner INFO, never an error.
+    # The QUALITY GATE is deliberately not waited on: this step fails on
+    # submission only; the verdict is SonarCloud's own check on the pull
+    # request. Measure first, gate in a later change.
+    - uses: SonarSource/sonarqube-scan-action@v8.2.1
+      env:
+        SONAR_TOKEN: ${{ inputs.token }}
+      with:
+        projectBaseDir: ${{ inputs.dir }}
+        args: >-
+          -Dsonar.organization=${{ inputs.organization }}
+          -Dsonar.projectKey=${{ inputs.organization }}_agent-ops-operator_${{ steps.component.outputs.name }}
+          -Dsonar.projectName=agentops-${{ steps.component.outputs.name }}
+          -Dsonar.sources=.
+          -Dsonar.exclusions=**/zz_generated.deepcopy.go,**/node_modules/**,**/dist/**,**/coverage/**,ui/e2e/**,ui/screenshots/**,ui/demo/**
+          -Dsonar.tests=.
+          -Dsonar.test.inclusions=**/*_test.go,**/*.test.ts,**/*.test.tsx,**/*.test.js
+          -Dsonar.go.coverage.reportPaths=coverage.out
+          -Dsonar.javascript.lcov.reportPaths=coverage.lcov,ui/coverage/lcov.info
+          -Dsonar.typescript.lcov.reportPaths=ui/coverage/lcov.info
