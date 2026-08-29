@@ -75,9 +75,13 @@ def main() -> int:
     # else the working directory. Named here so nothing has to guess.
     here = pathlib.Path(args.file).resolve().parent if args.file else pathlib.Path.cwd()
     fallback: dict = {}
-    for base in (here, pathlib.Path(os.environ.get("GITHUB_WORKSPACE", "")), pathlib.Path.cwd()):
+    candidates = [here]
+    if ws := os.environ.get("GITHUB_WORKSPACE"):
+        candidates.append(pathlib.Path(ws))
+    candidates.append(pathlib.Path.cwd())
+    for base in candidates:
         address = base / "review-input.json"
-        if str(base) and address.is_file():
+        if address.is_file():
             fallback = json.loads(address.read_text())
             break
     repo = d.get("repo") or fallback.get("repo") or os.environ.get("GITHUB_REPOSITORY", "")
