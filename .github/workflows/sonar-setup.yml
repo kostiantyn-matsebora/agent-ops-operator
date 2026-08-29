@@ -23,7 +23,7 @@ jobs:
           inst="${SONAR_ORG}/agent-ops-operator|1324376362"
           echo "== bound to monorepo?"
           api "https://sonarcloud.io/api/alm_integration/is_bound_to_monorepo?project=$SONAR_PROJECT_KEY" | mask; echo
-          body=$(./.github/components.sh images | jq -c --arg o "$SONAR_ORG" --arg i "$inst" '{addAsFavorite:false, newCodeDefinitionType:"NUMBER_OF_DAYS", newCodeDefinitionValue:"30", organization:$o,
+          body=$(./.github/components.sh images | jq -c --arg o "$SONAR_ORG" --arg i "$inst" '{addAsFavorite:false, newCodeDefinitionType:"days", newCodeDefinitionValue:"30", organization:$o,
             projects:[.[] | {installationKey:$i, projectKey:($o + "_agent-ops-operator_" + .component), projectName:("agentops-" + .component)}]}')
           echo "== provision"
           api -w '\nhttp %{http_code}\n' -X POST -H 'Content-Type: application/json' "https://sonarcloud.io/api/alm_integration/provision_monorepo_projects" --data "$body" | mask | head -c 2000; echo
