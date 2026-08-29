@@ -6,7 +6,7 @@ on:
     paths: [.github/workflows/sonar-cleanup.yml]
 env:
   # false = list projects only; true = delete the 15 derived keys
-  DELETE: "false"
+  DELETE: "true"
 permissions:
   contents: read
 jobs:
