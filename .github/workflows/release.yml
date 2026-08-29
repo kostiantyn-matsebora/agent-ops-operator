@@ -127,9 +127,9 @@ jobs:
   # rendered and its REFERENCES asserted — so one file each.
   # THE SMOKE GATES A RELEASE. ci proved the tagged commit's modules, chart and
   # images in isolation; this proves the chart installs and answers on a real
-  # single-node cluster with the stub runtime — the same smoke tier every pull
-  # request meets, run again on the exact commit being published, because a
-  # tag can land on a commit that ci passed days ago against a different k3s.
+  # single-node cluster with the stub runtime. A pull request meets conformance
+  # only and never this cluster; the smoke runs HERE, on the exact commit being
+  # published, because a tag can land on a commit ci passed days ago.
   smoke:
     name: smoke
     needs: [determine, ci_is_green]

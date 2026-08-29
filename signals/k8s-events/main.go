@@ -506,8 +506,10 @@ func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 	if err := a.mgr.Inbound(ctx, source, allowed); err != nil {
 		if ctx.Err() == nil {
 			log.Printf("posting %d signals for %s: %v", len(allowed), source, err)
-			a.reportPostFailure(ctx, source, err)
+			// The clip first, the lost post LAST: both write the same Ready
+			// condition, and the one that stands must be the graver fact.
 			a.reportClipping(ctx, source, clipped)
+			a.reportPostFailure(ctx, source, err)
 		}
 		return false
 	}
