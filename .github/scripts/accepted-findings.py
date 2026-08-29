@@ -27,6 +27,14 @@ FOUR REFUSALS, AND THEY ARE THE PRODUCT:
 
 EVERY SKIP IS REPORTED, never silent. A dispatch that acted on three findings
 when a person accepted four is a bug only if someone can see the fourth.
+
+TWO MODES, ONE PROGRAM. `--mode threads` (the default) is the above. `--mode
+all` is the labelled pull request: the label is change-level consent, so every
+open thread the review authored is on the list with no reply at all -- except
+one already carrying the DISPUTE MARKER, which a previous round answered and a
+person has not; that one is counted as awaiting the person and never disputed
+twice. The label itself is checked by the workflow's gate, not here: this
+program is told the mode and derives the list.
 """
 from __future__ import annotations
 
@@ -96,6 +104,7 @@ def load_vocabulary(path: pathlib.Path) -> dict:
         "accept": {p.strip().lower() for p in doc["accept"]},
         "dispatch": {p.strip().lower() for p in doc["dispatch"]},
         "punctuation": doc.get("trailing_punctuation", ".!,"),
+        "dispute_marker": doc.get("dispute_marker", "<!-- autofix:disputed -->"),
     }
 
 
@@ -129,9 +138,24 @@ def fetch_threads(owner: str, repo: str, number: int) -> list[dict]:
         cursor = page["pageInfo"]["endCursor"]
 
 
-def classify(thread: dict, allowed: set[str], vocabulary: dict) -> tuple[str, dict | None]:
-    """One thread -> ('accepted', item) or ('<reason>', None). Pure, so the
-    suite can exercise every refusal without a network."""
+def item_for(thread: dict, first: dict, accepted_by: str, reply: str) -> dict:
+    return {
+        "id": thread["id"],
+        "source": "review",
+        "threadId": thread["id"],
+        "commentId": first["databaseId"],
+        "path": thread["path"],
+        "line": thread.get("line"),
+        "outdated": bool(thread.get("isOutdated")),
+        "finding": first.get("body", ""),
+        "acceptedBy": accepted_by,
+        "reply": reply,
+    }
+
+
+def review_finding(thread: dict, allowed: set[str]) -> tuple[str | None, dict | None]:
+    """The two refusals both modes share: not the review's, or already
+    settled. Returns (reason, None) or (None, first comment)."""
     comments = thread["comments"]["nodes"]
     if not comments:
         return "empty thread", None
@@ -141,6 +165,29 @@ def classify(thread: dict, allowed: set[str], vocabulary: dict) -> tuple[str, di
         return f"first comment by {first_author.get('login')!r}, not the review", None
     if thread["isResolved"]:
         return "already resolved", None
+    return None, first
+
+
+def classify_all(thread: dict, allowed: set[str], vocabulary: dict, approver: str) -> tuple[str, dict | None]:
+    """The labelled pull request: every open finding of the review's is on the
+    list, on the strength of the label -- unless a previous round disputed it
+    and the person has not answered. Pure, like `classify`."""
+    reason, first = review_finding(thread, allowed)
+    if first is None:
+        return reason, None
+    marker = vocabulary["dispute_marker"]
+    if any(marker in (c.get("body") or "") for c in thread["comments"]["nodes"][1:]):
+        return "disputed by a previous round, awaiting the person", None
+    return "accepted", item_for(thread, first, approver, "")
+
+
+def classify(thread: dict, allowed: set[str], vocabulary: dict) -> tuple[str, dict | None]:
+    """One thread -> ('accepted', item) or ('<reason>', None). Pure, so the
+    suite can exercise every refusal without a network."""
+    reason, first = review_finding(thread, allowed)
+    if first is None:
+        return reason, None
+    comments = thread["comments"]["nodes"]
 
     accepted_by = None
     refused = None
@@ -172,16 +219,7 @@ def classify(thread: dict, allowed: set[str], vocabulary: dict) -> tuple[str, di
     if accepted_by is None:
         return refused or "not accepted", None
 
-    return "accepted", {
-        "threadId": thread["id"],
-        "commentId": first["databaseId"],
-        "path": thread["path"],
-        "line": thread.get("line"),
-        "outdated": bool(thread.get("isOutdated")),
-        "finding": first.get("body", ""),
-        "acceptedBy": accepted_by["login"],
-        "reply": accepted_by["reply"],
-    }
+    return "accepted", item_for(thread, first, accepted_by["login"], accepted_by["reply"])
 
 
 def main() -> int:
@@ -193,6 +231,10 @@ def main() -> int:
     ap.add_argument("--vocabulary", type=pathlib.Path, default=DEFAULT_VOCABULARY)
     ap.add_argument("--authors", default=os.environ.get("REVIEW_AUTHORS", "claude[bot],github-actions[bot]"),
                     help="comma-separated logins the review posts as")
+    ap.add_argument("--mode", choices=["threads", "all"], default="threads",
+                    help="threads: what a person accepted per thread; all: every open finding (the labelled pull request)")
+    ap.add_argument("--approver", default="the label",
+                    help="in --mode all, who placed the label; recorded as acceptedBy")
     args = ap.parse_args()
 
     owner, _, repo = args.repo.partition("/")
@@ -202,11 +244,17 @@ def main() -> int:
     threads = fetch_threads(owner, repo, args.pr)
     print(f"{len(threads)} review thread(s) on {args.repo}#{args.pr}")
     print(f"recognised as the review: {', '.join(sorted(allowed))}")
-    print(f"accept vocabulary: {', '.join(sorted(vocabulary['accept']))}")
+    if args.mode == "all":
+        print(f"mode: all — every open finding is accepted by the label (placed by {args.approver})")
+    else:
+        print(f"accept vocabulary: {', '.join(sorted(vocabulary['accept']))}")
 
     accepted: list[dict] = []
     for thread in threads:
-        verdict, item = classify(thread, allowed, vocabulary)
+        if args.mode == "all":
+            verdict, item = classify_all(thread, allowed, vocabulary, args.approver)
+        else:
+            verdict, item = classify(thread, allowed, vocabulary)
         where = f"{thread.get('path')}:{thread.get('line') or '?'}"
         if item is None:
             print(f"  skipped  {thread['id']} ({where}): {verdict}")
