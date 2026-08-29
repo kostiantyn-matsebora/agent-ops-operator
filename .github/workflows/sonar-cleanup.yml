@@ -1,11 +1,12 @@
 # TEMPORARY. Deletes the SonarCloud projects CI auto-created; removed before merge.
 name: sonar-cleanup
 on:
-  workflow_dispatch:
-    inputs:
-      delete:
-        description: "false = list projects only; true = delete the 15 derived keys"
-        default: "false"
+  push:
+    branches: [change/sonarcloud-analysis]
+    paths: [.github/workflows/sonar-cleanup.yml]
+env:
+  # false = list projects only; true = delete the 15 derived keys
+  DELETE: "false"
 permissions:
   contents: read
 jobs:
@@ -16,7 +17,6 @@ jobs:
       - env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_ORG: ${{ secrets.SONAR_ORG }}
-          DELETE: ${{ inputs.delete }}
         run: |
           set -eu
           echo "== projects in the organisation (lastAnalysisDate  key  name)"
