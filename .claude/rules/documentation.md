@@ -81,7 +81,8 @@ filename — so the routing is explicit:
 | Work contract, adapter contracts, HTTP endpoints | `docs/contracts.md` |
 | An integration's ADOPTER-FACING content | `docs/integrations/<system>.md` — named for the SYSTEM, never the subchart |
 | WHAT A BUNDLE RENDERS | nothing. The `renders` marker on that page, then `python3 .github/scripts/docs-generate.py` |
-| The PARENT chart's values, install, upgrade, uninstall | `docs/installation.md` |
+| Install, upgrade, uninstall, and the storage access mode — the one irreversible decision, though the immutable claim spec means it is two keys, `accessModes` and `storageClassName` | `docs/installation.md` |
+| Every other PARENT chart value — reversible by `helm upgrade` | `docs/configuration.md`, a REFERENCE page read on GitHub, not a site page |
 | A RELEASE — the chart version the install command prints, a first-party image tag a worked example shows | `docs/installation.md` and `docs/concepts.md`, and `python3 .github/scripts/docs-generate.py --check` FAILS on a number the chart does not ship. Chart 13.1.0 shipped with the site still saying `--version 13.0.1`, and no hook could see it: the two hooks check a task's shape and a commit's branch, nothing checks a typed number |
 | Breaking change + upgrade steps | `docs/CHANGELOG.md`, newest first |
 | Terminology | `.claude/rules/terminology.md`, `wiring.md`, `adapters.md` |
@@ -89,7 +90,7 @@ filename — so the routing is explicit:
 | Hard-won gotchas | `.claude/rules/gotchas.md` |
 | A name this project STOPPED using — a removed field, a withdrawn rule, a superseded command | `.claude/rules/retired-vocabulary.md`, and a term in `.github/retired-vocabulary.json` in the same change |
 | A THREAT, the posture a default install carries, what a control bounds and what is still open | `docs/security.md` — and if the change moves a trust boundary or a flow across one, re-run `python3 docs/diagrams/threat-model.py`, which CI does NOT do |
-| The chart KEY that sets a control, its default and its YAML | `docs/installation.md` — never the security page, which states no value |
+| The chart KEY that sets a control, its default and its YAML | `docs/configuration.md` — never the security page, which states no value. THE LINE IS IRREVERSIBILITY: a key a later `helm upgrade` cannot undo stays on `installation.md` instead |
 | What the console is FOR — its views, what each answers, the authentication decision | `docs/console-guide.md` |
 | What the console IS — endpoints, RBAC grant, values reference, internals | `docs/console.md` |
 | A change to the console's UI | re-run BOTH `npm run screenshots` and `npm run demo` in `platform/console/ui` — the site's screenshots and its landing recording are build output, and the change is not done until both match |
@@ -117,8 +118,10 @@ is reverted by the next run — silently, because the run reports success.
   marker and the command. That is the point of generating rather than typing.
 
 **Both value rows are "values", so the split is stated.** The PARENT chart's
-belong to `docs/installation.md`, a SUBCHART's to that integration's own page,
-and neither restates the other.
+split further, by IRREVERSIBILITY: what a later `helm upgrade` cannot undo stays
+on `docs/installation.md`, everything else goes to `docs/configuration.md`. A
+SUBCHART's values belong to that integration's own page. None of the three
+restates another.
 
 **AND NEITHER CARRIES AN INVENTORY OF WHAT A BUNDLE RENDERS.** That row routes
 to the GENERATOR rather than to a page, because it is a fact about the chart in
@@ -135,9 +138,12 @@ exactly the way a worked example is.
   rather than an integration page. A runtime is what EXECUTES an agent, not a
   seam a Pipeline wires.
 
-**`installation.md` carries the values an operator must DECIDE**, grouped by the
-decision they serve. `helm show values` is the exhaustive list, and a
-hand-copied inventory rots.
+**`installation.md` carries only what cannot be changed after install.**
+`configuration.md` carries every value that CAN — grouped by the decision they
+serve, and it is a REFERENCE page: no front matter, no nav entry, no component
+markup, because Jekyll never processes it and a `{: .ao-callout}` on it is dead
+text read on GitHub. `helm show values` is the exhaustive list either way, and
+a hand-copied inventory rots.
 
 **The last three rows are one rule read three ways: the theme holds no prose,
 the pages hold no theme, and neither holds the rules.**
@@ -162,13 +168,21 @@ here:
 
 | Landing page | README |
 |---|---|
-| the claims strip | the same three, one line |
-| the `.ao-presentation` build-up | the flow diagram, then **How it works** in five numbered steps |
+| the essence sentence | the SAME sentence, as the subtitle under the name |
+| — (the landing page carries NO claim chips) | the three claims, one line |
+| the drawing `{: .ao-presentation}` builds | the flow diagram, then **How it works** in five numbered steps |
 | the "What you write" tab | **What you write** — the same `Pipeline`, comment-annotated |
-| the console recording | a link to it, plus what the console is |
-| When it runs / Why it is built this way / Pluggable at three seams | the same three lists |
-| Why agent-ops? and the chip set | the same table, and "Works with" as one line |
-| Where to start / Understand the model / Run it | **Where to go next**, site first |
+| `What agent-ops is` — two paragraphs and six tiles | the same, the tiles as a list |
+| `What it gives you` — six tiles | the same, as a two-column table |
+| the console strip | **Console — all in one place**, plus a link and the recording |
+| `Where to go next` | **Where to go next**, site first |
+
+- **THE CLAIM CHIPS ARE THE ONE ROW THAT DOES NOT MIRROR**, and that is
+  deliberate. Six of them bracketed the landing page's drawing and were what a
+  reader met before the product, so the page dropped them. GitHub renders no
+  hero, so the README keeps three as its only visual claim — the two the
+  sentence does not already make (`Kubernetes native`, `GitOps ready`) plus
+  `Automation that thinks`.
 
 **RESTATING IS THE FAILURE, COVERING IS NOT**, and the difference is where the
 DETAIL lives:

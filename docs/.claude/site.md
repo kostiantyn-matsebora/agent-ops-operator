@@ -91,8 +91,18 @@ TWO drawio pages, and only one is exported:
 **There WAS a third**, `landing`, compressed to 950px for the landing page's own
 strip, and it is deleted along with its two exports.
 
-- **The landing page carries a PRESENTATION now** — the same argument built one
-  beat at a time, in real text, scaled to whatever width it is given.
+- **The landing page carries a DRAWING now** — the same argument built one beat
+  at a time, in real text, scaled to whatever width it is given.
+  - **IT IS ONE FIGURE, AND THE FIGURE IS THE CONTROL.** It had a transport —
+    play button, beat counter, ten scrub dots, progress bar, and a box showing
+    each beat's manifest lines, in two bordered boxes under the picture. That
+    was MORE MACHINERY THAN THE THING IT EXPLAINED. Clicking the drawing pauses
+    it, and nothing else sits below it.
+  - **The caption is IN the drawing**, in a lane reserved to the right of it,
+    vertically tracking whatever the beat lights. Placing it beside the anchor
+    was tried over ten candidate positions and collided on nearly every beat —
+    six boxes, a chip row and seven connectors leave no clear space. Reserving
+    the room is the fix a cost function cannot be, and it costs picture width.
 - **The still had a ceiling the presentation does not.** 950 because the content
   column is 720 and there is no breakout, so making it fit meant REMOVING
   ELEMENTS rather than shrinking type, and every attempt to add detail had to
@@ -103,8 +113,27 @@ strip, and it is deleted along with its two exports.
 ### The site shell
 
 **Astro Starlight's geometry**, read off that site's own stylesheet and verified
-against it live: BOTH rails 18.75rem, text 45rem FIXED, and the leftover SPLIT
-EVENLY between the left gutter and the right container.
+against it live: BOTH rails 18.75rem, and the leftover SPLIT EVENLY between the
+left gutter and the right container.
+
+**THE TEXT COLUMN IS NOT FIXED, AND "45rem FIXED" IS THE CORRECTION.** Starlight
+sizes it from WHICH RAILS THE PAGE CARRIES, and we had only the first rung:
+
+| Page has | Column | Sits |
+|---|---|---|
+| sidebar + on-this-page rail | 45rem | flush against the rail |
+| sidebar, NO rail | **58rem** | CENTRED in what the navigation leaves |
+| no sidebar at all | 67.5rem | centred |
+
+- **A page declining the rail kept the narrow measure AND lost the track that
+  justified it** — a 720px column pinned to the navigation with 380px of nothing
+  to its right, measured at 1440. That was the landing page, and it is the whole
+  of why it read as a reference page with a lot on it.
+- **`--ao-measure-wide` is the second rung**, and `index.md` reaches it by
+  declaring `toc: false` — declining the rail IS the decision to widen.
+- **The 58rem rung is the REFERENCE SITE'S OWN OVERRIDE**, not Starlight core:
+  `html[data-has-sidebar]:not([data-has-toc])` in its `@layer components`. Core
+  ships the first and third rows only.
 
 The rail keeps its width at that container's left, so its half is empty space
 PAST the rail, never a fatter rail.

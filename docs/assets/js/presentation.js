@@ -1,9 +1,15 @@
 // The presentation, for a page that explains a model one beat at a time.
 //
 // The page writes an ordinary ordered list named `{: .ao-presentation}`: one
-// item per beat, the item's text is that beat's caption, and a fenced block
-// under it is the manifest stanza that beat is about. This reads the list,
-// builds the stage and the transport beside it, and removes the list.
+// item per beat, the item's text is that beat's caption. This reads the list,
+// builds the drawing, and removes the list.
+//
+// IT IS ONE FIGURE, AND THE FIGURE IS THE CONTROL. The drawing carries its own
+// caption and clicking it pauses. There was a transport — a play button, a beat
+// counter, ten scrub dots, a progress bar and a box showing each beat's
+// manifest lines, in two bordered boxes under the picture. That was MORE
+// MACHINERY THAN THE THING IT EXPLAINED, and the manifest it showed is already
+// the strip's third panel.
 //
 // WITH NO SCRIPTING THE LIST IS THE WHOLE EXPLANATION — nine beats in order,
 // each carrying the lines it concerns. That is a working panel rather than a
@@ -47,14 +53,33 @@
   //
   // The top slack is the biggest because the frame's label sits ABOVE the frame,
   // outside the drawing's own box. Nothing may end flush with this boundary.
-  var DRAW_W = 668;
-  var DRAW_H = 208;
+  // 668 of DRAWING, then a gap, then the CAPTION'S OWN LANE. The lane is what
+  // makes "beside the element the beat is about" possible at all: the drawing
+  // is dense — six boxes, a chip row and seven connectors — and a caption
+  // placed near an anchor collided with something on every beat. A search over
+  // ten candidate positions still could not find clear space, because there is
+  // none. Reserving the room is the fix a cost function cannot be.
+  //
+  // THE COST IS PICTURE WIDTH, and it is paid knowingly: the drawing renders at
+  // about 1.05 rather than 1.39, so it is still larger than the 668 it was
+  // authored at and no longer the whole column.
+  var CAP_LANE = 190;
+  var CAP_GUTTER = 20;
+  var DRAW_W = 668 + CAP_GUTTER + CAP_LANE;
+  // 208 once, and that was the ceiling the narrow column imposed rather than a
+  // shape the drawing wanted: three bands in 208px left 43px between the first
+  // and the second and NINE between the toolset and the reach chips it grants,
+  // so the whole thing read as one flat strip.
+  var DRAW_H = 245;
   var PAD_TOP = 28;
   var PAD_BOTTOM = 4;
   var PAD_RIGHT = 2;
   var STAGE_W = DRAW_W + PAD_RIGHT;
   var STAGE_H = PAD_TOP + DRAW_H + PAD_BOTTOM;
-  var HOLD = 5200;
+  // 5200 read as a stall rather than a beat: long enough that a reader who had
+  // finished the sentence went looking for a control. A caption is six words —
+  // it is read in about a second, and the drawing does the rest.
+  var HOLD = 2600;
 
   // The drawing: five declared objects, the conversation they open, the reach
   // the wiring granted, and the install that frames them.
@@ -80,13 +105,13 @@
   var WIRES = [
     { id: 'w-source', d: 'M164 30 H248', len: 85 },
     { id: 'w-channel', d: 'M412 30 H496', len: 85 },
-    { id: 'w-profile', d: 'M300 58 V78 H244 V96', len: 100 },
-    { id: 'w-toolset', d: 'M360 58 V78 H416 V96', len: 100 },
+    { id: 'w-profile', d: 'M300 58 V96 H244 V118', len: 118 },
+    { id: 'w-toolset', d: 'M360 58 V96 H416 V118', len: 118 },
     // Turns ABOVE the toolset's elbow rather than below it, so the two never
     // share a horizontal run. A crossing reads as a junction that is not there.
-    { id: 'w-cfg', d: 'M406 58 V68 H578 V96', len: 210 },
-    { id: 'w-reach', d: 'M416 142 V150', len: 20 },
-    { id: 'w-conv', d: 'M82 58 V132', len: 78 },
+    { id: 'w-cfg', d: 'M406 58 V84 H578 V118', len: 234 },
+    { id: 'w-reach', d: 'M416 163 V186', len: 23 },
+    { id: 'w-conv', d: 'M82 58 V150', len: 92 },
   ];
 
   // What each beat TURNS ON, and what it LIGHTS. `on` accumulates — what a beat
@@ -193,14 +218,11 @@
       // the reader offers the wrong thing — the manifest to copy is the
       // strip's third panel, whole. Carrying the `highlight` class keeps the
       // block's own token colours, which are scoped to it.
-      var code = pre && (pre.querySelector('code') || pre);
-      var stanza = code ? code.cloneNode(true) : null;
-      if (stanza) stanza.classList.add('highlight');
-      // Taken out before the caption is read, so the stanza's own lines cannot
-      // end up in the beat's sentence. Kept, because the reduced-motion path
-      // puts the list back and a beat without its lines is a beat cut in half.
+      // Taken out before the caption is read, so the block's own lines cannot
+      // end up in the beat's sentence. Put back, because the reduced-motion
+      // path shows the list and a beat without its lines is a beat cut in half.
       if (holder) holder.parentNode.removeChild(holder);
-      var beat = { text: li.textContent.replace(/\s+/g, ' ').trim(), stanza: stanza };
+      var beat = { text: li.textContent.replace(/\s+/g, ' ').trim() };
       if (holder) li.appendChild(holder);
       return beat;
     });
@@ -212,64 +234,74 @@
     var stage = el('div', 'ao-pres-stage', viewport);
     var parts = buildStage(stage);
 
-    var stanzaBox = el('div', 'ao-pres-stanza', wrap);
-
-    var rail = el('div', 'ao-pres-rail', wrap);
-    var play = el('button', 'ao-pres-play', rail);
-    play.type = 'button';
-
-    // DRAWN, NOT TYPED. `\u25b6` and `\u258c\u258c` are font glyphs, and a font
-    // centres them on its own baseline and side bearings rather than in the
-    // circle they sit in — which is why they looked knocked off-centre. A path
-    // is positioned by its own coordinates and cannot drift with the typeface.
+    // THE CAPTION IS IN THE DRAWING, not a row under it. It is appended to the
+    // STAGE, so it is positioned in the drawing's own coordinates and is scaled
+    // by the same transform — it moves and sizes WITH the picture instead of
+    // being a line of page text that happens to sit below one.
     //
-    // The triangle's box runs 4.5 to 9.5 against a centre of 6, so it sits a
-    // whisker right of true centre: a triangle's mass is at its left, and
-    // centring the BOX makes it look left. The bars need no such correction.
-    var PLAY_D = 'M4.5 2.6 L9.6 6 L4.5 9.4 Z';
-    var PAUSE_D = 'M3.9 2.8 h1.7 v6.4 h-1.7 Z M6.9 2.8 h1.7 v6.4 h-1.7 Z';
-    var glyph = svg('svg', play);
-    glyph.setAttribute('viewBox', '0 0 12 12');
-    glyph.setAttribute('aria-hidden', 'true');
-    var glyphPath = svg('path', glyph);
-    glyphPath.setAttribute('fill', 'currentColor');
+    // It went through a bordered rail with a play button, a beat counter, ten
+    // scrub dots and a progress bar, and a box above it showing each beat's
+    // manifest lines. All of it was more machinery than the drawing it
+    // explained, and the manifest is already the strip's third panel.
+    //
+    // THERE IS NO BEAT COUNTER. "1 / 10" answered a question nobody reading a
+    // landing page has: it is not a form to complete or a queue to get through,
+    // and a number counting down beside a sentence invites waiting for the end
+    // rather than reading the sentence.
+    var text = el('div', 'ao-pres-caption', stage);
 
-    var caption = el('div', 'ao-pres-caption', rail);
-    var count = el('span', 'ao-pres-count', caption);
-    var text = el('span', 'ao-pres-text', caption);
-
-    // NO LIVE REGION. One that announced every advance would interrupt a
-    // screen-reader user every 6.6 seconds on the page they landed on. Each
-    // dot carries its beat's whole sentence instead, so the beats stay
-    // reachable — by reading them, rather than by being read at.
+    // THE FIGURE IS THE CONTROL. A reader pauses by clicking what they are
+    // looking at, which is the one target nobody has to find — and it costs no
+    // button, no glyph and no second thing to style, label and keep reachable.
+    //
+    // A real `tabindex` and a key handler, not a `<div>` with a click: the
+    // transport it replaces was operable from the keyboard and this must be
+    // too.
     wrap.setAttribute('role', 'group');
     wrap.setAttribute('aria-label', 'How it works, one beat at a time');
+    wrap.tabIndex = 0;
 
-    var dotsBox = el('div', 'ao-pres-dots', rail);
-    var progress = el('div', 'ao-pres-progress', rail);
-    var bar = el('i', null, progress);
-
-    var dots = beats.map(function (beat, i) {
-      var dot = el('button', null, dotsBox);
-      dot.type = 'button';
-      dot.setAttribute('aria-label', 'Beat ' + (i + 1) + ': ' + beat.text);
-      dot.addEventListener('click', function () {
-        // A reader who has taken control has stopped watching and started
-        // reading, so selecting a beat stops the advance rather than pausing it
-        // for one hold.
-        pause();
-        goTo(i);
-      });
-      return dot;
-    });
+    // NO LIVE REGION. One that announced every advance would interrupt a
+    // screen-reader user every 5.2 seconds on the page they landed on. The
+    // beats stay readable as the list below instead — by being read, rather
+    // than by being read at.
 
     var current = 0;
     var timer = null;
     // Whether the presentation is sitting as the reduced-motion still. Read by
     // the play button, cleared for good by `engage`.
     var stillNow = false;
-    var raf = null;
     var started = 0;
+
+    // WHERE THE BEAT IS HAPPENING. A stepped diagram puts its sentence beside
+    // the thing it is currently about — that is the whole reason the drawing is
+    // stepped rather than drawn once. A fixed caption makes the reader find the
+    // change for themselves on every beat.
+    //
+    // IN THE LANE, VERTICALLY ALIGNED TO THE ANCHOR. The caption's column is
+    // reserved, so there is nothing to collide with and nothing to search: only
+    // its height moves, tracking the middle of whatever the beat lights.
+
+    /** The element a beat is about: what it LIGHTS, else what it turns on.
+        Never the frame — it is the whole drawing, so "beside it" is nowhere,
+        and never a connector, which has no box to sit beside. */
+    function anchorFor(n) {
+      var beat = SCRIPT[n] || {};
+      var ids = (beat.lit || []).concat(beat.on || []);
+      for (var i = 0; i < ids.length; i++) {
+        var e = parts[ids[i]];
+        if (e && e.offsetWidth && !e.classList.contains('ao-pres-frame')) return e;
+      }
+      // A beat about the whole picture — the install, and the closing line.
+      return parts.pipeline;
+    }
+
+    function place(n) {
+      var a = anchorFor(n);
+      var h = text.offsetHeight || 34;
+      var mid = a.offsetTop + a.offsetHeight / 2 - h / 2;
+      text.style.top = Math.max(0, Math.min(DRAW_H - h, mid)) + 'px';
+    }
 
     /** Paint the stage as of beat n, from scratch. Idempotent, so scrubbing
         back is the same code path as playing forward. */
@@ -287,19 +319,8 @@
         parts[id].classList.toggle('is-lit', !!lit[id]);
       });
 
-      stanzaBox.textContent = '';
-      if (beats[n].stanza) stanzaBox.appendChild(beats[n].stanza.cloneNode(true));
-
-      count.textContent = (n + 1) + ' / ' + beats.length;
       text.textContent = beats[n].text;
-      dots.forEach(function (dot, i) {
-        dot.setAttribute('aria-current', String(i === n));
-      });
-    }
-
-    function tick() {
-      bar.style.width = Math.min(1, (Date.now() - started) / HOLD) * 100 + '%';
-      raf = requestAnimationFrame(tick);
+      place(n);
     }
 
     function advance() {
@@ -312,27 +333,36 @@
       if (timer) return;
       started = Date.now();
       timer = setTimeout(advance, HOLD);
-      raf = requestAnimationFrame(tick);
-      glyphPath.setAttribute('d', PAUSE_D);
-      play.setAttribute('aria-label', 'Pause the presentation');
+      wrap.classList.remove('is-paused');
     }
 
     function pause() {
       clearTimeout(timer);
-      cancelAnimationFrame(raf);
       timer = null;
-      bar.style.width = '0%';
-      glyphPath.setAttribute('d', PLAY_D);
-      play.setAttribute('aria-label', 'Play the presentation');
+      wrap.classList.add('is-paused');
     }
 
-    // WHILE STILL, THE BUTTON'S JOB IS TO LEAVE THE STILL. It is the same
-    // element, the same label and the same handler in both configurations —
-    // a second control beside it would be a second thing to style, label and
-    // keep reachable, and the two would drift.
-    play.addEventListener('click', function () {
+    // CLICKING THE FIGURE TOGGLES IT, and while it is sitting as the
+    // reduced-motion still that same click is what starts it. One target, one
+    // handler, both configurations.
+    //
+    // A click that lands on a LINK or a selection the reader is making is not
+    // a request to pause, so neither is intercepted.
+    function toggle() {
       if (stillNow) { engage(); return; }
       if (timer) pause(); else start();
+    }
+    wrap.addEventListener('click', function (e) {
+      if (e.target.closest('a')) return;
+      var sel = window.getSelection();
+      if (sel && String(sel).length) return;
+      toggle();
+    });
+    wrap.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();
+        toggle();
+      }
     });
 
     // ENGAGING IS ONE-WAY, and it is the READER'S OWN action rather than
@@ -349,14 +379,6 @@
       stillNow = false;
       wrap.classList.remove('is-still');
       list.parentNode.removeChild(list);
-      // Re-appended in their authored order, so the rail is byte-for-byte the
-      // transport every other reader gets.
-      rail.appendChild(caption);
-      rail.appendChild(dotsBox);
-      rail.appendChild(progress);
-      // Above the rail, where it was built: a running presentation without it
-      // loses the manifest half of every beat.
-      wrap.insertBefore(stanzaBox, rail);
       goTo(0);
       start();
     }
@@ -365,7 +387,11 @@
     // width, so the viewport is given the scaled height in the same step —
     // half of that pair is a presentation with a scrollbar inside it.
     function fit() {
-      var k = Math.min(1, viewport.clientWidth / STAGE_W);
+      // FILLS THE COLUMN. Capped at 1 while the column was 45rem and the
+      // stage was authored to just fit it. At 58rem the cap left the drawing
+      // at 668px pinned to the left of a 928px box. Unbounded is safe because
+      // the COLUMN is bounded by `--ao-measure-wide`.
+      var k = viewport.clientWidth / STAGE_W;
       // Scale THEN drop, so the top slack scales with everything else: a
       // constant offset would over-pad the drawing at every narrow width.
       stage.style.transform = 'translate(0, ' + (PAD_TOP * k) + 'px) scale(' + k + ')';
@@ -395,17 +421,11 @@
       pause();
       stillNow = true;
       wrap.classList.add('is-still');
-      // DETACHED, NOT HIDDEN. `display: none` reads cleaner and leaves the dots
-      // in the tab order and the caption in the accessibility tree — nine beats
-      // announced twice, once from the rail and once from the list beside it.
-      // The stanza box goes for a plainer reason: a still has no current beat
-      // to show lines for.
-      wrap.removeChild(stanzaBox);
-      rail.removeChild(caption);
-      rail.removeChild(dotsBox);
-      rail.removeChild(progress);
       wrap.parentNode.insertBefore(list, wrap.nextSibling);
     } else {
+      // Already detached at the top of this function — this branch just
+      // leaves it that way. The duplicate removeChild here threw on
+      // `list.parentNode` being null, since line 404 had already removed it.
       goTo(0);
       start();
     }

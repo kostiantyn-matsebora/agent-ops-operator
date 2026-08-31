@@ -18,35 +18,23 @@ Install the operator and get your first question answered, in the console. About
 fifteen minutes, most of it the install.
 
 {: .ao-callout}
-> **A demo, not a deployment.** It exists to show you the product quickly. Do
-> not build on it — [Installation]({{ '/installation/' | relative_url }}) is the
-> real one.
+> **This is a demo, not a deployment**
 >
-> The agent is **read-only** and cannot change your cluster. Three walls, not
-> one: the MCP server runs `--read-only`, its identity holds only `view`, and
-> the route grants observing tools alone.
+> It shows you the product in fifteen minutes, and
+> [Installation]({{ '/installation/' | relative_url }}) is the one to build on.
+>
+> **The agent is read-only and cannot change your cluster**
+>
+> Three walls, not one:
+>
+> - the MCP server runs `--read-only`
+> - its identity is granted reads and nothing else
+> - the route grants observing tools alone
 
 ## Before you begin
 
 - A cluster you can `kubectl` into, and Helm.
 - A model credential — a Claude subscription token or an Anthropic API key.
-
-**Storage. Nothing to decide.** A conversation's accumulated context lives on a
-claim the chart creates, and demo mode asks for `ReadWriteOnce` — which is what
-`local-path` provides, the only storage class rancher-desktop, k3d, kind and
-minikube ship.
-
-So the demo remembers. Follow-ups in a thread keep their context on a laptop
-cluster exactly as they do on a real one.
-
-**A real install asks for `ReadWriteMany` instead**, because runtime pods land
-wherever the scheduler puts them and every one of them mounts this volume — see
-[Installation]({{ '/installation/' | relative_url }}).
-
-**No storage at all?** `--set persistence.context.enabled=false` runs the demo
-against `emptyDir`. Everything works — agents run, answer and deliver — but
-every run starts fresh, and the operator says so up front rather than failing a
-follow-up later.
 
 ## Install
 
@@ -101,28 +89,6 @@ follow-up later.
    kubectl -n agent-ops rollout status deploy/agentops-manager
    ```
 
-Four objects matter here:
-
-| Object | What it is |
-|---|---|
-| `SignalSource/console` | where your questions enter |
-| `AgentProfile/k8s-engineer` | who the agent is. Behaviour only, no tools and no runtime |
-| `Pipeline/k8s-observe` | the wiring: those sources, that profile, a read-only toolset |
-| `AgentRuntime/default` | the image it runs in, and the credential it uses. It comes from the `claude` bundle, which is on by default |
-
-**THE AGENT HAS NO KUBERNETES PERMISSIONS OF ITS OWN.** The route runs as an
-account bound to nothing, and demo mode does not change that.
-
-It reads your cluster through the bundle's **MCP server**, which carries its own
-ServiceAccount and its own read-only grant. Two identities, each reviewable
-alone — and the reason a one-flag demo is not a one-flag privilege grant.
-
-{: .ao-callout}
-> **If you turn off the `claude` bundle without declaring a replacement, the
-> render FAILS**, naming the missing `default` runtime and the routes that
-> resolve to it. That is deliberate: the alternative is an install whose
-> conversations sit in `Pending` forever with the reason in the manager's log.
-
 ## Ask it something
 
 1. **Forward the console's port.**
@@ -141,9 +107,23 @@ alone — and the reason a one-flag demo is not a one-flag privilege grant.
 
    > How many nodes does this cluster have?
 
-No special API is involved. Your question is an ordinary signal, and the route
-claiming the console decides who answers
-([contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md)).
+Your question is an ordinary signal, and the
+[route]({{ '/guides/pipeline/' | relative_url }}) claiming the console decides
+who answers.
+
+## What you just installed
+
+That answer came from four objects the chart created:
+
+| Object | What it is |
+|---|---|
+| `SignalSource/console` | where your questions enter |
+| `AgentProfile/k8s-engineer` | who the agent is. Behaviour only, no tools and no runtime |
+| `Pipeline/k8s-observe` | the wiring: those sources, that profile, a read-only toolset |
+| `AgentRuntime/default` | the image it runs in, and the credential it uses. It comes from the `claude` bundle, which is on by default |
+
+The agent has no permissions of its own and reads your cluster through the
+bundle's read-only MCP server.
 
 ## What a good run looks like
 
@@ -157,9 +137,8 @@ console:
 
 The answer lands in the thread. Follow-ups in the same thread keep their context.
 
-**It opens with the conclusion.** A long answer arrives as a title, a few named
-sections, and the detail behind a control you expand — the profile declares
-`outputFormat: blocks`, and every surface renders that shape its own way.
+**It opens with the conclusion**, then a few named sections, with the long
+detail behind a control you can expand.
 
 From the outside:
 
@@ -195,8 +174,7 @@ exits on the idle TTL.
 | Cause | Where it shows |
 |---|---|
 | Bad or missing credential | the run fails — `status.runs[].status: failed`, non-zero exit code, reason in `kubectl logs` |
-| No storage provisioner at all | the `agentops-context` PVC sits `Pending` with no events. The conversation exists but never gets a pod. Install with `--set persistence.context.enabled=false` |
-| A pre-created volume that will not bind | the `agentops-context` PVC sits `Pending` too, and it looks identical. Different cause: a claim naming a volume must also name the right storage class. `kubectl describe pvc agentops-context` tells the two apart — `VolumeMismatch: storageClassName does not match` means the class is wrong, no event at all means there is no provisioner. For a volume you created by hand use `persistence.context.storageClassName: "-"`. For one RETAINED from an earlier release, name the class the PV already carries — a dynamically provisioned volume keeps it forever |
+| No storage provisioner | the `agentops-context` PVC sits `Pending` and no pod is created. Reinstall with `--set persistence.context.enabled=false` |
 | Nothing claims the source | the source's `Wired` condition is `False` with a reason. The console reports its composer unavailable, and signals are dropped |
 | At capacity | phase `Pending`, no pod, no thread. Five run at once by default |
 

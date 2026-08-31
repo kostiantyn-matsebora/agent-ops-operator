@@ -99,6 +99,15 @@
      wide-box scheme leaves dead space between the last word and the rail, which
      reads as an inflated right column. Cards and the diagram ARE the column. */
   --ao-measure: 45rem;
+  /* THE COLUMN IS SIZED FROM WHICH RAILS THE PAGE CARRIES, and that is the
+     reference's own ladder rather than a preference: 45rem beside an
+     on-this-page rail, 58rem without one, 67.5rem with no navigation either.
+     Read off Starlight 0.41.4's stylesheet live.
+
+     We had only the first rung, so a page declining the rail kept the narrow
+     measure AND lost the track that justified it — a 720px column pinned to
+     the navigation with 380px of nothing to its right, measured at 1440. */
+  --ao-measure-wide: 58rem;
   --ao-radius: 6px;
 }
 
@@ -423,12 +432,6 @@ a:hover {
     display: none;
   }
 
-  /* The class comes from front matter, not from the viewport, so the flush-right
-     rule has to be undone here — otherwise the text stays pressed against a rail
-     that is no longer rendered. */
-  .ao-shell--toc .ao-content {
-    margin-left: 0;
-  }
 }
 
 /* A column, mirroring the left sidebar: full viewport height, sticky, with its
@@ -634,8 +637,28 @@ a:hover {
   outline: none;
 }
 
+/* No rail: the column takes the wider measure and CENTRES in what the
+   navigation leaves, exactly as the reference does. Flush-left here is what
+   made the leftover read as abandoned space rather than as a margin. */
 .ao-content {
+  max-width: var(--ao-measure-wide);
+  margin-inline: auto;
+}
+
+/* With a rail the column is the narrow measure and sits flush against it, so
+   the leftover becomes the GUTTER between navigation and prose. */
+.ao-shell--toc .ao-content {
   max-width: var(--ao-measure);
+  margin-inline: auto 0;
+}
+
+/* IT MUST SIT AFTER THE RULE IT UNDOES. This lived in the shell's own
+   `max-width: 72rem` block, which is earlier in the file: same specificity,
+   later rule wins, so the undo silently stopped applying. */
+@media (max-width: 72rem) {
+  .ao-shell--toc .ao-content {
+    margin-inline: 0;
+  }
 }
 
 /* --- footer --------------------------------------------------------------- */
@@ -674,6 +697,18 @@ a:hover {
   padding-bottom: 0.35rem;
   border-bottom: 1px solid var(--ao-border);
   font-size: 1.5rem;
+}
+
+/* THE LANDING PAGE'S HEADINGS CARRY NO RULE. A reference page is scanned, and
+   the line is what tells a reader scrolling past where one section stopped. A
+   landing page is READ, top to bottom, in four sections — there the same line
+   is four horizontal strokes competing with the drawing for the eye.
+
+   Scoped by `.ao-hero`, which only `home.html` emits, and by the sibling
+   combinator because `index.md`'s sections are that hero's own siblings. */
+.ao-hero ~ h2 {
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 
 .ao-content h3 {
@@ -972,6 +1007,15 @@ a:hover {
 /* The title carries the card's colour, not the link colour: the whole card is
    the affordance, so a teal underlined phrase inside it would read as a second,
    narrower target. */
+/* A MARK IN A CARD TITLE, named by the PAGE. The areas table carried these
+   beside each name and the cards inherit the job when it became tiles. */
+.ao-content ul.ao-cards > li > p:first-child img {
+  width: 18px;
+  height: 18px;
+  margin-right: 0.4rem;
+  vertical-align: -3px;
+}
+
 .ao-content ul.ao-cards > li > p:first-child a {
   color: inherit;
   text-decoration: none;
@@ -1168,8 +1212,11 @@ a:hover {
    edge is applied by the script, which owns the transform. */
 .ao-pres-stage {
   position: relative;
-  width: 668px;
-  height: 208px;
+  width: 878px;
+  /* TRACKS `DRAW_H` IN `presentation.js`, and the SVG below carries it a third
+     time — a viewBox taller than the box it is drawn into does not overflow,
+     it SQUASHES, so a mismatch bends every connector rather than failing. */
+  height: 245px;
   transform-origin: top left;
 }
 
@@ -1181,7 +1228,7 @@ a:hover {
   position: absolute;
   inset: 0;
   width: 660px;
-  height: 208px;
+  height: 245px;
   overflow: visible;
 }
 
@@ -1278,13 +1325,13 @@ a:hover {
 
 .ao-pres-node[data-node="profile"] {
   left: 168px;
-  top: 96px;
+  top: 118px;
   width: 152px;
 }
 
 .ao-pres-node[data-node="toolset"] {
   left: 340px;
-  top: 96px;
+  top: 118px;
   width: 152px;
 }
 
@@ -1293,7 +1340,7 @@ a:hover {
    under both is what the pair grants. */
 .ao-pres-node[data-node="mcpconfig"] {
   left: 502px;
-  top: 96px;
+  top: 118px;
   width: 152px;
 }
 
@@ -1302,7 +1349,7 @@ a:hover {
 .ao-pres-reach {
   position: absolute;
   left: 340px;
-  top: 150px;
+  top: 186px;
   display: flex;
   flex-wrap: wrap;
   gap: 0.28rem;
@@ -1346,7 +1393,7 @@ a:hover {
   left: 212px;
   top: -16px;
   width: 456px;
-  height: 224px;
+  height: 261px;
   border: 1px dashed var(--ao-border-strong);
   border-radius: 10px;
   opacity: 0;
@@ -1374,7 +1421,7 @@ a:hover {
 .ao-pres-conv {
   position: absolute;
   left: 0;
-  top: 132px;
+  top: 150px;
   width: 160px;
   padding: 0.4rem 0.55rem 0.5rem;
   background: transparent;
@@ -1421,188 +1468,51 @@ a:hover {
   border-radius: 50%;
 }
 
-/* The stanza is the lines this beat is about, not the whole document: a reader
-   looking for the field a beat names should not have to find it in a manifest
-   they were not asked to read. The full one is the strip's third panel. Its
-   height is reserved so a shorter stanza cannot move the rail under the eye. */
-.ao-pres-stanza {
-  padding: 0.45rem 0.7rem;
-  min-height: 4.5rem;
-  overflow-x: auto;
-  background: var(--ao-code-bg);
-  border: 1px solid var(--ao-border);
-  border-radius: var(--ao-radius);
-  color: var(--ao-text);
-  font-family: var(--ao-font-mono);
-  font-size: 0.74rem;
-  line-height: 1.55;
-}
-
-.ao-pres-stanza > code {
-  display: block;
-  margin: 0;
-  padding: 0;
-  background: none;
-  border: 0;
-  border-radius: 0;
-  color: inherit;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
-  white-space: pre;
-}
-
-.ao-pres-rail {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.6rem 0.75rem 0.5rem;
-  background: var(--ao-surface-alt);
-  border: 1px solid var(--ao-border);
-  border-radius: var(--ao-radius);
-}
-
-/* THE STILL RAIL IS THE PLAY BUTTON AND NOTHING ELSE.
-   Under `prefers-reduced-motion: reduce` the presentation is composed, paused
-   and offering one control — the script detaches the caption, the dots and the
-   progress bar, because the beats are already on the page as the list beside
-   it. The three-column grid above is authored for the full transport, so left
-   alone it renders that one small round button stranded at the left of a bar
-   the width of the column. Shrink the rail to what it actually holds. */
-.ao-pres.is-still .ao-pres-rail {
-  /* `align-self`, NOT `align-items` on the wrap: the wrap is a column flex
-     container, so shrinking every child would take the VIEWPORT down to the
-     stage's authored 668px and defeat the scale-to-fit at every narrower
-     width. Only the rail shrinks. */
-  align-self: flex-start;
-  grid-template-columns: auto;
-  padding: 0.4rem;
-}
-
-.ao-pres-play {
-  display: grid;
-  place-items: center;
-  width: 1.9rem;
-  height: 1.9rem;
-  padding: 0;
-  appearance: none;
-  background: var(--ao-surface-alt);
-  border: 1px solid var(--ao-border);
-  border-radius: 50%;
-  color: var(--ao-text);
+/* THE FIGURE IS THE CONTROL, so it takes the pointer and the focus ring, and
+   the transport that used to sit under it is gone: a play button, a beat
+   counter's box, ten scrub dots and a progress bar, in two bordered boxes.
+   See the head of `presentation.js`. */
+.ao-pres {
   cursor: pointer;
+  border-radius: var(--ao-radius);
 }
 
-.ao-pres-play > svg {
-  display: block;
-  width: 0.72rem;
-  height: 0.72rem;
+.ao-pres:focus-visible {
+  outline: 2px solid var(--ao-brand);
+  outline-offset: 4px;
 }
 
-.ao-pres-play:hover {
-  border-color: var(--ao-brand);
-  color: var(--ao-brand-strong);
-}
+/* THE CAPTION'S OWN LANE, to the right of the drawing and inside the stage,
+   so it is scaled and moved by the same transform as everything else. Only its
+   `top` is set per beat, by `presentation.js`, to the middle of whatever that
+   beat is lighting.
 
-.ao-pres-play:focus-visible {
-  outline: 2px solid var(--ao-accent);
-  outline-offset: 2px;
-}
-
-/* THE COUNTER AND THE BEAT SHARE ONE LINE, and the RESERVED HEIGHT moves here
-   with them. A caption that grows from one line to two moves the page under the
-   reader on every advance — the beats are written short so it does not, and the
-   height is held so a translation cannot reintroduce the jump. */
+   A RESERVED COLUMN RATHER THAN A SEARCH. Placing it near the anchor was tried
+   over ten candidate positions and collided on nearly every beat — the drawing
+   has six boxes, a chip row and seven connectors and no clear space between
+   them. See the head of `presentation.js`. */
 .ao-pres-caption {
-  display: flex;
-  align-items: baseline;
-  gap: 0.55rem;
-  min-width: 0;
-  min-height: 1.35rem;
+  position: absolute;
+  left: 688px;
+  width: 190px;
+  font-family: var(--ao-font-display);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--ao-text);
+  transition: top 0.35s ease;
 }
 
-.ao-pres-count {
-  flex: none;
+/* PAUSED IS STATED, because a figure that has silently stopped reads as one
+   that has finished. */
+.ao-pres.is-paused .ao-pres-caption::after {
+  content: ' · paused';
   color: var(--ao-text-subtle);
   font-family: var(--ao-font-mono);
-  font-size: 0.64rem;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.08em;
-}
-
-.ao-pres-text {
-  min-width: 0;
-  font-family: var(--ao-font-display);
-  font-size: 0.92rem;
-  font-weight: 500;
-  line-height: 1.32;
-  text-wrap: balance;
-}
-
-.ao-pres-dots {
-  display: flex;
-  gap: 0.26rem;
-}
-
-/* Below the measure the beat no longer fits on the counter's line, and a
-   caption that is one line on some beats and two on others moves the page under
-   the reader — the exact jump the reserved height exists to prevent.
-
-   So the dots drop to their own row, giving the caption the rail's full width,
-   and the reservation grows to the two lines the longest beat then takes. The
-   counter stays on the beat's line, which is what was asked for. */
-@media (max-width: 44rem) {
-  .ao-pres-rail {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .ao-pres-caption {
-    min-height: 2.7rem;
-  }
-
-  .ao-pres-dots {
-    grid-column: 2;
-  }
-}
-
-/* The current beat is a SIZE as well as a colour, so it is identifiable
-   without relying on colour alone. */
-.ao-pres-dots button {
-  width: 7px;
-  height: 7px;
-  padding: 0;
-  appearance: none;
-  background: var(--ao-border-strong);
-  border: 0;
-  border-radius: 50%;
-  cursor: pointer;
-  transition: background 0.25s ease, transform 0.25s ease;
-}
-
-.ao-pres-dots button[aria-current="true"] {
-  background: var(--ao-brand);
-  transform: scale(1.45);
-}
-
-.ao-pres-dots button:focus-visible {
-  outline: 2px solid var(--ao-accent);
-  outline-offset: 3px;
-}
-
-.ao-pres-progress {
-  grid-column: 1 / -1;
-  height: 2px;
-  background: var(--ao-border);
-  border-radius: 2px;
-}
-
-.ao-pres-progress > i {
-  display: block;
-  width: 0;
-  height: 100%;
-  background: var(--ao-brand);
-  border-radius: 2px;
+  font-size: 0.68rem;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* --- tables --------------------------------------------------------------- */
@@ -1873,6 +1783,54 @@ a:hover {
   margin-top: 0;
   font-size: 1.05rem;
   color: var(--ao-text-subtle);
+  /* EVEN LINES, NOT A STUB. The sentence wrapped to a long first line and
+     "stay in." alone on a second — the browser's default is to fill each line
+     greedily, which leaves a two-word widow whenever the last word barely
+     misses. `balance` measures the block and evens the lines instead.
+
+     Safe to state unconditionally: a browser without it falls back to greedy
+     wrapping, which is exactly what is there now. */
+  text-wrap: balance;
+}
+
+/* --- the hero's actions -------------------------------------------------
+   `{: .ao-actions}` on a list of links, under the page's opening sentence. Two
+   at most: the first is what a reader who is convinced does next, the second
+   what a reader who is nearly convinced does. A third is a decision nobody
+   asked this page to make for them. */
+.ao-content ul.ao-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1.25rem 0 1.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.ao-content ul.ao-actions > li {
+  margin: 0;
+}
+
+.ao-content ul.ao-actions a {
+  display: inline-block;
+  padding: 0.45rem 1.1rem;
+  border: 1px solid var(--ao-brand);
+  border-radius: var(--ao-radius);
+  color: var(--ao-surface);
+  background: var(--ao-brand);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* The second reads as the quieter of the two, which is what makes the first a
+   recommendation rather than a pair of equal choices. */
+.ao-content ul.ao-actions > li:not(:first-child) a {
+  background: transparent;
+  color: var(--ao-brand-strong);
+}
+
+.ao-content ul.ao-actions a:hover {
+  filter: brightness(1.08);
 }
 
 /* --- claim chips ----------------------------------------------------------

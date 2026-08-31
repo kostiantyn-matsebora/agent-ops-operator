@@ -1,11 +1,3 @@
----
-title: Changelog
-permalink: /changelog/
-description: >-
-  Every chart version, newest first — what changed, and the upgrade steps a
-  breaking one needs.
----
-
 All notable changes to this project are documented here, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. Versions are
 CHART versions. Image tags move independently and are named in each entry.
@@ -1039,7 +1031,7 @@ the volume is untouched throughout, which is what makes it recoverable.
 
 | Archive | Covers |
 |---|---|
-| [CHANGELOG-8.0.md]({{ '/changelog/CHANGELOG-8.0.md' | relative_url }}) | chart 8.0.0 |
-| [CHANGELOG-5.22-7.0.md]({{ '/changelog/CHANGELOG-5.22-7.0.md' | relative_url }}) | chart 5.22.0 through 7.0.0 |
-| [CHANGELOG-5.0-5.21.md]({{ '/changelog/CHANGELOG-5.0-5.21.md' | relative_url }}) | chart 5.0.0 through 5.21.0 |
-| [CHANGELOG-1.0-4.0.md]({{ '/changelog/CHANGELOG-1.0-4.0.md' | relative_url }}) | chart 1.0 through 4.0.0 |
+| [CHANGELOG-8.0.md](changelog/CHANGELOG-8.0.md) | chart 8.0.0 |
+| [CHANGELOG-5.22-7.0.md](changelog/CHANGELOG-5.22-7.0.md) | chart 5.22.0 through 7.0.0 |
+| [CHANGELOG-5.0-5.21.md](changelog/CHANGELOG-5.0-5.21.md) | chart 5.0.0 through 5.21.0 |
+| [CHANGELOG-1.0-4.0.md](changelog/CHANGELOG-1.0-4.0.md) | chart 1.0 through 4.0.0 |
