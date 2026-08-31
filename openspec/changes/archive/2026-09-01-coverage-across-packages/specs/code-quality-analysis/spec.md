@@ -40,10 +40,14 @@ created, conditioned and assigned by the same deliberate provisioning step
 that creates the projects, idempotently, so that it is reproducible from the
 repository and never set by hand.
 
-The gate's verdict remains the service's own check and is NOT a check branch
-protection requires — that is the existing requirement, unchanged. A
-component under the threshold is visibly failing its gate on its dashboard
-and on every pull request that touches it.
+The gate's verdict is the same check the prior requirement already makes
+required: a component under 80% fails its gate, and that failure holds the
+merge through the always-present check exactly as any other gate failure
+does — nothing in branch protection names the SonarCloud check directly, but
+`ci-green`, which it does name, reports it. **Every component starts under
+the threshold** the moment the condition is provisioned — the coverage-raising
+work that follows is what turns each one green, one pull request at a time,
+and a red gate until then is the expected state, not a regression.
 
 **A gate on new code alone lets a component sit at any coverage forever.** A
 component at 27% and one at 79% passed identically; the number the tree is
@@ -65,10 +69,11 @@ asked to reach has to be a condition something evaluates.
 
 - **WHEN** a component's overall coverage is below 80%
 - **THEN** its project's gate fails, the verdict is visible on the pull
-  request, and the always-present check is unaffected
+  request, and the always-present check fails naming the component
 
 #### Scenario: A component reaches the threshold
 
 - **WHEN** a push brings a component's overall coverage to 80% or more with
   its new code meeting the new-code conditions
-- **THEN** its project's gate passes
+- **THEN** its project's gate passes, and the always-present check is
+  unaffected
