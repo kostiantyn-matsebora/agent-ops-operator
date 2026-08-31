@@ -41,7 +41,6 @@ persistence:
     storageClassName: "-"
 ```
 
-{: .ao-callout}
 > **`-` is for a volume you made by hand, not for a retained one**
 >
 > A dynamically provisioned volume keeps its `storageClassName` forever, so a
@@ -90,7 +89,6 @@ who creates the claim, so both is two answers rather than a preference.
 
 **Two routes on one `AgentRuntime` can keep their state on different volumes.**
 
-{: .ao-callout}
 > **A claim the manager creates OUTLIVES the route.** It carries no ownerRef and
 > the manager holds no `delete` verb on claims, so deleting a Pipeline never
 > deletes the accumulated context of the conversations it started. Removing it
@@ -211,7 +209,6 @@ No component in this release logs message content, so the pod logs an agent can
 read carry no conversation text. What it gains in the operator's namespace is
 pod names and specs, Services, events and the compiled MCP ConfigMaps.
 
-{: .ao-callout}
 > **Under `full` an agent can also restart or delete those pods** — the manager
 > and the adapters included. It can disrupt its own supervisor.
 
@@ -222,7 +219,6 @@ invisible to the agent until someone edited values and redeployed.
 
 ### `allowPodExecution` — read this before turning it on
 
-{: .ao-callout}
 > **No `secrets` verb is not the same as cannot read Secrets.** The **kubelet**
 > resolves a Secret when it builds a pod. An agent that can create a pod
 > mounting one, or exec into a pod that already has one, reads the value having
