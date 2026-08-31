@@ -4,18 +4,15 @@
 
 # agent-ops
 
-**A Kubernetes operator for agents you can address.**
+**A Kubernetes operator for LLM agents within boundaries you declare, cluster you control and conversations you stay in.**
 
 Something happens — an alert fires, a pod crashloops, someone asks. A
 conversation opens, an agent works in its own pod, and answers in a thread you
 can reply to.
 
 <img src="docs/assets/img/claim-thinks.svg" width="18" alt=""> **Automation that thinks** &nbsp;·&nbsp;
-<img src="docs/assets/img/logos/kubernetes.svg" width="18" alt=""> **Kubernetes-native** &nbsp;·&nbsp;
-<img src="docs/assets/img/claim-gitops.svg" width="18" alt=""> **GitOps-ready** &nbsp;·&nbsp;
-<img src="docs/assets/img/logos/claude.svg" width="18" alt=""> **Runs Claude Code** &nbsp;·&nbsp;
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/ollama-dark.svg"><img src="docs/assets/img/logos/ollama-light.svg" width="18" alt=""></picture> **Runs Ollama** &nbsp;·&nbsp;
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/github-dark.svg"><img src="docs/assets/img/logos/github-light.svg" width="18" alt=""></picture> **Runs GitHub Copilot**
+<img src="docs/assets/img/logos/kubernetes.svg" width="18" alt=""> **Kubernetes native** &nbsp;·&nbsp;
+<img src="docs/assets/img/claim-gitops.svg" width="18" alt=""> **GitOps ready**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-agent--ops-informational)](https://kostiantyn-matsebora.github.io/agent-ops-operator/)
@@ -85,45 +82,39 @@ spec:
     - name: telegram            # where you talk to it
 ```
 
-## When it runs
+## What agent-ops is
 
-- **Investigates** — queries the system, reads state.
-- **Explains** — in a thread you can reply to.
-- **Acts** — only where your wiring granted it.
-- **Asks** — when it needs you, it says so.
+agent-ops gives you a platform that puts an LLM agent behind the systems you
+already run. One Helm install and your cluster grows a brain and a pair of hands.
 
-## Why it is built this way
+agent-ops is more than a model and a prompt in a pod: grouping and cooldown, a
+capacity cap with a queue, context that survives a restart, per-route cluster
+identity, mediated egress and at-least-once delivery are already in it.
 
-- **Judgment, not a fixed sequence.** You describe the job in prose. Nobody
-  enumerates the steps, and nothing has to have been predicted in advance.
-- **Self-hosted, end to end.** It runs in your cluster on your credentials. No
-  prompt, transcript or alert is sent to a vendor.
-- **Bounded by construction.** One isolated pod per conversation. Tools come
-  only from the wiring, and the operator itself never reads a Secret.
+- **Kubernetes native** — eleven custom resources, validated by the API server
+  like anything else you deploy.
+- **GitOps ready** — every route is text. It reviews as a diff and deploys
+  through the pipeline you already run.
+- **Open at three seams** — your own signal source, runtime or channel.
+  Documented HTTP contracts, no fork.
+- **Any model you can run** — Claude Code, Ollama and GitHub Copilot ship with
+  it. Point it at your own image and the work contract is unchanged.
+- **A pod per conversation** — isolated, serial and capped.
+- **Tools that come from the wiring** — not from the prompt. An agent holds the
+  cluster identity its route named and nothing else.
 
-## Pluggable at three seams
+## What it gives you
 
-Documented HTTP contracts, no fork.
-
-- **Your own signal source** — Datadog, Dynatrace, Sentry, a sensor on your bench.
-- **Your own agent runtime** — swap the image; the work contract does not change.
-- **Your own channel** — Slack, Teams, Discord, e-mail. The operator sends meaning,
-  your adapter renders it.
-
-## Why agent-ops?
-
-The same wiring, wherever something needs looking at.
-
-| Where | What happens |
+| | |
 |---|---|
-| **Watch and fix your cluster** | It reads the events, the pods and the logs, and names the cause. |
-| **Answer your alerts** | Every firing alert arrives with the investigation already done. |
-| **Run the checks nobody gets to** | Certificates, drift and capacity, on a schedule. |
+| **A cluster that explains itself** | It reads the events, the pods and the logs, names the cause, and fixes what you allowed it to. |
+| **Alerts that arrive investigated** | Every firing alert turns up with the work already done. |
+| **The checks nobody gets to** | Certificates, drift and capacity, on a schedule. |
 | **An assistant for your home** | Its logs, its devices, its config. Not everything is a cluster. |
-| **Ask it from chat** | It answers in the thread where your team already talks. |
-| **Plug in your own** | Three HTTP contracts: your source, your runtime, your channel. |
+| **An answer where your team already talks** | Ask it in chat and reply in the thread it answers in. |
+| **Routine work on a model you host** | Route the lanes that run all day to a local model. Nothing they read ever leaves. |
 
-**And all of it in one place.** The [console](docs/console.md) ships enabled and
+**Console — all in one place.** The [console](docs/console.md) ships enabled and
 [read-only on your cluster](docs/console.md) — every conversation as it happens,
 what is queued, what is stuck and why, and the whole wiring as a graph. It is a
 channel too, so you answer the agent right there.
