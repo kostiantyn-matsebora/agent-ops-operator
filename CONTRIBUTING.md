@@ -331,6 +331,14 @@ gate needs a second permission, *Administer Quality Gates*, and fails on a
 SonarCloud changes it, the wizard's *Import JSON* takes the same `projects`
 array.
 
+**Reading the analysis from an agent session**, project-scoped in `.mcp.json`:
+the official `sonarqube-mcp-server` Docker image, `SONARQUBE_TOKEN` and
+`SONARQUBE_ORG` filled from the same `SONAR_TOKEN` / `SONAR_ORG` the scripts
+above read, `SONARQUBE_READ_ONLY=true` — no write tool is exposed, same
+posture as `sonar-issues.py`. Set the two host env vars once and every
+session picks them up; the config carries no literal token or organisation
+key, per the publication guard below.
+
 ## Commit messages
 
 **`type(scope): what the commit does, as a sentence.`**
