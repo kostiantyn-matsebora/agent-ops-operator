@@ -19,6 +19,11 @@ See proposal.md — Why. What shapes the approach:
 - **The gate's verdict is deliberately not a required check** (the published
   spec: "a failed quality gate does not fail the pull request"). Requiring it
   is `autofix-review-loop`'s step, and that change is in flight.
+  **SUPERSEDED BEFORE THIS CHANGE ARCHIVED** — `autofix-review-loop` merged
+  first, and the published spec now reads the opposite: a failed quality gate
+  fails the always-present check. D3 below is kept as the reasoning that held
+  when this was written; `openspec/specs/code-quality-analysis/spec.md` states
+  what is actually true now.
 
 ## Goals / Non-Goals
 
@@ -93,6 +98,16 @@ whoever opens the next unrelated pull request is one somebody switches off"
 — was about requiring it before the tree was measured; this change is the
 measuring. The change that requires it comes after the coverage changes that
 make it green.
+
+**THIS DECISION WAS OVERTAKEN BY `autofix-review-loop`, WHICH MERGED FIRST.**
+The gate verdict is already a required check by the time this change
+archives — a failed gate fails `ci-green` like any other analysis failure —
+so "the red is the feature" no longer holds: every component is red the
+moment the condition is provisioned, and that now blocks every pull request
+touching it until its own coverage work lands. The sequencing this decision
+wanted (measure, then require) still happened, just compressed into one
+change instead of two. Kept as the record of what was decided and why, not as
+a description of the current system.
 
 ## Risks / Trade-offs
 
