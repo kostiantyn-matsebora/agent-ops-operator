@@ -106,8 +106,10 @@ make it green.
   script copies the conditions by NAME from the built-in gate's `show`
   response rather than hard-coding them, so a re-run tracks upstream.
 - [A number that jumps from 27% to something higher reads as tests written]
-  → the tasks record before and after per component as counts, and the
-  commit message says it is measurement.
+  → task 1.3 records the manager's before-and-after as a per-package count
+  table, not a single figure, and the commit message says it is measurement.
+  The other fourteen components move by 0.0 points, which the table in 1.1
+  states for exactly that reason.
 
 ## Open Questions
 
