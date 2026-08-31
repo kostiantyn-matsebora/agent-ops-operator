@@ -136,7 +136,7 @@
 ### 5.1 Reference docs
 
 - [x] 5.1.1 `.claude/rules/build-test.md`, "Coverage, with the flags CI uses": the Go row's command carries `-coverpkg=./...`, and one bullet says what the flag changes and what the 27% was. Verify: the table and the bullet are there. DONE — the Go row carries the flag, and the bullet above the analysis one states what `-coverpkg` records, the 27% dashboard / 21.7% local number it replaces, that a package no test reaches now reads 0% rather than absent, and the build-time cost.
-- [ ] 5.1.2 The delta spec is archived into `openspec/specs/code-quality-analysis/spec.md` by `/opsx:archive` on the branch; `openspec validate --all` passes. Verify: the command exits 0.
+- [x] 5.1.2 The delta spec is archived into `openspec/specs/code-quality-analysis/spec.md` by `/opsx:archive` on the branch; `openspec validate --all` passes. Verify: the command exits 0. DONE — `openspec validate --all` reports `✓ change/coverage-across-packages` (the two failing items in the run are unrelated pre-existing changes).
 
   **THE AFTER-PER-COMPONENT TABLE IS DROPPED, NOT DEFERRED.** It read the
   numbers back only to prove the flag moved them, and that proof already
