@@ -1,9 +1,3 @@
----
-title: Testing
-permalink: /testing/
-description: The three tiers a change is verified at, what each can and cannot decide, and how to run each one yourself.
----
-
 # Testing
 
 agent-ops is verified at three tiers, and each exists for what the one below

@@ -162,13 +162,21 @@ here:
 
 | Landing page | README |
 |---|---|
-| the claims strip | the same three, one line |
-| the `.ao-presentation` build-up | the flow diagram, then **How it works** in five numbered steps |
+| the essence sentence | the SAME sentence, as the subtitle under the name |
+| — (the landing page carries NO claim chips) | the three claims, one line |
+| the drawing `{: .ao-presentation}` builds | the flow diagram, then **How it works** in five numbered steps |
 | the "What you write" tab | **What you write** — the same `Pipeline`, comment-annotated |
-| the console recording | a link to it, plus what the console is |
-| When it runs / Why it is built this way / Pluggable at three seams | the same three lists |
-| Why agent-ops? and the chip set | the same table, and "Works with" as one line |
-| Where to start / Understand the model / Run it | **Where to go next**, site first |
+| `What agent-ops is` — two paragraphs and six tiles | the same, the tiles as a list |
+| `What it gives you` — six tiles | the same, as a two-column table |
+| the console strip | **Console — all in one place**, plus a link and the recording |
+| `Where to go next` | **Where to go next**, site first |
+
+- **THE CLAIM CHIPS ARE THE ONE ROW THAT DOES NOT MIRROR**, and that is
+  deliberate. Six of them bracketed the landing page's drawing and were what a
+  reader met before the product, so the page dropped them. GitHub renders no
+  hero, so the README keeps three as its only visual claim — the two the
+  sentence does not already make (`Kubernetes native`, `GitOps ready`) plus
+  `Automation that thinks`.
 
 **RESTATING IS THE FAILURE, COVERING IS NOT**, and the difference is where the
 DETAIL lives:

@@ -13,18 +13,29 @@ path. Plugins are limited to the set Pages enables by default.
 
 | Page | Owns |
 |---|---|
-| `index.md` | the name, one sentence, the claim chips, the tab strip (the presentation, the recording, the manifest), `Why agent-ops?` and its areas table, paths onward |
+| `index.md` | the name, the essence sentence, two actions, the tab strip (the drawing, the recording, the manifest), `What agent-ops is` and `What it gives you` as tile sets, the console strip, paths onward |
 | `introduction.md` | the model — two sections, concepts and guides, no reference detail |
 | `getting-started.md` | the read-only DEMO walkthrough, console-first |
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `security.md` | the THREAT MODEL — trust boundaries, the flows that cross them, the control on each, the platform's own posture and the residual risk. **No values table, no default, no control YAML**: those are `installation.md`'s |
-| `installation.md` | the REAL install, and the PARENT chart's values |
-| `CHANGELOG.md` | every chart version newest first, and the upgrade steps — a SITE page at `/changelog/`, because the upgrade guides it holds are what Installation sends an adopter to. It carried no front matter until 13.1.0, and the links landed on raw text |
-| `testing.md` | the TIER MODEL — what each tier can and cannot decide, what gates a pull request, the oracle split, and how to run each tier locally |
+| `installation.md` | the REAL install: the commands, the first route, and the ONE setting that must be right before it runs. **No exhaustive values** |
+| `configuration.md` | every value the chart takes — a REFERENCE page read on GitHub, not a site page |
 | `integrations/<system>.md` | one integration each: what starts work, what it may reach, where it answers, what turning it on costs |
 | `runtimes/<vendor>.md` | one runtime each: what it EXECUTES, what it NEEDS from you, where its context lives, what turning it on costs |
 | `guides/*.md` | one adoption tier each, in learning order — hand-written prose around GENERATED resource blocks |
 
+- **THE LINE BETWEEN THE TWO IS IRREVERSIBILITY, not importance.** A setting
+  belongs on `installation.md` only when a later `helm upgrade` cannot undo it:
+  the model credential, the storage access mode, and whether the CRDs are kept.
+  Everything else — capacity, what an agent may do, the runtime, console access,
+  retention, idle timeouts, every bundle — is reversible and lives in
+  `configuration.md`.
+  - **`allowPodExecution` READS like an install decision and is not one.** It
+    defaults to `false`, so an install cannot come up over-privileged, and
+    granting it later is an upgrade like any other.
+  - **The page was 775 lines and is 204.** It documented every value
+    exhaustively, which the rule two paragraphs down already forbade — a reader
+    deciding whether to try this scrolled a reference manual first.
 - **`console-guide.md` is published at `/console/`.** `console.md` is the
   untouched reference and keeps its own URL.
   - **What the console is FOR goes to the guide.** What it IS goes to the
@@ -65,9 +76,22 @@ path. Plugins are limited to the set Pages enables by default.
   answered.
 - **The recording carries no text of its own.** No caption, no title card. What
   each beat shows is the page's words, beside it.
-- **Every other `docs/*.md` is a reference page, not a site page** — the changelog
-  is the exception above. They carry no
-  front matter, so Jekyll copies them verbatim. Do not add front matter, headings
+- **`CHANGELOG.md` AND `testing.md` ARE REFERENCE PAGES, NOT SITE PAGES**, and
+  both were published once. Neither is adopter-facing: the changelog is a
+  technical record of chart versions, and testing is CONTRIBUTOR material —
+  what a change's `tasks.md` must declare, what gates a pull request, how to
+  run each tier. `installation.md` links the changelog on the forge, exactly as
+  `index.md` links `concepts.md` and `contracts.md`.
+  - **The sidebar was the only way to either of them.** Nothing on the site
+    linked `testing.md` at all, and a nav group is not a reason for a page to
+    exist.
+  - **A file with no front matter is copied VERBATIM, so its Liquid stops
+    being evaluated.** The changelog's four archive links were
+    `{% raw %}{{ '/changelog/…' | relative_url }}{% endraw %}` and became
+    ordinary relative paths in the same edit — left alone they would have
+    rendered as literal braces.
+- **Every other `docs/*.md` is a reference page, not a site page.** They carry
+  no front matter, so Jekyll copies them verbatim. Do not add front matter, headings
   or navigation entries to them — publishing one is its own change.
 - **`cr-reference.md` is GENERATED and is one of those reference pages.** Every
   field of every kind, written by `.github/scripts/docs-generate.py` from
@@ -144,6 +168,18 @@ Everything here is written to be SCANNED. The markdown is the structure.
   to be read twice, it is wrong.
 - **NO SEMICOLONS.** A `;` is a full stop that lost its nerve — the tell of a
   sentence that should have been two. Forbidden whatever the grammar allows.
+  - **THE SEMICOLON IS THE SYMPTOM, AND THE FULL STOP IS NOT THE CURE.**
+    Swapping one for the other keeps the two crammed thoughts and just makes
+    them choppier. Ask which structure the sentence wanted — usually a list or
+    a table — and write that.
+  - **ONE THOUGHT PER SENTENCE, NOT ONE CLAUSE.** Pulling a single thought in
+    half reads as badly as cramming two together: "removes the workloads. It
+    leaves the CRDs" hides the contrast that "removes the workloads but leaves
+    the CRDs" states. A sentence carrying one idea in three clauses is finished
+    as it is.
+  - **The tell of overcorrecting is a verbless fragment** — "Two volumes.",
+    "It is below." Both were shipped on `installation.md` by applying the rule
+    above mechanically, and both had to be written again.
 - **Small paragraphs.** Past about three lines it stops being read.
 - **Emphasise the load-bearing phrase**, not the sentence around it. Everything
   bold means nothing bold.
@@ -200,11 +236,12 @@ style, no script in a page.
 | `{: .ao-callout}` | a blockquote that EMPHASISES. The plain one is an ASIDE in `--ao-text-subtle`, so rendering a load-bearing claim in it puts a footnote where the weight belongs |
 | `{: .ao-tabs}` | a list becomes tabbed panels, each item's leading bold phrase the label. With no script it stays the labelled list, so every word and image lives in the page |
 | `{: .ao-icon-*}` | a kind glyph on a card title, copied from the console |
-| `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels. The landing page shows none — its model is the presentation |
+| `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels. The landing page shows none — its model is the drawing `{: .ao-presentation}` builds |
 | `{: .ao-demo}` | on a LINK whose target is a recording and whose content is the poster image, it becomes a player. With no script it stays the poster, linking to the file |
 | `{: .ao-chipsets}` | a list of GROUPS becomes labelled chip rows — each item's leading bold phrase is the label, its nested list the chips. A chip may carry an ordinary markdown image, and the PAGE names that file. With no CSS it stays a labelled list of names |
-| `{: .ao-claims}` | a list becomes the claim chips under the page's opening sentence. A claim may carry a mark the PAGE names |
-| `{: .ao-presentation}` | an ORDERED list becomes the presentation: one item per beat, the item's text its caption, a fenced block under it the manifest stanza that beat is about. The THEME supplies the drawing, the timing and the controls, and it names no integration mark. With no script it stays the beats in order, each with its own lines. Under `prefers-reduced-motion` it is the composed drawing plus that same list, and it KEEPS the play button — the preference means do not move things at the reader, not never let them ask, so removing the control is the edit to not make again |
+| `{: .ao-actions}` | a list of LINKS becomes the hero's actions, under the page's opening sentence. Two at most — what a convinced reader does next, and what a nearly-convinced one does. The first is solid, the second quiet |
+| `{: .ao-claims}` | a list becomes claim chips under the page's opening sentence. A claim may carry a mark the PAGE names. **THE LANDING PAGE USES NONE** — six of them bracketed the drawing and were what a reader met before the product |
+| `{: .ao-presentation}` | an ORDERED list becomes the drawing: one item per beat, the item's text its caption. The THEME supplies the drawing, the timing and the caption's lane, and it names no integration mark. **THE FIGURE IS THE CONTROL** — clicking it pauses, and there is no transport: the play button, beat counter, ten scrub dots, progress bar and per-beat manifest box are DELETED, having been more machinery than the drawing they explained. The caption sits in a reserved lane inside the stage, tracking whatever the beat lights. With no script it stays the beats in order, each with its own lines |
 | `{: .ao-areas}` | a two-column table of areas of use, the left column a name and its mark, the right what happens there. Below the measure the two columns become two lines |
 | `{: .ao-console-strip}` | a blockquote becomes the full-width strip under that table — a mark, one lead line, one paragraph and a list of tags |
 | `next:` in front matter | the what-next card (eyebrow / title / body / url) at the foot of the on-this-page rail. A page declaring none gets no card |

@@ -1,20 +1,16 @@
 ---
 title: agent-ops
 description: >-
-  agent-ops is a Kubernetes operator for agents you can address: a signal starts
-  one, your wiring decides what it may touch, and it answers in a thread you can
-  reply to.
+  agent-ops is a Kubernetes operator for LLM agents within boundaries you declare,
+  cluster you control and conversations you stay in.
 ---
 
-A Kubernetes operator for agents you can address.
+A Kubernetes operator for LLM agents within boundaries you declare, cluster
+you control and conversations you stay in.
 
-{: .ao-claims}
-- ![]({{ '/assets/img/claim-thinks.svg' | relative_url }}) Automation that thinks
-- ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes-native
-- ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps-ready
-- ![]({{ '/assets/img/logos/claude.svg' | relative_url }}) Runs Claude Code
-- ![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) Runs Ollama
-- ![]({{ '/assets/img/logos/github-light.svg' | relative_url }}) Runs GitHub Copilot
+{: .ao-actions}
+- [Get started]({{ '/getting-started/' | relative_url }})
+- [Install it]({{ '/installation/' | relative_url }})
 
 {: .ao-tabs #tour}
 - **How it works**
@@ -85,10 +81,10 @@ A Kubernetes operator for agents you can address.
 
   10. Every part of it is a Kubernetes object.
 
-     ```text
-     $ kubectl get conversations
-     cluster-events-7c1d4e   Running   2m
-     ```
+      ```text
+      $ kubectl get conversations
+      cluster-events-7c1d4e   Running   2m
+      ```
 
 - **Watch it work** — One signal, start to finish. A minute, no sound.
 
@@ -116,37 +112,53 @@ A Kubernetes operator for agents you can address.
       - name: telegram            # where you talk to it
   ```
 
-{: .ao-chipsets}
-- **Works with**
-  - [![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes]({{ '/integrations/kubernetes/' | relative_url }})
-  - [![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) Prometheus]({{ '/integrations/prometheus/' | relative_url }})
-  - [Cron schedules]({{ '/guides/signal-adapter/' | relative_url }})
-  - [![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) Home Assistant]({{ '/integrations/home-assistant/' | relative_url }})
-  - [![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) Telegram]({{ '/integrations/telegram/' | relative_url }})
-  - [![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }}) The console]({{ '/console/' | relative_url }})
-  - [![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) any MCP server]({{ '/guides/toolsets/' | relative_url }})
-  - [![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) Ollama]({{ '/runtimes/ollama/' | relative_url }})
-  - [![]({{ '/assets/img/logos/github-light.svg' | relative_url }}) GitHub Copilot]({{ '/runtimes/copilot/' | relative_url }})
-  - [your own]({{ '/guides/signal-adapter/' | relative_url }})
+## What agent-ops is
 
-## Why agent-ops?
+agent-ops gives you a platform that puts an LLM agent behind the systems you
+already run. One Helm install and your cluster grows a brain and a pair of
+hands.
 
-The same wiring, wherever something needs looking at.
+agent-ops is more than a model and a prompt in a pod: grouping and cooldown, a
+capacity cap with a queue, context that survives a restart, per-route cluster
+identity, mediated egress and at-least-once delivery are already in it.
 
-| Where | What happens |
-|---|---|
-| ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) **Watch and fix your cluster** | It reads the events, the pods and the logs, and names the cause. |
-| ![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) **Answer your alerts** | Every firing alert arrives with the investigation already done. |
-| **Run the checks nobody gets to** | Certificates, drift and capacity, on a schedule. |
-| ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) **An assistant for your home** | Its logs, its devices, its config. Not everything is a cluster. |
-| ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) **Ask it from chat** | It answers in the thread where your team already talks. |
-| ![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) **Keep it in the cluster** | Route the routine lanes to a model you host. Nothing they read leaves. |
-| ![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) **Plug in your own** | Three HTTP contracts: your source, your runtime, your channel. |
-{: .ao-areas}
+{: .ao-cards}
+- ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes native
+
+  Eleven custom resources, validated by the API server like anything else you
+  deploy. `kubectl get conversations` tells you what is running.
+
+- ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps ready
+
+  Every route is text. It reviews as a diff and deploys through the pipeline
+  you already run.
+
+- ![]({{ '/assets/img/logos/mcp.svg' | relative_url }}) Open at three seams
+
+  Your own signal source, runtime or channel — Datadog, Sentry, Slack, a sensor
+  on your bench. Documented HTTP contracts, no fork.
+
+- Any model you can run
+  {: .ao-icon-runtime}
+
+  Claude Code, Ollama and GitHub Copilot ship with it. Point it at your own
+  image and the work contract is unchanged.
+
+- A pod per conversation
+  {: .ao-icon-conversation}
+
+  Isolated, serial and capped. One runaway conversation cannot take the others
+  with it, and an idle one is reaped.
+
+- Tools that come from the wiring
+  {: .ao-icon-toolset}
+
+  Not from the prompt. An agent holds the cluster identity its route named and
+  nothing else, and the operator never reads a Secret.
 
 > ![]({{ '/assets/img/logos/agent-ops.svg' | relative_url }})
 >
-> **And all of it in one place.**
+> **Console — all in one place**
 >
 > Every conversation as it happens, what is queued, what is stuck and why — and
 > the whole wiring as a graph. It is a channel too, so you answer the agent
@@ -157,78 +169,52 @@ The same wiring, wherever something needs looking at.
 > - [read-only on your cluster]({{ '/console/' | relative_url }})
 {: .ao-console-strip}
 
-## When it runs
+## What it gives you
 
-- **Investigates** — queries the system, reads state.
-- **Explains** — in a thread you can reply to.
-- **Acts** — only where your wiring granted it.
-- **Asks** — when it needs you, it says so.
+{: .ao-cards}
+- ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) A cluster that explains itself
 
-## Why it is built this way
+  It reads the events, the pods and the logs, names the cause, and fixes what
+  you allowed it to.
 
-- **Judgment, not a fixed sequence.** You describe the job in prose. Nobody
-  enumerates the steps, and nothing has to have been predicted in advance.
-- **Self-hosted, end to end.** It runs in your cluster on your credentials. No
-  prompt, transcript or alert is sent to a vendor.
-- **Bounded by construction.** One isolated pod per conversation. Tools come
-  only from the wiring, and the operator itself never reads a Secret.
+- ![]({{ '/assets/img/logos/prometheus.svg' | relative_url }}) Alerts that arrive investigated
 
-## Pluggable at three seams
+  Every firing alert turns up with the work already done, not with a link to a
+  dashboard.
 
-Documented HTTP contracts, no fork.
+- The checks nobody gets to
 
-- **Your own signal source** — Datadog, Dynatrace, Sentry, a sensor on your
-  bench.
-- **Your own agent runtime** — Codex, Gemini or a script of your own.
-  Swap the image. The work contract does not change.
-- **Your own channel** — Slack, Teams, Discord, e-mail. The operator sends
-  meaning, your adapter renders it.
+  Certificates, drift and capacity, on a schedule — the work that is always
+  worth doing and never urgent enough.
 
-## Where to start
+- ![]({{ '/assets/img/logos/home-assistant.svg' | relative_url }}) An assistant for your home
 
+  Its logs, its devices, its config. Not everything that needs looking at is a
+  cluster.
+
+- ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) An answer where your team already talks
+
+  Ask it in chat and reply in the thread it answers in. The conversation keeps
+  its context between runs.
+
+- ![]({{ '/assets/img/logos/ollama-light.svg' | relative_url }}) Routine work on a model you host
+
+  Route the lanes that run all day to a local model. Nothing they read ever
+  leaves.
+
+## Where to go next
+
+- **[Getting started]({{ '/getting-started/' | relative_url }})** — a read-only
+  demo in fifteen minutes: install it and ask an agent about your cluster.
 - **[Introduction]({{ '/introduction/' | relative_url }})** — how the pieces fit
   together: what starts a conversation, what decides what it may touch, what
   runs it.
-- **[Getting started]({{ '/getting-started/' | relative_url }})** — a read-only
-  demo in fifteen minutes: install it and ask an agent about your cluster.
-- **[The console]({{ '/console/' | relative_url }})** — the six views at full
-  length, and how to decide who may reach them.
-- **[Security]({{ '/security/' | relative_url }})** — an agent runs model output
-  in your cluster: what a default install grants, and what is still open.
 - **[Installation]({{ '/installation/' | relative_url }})** — the real install:
   what to decide first, what to configure, and how to wire your first route.
-- **[The kinds you will declare](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)** —
-  every CRD in full, and how a route's tool access is resolved.
-
-## Understand the model
-
-- [Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)
-  — profiles, runtimes, conversations, channels, signal sources and the
-  Pipeline that wires them together.
-- [Contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md)
-  — the work contract a runtime implements, both adapter contracts, and the
-  HTTP API.
-
-## Run it
-
-- [The console]({{ '/console/' | relative_url }})
-  — the wiring as a graph, live runs, and the channel it also is.
-- [Cluster events]({{ '/integrations/kubernetes/' | relative_url }})
-  — the events lane, the agent that answers it, and Kubernetes MCP tooling.
-- [Telegram]({{ '/integrations/telegram/' | relative_url }})
-  — the ingest stack and the chat surface.
-- [Prometheus]({{ '/integrations/prometheus/' | relative_url }})
-  — the Alertmanager alert lane, its metrics tooling and the agent that answers.
-- [Home Assistant]({{ '/integrations/home-assistant/' | relative_url }})
-  — the house's log lane, and two agents split by what they may do to it.
-
-## Keep it current
-
-- [Changelog]({{ '/changelog/' | relative_url }})
-  — every chart-version upgrade guide, newest first.
-- [The repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
-  — source, issues, and the working notes contributors read first.
-
-> The reference pages above are read on GitHub today. Bringing them onto this
-> site — with navigation, cross-page links and their own contents — is the next
-> change. This one lands the site itself.
+- **[Security]({{ '/security/' | relative_url }})** — an agent runs model output
+  in your cluster: what a default install grants, and what is still open.
+- **The reference** — every CRD in full in
+  [Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md),
+  and the work and adapter contracts in
+  [Contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md).
+  Both are read on GitHub today.

@@ -27,10 +27,6 @@ groups:
         url: /security/
       - title: Installation
         url: /installation/
-      - title: Changelog
-        url: /changelog/
-      - title: Testing
-        url: /testing/
   - title: Integrations
     entries:
       - title: Kubernetes
