@@ -25,11 +25,16 @@ path. Plugins are limited to the set Pages enables by default.
 | `guides/*.md` | one adoption tier each, in learning order — hand-written prose around GENERATED resource blocks |
 
 - **THE LINE BETWEEN THE TWO IS IRREVERSIBILITY, not importance.** A setting
-  belongs on `installation.md` only when a later `helm upgrade` cannot undo it:
-  the model credential, the storage access mode, and whether the CRDs are kept.
-  Everything else — capacity, what an agent may do, the runtime, console access,
-  retention, idle timeouts, every bundle — is reversible and lives in
-  `configuration.md`.
+  belongs on `installation.md` only when a later `helm upgrade` cannot undo it —
+  which is the storage access mode alone. A PVC's `accessModes` and
+  `storageClassName` are both part of its immutable `spec`, so getting either
+  wrong means deleting the claim, not upgrading past it.
+  - **Two earlier "irreversible" settings were WRONG, not merely importance
+    calls, and are gone rather than reworded.** CRD ownership named a decision
+    that does not exist — Helm never deletes CRDs from a chart's `crds/`
+    directory, and the keep annotation is on the PVC, not a CRD. The model
+    credential has no default to get wrong; there is nothing to undo, only a
+    different Secret to create.
   - **`allowPodExecution` READS like an install decision and is not one.** It
     defaults to `false`, so an install cannot come up over-privileged, and
     granting it later is an upgrade like any other.

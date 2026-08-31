@@ -11,7 +11,24 @@ For the exhaustive value list the chart itself carries:
 helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
 ```
 
+```powershell
+helm show values oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator
+```
+
 ## Storage
+
+The access mode and storage class are set once, before install — see
+[Installation](https://kostiantyn-matsebora.github.io/agent-ops-operator/installation/#storage).
+Everything else here is a `helm upgrade` away.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `persistence.context.enabled` | `true` | off means conversations never keep context |
+| `persistence.context.size` | `5Gi` | the accumulated context of every conversation |
+| `persistence.workspace.enabled` | `false` | on keeps uncommitted agent work across a pod restart |
+
+**Turning context off is a supported configuration.** Conversations then answer
+each message fresh and say so, and nothing else needs changing to match.
 
 ### Pointing a volume at storage the chart did not create
 
@@ -51,6 +68,10 @@ persistence:
 > Name the class the volume already carries:
 >
 > ```sh
+> kubectl get pv <name> -o jsonpath='{.spec.storageClassName}'
+> ```
+>
+> ```powershell
 > kubectl get pv <name> -o jsonpath='{.spec.storageClassName}'
 > ```
 >
@@ -95,6 +116,10 @@ who creates the claim, so both is two answers rather than a preference.
 > is yours to do deliberately:
 >
 > ```sh
+> kubectl -n agent-ops delete pvc agentops-<route>-context
+> ```
+>
+> ```powershell
 > kubectl -n agent-ops delete pvc agentops-<route>-context
 > ```
 
