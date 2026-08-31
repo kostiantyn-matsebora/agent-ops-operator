@@ -423,9 +423,11 @@
       wrap.classList.add('is-still');
       wrap.parentNode.insertBefore(list, wrap.nextSibling);
     } else {
+      // Already detached at the top of this function — this branch just
+      // leaves it that way. The duplicate removeChild here threw on
+      // `list.parentNode` being null, since line 404 had already removed it.
       goTo(0);
       start();
-      list.parentNode.removeChild(list);
     }
   });
 })();

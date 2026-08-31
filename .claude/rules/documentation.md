@@ -81,7 +81,7 @@ filename — so the routing is explicit:
 | Work contract, adapter contracts, HTTP endpoints | `docs/contracts.md` |
 | An integration's ADOPTER-FACING content | `docs/integrations/<system>.md` — named for the SYSTEM, never the subchart |
 | WHAT A BUNDLE RENDERS | nothing. The `renders` marker on that page, then `python3 .github/scripts/docs-generate.py` |
-| Install, upgrade, uninstall, and the ONE setting that must be right first | `docs/installation.md` |
+| Install, upgrade, uninstall, and the storage access mode — the one irreversible decision, though the immutable claim spec means it is two keys, `accessModes` and `storageClassName` | `docs/installation.md` |
 | Every other PARENT chart value — reversible by `helm upgrade` | `docs/configuration.md`, a REFERENCE page read on GitHub, not a site page |
 | A RELEASE — the chart version the install command prints, a first-party image tag a worked example shows | `docs/installation.md` and `docs/concepts.md`, and `python3 .github/scripts/docs-generate.py --check` FAILS on a number the chart does not ship. Chart 13.1.0 shipped with the site still saying `--version 13.0.1`, and no hook could see it: the two hooks check a task's shape and a commit's branch, nothing checks a typed number |
 | Breaking change + upgrade steps | `docs/CHANGELOG.md`, newest first |
