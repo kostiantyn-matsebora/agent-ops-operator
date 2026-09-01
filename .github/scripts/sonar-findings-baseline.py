@@ -200,10 +200,14 @@ def main() -> int:
         print(line)
 
     result = {"organization": args.organization, "components": rows}
-    out_path = validated_path(args.out, must_exist=False)
-    out_path.write_text(json.dumps(result, indent=2) + "\n")
+    # ONE EXPRESSION, not a validated variable carried to a later
+    # statement: the shape components()'s (never-flagged) read side already
+    # uses, and pythonsecurity:S2083/S8707's own `open(safe_path(filename))`
+    # example -- a sanitiser call the line above the sink it guards was
+    # still flagged, so the call itself is now the sink's own argument.
+    validated_path(args.out, must_exist=False).write_text(json.dumps(result, indent=2) + "\n")
     total = sum(r["total"] for r in rows)
-    print(f"\n{total} open Blocker/High finding(s) across {len(rows)} project(s), written to {out_path}"
+    print(f"\n{total} open Blocker/High finding(s) across {len(rows)} project(s), written to {validated_path(args.out, must_exist=False)}"
           + (f"; TAXONOMY MISMATCH for {', '.join(mismatches)}" if mismatches else ""))
     return 0
 

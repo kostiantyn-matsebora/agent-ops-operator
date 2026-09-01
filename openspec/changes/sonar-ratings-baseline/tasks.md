@@ -78,9 +78,30 @@
   full smoke test against real `sonarcloud.io` (curl exit 22, not a
   regex or parse rejection). `.github/tests/run.sh`: 11/11, unchanged.
 
-  Whether THIS round clears the gate is what the next CI push answers —
-  recorded honestly either way, not assumed clean because the pattern now
-  matches the docs.
+  **PARTIAL RESULT, READ PRECISELY: `S8705` (the curl regex) CLEARED.
+  `S2083`/`S8707` (the write) DID NOT** — same rule, same line, STILL
+  open on the next analysis. The adjacent-STATEMENT fix
+  (`out_path = validated_path(...)` immediately followed by
+  `out_path.write_text(...)`, no loop or branch between them any more)
+  was not enough; `components()`'s never-flagged read side is not just
+  adjacent, it is ONE EXPRESSION — the sanitiser call is a sub-expression
+  of the sink call itself
+  (`validated_path(path, must_exist=True).read_text()`), never assigned
+  to a variable at all. Third round: `validated_path(args.out,
+  must_exist=False).write_text(...)` inline, matching that exactly (and
+  the rule's own `open(safe_path(filename))`, which is the same shape —
+  sanitiser nested INSIDE the sink call, not preceding it). The one
+  remaining use of the resolved path (the closing print line) now calls
+  `validated_path` a second time rather than keeping the old variable —
+  cheap and pure, and keeps every use of the CLI-supplied `--out` value
+  going through the same single-expression validation. `.github/tests/run.sh`:
+  11/11 unchanged; smoke-tested against real `sonarcloud.io` again.
+
+  Whether THIS round clears both remaining conditions
+  (`new_security_rating`, and `new_duplicated_lines_density` — trending
+  3.7% → 3.4% → 3.1% → 3.0% across rounds as the file diverges further
+  from `sonar-issues.py`'s copied shape, needs `< 3`) is what the next CI
+  push answers.
 - [ ] 1.2 **PARTIALLY DONE, differently than planned.** `SONAR_TOKEN` never
   reached this session's own shell (an MCP client env-substitution timing
   issue — the token is set on the host, but a running session's MCP
