@@ -14,6 +14,19 @@ import (
 // The conversations surface: a filterable list, a full detail view, the
 // per-conversation graph and sequence, origination, and replies.
 
+// sanitizeLog strips control characters (CR/LF and other C0) from an
+// error's text before it reaches a log line -- gosecurity:S5145's ask,
+// since an error here can carry user-controlled content (a task's text, a
+// manager-relayed reason) that could otherwise forge a second log line.
+func sanitizeLog(err error) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 {
+			return ' '
+		}
+		return r
+	}, err.Error())
+}
+
 // ConversationFilter is the server-side filter set. Filtering happens HERE, not
 // in the browser: an event storm makes thousands of conversations, and shipping
 // them all so the client can hide most is how a viewer becomes an API-server
@@ -535,7 +548,7 @@ func (a *API) handleStart(w http.ResponseWriter, r *http.Request) {
 	reason, err := a.originator.Start(r.Context(), a.adapter.PrimaryChannel(), Identity(r),
 		a.adapter.ReaderKey(Identity(r)), in.Task)
 	if err != nil {
-		log.Printf("origination failed: %v", err)
+		log.Printf("origination failed: %s", sanitizeLog(err))
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
@@ -571,7 +584,7 @@ func (a *API) handleSend(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		log.Printf("inbound send: %v", err)
+		log.Printf("inbound send: %s", sanitizeLog(err))
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "sending failed"})
 		return
 	}

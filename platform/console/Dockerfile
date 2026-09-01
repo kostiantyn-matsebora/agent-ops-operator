@@ -16,10 +16,18 @@
 
 FROM --platform=$BUILDPLATFORM node:22-alpine AS ui
 WORKDIR /ui
-# package files first so a source-only edit reuses the install layer
-COPY ui/package.json ui/package-lock.json* ./
-# `npm ci` when a lockfile is present (reproducible), `npm install` otherwise
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+# package files first so a source-only edit reuses the install layer.
+# ui/package-lock.json is COMMITTED, never optional (no trailing `*`
+# glob): a reproducible build depends on it existing, and docker:S8543
+# flagged the old `npm install` fallback that silently accepted its
+# absence -- if it is ever missing, the build should fail loudly here,
+# not resolve unpinned versions quietly.
+COPY ui/package.json ui/package-lock.json ./
+# --ignore-scripts (docker:S6505): verified locally that
+# `npm ci --ignore-scripts && npm run build` still succeeds -- esbuild's
+# platform binary resolves as a regular optionalDependency, not a
+# postinstall download, so there is no install script this build needs.
+RUN npm ci --ignore-scripts
 COPY ui/ ./
 RUN npm run build
 # PRE-COMPRESS, once, here. The assets never change after this line, so gzipping

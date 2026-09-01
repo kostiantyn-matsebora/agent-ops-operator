@@ -220,6 +220,15 @@ func identityOrToken(r *http.Request) string {
 	return "token"
 }
 
+// secureCookie reports whether THIS request reached us over TLS, directly or
+// through a proxy that terminated it (oauth2-proxy, an ingress) and said so
+// via the standard header. Hardcoding Secure:true (go:S2092) would break
+// login outright for an install whose internal hop to the console is plain
+// HTTP -- a real, not hypothetical, deployment shape this rule cannot see.
+func secureCookie(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
 func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Token string `json:"token"`
@@ -241,7 +250,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: id, Path: "/", HttpOnly: true,
+		Name: sessionCookie, Value: id, Path: "/", HttpOnly: true, Secure: secureCookie(r),
 		SameSite: http.SameSiteStrictMode, MaxAge: int(sessionTTL / time.Second),
 	})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -251,7 +260,10 @@ func (a *API) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		a.sessions.drop(c.Value)
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{
+		Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
+		HttpOnly: true, Secure: secureCookie(r),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

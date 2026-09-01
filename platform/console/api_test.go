@@ -103,6 +103,9 @@ func TestLoginIssuesSessionCookie(t *testing.T) {
 	if len(cookies) == 0 || cookies[0].Name != sessionCookie || !cookies[0].HttpOnly {
 		t.Fatalf("session cookie missing or not HttpOnly: %+v", cookies)
 	}
+	if cookies[0].Secure {
+		t.Fatalf("Secure on a plain-HTTP request would drop the cookie entirely: %+v", cookies[0])
+	}
 
 	// the cookie now authorizes reads
 	req := httptest.NewRequest("GET", "/api/topology", nil)
@@ -120,6 +123,48 @@ func TestLoginIssuesSessionCookie(t *testing.T) {
 	}
 	if findNode(payload.Topology, "pipelines", "p") == nil {
 		t.Fatalf("topology missing the pipeline: %s", rec.Body.String())
+	}
+}
+
+// A hardcoded Secure:true would drop the cookie for an install whose
+// internal hop to the console is plain HTTP -- go:S2092's compliant fix has
+// to be conditional, so the condition itself is worth pinning both ways.
+func TestSessionCookieIsSecureOnlyWhenTheRequestWas(t *testing.T) {
+	api, _, _ := apiUnderTest(t, "tok")
+	h := api.Handler(http.NotFoundHandler())
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, jsonReq("POST", "/api/login", `{"token":"tok"}`))
+	if cookies := rec.Result().Cookies(); len(cookies) == 0 || cookies[0].Secure {
+		t.Fatalf("plain HTTP: Secure should be false: %+v", cookies)
+	}
+
+	req := jsonReq("POST", "/api/login", `{"token":"tok"}`)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if cookies := rec.Result().Cookies(); len(cookies) == 0 || !cookies[0].Secure {
+		t.Fatalf("proxy-terminated TLS (X-Forwarded-Proto): Secure should be true: %+v", cookies)
+	}
+}
+
+// The logout cookie clears the SAME cookie login sets, so it carries the
+// SAME flags -- a clearing cookie missing HttpOnly/Secure was go:S2092 and
+// go:S3330's other instance.
+func TestLogoutCookieCarriesTheSameFlagsAsLogin(t *testing.T) {
+	api, _, _ := apiUnderTest(t, "tok")
+	h := api.Handler(http.NotFoundHandler())
+
+	req := jsonReq("POST", "/api/logout", "")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 || cookies[0].Name != sessionCookie || !cookies[0].HttpOnly || !cookies[0].Secure {
+		t.Fatalf("logout cookie missing HttpOnly or Secure: %+v", cookies)
+	}
+	if cookies[0].MaxAge >= 0 {
+		t.Fatalf("logout must still clear the cookie (negative MaxAge): %+v", cookies[0])
 	}
 }
 

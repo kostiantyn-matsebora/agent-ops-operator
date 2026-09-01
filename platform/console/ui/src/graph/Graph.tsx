@@ -73,7 +73,7 @@ export function Graph({ topology, liveEvents, renderNodeExtras, emptyMessage }: 
   // hop or less, which includes a detached element whose route is only itself.
   const levels = useMemo<ScopeDepth[]>(() => {
     const rings = Math.max(0, Math.min(scoped.maxDepth - 1, 3))
-    return rings === 0 ? [] : [...Array(rings)].map((_, i) => i + 1 as ScopeDepth).concat('all')
+    return rings === 0 ? [] : [...new Array(rings)].map((_, i) => i + 1 as ScopeDepth).concat('all')
   }, [scoped.maxDepth])
   // Re-fit when the SET of nodes changes, not on every traffic refresh — a
   // viewport that snapped back every ten seconds would be unusable.

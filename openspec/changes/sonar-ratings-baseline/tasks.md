@@ -296,7 +296,72 @@
       Code)` and `npm --version` printed `12.0.2` in the built claude
       image, and the same two in copilot's plus
       `require('@github/copilot-sdk')` resolving.
-  - **The other ~13 components were never touched** — no findings were even
+  - **`console` and `signal-ha` fixed too**, after PR #145 itself went
+    green and the user asked directly what was still below B org-wide: a
+    fresh per-component ratings pull (same `get_component_measures` sweep
+    as before) showed exactly these two still failing, everything else
+    already A. Neither was in the original plan; both are the SAME kind
+    of work task 2 already covers, so folded in here rather than opened
+    as a separate change.
+    - **`signal-ha` — ONE finding, ZERO code changed:** `go:S4790`
+      (weak hash) on `ws.go`'s `acceptKey`, computing RFC 6455's
+      `Sec-WebSocket-Accept` handshake value — which the SPEC DEFINES as
+      `SHA1(key + GUID)`. Read the rule's own doc before touching
+      anything: it scopes explicitly to hashing PASSWORDS, SECURITY
+      TOKENS or DATA INTEGRITY, none of which apply to a protocol
+      checksum with no confidentiality purpose — and changing the
+      algorithm would produce a value no RFC 6455-compliant server
+      (Home Assistant included) would recognise, breaking the handshake
+      outright rather than improving anything. Marked `accept` via
+      `mcp__sonarqube__change_sonar_issue_status` (key
+      `AaBNvIYkrl9RvYuOlFsq`). Took effect immediately: reliability,
+      security and maintainability all read `1.0` (A) on the next
+      `get_component_measures` call, no new analysis needed — same
+      immediacy `S6350`'s disposition on `runtime-claude` showed.
+    - **`console` — 13 findings, all fixed in code:** `typescript:S2871`
+      ×2 (`graph/model.ts` — bare `.sort()` on a `Set` of strings uses
+      UTF-16 code-unit order, not alphabetical; both now
+      `.sort((a, b) => a.localeCompare(b))`); `typescript:S7723`
+      (`graph/Graph.tsx` — `Array(rings)` → `new Array(rings)`);
+      `typescript:S8786` ×2 (`components/Yaml.tsx`'s YAML-line tokenizer
+      — the same adjacent-quantifier shape `runtime-claude`'s `tools.js`
+      had, rewritten the same way: indent, dash and key each matched by
+      their own single-quantifier regex and split with plain slicing,
+      not one pattern backtracking across all three; `Yaml.test.tsx`'s
+      7 cases plus `model.test.ts`'s 19 and `Graph.test.tsx`'s 19 all
+      still pass, confirming the rewrite is behaviourally identical);
+      `docker:S6505` ×2 + `S8543` (the `Dockerfile`'s conditional `npm
+      ci`/`npm install` fallback — `--ignore-scripts` added to both,
+      verified locally that `npm ci --ignore-scripts && npm run build`
+      still succeeds since esbuild's platform binary is an
+      `optionalDependency`, not a postinstall download; the `npm
+      install` fallback branch was ALSO removed entirely rather than
+      just pinned, since `ui/package-lock.json` is committed and always
+      present — a silently-taken unpinned path was the S8543 finding
+      itself, and reproducible-or-fail is strictly better than
+      reproducible-or-silently-not); `go:S2092` ×2 + `S3330`
+      (`auth.go`'s two `http.SetCookie` calls, missing `Secure`/
+      `HttpOnly` — new `secureCookie(r)` sets `Secure` from `r.TLS` or a
+      proxy-forwarded `X-Forwarded-Proto: https`, never hardcoded true,
+      since an install with a plain-HTTP internal hop to the console
+      would otherwise never receive the cookie back at all; both the
+      login and the logout cookie now carry both flags); `gosecurity:S5145`
+      ×2 (`convapi.go`'s two `log.Printf` calls wrapping an `error` that
+      can carry user-controlled content — new `sanitizeLog(err)`, same
+      control-character-stripping shape as the runtimes' JS
+      `sanitizeLog`, applied at both sites).
+
+      New/extended tests: `TestSessionCookieIsSecureOnlyWhenTheRequestWas`
+      and `TestLogoutCookieCarriesTheSameFlagsAsLogin` in `api_test.go`
+      (both directions of the `Secure` condition, not just the happy
+      path); `TestLoginIssuesSessionCookie` extended to assert `Secure`
+      is FALSE on a plain request; new `convapi_test.go` for
+      `sanitizeLog` directly. `go build`/`go vet`/`go test ./...` all
+      green; `npx vitest run`: 195/195; `npm run typecheck`: clean;
+      `docker build --no-cache` succeeded and the binary starts
+      (reports its one missing required env var, proving the embedded
+      SPA and the Go binary both built correctly).
+  - **The other ~11 components were never touched** — no findings were even
     read for them (see 1.2).
   - **A THIRD, INFRASTRUCTURE-LEVEL FIX landed alongside these**, asked and
     confirmed directly: `manager`'s own new-code coverage was failing at
