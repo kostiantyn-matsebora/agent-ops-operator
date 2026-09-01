@@ -181,8 +181,37 @@ function dedup(list) {
   return out;
 }
 
+// buildClaudeArgs is the CLI invocation's argv, pulled out of runtime.js so
+// its exact shape -- in particular the jssecurity:S6350 fix -- is asserted
+// directly rather than only exercised end to end. `contextId` and `prompt`
+// both arrive from a work unit and are values a naive `--flag value`
+// pairing hands the CLI's parser openly: a prompt beginning with "-" is
+// misread as an unrecognised OPTION ("error: unknown option ..."), verified
+// against the real CLI, and `--resume` takes an OPTIONAL argument ([value]
+// in --help) so the same misparse hits a dash-leading context id too, one
+// path over -- the value reads as absent and the id is parsed as its own
+// token. `--resume=<id>` (one `=`-joined token) and a `--` separator
+// immediately before the trailing positional `prompt` are the fixes;
+// `--append-system-prompt <value>` needs neither, since a REQUIRED-argument
+// option already consumes the very next token unconditionally.
+function buildClaudeArgs({ contextId, systemPrompt, allowed, maxTurns, mcpConfig, prompt }) {
+  return [
+    ...(contextId ? [`--resume=${contextId}`] : []),
+    ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
+    '-p',
+    '--allowedTools', allowed.join(','),
+    '--permission-mode', 'dontAsk',
+    '--max-turns', String(maxTurns || 60),
+    '--output-format', 'stream-json',
+    '--verbose',
+    '--strict-mcp-config',
+    '--mcp-config', mcpConfig,
+    '--', prompt,
+  ];
+}
+
 module.exports = {
   MODE_MERGE, MODE_OVERWRITE,
   splitList, parseFrontmatterTools, agentDeclaredTools, composeAllowedTools,
-  safeJoin, sanitizeLog, resolveBin,
+  safeJoin, sanitizeLog, resolveBin, buildClaudeArgs,
 };

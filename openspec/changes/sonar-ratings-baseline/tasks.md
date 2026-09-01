@@ -254,6 +254,21 @@
       breaking the feature" case the first assessment claimed without
       checking.** The difference from the first pass: this one is backed
       by the rule's own documented remediation, not a guess.
+
+      **SEPARATELY: `new_coverage` was ALSO short (78.6%, `runtime.js`
+      itself unreachable by `node --test` at 0%, as documented — task 4.3
+      names why).** The argv-building block this fix touched is genuinely
+      pure (`unit` in, an array out — no I/O), so it moved: `tools.js`
+      gained `buildClaudeArgs({contextId, systemPrompt, allowed, maxTurns,
+      mcpConfig, prompt})`, `runtime.js`'s `runClaude` now calls it instead
+      of building the array inline. 9 new direct tests assert the exact
+      argv shape — the `--` separator position, `--resume=` with a
+      dash-leading id, `--append-system-prompt` surviving one unmodified,
+      omission of both when absent, the allowlist/mcp-config/max-turns
+      values and its default — locking in the `S6350` fix itself with a
+      test, independent of whether Sonar ever credits it. `node --test`:
+      59/59, `tools.js` stays 100% line coverage. Image rebuilt
+      (`--no-cache`) and `claude --version` still runs.
     - Two `S5145` findings on `unit.systemPrompt.length`/pure numeric
       fields are very likely a taint-analysis false positive (a `.length`
       access can never carry a control character) and were left alone

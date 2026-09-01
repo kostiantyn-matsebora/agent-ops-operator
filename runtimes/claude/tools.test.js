@@ -10,7 +10,7 @@ const path = require('path');
 const {
   MODE_MERGE, MODE_OVERWRITE,
   parseFrontmatterTools, agentDeclaredTools, composeAllowedTools,
-  safeJoin, sanitizeLog, resolveBin,
+  safeJoin, sanitizeLog, resolveBin, buildClaudeArgs,
 } = require('./tools');
 
 // mkRepo builds a throwaway checkout containing the given agent definitions.
@@ -231,4 +231,57 @@ test('the composed allowlist joins to a comma-separated argument', () => {
     composeAllowedTools(declared, 'Bash', MODE_OVERWRITE).join(','),
     'Bash',
   );
+});
+
+// ---- buildClaudeArgs (jssecurity:S6350) ----------------------------------------
+
+test('buildClaudeArgs puts the prompt last, after a -- separator', () => {
+  const args = buildClaudeArgs({ allowed: ['Read'], mcpConfig: '/etc/mcp.json', prompt: 'hello' });
+  assert.deepStrictEqual(args.slice(-2), ['--', 'hello']);
+});
+
+test('buildClaudeArgs is unaffected by a prompt beginning with -', () => {
+  const args = buildClaudeArgs({ allowed: [], mcpConfig: '/etc/mcp.json', prompt: '--dangerously-skip-permissions' });
+  const sepIndex = args.indexOf('--');
+  assert.strictEqual(args[sepIndex + 1], '--dangerously-skip-permissions');
+  assert.strictEqual(args.length, sepIndex + 2, 'the prompt is the LAST argv element');
+});
+
+test('buildClaudeArgs joins a resume id with = rather than a separate token', () => {
+  const args = buildClaudeArgs({ contextId: 'sess-123', allowed: [], mcpConfig: '/x', prompt: 'p' });
+  assert.strictEqual(args[0], '--resume=sess-123');
+});
+
+test('buildClaudeArgs = -joins a resume id even when it begins with -', () => {
+  const args = buildClaudeArgs({ contextId: '--fake-session', allowed: [], mcpConfig: '/x', prompt: 'p' });
+  assert.strictEqual(args[0], '--resume=--fake-session');
+});
+
+test('buildClaudeArgs omits --resume with no context id', () => {
+  const args = buildClaudeArgs({ allowed: [], mcpConfig: '/x', prompt: 'p' });
+  assert.ok(!args.some((a) => a.startsWith('--resume')));
+});
+
+test('buildClaudeArgs appends the system prompt as its own required-argument flag, unmodified', () => {
+  const args = buildClaudeArgs({ systemPrompt: '--looks-like-a-flag', allowed: [], mcpConfig: '/x', prompt: 'p' });
+  const i = args.indexOf('--append-system-prompt');
+  assert.notStrictEqual(i, -1);
+  assert.strictEqual(args[i + 1], '--looks-like-a-flag');
+});
+
+test('buildClaudeArgs omits --append-system-prompt with none given', () => {
+  const args = buildClaudeArgs({ allowed: [], mcpConfig: '/x', prompt: 'p' });
+  assert.ok(!args.includes('--append-system-prompt'));
+});
+
+test('buildClaudeArgs carries the composed allowlist, the mcp config path, and defaults max-turns to 60', () => {
+  const args = buildClaudeArgs({ allowed: ['Read', 'Bash'], mcpConfig: '/etc/agentops/mcp.json', prompt: 'p' });
+  assert.strictEqual(args[args.indexOf('--allowedTools') + 1], 'Read,Bash');
+  assert.strictEqual(args[args.indexOf('--mcp-config') + 1], '/etc/agentops/mcp.json');
+  assert.strictEqual(args[args.indexOf('--max-turns') + 1], '60');
+});
+
+test('buildClaudeArgs honours an explicit max-turns', () => {
+  const args = buildClaudeArgs({ allowed: [], mcpConfig: '/x', maxTurns: 12, prompt: 'p' });
+  assert.strictEqual(args[args.indexOf('--max-turns') + 1], '12');
 });
