@@ -376,7 +376,29 @@
       `docker build --no-cache` succeeded and the binary starts
       (reports its one missing required env var, proving the embedded
       SPA and the Go binary both built correctly).
-  - **The other ~11 components were never touched** — no findings were even
+  - **Three more, pushed to full A even though B already passes the
+    gate:** the change's own stated goal is "at least B", and
+    `channel-telegram`/`runtime-ollama`/`signal-telegram` were already at
+    B on security (nothing here failed CI) — kept going anyway, same as
+    `console`/`signal-ha` were, rather than stopping at "good enough."
+    - `runtime-ollama` — `go:S4036` on `repo.go`'s bare `exec.CommandContext(ctx,
+      "git", ...)`. New `resolveBin(name string) string` (`exec.LookPath`,
+      falling back to the bare name), `gitBin = resolveBin("git")` resolved
+      once at package load — the same shape as the JS runtimes'
+      `resolveBin`, this time genuinely testable without a subprocess:
+      `t.Setenv("PATH", dir)` plus a fake executable, and the no-match
+      fallback, both asserted directly in new `repo_test.go`.
+    - `channel-telegram` and `signal-telegram` — one `gosecurity:S5145`
+      each (two call sites in `channel-telegram`), `log.Printf` wrapping
+      an `error` that can carry Telegram-relayed content. Both gained
+      their OWN `sanitizeLog(err)` (each is a separate Go module per
+      `structure.md`, so there is no shared package to add it to once) —
+      identical shape to `console`'s, and to the runtimes' JS version.
+      New `sanitizelog_test.go` in each, same two cases as `console`'s
+      (control characters stripped, ordinary text unchanged).
+
+    `go build`/`go vet`/`go test ./...` green in all three modules.
+  - **The other ~8 components were never touched** — no findings were even
     read for them (see 1.2).
   - **A THIRD, INFRASTRUCTURE-LEVEL FIX landed alongside these**, asked and
     confirmed directly: `manager`'s own new-code coverage was failing at

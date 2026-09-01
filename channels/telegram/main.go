@@ -51,6 +51,19 @@ import (
 	"time"
 )
 
+// sanitizeLog strips control characters (CR/LF and other C0) from an
+// error's text before it reaches a log line -- gosecurity:S5145's ask,
+// since an error here can carry Telegram-relayed content (a message's
+// text, ultimately) that could otherwise forge a second log line.
+func sanitizeLog(err error) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 {
+			return ' '
+		}
+		return r
+	}, err.Error())
+}
+
 // channelConfig is this adapter's interpretation of Channel spec.config.
 //
 // There is no pollingEnabled any more: this adapter never polls, so a channel
@@ -642,7 +655,7 @@ func (a *adapter) dispatch(ctx context.Context, upd tgUpdate) {
 		}
 		threadID := strconv.FormatInt(m.MessageThreadID, 10)
 		if err := a.mgr.Inbound(ctx, name, &threadID, m.Text); err != nil {
-			log.Printf("inbound %s: %v", name, err)
+			log.Printf("inbound %s: %s", name, sanitizeLog(err))
 		}
 		return // first matching channel wins
 	}
@@ -707,7 +720,7 @@ func (a *adapter) handleOffsetPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.mgr.PutState(r.Context(), name, "telegram-offset", in.Value); err != nil {
-		log.Printf("offset write %s: %v", name, err)
+		log.Printf("offset write %s: %s", name, sanitizeLog(err))
 		http.Error(w, "offset write failed", http.StatusBadGateway)
 		return
 	}
