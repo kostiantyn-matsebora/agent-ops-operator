@@ -152,6 +152,17 @@
     files are still analysed for bugs/vulnerabilities/smells exactly as
     before, only the coverage metric is exempted. `CONTRIBUTING.md`'s
     Code analysis section documents it in the same commit.
+
+    The exclusion took `manager`'s new-code coverage from 17.1% to 43.8%,
+    not to 80% — the REMAINDER was three already-uncovered guard-clause
+    lines in `internal/httpapi/activity.go` (36% file coverage, the worst
+    of the touched files), all three `if s.Activity == nil { … 503 … }`
+    checks the S1192 constant-extraction happened to touch. No existing
+    test ever constructed a `Server` with a nil `Activity` log. New
+    `internal/httpapi/activity_test.go` does, against all three handlers
+    directly (the package's own lightweight httptest pattern, already used
+    by `contextreport_test.go` — no envtest needed). `go test ./...`
+    (envtest included) still green, 48.3s.
 - [ ] 2.2 Not run: no re-analysis of this branch has happened yet (needs a
   CI push), and `manager`'s own backlog is not fully fixed (26 production
   findings remain per 2.1), so a re-run would not read zero regardless.
