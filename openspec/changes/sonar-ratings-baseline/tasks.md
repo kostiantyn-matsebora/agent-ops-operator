@@ -97,11 +97,28 @@
   going through the same single-expression validation. `.github/tests/run.sh`:
   11/11 unchanged; smoke-tested against real `sonarcloud.io` again.
 
+  **THAT ROUND ALSO STAYED FLAGGED, on the identical inline expression —
+  ruling out "adjacent" and "one expression" both, as SHAPES within
+  `main`'s own scope.** Fourth round, a different axis: `components`
+  (never flagged) receives its CLI-supplied path as its OWN PARAMETER and
+  validates it inside that function — not `args.components` referenced
+  directly in `main`. New `write_result(out: pathlib.Path, result: dict)`
+  does the same for the write side: `args.out` is passed as an ordinary
+  argument, and `validated_path`/`.write_text()` happen inside
+  `write_result`'s own scope, crossing a real function boundary instead
+  of guessing at another same-scope rewrite. `main` now calls
+  `write_result(args.out, result)`. `.github/tests/run.sh`: 11/11
+  unchanged; smoke-tested against real `sonarcloud.io` again.
+
   Whether THIS round clears both remaining conditions
   (`new_security_rating`, and `new_duplicated_lines_density` — trending
   3.7% → 3.4% → 3.1% → 3.0% across rounds as the file diverges further
   from `sonar-issues.py`'s copied shape, needs `< 3`) is what the next CI
-  push answers.
+  push answers. Three same-scope shapes have now failed; if this one
+  does too, the working/non-working line is `components` vs. `main`
+  specifically, and it may be `args.*` attribute access itself Sonar's
+  engine treats differently from a plain parameter — worth asking rather
+  than guessing a fifth pattern.
 - [ ] 1.2 **PARTIALLY DONE, differently than planned.** `SONAR_TOKEN` never
   reached this session's own shell (an MCP client env-substitution timing
   issue — the token is set on the host, but a running session's MCP

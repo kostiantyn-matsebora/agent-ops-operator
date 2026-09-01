@@ -102,6 +102,22 @@ def components(path: pathlib.Path | None, script: pathlib.Path) -> list[dict]:
     return json.loads(out)
 
 
+def write_result(out: pathlib.Path, result: dict) -> pathlib.Path:
+    """Validates `out` and writes `result` to it, returning the path used.
+
+    A DEDICATED FUNCTION, not inlined at the call site in `main` -- the
+    working reference for pythonsecurity:S2083/S8707 is `components`
+    above, which takes its CLI-supplied path as its OWN parameter and
+    validates it there; three earlier attempts at `main`'s own scope
+    (a separated variable, adjacent statements, one nested expression)
+    all stayed flagged on `args.out` specifically. This crosses the same
+    function boundary `components` does rather than guessing at another
+    same-scope shape."""
+    target = validated_path(out, must_exist=False)
+    target.write_text(json.dumps(result, indent=2) + "\n")
+    return target
+
+
 def issues_for(api: str, token: str, key: str, **filters) -> list[dict]:
     """Every open (`resolved=false`) issue on `key` matching `filters`, paged.
     NO `pullRequest` param -- the branch-wide backlog, not one pull request's."""
@@ -166,11 +182,8 @@ def main() -> int:
         return 1
 
     args.api = validated_api(args.api)
-    # Fails fast, before any network call -- but the WRITE below revalidates
-    # inline rather than trusting this one across the whole function: kept
-    # directly adjacent to the sink it guards, the same shape as the rule's
-    # own `open(safe_path(filename))` example, since a validation several
-    # statements and a loop away from its `.write_text()` was not credited.
+    # Fails fast, before any network call -- write_result (below) validates
+    # again itself, inside its own scope, when it actually writes.
     validated_path(args.out, must_exist=False)
 
     # THE SAME LIST sonar-provision.sh PROVISIONS: every component plus
@@ -200,14 +213,9 @@ def main() -> int:
         print(line)
 
     result = {"organization": args.organization, "components": rows}
-    # ONE EXPRESSION, not a validated variable carried to a later
-    # statement: the shape components()'s (never-flagged) read side already
-    # uses, and pythonsecurity:S2083/S8707's own `open(safe_path(filename))`
-    # example -- a sanitiser call the line above the sink it guards was
-    # still flagged, so the call itself is now the sink's own argument.
-    validated_path(args.out, must_exist=False).write_text(json.dumps(result, indent=2) + "\n")
+    out_path = write_result(args.out, result)
     total = sum(r["total"] for r in rows)
-    print(f"\n{total} open Blocker/High finding(s) across {len(rows)} project(s), written to {validated_path(args.out, must_exist=False)}"
+    print(f"\n{total} open Blocker/High finding(s) across {len(rows)} project(s), written to {out_path}"
           + (f"; TAXONOMY MISMATCH for {', '.join(mismatches)}" if mismatches else ""))
     return 0
 
