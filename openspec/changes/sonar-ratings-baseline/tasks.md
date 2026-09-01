@@ -398,6 +398,31 @@
       (control characters stripped, ordinary text unchanged).
 
     `go build`/`go vet`/`go test ./...` green in all three modules.
+
+    **CI THEN FAILED `channel-telegram` AND `runtime-ollama` ON
+    `new_coverage`** (66.7% and 75.0%, `signal-telegram` passed) — same
+    story as `manager`'s `activity.go`: the mechanical `%v` → `%s,
+    sanitizeLog(err)` / `"git"` → `gitBin` edits touched lines inside
+    ALREADY-uncovered error branches and an already-mostly-untested
+    method (`repo.go`'s `git()`, 7.9% file coverage — it shells out, so
+    nothing had exercised it). Both closed the same way as `manager`'s:
+    reached the specific lines directly rather than chased the whole
+    file.
+    - `channel-telegram`: new `errorpaths_test.go` points `adapter.mgr`
+      at an `httptest.Server` answering 500, then calls `dispatch` (a
+      failed `Inbound` must not panic) and `handleOffsetPut` (must
+      answer 502) — the `failingManager` fixture is the mirror of
+      `vocabulary_test.go`'s existing `TestSyncCommandsRetriesAfterAFailedRun`,
+      not a new pattern.
+    - `runtime-ollama`: new `gitexec_test.go` calls `Repo.git` against a
+      REAL `git` binary in a `t.TempDir()` — `git init` (success) and an
+      unrecognised subcommand (the command's own reported failure) —
+      rather than mocking the subprocess. Safe in CI: the `modules` job
+      runs on `ubuntu-latest` directly, not a container, and needs `git`
+      for its own checkout step. Covers `env()` too, as a side effect of
+      `git()` calling it.
+
+    `go build`/`go vet`/`go test ./...` green in both, again.
   - **The other ~8 components were never touched** — no findings were even
     read for them (see 1.2).
   - **A THIRD, INFRASTRUCTURE-LEVEL FIX landed alongside these**, asked and
