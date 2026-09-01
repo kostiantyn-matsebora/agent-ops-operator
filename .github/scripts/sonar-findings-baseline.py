@@ -52,20 +52,34 @@ def validated_api(raw: str) -> str:
 
 
 def validated_path(raw: pathlib.Path, *, must_exist: bool) -> pathlib.Path:
-    """Resolves the path and refuses a `..` segment before it is ever opened
-    or executed -- what pythonsecurity:S2083/S8707 ask of a CLI-supplied
-    path, here `--out`, `--components` and `--components-script`."""
-    if ".." in raw.parts:
-        raise SystemExit(f"path must not contain '..': {raw}")
-    resolved = raw.resolve()
-    if must_exist and not resolved.is_file():
-        raise SystemExit(f"not a file: {resolved}")
-    return resolved
+    """Canonicalises the path and refuses one that resolves outside the
+    current working directory -- the exact pythonsecurity:S2083/S8707
+    remediation (their own compliant example: `os.path.realpath` against
+    `os.getcwd()`, checked with the trailing separator the rule's own
+    "partial path traversal" pitfall warns is required), applied to every
+    CLI-supplied path: `--out`, `--components` and `--components-script`.
+    """
+    base_dir = os.path.realpath(os.getcwd())
+    resolved = os.path.realpath(str(raw))
+    if resolved != base_dir and not resolved.startswith(base_dir + os.sep):
+        raise SystemExit(f"path resolves outside the working directory: {raw}")
+    result = pathlib.Path(resolved)
+    if must_exist and not result.is_file():
+        raise SystemExit(f"not a file: {result}")
+    return result
 
 
 def fetch(api: str, path: str, token: str, **params) -> dict:
     url = f"{api}/api/{path}?{urllib.parse.urlencode(params)}"
-    out = subprocess.run(["curl", "-sf", "-u", f"{token}:", url], capture_output=True, text=True)
+    # `--` marks the end of options: verified against curl itself that
+    # without it a URL beginning with "-" is read as an unrecognised flag
+    # ("curl: option ...: is unknown", exit 2) rather than the target --
+    # pythonsecurity:S8705's argument-injection concern, made concrete.
+    # `api` is `validated_api`-checked to start with http(s):// so this
+    # exact call can never actually hit that path, but the separator is
+    # what a reader -- and the rule -- can verify without also reasoning
+    # through that other function.
+    out = subprocess.run(["curl", "-sf", "-u", f"{token}:", "--", url], capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError(f"{path}: curl exit {out.returncode} {out.stderr.strip()}")
     return json.loads(out.stdout or "{}")

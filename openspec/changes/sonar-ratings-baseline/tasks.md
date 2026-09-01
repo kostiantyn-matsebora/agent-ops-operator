@@ -15,17 +15,48 @@
   Verified against fixtures in task 4.1, not against the organisation — the
   script itself was never run with a real token this session (see 1.2).
 
-  **KNOWN, ACCEPTED GAP: the script itself trips `scripts`' own new-code
-  security gate.** `pythonsecurity:S8701`/`S8705`/`S8707` fire on its
-  `subprocess.run(["curl", ...])` call and `pythonsecurity:S2083` (BLOCKER)
-  on `out_path.write_text(...)`, even after adding explicit `--api`/path
-  validation (`validated_api`, `validated_path`) — Sonar's dataflow does not
-  recognise a hand-written function as a sanitiser for this rule family, and
-  the only way to fully silence it would be rejecting a legitimate absolute
-  `--out` path, breaking the tool's basic contract. The sibling
-  `sonar-issues.py` carries the IDENTICAL unaddressed pattern on `master`
-  already (same `fetch`/`components` shape, copied). Asked and confirmed:
-  accepted as a known gap rather than chased further.
+  **"ACCEPTED AS A KNOWN GAP" WAS WRONG HERE TOO, SAME AS `S6350`
+  — REVERSED after pushback, by reading Sonar's OWN documented remediation
+  instead of guessing at one.** The first attempt's `validated_api` /
+  `validated_path` were hand-invented and Sonar's dataflow never
+  recognised them as sanitisers — true — but the fix isn't "this class of
+  finding can't be satisfied," it's "use the pattern the rule itself
+  publishes":
+  - `pythonsecurity:S2083`/`S8707` (path injection) — the rule's own
+    compliant example is `os.path.realpath(path)` checked against
+    `os.path.realpath(os.getcwd())` with `startswith(base + os.sep)`
+    (their "partial path traversal" pitfall names the trailing separator
+    as load-bearing). `validated_path` now does exactly that instead of
+    the previous `pathlib.resolve()` + `..`-in-parts check, which is a
+    DIFFERENT function the rule's engine apparently never credited. The
+    real, accepted narrowing: `--out`/`--components`/
+    `--components-script` must now resolve under the CURRENT WORKING
+    DIRECTORY, matching the rule's own stated intent ("prevent LLMs from
+    escaping the directory from which it was invoked") — an absolute
+    path outside cwd is refused where it was silently accepted before.
+    New test asserts the refusal directly (`../../../../etc/passwd`
+    against `--out`).
+  - `pythonsecurity:S8705` (argument injection) — the rule's own
+    compliant example validates with a regex before the value reaches a
+    subprocess argv; the shape here is closer to `S6350`'s: `curl -sf -u
+    <token> <url>` misreads a `-`-leading `url` as an unknown option,
+    confirmed directly (`curl --this-looks-like-a-flag` → `curl: option
+    ...: is unknown`, exit 2; `curl -- --this-looks-like-a-flag` resolves
+    it as the target instead, exit 6/"could not resolve host"). Added the
+    same `--` separator `runtime-claude`'s fix uses, before `url` in the
+    one `subprocess.run(["curl", ...])` call. `api` is already
+    `validated_api`-restricted to `http(s)://`, so this call can in fact
+    never hit the vulnerable path — the separator is what makes that
+    verifiable without also tracing through a second function.
+
+  Neither breaks the tool's real usage: CI always invokes this from the
+  repository root with a repo-relative `--out`, and a real `curl` against
+  `sonarcloud.io` with a fake token still reaches the network correctly
+  through the `--` separator (verified by hand, `curl exit 22`/HTTP
+  error, not a parse failure). `sonar-issues.py` carries the identical
+  ORIGINAL pattern unaddressed on `master` still — out of scope here, a
+  candidate for the same fix later, not evidence this one is unfixable.
+  `.github/tests/run.sh`: all passing, plus the new refusal test.
 - [ ] 1.2 **PARTIALLY DONE, differently than planned.** `SONAR_TOKEN` never
   reached this session's own shell (an MCP client env-substitution timing
   issue — the token is set on the host, but a running session's MCP
