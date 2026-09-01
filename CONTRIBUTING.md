@@ -312,6 +312,16 @@ Code impact severity scale this organisation reads issues under, not the
 retired five-level one — keeps its rating below B, so reaching B means fixing
 those, never relaxing the threshold.
 
+**`test/e2e/**` AND `test/conformance/** ARE EXCLUDED FROM COVERAGE, NOT FROM
+ANALYSIS`** (`sonar.coverage.exclusions` in `.github/actions/sonar-scan`). Both
+are build-tag gated (`e2e`, `conformance`), so the plain `go test ./...` that
+produces `coverage.out` never runs them — a diff touching `cluster.go`,
+`install.go`, `wiring.go` or `runner.go` there has no coverage data at all,
+which the new-code condition reads as uncovered regardless of what the
+conformance suite or a live k3d cluster actually exercises. Bugs,
+vulnerabilities and smells in these files are still scored exactly as
+elsewhere; only the coverage metric is exempted.
+
 **A pull request from a fork is analysed by nothing**, shown as a SKIPPED job:
 the scanner's token is withheld from fork workflows, so there is nothing you
 could do about it and nothing you should.

@@ -19,16 +19,20 @@ RUN apt-get update -qq && \
 # checks out a repo and runs Copilot. What an agent may reach is wiring —
 # MCPConfig + MCPToolset bound by a Pipeline — so a Kubernetes CLI here would be
 # the same category error as bundling an MCP server. Need one? Derive an image
-# (three lines, and the version pin becomes yours to own against your cluster)
-# and point AgentRuntime.spec.image at it; see docs/concepts.md.
+# (three lines, and its own version pin becomes yours to own against your
+# cluster, same as this one) and point AgentRuntime.spec.image at it; see
+# docs/concepts.md.
 WORKDIR /srv
 COPY package.json package-lock.json /srv/
 # `npm ci` from the lockfile: the SDK and the CLI it drives are one artifact
 # released as two packages, and a floating range once installed a pair that
 # threw before any session existed (SDK 1.0.11 against CLI 1.0.81).
-# npm@latest FIRST: the image scan gates on fixable CRITICAL/HIGH, and the npm
-# the base image ships carries old `tar` and `brace-expansion` under
+# npm FIRST: the image scan gates on fixable CRITICAL/HIGH, and the npm the
+# base image ships carries old `tar` and `brace-expansion` under
 # /usr/local/lib/node_modules/npm — the same fix runtimes/claude applies.
+# PINNED, not @latest (docker:S8543) -- an EXPLICIT, hand-bumped version;
+# check `npm view npm version` before bumping, and re-verify against a Trivy
+# scan of the built image that the CVE this upgrade exists for stays fixed.
 # THEN drop the CLI's bundled foundry-local-sdk: a Windows/macOS local-model
 # host this Linux pod can never use, whose vendored adm-zip is the one finding
 # npm cannot reach (it sits inside the platform package, not in the lockfile).
@@ -37,7 +41,7 @@ COPY package.json package-lock.json /srv/
 # ships as plain files, not a postinstall download, so skipping every
 # package's scripts (npm's own and the ~20 in this tree) costs nothing here,
 # unlike runtimes/claude where the CLI needs its own installer run after.
-RUN npm install -g --ignore-scripts npm@latest && \
+RUN npm install -g --ignore-scripts npm@12.0.2 && \
     npm ci --omit=dev --no-audit --no-fund --ignore-scripts && \
     rm -rf /srv/node_modules/@github/copilot-linux-*/foundry-local-sdk && \
     npm cache clean --force

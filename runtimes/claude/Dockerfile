@@ -15,12 +15,17 @@ LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/ag
 # scoped, rather than every postinstall in the tree running unexamined.
 # Verified against node:22-bookworm-slim: the plain install fails at
 # `claude --version` with "native binary not installed" until this second
-# step runs; npm@latest carries no such step.
+# step runs.
+#
+# BOTH VERSIONS ARE PINNED (docker:S8543) -- an EXPLICIT, hand-bumped pair,
+# not resolved implicitly at build time. Was `@latest` on both; check what
+# `npm view npm version` / `npm view @anthropic-ai/claude-code version` now
+# resolve to before bumping, same as any other dependency upgrade here.
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
       git openssh-client curl jq ca-certificates procps && \
     rm -rf /var/lib/apt/lists/* && \
-    npm install -g --ignore-scripts npm@latest @anthropic-ai/claude-code && \
+    npm install -g --ignore-scripts npm@12.0.2 @anthropic-ai/claude-code@2.1.252 && \
     node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs" && \
     npm cache clean --force
 
@@ -28,8 +33,8 @@ RUN apt-get update -qq && \
 # checks out a repo and runs claude-code. What an agent may reach is wiring —
 # MCPConfig + MCPToolset bound by a Pipeline — so a Kubernetes CLI here would be
 # the same category error as bundling an MCP server. Need one? Derive an image
-# (three lines, and the version pin becomes yours to own against your cluster)
-# and point AgentRuntime.spec.image at it; see README.
+# (three lines, and its own version pin becomes yours to own against your
+# cluster, same as this one) and point AgentRuntime.spec.image at it; see README.
 COPY runtime.js tools.js spin.js /srv/
 
 ENV HOME=/data/context

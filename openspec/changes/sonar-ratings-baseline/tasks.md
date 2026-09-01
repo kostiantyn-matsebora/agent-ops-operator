@@ -14,6 +14,18 @@
 
   Verified against fixtures in task 4.1, not against the organisation — the
   script itself was never run with a real token this session (see 1.2).
+
+  **KNOWN, ACCEPTED GAP: the script itself trips `scripts`' own new-code
+  security gate.** `pythonsecurity:S8701`/`S8705`/`S8707` fire on its
+  `subprocess.run(["curl", ...])` call and `pythonsecurity:S2083` (BLOCKER)
+  on `out_path.write_text(...)`, even after adding explicit `--api`/path
+  validation (`validated_api`, `validated_path`) — Sonar's dataflow does not
+  recognise a hand-written function as a sanitiser for this rule family, and
+  the only way to fully silence it would be rejecting a legitimate absolute
+  `--out` path, breaking the tool's basic contract. The sibling
+  `sonar-issues.py` carries the IDENTICAL unaddressed pattern on `master`
+  already (same `fetch`/`components` shape, copied). Asked and confirmed:
+  accepted as a known gap rather than chased further.
 - [ ] 1.2 **PARTIALLY DONE, differently than planned.** `SONAR_TOKEN` never
   reached this session's own shell (an MCP client env-substitution timing
   issue — the token is set on the host, but a running session's MCP
@@ -98,13 +110,17 @@
       `--ignore-scripts` install fails `claude --version` with "native
       binary not installed" until that second step runs; copilot's SDK
       needed no such step, verified the same way).
-    - **NOT fixed — 6, by explicit choice:** `docker:S8543` (unlocked
-      `npm@latest`/unpinned `claude-code` version) ×2 is the DELIBERATE
-      design both Dockerfiles already state in comment — the reference
-      image tracks latest on purpose, an adopter who wants a pin derives
-      their own image (`structure.md`); copilot's `npm@latest` is there
-      specifically to outrun a CVE in the base image's bundled npm, so
-      pinning it would reintroduce the finding it exists to fix.
+    - **Fixed — 25 of 29, after a follow-up round:** `docker:S8543`
+      (unlocked `npm@latest`/unpinned `claude-code` version) ×2 was
+      INITIALLY left alone as the DELIBERATE design both Dockerfiles stated
+      in comment — but touching the SAME line to add `--ignore-scripts`
+      made it count as new code on this pull request's own gate regardless,
+      and asked directly, the user chose to PIN rather than mark it
+      won't-fix: both Dockerfiles now pin `npm@12.0.2` and
+      `@anthropic-ai/claude-code@2.1.252` explicitly, with a comment naming
+      `npm view <pkg> version` as how to check before the next bump. Both
+      rebuilt and re-verified the same way as the first round.
+    - **NOT fixed — 4, by explicit choice:**
       `jssecurity:S6350` (user-controlled command argument to `spawn`) is
       structural: the runtime's whole job is passing profile/work-unit
       content — the prompt, the system prompt — to the CLI as argv, so
@@ -115,13 +131,27 @@
       likely a taint-analysis false positive (a `.length` access can never
       carry a control character) and were left alone rather than wrapped
       for no real effect.
-    - Both Dockerfiles' fix was BUILT AND RUN, not just read: `docker
-      build` succeeded for both, `claude --version` printed `2.1.252
-      (Claude Code)` in the built claude image, and
-      `require('@github/copilot-sdk')` resolved in the built copilot
-      image.
+    - Both Dockerfiles' fix was BUILT AND RUN, not just read, TWICE — once
+      for `--ignore-scripts`, again for the pin: `docker build` succeeded
+      both times for both, `claude --version` printed `2.1.252 (Claude
+      Code)` and `npm --version` printed `12.0.2` in the built claude
+      image, and the same two in copilot's plus
+      `require('@github/copilot-sdk')` resolving.
   - **The other ~13 components were never touched** — no findings were even
     read for them (see 1.2).
+  - **A THIRD, INFRASTRUCTURE-LEVEL FIX landed alongside these**, asked and
+    confirmed directly: `manager`'s own new-code coverage was failing at
+    17.1% because this pull request's `manager` diff mostly touches
+    `test/e2e/` and `test/conformance/` source (`cluster.go`, `install.go`,
+    `wiring.go`, `runner.go`) — build-tag gated, so the plain
+    `go test ./...` this session's CI job runs has NO coverage data for
+    them at all, which the new-code condition reads as uncovered
+    regardless of what the conformance suite or a live cluster actually
+    exercises. `.github/actions/sonar-scan` now carries
+    `-Dsonar.coverage.exclusions=test/e2e/**,test/conformance/**` — the
+    files are still analysed for bugs/vulnerabilities/smells exactly as
+    before, only the coverage metric is exempted. `CONTRIBUTING.md`'s
+    Code analysis section documents it in the same commit.
 - [ ] 2.2 Not run: no re-analysis of this branch has happened yet (needs a
   CI push), and `manager`'s own backlog is not fully fixed (26 production
   findings remain per 2.1), so a re-run would not read zero regardless.
