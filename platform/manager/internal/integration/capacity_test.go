@@ -389,7 +389,7 @@ func assertDeleteConversationOpReached(t *testing.T, srv *httpapi.Server, adapte
 	if op.Message == nil {
 		t.Fatalf("%s: it must carry the notice the thread is owed", adapter)
 	}
-	if stale := findOp(t, srv, adapter, chat.OpCloseTopic, "close-1"); stale != nil {
+	if findOp(t, srv, adapter, chat.OpCloseTopic, "close-1") != nil {
 		t.Fatalf("%s: deletion must not also send close-topic", adapter)
 	}
 }

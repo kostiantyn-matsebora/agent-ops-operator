@@ -139,7 +139,7 @@ func assertAdapterContractEnv(t *testing.T, pod *corev1.PodSpec, adapterName str
 	if env["MANAGER_URL"] != "http://manager:8080" || env["ADAPTER_NAME"] != adapterName {
 		t.Fatalf("contract env wrong: %+v", env)
 	}
-	if want := chat.DeriveAdapterToken(testMasterToken, adapterName); env["ADAPTER_TOKEN"] != want {
+	if env["ADAPTER_TOKEN"] != chat.DeriveAdapterToken(testMasterToken, adapterName) {
 		t.Fatalf("ADAPTER_TOKEN not the derived token")
 	}
 }

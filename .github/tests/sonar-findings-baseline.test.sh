@@ -77,10 +77,17 @@ cat > "$FIXTURES/issues-org_agent-ops-operator_scripts-legacy-p1.json" <<'JSON'
 {"total":0,"issues":[]}
 JSON
 
-run() { : > "$CURL_CALLS"; rm -f "$tmp/out.json"
-        SONAR_TOKEN=t python3 "$S" --organization org --components "$tmp/components.json" \
-          --api http://sonar.test --out "$tmp/out.json" "$@" 2>&1; }
-field() { python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(eval(sys.argv[2]))' "$tmp/out.json" "$1"; }
+run() {
+  : > "$CURL_CALLS"; rm -f "$tmp/out.json"
+  SONAR_TOKEN=t python3 "$S" --organization org --components "$tmp/components.json" \
+    --api http://sonar.test --out "$tmp/out.json" "$@" 2>&1
+  return $?
+}
+field() {
+  local expr="$1"
+  python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(eval(sys.argv[2]))' "$tmp/out.json" "$expr"
+  return $?
+}
 
 out=$(run); rc=$?
 

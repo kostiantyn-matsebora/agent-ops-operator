@@ -18,6 +18,23 @@ import (
 
 const kubeconfigFlag = "--kubeconfig"
 
+// Resolved once, and used everywhere the harness shells out to kubectl or
+// helm — go:S4036 wants a caller to say explicitly where the binary comes
+// from rather than leaving PATH to answer implicitly at each call site. When
+// the binary is not on PATH the fallback is the bare name, so the resulting
+// exec error is the same "not found" a reader would already expect.
+var (
+	kubectlBin = lookupBin("kubectl")
+	helmBin    = lookupBin("helm")
+)
+
+func lookupBin(name string) string {
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return name
+}
+
 // Cluster is one k3d cluster and the kubeconfig that reaches it.
 type Cluster struct {
 	Name       string
@@ -106,14 +123,14 @@ func (c *Cluster) Delete() {
 
 // Kubectl runs kubectl against the cluster.
 func (c *Cluster) Kubectl(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "kubectl", append([]string{kubeconfigFlag, c.Kubeconfig}, args...)...)
+	cmd := exec.CommandContext(ctx, kubectlBin, append([]string{kubeconfigFlag, c.Kubeconfig}, args...)...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
 // Helm runs helm against the cluster.
 func (c *Cluster) Helm(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "helm", append([]string{kubeconfigFlag, c.Kubeconfig}, args...)...)
+	cmd := exec.CommandContext(ctx, helmBin, append([]string{kubeconfigFlag, c.Kubeconfig}, args...)...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -171,7 +188,7 @@ func (c *Cluster) Forward(namespace, target string, remotePort int) (*Forward, e
 	}
 	port := l.Addr().(*net.TCPAddr).Port
 	l.Close()
-	cmd := exec.Command("kubectl", kubeconfigFlag, c.Kubeconfig, "-n", namespace, "port-forward", target,
+	cmd := exec.Command(kubectlBin, kubeconfigFlag, c.Kubeconfig, "-n", namespace, "port-forward", target,
 		fmt.Sprintf("%d:%d", port, remotePort))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
