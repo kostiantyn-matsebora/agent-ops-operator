@@ -152,10 +152,25 @@ function runClaude(unit) {
     // Inline role text from a repo-less profile. APPENDED, so the runtime's own
     // system prompt survives — and it says nothing about tools: the allowlist
     // above is the only permission authority.
+    // jssecurity:S6350 -- prompt and resume id both arrive from the work
+    // unit, and both are values a naive `--flag value` pairing hands the
+    // CLI's parser openly: verified against the real CLI that a prompt
+    // beginning with "-" is misread as an unrecognised OPTION and the run
+    // never starts ("error: unknown option ...") -- a real reliability
+    // bug this predates, not a hypothetical. `--resume` takes an OPTIONAL
+    // argument ([value] in --help), so the same misparse hits a
+    // dash-leading context id too, via a different path: the value is
+    // read as absent and the id parsed as its own (unrecognised) token.
+    // `--resume=<id>` (an `=`-joined single token, unambiguous regardless
+    // of a leading dash) and a `--` separator immediately before the
+    // trailing positional prompt are the standard, verified fixes for
+    // each shape -- `--append-system-prompt <value>` needs neither, since
+    // a REQUIRED-argument option already consumes the very next token
+    // unconditionally.
     const args = [
-      ...(contextIdOf(unit) ? ['--resume', contextIdOf(unit)] : []),
+      ...(contextIdOf(unit) ? [`--resume=${contextIdOf(unit)}`] : []),
       ...(unit.systemPrompt ? ['--append-system-prompt', unit.systemPrompt] : []),
-      '-p', prompt,
+      '-p',
       '--allowedTools', allowed.join(','),
       '--permission-mode', 'dontAsk',
       '--max-turns', String(unit.maxTurns || 60),
@@ -163,6 +178,7 @@ function runClaude(unit) {
       '--verbose',
       '--strict-mcp-config',
       '--mcp-config', MCP_CONFIG,
+      '--', prompt,
     ];
     console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${contextIdOf(unit) ? ' continue=' + sanitizeLog(contextIdOf(unit)) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
     console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${allowed.length ? allowed.join(',') : '(none)'}`);

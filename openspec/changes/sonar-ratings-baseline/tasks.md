@@ -110,7 +110,7 @@
       `--ignore-scripts` install fails `claude --version` with "native
       binary not installed" until that second step runs; copilot's SDK
       needed no such step, verified the same way).
-    - **Fixed — 25 of 29, after a follow-up round:** `docker:S8543`
+    - **Fixed — 27 of 29, after two follow-up rounds:** `docker:S8543`
       (unlocked `npm@latest`/unpinned `claude-code` version) ×2 was
       INITIALLY left alone as the DELIBERATE design both Dockerfiles stated
       in comment — but touching the SAME line to add `--ignore-scripts`
@@ -120,17 +120,37 @@
       `@anthropic-ai/claude-code@2.1.252` explicitly, with a comment naming
       `npm view <pkg> version` as how to check before the next bump. Both
       rebuilt and re-verified the same way as the first round.
-    - **NOT fixed — 4, by explicit choice:**
-      `jssecurity:S6350` (user-controlled command argument to `spawn`) is
-      structural: the runtime's whole job is passing profile/work-unit
-      content — the prompt, the system prompt — to the CLI as argv, so
-      there is no validation that would not also break the feature; left
-      for the same "unsupervised risk to reshape core logic" reason task
-      2.1's 26 production `manager` findings were deferred. Two `S5145`
-      findings on `unit.systemPrompt.length`/pure numeric fields are very
-      likely a taint-analysis false positive (a `.length` access can never
-      carry a control character) and were left alone rather than wrapped
-      for no real effect.
+    - **`jssecurity:S6350` was INITIALLY marked structural/deferred, and
+      that call was WRONG — reversed after the user pushed back on
+      accepting it.** Re-investigated rather than re-asserted: verified
+      against the real CLI that a prompt beginning with `-` was ALREADY
+      MISPARSED as an unrecognised option (`error: unknown option
+      '...'`), the run never starting — a genuine reliability bug this
+      predates, not a hypothetical Sonar heuristic. `--resume [value]`
+      (an OPTIONAL argument, per `--help`) carries the same misparse for a
+      dash-leading context id, one path over — the value reads as absent
+      and the id is parsed as its own unrecognised token. Fixed both,
+      confirmed against the CLI at each step: `--resume=<id>` (single
+      `=`-joined token, unambiguous regardless of a leading dash) and a
+      `--` separator immediately before the trailing positional prompt
+      (moved to the END of `args`, after every flag, since everything
+      following `--` stops being read as an option). Neither changes how
+      the prompt reaches the CLI — still argv, still one `spawn` call — so
+      this is NOT the core-logic redesign (stdin plumbing) that was ruled
+      out; it is a 15-line, behavior-preserving reorder of the SAME argv
+      array. `--append-system-prompt <value>` needed no change — a
+      REQUIRED-argument option already consumes the very next token
+      unconditionally, verified the value survives a leading dash
+      unmodified. `node --test`: 50/50 unchanged. Full image rebuilt
+      (`--no-cache`) and the exact new argv shape — resume id, system
+      prompt, every flag, a `--rm -rf /`-prefixed prompt — run against the
+      real CLI: parses cleanly through to a legitimate downstream error
+      (MCP config schema), never an argument-parsing one.
+    - Two `S5145` findings on `unit.systemPrompt.length`/pure numeric
+      fields are very likely a taint-analysis false positive (a `.length`
+      access can never carry a control character) and were left alone
+      rather than wrapped for no real effect — the one true remaining
+      "not fixed" item for `runtime-claude`/`runtime-copilot`.
     - Both Dockerfiles' fix was BUILT AND RUN, not just read, TWICE — once
       for `--ignore-scripts`, again for the pin: `docker build` succeeded
       both times for both, `claude --version` printed `2.1.252 (Claude
