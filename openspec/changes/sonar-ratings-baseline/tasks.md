@@ -351,6 +351,21 @@
       control-character-stripping shape as the runtimes' JS
       `sanitizeLog`, applied at both sites).
 
+      **`go:S2092` STAYED FLAGGED ON ONE SITE — the logout cookie
+      specifically, NOT login — despite both carrying the identical
+      `Secure: secureCookie(r)` expression.** Same shape as `scripts`'
+      `S2083`/`S8707` saga: not a code-correctness question, a
+      dataflow-recognition one, and inconsistent between two
+      byte-identical expressions this time rather than between two
+      different ones. Fix: `newSessionCookie(r, value, maxAge)`, the ONE
+      place either flag is now set, called from both `handleLogin` and
+      `handleLogout` — a real DRY win regardless (two near-duplicate
+      `http.Cookie` literals were genuinely redundant), and it also
+      happens to be the same "cross a function boundary" shape that
+      cleared `scripts`' write-sink findings. Whether Sonar credits THIS
+      one is what the next analysis answers; recorded rather than
+      assumed, per the pattern this whole task has followed.
+
       New/extended tests: `TestSessionCookieIsSecureOnlyWhenTheRequestWas`
       and `TestLogoutCookieCarriesTheSameFlagsAsLogin` in `api_test.go`
       (both directions of the `Secure` condition, not just the happy

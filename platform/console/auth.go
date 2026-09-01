@@ -229,6 +229,19 @@ func secureCookie(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
+// newSessionCookie is the ONE place either flag is set, for either the live
+// cookie login mints or the cleared one logout sends -- login and logout
+// used to build near-identical http.Cookie literals separately, and the
+// clearing one was missing both flags entirely until go:S2092/S3330 caught
+// it. One constructor means Secure's origin (always secureCookie(r), never
+// a literal true) is asserted once, not re-typed at every call site.
+func newSessionCookie(r *http.Request, value string, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name: sessionCookie, Value: value, Path: "/", HttpOnly: true, Secure: secureCookie(r),
+		SameSite: http.SameSiteStrictMode, MaxAge: maxAge,
+	}
+}
+
 func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Token string `json:"token"`
@@ -249,10 +262,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "session"})
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: id, Path: "/", HttpOnly: true, Secure: secureCookie(r),
-		SameSite: http.SameSiteStrictMode, MaxAge: int(sessionTTL / time.Second),
-	})
+	http.SetCookie(w, newSessionCookie(r, id, int(sessionTTL/time.Second)))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -260,10 +270,7 @@ func (a *API) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		a.sessions.drop(c.Value)
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, Secure: secureCookie(r),
-	})
+	http.SetCookie(w, newSessionCookie(r, "", -1))
 	w.WriteHeader(http.StatusNoContent)
 }
 
