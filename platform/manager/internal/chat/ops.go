@@ -699,6 +699,8 @@ func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) e
 	return fmt.Errorf("conflict recording the %s thread of %s", op.Channel, op.Conversation)
 }
 
+const channelMsgPrefix = "channel "
+
 // tryFinishEnsureTopic is one attempt; a false, nil result is a conflict.
 func (q *OpQueue) tryFinishEnsureTopic(ctx context.Context, op *Op, res OpResult) (bool, error) {
 	var conv agentopsv1alpha1.Conversation
@@ -707,15 +709,15 @@ func (q *OpQueue) tryFinishEnsureTopic(ctx context.Context, op *Op, res OpResult
 	}
 	patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	cond := metav1.Condition{Type: ConditionTopicReady, Status: metav1.ConditionTrue, Reason: "TopicCreated",
-		Message: "channel " + op.Channel}
+		Message: channelMsgPrefix + op.Channel}
 	if res.Error != "" {
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "AdapterError"
-		cond.Message = "channel " + op.Channel + ": " + res.Error
+		cond.Message = channelMsgPrefix + op.Channel + ": " + res.Error
 	} else if res.ThreadID == "" {
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "AdapterError"
-		cond.Message = "channel " + op.Channel + ": adapter completed ensure-topic without a thread id"
+		cond.Message = channelMsgPrefix + op.Channel + ": adapter completed ensure-topic without a thread id"
 	} else if existing := conv.ThreadFor(op.Channel); existing == nil {
 		binding := agentopsv1alpha1.ThreadBinding{
 			// ReadTracked for EVERY channel, whether or not its adapter reports

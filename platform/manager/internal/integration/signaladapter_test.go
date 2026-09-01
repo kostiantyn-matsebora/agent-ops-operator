@@ -89,7 +89,19 @@ func TestSignalInboundRouting(t *testing.T) {
 	reconcilePipeline(t, "sig-pipe")
 	h := apiServer().Handler()
 
-	// unwired sources drop signals loudly, BEFORE burning cooldown slots
+	assertUnwiredSourceDropsSignal(t, h)
+	conv := postJobSignalAndFindConversation(t, ctx, h)
+	assertJobInputShape(t, ctx, conv)
+	assertDuplicateFingerprintAbsorbedByCooldown(t, h)
+	assertRecurrenceIntoSameConversation(t, ctx, h, conv)
+	assertUnknownSourceAndMissingFingerprintRejected(t, h)
+	assertSourceBookkeeping(t, ctx, 2)
+}
+
+// assertUnwiredSourceDropsSignal: unwired sources drop signals loudly,
+// BEFORE burning cooldown slots.
+func assertUnwiredSourceDropsSignal(t *testing.T, h http.Handler) {
+	t.Helper()
 	mkSignalSource(t, "sig-unwired", "sig-t", "")
 	rec0 := postSignal(t, h, testMasterToken, "sig-unwired", []map[string]any{{
 		"fingerprint": "u-1", "labels": map[string]string{"alertname": "x"},
@@ -97,8 +109,12 @@ func TestSignalInboundRouting(t *testing.T) {
 	if rec0.Code != 200 || !strings.Contains(rec0.Body.String(), "not served by any Ready pipeline") {
 		t.Fatalf("unwired drop reason expected: %d %s", rec0.Code, rec0.Body.String())
 	}
+}
 
-	// job-kind signal with title override → job-lane conversation
+// postJobSignalAndFindConversation posts a job-kind signal with a title
+// override and returns the job-lane conversation it opened.
+func postJobSignalAndFindConversation(t *testing.T, ctx context.Context, h http.Handler) *agentopsv1alpha1.Conversation {
+	t.Helper()
 	rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
 		"fingerprint": "tick-1", "labels": map[string]string{"alertname": "nightly"},
 		"title": "🛠 Nightly job", "payload": "run the nightly checks", "kind": "job",
@@ -120,6 +136,13 @@ func TestSignalInboundRouting(t *testing.T) {
 	if !strings.HasPrefix(conv.Name, "job-") {
 		t.Fatalf("job conversation name: %s", conv.Name)
 	}
+	return conv
+}
+
+// assertJobInputShape checks the job input's type, provenance and
+// out-of-line payload.
+func assertJobInputShape(t *testing.T, ctx context.Context, conv *agentopsv1alpha1.Conversation) {
+	t.Helper()
 	in := conv.Spec.Inputs[0]
 	if len(conv.Spec.Inputs) != 1 || in.Type != agentopsv1alpha1.InputJob || in.PayloadRef == nil {
 		t.Fatalf("job input wrong: %+v", conv.Spec.Inputs)
@@ -136,16 +159,23 @@ func TestSignalInboundRouting(t *testing.T) {
 	if ci.Spec.Payload != "run the nightly checks" {
 		t.Fatalf("payload: %q", ci.Spec.Payload)
 	}
+}
 
-	// duplicate fingerprint absorbed by cooldown (at-least-once safe)
-	rec = postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
+// assertDuplicateFingerprintAbsorbedByCooldown: at-least-once safe.
+func assertDuplicateFingerprintAbsorbedByCooldown(t *testing.T, h http.Handler) {
+	t.Helper()
+	rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
 		"fingerprint": "tick-1", "labels": map[string]string{"alertname": "nightly"}, "kind": "job",
 	}})
 	if !strings.Contains(rec.Body.String(), `"queued":0`) {
 		t.Fatalf("cooldown not applied: %s", rec.Body.String())
 	}
+}
 
-	// same signature + session → recurrence into the SAME conversation
+// assertRecurrenceIntoSameConversation: same signature + session → a second
+// tick becomes a recurrence input on the SAME conversation, not a new one.
+func assertRecurrenceIntoSameConversation(t *testing.T, ctx context.Context, h http.Handler, conv *agentopsv1alpha1.Conversation) {
+	t.Helper()
 	patch := client.MergeFrom(conv.DeepCopy())
 	conv.Status.SessionID = "sess-sig"
 	if err := k8sClient.Status().Patch(ctx, conv, patch); err != nil {
@@ -153,7 +183,7 @@ func TestSignalInboundRouting(t *testing.T) {
 	}
 	// (signature label is set at creation by the routing core — no reconcile
 	// needed, which also keeps the shared runtime-pod pool untouched)
-	rec = postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
+	rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
 		"fingerprint": "tick-2", "labels": map[string]string{"alertname": "nightly"}, "kind": "job",
 	}})
 	if !strings.Contains(rec.Body.String(), `"queued":1`) {
@@ -163,20 +193,24 @@ func TestSignalInboundRouting(t *testing.T) {
 	if len(conv.Spec.Inputs) != 2 || conv.Spec.Inputs[1].Type != agentopsv1alpha1.InputRecurrence {
 		t.Fatalf("recurrence expected: %+v", conv.Spec.Inputs)
 	}
+}
 
-	// unknown source → 404
+func assertUnknownSourceAndMissingFingerprintRejected(t *testing.T, h http.Handler) {
+	t.Helper()
 	if rec := postSignal(t, h, testMasterToken, "no-such-source", []map[string]any{{"fingerprint": "x"}}); rec.Code != 404 {
 		t.Fatalf("unknown source: %d", rec.Code)
 	}
-	// missing fingerprint → 400
 	if rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{"labels": map[string]string{}}}); rec.Code != 400 {
 		t.Fatalf("missing fingerprint: %d", rec.Code)
 	}
+}
 
-	// source bookkeeping updated in one place
+// assertSourceBookkeeping: source bookkeeping updated in one place.
+func assertSourceBookkeeping(t *testing.T, ctx context.Context, wantReceived int64) {
+	t.Helper()
 	var src agentopsv1alpha1.SignalSource
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "sig-src"}, &src)
-	if src.Status.ReceivedTotal != 2 || src.Status.LastReceived == nil {
+	if src.Status.ReceivedTotal != wantReceived || src.Status.LastReceived == nil {
 		t.Fatalf("bookkeeping: %+v", src.Status)
 	}
 }
@@ -266,6 +300,13 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	mkSignalAdapter(t, "life-sig")
 	reconcileSignalAdapter(t, "life-sig")
 
+	assertSignalAdapterWorkloadShape(t, ctx)
+	assertNoServiceWithoutPort(t, ctx, "life-sig")
+	assertSignalSourceServedFlipsWithWiringAndReadiness(t, ctx)
+}
+
+func assertSignalAdapterWorkloadShape(t *testing.T, ctx context.Context) {
+	t.Helper()
 	var deploy appsv1.Deployment
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("life-sig")}, &deploy); err != nil {
 		t.Fatalf("workload not created: %v", err)
@@ -291,6 +332,20 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
 		t.Fatal("the floor's token must be mounted")
 	}
+	assertSignalAdapterContractEnv(t, &pod)
+	efs := pod.Containers[0].EnvFrom
+	if len(efs) != 1 || efs[0].Prefix != controller.CredentialEnvPrefix("life-src-a") || efs[0].SecretRef.Name != "life-secret" {
+		t.Fatalf("projection wrong: %+v", efs)
+	}
+	var adapter agentopsv1alpha1.SignalAdapter
+	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-sig"}, &adapter)
+	if adapter.Status.ServedSources != 2 || !apimeta.IsStatusConditionTrue(adapter.Status.Conditions, controller.ConditionDeployed) {
+		t.Fatalf("status: %+v", adapter.Status)
+	}
+}
+
+func assertSignalAdapterContractEnv(t *testing.T, pod *corev1.PodSpec) {
+	t.Helper()
 	env := map[string]string{}
 	for _, e := range pod.Containers[0].Env {
 		env[e.Name] = e.Value
@@ -304,23 +359,23 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	if env["ADAPTER_TOKEN"] != chat.DeriveSignalAdapterToken(testMasterToken, "life-sig") {
 		t.Fatal("ADAPTER_TOKEN is not the signal-context derived token")
 	}
-	efs := pod.Containers[0].EnvFrom
-	if len(efs) != 1 || efs[0].Prefix != controller.CredentialEnvPrefix("life-src-a") || efs[0].SecretRef.Name != "life-secret" {
-		t.Fatalf("projection wrong: %+v", efs)
-	}
-	var adapter agentopsv1alpha1.SignalAdapter
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "life-sig"}, &adapter)
-	if adapter.Status.ServedSources != 2 || !apimeta.IsStatusConditionTrue(adapter.Status.Conditions, controller.ConditionDeployed) {
-		t.Fatalf("status: %+v", adapter.Status)
-	}
+}
 
-	// no inbound port declared → no reconciler-owned Service
+// assertNoServiceWithoutPort: no inbound port declared → no reconciler-owned
+// Service.
+func assertNoServiceWithoutPort(t *testing.T, ctx context.Context, adapterName string) {
+	t.Helper()
 	var svc corev1.Service
-	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("life-sig")}, &svc); err == nil {
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName(adapterName)}, &svc); err == nil {
 		t.Fatal("Service must not be rendered without spec.port")
 	}
+}
 
-	// Served condition flips when the named adapter reports Ready
+// assertSignalSourceServedFlipsWithWiringAndReadiness: Served flips when the
+// named adapter reports Ready, and Wired flips only once a Pipeline claims
+// the source (pipeline-only wiring: unclaimed → Wired=False).
+func assertSignalSourceServedFlipsWithWiringAndReadiness(t *testing.T, ctx context.Context) {
+	t.Helper()
 	srcRec := &controller.SignalSourceReconciler{Client: k8sClient}
 	reconcileSrc := func(name string) {
 		t.Helper()
@@ -334,7 +389,6 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	if !apimeta.IsStatusConditionFalse(src.Status.Conditions, controller.ConditionServed) {
 		t.Fatal("expected Served=False before adapter Ready")
 	}
-	// pipeline-only wiring: unclaimed → Wired=False; claim flips it
 	if !apimeta.IsStatusConditionFalse(src.Status.Conditions, controller.ConditionWired) {
 		t.Fatalf("expected Wired=False while unclaimed: %+v", src.Status.Conditions)
 	}
@@ -346,6 +400,7 @@ func TestSignalAdapterLifecycle(t *testing.T) {
 	if w := apimeta.FindStatusCondition(src.Status.Conditions, controller.ConditionWired); w == nil || w.Status != "True" || !strings.Contains(w.Message, "life-wire-pipe") {
 		t.Fatalf("Wired should flip True naming the pipeline: %+v", src.Status.Conditions)
 	}
+	var deploy appsv1.Deployment
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("life-sig")}, &deploy)
 	deploy.Status.AvailableReplicas, deploy.Status.ReadyReplicas, deploy.Status.UpdatedReplicas, deploy.Status.Replicas = 1, 1, 1, 1
 	if err := k8sClient.Status().Update(ctx, &deploy); err != nil {

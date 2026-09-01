@@ -56,92 +56,98 @@ func TestRuntimeStartOverdue(t *testing.T) {
 // storage breaker. Misfiling an image pull as a volume problem would hold every
 // conversation in the install for a reason that has nothing to do with storage.
 func TestClassifyStuckPod(t *testing.T) {
-	t.Run("unattachable volume is storage-attributable", func(t *testing.T) {
-		pod := podAt(30*time.Minute, corev1.PodPending,
-			cond(corev1.PodScheduled, corev1.ConditionTrue, "", ""),
-			cond(corev1.PodReadyToStartContainers, corev1.ConditionFalse, "", ""),
-		)
-		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
-		}}
-		got := classifyStuckPod(pod)
-		if got.Reason != ReasonVolumeUnavailable {
-			t.Fatalf("reason = %q, want %q", got.Reason, ReasonVolumeUnavailable)
-		}
-		if !got.Storage {
-			t.Fatal("an unattachable volume must be storage-attributable")
-		}
-		if !strings.Contains(got.Message, "ContainerCreating") {
-			t.Fatalf("message should carry the kubelet's own waiting reason, got %q", got.Message)
-		}
-	})
+	t.Run("unattachable volume is storage-attributable", assertUnattachableVolumeIsStorageAttributable)
+	t.Run("unschedulable is not storage", assertUnschedulableIsNotStorage)
+	t.Run("image pull failure is not storage", assertImagePullFailureIsNotStorage)
+	t.Run("a missing configmap is not filed as an image problem", assertMissingConfigMapNotFiledAsImageProblem)
+	t.Run("an unclassifiable pod says so honestly", assertUnclassifiablePodSaysSoHonestly)
+}
 
-	t.Run("unschedulable is not storage", func(t *testing.T) {
-		got := classifyStuckPod(podAt(30*time.Minute, corev1.PodPending,
-			cond(corev1.PodScheduled, corev1.ConditionFalse, "Unschedulable", "0/5 nodes are available"),
-		))
-		if got.Reason != ReasonUnschedulable {
-			t.Fatalf("reason = %q, want %q", got.Reason, ReasonUnschedulable)
-		}
-		if got.Storage {
-			t.Fatal("an unschedulable pod must NOT open a storage breaker")
-		}
-		if !strings.Contains(got.Message, "0/5 nodes are available") {
-			t.Fatalf("message should quote the scheduler verbatim, got %q", got.Message)
-		}
-	})
+func assertUnattachableVolumeIsStorageAttributable(t *testing.T) {
+	pod := podAt(30*time.Minute, corev1.PodPending,
+		cond(corev1.PodScheduled, corev1.ConditionTrue, "", ""),
+		cond(corev1.PodReadyToStartContainers, corev1.ConditionFalse, "", ""),
+	)
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+	}}
+	got := classifyStuckPod(pod)
+	if got.Reason != ReasonVolumeUnavailable {
+		t.Fatalf("reason = %q, want %q", got.Reason, ReasonVolumeUnavailable)
+	}
+	if !got.Storage {
+		t.Fatal("an unattachable volume must be storage-attributable")
+	}
+	if !strings.Contains(got.Message, "ContainerCreating") {
+		t.Fatalf("message should carry the kubelet's own waiting reason, got %q", got.Message)
+	}
+}
 
-	t.Run("image pull failure is not storage", func(t *testing.T) {
-		pod := podAt(30*time.Minute, corev1.PodPending,
-			cond(corev1.PodScheduled, corev1.ConditionTrue, "", ""),
-			// Deliberately ALSO false: a pod stuck pulling can report this, and
-			// the image reason must win so a slow registry is never reported as
-			// a bad volume.
-			cond(corev1.PodReadyToStartContainers, corev1.ConditionFalse, "", ""),
-		)
-		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
-				Reason: "ImagePullBackOff", Message: "back-off pulling image",
-			}},
-		}}
-		got := classifyStuckPod(pod)
-		if got.Reason != ReasonImageUnavailable {
-			t.Fatalf("reason = %q, want %q", got.Reason, ReasonImageUnavailable)
-		}
-		if got.Storage {
-			t.Fatal("an image pull failure must NOT open a storage breaker")
-		}
-	})
+func assertUnschedulableIsNotStorage(t *testing.T) {
+	got := classifyStuckPod(podAt(30*time.Minute, corev1.PodPending,
+		cond(corev1.PodScheduled, corev1.ConditionFalse, "Unschedulable", "0/5 nodes are available"),
+	))
+	if got.Reason != ReasonUnschedulable {
+		t.Fatalf("reason = %q, want %q", got.Reason, ReasonUnschedulable)
+	}
+	if got.Storage {
+		t.Fatal("an unschedulable pod must NOT open a storage breaker")
+	}
+	if !strings.Contains(got.Message, "0/5 nodes are available") {
+		t.Fatalf("message should quote the scheduler verbatim, got %q", got.Message)
+	}
+}
 
-	t.Run("a missing configmap is not filed as an image problem", func(t *testing.T) {
-		pod := podAt(30*time.Minute, corev1.PodPending,
-			cond(corev1.PodScheduled, corev1.ConditionTrue, "", ""),
-			cond(corev1.PodReadyToStartContainers, corev1.ConditionTrue, "", ""),
-		)
-		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
-				Reason: "CreateContainerConfigError", Message: "configmap not found",
-			}},
-		}}
-		got := classifyStuckPod(pod)
-		if got.Reason != ReasonNotStarted {
-			t.Fatalf("reason = %q, want %q — a wiring problem must not be reported as a registry one",
-				got.Reason, ReasonNotStarted)
-		}
-		if got.Storage {
-			t.Fatal("a config error must NOT open a storage breaker")
-		}
-	})
+func assertImagePullFailureIsNotStorage(t *testing.T) {
+	pod := podAt(30*time.Minute, corev1.PodPending,
+		cond(corev1.PodScheduled, corev1.ConditionTrue, "", ""),
+		// Deliberately ALSO false: a pod stuck pulling can report this, and
+		// the image reason must win so a slow registry is never reported as
+		// a bad volume.
+		cond(corev1.PodReadyToStartContainers, corev1.ConditionFalse, "", ""),
+	)
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+			Reason: "ImagePullBackOff", Message: "back-off pulling image",
+		}},
+	}}
+	got := classifyStuckPod(pod)
+	if got.Reason != ReasonImageUnavailable {
+		t.Fatalf("reason = %q, want %q", got.Reason, ReasonImageUnavailable)
+	}
+	if got.Storage {
+		t.Fatal("an image pull failure must NOT open a storage breaker")
+	}
+}
 
-	t.Run("an unclassifiable pod says so honestly", func(t *testing.T) {
-		got := classifyStuckPod(podAt(30*time.Minute, corev1.PodPending))
-		if got.Reason != ReasonNotStarted {
-			t.Fatalf("reason = %q, want %q", got.Reason, ReasonNotStarted)
-		}
-		if got.Storage {
-			t.Fatal("an unclassified failure must NOT be attributed to storage")
-		}
-	})
+func assertMissingConfigMapNotFiledAsImageProblem(t *testing.T) {
+	pod := podAt(30*time.Minute, corev1.PodPending,
+		cond(corev1.PodScheduled, corev1.ConditionTrue, "", ""),
+		cond(corev1.PodReadyToStartContainers, corev1.ConditionTrue, "", ""),
+	)
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+			Reason: "CreateContainerConfigError", Message: "configmap not found",
+		}},
+	}}
+	got := classifyStuckPod(pod)
+	if got.Reason != ReasonNotStarted {
+		t.Fatalf("reason = %q, want %q — a wiring problem must not be reported as a registry one",
+			got.Reason, ReasonNotStarted)
+	}
+	if got.Storage {
+		t.Fatal("a config error must NOT open a storage breaker")
+	}
+}
+
+func assertUnclassifiablePodSaysSoHonestly(t *testing.T) {
+	got := classifyStuckPod(podAt(30*time.Minute, corev1.PodPending))
+	if got.Reason != ReasonNotStarted {
+		t.Fatalf("reason = %q, want %q", got.Reason, ReasonNotStarted)
+	}
+	if got.Storage {
+		t.Fatal("an unclassified failure must NOT be attributed to storage")
+	}
 }
 
 // A message reading only "deadline exceeded" would reproduce the outage this

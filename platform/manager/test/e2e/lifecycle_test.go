@@ -23,18 +23,38 @@ func TestConsoleLifecycle(t *testing.T) {
 	ctx := context.Background()
 	stamp := fmt.Sprint(time.Now().UnixNano())
 
-	// 9.2 first: no session, no write.
+	assertUnauthenticatedConsoleWriteRefused(t, e)
+	name := consoleStartAndFindConversation(t, ctx, e, stamp)
+	assertConsoleFirstRunDelivered(t, e, name, stamp)
+	consoleContinueAndAssertSecondAnswer(t, e, name, stamp)
+	assertPersonsWordsRecordedOnRun(t, ctx, e, name, stamp)
+
+	// 9.3 /close sets a phase, archives every bound thread, and the object
+	// survives; delete is the second verb and refuses anything not Closed.
+	t.Run("close then delete", func(t *testing.T) {
+		assertCloseThenDelete(t, ctx, e, name)
+	})
+}
+
+// 9.2 first: no session, no write.
+func assertUnauthenticatedConsoleWriteRefused(t *testing.T, e *Env) {
+	t.Helper()
 	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations", []byte(`{"task":"echo nope"}`), ""); code != 401 {
 		t.Fatalf("an unauthenticated write must be refused, got %d %s", code, out)
 	}
+}
+
+// consoleStartAndFindConversation starts a task and returns the conversation
+// it opened. The console originates through its chat SignalSource; the text
+// rides a payloadRef, so the conversation is matched by source and age.
+func consoleStartAndFindConversation(t *testing.T, ctx context.Context, e *Env, stamp string) string {
+	t.Helper()
 	start := time.Now().Add(-5 * time.Second)
 	task := "echo console " + stamp
 	code, out := e.ConsoleStart(t, task)
 	if code/100 != 2 {
 		t.Fatalf("start: %d %s", code, out)
 	}
-	// The console originates through its chat SignalSource; the text rides a
-	// payloadRef, so the conversation is matched by source and age.
 	var name string
 	waitFor(t, "the started conversation", 2*time.Minute, func() (bool, error) {
 		items, err := e.K.Conversations(ctx)
@@ -50,15 +70,24 @@ func TestConsoleLifecycle(t *testing.T) {
 		}
 		return false, nil
 	})
+	return name
+}
+
+// assertConsoleFirstRunDelivered: delivered to the console's bound thread —
+// the transcript shows the answer.
+func assertConsoleFirstRunDelivered(t *testing.T, e *Env, name, stamp string) {
+	t.Helper()
 	conv := e.WaitRun(t, name, 1, 4*time.Minute)
 	if got := conv.Status.Runs[0].Result; !strings.Contains(got, "[stub] console "+stamp) {
 		t.Fatalf("first run result: %q", got)
 	}
-	// Delivered to the console's bound thread — the transcript shows the answer.
 	waitFor(t, "the answer in the console thread", 2*time.Minute, func() (bool, error) {
 		return strings.Contains(e.ConsoleTranscript(t, name), "[stub] console "+stamp), nil
 	})
-	// Continue.
+}
+
+func consoleContinueAndAssertSecondAnswer(t *testing.T, e *Env, name, stamp string) {
+	t.Helper()
 	if code, out := e.ConsoleSend(t, name, "echo second "+stamp); code/100 != 2 {
 		t.Fatalf("send: %d %s", code, out)
 	}
@@ -66,8 +95,13 @@ func TestConsoleLifecycle(t *testing.T) {
 	waitFor(t, "the second answer in the console thread", 2*time.Minute, func() (bool, error) {
 		return strings.Contains(e.ConsoleTranscript(t, name), "[stub] second "+stamp), nil
 	})
-	// The person's own words are Kubernetes-API state, beside the answer.
-	conv, _ = e.K.Conversation(ctx, name)
+}
+
+// assertPersonsWordsRecordedOnRun: the person's own words are Kubernetes-API
+// state, beside the answer.
+func assertPersonsWordsRecordedOnRun(t *testing.T, ctx context.Context, e *Env, name, stamp string) {
+	t.Helper()
+	conv, _ := e.K.Conversation(ctx, name)
 	recorded := false
 	for _, r := range conv.Status.Runs {
 		for _, in := range r.Inputs {
@@ -79,51 +113,50 @@ func TestConsoleLifecycle(t *testing.T) {
 	if !recorded {
 		t.Fatalf("what a person typed must be recorded on the run: %+v", conv.Status.Runs)
 	}
+}
 
-	// 9.3 /close sets a phase, archives every bound thread, and the object
-	// survives; delete is the second verb and refuses anything not Closed.
-	t.Run("close then delete", func(t *testing.T) {
-		if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/delete",
-			[]byte(`{"names":["`+name+`"]}`), "Bearer "+e.Values.UIToken); code/100 == 2 && !strings.Contains(out, "refused") && !strings.Contains(out, "Closed") {
-			// A 2xx with an all-failed report is still a refusal; look at the CR.
-			c, _ := e.K.Conversation(ctx, name)
-			if c == nil {
-				t.Fatalf("delete of a conversation that is not Closed must be refused (%d %s)", code, out)
-			}
+func assertCloseThenDelete(t *testing.T, ctx context.Context, e *Env, name string) {
+	t.Helper()
+	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/delete",
+		[]byte(`{"names":["`+name+`"]}`), "Bearer "+e.Values.UIToken); code/100 == 2 && !strings.Contains(out, "refused") && !strings.Contains(out, "Closed") {
+		// A 2xx with an all-failed report is still a refusal; look at the CR.
+		c, _ := e.K.Conversation(ctx, name)
+		if c == nil {
+			t.Fatalf("delete of a conversation that is not Closed must be refused (%d %s)", code, out)
 		}
-		if code, out := e.ConsoleSend(t, name, "/close"); code/100 != 2 {
-			t.Fatalf("/close: %d %s", code, out)
+	}
+	if code, out := e.ConsoleSend(t, name, "/close"); code/100 != 2 {
+		t.Fatalf("/close: %d %s", code, out)
+	}
+	waitFor(t, "phase Closed", 2*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, name)
+		if err != nil {
+			return false, err
 		}
-		waitFor(t, "phase Closed", 2*time.Minute, func() (bool, error) {
-			c, err := e.K.Conversation(ctx, name)
-			if err != nil {
-				return false, err
-			}
-			return c.Status.Phase == "Closed" && c.Status.ClosedAt != nil, nil
-		})
-		conv, _ := e.K.Conversation(ctx, name)
-		if len(conv.Status.Threads) == 0 {
-			t.Fatalf("threads must survive a close")
+		return c.Status.Phase == "Closed" && c.Status.ClosedAt != nil, nil
+	})
+	conv, _ := e.K.Conversation(ctx, name)
+	if len(conv.Status.Threads) == 0 {
+		t.Fatalf("threads must survive a close")
+	}
+	waitFor(t, "every bound thread archived", 2*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, name)
+		if err != nil {
+			return false, err
 		}
-		waitFor(t, "every bound thread archived", 2*time.Minute, func() (bool, error) {
-			c, err := e.K.Conversation(ctx, name)
-			if err != nil {
-				return false, err
-			}
-			return len(c.Status.ThreadsArchived) >= len(c.Status.Threads), nil
-		})
-		if len(conv.Status.Runs) < 2 || conv.Status.RuntimeContextID == "" {
-			t.Fatalf("runs and the context handle must survive a close: %+v", conv.Status)
-		}
-		// Now delete is allowed.
-		if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/delete",
-			[]byte(`{"names":["`+name+`"]}`), "Bearer "+e.Values.UIToken); code/100 != 2 {
-			t.Fatalf("delete of a Closed conversation: %d %s", code, out)
-		}
-		waitFor(t, "the object to be gone", 3*time.Minute, func() (bool, error) {
-			_, err := e.K.Conversation(ctx, name)
-			return err != nil, nil
-		})
+		return len(c.Status.ThreadsArchived) >= len(c.Status.Threads), nil
+	})
+	if len(conv.Status.Runs) < 2 || conv.Status.RuntimeContextID == "" {
+		t.Fatalf("runs and the context handle must survive a close: %+v", conv.Status)
+	}
+	// Now delete is allowed.
+	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/delete",
+		[]byte(`{"names":["`+name+`"]}`), "Bearer "+e.Values.UIToken); code/100 != 2 {
+		t.Fatalf("delete of a Closed conversation: %d %s", code, out)
+	}
+	waitFor(t, "the object to be gone", 3*time.Minute, func() (bool, error) {
+		_, err := e.K.Conversation(ctx, name)
+		return err != nil, nil
 	})
 }
 

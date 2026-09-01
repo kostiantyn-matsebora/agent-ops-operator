@@ -180,6 +180,24 @@ func TestSignalTelegramConformance(t *testing.T) {
 func TestSignalK8sEventsConformance(t *testing.T) {
 	mgr := NewFakeManager(t, "adapter-token")
 	api := NewFakeAPIServer(t)
+	p := k8sEventsStartAdapterAndAssertWatch(t, mgr, api)
+	k8sEventsAssertEventBecomesNormalizedSignal(t, mgr, api)
+	k8sEventsAssertRejectedPostRetriedOrReported(t, mgr, api, p)
+}
+
+func k8sEventsEventPayload(now, name string) map[string]any {
+	return map[string]any{
+		"apiVersion": "v1", "kind": "Event",
+		"metadata":       map[string]any{"name": name, "namespace": "apps", "creationTimestamp": now},
+		"involvedObject": map[string]any{"kind": "Pod", "name": "api-7d9f8b6c4-x2k9q", "namespace": "apps"},
+		"reason":         "BackOff", "type": "Warning", "count": 3,
+		"message":        "Back-off restarting failed container api in pod api-7d9f8b6c4-x2k9q",
+		"firstTimestamp": now, "lastTimestamp": now,
+	}
+}
+
+func k8sEventsStartAdapterAndAssertWatch(t *testing.T, mgr *FakeManager, api *FakeAPIServer) *Process {
+	t.Helper()
 	mgr.ServeSources(SourceInfo{Name: "events", Config: json.RawMessage(`{"namespaces":["apps"]}`)})
 	env := append(contractEnv(mgr, "k8s-events", 0), api.Env()...)
 	p := start(t, "signal-k8s-events", build(t, "signals/k8s-events"), env)
@@ -195,18 +213,13 @@ func TestSignalK8sEventsConformance(t *testing.T) {
 	if p.Exited() {
 		t.Fatalf("exited:\n%s", p.Output())
 	}
+	return p
+}
+
+func k8sEventsAssertEventBecomesNormalizedSignal(t *testing.T, mgr *FakeManager, api *FakeAPIServer) {
+	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
-	event := func(name string) map[string]any {
-		return map[string]any{
-			"apiVersion": "v1", "kind": "Event",
-			"metadata":       map[string]any{"name": name, "namespace": "apps", "creationTimestamp": now},
-			"involvedObject": map[string]any{"kind": "Pod", "name": "api-7d9f8b6c4-x2k9q", "namespace": "apps"},
-			"reason":         "BackOff", "type": "Warning", "count": 3,
-			"message":        "Back-off restarting failed container api in pod api-7d9f8b6c4-x2k9q",
-			"firstTimestamp": now, "lastTimestamp": now,
-		}
-	}
-	api.Push("/api/v1/namespaces/apps/events", "ADDED", event("api-backoff.1"))
+	api.Push("/api/v1/namespaces/apps/events", "ADDED", k8sEventsEventPayload(now, "api-backoff.1"))
 	waitFor(t, "the event to become a signal", 60*time.Second, func() bool { return len(accepted(mgr, "events")) >= 1 })
 	post := accepted(mgr, "events")[0]
 	assertNormalized(t, post, "events")
@@ -218,10 +231,16 @@ func TestSignalK8sEventsConformance(t *testing.T) {
 	if labels["namespace"] != "apps" {
 		t.Fatalf("the namespace label: %v", labels)
 	}
-	// A rejected post is retried or reported — never silently dropped.
+}
+
+// k8sEventsAssertRejectedPostRetriedOrReported: a rejected post is retried
+// or reported — never silently dropped.
+func k8sEventsAssertRejectedPostRetriedOrReported(t *testing.T, mgr *FakeManager, api *FakeAPIServer, p *Process) {
+	t.Helper()
 	mgr.RejectSignals(500)
 	before := attempts(mgr, "events")
-	api.Push("/api/v1/namespaces/apps/events", "ADDED", event("api-backoff.2"))
+	now := time.Now().UTC().Format(time.RFC3339)
+	api.Push("/api/v1/namespaces/apps/events", "ADDED", k8sEventsEventPayload(now, "api-backoff.2"))
 	waitFor(t, "the rejected post attempt", 60*time.Second, func() bool { return attempts(mgr, "events") > before })
 	afterFirst := attempts(mgr, "events")
 	waitFor(t, "a retry or a status report about the rejection", 90*time.Second, func() bool {
@@ -245,6 +264,13 @@ func TestSignalK8sEventsConformance(t *testing.T) {
 func TestSignalHAConformance(t *testing.T) {
 	mgr := NewFakeManager(t, "adapter-token")
 	ha := NewFakeHA(t, "ha-long-lived-token")
+	p := haStartAdapterAndAssertAuthenticatedSubscription(t, mgr, ha)
+	rec := haAssertLogRecordBecomesNormalizedSignal(t, mgr, ha)
+	haAssertRejectedPostRetriedOrReported(t, mgr, ha, p, rec)
+}
+
+func haStartAdapterAndAssertAuthenticatedSubscription(t *testing.T, mgr *FakeManager, ha *FakeHA) *Process {
+	t.Helper()
 	mgr.ServeSources(SourceInfo{Name: "ha", CredentialEnvPrefix: "AGENTOPS_CRED_HA_",
 		Config: json.RawMessage(`{"endpoint":"` + ha.Endpoint() + `","backfill":false}`)})
 	env := append(contractEnv(mgr, "home-assistant", 0), "AGENTOPS_CRED_HA_token=ha-long-lived-token")
@@ -260,6 +286,11 @@ func TestSignalHAConformance(t *testing.T) {
 	if ha.Authed() != 1 {
 		t.Fatalf("exactly one session must authenticate, got %d", ha.Authed())
 	}
+	return p
+}
+
+func haAssertLogRecordBecomesNormalizedSignal(t *testing.T, mgr *FakeManager, ha *FakeHA) map[string]any {
+	t.Helper()
 	rec := map[string]any{
 		"name": "homeassistant.components.zwave_js", "level": "ERROR",
 		"message":   []any{"Failed to connect to the Z-Wave JS server"},
@@ -273,7 +304,12 @@ func TestSignalHAConformance(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(post.Signals[0]["payload"]), "zwave_js") {
 		t.Fatalf("the payload must carry the record: %v", post.Signals[0])
 	}
-	// Rejected → retried or reported.
+	return rec
+}
+
+// haAssertRejectedPostRetriedOrReported: rejected → retried or reported.
+func haAssertRejectedPostRetriedOrReported(t *testing.T, mgr *FakeManager, ha *FakeHA, p *Process, rec map[string]any) {
+	t.Helper()
 	mgr.RejectSignals(500)
 	before := attempts(mgr, "ha")
 	rec2 := map[string]any{}

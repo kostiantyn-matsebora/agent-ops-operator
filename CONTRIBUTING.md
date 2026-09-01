@@ -299,6 +299,19 @@ which is why the number the tree is asked to reach has to become a condition
 something evaluates; making it evaluate before anything meets it is a
 different thing from measuring.
 
+**THE GATE ALSO HOLDS EVERY COMPONENT'S EXISTING BACKLOG TO AT LEAST A B,
+NOT ONLY WHAT A PULL REQUEST TOUCHES.** A new-code condition judges only what
+a diff adds, so a component could sit at an E reliability rating forever with
+nothing ever asking. `sonar-provision.sh --gate` adds three more conditions,
+provisioned the same idempotent way as coverage: the component's OVERALL
+reliability rating, security rating and maintainability rating each at least
+B (`reliability_rating`, `security_rating` and `sqale_rating` — maintainability
+keeps its historical SQALE key — each `GT 2` on the 1–5, A–E scale). Every
+Blocker and High severity finding open in a project's code — by the Clean
+Code impact severity scale this organisation reads issues under, not the
+retired five-level one — keeps its rating below B, so reaching B means fixing
+those, never relaxing the threshold.
+
 **A pull request from a fork is analysed by nothing**, shown as a SKIPPED job:
 the scanner's token is withheld from fork workflows, so there is nothing you
 could do about it and nothing you should.
@@ -332,12 +345,16 @@ SonarCloud changes it, the wizard's *Import JSON* takes the same `projects`
 array.
 
 **Reading the analysis from an agent session**, project-scoped in `.mcp.json`:
-the official `sonarqube-mcp-server` Docker image, `SONARQUBE_TOKEN` and
-`SONARQUBE_ORG` filled from the same `SONAR_TOKEN` / `SONAR_ORG` the scripts
-above read, `SONARQUBE_READ_ONLY=true` — no write tool is exposed, same
-posture as `sonar-issues.py`. Set the two host env vars once and every
-session picks them up; the config carries no literal token or organisation
-key, per the publication guard below.
+SonarCloud's own native, hosted MCP endpoint (`https://api.sonarcloud.io/mcp`)
+— no local process, no Docker container, nothing to keep updated. Auth rides
+as an ordinary HTTP header, filled from the same `SONAR_TOKEN` / `SONAR_ORG`
+the scripts above read; there is no read-only flag to set because the
+endpoint's own tool set carries no write. Set the two host env vars once and
+every session picks them up, at the moment ITS OWN Claude Code process
+starts — a var exported after that, or in a shell that never launched it,
+reaches nothing, and the fix is relaunching from a shell that has it, not
+restarting the app in place. The config carries no literal token or
+organisation key, per the publication guard below.
 
 ## Commit messages
 

@@ -28,6 +28,8 @@ import (
 // standard way to stay under that.
 const streamKeepAlive = 20 * time.Second
 
+const errActivityDisabled = "activity telemetry is disabled"
+
 // activityResponse is the replay envelope. `resync` is the load-bearing field:
 // a client whose cursor has been evicted is TOLD so, rather than handed a
 // shorter list it would mistake for continuity.
@@ -39,7 +41,7 @@ type activityResponse struct {
 
 func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 	if s.Activity == nil {
-		writeJSON(w, 503, map[string]string{"error": "activity telemetry is disabled"})
+		writeJSON(w, 503, map[string]string{"error": errActivityDisabled})
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -56,7 +58,7 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 	if s.Activity == nil {
-		writeJSON(w, 503, map[string]string{"error": "activity telemetry is disabled"})
+		writeJSON(w, 503, map[string]string{"error": errActivityDisabled})
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -150,7 +152,7 @@ type reportedEvent struct {
 // graph through manager-side events; it simply never confirms delivery.
 func (s *Server) handleActivityReport(w http.ResponseWriter, r *http.Request) {
 	if s.Activity == nil {
-		writeJSON(w, 503, map[string]string{"error": "activity telemetry is disabled"})
+		writeJSON(w, 503, map[string]string{"error": errActivityDisabled})
 		return
 	}
 	scope, _ := r.Context().Value(adapterScopeKey{}).(string)

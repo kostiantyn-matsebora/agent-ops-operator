@@ -110,78 +110,97 @@ func run(m *testing.M) int {
 		return 1
 	}
 	if os.Getenv("E2E_REUSE") == "1" {
-		// A reused install carries the previous run's conversations and the
-		// manager's in-memory state — an open storage breaker, above all.
-		// Start from a clean manager, as a fresh cluster would.
-		// Deleted conversations linger under their close-topics finalizer
-		// for up to two minutes, and a signal with a lingering one's
-		// signature folds into it. Wait until they are really gone.
-		_, _ = cluster.Kubectl(ctx, "-n", Namespace, "delete", "conversations", "--all", "--wait=false")
-		deadline := time.Now().Add(4 * time.Minute)
-		for time.Now().Before(deadline) {
-			items, err := k.Conversations(ctx)
-			if err == nil && len(items) == 0 {
-				break
-			}
-			time.Sleep(3 * time.Second)
-		}
-		// rollout status waits for the OLD pod to be gone too, so the
-		// port-forward below cannot latch onto a terminating one.
-		_, _ = cluster.Kubectl(ctx, "-n", Namespace, "rollout", "restart", "deployment/agentops-manager")
-		if out, err := cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", "deployment/agentops-manager", "--timeout=3m"); err != nil {
-			fmt.Fprintln(os.Stderr, "manager restart:", err, out)
+		if err := resetReusedInstall(ctx, cluster, k); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			return 1
-		}
-		// The restarted manager re-applies every adapter Deployment and their
-		// pods roll shortly after — a port-forward opened before that lands
-		// on a pod about to die. Roll them NOW, deliberately, and wait.
-		out, _ := cluster.Kubectl(ctx, "-n", Namespace, "get", "deployments", "-l", "app.kubernetes.io/name in (agentops-adapter, agentops-signal-adapter)", "-o", "name")
-		for _, d := range strings.Fields(out) {
-			_, _ = cluster.Kubectl(ctx, "-n", Namespace, "rollout", "restart", d)
-		}
-		for _, d := range strings.Fields(out) {
-			if out, err := cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", d, "--timeout=3m"); err != nil {
-				fmt.Fprintln(os.Stderr, "adapter restart:", d, err, out)
-				return 1
-			}
 		}
 	}
 	if err := SetupWiring(ctx, k); err != nil {
 		fmt.Fprintln(os.Stderr, "wiring:", err)
 		return 1
 	}
-	env = &Env{Cluster: cluster, K: k, Values: values, Adapter: map[string]*Forward{}, artifact: artifact}
-	if env.Manager, err = cluster.Forward(Namespace, "svc/agentops-manager", 8080); err != nil {
-		fmt.Fprintln(os.Stderr, "forward manager:", err)
-		return 1
-	}
-	if env.Console, err = cluster.Forward(Namespace, "svc/agentops-adapter-console", 8080); err != nil {
-		fmt.Fprintln(os.Stderr, "forward console:", err)
-		return 1
-	}
-	if env.BotAPI, err = cluster.Forward(Namespace, "svc/agentops-test-fake-bot-api", 8081); err != nil {
-		fmt.Fprintln(os.Stderr, "forward fake bot api:", err)
+	var envErr error
+	if env, envErr = openHarnessEnv(cluster, k, values, artifact); envErr != nil {
+		fmt.Fprintln(os.Stderr, envErr)
 		return 1
 	}
 	code = m.Run()
-	// The budget is asserted for the gating tier only: growth must be visible
-	// rather than gradual, and the nightly pack is allowed to be slow.
-	if tier == "smoke" {
-		budget := 20 * time.Minute
-		if v := os.Getenv("E2E_BUDGET"); v != "" {
-			if d, err := time.ParseDuration(v); err == nil {
-				budget = d
-			}
+	return enforceSmokeBudget(code)
+}
+
+// resetReusedInstall: a reused install carries the previous run's
+// conversations and the manager's in-memory state — an open storage breaker,
+// above all. Start from a clean manager, as a fresh cluster would.
+func resetReusedInstall(ctx context.Context, cluster *Cluster, k *Kube) error {
+	// Deleted conversations linger under their close-topics finalizer for up
+	// to two minutes, and a signal with a lingering one's signature folds
+	// into it. Wait until they are really gone.
+	_, _ = cluster.Kubectl(ctx, "-n", Namespace, "delete", "conversations", "--all", "--wait=false")
+	deadline := time.Now().Add(4 * time.Minute)
+	for time.Now().Before(deadline) {
+		items, err := k.Conversations(ctx)
+		if err == nil && len(items) == 0 {
+			break
 		}
-		if elapsed := time.Since(started); elapsed > budget {
-			fmt.Fprintf(os.Stderr, "WALL-CLOCK BUDGET EXCEEDED: the gating tier took %s, budget %s — move work to the full tier rather than slowing the gate\n", elapsed.Round(time.Second), budget)
-			if code == 0 {
-				code = 1
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "gating tier took %s of its %s budget\n", elapsed.Round(time.Second), budget)
+		time.Sleep(3 * time.Second)
+	}
+	// rollout status waits for the OLD pod to be gone too, so the
+	// port-forward below cannot latch onto a terminating one.
+	_, _ = cluster.Kubectl(ctx, "-n", Namespace, "rollout", "restart", "deployment/agentops-manager")
+	if out, err := cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", "deployment/agentops-manager", "--timeout=3m"); err != nil {
+		return fmt.Errorf("manager restart: %w %s", err, out)
+	}
+	// The restarted manager re-applies every adapter Deployment and their
+	// pods roll shortly after — a port-forward opened before that lands on
+	// a pod about to die. Roll them NOW, deliberately, and wait.
+	out, _ := cluster.Kubectl(ctx, "-n", Namespace, "get", "deployments", "-l", "app.kubernetes.io/name in (agentops-adapter, agentops-signal-adapter)", "-o", "name")
+	for _, d := range strings.Fields(out) {
+		_, _ = cluster.Kubectl(ctx, "-n", Namespace, "rollout", "restart", d)
+	}
+	for _, d := range strings.Fields(out) {
+		if out, err := cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", d, "--timeout=3m"); err != nil {
+			return fmt.Errorf("adapter restart: %s %w %s", d, err, out)
 		}
 	}
+	return nil
+}
+
+func openHarnessEnv(cluster *Cluster, k *Kube, values *InstallValues, artifact string) (*Env, error) {
+	e := &Env{Cluster: cluster, K: k, Values: values, Adapter: map[string]*Forward{}, artifact: artifact}
+	var err error
+	if e.Manager, err = cluster.Forward(Namespace, "svc/agentops-manager", 8080); err != nil {
+		return nil, fmt.Errorf("forward manager: %w", err)
+	}
+	if e.Console, err = cluster.Forward(Namespace, "svc/agentops-adapter-console", 8080); err != nil {
+		return nil, fmt.Errorf("forward console: %w", err)
+	}
+	if e.BotAPI, err = cluster.Forward(Namespace, "svc/agentops-test-fake-bot-api", 8081); err != nil {
+		return nil, fmt.Errorf("forward fake bot api: %w", err)
+	}
+	return e, nil
+}
+
+// enforceSmokeBudget is asserted for the gating tier only: growth must be
+// visible rather than gradual, and the nightly pack is allowed to be slow.
+func enforceSmokeBudget(code int) int {
+	if tier != "smoke" {
+		return code
+	}
+	budget := 20 * time.Minute
+	if v := os.Getenv("E2E_BUDGET"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			budget = d
+		}
+	}
+	elapsed := time.Since(started)
+	if elapsed > budget {
+		fmt.Fprintf(os.Stderr, "WALL-CLOCK BUDGET EXCEEDED: the gating tier took %s, budget %s — move work to the full tier rather than slowing the gate\n", elapsed.Round(time.Second), budget)
+		if code == 0 {
+			code = 1
+		}
+		return code
+	}
+	fmt.Fprintf(os.Stderr, "gating tier took %s of its %s budget\n", elapsed.Round(time.Second), budget)
 	return code
 }
 

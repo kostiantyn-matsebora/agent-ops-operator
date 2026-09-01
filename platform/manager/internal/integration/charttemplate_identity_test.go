@@ -223,54 +223,83 @@ func TestNoRuntimeRoleCanReachASecret(t *testing.T) {
 	// own — the k8s MCP server's account is a wall on the same path, since an
 	// agent reaches the cluster THROUGH it.
 	for _, mode := range []string{"granted", "ungranted"} {
-		args := []string{
-			"--set", "kubernetes.enabled=true",
-			"--set", "kubernetes.pipelines.enabled=true",
-			"--set", "kubernetes.allowMutations=true",
-			"--set", "prometheus.enabled=true",
-			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-actor",
-		}
-		if mode == "granted" {
-			args = append(args, "--set-json",
-				`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
-					`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
-		}
-		out := helmTemplate(t, args...)
+		assertNoAgentRoleReachesSecrets(t, mode)
+	}
+}
 
-		for _, role := range rolesIn(t, out) {
-			// The MANAGER's own roles are held to their own rule elsewhere; this
-			// guard is about what an AGENT can reach.
-			if !isAgentRole(role.Metadata.Name) {
+func assertNoAgentRoleReachesSecrets(t *testing.T, mode string) {
+	t.Helper()
+	args := []string{
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.allowMutations=true",
+		"--set", "prometheus.enabled=true",
+		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-actor",
+	}
+	if mode == "granted" {
+		args = append(args, "--set-json",
+			`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
+				`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
+	}
+	out := helmTemplate(t, args...)
+
+	for _, role := range rolesIn(t, out) {
+		// The MANAGER's own roles are held to their own rule elsewhere; this
+		// guard is about what an AGENT can reach.
+		if !isAgentRole(role.Metadata.Name) {
+			continue
+		}
+		assertRoleGrantsNoSecretsAccess(t, mode, role)
+		assertRoleHasNoWildcardAPIGroup(t, mode, role)
+		assertRoleCannotEscalateOrBindRBAC(t, mode, role)
+	}
+}
+
+// assertRoleGrantsNoSecretsAccess: no runtime role may carry ANY verb on
+// secrets, in any mode, and a resources: [*] wildcard is refused on the same
+// grounds — it reaches Secrets without naming them, which is how a role
+// passes review and fails its purpose.
+func assertRoleGrantsNoSecretsAccess(t *testing.T, mode string, role clusterRoleRules) {
+	t.Helper()
+	for _, rule := range role.Rules {
+		for _, res := range rule.Resources {
+			if res == "secrets" || strings.HasPrefix(res, "secrets/") {
+				t.Fatalf("mode=%q role %q grants %v on %q — no runtime role may carry ANY verb "+
+					"on secrets, in any mode", mode, role.Metadata.Name, rule.Verbs, res)
+			}
+			if res == "*" {
+				t.Fatalf("mode=%q role %q has resources: [*] — a wildcard reaches Secrets without "+
+					"naming them, which is how a role passes review and fails its purpose",
+					mode, role.Metadata.Name)
+			}
+		}
+	}
+}
+
+func assertRoleHasNoWildcardAPIGroup(t *testing.T, mode string, role clusterRoleRules) {
+	t.Helper()
+	for _, rule := range role.Rules {
+		for _, g := range rule.APIGroups {
+			if g == "*" {
+				t.Fatalf("mode=%q role %q has apiGroups: [*]", mode, role.Metadata.Name)
+			}
+		}
+	}
+}
+
+// assertRoleCannotEscalateOrBindRBAC (5.4): a role that can escalate or bind
+// rewrites every guard above it.
+func assertRoleCannotEscalateOrBindRBAC(t *testing.T, mode string, role clusterRoleRules) {
+	t.Helper()
+	for _, rule := range role.Rules {
+		for _, g := range rule.APIGroups {
+			if g != "rbac.authorization.k8s.io" {
 				continue
 			}
-			for _, rule := range role.Rules {
-				for _, res := range rule.Resources {
-					if res == "secrets" || strings.HasPrefix(res, "secrets/") {
-						t.Fatalf("mode=%q role %q grants %v on %q — no runtime role may carry ANY verb "+
-							"on secrets, in any mode", mode, role.Metadata.Name, rule.Verbs, res)
-					}
-					if res == "*" {
-						t.Fatalf("mode=%q role %q has resources: [*] — a wildcard reaches Secrets without "+
-							"naming them, which is how a role passes review and fails its purpose",
-							mode, role.Metadata.Name)
-					}
-				}
-				for _, g := range rule.APIGroups {
-					if g == "*" {
-						t.Fatalf("mode=%q role %q has apiGroups: [*]", mode, role.Metadata.Name)
-					}
-				}
-				// 5.4 — a role that can escalate or bind rewrites the rule above.
-				for _, g := range rule.APIGroups {
-					if g != "rbac.authorization.k8s.io" {
-						continue
-					}
-					for _, v := range rule.Verbs {
-						if v == "escalate" || v == "bind" || v == "*" {
-							t.Fatalf("mode=%q role %q grants %q on rbac — the role can then widen itself "+
-								"and every guard above becomes advisory", mode, role.Metadata.Name, v)
-						}
-					}
+			for _, v := range rule.Verbs {
+				if v == "escalate" || v == "bind" || v == "*" {
+					t.Fatalf("mode=%q role %q grants %q on rbac — the role can then widen itself "+
+						"and every guard above becomes advisory", mode, role.Metadata.Name, v)
 				}
 			}
 		}
@@ -446,38 +475,43 @@ func grants(role *clusterRoleRules, resource, verb string) bool {
 // an enumerated role fixed the blast radius and left the model inverted.
 //
 // SILENCE MUST MEAN NO POWER. If this test fails, that inversion is back.
+const floorAccount = "agentops-runtime"
+
 func TestNothingEverBindsToTheFloorAccount(t *testing.T) {
-	const floor = "agentops-runtime"
-
 	for _, mode := range []string{"ungranted", "granted"} {
-		args := []string{
-			"--set", "kubernetes.enabled=true",
-			"--set", "kubernetes.pipelines.enabled=true",
-			"--set", "global.demo.enabled=true",
-			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
-		}
-		if mode == "granted" {
-			args = append(args, "--set-json",
-				`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
-					`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
-		}
-		out := helmTemplate(t, args...)
+		assertNoBindingNamesTheFloorAccount(t, mode)
+	}
+}
 
-		for _, doc := range strings.Split(out, "\n---") {
-			if !strings.Contains(doc, "\nkind: ClusterRoleBinding\n") &&
-				!strings.Contains(doc, "\nkind: RoleBinding\n") {
-				continue
-			}
-			subjects := doc
-			if i := strings.Index(doc, "subjects:"); i >= 0 {
-				subjects = doc[i:]
-			}
-			for _, line := range strings.Split(subjects, "\n") {
-				if strings.TrimSpace(line) == "name: "+floor {
-					t.Fatalf("mode=%q: a binding names the FLOOR account %q as a subject. "+
-						"A Pipeline that declares no serviceAccountName must hold NOTHING — "+
-						"grants belong on a named account a route opts into:\n%s", mode, floor, doc)
-				}
+func assertNoBindingNamesTheFloorAccount(t *testing.T, mode string) {
+	t.Helper()
+	args := []string{
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "global.demo.enabled=true",
+		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
+	}
+	if mode == "granted" {
+		args = append(args, "--set-json",
+			`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
+				`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
+	}
+	out := helmTemplate(t, args...)
+
+	for _, doc := range strings.Split(out, "\n---") {
+		if !strings.Contains(doc, "\nkind: ClusterRoleBinding\n") &&
+			!strings.Contains(doc, "\nkind: RoleBinding\n") {
+			continue
+		}
+		subjects := doc
+		if i := strings.Index(doc, "subjects:"); i >= 0 {
+			subjects = doc[i:]
+		}
+		for _, line := range strings.Split(subjects, "\n") {
+			if strings.TrimSpace(line) == "name: "+floorAccount {
+				t.Fatalf("mode=%q: a binding names the FLOOR account %q as a subject. "+
+					"A Pipeline that declares no serviceAccountName must hold NOTHING — "+
+					"grants belong on a named account a route opts into:\n%s", mode, floorAccount, doc)
 			}
 		}
 	}
@@ -563,46 +597,57 @@ func TestABundleWithNoRouteRendersNoIdentity(t *testing.T) {
 // A built-in role is one nobody in this repo can review: its contents come from
 // the Kubernetes distribution, change between versions, and aggregate roles
 // other controllers contribute to.
-func TestNoBindingUsesABuiltInClusterRole(t *testing.T) {
-	builtIn := map[string]bool{
-		"cluster-admin": true, "admin": true, "edit": true, "view": true,
-	}
-	for _, mode := range []string{"ungranted", "granted"} {
-		args := []string{"-n", "agent-ops",
-			"--set", "kubernetes.enabled=true",
-			"--set", "kubernetes.pipelines.enabled=true",
-			"--set", "kubernetes.allowMutations=true",
-			"--set", "prometheus.enabled=true",
-			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting"}
-		if mode == "granted" {
-			args = append(args, "--set-json",
-				`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
-					`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
-		}
-		out := helmTemplate(t, args...)
+var builtInClusterRoles = map[string]bool{
+	"cluster-admin": true, "admin": true, "edit": true, "view": true,
+}
 
-		for _, doc := range strings.Split(out, "\n---") {
-			if !strings.Contains(doc, "\nkind: ClusterRoleBinding\n") &&
-				!strings.Contains(doc, "\nkind: RoleBinding\n") {
-				continue
-			}
-			i := strings.Index(doc, "roleRef:")
-			if i < 0 {
-				continue
-			}
-			for _, line := range strings.Split(doc[i:], "\n") {
-				t2 := strings.TrimSpace(line)
-				if !strings.HasPrefix(t2, "name: ") {
-					continue
-				}
-				if builtIn[strings.TrimPrefix(t2, "name: ")] {
-					t.Errorf("mode=%q: a binding uses the built-in role %q. Every grant must be a "+
-						"role this chart writes out and an operator can read:\n%s",
-						mode, strings.TrimPrefix(t2, "name: "), doc)
-				}
-				break
-			}
+func TestNoBindingUsesABuiltInClusterRole(t *testing.T) {
+	for _, mode := range []string{"ungranted", "granted"} {
+		assertNoBindingUsesABuiltInClusterRole(t, mode)
+	}
+}
+
+func assertNoBindingUsesABuiltInClusterRole(t *testing.T, mode string) {
+	t.Helper()
+	args := []string{"-n", "agent-ops",
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.allowMutations=true",
+		"--set", "prometheus.enabled=true",
+		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting"}
+	if mode == "granted" {
+		args = append(args, "--set-json",
+			`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
+				`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
+	}
+	out := helmTemplate(t, args...)
+
+	for _, doc := range strings.Split(out, "\n---") {
+		if !strings.Contains(doc, "\nkind: ClusterRoleBinding\n") &&
+			!strings.Contains(doc, "\nkind: RoleBinding\n") {
+			continue
 		}
+		assertDocRoleRefNotBuiltIn(t, mode, doc)
+	}
+}
+
+func assertDocRoleRefNotBuiltIn(t *testing.T, mode, doc string) {
+	t.Helper()
+	i := strings.Index(doc, "roleRef:")
+	if i < 0 {
+		return
+	}
+	for _, line := range strings.Split(doc[i:], "\n") {
+		t2 := strings.TrimSpace(line)
+		if !strings.HasPrefix(t2, "name: ") {
+			continue
+		}
+		if builtInClusterRoles[strings.TrimPrefix(t2, "name: ")] {
+			t.Errorf("mode=%q: a binding uses the built-in role %q. Every grant must be a "+
+				"role this chart writes out and an operator can read:\n%s",
+				mode, strings.TrimPrefix(t2, "name: "), doc)
+		}
+		break
 	}
 }
 
@@ -619,38 +664,59 @@ func TestNoBindingUsesABuiltInClusterRole(t *testing.T) {
 // This test is what that reversal rests on.
 func TestAgentRolesNeverGrantAgentopsCRs(t *testing.T) {
 	for _, mode := range []string{"ungranted", "granted"} {
-		args := []string{"-n", "agent-ops",
-			"--set", "kubernetes.enabled=true",
-			"--set", "kubernetes.pipelines.enabled=true",
-			"--set", "kubernetes.allowMutations=true",
-			"--set", "prometheus.enabled=true",
-			"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting"}
-		if mode == "granted" {
-			args = append(args, "--set-json",
-				`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
-					`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
-		}
-		out := helmTemplate(t, args...)
+		assertAgentRolesGrantNoAgentopsCRsOrIdentityListing(t, mode)
+	}
+}
 
-		for _, role := range rolesIn(t, out) {
-			if !isAgentRole(role.Metadata.Name) {
-				continue
+func assertAgentRolesGrantNoAgentopsCRsOrIdentityListing(t *testing.T, mode string) {
+	t.Helper()
+	args := []string{"-n", "agent-ops",
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.allowMutations=true",
+		"--set", "prometheus.enabled=true",
+		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting"}
+	if mode == "granted" {
+		args = append(args, "--set-json",
+			`rbac.runtime.serviceAccounts[0].clusterRoles=[{"name":"wide","rules":`+
+				`[{"apiGroups":[""],"resources":["pods","configmaps"],"verbs":["get","list","delete"]}]}]`)
+	}
+	out := helmTemplate(t, args...)
+
+	for _, role := range rolesIn(t, out) {
+		if !isAgentRole(role.Metadata.Name) {
+			continue
+		}
+		assertRoleGrantsNoAgentopsAPIGroup(t, mode, role)
+		assertRoleDoesNotListIdentities(t, mode, role)
+	}
+}
+
+// assertRoleGrantsNoAgentopsAPIGroup: the grant is cluster-wide, so any rule
+// on the agentops.dev group would expose every Conversation in the install.
+func assertRoleGrantsNoAgentopsAPIGroup(t *testing.T, mode string, role clusterRoleRules) {
+	t.Helper()
+	for _, rule := range role.Rules {
+		for _, g := range rule.APIGroups {
+			if g == "agentops.dev" {
+				t.Errorf("mode=%q: agent role %q grants %v on the agentops.dev group. "+
+					"The grant is cluster-wide, so this would expose every Conversation "+
+					"in the install", mode, role.Metadata.Name, rule.Verbs)
 			}
-			for _, rule := range role.Rules {
-				for _, g := range rule.APIGroups {
-					if g == "agentops.dev" {
-						t.Errorf("mode=%q: agent role %q grants %v on the agentops.dev group. "+
-							"The grant is cluster-wide, so this would expose every Conversation "+
-							"in the install", mode, role.Metadata.Name, rule.Verbs)
-					}
-				}
-				for _, res := range rule.Resources {
-					if res == "clusterroles" || res == "clusterrolebindings" {
-						t.Errorf("mode=%q: agent role %q reads %q — that listing names every "+
-							"identity in the install and cannot be narrowed",
-							mode, role.Metadata.Name, res)
-					}
-				}
+		}
+	}
+}
+
+// assertRoleDoesNotListIdentities: listing ClusterRoles/ClusterRoleBindings
+// names every identity in the install and cannot be narrowed.
+func assertRoleDoesNotListIdentities(t *testing.T, mode string, role clusterRoleRules) {
+	t.Helper()
+	for _, rule := range role.Rules {
+		for _, res := range rule.Resources {
+			if res == "clusterroles" || res == "clusterrolebindings" {
+				t.Errorf("mode=%q: agent role %q reads %q — that listing names every "+
+					"identity in the install and cannot be narrowed",
+					mode, role.Metadata.Name, res)
 			}
 		}
 	}

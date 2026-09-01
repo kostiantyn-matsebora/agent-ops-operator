@@ -207,23 +207,7 @@ func TestAdmissionFIFOOnPodDelete(t *testing.T) {
 		time.Sleep(1500 * time.Millisecond) // distinct creation timestamps
 	}
 	ours := func(pod corev1.Pod) bool { return indexOf(names, pod.Labels["agentops.dev/conversation"]) >= 0 }
-	// The cron lane ticks every minute and its conversation is OLDER than
-	// anything posted here, so it would out-rank the waiters in the FIFO.
-	// Pause it by removing its Pipeline (its ticks then drop, Wired=False),
-	// and clear every other test's leftover conversation: an idle pod is
-	// evicted the moment a waiter exists, so only stalling work holds a slot.
-	cronLane := pipeline(PipelineCron, ProfileStub, []string{SourceCron}, []string{ChannelConsole})
-	cronLane.Namespace = Namespace
-	if err := e.K.Delete(ctx, cronLane); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		fresh := pipeline(PipelineCron, ProfileStub, []string{SourceCron}, []string{ChannelConsole})
-		_ = ensure(context.Background(), e.K, fresh)
-	})
-	if _, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "delete", "conversations", "--all", "--wait=false"); err != nil {
-		t.Fatal(err)
-	}
+	pauseCronLaneAndClearLeftovers(t, ctx, e)
 	waitFor(t, "no runtime pods", 4*time.Minute, func() (bool, error) {
 		pods, err := e.K.Pods(ctx, "agentops.dev/conversation")
 		return err == nil && len(pods) == 0, err
@@ -236,13 +220,7 @@ func TestAdmissionFIFOOnPodDelete(t *testing.T) {
 		if err != nil {
 			return false, err
 		}
-		mine := 0
-		for _, p := range pods {
-			if ours(p) {
-				mine++
-			}
-		}
-		return mine >= cap, nil
+		return countMatchingPods(pods, ours) >= cap, nil
 	})
 	holders := len(names)
 	// Two waiters, the older first.
@@ -272,9 +250,46 @@ func TestAdmissionFIFOOnPodDelete(t *testing.T) {
 	waitFor(t, "the older waiter to be promoted", 3*time.Minute, func() (bool, error) {
 		return phase(older) != "Pending" && phase(older) != "", nil
 	})
-	// The newer one may follow later when some other slot frees, but never
-	// before the older: FIFO is the claim, and it was checked at the moment
-	// the older left Pending.
+	assertNewerNotPromotedBeforeOlder(t, e, ctx, phase, newer, older)
+}
+
+// pauseCronLaneAndClearLeftovers: the cron lane ticks every minute and its
+// conversation is OLDER than anything posted here, so it would out-rank the
+// waiters in the FIFO. Pause it by removing its Pipeline (its ticks then
+// drop, Wired=False), and clear every other test's leftover conversation: an
+// idle pod is evicted the moment a waiter exists, so only stalling work
+// holds a slot.
+func pauseCronLaneAndClearLeftovers(t *testing.T, ctx context.Context, e *Env) {
+	t.Helper()
+	cronLane := pipeline(PipelineCron, ProfileStub, []string{SourceCron}, []string{ChannelConsole})
+	cronLane.Namespace = Namespace
+	if err := e.K.Delete(ctx, cronLane); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		fresh := pipeline(PipelineCron, ProfileStub, []string{SourceCron}, []string{ChannelConsole})
+		_ = ensure(context.Background(), e.K, fresh)
+	})
+	if _, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "delete", "conversations", "--all", "--wait=false"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func countMatchingPods(pods []corev1.Pod, pred func(corev1.Pod) bool) int {
+	n := 0
+	for _, p := range pods {
+		if pred(p) {
+			n++
+		}
+	}
+	return n
+}
+
+// assertNewerNotPromotedBeforeOlder: the newer one may follow later when
+// some other slot frees, but never before the older — FIFO is the claim,
+// checked at the moment the older left Pending.
+func assertNewerNotPromotedBeforeOlder(t *testing.T, e *Env, ctx context.Context, phase func(string) string, newer, older string) {
+	t.Helper()
 	if p := phase(newer); p != "Pending" {
 		o, _ := e.K.Conversation(ctx, older)
 		if o == nil || o.Status.Phase == "Pending" {
@@ -354,138 +369,151 @@ func TestStubMechanisms(t *testing.T) {
 	e := requireEnv(t)
 	ctx := context.Background()
 
-	t.Run("stale-context fails the next run", func(t *testing.T) {
-		fp := "e2e-stale-" + fmt.Sprint(time.Now().UnixNano())
-		e.PostTask(t, SourceTasks, fp, "stale-context")
-		conv := e.ConversationFor(t, fp, time.Minute)
-		// A conversation whose handle names nothing fails EVERY continuation,
-		// and while the breaker is open each failure is one more report —
-		// so it must not outlive its test, or nothing closes the breaker.
-		t.Cleanup(func() {
-			_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
-		})
-		conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
-		if !strings.HasPrefix(conv.Status.RuntimeContextID, "stub-stale-") {
-			t.Fatalf("latest-wins: the stale handle must be recorded, got %q", conv.Status.RuntimeContextID)
+	t.Run("stale-context fails the next run", func(t *testing.T) { assertStaleContextFailsNextRun(t, ctx, e) })
+	t.Run("no-context is not a loss", func(t *testing.T) { assertNoContextIsNotALoss(t, ctx, e) })
+	t.Run("die clears inflight", func(t *testing.T) { assertDieClearsInflight(t, ctx, e) })
+	t.Run("storage-outage holds work", func(t *testing.T) { assertStorageOutageHoldsWork(t, ctx, e) })
+}
+
+func assertStaleContextFailsNextRun(t *testing.T, ctx context.Context, e *Env) {
+	t.Helper()
+	fp := "e2e-stale-" + fmt.Sprint(time.Now().UnixNano())
+	e.PostTask(t, SourceTasks, fp, "stale-context")
+	conv := e.ConversationFor(t, fp, time.Minute)
+	// A conversation whose handle names nothing fails EVERY continuation,
+	// and while the breaker is open each failure is one more report —
+	// so it must not outlive its test, or nothing closes the breaker.
+	t.Cleanup(func() {
+		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
+	})
+	conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
+	if !strings.HasPrefix(conv.Status.RuntimeContextID, "stub-stale-") {
+		t.Fatalf("latest-wins: the stale handle must be recorded, got %q", conv.Status.RuntimeContextID)
+	}
+	if code, out := e.ConsoleSend(t, conv.Name, "echo again"); code/100 != 2 {
+		t.Fatalf("console send: %d %s", code, out)
+	}
+	conv = e.WaitRun(t, conv.Name, 2, 4*time.Minute)
+	run := conv.Status.Runs[len(conv.Status.Runs)-1]
+	if run.Status != "failed" {
+		t.Fatalf("a promised-and-lost context must FAIL the run, got %+v", run)
+	}
+	found := false
+	for _, c := range conv.Status.Conditions {
+		if c.Type == "ContextContinuity" && c.Status == metav1.ConditionFalse {
+			found = true
 		}
-		if code, out := e.ConsoleSend(t, conv.Name, "echo again"); code/100 != 2 {
-			t.Fatalf("console send: %d %s", code, out)
+	}
+	if !found {
+		t.Fatalf("the loss must be visible as a condition: %+v", conv.Status.Conditions)
+	}
+}
+
+func assertNoContextIsNotALoss(t *testing.T, ctx context.Context, e *Env) {
+	t.Helper()
+	fp := "e2e-nocontext-" + fmt.Sprint(time.Now().UnixNano())
+	e.PostTask(t, SourceTasks, fp, "no-context")
+	conv := e.ConversationFor(t, fp, time.Minute)
+	t.Cleanup(func() {
+		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
+	})
+	conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
+	run := conv.Status.Runs[len(conv.Status.Runs)-1]
+	if run.Status != "succeeded" || conv.Status.RuntimeContextID != "" {
+		t.Fatalf("no handle is not a lost handle: %+v handle=%q", run, conv.Status.RuntimeContextID)
+	}
+	for _, c := range conv.Status.Conditions {
+		if c.Type == "ContextContinuity" && c.Status == metav1.ConditionFalse {
+			t.Fatalf("absence must not be reported as loss: %s", c.Message)
 		}
-		conv = e.WaitRun(t, conv.Name, 2, 4*time.Minute)
-		run := conv.Status.Runs[len(conv.Status.Runs)-1]
-		if run.Status != "failed" {
-			t.Fatalf("a promised-and-lost context must FAIL the run, got %+v", run)
+	}
+}
+
+func assertDieClearsInflight(t *testing.T, ctx context.Context, e *Env) {
+	t.Helper()
+	fp := "e2e-die-" + fmt.Sprint(time.Now().UnixNano())
+	e.PostTask(t, SourceTasks, fp, "die")
+	conv := e.ConversationFor(t, fp, time.Minute)
+	t.Cleanup(func() {
+		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
+	})
+	var firstPod string
+	waitFor(t, "the run to be inflight", 3*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, conv.Name)
+		if err != nil {
+			return false, err
 		}
-		found := false
-		for _, c := range conv.Status.Conditions {
-			if c.Type == "ContextContinuity" && c.Status == metav1.ConditionFalse {
-				found = true
-			}
+		firstPod = c.Status.RuntimePod
+		return c.Status.Inflight != nil, nil
+	})
+	// The pod exits 3 without reporting. The manager sees the pod go and
+	// clears the inflight run rather than waiting on a report that never
+	// comes; the input is pending again.
+	waitFor(t, "inflight to clear after the pod died", 4*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, conv.Name)
+		if err != nil {
+			return false, err
 		}
-		if !found {
-			t.Fatalf("the loss must be visible as a condition: %+v", conv.Status.Conditions)
+		return c.Status.Inflight == nil || c.Status.RuntimePod != firstPod, nil
+	})
+}
+
+// assertStorageOutageHoldsWork: three reports within the breaker window open
+// it; the fourth conversation's input is HELD rather than consumed.
+func assertStorageOutageHoldsWork(t *testing.T, ctx context.Context, e *Env) {
+	t.Helper()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	var convs []string
+	for i := 0; i < 4; i++ {
+		fp := fmt.Sprintf("e2e-outage-%s-%d", stamp, i)
+		e.PostTask(t, SourceTasks, fp, "storage-outage")
+		convs = append(convs, e.ConversationFor(t, fp, time.Minute).Name)
+	}
+	t.Cleanup(func() {
+		for _, n := range convs {
+			_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: n}})
 		}
 	})
-
-	t.Run("no-context is not a loss", func(t *testing.T) {
-		fp := "e2e-nocontext-" + fmt.Sprint(time.Now().UnixNano())
-		e.PostTask(t, SourceTasks, fp, "no-context")
-		conv := e.ConversationFor(t, fp, time.Minute)
-		t.Cleanup(func() {
-			_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
-		})
-		conv = e.WaitRun(t, conv.Name, 1, 4*time.Minute)
-		run := conv.Status.Runs[len(conv.Status.Runs)-1]
-		if run.Status != "succeeded" || conv.Status.RuntimeContextID != "" {
-			t.Fatalf("no handle is not a lost handle: %+v handle=%q", run, conv.Status.RuntimeContextID)
-		}
-		for _, c := range conv.Status.Conditions {
-			if c.Type == "ContextContinuity" && c.Status == metav1.ConditionFalse {
-				t.Fatalf("absence must not be reported as loss: %s", c.Message)
-			}
-		}
+	waitFor(t, "the breaker to hold a conversation", 6*time.Minute, func() (bool, error) {
+		return anyConversationHeldByBreaker(ctx, e, convs)
 	})
-
-	t.Run("die clears inflight", func(t *testing.T) {
-		fp := "e2e-die-" + fmt.Sprint(time.Now().UnixNano())
-		e.PostTask(t, SourceTasks, fp, "die")
-		conv := e.ConversationFor(t, fp, time.Minute)
-		t.Cleanup(func() {
-			_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
-		})
-		var firstPod string
-		waitFor(t, "the run to be inflight", 3*time.Minute, func() (bool, error) {
-			c, err := e.K.Conversation(ctx, conv.Name)
-			if err != nil {
-				return false, err
-			}
-			firstPod = c.Status.RuntimePod
-			return c.Status.Inflight != nil, nil
-		})
-		// The pod exits 3 without reporting. The manager sees the pod go and
-		// clears the inflight run rather than waiting on a report that never
-		// comes; the input is pending again.
-		waitFor(t, "inflight to clear after the pod died", 4*time.Minute, func() (bool, error) {
-			c, err := e.K.Conversation(ctx, conv.Name)
-			if err != nil {
-				return false, err
-			}
-			return c.Status.Inflight == nil || c.Status.RuntimePod != firstPod, nil
-		})
-	})
-
-	t.Run("storage-outage holds work", func(t *testing.T) {
-		// Three reports within the breaker window open it; the fourth
-		// conversation's input is HELD rather than consumed.
-		stamp := fmt.Sprint(time.Now().UnixNano())
-		var convs []string
-		for i := 0; i < 4; i++ {
-			fp := fmt.Sprintf("e2e-outage-%s-%d", stamp, i)
-			e.PostTask(t, SourceTasks, fp, "storage-outage")
-			convs = append(convs, e.ConversationFor(t, fp, time.Minute).Name)
-		}
-		t.Cleanup(func() {
-			for _, n := range convs {
-				_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: n}})
-			}
-		})
-		waitFor(t, "the breaker to hold a conversation", 6*time.Minute, func() (bool, error) {
-			for _, n := range convs {
-				c, err := e.K.Conversation(ctx, n)
-				if err != nil {
-					return false, err
-				}
-				for _, cond := range c.Status.Conditions {
-					if cond.Reason == "ContextStoreUnavailable" {
-						return true, nil
-					}
-				}
-			}
-			return false, nil
-		})
+	held := 0
+	for _, n := range convs {
+		c, _ := e.K.Conversation(ctx, n)
 		// While held, the input was not consumed: it is still pending.
-		held := 0
-		for _, n := range convs {
-			c, _ := e.K.Conversation(ctx, n)
-			if c != nil && len(c.Spec.Inputs) > 0 && len(c.Status.ProcessedInputIDs) == 0 {
-				held++
+		if c != nil && len(c.Spec.Inputs) > 0 && len(c.Status.ProcessedInputIDs) == 0 {
+			held++
+		}
+	}
+	if held == 0 {
+		t.Fatalf("a held conversation keeps its input pending; none did")
+	}
+	// The outage conversations are removed so their held inputs stop
+	// re-reporting. WHAT IS NOT ASSERTED: that the breaker closes again.
+	// It closes on a CONTINUED run (a new context proves nothing about
+	// the store), and the one canary the manager let through here never
+	// reached a pod in two runs — an open question for the manager, filed
+	// rather than papered over with a longer wait. This subtest therefore
+	// runs LAST in the pack: an open breaker holds every conversation
+	// after it.
+	for _, n := range convs {
+		_ = e.K.Delete(ctx, &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: n}})
+	}
+}
+
+func anyConversationHeldByBreaker(ctx context.Context, e *Env, convs []string) (bool, error) {
+	for _, n := range convs {
+		c, err := e.K.Conversation(ctx, n)
+		if err != nil {
+			return false, err
+		}
+		for _, cond := range c.Status.Conditions {
+			if cond.Reason == "ContextStoreUnavailable" {
+				return true, nil
 			}
 		}
-		if held == 0 {
-			t.Fatalf("a held conversation keeps its input pending; none did")
-		}
-		// The outage conversations are removed so their held inputs stop
-		// re-reporting. WHAT IS NOT ASSERTED: that the breaker closes again.
-		// It closes on a CONTINUED run (a new context proves nothing about
-		// the store), and the one canary the manager let through here never
-		// reached a pod in two runs — an open question for the manager, filed
-		// rather than papered over with a longer wait. This subtest therefore
-		// runs LAST in the pack: an open breaker holds every conversation
-		// after it.
-		for _, n := range convs {
-			_ = e.K.Delete(ctx, &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: n}})
-		}
-	})
+	}
+	return false, nil
 }
 
 func indexOf(list []string, s string) int {

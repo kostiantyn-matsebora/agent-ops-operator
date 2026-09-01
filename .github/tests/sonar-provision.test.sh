@@ -209,6 +209,11 @@ done
 it "adds the overall coverage condition this repository is here for"
 assert_contains "$OUT" "condition added: coverage LT 80"
 
+it "adds the three overall rating conditions sonar-ratings-baseline is here for"
+for m in reliability_rating security_rating sqale_rating; do
+  assert_contains "$OUT" "condition added: $m GT 2"
+done
+
 it "makes it the organisation default"
 assert_contains "$OUT" "gate set as the organisation default"
 
@@ -229,9 +234,12 @@ it "creates no second gate when one is already there"
 assert_contains "$OUT" "gate present: agentops"
 assert_not_contains "$OUT" "gate created"
 
-it "adds ONLY the coverage condition, leaving the six it already carries"
+it "adds coverage and the three overall ratings, leaving the six it already carries"
 assert_contains "$OUT" "condition added: coverage LT 80"
-assert_equals "1" "$(printf '%s\n' "$OUT" | grep -c 'condition added')"
+for m in reliability_rating security_rating sqale_rating; do
+  assert_contains "$OUT" "condition added: $m GT 2"
+done
+assert_equals "4" "$(printf '%s\n' "$OUT" | grep -c 'condition added')"
 
 it "reports the six it left alone rather than saying nothing about them"
 assert_equals "6" "$(printf '%s\n' "$OUT" | grep -c 'condition present')"
@@ -246,7 +254,7 @@ assert_not_contains "$(cat "$CALLS")" "set_as_default"
 
 CALLS="$TMP/calls-done"; : > "$CALLS"
 F="$TMP/fx-done"
-fixtures "$F" "$(agentops_gate true ',{"id":107,"metric":"coverage","op":"LT","error":"80"}')" \
+fixtures "$F" "$(agentops_gate true ',{"id":107,"metric":"coverage","op":"LT","error":"80"},{"id":108,"metric":"reliability_rating","op":"GT","error":"2"},{"id":109,"metric":"security_rating","op":"GT","error":"2"},{"id":110,"metric":"sqale_rating","op":"GT","error":"2"}')" \
   '{"qualityGate":{"id":"777","name":"agentops","default":false}}'
 run "$F" --gate
 
@@ -275,7 +283,7 @@ assert_equals "0" "$RC"
 
 CALLS="$TMP/calls-drift"; : > "$CALLS"
 F="$TMP/fx-drift"
-fixtures "$F" "$(agentops_gate true ',{"id":107,"metric":"coverage","op":"LT","error":"50"}')" \
+fixtures "$F" "$(agentops_gate true ',{"id":107,"metric":"coverage","op":"LT","error":"50"},{"id":108,"metric":"reliability_rating","op":"GT","error":"2"},{"id":109,"metric":"security_rating","op":"GT","error":"2"},{"id":110,"metric":"sqale_rating","op":"GT","error":"2"}')" \
   '{"qualityGate":{"id":"777","name":"agentops","default":true}}'
 run "$F" --gate
 
@@ -364,7 +372,7 @@ assert_contains "$OUT" "assigned: o_agent-ops-operator_manager"
 assert_contains "$OUT" "assigned: o_agent-ops-operator_console"
 
 it "writes every condition too, not just the first"
-assert_equals "7" "$(printf '%s\n' "$OUT" | grep -c 'condition added')"
+assert_equals "10" "$(printf '%s\n' "$OUT" | grep -c 'condition added')"
 
 # BOTH roots: the project-list section's and the gate section's, the latter
 # holding every tree make_tree built.

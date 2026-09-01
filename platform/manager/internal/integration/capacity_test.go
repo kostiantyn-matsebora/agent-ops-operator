@@ -360,20 +360,7 @@ func TestDeletionTellsThreadsThenReleases(t *testing.T) {
 	reconcileWith(t, rc, "close-1")
 
 	for _, tc := range []struct{ adapter, thread string }{{"tg-close-a", "9876"}, {"tg-close-b", "T-42"}} {
-		op := findOp(t, srv, tc.adapter, chat.OpDeleteConversation, "close-1")
-		if op == nil {
-			t.Fatalf("%s: no delete-conversation op reached the adapter", tc.adapter)
-		}
-		if op.ThreadID == nil || *op.ThreadID != tc.thread {
-			t.Fatalf("%s: delete-conversation op %+v", tc.adapter, op)
-		}
-		if op.Message == nil {
-			t.Fatalf("%s: it must carry the notice the thread is owed", tc.adapter)
-		}
-		// and NOT close-topic: one lifecycle event, one operation
-		if stale := findOp(t, srv, tc.adapter, chat.OpCloseTopic, "close-1"); stale != nil {
-			t.Fatalf("%s: deletion must not also send close-topic", tc.adapter)
-		}
+		assertDeleteConversationOpReached(t, srv, tc.adapter, tc.thread)
 	}
 
 	// nobody completes them; the grace expires and deletion proceeds anyway
@@ -384,6 +371,26 @@ func TestDeletionTellsThreadsThenReleases(t *testing.T) {
 	}
 	if podExists(t, "close-1") {
 		t.Fatal("closing must release the runtime pod (and with it the capacity slot)")
+	}
+}
+
+// assertDeleteConversationOpReached: the named adapter got a
+// delete-conversation op for the bound thread, carrying the owed notice, and
+// NOT close-topic too — one lifecycle event, one operation.
+func assertDeleteConversationOpReached(t *testing.T, srv *httpapi.Server, adapter, thread string) {
+	t.Helper()
+	op := findOp(t, srv, adapter, chat.OpDeleteConversation, "close-1")
+	if op == nil {
+		t.Fatalf("%s: no delete-conversation op reached the adapter", adapter)
+	}
+	if op.ThreadID == nil || *op.ThreadID != thread {
+		t.Fatalf("%s: delete-conversation op %+v", adapter, op)
+	}
+	if op.Message == nil {
+		t.Fatalf("%s: it must carry the notice the thread is owed", adapter)
+	}
+	if stale := findOp(t, srv, adapter, chat.OpCloseTopic, "close-1"); stale != nil {
+		t.Fatalf("%s: deletion must not also send close-topic", adapter)
 	}
 }
 

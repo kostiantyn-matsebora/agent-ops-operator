@@ -252,8 +252,16 @@ func TestSignalBatchGrouping(t *testing.T) {
 	h := apiServer().Handler()
 	labels := map[string]string{"alertgroup": "g", "alertname": "TestAlert", "namespace": "ha"}
 
-	// two fresh same-signature signals in ONE batch → one conversation, one
-	// combined out-of-line input
+	conv := postBatchAndFindCombinedConversation(t, ctx, h, labels)
+	assertCooldownSuppressesDuplicateFingerprint(t, h, labels)
+	assertBatchRecurrenceIntoSameConversation(t, ctx, h, conv, labels)
+}
+
+// postBatchAndFindCombinedConversation posts two fresh same-signature
+// signals in ONE batch, which must open one conversation with one combined
+// out-of-line input.
+func postBatchAndFindCombinedConversation(t *testing.T, ctx context.Context, h http.Handler, labels map[string]string) *agentopsv1alpha1.Conversation {
+	t.Helper()
 	rec := postSignal(t, h, testMasterToken, "am", []map[string]any{
 		{"fingerprint": "fp-a", "labels": labels, "payload": "alert-a"},
 		{"fingerprint": "fp-a2", "labels": labels, "payload": "alert-a2"},
@@ -282,22 +290,31 @@ func TestSignalBatchGrouping(t *testing.T) {
 	if !strings.Contains(ci.Spec.Payload, "alert-a") || !strings.Contains(ci.Spec.Payload, "alert-a2") {
 		t.Fatalf("combined payload expected: %q", ci.Spec.Payload)
 	}
+	return conv
+}
 
-	// same fingerprint suppressed by cooldown
-	rec = postSignal(t, h, testMasterToken, "am", []map[string]any{{"fingerprint": "fp-a", "labels": labels}})
+func assertCooldownSuppressesDuplicateFingerprint(t *testing.T, h http.Handler, labels map[string]string) {
+	t.Helper()
+	rec := postSignal(t, h, testMasterToken, "am", []map[string]any{{"fingerprint": "fp-a", "labels": labels}})
 	if !strings.Contains(rec.Body.String(), `"queued":0`) {
 		t.Fatalf("cooldown: %s", rec.Body.String())
 	}
+}
 
-	// new fingerprint, same signature, session present -> recurrence into SAME conversation
+// assertBatchRecurrenceIntoSameConversation: a new fingerprint, same signature,
+// with a session present becomes a recurrence into the SAME conversation —
+// never a duplicate one.
+func assertBatchRecurrenceIntoSameConversation(t *testing.T, ctx context.Context, h http.Handler, conv *agentopsv1alpha1.Conversation, labels map[string]string) {
+	t.Helper()
 	patch := client.MergeFrom(conv.DeepCopy())
 	conv.Status.SessionID = "sess-x"
 	if err := k8sClient.Status().Patch(ctx, conv, patch); err != nil {
 		t.Fatal(err)
 	}
-	if rec = postSignal(t, h, testMasterToken, "am", []map[string]any{{"fingerprint": "fp-b", "labels": labels}}); rec.Code != 200 {
+	if rec := postSignal(t, h, testMasterToken, "am", []map[string]any{{"fingerprint": "fp-b", "labels": labels}}); rec.Code != 200 {
 		t.Fatal("recurrence post")
 	}
+	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	count := 0
 	for i := range list.Items {

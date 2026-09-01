@@ -28,7 +28,23 @@ func TestSignalLoopBreaker(t *testing.T) {
 	e := requireEnv(t)
 	ctx := context.Background()
 
-	// 8.1 A runtime that cannot start, and a Pipeline pointed at it.
+	srcName := setupBrokenRuntimePipeline(t, ctx, e)
+	before, err := e.K.Conversations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv := postTaskAndWaitPodFailsToStart(t, ctx, e, srcName)
+	t.Cleanup(func() {
+		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
+	})
+	assertFailingPodEmitsWarningEvents(t, ctx, e)
+	assertLoopStaysBoundedAcrossWindow(t, ctx, e, len(before)+1)
+}
+
+// setupBrokenRuntimePipeline (8.1): a runtime that cannot start, and a
+// Pipeline pointed at it. Returns the source name to post tasks to.
+func setupBrokenRuntimePipeline(t *testing.T, ctx context.Context, e *Env) string {
+	t.Helper()
 	broken := &agentopsv1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "e2e-broken"}}
 	broken.Spec.Image = "agentops-e2e-runtime-that-does-not-exist:never"
 	broken.Spec.ContextStorage = agentopsv1alpha1.ContextStorage("none")
@@ -42,18 +58,17 @@ func TestSignalLoopBreaker(t *testing.T) {
 	if err := waitPipelineReady(ctx, e.K, p.Name, 2*time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	before, err := e.K.Conversations(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	return src.Name
+}
+
+// postTaskAndWaitPodFailsToStart: the pod really fails — ErrImagePull /
+// ImagePullBackOff Warning events in the operator's own namespace, about a
+// pod named agentops-conv-*.
+func postTaskAndWaitPodFailsToStart(t *testing.T, ctx context.Context, e *Env, srcName string) *agentopsv1alpha1.Conversation {
+	t.Helper()
 	fp := "e2e-loop-" + fmt.Sprint(time.Now().UnixNano())
-	e.PostTask(t, src.Name, fp, "echo never")
+	e.PostTask(t, srcName, fp, "echo never")
 	conv := e.ConversationFor(t, fp, time.Minute)
-	t.Cleanup(func() {
-		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
-	})
-	// The pod really fails: ErrImagePull / ImagePullBackOff Warning events in
-	// the operator's own namespace, about a pod named agentops-conv-*.
 	waitFor(t, "the runtime pod to fail to start", 3*time.Minute, func() (bool, error) {
 		c, err := e.K.Conversation(ctx, conv.Name)
 		if err != nil || c.Status.RuntimePod == "" {
@@ -70,15 +85,25 @@ func TestSignalLoopBreaker(t *testing.T) {
 		}
 		return false, nil
 	})
+	return conv
+}
+
+func assertFailingPodEmitsWarningEvents(t *testing.T, ctx context.Context, e *Env) {
+	t.Helper()
 	events, _ := e.Cluster.Kubectl(ctx, "-n", Namespace, "get", "events", "--field-selector", "type=Warning", "-o", "name")
 	if !strings.Contains(events, "event/") {
 		t.Fatalf("the failing pod must be emitting Warning events for the test to mean anything")
 	}
+}
 
-	// 8.2 Bounded count AND bounded rate across the window: a slow leak fails.
+// assertLoopStaysBoundedAcrossWindow (8.2 + 8.3): bounded count AND bounded
+// rate across the window — a slow leak fails — while, half-way through, the
+// adapter is restarted (cold cache) to prove the name-prefix mechanism holds
+// before the object cache is warm.
+func assertLoopStaysBoundedAcrossWindow(t *testing.T, ctx context.Context, e *Env, created int) {
+	t.Helper()
 	window := 4 * time.Minute
 	deadline := time.Now().Add(window)
-	created := len(before) + 1 // ours
 	maxSeen := created
 	for time.Now().Before(deadline) {
 		items, err := e.K.Conversations(ctx)
@@ -88,23 +113,8 @@ func TestSignalLoopBreaker(t *testing.T) {
 		if len(items) > maxSeen {
 			maxSeen = len(items)
 		}
-		for _, c := range items {
-			if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents {
-				if strings.Contains(c.Spec.Title+c.Spec.Signature, "agentops-") || strings.Contains(c.Spec.Title+c.Spec.Signature, Namespace) {
-					t.Fatalf("a conversation was opened from an event about agent-ops' own machinery: %s %q", c.Name, c.Spec.Title)
-				}
-			}
-		}
-		// 8.3 Cold cache: half-way through, restart the adapter while the
-		// pod keeps failing — the name-prefix mechanism must hold before
-		// the object cache is warm.
-		if time.Until(deadline) < window/2 && !restarted(t) {
-			pods, _ := e.K.Pods(ctx, "agentops.dev/signal-adapter=k8s-events")
-			for _, pod := range pods {
-				_ = e.K.Delete(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: pod.Name}})
-			}
-			markRestarted(t)
-		}
+		assertNoSelfSignalConversation(t, items)
+		maybeRestartEventsAdapterAtHalfway(t, ctx, e, deadline, window)
 		time.Sleep(10 * time.Second)
 	}
 	after, _ := e.K.Conversations(ctx)
@@ -116,6 +126,32 @@ func TestSignalLoopBreaker(t *testing.T) {
 	if len(pods) == 0 {
 		t.Fatalf("the events adapter must be running again after its restart")
 	}
+}
+
+func assertNoSelfSignalConversation(t *testing.T, items []agentopsv1alpha1.Conversation) {
+	t.Helper()
+	for _, c := range items {
+		if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents {
+			if strings.Contains(c.Spec.Title+c.Spec.Signature, "agentops-") || strings.Contains(c.Spec.Title+c.Spec.Signature, Namespace) {
+				t.Fatalf("a conversation was opened from an event about agent-ops' own machinery: %s %q", c.Name, c.Spec.Title)
+			}
+		}
+	}
+}
+
+// maybeRestartEventsAdapterAtHalfway (8.3): cold cache — half-way through,
+// restart the adapter while the pod keeps failing — the name-prefix
+// mechanism must hold before the object cache is warm.
+func maybeRestartEventsAdapterAtHalfway(t *testing.T, ctx context.Context, e *Env, deadline time.Time, window time.Duration) {
+	t.Helper()
+	if time.Until(deadline) >= window/2 || restarted(t) {
+		return
+	}
+	pods, _ := e.K.Pods(ctx, "agentops.dev/signal-adapter=k8s-events")
+	for _, pod := range pods {
+		_ = e.K.Delete(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: pod.Name}})
+	}
+	markRestarted(t)
 }
 
 var restartedFlag = map[string]bool{}

@@ -141,12 +141,21 @@ else
 fi
 
 # WANTED = every condition of the built-in gate, verbatim, plus overall
-# coverage. Copied rather than listed here so upstream's set can change without
-# this script describing a gate contributors no longer see.
+# coverage and the three overall ratings (sonar-ratings-baseline). Copied
+# rather than listed here so upstream's set can change without this script
+# describing a gate contributors no longer see.
+#
+# 1.0-5.0, A=1 ... E=5 on all three -- `GT 2` fails worse than B, mirroring
+# `coverage LT 80`'s own numeric-scale condition. Maintainability keeps its
+# historical SQALE key; there is no separate "new" vs "overall" spelling to
+# confuse it with, unlike `new_coverage` vs `coverage` above.
 wanted=$(sq GET qualitygates/show "organization=$SONAR_ORG" "name=$BUILTIN" \
   | jq -r '.conditions[] | "\(.metric) \(.op) \(.error)"')
 wanted="$wanted
-coverage LT $COVERAGE_THRESHOLD"
+coverage LT $COVERAGE_THRESHOLD
+reliability_rating GT 2
+security_rating GT 2
+sqale_rating GT 2"
 
 printf '%s\n' "$wanted" | while read -r metric op error; do
   [ -n "$metric" ] || continue
