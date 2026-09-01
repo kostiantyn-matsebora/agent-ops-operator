@@ -180,6 +180,29 @@
     uses (`contextreport_test.go`, `router_test.go`) — no envtest needed for
     any of them. `go test ./...` (envtest included, for the rest of the
     module) still green, 47.7s.
+
+    **CONFIRMED: `manager`'s new-code gate reads OK on CI**, all six
+    conditions including `new_coverage` at 100.0%.
+
+  - **A FOURTH, UNRELATED CI FIX**, found while chasing what looked like a
+    flake: `images (runtime-copilot)` and `images (runtime-ollama)` both
+    failed Trivy on the identical `libexpat1` `CVE-2026-56408`, on the
+    identical cached version `2.5.0-1+deb12u2`, across two separate CI runs
+    minutes apart. NOT a flake — `docker/build-push-action`'s log showed
+    the `apt-get install` layer as `CACHED` both times: the RUN
+    instruction's TEXT is the cache key, so an unchanged Dockerfile line
+    keeps reusing whatever it resolved to on an earlier build even after a
+    CVE lands against a transitive dependency (`libexpat1`, pulled in by
+    `git`/`curl`/`jq`, never named directly). Confirmed locally with
+    `--no-cache`: a genuinely fresh `apt-get install` on the SAME base
+    image already resolves the patched `2.5.0-1+deb12u3` — the Debian
+    security archive had it; CI's cache did not. `apt-get upgrade -y`
+    added to all three runtime Dockerfiles (`claude`, `copilot`, `ollama`
+    — the only three with an apt layer at all) forces the layer to
+    re-resolve on every future security-relevant apt change, not just this
+    one. All three rebuilt with `--no-cache` and verified: `dpkg -l
+    libexpat1` shows `2.5.0-1+deb12u3` in each, and `claude --version` /
+    the copilot SDK / the ollama runtime binary all still run.
 - [ ] 2.2 Not run: no re-analysis of this branch has happened yet (needs a
   CI push), and `manager`'s own backlog is not fully fixed (26 production
   findings remain per 2.1), so a re-run would not read zero regardless.

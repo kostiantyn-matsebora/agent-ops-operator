@@ -26,7 +26,18 @@ LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/ag
 # tooling: what an agent may reach is WIRING — MCPConfig + MCPToolset bound by
 # a Pipeline — and a CLI here would be the same category error as bundling an
 # MCP server. Need one? Derive an image and point AgentRuntime.spec.image at it.
+#
+# apt-get upgrade -y IS LOAD-BEARING, not defensive boilerplate: CI's build
+# cache keys this RUN layer on its own TEXT, so an unchanged instruction
+# reuses whatever it resolved to on an earlier build even after a CVE is
+# published against a package pulled in as a transitive dependency here
+# (libexpat1, CVE-2026-56408, via git/curl/jq) -- Trivy failed two straight
+# builds on the SAME cached 2.5.0-1+deb12u2 while a genuinely fresh
+# `apt-get install` on this exact base already resolved the patched
+# 2.5.0-1+deb12u3, confirmed locally. Removing this line silently reopens
+# that cache trap the next time any package here gets a security fix.
 RUN apt-get update -qq && \
+    apt-get upgrade -y -qq && \
     apt-get install -y -qq --no-install-recommends \
       git openssh-client curl jq ca-certificates procps && \
     rm -rf /var/lib/apt/lists/* && \
