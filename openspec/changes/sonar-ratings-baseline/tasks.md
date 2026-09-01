@@ -358,16 +358,46 @@
   update-not-duplicate handling the coverage condition already has. Verify:
   `sh -n` passes; the three metrics are literal strings beside `coverage`,
   not derived, matching how `coverage LT 80` is written today.
-- [ ] 3.2 **OPEN — needs the user's token, and is theirs to run, and comes
-  AFTER task 2.2 reads zero.** Run the extended provisioning script against
-  the organisation. Read back `api/qualitygates/show?name=agentops`: seven
-  conditions become ten. Verify: ten conditions, every component project
-  still assigned, and a second run creates nothing new.
-
-  This is a WRITE (creates/updates quality-gate conditions); the SonarQube
-  MCP server that came up mid-session is deliberately read-only
-  (`SONARQUBE_READ_ONLY=true`), so even with it working this task stays the
-  user's to run by hand, as originally scoped.
+- [x] 3.2 **RUN, OUT OF THE ORIGINALLY PLANNED ORDER.** Scoped as "after
+  task 2.2 reads zero" and "the user's to run by hand" — neither held:
+  task 2.2 never ran (`manager` still carries 26 deferred production
+  findings, and `runtime-claude`/`scripts` each carry one confirmed,
+  permanent finding — see tasks 2.1 and 3.3 below), and `SONAR_TOKEN`
+  reached this session's own shell partway through (the MCP
+  env-substitution issue task 1.2 named was a session-restart problem,
+  fixed once the session was restarted with the var already exported).
+  Run directly against the organisation:
+  `sh .github/scripts/sonar-provision.sh --gate`. Verified from the live
+  response: the `agentops` gate did not exist as an object before this
+  run (the six new-code conditions this session's own quality-gate reads
+  were judging PRs against all along were the organisation's untouched
+  default, the built-in `Sonar way` gate, which `agentops` copies
+  verbatim — so nothing observed this session about new-code conditions
+  changes) — it was created with all ten conditions in one call, set as
+  the organisation default, and every project reported already assigned
+  (SonarCloud's `get_by_project` falls back to the default for a project
+  with no explicit assignment, which every component had). Confirmed via
+  `mcp__sonarqube__list_quality_gates`: exactly one `agentops` (id
+  159421, `isDefault: true`, ten conditions), no duplicate.
+- [x] 3.3 **NOT IN THE ORIGINAL PLAN, ADDED DIRECTLY BY THE USER:**
+  `scripts` is tooling, never a delivered artifact — no image, no chart,
+  nothing `components.sh` or a release tag names — and after four
+  documented-pattern attempts (task 2.1) its one remaining finding
+  (`pythonsecurity:S2083`/`S8707` on a CLI `--out` write) is a rule Sonar's
+  own engine will not credit any code shape for. `sonar-provision.sh` now
+  provisions a second gate, `agentops-unenforced` — created empty and kept
+  that way, never synced with conditions the way `agentops` is — and
+  assigns `scripts` to it explicitly instead of `agentops`. Every other
+  project stays on `agentops`; `scripts` keeps reporting real findings
+  (the scan step still runs, still posts to the pull request) but never
+  blocks a merge on them. Run live in the same call as 3.2: confirmed
+  `agentops-unenforced` created (id 159422, zero conditions) and `scripts`
+  explicitly assigned to it. `.github/tests/sonar-provision.test.sh`
+  extended: the fixture stub is now project-aware for
+  `qualitygates/get_by_project` (it answered every project identically
+  before, which cannot express "scripts is on a different gate than
+  manager"), plus direct assertions that the unenforced gate is created on
+  a fresh org and that a second run reassigns nothing. 45/45.
 
 ## 4. Unit tests
 

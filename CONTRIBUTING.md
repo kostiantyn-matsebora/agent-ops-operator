@@ -265,6 +265,14 @@ call, because `components.sh` lists what publishes an image and the scripts
 publish none. It runs when the scripts, their tests or the hooks they
 exercise change, and on every path that rebuilds everything.
 
+**IT IS THE ONE PROJECT NOT ASSIGNED TO THE `agentops` GATE.** Tooling, never
+a delivered artifact — no image, no chart, nothing `components.sh` or a
+release tag names — assigned instead to `agentops-unenforced`: created empty
+by `sonar-provision.sh --gate` and kept that way, never synced with
+conditions the way `agentops` is. The scan still runs and still posts real
+findings to the pull request; none of them can block a merge. Every other
+project stays on `agentops`.
+
 **What fails your pull request:** the scanner not running or not submitting,
 AND the quality gate's verdict on the submitted analysis. The scan step waits
 on the gate (`sonar.qualitygate.wait`) and fails the component's job on
