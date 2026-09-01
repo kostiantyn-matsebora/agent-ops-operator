@@ -154,15 +154,32 @@
     Code analysis section documents it in the same commit.
 
     The exclusion took `manager`'s new-code coverage from 17.1% to 43.8%,
-    not to 80% — the REMAINDER was three already-uncovered guard-clause
-    lines in `internal/httpapi/activity.go` (36% file coverage, the worst
-    of the touched files), all three `if s.Activity == nil { … 503 … }`
-    checks the S1192 constant-extraction happened to touch. No existing
-    test ever constructed a `Server` with a nil `Activity` log. New
-    `internal/httpapi/activity_test.go` does, against all three handlers
-    directly (the package's own lightweight httptest pattern, already used
-    by `contextreport_test.go` — no envtest needed). `go test ./...`
-    (envtest included) still green, 48.3s.
+    not to 80% — the REMAINDER was already-uncovered lines the S1192
+    constant-extraction happened to touch, none of them exercised by any
+    existing test:
+    - Three `if s.Activity == nil { … 503 … }` guard clauses in
+      `internal/httpapi/activity.go` (36% file coverage, the worst of the
+      touched files). New `internal/httpapi/activity_test.go` constructs a
+      `Server` with a nil `Activity` log and hits all three handlers
+      directly (43.8% → 62.5%).
+    - Four `if err := json.Unmarshal(...); err != nil { … errInvalidJSON
+      … }` sites in `internal/httpapi/server.go`, across
+      `handleWorkDone`/`handleChannelOpDone` (need only a zero-value
+      `Server` — neither reads anything before the parse; new
+      `invalidjson_test.go`) and `handleStatePut`/`handleChannelStatus`
+      (need a real channel to resolve first; new `state_test.go`, a fake
+      client the same way `chat`'s `router_test.go` already builds one).
+    - Two `res.Error != ""` / `res.ThreadID == ""` branches in
+      `internal/chat/ops.go`'s `tryFinishEnsureTopic` — the adapter-error
+      paths of ensure-topic completion, reachable only through a real (fake)
+      `client.Client`, which no `chat`-package test had ever constructed for
+      this function specifically. Extended `ops_test.go`, reusing
+      `router_test.go`'s `closeTestScheme`/`testNS` from the same package.
+
+    All via the same lightweight per-package pattern this codebase already
+    uses (`contextreport_test.go`, `router_test.go`) — no envtest needed for
+    any of them. `go test ./...` (envtest included, for the rest of the
+    module) still green, 47.7s.
 - [ ] 2.2 Not run: no re-analysis of this branch has happened yet (needs a
   CI push), and `manager`'s own backlog is not fully fixed (26 production
   findings remain per 2.1), so a re-run would not read zero regardless.
