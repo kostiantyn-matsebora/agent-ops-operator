@@ -110,6 +110,33 @@ function safeJoin(base, ...segments) {
   return target;
 }
 
+// sanitizeLog strips control characters (CR/LF and other C0) from a value
+// before it reaches a log line -- jssecurity:S5145's ask, since a crafted
+// runId, agent name or thread id in a work unit could otherwise forge a
+// second log line that reads as the runtime's own.
+function sanitizeLog(v) {
+  return String(v).replace(/[\r\n\x00-\x1f]/g, ' ');
+}
+
+// resolveBin looks `name` up on PATH once and returns the first absolute
+// hit, falling back to the bare name so a missing binary still fails with
+// the ordinary ENOENT a reader expects. go:S4036's ask, one process over:
+// say explicitly where a spawned binary comes from, rather than leaving
+// PATH to answer it implicitly at the call site.
+function resolveBin(name, pathEnv = process.env.PATH || '') {
+  for (const dir of pathEnv.split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // not here — keep looking
+    }
+  }
+  return name;
+}
+
 // definitionPath is where THIS runtime's vendor keeps an agent definition.
 // null when the agent name would escape the workspace.
 function definitionPath(workspace, agent) {
@@ -169,5 +196,6 @@ function dedup(list) {
 
 module.exports = {
   MODE_MERGE, MODE_OVERWRITE,
-  splitList, parseFrontmatterTools, definitionPath, agentDeclaredTools, composeAllowedTools, safeJoin,
+  splitList, parseFrontmatterTools, definitionPath, agentDeclaredTools, composeAllowedTools,
+  safeJoin, sanitizeLog, resolveBin,
 };

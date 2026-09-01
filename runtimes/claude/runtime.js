@@ -14,7 +14,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { agentDeclaredTools, composeAllowedTools, safeJoin } = require('./tools');
+const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog, resolveBin } = require('./tools');
 const { DEFAULT_LIMIT, newSpinWatch, noteToolUse, spinMessage, discardedNotice } = require('./spin');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
@@ -43,34 +43,7 @@ if (!CONTROL_URL || !CONVO_ID) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// resolveBin looks `name` up on PATH once and returns the first absolute hit,
-// falling back to the bare name so a missing binary still fails with the
-// ordinary ENOENT a reader expects. go:S4036's ask, one process over: say
-// explicitly where the binary this spawns from comes from, rather than
-// leaving PATH to answer it implicitly at the call site.
-function resolveBin(name) {
-  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
-    if (!dir) continue;
-    const candidate = path.join(dir, name);
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch {
-      // not here — keep looking
-    }
-  }
-  return name;
-}
-
 const CLAUDE_BIN = resolveBin('claude');
-
-// sanitizeLog strips control characters (CR/LF and other C0) from a value
-// before it reaches a log line -- jssecurity:S5145's ask, since a crafted
-// runId, agent name or thread id in a work unit could otherwise forge a
-// second log line that reads as the runtime's own.
-function sanitizeLog(v) {
-  return String(v).replace(/[\r\n\x00-\x1f]/g, ' ');
-}
 
 function gitEnv() {
   const env = { ...process.env };

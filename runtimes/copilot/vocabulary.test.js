@@ -84,6 +84,24 @@ test('parsers', () => {
   assert.strictEqual(parseMcpPattern('Read'), null);
 });
 
+test('parseMcpPattern splits on the FIRST __, leaving a later one in the tool half', () => {
+  // the leftmost-match behaviour a lazy .*? gave the old regex, kept exactly
+  // by indexOf rather than restated as a second regex.
+  assert.deepStrictEqual(parseMcpPattern('mcp__a__b__c'), { server: 'a', tool: 'b__c' });
+});
+
+test('parseMcpPattern refuses a server name starting with _', () => {
+  assert.strictEqual(parseMcpPattern('mcp____x'), null);
+});
+
+test('parseMcpPattern refuses an empty tool half', () => {
+  assert.strictEqual(parseMcpPattern('mcp__server__'), null);
+});
+
+test('parseMcpPattern refuses a pattern with no __ separator at all', () => {
+  assert.strictEqual(parseMcpPattern('mcp__onlyone'), null);
+});
+
 // ---- sub-command matching ----------------------------------------------------
 
 test('a bare grant approves anything', () => {

@@ -10,6 +10,7 @@ const path = require('path');
 const {
   MODE_MERGE, MODE_OVERWRITE,
   parseFrontmatterTools, agentDeclaredTools, composeAllowedTools,
+  safeJoin, sanitizeLog, resolveBin,
 } = require('./tools');
 
 // mkRepo builds a throwaway checkout containing the given agent definitions.
@@ -73,6 +74,76 @@ test('unclosed flow list is an error', () => {
 test('a missing definition file contributes nothing', () => {
   const dir = mkRepo({});
   assert.deepStrictEqual(agentDeclaredTools(dir, 'nobody'), []);
+});
+
+test('an agent name that escapes the workspace contributes nothing, and logs why', () => {
+  const dir = mkRepo({});
+  const logged = [];
+  const got = agentDeclaredTools(dir, '../../../etc/passwd', (m) => logged.push(m));
+  assert.deepStrictEqual(got, []);
+  assert.match(logged[0], /escapes the workspace/);
+});
+
+// ---- safeJoin ----------------------------------------------------------------
+
+test('safeJoin joins ordinary segments', () => {
+  const dir = mkRepo({});
+  assert.strictEqual(safeJoin(dir, '.claude', 'agents', 'x.md'), path.join(dir, '.claude', 'agents', 'x.md'));
+});
+
+test('safeJoin refuses a segment that escapes base via ..', () => {
+  const dir = mkRepo({});
+  assert.strictEqual(safeJoin(dir, '..', '..', 'etc', 'passwd'), null);
+  assert.strictEqual(safeJoin(dir, '../../../../etc/passwd'), null);
+});
+
+test('safeJoin refuses an absolute segment that resolves outside base', () => {
+  const dir = mkRepo({});
+  assert.strictEqual(safeJoin(dir, '/etc/passwd'), null);
+});
+
+test('safeJoin allows base itself, with no segments', () => {
+  const dir = mkRepo({});
+  assert.strictEqual(safeJoin(dir), dir);
+});
+
+// ---- sanitizeLog --------------------------------------------------------------
+
+test('sanitizeLog passes ordinary text through unchanged', () => {
+  assert.strictEqual(sanitizeLog('run-42'), 'run-42');
+});
+
+test('sanitizeLog strips CR/LF so a value cannot forge a second log line', () => {
+  assert.strictEqual(sanitizeLog('id\n[runtime] FAKE line\r\n'), 'id [runtime] FAKE line  ');
+});
+
+test('sanitizeLog strips other C0 control characters too', () => {
+  assert.strictEqual(sanitizeLog('a\x00b\x1bc'), 'a b c');
+});
+
+test('sanitizeLog stringifies a non-string value', () => {
+  assert.strictEqual(sanitizeLog(42), '42');
+});
+
+// ---- resolveBin ----------------------------------------------------------------
+
+test('resolveBin finds an executable on PATH and returns its absolute path', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-bin-'));
+  const bin = path.join(dir, 'agentops-fake-bin');
+  fs.writeFileSync(bin, '#!/bin/sh\n');
+  fs.chmodSync(bin, 0o755);
+  assert.strictEqual(resolveBin('agentops-fake-bin', dir), bin);
+});
+
+test('resolveBin falls back to the bare name when nothing on PATH matches', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-bin-'));
+  assert.strictEqual(resolveBin('agentops-nowhere', dir), 'agentops-nowhere');
+});
+
+test('resolveBin skips a non-executable file with the right name', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-bin-'));
+  fs.writeFileSync(path.join(dir, 'agentops-not-exec'), '#!/bin/sh\n');
+  assert.strictEqual(resolveBin('agentops-not-exec', dir), 'agentops-not-exec');
 });
 
 test('no agent name and no workspace contribute nothing', () => {

@@ -22,7 +22,7 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { agentDeclaredTools, composeAllowedTools, safeJoin } = require('./tools');
+const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog } = require('./tools');
 const { translate, decide } = require('./vocabulary');
 const { loadMcpServers } = require('./mcp');
 const { confirmContextMissing } = require('./continuity');
@@ -75,14 +75,6 @@ if (!COPILOT_GITHUB_TOKEN && !PROVIDER) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---- repo checkout ----------------------------------------------------------
-
-// sanitizeLog strips control characters (CR/LF and other C0) from a value
-// before it reaches a log line -- jssecurity:S5145's ask, since a crafted
-// runId, agent name or thread id in a work unit could otherwise forge a
-// second log line that reads as the runtime's own.
-function sanitizeLog(v) {
-  return String(v).replace(/[\r\n\x00-\x1f]/g, ' ');
-}
 
 function gitEnv() {
   const env = { ...process.env };

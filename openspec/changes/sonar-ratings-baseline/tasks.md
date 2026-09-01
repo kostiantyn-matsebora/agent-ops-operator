@@ -177,6 +177,26 @@
   fix plus a fuzz-based deepcopy round-trip test in `api/v1alpha1`) — asked
   for directly by the user, not scoped by this change's design, recorded
   here only because it landed on this branch alongside these fixes.
+
+  Also separately: the fix sweep on `runtime-claude`/`runtime-copilot`
+  (above) introduced three genuinely new, security-relevant functions
+  (`safeJoin`, `sanitizeLog`, `resolveBin`) with no test at all — they had
+  been written inline in each `runtime.js`, the untestable entrypoint (it
+  calls `process.exit(1)` at require-time without `CONTROL_URL`/`CONVO_ID`,
+  which is why there is no `runtime.test.js`). Moved into each `tools.js`
+  (already tested, already exported) and given 24 new `node --test` cases
+  across both runtimes covering the escape-refusal, control-character-strip
+  and PATH-miss/executable-bit paths specifically — not just the happy
+  path. `node --test --experimental-test-coverage`: `tools.js` went from
+  untested-for-these-functions to **100% line / 89% branch** in both
+  runtimes, `vocabulary.js` to **100% line / 94% branch** (its
+  `parseMcpPattern` rewrite got 4 new edge-case tests: multiple `__`
+  occurrences, a `_`-leading server, an empty tool half, no separator at
+  all — pinning the exact leftmost-match behaviour the old lazy regex had).
+  `runtime.js` itself stays uncovered by `node --test` in both — it is the
+  daemon loop, unreachable without a live `/work` endpoint to poll; that gap
+  is unchanged by this session and is a coverage question about the
+  ENTRYPOINT shape, not about these three functions.
 - [x] 4.4 Run the suite and both guards from the worktree:
   `.github/tests/run.sh`, `python3 .github/scripts/publication-guard.py`,
   `python3 .github/scripts/retired-vocabulary-guard.py`. Verify: all three
