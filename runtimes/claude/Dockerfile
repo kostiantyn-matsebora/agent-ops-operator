@@ -9,11 +9,19 @@
 FROM node:22-bookworm-slim
 LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/agent-ops-operator
 
+# --ignore-scripts refuses every package's own lifecycle scripts, npm's
+# transitive dependencies included; claude-code's native binary then needs
+# its OWN installer run explicitly and nothing else's -- deliberate and
+# scoped, rather than every postinstall in the tree running unexamined.
+# Verified against node:22-bookworm-slim: the plain install fails at
+# `claude --version` with "native binary not installed" until this second
+# step runs; npm@latest carries no such step.
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
       git openssh-client curl jq ca-certificates procps && \
     rm -rf /var/lib/apt/lists/* && \
-    npm install -g npm@latest @anthropic-ai/claude-code && \
+    npm install -g --ignore-scripts npm@latest @anthropic-ai/claude-code && \
+    node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs" && \
     npm cache clean --force
 
 # NO kubectl, and no other domain tooling. This image is a VENDOR runtime: it

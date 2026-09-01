@@ -26,9 +26,20 @@
   severities, not this script) — 73 findings: 61 `go:S3776` (cognitive
   complexity), 7 `go:S1192` (duplicate literal), 5 `go:S5443`/`S5445`
   (predictable/writable temp path). The other ~15 components in
-  `components.sh images` were never enumerated. Whoever resumes this: either
-  run 1.1's script by hand with the token (task as originally scoped), or
-  keep reading via the MCP tool per-component and fold counts in here.
+  `components.sh images` were never enumerated FOR FINDING COUNTS this way.
+
+  **A DIFFERENT, LIGHTER pull was done for all 16** — `get_component_measures`
+  (`reliability_rating`, `security_rating`, `sqale_rating`, `coverage`) per
+  component, the RATINGS THEMSELVES rather than a finding backlog. That is
+  what task 2's component choice after `manager` was made from: every
+  component below B on any rating was `manager`, `scripts` (security E),
+  `console`, `runtime-claude` and `runtime-copilot` (both E/E, worst in the
+  org) and `signal-ha`. This does NOT satisfy 1.1's script or produce the
+  per-quality Blocker/High counts it's for — it only answers "which rating is
+  failing", not "which findings would need fixing" for the ~11 components
+  still untouched. Whoever resumes this: either run 1.1's script by hand with
+  the token (task as originally scoped), or keep reading via the MCP tool
+  per-component and fold counts in here.
 
 ## 2. Every Blocker and High finding, fixed (design D2, D3)
 
@@ -61,7 +72,55 @@
   - Every fix verified: `go build`/`go vet` under the default, `conformance`
     and `e2e` build tags, the full `go test ./...` suite (envtest included,
     47s), and the full `-tags conformance` suite (37s) — see task 4.3/4.4.
-  - **The other ~15 components were never touched** — no findings were even
+  - **`runtime-claude` and `runtime-copilot` also read and mostly fixed**,
+    chosen after 1.2's per-component rating/coverage pull showed both at E
+    (worst in the org) on BOTH reliability and security — see the ratings
+    table this task's own conversation produced, not reproduced here per
+    `publication.md`. Of 14 findings (`runtime-claude`) and 15
+    (`runtime-copilot`):
+    - **Fixed — 23 of 29:** `javascript:S2189` (the poll loop's `for(;;)`
+      rewritten as `while(!idle)` with a real `continue`, in both
+      `runtime.js`); `jssecurity:S2083` path-traversal ×4 (a shared
+      `safeJoin` helper in each `tools.js`, refusing a `..`-escaping agent
+      name or `promptFile`, used by `agentDeclaredTools` and the prompt
+      read in `runtime.js`); `jssecurity:S5145` log-injection ×7 (a
+      `sanitizeLog` helper stripping control characters before a work
+      unit's `runId`/`threadId`/`agent`/`toolsMode`/`maxTurns` reach
+      `console.log`); `javascript:S4036` (`claude` resolved once via a PATH
+      walk instead of by bare name); `javascript:S8786` ReDoS ×3 (the
+      adjacent-quantifier regexes in both `tools.js`'
+      block-form-tools-list parser and copilot's `vocabulary.js`
+      `parseMcpPattern` rewritten as plain string search — `node --test`
+      re-verifies identical parsing, all 38+56 cases); `javascript:S7773`
+      ×4 (`parseInt` → `Number.parseInt`); `docker:S6505` ×3 (`npm install
+      -g --ignore-scripts`, with claude-code's own installer then run
+      explicitly — verified against a real build: the plain
+      `--ignore-scripts` install fails `claude --version` with "native
+      binary not installed" until that second step runs; copilot's SDK
+      needed no such step, verified the same way).
+    - **NOT fixed — 6, by explicit choice:** `docker:S8543` (unlocked
+      `npm@latest`/unpinned `claude-code` version) ×2 is the DELIBERATE
+      design both Dockerfiles already state in comment — the reference
+      image tracks latest on purpose, an adopter who wants a pin derives
+      their own image (`structure.md`); copilot's `npm@latest` is there
+      specifically to outrun a CVE in the base image's bundled npm, so
+      pinning it would reintroduce the finding it exists to fix.
+      `jssecurity:S6350` (user-controlled command argument to `spawn`) is
+      structural: the runtime's whole job is passing profile/work-unit
+      content — the prompt, the system prompt — to the CLI as argv, so
+      there is no validation that would not also break the feature; left
+      for the same "unsupervised risk to reshape core logic" reason task
+      2.1's 26 production `manager` findings were deferred. Two `S5145`
+      findings on `unit.systemPrompt.length`/pure numeric fields are very
+      likely a taint-analysis false positive (a `.length` access can never
+      carry a control character) and were left alone rather than wrapped
+      for no real effect.
+    - Both Dockerfiles' fix was BUILT AND RUN, not just read: `docker
+      build` succeeded for both, `claude --version` printed `2.1.252
+      (Claude Code)` in the built claude image, and
+      `require('@github/copilot-sdk')` resolved in the built copilot
+      image.
+  - **The other ~13 components were never touched** — no findings were even
     read for them (see 1.2).
 - [ ] 2.2 Not run: no re-analysis of this branch has happened yet (needs a
   CI push), and `manager`'s own backlog is not fully fixed (26 production

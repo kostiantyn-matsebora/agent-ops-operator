@@ -32,8 +32,13 @@ COPY package.json package-lock.json /srv/
 # THEN drop the CLI's bundled foundry-local-sdk: a Windows/macOS local-model
 # host this Linux pod can never use, whose vendored adm-zip is the one finding
 # npm cannot reach (it sits inside the platform package, not in the lockfile).
-RUN npm install -g npm@latest && \
-    npm ci --omit=dev --no-audit --no-fund && \
+# --ignore-scripts on both: verified against this lockfile that neither step
+# needs a lifecycle script -- the SDK's prebuilt copilot-linux-x64 binary
+# ships as plain files, not a postinstall download, so skipping every
+# package's scripts (npm's own and the ~20 in this tree) costs nothing here,
+# unlike runtimes/claude where the CLI needs its own installer run after.
+RUN npm install -g --ignore-scripts npm@latest && \
+    npm ci --omit=dev --no-audit --no-fund --ignore-scripts && \
     rm -rf /srv/node_modules/@github/copilot-linux-*/foundry-local-sdk && \
     npm cache clean --force
 COPY runtime.js tools.js vocabulary.js mcp.js continuity.js /srv/

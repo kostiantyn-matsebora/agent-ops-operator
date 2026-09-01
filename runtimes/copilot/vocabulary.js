@@ -63,10 +63,21 @@ function parseShellPattern(p) {
 
 // parseMcpPattern reads `mcp__<server>__<tool>` and returns {server, tool},
 // with tool '*' for the per-server wildcard, or null for a non-MCP pattern.
+//
+// Plain string search rather than /^mcp__([^_].*?)__(.+)$/ (javascript:S8786):
+// the lazy .*? immediately before the literal it hunts for is the shape that
+// rule flags, and indexOf finds the same leftmost `__` with no backtracking
+// at all -- server is everything before it (never empty, never starting with
+// `_`), tool everything after (never empty).
 function parseMcpPattern(p) {
-  const m = /^mcp__([^_].*?)__(.+)$/.exec(p);
-  if (!m) return null;
-  return { server: m[1], tool: m[2] };
+  if (!p.startsWith('mcp__')) return null;
+  const rest = p.slice(5);
+  if (rest.startsWith('_')) return null;
+  const sep = rest.indexOf('__');
+  if (sep < 1) return null;
+  const tool = rest.slice(sep + 2);
+  if (!tool) return null;
+  return { server: rest.slice(0, sep), tool };
 }
 
 // translate maps a composed allowlist into what the session is created with.

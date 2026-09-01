@@ -83,9 +83,13 @@ function parseFrontmatterTools(text) {
     for (let k = j + 1; k < end; k++) {
       const raw = lines[k];
       if (raw.trim() === '') continue;
-      const item = /^\s+-\s*(.*)$/.exec(raw);
-      if (!item) break; // next key — the block ended
-      const v = unquote(item[1]);
+      // No adjacent quantifiers (javascript:S8786): the leading indent, the
+      // dash and the item text are each matched by their own single-quantifier
+      // step instead of one regex where \s* and .* could both claim the same
+      // characters.
+      const indent = /^\s+/.exec(raw);
+      if (!indent || raw[indent[0].length] !== '-') break; // next key — the block ended
+      const v = unquote(raw.slice(indent[0].length + 1).replace(/^\s+/, ''));
       if (v) tools.push(v);
     }
     return { tools };
@@ -93,9 +97,23 @@ function parseFrontmatterTools(text) {
   return { tools: [] }; // frontmatter present, no tools: key — declares nothing
 }
 
+// safeJoin resolves base/...segments and refuses a result that escapes base
+// -- jssecurity:S2083's ask, since both callers below join a directory this
+// process controls with a name that arrives from data it does not (a CR's
+// agent name, a work unit's promptFile). null on escape, so a caller can
+// treat it exactly like a missing file rather than reading outside its
+// intended tree.
+function safeJoin(base, ...segments) {
+  const root = path.resolve(base);
+  const target = path.resolve(root, ...segments);
+  if (target !== root && !target.startsWith(root + path.sep)) return null;
+  return target;
+}
+
 // definitionPath is where THIS runtime's vendor keeps an agent definition.
+// null when the agent name would escape the workspace.
 function definitionPath(workspace, agent) {
-  return path.join(workspace, '.github', 'agents', `${agent}.agent.md`);
+  return safeJoin(workspace, '.github', 'agents', `${agent}.agent.md`);
 }
 
 // agentDeclaredTools reads .github/agents/<agent>.agent.md under workspace and
@@ -105,9 +123,14 @@ function definitionPath(workspace, agent) {
 // not be used, so a typo in a role file is visible in the pod log.
 function agentDeclaredTools(workspace, agent, log = () => {}) {
   if (!workspace || !agent) return [];
+  const file = definitionPath(workspace, agent);
+  if (!file) {
+    log(`[runtime] agent definition ${agent}.agent.md: path escapes the workspace — treating it as declaring no tools`);
+    return [];
+  }
   let text;
   try {
-    text = fs.readFileSync(definitionPath(workspace, agent), 'utf8');
+    text = fs.readFileSync(file, 'utf8');
   } catch {
     return []; // no definition — the wiring's tools stand alone
   }
@@ -146,5 +169,5 @@ function dedup(list) {
 
 module.exports = {
   MODE_MERGE, MODE_OVERWRITE,
-  splitList, parseFrontmatterTools, definitionPath, agentDeclaredTools, composeAllowedTools,
+  splitList, parseFrontmatterTools, definitionPath, agentDeclaredTools, composeAllowedTools, safeJoin,
 };
