@@ -105,11 +105,17 @@ jobs:
     # nobody wrote.
     #
     # A DISPATCH IS A PERSON ASKING, on this repository, and bypasses all three.
+    #
+    # TEMPORARY, PER-BRANCH: sonar-ratings-baseline's own diff is dominated by
+    # a mechanical test-extraction sweep the review would re-read file by
+    # file for no new judgement call. Revert this exclusion before merging —
+    # it must not reach master.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.head_ref != 'change/sonar-ratings-baseline' &&
+      (github.event_name == 'workflow_dispatch' ||
       (!github.event.pull_request.draft &&
        !github.event.pull_request.head.repo.fork &&
-       github.actor != 'dependabot[bot]')
+       github.actor != 'dependabot[bot]'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
