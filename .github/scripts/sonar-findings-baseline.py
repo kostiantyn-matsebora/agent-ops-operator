@@ -32,6 +32,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -69,16 +70,21 @@ def validated_path(raw: pathlib.Path, *, must_exist: bool) -> pathlib.Path:
     return result
 
 
+SAFE_URL = re.compile(r"^https?://[\w.\-~:/]+\?[\w.\-~%=&]*$")
+
+
 def fetch(api: str, path: str, token: str, **params) -> dict:
     url = f"{api}/api/{path}?{urllib.parse.urlencode(params)}"
-    # `--` marks the end of options: verified against curl itself that
-    # without it a URL beginning with "-" is read as an unrecognised flag
-    # ("curl: option ...: is unknown", exit 2) rather than the target --
-    # pythonsecurity:S8705's argument-injection concern, made concrete.
-    # `api` is `validated_api`-checked to start with http(s):// so this
-    # exact call can never actually hit that path, but the separator is
-    # what a reader -- and the rule -- can verify without also reasoning
-    # through that other function.
+    # Validated immediately before the subprocess call it guards, the same
+    # shape as pythonsecurity:S8705's own compliant example (a regex check
+    # adjacent to the sink) -- a validation several statements away was not
+    # credited, same lesson as `validated_path` below. `--` marks the end
+    # of options too: verified against curl itself that without it a URL
+    # beginning with "-" is read as an unrecognised flag ("curl: option
+    # ...: is unknown", exit 2) rather than the target -- the concrete case
+    # this regex also rules out, since only an http(s) scheme passes it.
+    if not SAFE_URL.match(url):
+        raise SystemExit(f"refusing a malformed request URL: {url!r}")
     out = subprocess.run(["curl", "-sf", "-u", f"{token}:", "--", url], capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError(f"{path}: curl exit {out.returncode} {out.stderr.strip()}")
@@ -160,7 +166,12 @@ def main() -> int:
         return 1
 
     args.api = validated_api(args.api)
-    out_path = validated_path(args.out, must_exist=False)
+    # Fails fast, before any network call -- but the WRITE below revalidates
+    # inline rather than trusting this one across the whole function: kept
+    # directly adjacent to the sink it guards, the same shape as the rule's
+    # own `open(safe_path(filename))` example, since a validation several
+    # statements and a loop away from its `.write_text()` was not credited.
+    validated_path(args.out, must_exist=False)
 
     # THE SAME LIST sonar-provision.sh PROVISIONS: every component plus
     # `scripts`, which is a project and not a component -- see that script's
@@ -189,6 +200,7 @@ def main() -> int:
         print(line)
 
     result = {"organization": args.organization, "components": rows}
+    out_path = validated_path(args.out, must_exist=False)
     out_path.write_text(json.dumps(result, indent=2) + "\n")
     total = sum(r["total"] for r in rows)
     print(f"\n{total} open Blocker/High finding(s) across {len(rows)} project(s), written to {out_path}"

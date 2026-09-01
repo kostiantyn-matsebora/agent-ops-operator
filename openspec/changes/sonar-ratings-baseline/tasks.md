@@ -57,6 +57,30 @@
   ORIGINAL pattern unaddressed on `master` still — out of scope here, a
   candidate for the same fix later, not evidence this one is unfixable.
   `.github/tests/run.sh`: all passing, plus the new refusal test.
+
+  **STILL OPEN ON THE NEXT ANALYSIS — SECOND ROUND, DIAGNOSED FROM WHAT
+  DID CLEAR.** `components()`'s inline `validated_path(path,
+  must_exist=True).read_text()` was never flagged; the separated
+  `out_path = validated_path(...)` assigned early and `.write_text()`'d
+  many statements and a loop later STAYED flagged. The one working
+  difference: distance from sanitiser to sink. `out_path` is now
+  recomputed immediately before `.write_text()` (matching the rule's own
+  `open(safe_path(filename))` — sanitiser and sink adjacent, not a
+  variable carried across the function), with an early fail-fast check on
+  `args.out` kept as a SEPARATE call so a malformed path is still refused
+  before any network round-trip. `fetch()`'s `subprocess.run(["curl",
+  ...])` gained an actual regex check immediately before it —
+  `^https?://[\w.\-~:/]+\?[\w.\-~%=&]*$` — matching S8705's own compliant
+  shape (`re.match` adjacent to the sink) rather than relying on the `--`
+  separator alone, which fixed the real bug but was not what this rule's
+  engine checks for. Verified the regex against every URL shape this
+  script actually produces (empty query string included) and re-ran the
+  full smoke test against real `sonarcloud.io` (curl exit 22, not a
+  regex or parse rejection). `.github/tests/run.sh`: 11/11, unchanged.
+
+  Whether THIS round clears the gate is what the next CI push answers —
+  recorded honestly either way, not assumed clean because the pattern now
+  matches the docs.
 - [ ] 1.2 **PARTIALLY DONE, differently than planned.** `SONAR_TOKEN` never
   reached this session's own shell (an MCP client env-substitution timing
   issue — the token is set on the host, but a running session's MCP
@@ -177,6 +201,21 @@
       prompt, every flag, a `--rm -rf /`-prefixed prompt — run against the
       real CLI: parses cleanly through to a legitimate downstream error
       (MCP config schema), never an argument-parsing one.
+
+      **THE FIX IS REAL AND KEPT. IT DOES NOT CLEAR THE FINDING, AND NOW
+      THAT IS VERIFIED RATHER THAN ASSUMED.** `jssecurity:S6350` stayed
+      OPEN on the next analysis (same line, same `spawn` call). Read the
+      rule's OWN compliant example rather than re-guessing: it is
+      `if (allowed.includes(input)) { spawn(...) }` — an ALLOW-LIST of
+      exact permitted values, checked before the call. That is what this
+      rule accepts and the ONLY thing it accepts; a `--`
+      separator/argument-injection fix (correct for the bug it fixes) is
+      not in its vocabulary at all. An allow-list is incompatible with a
+      free-form prompt by construction — there is no finite set of valid
+      prompts. **This is now the "structural, cannot satisfy without
+      breaking the feature" case the first assessment claimed without
+      checking.** The difference from the first pass: this one is backed
+      by the rule's own documented remediation, not a guess.
     - Two `S5145` findings on `unit.systemPrompt.length`/pure numeric
       fields are very likely a taint-analysis false positive (a `.length`
       access can never carry a control character) and were left alone
