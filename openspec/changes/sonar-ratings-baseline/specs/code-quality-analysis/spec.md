@@ -2,13 +2,13 @@
 
 ### Requirement: Every project is held to at least a B rating, overall, for reliability, security and maintainability
 
-Every component's project SHALL be assigned a quality gate that requires the
-component's OVERALL reliability rating, OVERALL security rating and OVERALL
-maintainability rating to each be A or B, in addition to the new-code and
-overall-coverage conditions already on the gate. The gate SHALL be created,
-conditioned and assigned by the same deliberate provisioning step that
-creates the other conditions, idempotently, so that it is reproducible from
-the repository and never set by hand.
+Every component's project SHALL be assigned the `agentops` quality gate,
+which requires the component's OVERALL reliability rating, OVERALL security
+rating and OVERALL maintainability rating to each be A or B, in addition to
+the new-code and overall-coverage conditions already on it. The gate SHALL
+be created, conditioned and assigned by the same deliberate provisioning
+step that creates the other conditions, idempotently, so that it is
+reproducible from the repository and never set by hand.
 
 A project that ships no delivered artifact — no image, no chart, nothing a
 release tag names — MAY instead be assigned a second, unenforced gate that

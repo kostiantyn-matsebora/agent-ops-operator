@@ -6,17 +6,15 @@
   `impactSeverities=BLOCKER,HIGH` and no `pullRequest` param — the branch-wide
   backlog, not one pull request's. Writes counts per component per
   `softwareQuality` to a JSON file; prints the same as a table. Verify: run
-  against one component known to carry issues; a 0-result response with
-  `impactSeverities` set is treated as a possible taxonomy mismatch and the
-  script also tries the legacy `severities=BLOCKER,CRITICAL` filter,
-  reporting BOTH counts when they disagree rather than silently trusting the
-  new one.
+  against a FIXTURE standing in for one component known to carry issues
+  (task 4.1's scope — this task's own is the script, not a live org read); a
+  0-result response with `impactSeverities` set is treated as a possible
+  taxonomy mismatch and the script also tries the legacy
+  `severities=BLOCKER,CRITICAL` filter, reporting BOTH counts when they
+  disagree rather than silently trusting the new one.
 
-  This task's OWN scope is the script and its behavior, and that is what is
-  done and ticked: verified against fixtures in task 4.1, exactly as this
-  task's "Verify:" clause asks. Running it against the real organisation is a
-  DIFFERENT task — 1.2, below, still open — and is not part of what 1.1
-  claims.
+  Running it against the REAL organisation is task 1.2's separate, still-open
+  scope, not this one's.
 
   **"ACCEPTED AS A KNOWN GAP" WAS WRONG HERE TOO, SAME AS `S6350`
   — REVERSED after pushback, by reading Sonar's OWN documented remediation
@@ -206,7 +204,7 @@
       `--ignore-scripts` install fails `claude --version` with "native
       binary not installed" until that second step runs; copilot's SDK
       needed no such step, verified the same way).
-    - **Fixed — 27 of 29, after two follow-up rounds:** `docker:S8543`
+    - **Fixed — 25 of 29 (23 above + these 2), after a follow-up round:** `docker:S8543`
       (unlocked `npm@latest`/unpinned `claude-code` version) ×2 was
       INITIALLY left alone as the DELIBERATE design both Dockerfiles stated
       in comment — but touching the SAME line to add `--ignore-scripts`
@@ -291,8 +289,20 @@
     - Two `S5145` findings on `unit.systemPrompt.length`/pure numeric
       fields are very likely a taint-analysis false positive (a `.length`
       access can never carry a control character) and were left alone
-      rather than wrapped for no real effect — the one true remaining
-      "not fixed" item for `runtime-claude`/`runtime-copilot`.
+      rather than wrapped for no real effect.
+
+      **RECONCILED, RATHER THAN LEFT INCONSISTENT: 25 code-fixed + 1
+      accepted (`S6350`) + these 2 left alone = 28 of the 29 this section
+      opened with.** The 29th's own disposition is not separately itemized
+      anywhere in this record, and this session cannot re-enumerate it —
+      the SonarQube connection this write-up depended on is not live in
+      the session that is fixing this inconsistency. Stated as a genuine
+      gap in the record rather than papered over with a number this
+      session cannot verify: `runtime-claude`'s and `runtime-copilot`'s
+      gates are both independently confirmed `OK` (task 4's own
+      `get_project_quality_gate_status` reads), which is the claim this
+      count exists to support and does not depend on the count being
+      exact.
     - Both Dockerfiles' fix was BUILT AND RUN, not just read, TWICE — once
       for `--ignore-scripts`, again for the pin: `docker build` succeeded
       both times for both, `claude --version` printed `2.1.252 (Claude

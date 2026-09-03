@@ -285,3 +285,16 @@ test('buildClaudeArgs honours an explicit max-turns', () => {
   const args = buildClaudeArgs({ allowed: [], mcpConfig: '/x', maxTurns: 12, prompt: 'p' });
   assert.strictEqual(args[args.indexOf('--max-turns') + 1], '12');
 });
+
+// The three fixed flags a pod's own contract depends on, none of which vary
+// by call site — a hang (no --permission-mode dontAsk, the interactive
+// default prompts for a person who isn't there), a parse the manager can't
+// read (no --output-format stream-json), or a raw mcp.json edited outside
+// the referenced config file being silently honoured (no --strict-mcp-config)
+// are each a real failure mode this pins against a future edit dropping one.
+test('buildClaudeArgs always carries permission-mode, output-format and strict-mcp-config', () => {
+  const args = buildClaudeArgs({ allowed: [], mcpConfig: '/x', prompt: 'p' });
+  assert.strictEqual(args[args.indexOf('--permission-mode') + 1], 'dontAsk');
+  assert.strictEqual(args[args.indexOf('--output-format') + 1], 'stream-json');
+  assert.ok(args.includes('--strict-mcp-config'));
+});

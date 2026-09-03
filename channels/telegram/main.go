@@ -366,7 +366,7 @@ func (a *adapter) opsLoop(ctx context.Context) {
 		a.syncCommands(ctx, revision)
 		if err != nil {
 			if ctx.Err() == nil {
-				log.Printf("ops poll: %v", err)
+				log.Printf("ops poll: %s", sanitizeLog(err))
 				sleepCtx(ctx, 5*time.Second)
 			}
 			continue
@@ -382,7 +382,7 @@ func (a *adapter) opsLoop(ctx context.Context) {
 		if tid, done := a.completed.seen(op.ID); done {
 			log.Printf("op %s redelivered; acknowledging without repeating it", op.ID)
 			if err := a.mgr.CompleteOp(ctx, op.ID, tid, ""); err != nil && ctx.Err() == nil {
-				log.Printf("complete op %s: %v", op.ID, err)
+				log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
 			}
 			continue
 		}
@@ -391,7 +391,7 @@ func (a *adapter) opsLoop(ctx context.Context) {
 			a.completed.add(op.ID, threadID)
 		}
 		if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
-			log.Printf("complete op %s: %v", op.ID, err)
+			log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
 		}
 	}
 }
@@ -466,7 +466,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 				name := renderTopicName(*op.Topic)
 				if err := tg.Send(ctx, sc.cfg.ChatID, nil,
 					`💬 <a href="`+escape(link)+`">`+escape(name)+`</a>`); err != nil {
-					log.Printf("point at topic %d: %v", id, err)
+					log.Printf("point at topic %d: %s", id, sanitizeLog(err))
 				}
 			}
 		}
@@ -563,8 +563,8 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 					"</code> was deleted, and its topic removed with it."); err != nil {
 				// The topic is already gone; failing the op would ask the
 				// manager to retry a deletion that succeeded.
-				log.Printf("delete-conversation %s: topic deleted but the general-surface note failed: %v",
-					op.Conversation, err)
+				log.Printf("delete-conversation %s: topic deleted but the general-surface note failed: %s",
+					op.Conversation, sanitizeLog(err))
 			}
 			return "", ""
 		}

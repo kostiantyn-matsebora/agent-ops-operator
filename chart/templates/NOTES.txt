@@ -662,7 +662,7 @@ To give ONE route more, declare an account STATING WHAT IT MAY DO, and name it:
   rbac:
     runtime:
       serviceAccounts:
-        - name: agentops-runtime-acting
+        - name: agentops-runtime-workloads
           clusterRoles:
             - name: workloads
               rules:
