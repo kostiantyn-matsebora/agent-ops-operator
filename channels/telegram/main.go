@@ -350,49 +350,56 @@ func (a *adapter) client(sc servedChannel) *Telegram {
 func (a *adapter) opsLoop(ctx context.Context) {
 	a.refreshChannels(ctx)
 	for ctx.Err() == nil {
-		// PACE BEFORE CLAIMING, not before sending. Work this adapter cannot
-		// yet deliver stays queued in the manager, where it is still derivable
-		// from CR state and survives an adapter restart. Gating the send
-		// instead would hold a claim while waiting, and a crash mid-wait would
-		// strand the op until ReclaimAfter.
-		if !a.pace.wait(ctx, a.chatIDs()) {
-			continue
+		a.pollOnce(ctx)
+	}
+}
+
+// pollOnce is one iteration of opsLoop's body, split out so it is callable
+// directly with a mock manager rather than only through the infinite loop —
+// each of its error branches is otherwise unreachable from a test.
+func (a *adapter) pollOnce(ctx context.Context) {
+	// PACE BEFORE CLAIMING, not before sending. Work this adapter cannot
+	// yet deliver stays queued in the manager, where it is still derivable
+	// from CR state and survives an adapter restart. Gating the send
+	// instead would hold a claim while waiting, and a crash mid-wait would
+	// strand the op until ReclaimAfter.
+	if !a.pace.wait(ctx, a.chatIDs()) {
+		return
+	}
+	op, revision, err := a.mgr.NextOp(ctx, a.channelType, 25)
+	// The revision rides EVERY poll response, delivered op or not, so a
+	// vocabulary change reaches this adapter while it is otherwise idle —
+	// the manager cannot dial us. Acted on before the error check: a poll
+	// that failed may still have carried it.
+	a.syncCommands(ctx, revision)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("ops poll: %s", sanitizeLog(err))
+			sleepCtx(ctx, 5*time.Second)
 		}
-		op, revision, err := a.mgr.NextOp(ctx, a.channelType, 25)
-		// The revision rides EVERY poll response, delivered op or not, so a
-		// vocabulary change reaches this adapter while it is otherwise idle —
-		// the manager cannot dial us. Acted on before the error check: a poll
-		// that failed may still have carried it.
-		a.syncCommands(ctx, revision)
-		if err != nil {
-			if ctx.Err() == nil {
-				log.Printf("ops poll: %s", sanitizeLog(err))
-				sleepCtx(ctx, 5*time.Second)
-			}
-			continue
-		}
-		if op == nil {
-			continue
-		}
-		// The claim window is the manager's to state and ours to respect: every
-		// Bot API call this op makes shares one retry budget, bounded well
-		// inside it.
-		// A redelivered id is answered as it was answered before, and the
-		// transport is not touched again: the effect happened once.
-		if tid, done := a.completed.seen(op.ID); done {
-			log.Printf("op %s redelivered; acknowledging without repeating it", op.ID)
-			if err := a.mgr.CompleteOp(ctx, op.ID, tid, ""); err != nil && ctx.Err() == nil {
-				log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
-			}
-			continue
-		}
-		threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
-		if opErr == "" {
-			a.completed.add(op.ID, threadID)
-		}
-		if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
+		return
+	}
+	if op == nil {
+		return
+	}
+	// The claim window is the manager's to state and ours to respect: every
+	// Bot API call this op makes shares one retry budget, bounded well
+	// inside it.
+	// A redelivered id is answered as it was answered before, and the
+	// transport is not touched again: the effect happened once.
+	if tid, done := a.completed.seen(op.ID); done {
+		log.Printf("op %s redelivered; acknowledging without repeating it", op.ID)
+		if err := a.mgr.CompleteOp(ctx, op.ID, tid, ""); err != nil && ctx.Err() == nil {
 			log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
 		}
+		return
+	}
+	threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
+	if opErr == "" {
+		a.completed.add(op.ID, threadID)
+	}
+	if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
+		log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
 	}
 }
 
