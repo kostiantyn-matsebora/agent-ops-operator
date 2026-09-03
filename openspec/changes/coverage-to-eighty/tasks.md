@@ -24,6 +24,20 @@
   | console | 76.0% | 7769 | 1891 |
   | signal-k8s-events | 78.7% | 1210 | 258 |
 
+  **`Coverage` IS NOT `(lines to cover − uncovered) / lines to cover`,
+  and `runtime-claude`/`runtime-copilot` are where that shows.** For every
+  Go component the two agree to within rounding — SonarCloud's Go coverage
+  report is line-only, so the composite metric collapses to the simple
+  ratio. `runtime-claude` (63.8%) and `runtime-copilot` (72.9%) are the ONLY
+  two rows where they diverge (58.9% and 68.1% by the naive ratio), and they
+  are exactly the two components `node --test --experimental-test-coverage`
+  measures, whose report includes BRANCH coverage alongside line coverage —
+  which `coverage` composites in, per SonarCloud's own documented formula.
+  The pattern isolating to precisely those two rows, and no others, is what
+  makes this a toolchain difference rather than a mistyped figure: an actual
+  transcription error would not land only on the two rows sharing one
+  non-Go coverage tool.
+
   None clears the gate's 80% condition. Worked worst-first per `design.md`.
 
 ## 2. signal-cron (26.6% → 80%)
@@ -176,24 +190,30 @@
   behavior changes, so nothing here is decided by a cluster. The live proof
   is each component's own SonarCloud `coverage` measure after this branch's
   changes merge to `master` — recorded per component's task above and
-  re-confirmed in task 20.1.2 below.
+  re-confirmed in task 20.1.3 below.
 
 ## 20. Documentation
 
 ### 20.1 Reference docs
 
-- [ ] 20.1.1 If any component's remaining gap required deleting dead code or
+- [ ] 20.1.1 `docs/concepts.md` and `docs/contracts.md` describe CRD fields,
+  semantics and contracts — this change adds tests against EXISTING
+  behavior only (`proposal.md`'s Impact section), so neither page has
+  anything this change makes untrue. Verify at archive time that no task
+  above ended up changing production behavior; if one did, that page's
+  section is updated here instead of left as this claim.
+- [ ] 20.1.2 If any component's remaining gap required deleting dead code or
   adding a coverage-tool exclusion (rather than a test), record which
   component and why in this task — otherwise state "no exclusions were
   needed" here.
-- [ ] 20.1.2 Record the AFTER coverage per component beside task 1.1's table,
+- [ ] 20.1.3 Record the AFTER coverage per component beside task 1.1's table,
   read from the first `master` analysis after this change's PR merges.
   Verify: sixteen rows, and every row is ≥80% except any recorded as an
-  explicit, justified exception in task 20.1.1.
+  explicit, justified exception in task 20.1.2.
 
 ### 20.2 Adopter site
 
-- [ ] 20.2.1 `CONTRIBUTING.md`, "Code analysis": if task 20.1.1 recorded any
+- [ ] 20.2.1 `CONTRIBUTING.md`, "Code analysis": if task 20.1.2 recorded any
   exclusion, add one sentence naming it and why; otherwise no wording there
   becomes false (it already states the 80% threshold and that a component
   under it is expected to be red), so leave it untouched and state that here.
