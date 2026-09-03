@@ -10,6 +10,16 @@ conditioned and assigned by the same deliberate provisioning step that
 creates the other conditions, idempotently, so that it is reproducible from
 the repository and never set by hand.
 
+A project that ships no delivered artifact — no image, no chart, nothing a
+release tag names — MAY instead be assigned a second, unenforced gate that
+carries none of these conditions, PROVIDED the provisioning step still
+creates and analyzes its SonarCloud project, so its findings stay visible on
+its own dashboard even though nothing blocks a merge on them. This is a
+NAMED exception, not a general escape hatch: only a project meeting the
+no-artifact test above may be assigned to it, and the provisioning step's
+own source is where that assignment is made, never a preference set by
+hand.
+
 The gate's verdict remains the service's own check and is NOT a check branch
 protection requires — unchanged from every earlier condition on this gate. A
 component whose overall rating is worse than B is visibly failing its gate on
@@ -45,3 +55,12 @@ before this evaluates the backlog a repository already carries.
   B is fixed or resolved
 - **THEN** the corresponding rating condition passes on the project's next
   analysis
+
+#### Scenario: A tooling-only project is exempted from the gate
+
+- **WHEN** a project's component ships no delivered artifact (no image, no
+  chart, nothing a release tag names)
+- **THEN** the provisioning step MAY assign it the unenforced gate instead of
+  `agentops`, its findings remain visible on its own dashboard, and no other
+  project is assigned to the unenforced gate without the same justification
+  stated in the provisioning step's own source

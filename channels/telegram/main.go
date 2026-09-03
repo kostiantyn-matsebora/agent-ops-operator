@@ -699,7 +699,7 @@ func (a *adapter) handleOffsetGet(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := a.mgr.GetState(r.Context(), name, "telegram-offset")
 	if err != nil {
-		log.Printf("offset read %s: %v", name, err)
+		log.Printf("offset read %s: %s", name, sanitizeLog(err))
 		http.Error(w, "offset read failed", http.StatusBadGateway)
 		return
 	}

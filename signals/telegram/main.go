@@ -42,17 +42,23 @@ import (
 	"time"
 )
 
-// sanitizeLog strips control characters (CR/LF and other C0) from an
-// error's text before it reaches a log line -- gosecurity:S5145's ask,
-// since an error here can carry Telegram-relayed content (a message's
-// text, ultimately) that could otherwise forge a second log line.
-func sanitizeLog(err error) string {
+// sanitizeLogText strips control characters (CR/LF and other C0) from a
+// string before it reaches a log line -- gosecurity:S5145's ask, since a
+// value logged here can carry Telegram-relayed content (a message's text,
+// ultimately, or a manager response derived from it) that could otherwise
+// forge a second log line.
+func sanitizeLogText(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r < 0x20 {
 			return ' '
 		}
 		return r
-	}, err.Error())
+	}, s)
+}
+
+// sanitizeLog is sanitizeLogText for an error's own text.
+func sanitizeLog(err error) string {
+	return sanitizeLogText(err.Error())
 }
 
 // Reserved labels every chat adapter sets. agentops.dev/channel is what lets
@@ -298,7 +304,7 @@ func (a *adapter) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if res.Reason != "" {
-		log.Printf("source %s: %s", source, res.Reason)
+		log.Printf("source %s: %s", source, sanitizeLogText(res.Reason))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -47,3 +47,17 @@ func TestOffsetPutReturnsBadGatewayOnAFailedWrite(t *testing.T) {
 		t.Fatalf("status = %d, want 502", rec.Code)
 	}
 }
+
+func TestOffsetGetReturnsBadGatewayOnAFailedRead(t *testing.T) {
+	a := &adapter{
+		mgr:      failingManager(t),
+		channels: map[string]servedChannel{"telegram-ops": {cfg: channelConfig{ChatID: "-1001"}, token: "bot-token"}},
+		reported: map[string]string{}, clients: map[string]*Telegram{},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/offset", nil)
+	a.handleOffsetGet(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+}

@@ -341,11 +341,12 @@ were a separate unit.
   costing nothing since it holds no control flow of its own). A plain
   function call is not a nesting-increasing construct — only
   `if`/`for`/`switch`/`&&`/`||` and nested function bodies are.
-- **First tried the wrong way and caught before it shipped**, sonar-ratings-baseline: two functions were reshaped into
-  `t.Run` subtests, verified to compile and pass, and were about to be
-  called done — until re-deriving how Sonar scores nested closures showed the
-  reshape did nothing for the metric being fixed. Both were redone as named
-  helpers before landing.
+- **`sonar-ratings-baseline` first tried this the wrong way, and caught it
+  before it shipped**: two functions were reshaped into `t.Run` subtests,
+  verified to compile and pass, and were about to be called done — until
+  re-deriving how Sonar scores nested closures showed the reshape did nothing
+  for the metric being fixed. Both were redone as named helpers before
+  landing.
 - **Reuse candidates across one file are common** — a repeated "find this doc
   by kind and name" search, a repeated table-driven assertion — so extracting
   the first flagged function in a file often produces a helper (`findDocByKindAndName`,

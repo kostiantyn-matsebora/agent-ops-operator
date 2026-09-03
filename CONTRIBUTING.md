@@ -320,8 +320,8 @@ Code impact severity scale this organisation reads issues under, not the
 retired five-level one — keeps its rating below B, so reaching B means fixing
 those, never relaxing the threshold.
 
-**`test/e2e/**` AND `test/conformance/** ARE EXCLUDED FROM COVERAGE, NOT FROM
-ANALYSIS`** (`sonar.coverage.exclusions` in `.github/actions/sonar-scan`). Both
+**`test/e2e/**` AND `test/conformance/**` ARE EXCLUDED FROM COVERAGE, NOT FROM
+ANALYSIS** (`sonar.coverage.exclusions` in `.github/actions/sonar-scan`). Both
 are build-tag gated (`e2e`, `conformance`), so the plain `go test ./...` that
 produces `coverage.out` never runs them — a diff touching `cluster.go`,
 `install.go`, `wiring.go` or `runner.go` there has no coverage data at all,

@@ -27,7 +27,7 @@ which profiles have no Pipeline granting them anything:
 {{- if .Values.persistence.context.enabled }}
 
 A conversation's accumulated context persists by default: claim {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }} backs
-/data/home, so conversational history survives a runtime pod restart.
+/data/context, so conversational history survives a runtime pod restart.
 
 If runtime pods never start, check the claim FIRST — a Pending PVC produces no
 error anywhere else, just conversations that queue forever:
