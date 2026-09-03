@@ -662,3 +662,17 @@
   SonarCloud's native hosted MCP endpoint instead) — a documentation.md
   obligation independent of this change's own scope, fixed in the same
   commit because it lives in the same section.
+- [x] 6.2.2 Task 2's console fixes touched `graph/model.ts`, `graph/Graph.tsx`
+  and `components/Yaml.tsx` — a console UI change, so `npm run screenshots`
+  and `npm run demo` are re-run in `platform/console/ui`. Verify: both
+  commands exit 0 and the resulting `docs/` assets are committed.
+
+  BOTH RUN. `npm run screenshots`: `docs/assets/img/console/*` produced NO
+  diff — the fixes (a locale-aware sort comparator, `new Array(rings)`, the
+  YAML tokenizer rewrite) are confirmed behaviour-preserving for the
+  screenshot fixture's data, not merely asserted from the passing unit
+  tests. `npm run demo`: `docs/assets/video/console-demo-{light,dark}.mp4`
+  DID change — expected and committed, since a video re-encode differs
+  byte-for-byte on every run regardless of whether the UI changed at all;
+  the screenshots, which would show a REAL visual difference, are what
+  settles whether this change moved anything on screen, and they did not.

@@ -11,8 +11,9 @@ step that creates the other conditions, idempotently, so that it is
 reproducible from the repository and never set by hand.
 
 A project that ships no delivered artifact — no image, no chart, nothing a
-release tag names — MAY instead be assigned a second, unenforced gate that
-carries none of these conditions, PROVIDED the provisioning step still
+release tag names — MAY instead be assigned the `agentops-unenforced` gate, a
+second gate that carries none of these conditions, PROVIDED the provisioning
+step still
 creates and analyzes its SonarCloud project, so its findings stay visible on
 its own dashboard even though nothing blocks a merge on them. This is a
 NAMED exception, not a general escape hatch: only a project meeting the

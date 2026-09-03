@@ -225,6 +225,14 @@ func identityOrToken(r *http.Request) string {
 // via the standard header. Hardcoding Secure:true (go:S2092) would break
 // login outright for an install whose internal hop to the console is plain
 // HTTP -- a real, not hypothetical, deployment shape this rule cannot see.
+//
+// TRUSTING the header rides the SAME boundary forwardAuthHeaders above does
+// for X-Forwarded-Email and its siblings -- docs/console.md, "What this mode
+// requires of the proxy": the console must be the only route to its Service,
+// and the proxy must set this header from the connection it terminated
+// rather than relay a client's own. Not re-verified here, for the same
+// reason the identity headers are not: a second, weaker check beside an
+// already-documented one is a second place for the two to drift apart.
 func secureCookie(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
