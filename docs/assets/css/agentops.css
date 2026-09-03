@@ -1515,6 +1515,23 @@ a:hover {
   text-transform: uppercase;
 }
 
+/* THE REDUCED-MOTION STILL IS STATED TOO, and it must win over `is-paused`
+   above: `presentation.js` sets both classes on the still (it IS paused, in
+   every sense the rest of the code cares about), and this rule is declared
+   AFTER that one so the cascade's source-order tie-break — both selectors
+   carry identical specificity — picks this message instead. This is the
+   ONLY visible sign the figure can be pressed; there is no separate play
+   control to draw. */
+.ao-pres.is-still .ao-pres-caption::after {
+  content: ' · press to play';
+  color: var(--ao-text-subtle);
+  font-family: var(--ao-font-mono);
+  font-size: 0.68rem;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* --- tables --------------------------------------------------------------- */
 /* A table is a TABLE, so its cells divide the column. It used to be
    `display: block` for the scroll frame — which makes a table shrink to its
