@@ -682,12 +682,16 @@
 
 - [x] 6.2.1 `CONTRIBUTING.md`, "Code analysis": the gate now additionally
   requires at least a B overall reliability, security and maintainability
-  rating per component, provisioned the same way the coverage condition is.
-  No page under `docs/` describes the analysis (confirmed by
-  `coverage-across-packages`' own check), so the site carries nothing to
-  update — stated here so the absence is a claim rather than an omission.
-  Verify: the paragraph names the three ratings and the threshold, and
-  `wc -l README.md` is unchanged.
+  rating per component, provisioned the same way the coverage condition is
+  — AND task 3.3's `agentops-unenforced` exemption for `scripts`, which the
+  same section now names explicitly ("IT IS THE ONE PROJECT NOT ASSIGNED TO
+  THE `agentops` GATE"), so a reader of `scripts`' red-looking dashboard
+  finds the reason without reading this tasks file. No page under `docs/`
+  describes the analysis (confirmed by `coverage-across-packages`' own
+  check), so the site carries nothing to update — stated here so the
+  absence is a claim rather than an omission. Verify: the paragraph names
+  the three ratings, the threshold, and the exemption, and `wc -l
+  README.md` is unchanged.
 
   Also updated, in the same section: the `.mcp.json` SonarQube entry
   paragraph, which this session's own tooling work made stale (it described
