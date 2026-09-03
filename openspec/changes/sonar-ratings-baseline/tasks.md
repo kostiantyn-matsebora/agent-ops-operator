@@ -149,8 +149,11 @@
 
 ## 2. Every Blocker and High finding, fixed (design D2, D3)
 
-- [ ] 2.1 **`manager` only, and even there not finished.** Of the 73 findings
-  read for `manager` (see 1.2):
+- [ ] 2.1 **Started as `manager` only, and grew across the whole review
+  loop to also cover `runtime-claude`, `runtime-copilot`, `console`,
+  `signal-ha`, `channel-telegram`, `runtime-ollama`, `signal-telegram` and
+  `.github/scripts` — `manager` is STILL the one left not finished.** Of
+  the 73 findings read for `manager` (see 1.2):
   - **Fixed — 12 mechanical:** 7 `S1192` (extracted a named constant: 3× in
     `test/e2e/cluster.go`/`wiring.go`, 1× each in
     `internal/httpapi/{activity,server}.go`, `internal/controller/{channel,signal}adapter_controller.go`,
@@ -512,9 +515,16 @@
     one. All three rebuilt with `--no-cache` and verified: `dpkg -l
     libexpat1` shows `2.5.0-1+deb12u3` in each, and `claude --version` /
     the copilot SDK / the ollama runtime binary all still run.
-- [ ] 2.2 Not run: no re-analysis of this branch has happened yet (needs a
-  CI push), and `manager`'s own backlog is not fully fixed (26 production
-  findings remain per 2.1), so a re-run would not read zero regardless.
+- [ ] 2.2 **NARROWER THAN WHEN WRITTEN.** Per-component re-analysis has
+  since happened many times over — every push in this change's own review
+  loop re-analyzed every touched project (task 3's gate-status reads,
+  `S6350`'s "stayed flagged on next analysis" narration, and the coverage
+  fixes' before/after numbers all depend on it having run). What has NOT
+  run is `sonar-findings-baseline.py` (task 1.1) against the LIVE
+  organisation — the branch-wide enumeration this task was originally
+  scoped to — and `manager`'s own backlog is still not fully fixed (26
+  production findings remain per 2.1), so that specific re-run would not
+  read zero regardless.
 
 ## 3. The gate, extended (design D1, D2)
 
