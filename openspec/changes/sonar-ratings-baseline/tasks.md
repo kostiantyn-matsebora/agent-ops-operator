@@ -620,12 +620,20 @@
 
 ## 5. E2E tests
 
-- [x] 5.1 Not applicable: nothing here is decided by a cluster — a
-  branch-wide analysis read, code fixes judged by the analysis service, and a
-  gate provisioning script. The live proof is the first CI run of this
-  branch (every touched component's analysis) and task 3.2's read-back.
-  Verify: the pull request's SonarCloud checks show every touched component
-  clean of Blocker/High findings, and the `agentops` gate's ten conditions.
+- [x] 5.1 Not applicable, INCLUDING the `test/e2e/` files task 4.3 flagged as
+  vetted-not-run: this change's OWN touches there (the review-response
+  rounds' `cluster.go`/`install.go` CreateTemp cleanup) are process-level
+  filesystem calls the running process makes on its own temp files — a
+  cluster decides nothing about whether `os.Remove` on a path this process
+  just created succeeds. `go vet -tags e2e` is therefore the right and
+  sufficient check for exactly those lines, not a gap task 5 owed a fuller
+  answer for. The REST of this change is a branch-wide analysis read, code
+  fixes judged by the analysis service, and a gate provisioning script —
+  nothing cluster-decided there either. The live proof is the first CI run
+  of this branch (every touched component's analysis) and task 3.2's
+  read-back. Verify: the pull request's SonarCloud checks show every
+  touched component clean of Blocker/High findings, and the `agentops`
+  gate's ten conditions.
 
 ## 6. Documentation
 

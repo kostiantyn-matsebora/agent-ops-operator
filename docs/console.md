@@ -746,7 +746,7 @@ What this mode requires of the proxy:
   X-Forwarded-Proto == "https"`) — the same "only route to the Service" trust
   boundary above, one header over. `ingress-nginx` does this by default,
   computing the header from `$scheme` on the connection it received rather
-  than passing a client-sent one through; only `use-forwarded-headers: true`
+  than passing a client-sent one through. Only `use-forwarded-headers: true`
   in its ConfigMap changes that, and it exists for a CHAIN of proxies this
   console does not need. Leave it off.
 - **It should FORWARD one.** Without an identity the console is **read-only**:
