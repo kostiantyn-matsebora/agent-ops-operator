@@ -16,6 +16,10 @@
 // fallback for one, and it is the same bargain the tab strip and the player
 // make.
 //
+// REDUCED MOTION IS THE SAME FIGURE, PAUSED FROM THE START. It carries a cue
+// saying it can be pressed, never a second control and never a second copy of
+// the beats below it — see the branch near the end of this file for why.
+//
 // WHAT IS HERE AND WHAT IS THE PAGE'S. The drawing is the theme's: its shape,
 // its coordinates and the connectors drawn between them are geometry, not
 // prose, and no markdown shape states them. Every WORD a beat says is the
@@ -219,11 +223,10 @@
       // strip's third panel, whole. Carrying the `highlight` class keeps the
       // block's own token colours, which are scoped to it.
       // Taken out before the caption is read, so the block's own lines cannot
-      // end up in the beat's sentence. Put back, because the reduced-motion
-      // path shows the list and a beat without its lines is a beat cut in half.
+      // end up in the beat's sentence. Never put back: `list` is discarded a
+      // few lines below regardless of branch, and nothing displays it again.
       if (holder) holder.parentNode.removeChild(holder);
       var beat = { text: li.textContent.replace(/\s+/g, ' ').trim() };
-      if (holder) li.appendChild(holder);
       return beat;
     });
 
@@ -257,19 +260,21 @@
     // A real `tabindex` and a key handler, not a `<div>` with a click: the
     // transport it replaces was operable from the keyboard and this must be
     // too.
+    var BASE_LABEL = 'How it works, one beat at a time';
     wrap.setAttribute('role', 'group');
-    wrap.setAttribute('aria-label', 'How it works, one beat at a time');
+    wrap.setAttribute('aria-label', BASE_LABEL);
     wrap.tabIndex = 0;
 
     // NO LIVE REGION. One that announced every advance would interrupt a
-    // screen-reader user every 5.2 seconds on the page they landed on. The
-    // beats stay readable as the list below instead — by being read, rather
-    // than by being read at.
+    // screen-reader user every 5.2 seconds on the page they landed on. A
+    // reader with no scripting gets the beats as an ordinary list instead; a
+    // scripted reader has the current beat's caption live in the DOM, to read
+    // at their own pace rather than have it read at them.
 
     var current = 0;
     var timer = null;
     // Whether the presentation is sitting as the reduced-motion still. Read by
-    // the play button, cleared for good by `engage`.
+    // `toggle()`, cleared for good by `engage`.
     var stillNow = false;
     var started = 0;
 
@@ -368,9 +373,8 @@
     // ENGAGING IS ONE-WAY, and it is the READER'S OWN action rather than
     // something the page did at them — which is the whole of what the
     // preference asks. There is no path back to the still: pausing afterwards
-    // leaves the ordinary paused transport, because taking the beat list back
-    // out from under a reader who has just pressed play would move the page for
-    // the person who asked for less movement.
+    // leaves the ordinary paused figure, exactly as it would for any other
+    // reader who has already said what they want.
     //
     // It starts at beat ONE, not at what the still was composed as. The still
     // is every element lit at once, which is the LAST beat's state — resuming
@@ -378,7 +382,7 @@
     function engage() {
       stillNow = false;
       wrap.classList.remove('is-still');
-      list.parentNode.removeChild(list);
+      wrap.setAttribute('aria-label', BASE_LABEL);
       goTo(0);
       start();
     }
@@ -403,17 +407,23 @@
 
     list.parentNode.removeChild(list);
 
-    // REDUCED MOTION IS THE COMPOSED DRAWING PLUS THE LIST, AND A WAY IN.
-    // Nothing moves, the whole model is on the stage at once, and the beats
-    // stay readable in order — the same content the no-scripting reader gets.
+    // REDUCED MOTION IS THE COMPOSED DRAWING, PAUSED, WITH A CUE INSTEAD OF A
+    // SECOND CONTROL. Nothing moves, and the whole model is on the stage at
+    // once — the preference says do not move things AT me, it does not say
+    // never let me ask, so DELETING the ability to play at all (what this
+    // branch answered `reduce` with before the figure became the only
+    // control anywhere on the page) is still wrong.
     //
-    // THE PLAY BUTTON SURVIVES, AND THAT IS THE POINT OF THIS BRANCH. The
-    // transport used to be removed with the motion it drove, which answered
-    // `reduce` by DELETING the control: a reader with the system setting on
-    // could not play the page's central explanation even deliberately, and it
-    // was reported from a second machine as a missing animation — which is also
-    // what a broken script looks like. The preference says do not move things
-    // AT me. It does not say never let me ask.
+    // BUT ASKING IS THE SAME CLICK EVERY OTHER READER ALREADY HAS —
+    // `toggle()` calls `engage()` exactly when `stillNow` is true — so there
+    // is no separate control to keep alive here, only a cue that one exists.
+    // This branch used to reinsert the beat list below the figure, which was
+    // right while a rail's play button sat beside it as the still's only
+    // control: the list was that reader's sole account of the beats, since
+    // the rest of the transport was hidden. The rail is gone now, the
+    // drawing already shows the whole model composed, and reinserting the
+    // list turned into a second, unlabelled copy of the same explanation
+    // sitting under a picture with no visible sign it could be clicked.
     var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (still) {
       goTo(beats.length - 1);
@@ -421,11 +431,8 @@
       pause();
       stillNow = true;
       wrap.classList.add('is-still');
-      wrap.parentNode.insertBefore(list, wrap.nextSibling);
+      wrap.setAttribute('aria-label', BASE_LABEL + ' — press to play');
     } else {
-      // Already detached at the top of this function — this branch just
-      // leaves it that way. The duplicate removeChild here threw on
-      // `list.parentNode` being null, since line 404 had already removed it.
       goTo(0);
       start();
     }
