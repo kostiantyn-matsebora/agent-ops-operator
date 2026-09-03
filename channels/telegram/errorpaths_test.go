@@ -48,6 +48,20 @@ func TestOffsetPutReturnsBadGatewayOnAFailedWrite(t *testing.T) {
 	}
 }
 
+func TestRefreshChannelsLogsAndSwallowsAFailedList(t *testing.T) {
+	a := &adapter{
+		mgr:      failingManager(t),
+		channels: map[string]servedChannel{},
+		reported: map[string]string{}, clients: map[string]*Telegram{},
+	}
+	// Must not panic even though a.mgr.Channels fails, and must leave the
+	// served set untouched rather than clearing it on a transient error.
+	a.refreshChannels(context.Background())
+	if len(a.channels) != 0 {
+		t.Fatalf("channels = %v, want unchanged (empty)", a.channels)
+	}
+}
+
 func TestOffsetGetReturnsBadGatewayOnAFailedRead(t *testing.T) {
 	a := &adapter{
 		mgr:      failingManager(t),

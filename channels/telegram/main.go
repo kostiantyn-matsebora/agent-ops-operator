@@ -262,7 +262,7 @@ func (a *adapter) handler() http.Handler {
 func (a *adapter) refreshChannels(ctx context.Context) {
 	infos, err := a.mgr.Channels(ctx, a.channelType)
 	if err != nil {
-		log.Printf("list channels: %v", err)
+		log.Printf("list channels: %s", sanitizeLog(err))
 		return
 	}
 	next := map[string]servedChannel{}

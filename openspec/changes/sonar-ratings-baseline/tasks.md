@@ -12,8 +12,11 @@
   reporting BOTH counts when they disagree rather than silently trusting the
   new one.
 
-  Verified against fixtures in task 4.1, not against the organisation — the
-  script itself was never run with a real token this session (see 1.2).
+  This task's OWN scope is the script and its behavior, and that is what is
+  done and ticked: verified against fixtures in task 4.1, exactly as this
+  task's "Verify:" clause asks. Running it against the real organisation is a
+  DIFFERENT task — 1.2, below, still open — and is not part of what 1.1
+  claims.
 
   **"ACCEPTED AS A KNOWN GAP" WAS WRONG HERE TOO, SAME AS `S6350`
   — REVERSED after pushback, by reading Sonar's OWN documented remediation
