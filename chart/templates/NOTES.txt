@@ -662,7 +662,7 @@ To give ONE route more, declare an account STATING WHAT IT MAY DO, and name it:
   rbac:
     runtime:
       serviceAccounts:
-        - name: agentops-runtime-workloads
+        - name: agentops-runtime-acting
           clusterRoles:
             - name: workloads
               rules:
@@ -672,7 +672,7 @@ To give ONE route more, declare an account STATING WHAT IT MAY DO, and name it:
 
   pipelines:
     - name: <route>
-      serviceAccountName: agentops-runtime-workloads
+      serviceAccountName: agentops-runtime-acting   # the account just declared
 
 There is no mode to name. A word like `full` is a grant nobody reviewed, and
 agentops.runtimeReadRules / runtimeWriteRules in the chart are the rules to copy

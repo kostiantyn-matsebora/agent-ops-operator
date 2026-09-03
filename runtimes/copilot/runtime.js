@@ -340,8 +340,8 @@ async function runCopilot(unit) {
   console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${id ? ' continue=' + sanitizeLog(id) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
   console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
   console.log(`[runtime] copilot available=${grant.available.length ? grant.available.join(',') : '(none)'}${grant.shell ? ` shell=${grant.shell.all ? 'any' : grant.shell.prefixes.map((x) => `"${x} *"`).join('|')}` : ''}`);
-  for (const u of grant.unmapped) console.log(`[runtime] UNMAPPED pattern withheld: ${u} — no Copilot equivalent, granting nothing`);
-  for (const r of grant.refused) console.log(`[runtime] REFUSED per-server wildcard: ${r} — Copilot admits mcp:* or an exact name, and mcp:* would grant every bound server`);
+  for (const u of grant.unmapped) console.log(`[runtime] UNMAPPED pattern withheld: ${sanitizeLog(u)} — no Copilot equivalent, granting nothing`);
+  for (const r of grant.refused) console.log(`[runtime] REFUSED per-server wildcard: ${sanitizeLog(r)} — Copilot admits mcp:* or an exact name, and mcp:* would grant every bound server`);
   for (const f of mcp.failed) console.log(`[runtime] MCP server "${f.name}" not registered: ${f.reason}`);
   console.log(`[init] model=${COPILOT_MODEL || 'default'} tools=${grant.available.length} mcp=${Object.keys(mcp.servers).join(',') || '-'}`);
   if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);

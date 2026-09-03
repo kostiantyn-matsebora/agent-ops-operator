@@ -548,7 +548,13 @@
   (the scan step still runs, still posts to the pull request) but never
   blocks a merge on them. Run live in the same call as 3.2: confirmed
   `agentops-unenforced` created (id 159422, zero conditions) and `scripts`
-  explicitly assigned to it. `.github/tests/sonar-provision.test.sh`
+  explicitly assigned to it. The justification above is not only here — a
+  comment stating the same three things (no artifact, the specific
+  unfixable finding and its task reference, why an empty gate rather than
+  disabling the scan) sits directly on `GATE_UNENFORCED`'s declaration in
+  `sonar-provision.sh` itself, so a reader of the script never needs this
+  tasks file to know why `scripts` is exempted.
+  `.github/tests/sonar-provision.test.sh`
   extended: the fixture stub is now project-aware for
   `qualitygates/get_by_project` (it answered every project identically
   before, which cannot express "scripts is on a different gate than
