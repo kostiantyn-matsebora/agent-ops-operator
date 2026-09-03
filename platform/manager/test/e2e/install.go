@@ -139,6 +139,9 @@ func Install(ctx context.Context, c *Cluster, v *InstallValues) error {
 		return err
 	}
 	values := valuesFile.Name()
+	// helm reads it once, at the upgrade/install call below, and nothing
+	// after this function needs it.
+	defer func() { _ = os.Remove(values) }()
 	_, writeErr := valuesFile.Write([]byte(v.valuesYAML()))
 	closeErr := valuesFile.Close()
 	if writeErr != nil {

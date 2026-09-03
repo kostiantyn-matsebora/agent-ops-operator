@@ -67,6 +67,10 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 			return nil, err
 		}
 		regs := regsFile.Name()
+		// k3d reads it once, at `cluster create` below, and nothing after
+		// this function needs it -- unlike the kubeconfig, its lifetime is
+		// this function's, not the cluster's.
+		defer func() { _ = os.Remove(regs) }()
 		_, writeErr := regsFile.Write([]byte(registriesYAML))
 		closeErr := regsFile.Close()
 		if writeErr != nil {
@@ -116,9 +120,15 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 	return c, nil
 }
 
-// Delete tears the cluster down.
+// Delete tears the cluster down and removes the CreateTemp'd kubeconfig
+// that reached it -- unlike the registries file, this one lives for the
+// cluster's whole lifetime, so it is Delete's to remove rather than
+// EnsureCluster's.
 func (c *Cluster) Delete() {
 	_ = exec.Command("k3d", "cluster", "delete", c.Name).Run()
+	if c.Kubeconfig != "" {
+		_ = os.Remove(c.Kubeconfig)
+	}
 }
 
 // Kubectl runs kubectl against the cluster.
