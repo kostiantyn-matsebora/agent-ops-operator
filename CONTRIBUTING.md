@@ -365,14 +365,24 @@ array.
 **Reading the analysis from an agent session**, project-scoped in `.mcp.json`:
 SonarCloud's own native, hosted MCP endpoint (`https://api.sonarcloud.io/mcp`)
 — no local process, no Docker container, nothing to keep updated. Auth rides
-as an ordinary HTTP header, filled from the same `SONAR_TOKEN` / `SONAR_ORG`
-the scripts above read; there is no read-only flag to set because the
-endpoint's own tool set carries no write. Set the two host env vars once and
-every session picks them up, at the moment ITS OWN Claude Code process
-starts — a var exported after that, or in a shell that never launched it,
-reaches nothing, and the fix is relaunching from a shell that has it, not
-restarting the app in place. The config carries no literal token or
-organisation key, per the publication guard below.
+as an ordinary HTTP header, filled from the same `SONAR_TOKEN` the scripts
+above read. Set the host env var once and every session picks it up, at the
+moment ITS OWN Claude Code process starts — a var exported after that, or in
+a shell that never launched it, reaches nothing, and the fix is relaunching
+from a shell that has it, not restarting the app in place. The config
+carries no literal token or organisation key, per the publication guard
+below.
+
+**THERE IS NO READ-ONLY FLAG HERE, AND THAT IS NOT THE SAME AS "NOTHING TO
+SET."** The retired Docker `sonarqube-mcp-server` enforced
+`SONARQUBE_READ_ONLY=true`; the hosted endpoint exposes no equivalent this
+session could find, and its tool set is NOT read-only — it carries
+`change_sonar_issue_status` and `change_security_hotspot_status`, both used
+directly earlier in this very change (accepting `S6350` on `runtime-claude`
+and a hash-algorithm finding on `signal-ha`). Whatever `SONAR_TOKEN` this
+config resolves to therefore has WRITE reach over every project it can see —
+scope it accordingly, the same way any other write-capable credential in
+this repository is treated.
 
 ## Commit messages
 
