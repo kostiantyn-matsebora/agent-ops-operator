@@ -98,6 +98,14 @@ strip, and it is deleted along with its two exports.
     each beat's manifest lines, in two bordered boxes under the picture. That
     was MORE MACHINERY THAN THE THING IT EXPLAINED. Clicking the drawing pauses
     it, and nothing else sits below it.
+  - **A REDUCED-MOTION READER GETS THE SAME FIGURE, STILL FROM THE START**,
+    with a `· press to play` caption cue and a matching `aria-label` as the
+    only sign it can be pressed. It never gets a second control and never a
+    second copy of the beats reinserted below it — the reduced-motion branch
+    used to reinsert that list, back when a rail's play button sat beside it
+    as the still's only control. Once the rail was deleted, the reinsertion
+    became a duplicate account of the whole model sitting under a picture
+    that already showed it, with nothing marking either as clickable.
   - **The caption is IN the drawing**, in a lane reserved to the right of it,
     vertically tracking whatever the beat lights. Placing it beside the anchor
     was tried over ten candidate positions and collided on nearly every beat —
