@@ -98,11 +98,11 @@ function parseFrontmatterTools(text) {
 }
 
 // safeJoin resolves base/...segments and refuses a result that escapes base
-// -- jssecurity:S2083's ask, since both callers below join a directory this
+// -- jssecurity:S2083's ask, since the caller below joins a directory this
 // process controls with a name that arrives from data it does not (a CR's
-// agent name, a work unit's promptFile). null on escape, so a caller can
-// treat it exactly like a missing file rather than reading outside its
-// intended tree.
+// agent name); runtime.js's promptFile caller does the same for a work
+// unit's prompt file. null on escape, so a caller can treat it exactly like
+// a missing file rather than reading outside its intended tree.
 function safeJoin(base, ...segments) {
   const root = path.resolve(base);
   const target = path.resolve(root, ...segments);

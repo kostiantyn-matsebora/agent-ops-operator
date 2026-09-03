@@ -616,8 +616,8 @@
   `openspec/specs/code-quality-analysis/spec.md` by `/opsx:archive` on the
   branch; `openspec validate --all` passes. Verify: the command exits 0.
 
-  Not run: `/opsx:archive` is refused with 1.2/2.1/2.2/3.2 open, correctly —
-  this change is not finished.
+  Not run: `/opsx:archive` is refused with 1.2/2.1/2.2 open, correctly — this
+  change is not finished. (3.2 is done and dropped from this list.)
 - [x] 6.1.2 If task 2's fix sweep surfaces a technique worth keeping —
   a class of finding this codebase produces repeatedly, or a rule worth
   naming as a house convention — record it in `.claude/rules/gotchas.md` or
