@@ -538,7 +538,7 @@
 - [x] 3.3 **NOT IN THE ORIGINAL PLAN, ADDED DIRECTLY BY THE USER:**
   `scripts` is tooling, never a delivered artifact — no image, no chart,
   nothing `components.sh` or a release tag names — and after four
-  documented-pattern attempts (task 2.1) its one remaining finding
+  documented-pattern attempts (task 1.1) its one remaining finding
   (`pythonsecurity:S2083`/`S8707` on a CLI `--out` write) is a rule Sonar's
   own engine will not credit any code shape for. `sonar-provision.sh` now
   provisions a second gate, `agentops-unenforced` — created empty and kept

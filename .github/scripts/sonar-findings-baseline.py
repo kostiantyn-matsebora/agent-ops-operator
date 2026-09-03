@@ -212,7 +212,10 @@ def main() -> int:
             mismatches.append(name)
         print(line)
 
-    result = {"organization": args.organization, "components": rows}
+    # No "organization" key: the docstring's guarantee is that no
+    # organisation identifier reaches this file, and args.organization
+    # embedded here would have been exactly that.
+    result = {"components": rows}
     out_path = write_result(args.out, result)
     total = sum(r["total"] for r in rows)
     print(f"\n{total} open Blocker/High finding(s) across {len(rows)} project(s), written to {out_path}"

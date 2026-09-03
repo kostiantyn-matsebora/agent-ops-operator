@@ -98,6 +98,9 @@ out=$(run); rc=$?
 it "runs and writes a JSON file"
 assert_status 0 "$rc"
 
+it "writes no organisation identifier to the output file -- the docstring's own guarantee"
+assert_not_contains "$(cat "$tmp/out.json")" "organization"
+
 it "derives the project key exactly as sonar-issues.py and sonar-provision.sh do"
 assert_contains "$(cat "$CURL_CALLS")" "componentKeys=org_agent-ops-operator_manager"
 
