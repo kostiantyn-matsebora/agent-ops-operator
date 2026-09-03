@@ -303,6 +303,16 @@
       `get_project_quality_gate_status` reads), which is the claim this
       count exists to support and does not depend on the count being
       exact.
+
+      STILL BLOCKED as of this fix round too — `.mcp.json` pointed at a
+      Docker-based `sonarqube-mcp-server` this session's own tooling work
+      had already replaced with SonarCloud's hosted endpoint everywhere
+      except the config file itself (a separate finding this same round,
+      task 6.2.1's note below); corrected now, but a `.mcp.json` edit
+      takes effect on the NEXT session, not this one already running with
+      it loaded. Re-pulling the 29th finding's disposition is therefore
+      left for whichever session opens next with a live connection, not
+      claimed here.
     - Both Dockerfiles' fix was BUILT AND RUN, not just read, TWICE — once
       for `--ignore-scripts`, again for the pin: `docker build` succeeded
       both times for both, `claude --version` printed `2.1.252 (Claude
@@ -645,6 +655,15 @@
 
   Not run: `/opsx:archive` is refused with 1.2/2.1/2.2 open, correctly — this
   change is not finished. (3.2 is done and dropped from this list.)
+
+  UNTICKED WHILE 6.1.2 AND 6.2 BELOW ARE TICKED, ON PURPOSE, NOT OUT OF
+  ORDER BY MISTAKE: this task depends on 1.2/2.1/2.2, which are still
+  open; the other documentation tasks depend on nothing this change has
+  not already done, so they finished first. Ticking THIS one before the
+  archive actually runs would be the false claim — see
+  `.claude/rules/documentation.md`'s own point that the documentation
+  section records what actually happened, not what "should" be done by
+  now.
 - [x] 6.1.2 If task 2's fix sweep surfaces a technique worth keeping —
   a class of finding this codebase produces repeatedly, or a rule worth
   naming as a house convention — record it in `.claude/rules/gotchas.md` or
@@ -672,10 +691,23 @@
 
   Also updated, in the same section: the `.mcp.json` SonarQube entry
   paragraph, which this session's own tooling work made stale (it described
-  the old Dockerised `sonarqube-mcp-server`; `.mcp.json` now points at
-  SonarCloud's native hosted MCP endpoint instead) — a documentation.md
-  obligation independent of this change's own scope, fixed in the same
-  commit because it lives in the same section.
+  the old Dockerised `sonarqube-mcp-server`, which SonarCloud's native
+  hosted MCP endpoint replaced) — a documentation.md obligation
+  independent of this change's own scope, fixed in the same commit
+  because it lives in the same section.
+
+  **THIS PARAGRAPH ITSELF WAS WRONG FOR SEVEN REVIEW ROUNDS: it said
+  `.mcp.json` "now points at" the hosted endpoint, and `.mcp.json` was
+  never actually changed.** Only the prose was updated; the config file
+  kept the Docker form the whole time — caught in review round 10, not by
+  re-reading this claim. `.mcp.json` is fixed in this same round's commit,
+  to the shape CONTRIBUTING.md's paragraph already describes
+  (`type: "http"`, `url: https://api.sonarcloud.io/mcp`, `Authorization:
+  Bearer ${SONAR_TOKEN}`, no organisation key, matching "the config
+  carries no literal token or organisation key" the paragraph already
+  claimed). It could not have been verified by RUNNING it: an `.mcp.json`
+  edit takes effect on the NEXT Claude Code session, never the one editing
+  it — see task 1.2's `29th finding` note above for the same limit.
 - [x] 6.2.2 Task 2's console fixes touched `graph/model.ts`, `graph/Graph.tsx`
   and `components/Yaml.tsx` — a console UI change, so `npm run screenshots`
   and `npm run demo` are re-run in `platform/console/ui`. Verify: both

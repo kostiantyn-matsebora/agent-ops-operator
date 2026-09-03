@@ -152,7 +152,11 @@ def baseline_for(api: str, token: str, key: str) -> dict:
     # quality, so it can be less than the sum of `counts`); the sum is what a
     # zero-result taxonomy check below is keyed on, since the two agree exactly
     # when nothing was found at all.
-    entry: dict = {"key": key, "counts": counts, "total": len(found)}
+    #
+    # NO "key" HERE: it is `{organization}_{repo_name}_{component}`, and the
+    # docstring's guarantee is that no organisation identifier reaches this
+    # file. The caller already records the bare component name separately.
+    entry: dict = {"counts": counts, "total": len(found)}
     if sum(counts.values()) == 0:
         legacy = issues_for(api, token, key, severities="BLOCKER,CRITICAL")
         entry["legacyCount"] = len(legacy)
@@ -199,7 +203,7 @@ def main() -> int:
         try:
             entry = baseline_for(args.api, token, key)
         except (RuntimeError, json.JSONDecodeError) as exc:
-            entry = {"key": key, "counts": dict.fromkeys(QUALITIES, 0), "total": 0,
+            entry = {"counts": dict.fromkeys(QUALITIES, 0), "total": 0,
                       "legacyCount": None, "taxonomyMismatch": False, "error": str(exc)}
         entry["component"] = name
         rows.append(entry)

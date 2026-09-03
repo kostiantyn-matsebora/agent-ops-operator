@@ -101,6 +101,9 @@ assert_status 0 "$rc"
 it "writes no organisation identifier to the output file -- the docstring's own guarantee"
 assert_not_contains "$(cat "$tmp/out.json")" "organization"
 
+it "writes no organisation-prefixed project key either -- not just the literal word 'organization'"
+assert_not_contains "$(cat "$tmp/out.json")" "org_agent-ops-operator_"
+
 it "derives the project key exactly as sonar-issues.py and sonar-provision.sh do"
 assert_contains "$(cat "$CURL_CALLS")" "componentKeys=org_agent-ops-operator_manager"
 
