@@ -67,6 +67,13 @@ duplicating the list" — it was free to add and the base spec already commits
 to "a discoverable, non-visual-only cue," which a CSS-only cue does not
 reliably satisfy on its own.
 
+**`engage()` also removes `wrap`'s `is-still` class**, which is what stops the
+CSS cue rendering once the reader has already asked — the visual half of the
+same "engaging is one-way" contract the `aria-label` restore serves on the
+accessible-name half. Both are one function's two ways of saying the still is
+over: `wrap.classList.remove('is-still')` for the caption's `::after`, the
+`aria-label` reset for anyone not reading it visually.
+
 **Both classes stay on `wrap` while still (`is-paused` and `is-still`).**
 `pause()` already adds `is-paused` as part of stopping the timer, and the
 still composition is a paused state in every sense the rest of the code

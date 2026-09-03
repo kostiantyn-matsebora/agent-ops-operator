@@ -103,7 +103,7 @@ strip, and it is deleted along with its two exports.
     only sign it can be pressed. It never gets a second control and never a
     second copy of the beats reinserted below it — the reduced-motion branch
     used to reinsert that list, back when a rail's play button sat beside it
-    as the still's only control; once the rail was deleted the reinsertion
+    as the still's only control. Once the rail was deleted, the reinsertion
     became a duplicate account of the whole model sitting under a picture
     that already showed it, with nothing marking either as clickable.
   - **The caption is IN the drawing**, in a lane reserved to the right of it,
