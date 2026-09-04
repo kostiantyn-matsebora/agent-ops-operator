@@ -174,11 +174,27 @@
 
 ## 12. channel-telegram (69.7% → 80%)
 
-- [ ] 12.1 In `channels/telegram/`, add tests closing the gap (~115 of 338
+- [x] 12.1 In `channels/telegram/`, add tests closing the gap (~115 of 338
   uncovered lines) — `sonar-ratings-baseline` already added
   `errorpaths_test.go`; find the next-largest uncovered file rather than
   re-testing it. Verify: `-coverpkg=./...` run reports ≥80% total.
-- [ ] 12.2 Record the local before/after total in this task.
+
+  Added `coverage_test.go`: `execute`'s reopen-from-`PreviousThreadID`
+  branch, its five malformed-op error returns, the ordinary chunked-send and
+  oversized-as-document paths, and plain `close-topic`; `handleUpdate`'s
+  real HTTP entry point (valid/malformed-JSON/unreadable-body); `menu`'s
+  `displayName` and non-nil `publishedName`; the pure helpers
+  `utf8Boundary`/`documentName`/`asDocument`/`degradeQuotes`; the send-side
+  of the quote-degrade retry latch; and `bucket.doSleep`'s real-clock
+  branch. No production code changed. `main.go`'s `mustEnv`/`main`/
+  `opsLoop`/`refreshLoop` remain untested — real entrypoint/background-loop
+  code, awkward to unit-test without refactoring a hardcoded 60s sleep into
+  an injectable variable, left alone per the no-refactor-for-its-own-sake
+  rule; coverage already clears the gate without them.
+- [x] 12.2 Record the local before/after total in this task.
+
+  Before: 69.7% (SonarCloud) / 78.4% local (after `sonar-ratings-baseline`).
+  After: **85.5%** local (`-coverpkg=./... -coverprofile`, build/vet clean).
 
 ## 13. runtime-copilot (72.9% → 80%)
 
