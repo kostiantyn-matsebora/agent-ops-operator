@@ -382,15 +382,40 @@
 
 ## 16. console (76.0% → 80%)
 
-- [ ] 16.1 In `platform/console/` (Go half), add tests closing the Go-side
+- [x] 16.1 In `platform/console/` (Go half), add tests closing the Go-side
   gap. Verify: `-coverpkg=./...` run reports the Go total.
-- [ ] 16.2 In `platform/console/ui/` (TypeScript half), add `vitest` cases
+
+  Added `config_test.go` (`envOr`/`envBound`/`LoadConfig`/`CanOriginate`,
+  none previously tested), `kube_test.go` (the real in-cluster HTTP client:
+  `NewInClusterKube`'s construction, `bearer`'s caching/staleness/transient-
+  fallback, `Watch`'s full frame handling — ADDED/MODIFIED/DELETED/
+  BOOKMARK/expired-and-other-ERROR/EOF/decode-errors/cancellation),
+  `metrics_test.go` (`NewMetricsClient`/`QueryRange`/`stepFor`/
+  `handleHistory`/`handleCharts` against a real configured backend),
+  `uiserve_test.go` (the SPA handler end-to-end against a real
+  `fstest.MapFS` — deep-link fallback, ETag/304, pre-compressed `.gz`
+  serving, plus `UIHandler()` against the real embedded `ui/dist`), and
+  `extra_test.go` (session `drop`, `handleActivity`/
+  `handleOriginationSources`/`handleKinds`, `podHealth`, `Manager.Resolved`,
+  the queues' `Work` loop). No production code changed. Dead-code
+  candidate found (not deleted): `(*API).authorized` in `auth.go` is
+  defined but called from nowhere in the module. `main()` left untested
+  (process entrypoint).
+- [x] 16.2 In `platform/console/ui/` (TypeScript half), add `vitest` cases
   closing the UI-side gap — this project's coverage is the COMBINED Go+lcov
   number SonarCloud reports for one project, so both halves count toward the
   same 80%. Verify: `npm run test:coverage` reports the `src/**` total, and
   the combined figure (weighted by `lines_to_cover` from each report) is
   ≥80%.
-- [ ] 16.3 Record the local before/after totals (both halves) in this task.
+
+  UI half was already at 83.0% (above target) — untouched, per design.md's
+  non-goal against pushing past the gate once cleared.
+- [x] 16.3 Record the local before/after totals (both halves) in this task.
+
+  Go half — before: 76.0% (SonarCloud, combined) / 74.9% local. After:
+  **85.0%** local (`-coverpkg=./... -coverprofile`, build/vet/gofmt
+  clean). UI half: unchanged at 83.0% (`npm run test:coverage`). Combined
+  (lines_to_cover-weighted): ~84%.
 
 ## 17. signal-k8s-events (78.7% → 80%)
 
