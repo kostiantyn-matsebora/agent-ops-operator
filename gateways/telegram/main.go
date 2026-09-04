@@ -136,39 +136,68 @@ func (r *router) poll(ctx context.Context) {
 	offset := int64(-1) // -1 = not yet obtained
 	for ctx.Err() == nil {
 		if offset < 0 {
-			raw, err := r.down.GetOffset(ctx, r.cfg.ChannelTarget)
-			if err != nil {
-				if ctx.Err() == nil {
-					log.Printf("offset read: %v", err)
-					sleepCtx(ctx, 5*time.Second)
-				}
+			next, ok := r.resolveOffset(ctx)
+			if !ok {
 				continue
 			}
-			offset, _ = strconv.ParseInt(raw, 10, 64)
+			offset = next
 		}
-		updates, err := r.tg.GetUpdates(ctx, offset)
-		if err != nil {
-			if ctx.Err() == nil {
-				log.Printf("getUpdates: %v", err)
-				sleepCtx(ctx, 5*time.Second)
-			}
+		updates, ok := r.fetchUpdates(ctx, offset)
+		if !ok {
 			continue
 		}
-		for _, upd := range updates {
-			r.route(ctx, upd)
-			offset = upd.UpdateID + 1
-			// Report AFTER forwarding: a crash in between replays the batch,
-			// which is harmless (signals collapse on fingerprint, and a
-			// duplicate topic message is the same exposure the single-container
-			// adapter had on restart). Losing an update would not be.
-			if err := r.down.PutOffset(ctx, r.cfg.ChannelTarget, strconv.FormatInt(offset, 10)); err != nil {
-				if ctx.Err() == nil {
-					log.Printf("offset report: %v", err)
-				}
-				break
+		offset = r.deliverUpdates(ctx, updates, offset)
+	}
+}
+
+// resolveOffset reads the persisted offset once. A failure sleeps out the
+// retry window and reports false, so poll's own loop simply tries again.
+func (r *router) resolveOffset(ctx context.Context) (int64, bool) {
+	raw, err := r.down.GetOffset(ctx, r.cfg.ChannelTarget)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("offset read: %v", err)
+			sleepCtx(ctx, 5*time.Second)
+		}
+		return 0, false
+	}
+	offset, _ := strconv.ParseInt(raw, 10, 64)
+	return offset, true
+}
+
+// fetchUpdates polls Telegram once, on the same retry shape as resolveOffset.
+func (r *router) fetchUpdates(ctx context.Context, offset int64) ([]update, bool) {
+	updates, err := r.tg.GetUpdates(ctx, offset)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("getUpdates: %v", err)
+			sleepCtx(ctx, 5*time.Second)
+		}
+		return nil, false
+	}
+	return updates, true
+}
+
+// deliverUpdates routes each update and reports the confirmed offset
+// downstream, returning the offset actually reached — which the caller
+// resumes from on the next poll if reporting fails partway through the
+// batch.
+func (r *router) deliverUpdates(ctx context.Context, updates []update, offset int64) int64 {
+	for _, upd := range updates {
+		r.route(ctx, upd)
+		offset = upd.UpdateID + 1
+		// Report AFTER forwarding: a crash in between replays the batch,
+		// which is harmless (signals collapse on fingerprint, and a
+		// duplicate topic message is the same exposure the single-container
+		// adapter had on restart). Losing an update would not be.
+		if err := r.down.PutOffset(ctx, r.cfg.ChannelTarget, strconv.FormatInt(offset, 10)); err != nil {
+			if ctx.Err() == nil {
+				log.Printf("offset report: %v", err)
 			}
+			break
 		}
 	}
+	return offset
 }
 
 // route is the entire routing rule: topic → continuation → channel adapter;
