@@ -6,9 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -278,12 +276,16 @@ func TestRouteStillForwardsWhenAcknowledgeFails(t *testing.T) {
 	}
 }
 
-// TestMainStartsAndStopsOnSIGINT is the only way to close the gap on main()
-// itself: it wires loadConfig → NewDownstream/NewTelegram → poll() under a
-// signal.NotifyContext, and nothing else in the suite ever calls it. A real
-// SIGINT is sent to this process (exactly the signal Kubernetes sends on pod
-// termination) and main() must return once poll() observes ctx.Err() != nil.
-func TestMainStartsAndStopsOnSIGINT(t *testing.T) {
+// TestRunStartsAndStopsOnContextCancellation is the only way to close the gap
+// on main's own body: it wires loadConfig → NewDownstream/NewTelegram →
+// poll() under a signal.NotifyContext, and nothing else in the suite ever
+// calls it. run() takes signal.NotifyContext's PARENT context precisely so
+// this test can cancel it directly — the derived ctx sees that exactly as it
+// would a real SIGINT — without sending any OS signal to the test process
+// itself and without a fixed sleep to dodge a signal-registration race: the
+// first GetUpdates request proves poll() has actually entered its loop
+// before cancellation, deterministically.
+func TestRunStartsAndStopsOnContextCancellation(t *testing.T) {
 	channelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/offset" {
 			_ = json.NewEncoder(w).Encode(map[string]string{"value": "1"})
@@ -291,7 +293,12 @@ func TestMainStartsAndStopsOnSIGINT(t *testing.T) {
 	}))
 	defer channelSrv.Close()
 
+	polled := make(chan struct{}, 1)
 	tgSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case polled <- struct{}{}:
+		default:
+		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
 	}))
 	defer tgSrv.Close()
@@ -301,23 +308,23 @@ func TestMainStartsAndStopsOnSIGINT(t *testing.T) {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "t")
 	t.Setenv(apiBaseEnv, tgSrv.URL)
 
+	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		main()
+		run(ctx)
 		close(done)
 	}()
 
-	// Give main() time to load config and enter the poll loop before
-	// signalling it — otherwise the signal could race NotifyContext's
-	// registration.
-	time.Sleep(150 * time.Millisecond)
-	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
-		t.Fatalf("failed to signal self: %v", err)
+	select {
+	case <-polled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("poll() never reached the Telegram double")
 	}
+	cancel()
 
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("main() did not return after SIGINT")
+		t.Fatal("run() did not return after its context was cancelled")
 	}
 }

@@ -70,11 +70,21 @@ test('no handle is trivially missing', async () => {
   assert.strictEqual(await confirmContextMissing('/x', '', noSleep), true);
 });
 
-test('a root that exists but cannot be LISTED is not absence — re-throws past the ENOENT check', async () => {
+test('a root that exists but cannot be LISTED is not absence — re-throws past the ENOENT check', async (t) => {
   // Traversal (stat of the missing child) needs only EXECUTE on the root, so it
   // still resolves ENOENT; LISTING it (the root-must-answer readdir) needs READ
   // too, and its absence is EACCES, not ENOENT — the one path that reaches the
   // `pe.code !== 'ENOENT'` re-throw inside stateDirPresent, previously untested.
+  //
+  // The mode bits this relies on mean nothing to root — the kernel skips the
+  // permission check entirely for uid 0 — so a root-run container (the
+  // default for an unprivileged Docker image, as CI runs) would see readdir
+  // succeed and this assertion fail for a reason that has nothing to do with
+  // the behavior under test.
+  if (process.getuid && process.getuid() === 0) {
+    t.skip('running as root: permission bits are not enforced, so EACCES cannot occur');
+    return;
+  }
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-copilot-state-'));
   const sessions = path.join(root, 'session-state');
   fs.mkdirSync(sessions);

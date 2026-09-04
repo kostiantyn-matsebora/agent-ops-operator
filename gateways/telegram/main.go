@@ -113,10 +113,18 @@ func loadConfig() config {
 }
 
 func main() {
+	run(context.Background())
+}
+
+// run holds main's own body, taking the signal context's PARENT rather than
+// building it internally — so a test can cancel that parent directly and
+// stop poll() exactly as a real SIGINT would, without sending any OS signal
+// to the test process itself.
+func run(parent context.Context) {
 	cfg := loadConfig()
 	r := &router{cfg: cfg, down: NewDownstream(), tg: NewTelegram(cfg.Token, cfg.APIBase)}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	log.Printf("gateway-telegram starting (signal=%s channel=%s)", cfg.SignalTarget, cfg.ChannelTarget)
 
