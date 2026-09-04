@@ -74,11 +74,22 @@
 
 ## 6. gateway-telegram (60.1% → 80%)
 
-- [ ] 6.1 In `gateways/telegram/`, add tests closing the gap (~35 of 71
+- [x] 6.1 In `gateways/telegram/`, add tests closing the gap (~35 of 71
   uncovered lines) — the `is_topic_message` classifier and offset persistence
   are the likely candidates. Verify: `-coverpkg=./...` run reports ≥80%
   total.
-- [ ] 6.2 Record the local before/after total in this task.
+
+  Added `main_test.go` (poll's full lifecycle over real `httptest` servers,
+  `loadConfig`'s credential discovery, `sleepCtx`, `route`'s callback-ack
+  branch, `main()` itself stopped via a real SIGINT), `downstream_test.go`
+  (marshal/request-construction errors, `Forward`'s ≥400 branch), and
+  `telegram_errors_test.go` (`API`'s rejection/unreachable/malformed-JSON
+  branches, `GetUpdates` malformed-payload branches). No production code
+  changed; no dead code found.
+- [x] 6.2 Record the local before/after total in this task.
+
+  Before: 60.1% (SonarCloud) / 56.2% local. After: **92.5%** local
+  (`-coverpkg=./... -coverprofile`, verified with `-race`, 27/27 tests pass).
 
 ## 7. runtime-claude (63.8% → 80%)
 
@@ -114,14 +125,25 @@
 
 ## 11. manager (69.6% → 80%)
 
-- [ ] 11.1 In `platform/manager/`, add tests closing the gap (~617 of 1809
+- [x] 11.1 In `platform/manager/`, add tests closing the gap (~617 of 1809
   uncovered lines — the largest gate-enforced gap in the org). Work package
   by package from `go tool cover -func`, favoring `internal/httpapi`,
   `internal/controller` and `internal/chat` where `coverage-across-packages`
   measured the deepest gaps. Verify:
   `KUBEBUILDER_ASSETS=... go test -coverpkg=./... -coverprofile=coverage.out ./...`
   reports ≥80% total.
-- [ ] 11.2 Record the local before/after total in this task.
+
+  **Already closed by `sonar-ratings-baseline` (PR #145, merged 2026-09-04
+  as part of the same session that raised ratings)** — its commit message
+  states the module went 70.7% → 80.9% via a fuzzed deepcopy round-trip test
+  plus the cognitive-complexity test extractions. No further work needed
+  here; verified independently below.
+- [x] 11.2 Record the local before/after total in this task.
+
+  Before: 69.6% (SonarCloud, 2026-09-02). After: 81.5% local
+  (`-coverpkg=./... -coverprofile` statement coverage, re-run on current
+  `master`, 2026-09-04, envtest suite included, all packages passing). Clears
+  the 80% gate.
 
 ## 12. channel-telegram (69.7% → 80%)
 
