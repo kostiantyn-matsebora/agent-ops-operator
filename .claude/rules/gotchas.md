@@ -324,3 +324,31 @@ rules loaded on demand.
   which is split like a shell line.** One apostrophe in the reviewer prompt
   ends the argument early and reads as a JSON error somewhere else. The suite
   counts them.
+
+**WRAPPING A TEST FUNCTION'S BODY IN `t.Run` DOES NOT LOWER SONAR'S
+`go:S3776` COGNITIVE COMPLEXITY SCORE FOR IT.** Confirmed against
+SonarSource's own answer on the mechanism (a maintainer, on the community
+forum): a nested function literal — a `t.Run(name, func(t *testing.T)
+{...})` closure, or any `func() {...}` assigned to a local var — increments
+the NESTING level for whatever control flow sits inside it, and that cost is
+charged to the ENCLOSING function, not reset for the closure as though it
+were a separate unit.
+
+- **The technique that actually works: extract the control-flow-heavy body
+  into a genuinely separate, NAMED top-level function**, called BY NAME from
+  the flagged function (`t.Run("case", assertFoo)` or
+  `t.Run("case", func(t *testing.T) { assertFoo(t, ...) })`, the wrapper
+  costing nothing since it holds no control flow of its own). A plain
+  function call is not a nesting-increasing construct — only
+  `if`/`for`/`switch`/`&&`/`||` and nested function bodies are.
+- **`sonar-ratings-baseline` first tried this the wrong way, and caught it
+  before it shipped**: two functions were reshaped into `t.Run` subtests,
+  verified to compile and pass, and were about to be called done — until
+  re-deriving how Sonar scores nested closures showed the reshape did nothing
+  for the metric being fixed. Both were redone as named helpers before
+  landing.
+- **Reuse candidates across one file are common** — a repeated "find this doc
+  by kind and name" search, a repeated table-driven assertion — so extracting
+  the first flagged function in a file often produces a helper (`findDocByKindAndName`,
+  `countDocsContaining`, …) that the NEXT flagged function in the same file
+  can call directly, without writing its own extraction.

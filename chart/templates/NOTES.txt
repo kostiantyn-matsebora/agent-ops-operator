@@ -23,16 +23,17 @@ which profiles have no Pipeline granting them anything:
     kubectl -n {{ .Release.Namespace }} get pipeline -o jsonpath="{range .items[?(@.spec.profileRef.name=='$n')]}{.metadata.name} {end}" | grep -q . \
       || echo "no Pipeline grants capabilities to profile/$n"
   done
+{{- $contextAccessModes := include "agentops.accessModes" (dict "volume" .Values.persistence.context "root" $) | fromYamlArray }}
 {{- if .Values.persistence.context.enabled }}
 
 A conversation's accumulated context persists by default: claim {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }} backs
-/data/home, so conversational history survives a runtime pod restart.
+/data/context, so conversational history survives a runtime pod restart.
 
 If runtime pods never start, check the claim FIRST — a Pending PVC produces no
 error anywhere else, just conversations that queue forever:
   kubectl -n {{ .Release.Namespace }} get pvc {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }}
 Pending with "no persistent volumes available" or "storageclass not found"
-means this cluster has no default StorageClass or no {{ join "/" .Values.persistence.context.accessModes }} provisioner.
+means this cluster has no default StorageClass or no {{ join "/" $contextAccessModes }} provisioner.
 Either name one (persistence.context.storageClassName) or turn storage off:
   helm upgrade ... --set persistence.context.enabled=false
 A claim naming a PRE-CREATED volume that stays Pending is a different fault with
@@ -40,9 +41,9 @@ the same symptom: it also needs persistence.context.storageClassName="-", or the
 cluster's default class is injected and a second volume is provisioned instead.
 See below for what turning it off costs.
 {{- end }}
-{{- if and .Values.persistence.context.enabled (not (has "ReadWriteMany" .Values.persistence.context.accessModes)) (not (dig "agentops" "runtimeDefaults" "nodeSelector" dict (.Values.global | default dict))) }}
+{{- if and .Values.persistence.context.enabled (not (has "ReadWriteMany" $contextAccessModes)) (not (dig "agentops" "runtimeDefaults" "nodeSelector" dict (.Values.global | default dict))) }}
 
-HEADS UP — this claim can be attached by ONE node ({{ join "/" .Values.persistence.context.accessModes }}), but runtime pods
+HEADS UP — this claim can be attached by ONE node ({{ join "/" $contextAccessModes }}), but runtime pods
 are not pinned. It works until a second conversation schedules on another node,
 then that pod fails to attach the volume (Multi-Attach) — at the moment of
 concurrency, far from the storage setting that caused it.
@@ -671,7 +672,7 @@ To give ONE route more, declare an account STATING WHAT IT MAY DO, and name it:
 
   pipelines:
     - name: <route>
-      serviceAccountName: agentops-runtime-workloads
+      serviceAccountName: agentops-runtime-acting   # the account just declared
 
 There is no mode to name. A word like `full` is a grant nobody reviewed, and
 agentops.runtimeReadRules / runtimeWriteRules in the chart are the rules to copy

@@ -22,7 +22,7 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { agentDeclaredTools, composeAllowedTools } = require('./tools');
+const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog } = require('./tools');
 const { translate, decide } = require('./vocabulary');
 const { loadMcpServers } = require('./mcp');
 const { confirmContextMissing } = require('./continuity');
@@ -35,7 +35,7 @@ const REPO_REF = process.env.REPO_REF || 'master';
 const GIT_AUTH_TYPE = process.env.GIT_AUTH_TYPE || '';
 const GIT_SSH_KEY = process.env.GIT_SSH_KEY || '';
 const GIT_TOKEN = process.env.GIT_TOKEN || '';
-const TTL_MS = (parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
+const TTL_MS = (Number.parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
 const WORKSPACE = process.env.WORKSPACE || '/data/workspace';
 const MCP_CONFIG = process.env.MCP_CONFIG || '/etc/agentops/mcp.json';
 const HOME = process.env.HOME || '/data/context';
@@ -48,7 +48,7 @@ const COPILOT_GITHUB_TOKEN = process.env.COPILOT_GITHUB_TOKEN || '';
 const COPILOT_MODEL = process.env.COPILOT_MODEL || '';
 // One run's wall-clock ceiling. The unit's maxTurns has no Copilot equivalent
 // (see runCopilot), so this and the optional credit budget are what bound it.
-const RUN_TIMEOUT_MS = (parseInt(process.env.COPILOT_RUN_TIMEOUT_S || '3600', 10)) * 1000;
+const RUN_TIMEOUT_MS = (Number.parseInt(process.env.COPILOT_RUN_TIMEOUT_S || '3600', 10)) * 1000;
 // BYOK: the SDK's `provider` config, verbatim — an install that fronts its
 // own model endpoint sets it, and it bypasses Copilot API authentication.
 const PROVIDER = (() => {
@@ -224,7 +224,9 @@ function resolvePrompt(unit) {
   let prompt = unit.promptText || '';
   if (!prompt && unit.promptFile) {
     try {
-      prompt = fs.readFileSync(path.join(WORKSPACE, unit.promptFile), 'utf8');
+      const file = safeJoin(WORKSPACE, unit.promptFile);
+      if (!file) throw new Error('promptFile escapes the workspace');
+      prompt = fs.readFileSync(file, 'utf8');
       for (const [k, v] of Object.entries(unit.promptVars || {})) {
         prompt = prompt.replaceAll(`{{${k}}}`, v);
       }
@@ -329,23 +331,23 @@ async function runCopilot(unit) {
   const p = resolvePrompt(unit);
   if (p.error) return { status: 'failed', exitCode: -1, result: p.error };
 
-  const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(m));
+  const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
   const allowed = composeAllowedTools(declared, unit.allowedTools, unit.toolsMode);
   const grant = translate(allowed);
   const mcp = loadMcpServers(MCP_CONFIG);
 
   const id = contextIdOf(unit);
-  console.log(`\n[runtime] run ${unit.runId}${id ? ' continue=' + id : ''} thread=${unit.threadId ?? 'general'}`);
-  console.log(`[runtime] tools agent=${unit.agent || '-'} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${unit.toolsMode || 'merge'} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
+  console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${id ? ' continue=' + sanitizeLog(id) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
+  console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
   console.log(`[runtime] copilot available=${grant.available.length ? grant.available.join(',') : '(none)'}${grant.shell ? ` shell=${grant.shell.all ? 'any' : grant.shell.prefixes.map((x) => `"${x} *"`).join('|')}` : ''}`);
-  for (const u of grant.unmapped) console.log(`[runtime] UNMAPPED pattern withheld: ${u} — no Copilot equivalent, granting nothing`);
-  for (const r of grant.refused) console.log(`[runtime] REFUSED per-server wildcard: ${r} — Copilot admits mcp:* or an exact name, and mcp:* would grant every bound server`);
+  for (const u of grant.unmapped) console.log(`[runtime] UNMAPPED pattern withheld: ${sanitizeLog(u)} — no Copilot equivalent, granting nothing`);
+  for (const r of grant.refused) console.log(`[runtime] REFUSED per-server wildcard: ${sanitizeLog(r)} — Copilot admits mcp:* or an exact name, and mcp:* would grant every bound server`);
   for (const f of mcp.failed) console.log(`[runtime] MCP server "${f.name}" not registered: ${f.reason}`);
   console.log(`[init] model=${COPILOT_MODEL || 'default'} tools=${grant.available.length} mcp=${Object.keys(mcp.servers).join(',') || '-'}`);
   if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
   // maxTurns bounds a claude run; Copilot's nearest control is a credit budget,
   // not a turn count. Logged, never faked as enforced.
-  if (unit.maxTurns) console.log(`[runtime] maxTurns=${unit.maxTurns} requested (not enforced by this runtime; ${MAX_AI_CREDITS ? `maxAiCredits=${MAX_AI_CREDITS}` : 'no credit cap'}, run timeout ${RUN_TIMEOUT_MS / 1000}s)`);
+  if (unit.maxTurns) console.log(`[runtime] maxTurns=${sanitizeLog(unit.maxTurns)} requested (not enforced by this runtime; ${MAX_AI_CREDITS ? `maxAiCredits=${MAX_AI_CREDITS}` : 'no credit cap'}, run timeout ${RUN_TIMEOUT_MS / 1000}s)`);
 
   let c;
   try {
@@ -421,11 +423,13 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
   try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
 
   let lastWork = Date.now();
-  for (;;) {
+  let idle = false;
+  while (!idle) {
     if (Date.now() - lastWork > TTL_MS) {
       console.log('[runtime] idle TTL reached — exiting');
       try { if (client) await client.stop(); } catch {}
-      process.exit(0);
+      idle = true;
+      continue;
     }
     let res;
     try {
@@ -458,4 +462,5 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
       await sleep(10000);
     }
   }
+  process.exit(0);
 })();

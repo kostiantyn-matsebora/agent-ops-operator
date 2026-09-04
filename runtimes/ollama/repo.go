@@ -16,6 +16,21 @@ type Repo struct {
 	Workspace                         string
 }
 
+// resolveBin looks `name` up on PATH, falling back to the bare name so a
+// missing binary still fails with the ordinary "executable file not found"
+// a reader expects. go:S4036's ask: say explicitly where a spawned binary
+// comes from, rather than leaving PATH to answer it implicitly at the exec
+// call site.
+func resolveBin(name string) string {
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return name
+}
+
+// gitBin is resolved ONCE at package load, not per exec call.
+var gitBin = resolveBin("git")
+
 func (r Repo) env() []string {
 	env := os.Environ()
 	if r.AuthType == "ssh" && r.SSHKey != "" {
@@ -32,7 +47,7 @@ func (r Repo) cloneURL() string {
 }
 
 func (r Repo) git(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, gitBin, args...)
 	cmd.Dir = r.Workspace
 	cmd.Env = r.env()
 	out, err := cmd.CombinedOutput()

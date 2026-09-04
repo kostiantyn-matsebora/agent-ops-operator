@@ -22,6 +22,46 @@ const path = require('path');
 const MODE_MERGE = 'merge';
 const MODE_OVERWRITE = 'overwrite';
 
+// safeJoin resolves base/...segments and refuses a result that escapes base
+// -- jssecurity:S2083's ask, since the caller below joins a directory this
+// process controls with a name that arrives from data it does not (a CR's
+// agent name); runtime.js's promptFile caller does the same for a work
+// unit's prompt file. null on escape, so a caller can treat it exactly like
+// a missing file rather than reading outside its intended tree.
+function safeJoin(base, ...segments) {
+  const root = path.resolve(base);
+  const target = path.resolve(root, ...segments);
+  if (target !== root && !target.startsWith(root + path.sep)) return null;
+  return target;
+}
+
+// sanitizeLog strips control characters (CR/LF and other C0) from a value
+// before it reaches a log line -- jssecurity:S5145's ask, since a crafted
+// runId, agent name or thread id in a work unit could otherwise forge a
+// second log line that reads as the runtime's own.
+function sanitizeLog(v) {
+  return String(v).replace(/[\r\n\x00-\x1f]/g, ' ');
+}
+
+// resolveBin looks `name` up on PATH once and returns the first absolute
+// hit, falling back to the bare name so a missing binary still fails with
+// the ordinary ENOENT a reader expects. go:S4036's ask, one process over:
+// say explicitly where a spawned binary comes from, rather than leaving
+// PATH to answer it implicitly at the call site.
+function resolveBin(name, pathEnv = process.env.PATH || '') {
+  for (const dir of pathEnv.split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // not here — keep looking
+    }
+  }
+  return name;
+}
+
 // splitList turns a comma/newline separated allowlist into trimmed entries.
 function splitList(s) {
   if (!s) return [];
@@ -76,9 +116,13 @@ function parseFrontmatterTools(text) {
     for (let k = j + 1; k < end; k++) {
       const raw = lines[k];
       if (raw.trim() === '') continue;
-      const item = /^\s+-\s*(.*)$/.exec(raw);
-      if (!item) break; // next key — the block ended
-      const v = unquote(item[1]);
+      // No adjacent quantifiers (javascript:S8786): the leading indent, the
+      // dash and the item text are each matched by their own single-quantifier
+      // step instead of one regex where \s* and .* could both claim the same
+      // characters.
+      const indent = /^\s+/.exec(raw);
+      if (!indent || raw[indent[0].length] !== '-') break; // next key — the block ended
+      const v = unquote(raw.slice(indent[0].length + 1).replace(/^\s+/, ''));
       if (v) tools.push(v);
     }
     return { tools };
@@ -93,7 +137,11 @@ function parseFrontmatterTools(text) {
 // not be used, so a typo in a role file is visible in the pod log.
 function agentDeclaredTools(workspace, agent, log = () => {}) {
   if (!workspace || !agent) return [];
-  const file = path.join(workspace, '.claude', 'agents', `${agent}.md`);
+  const file = safeJoin(workspace, '.claude', 'agents', `${agent}.md`);
+  if (!file) {
+    log(`[runtime] agent definition ${agent}.md: path escapes the workspace — treating it as declaring no tools`);
+    return [];
+  }
   let text;
   try {
     text = fs.readFileSync(file, 'utf8');
@@ -133,7 +181,37 @@ function dedup(list) {
   return out;
 }
 
+// buildClaudeArgs is the CLI invocation's argv, pulled out of runtime.js so
+// its exact shape -- in particular the jssecurity:S6350 fix -- is asserted
+// directly rather than only exercised end to end. `contextId` and `prompt`
+// both arrive from a work unit and are values a naive `--flag value`
+// pairing hands the CLI's parser openly: a prompt beginning with "-" is
+// misread as an unrecognised OPTION ("error: unknown option ..."), verified
+// against the real CLI, and `--resume` takes an OPTIONAL argument ([value]
+// in --help) so the same misparse hits a dash-leading context id too, one
+// path over -- the value reads as absent and the id is parsed as its own
+// token. `--resume=<id>` (one `=`-joined token) and a `--` separator
+// immediately before the trailing positional `prompt` are the fixes;
+// `--append-system-prompt <value>` needs neither, since a REQUIRED-argument
+// option already consumes the very next token unconditionally.
+function buildClaudeArgs({ contextId, systemPrompt, allowed, maxTurns, mcpConfig, prompt }) {
+  return [
+    ...(contextId ? [`--resume=${contextId}`] : []),
+    ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
+    '-p',
+    '--allowedTools', allowed.join(','),
+    '--permission-mode', 'dontAsk',
+    '--max-turns', String(maxTurns || 60),
+    '--output-format', 'stream-json',
+    '--verbose',
+    '--strict-mcp-config',
+    '--mcp-config', mcpConfig,
+    '--', prompt,
+  ];
+}
+
 module.exports = {
   MODE_MERGE, MODE_OVERWRITE,
   splitList, parseFrontmatterTools, agentDeclaredTools, composeAllowedTools,
+  safeJoin, sanitizeLog, resolveBin, buildClaudeArgs,
 };

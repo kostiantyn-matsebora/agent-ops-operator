@@ -137,44 +137,51 @@ func TestConsoleSignalAdapterIsExternallyServed(t *testing.T) {
 // being exactly the three it needs — not on the absence of pods.
 func TestConsoleRoleIsReadOnly(t *testing.T) {
 	out := helmTemplate(t, "--set", "console.enabled=true")
-	var role string
-	for _, doc := range splitDocs(out) {
-		// "\nkind: Role\n" and not the RoleBinding's indented roleRef.kind
-		if strings.Contains(doc, "\nkind: Role\n") && strings.Contains(doc, "name: agentops-adapter-console") {
-			role = doc
-		}
-	}
-	if role == "" {
-		t.Fatal("console Role not rendered")
-	}
 	// assert on the RULES, not the prose above them: the template's own comment
 	// says the words this check forbids
-	rules := stripComments(role)
+	rules := findDocByKindAndName(t, out, "Role", "agentops-adapter-console")
+	assertOnlyReadVerbs(t, rules, "console Role")
+	assertRuleGrantsNone(t, rules, "console Role", "create", "update", "patch", "delete", "secrets")
+	assertExactlyAPIGroups(t, rules, "console Role",
+		`apiGroups: ["agentops.dev"]`, `apiGroups: ["apps"]`, `apiGroups: [""]`)
+}
 
-	// EVERY rule is get/list/watch. The console has no write path to the
-	// Kubernetes API at all, so a write verb here would grant something no code
-	// in that module can use.
+// assertOnlyReadVerbs fails unless every verbs: line in rules is exactly
+// get/list/watch — the console has no write path to the Kubernetes API at
+// all, so any other verb would grant something no code in that module uses.
+func assertOnlyReadVerbs(t *testing.T, rules, label string) {
+	t.Helper()
 	for _, line := range strings.Split(rules, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "verbs:") && !strings.HasPrefix(trimmed, "- verbs:") {
 			continue
 		}
 		if !strings.Contains(trimmed, `["get", "list", "watch"]`) {
-			t.Fatalf("console Role verbs changed:\n%s", rules)
+			t.Fatalf("%s verbs changed:\n%s", label, rules)
 		}
 	}
-	for _, forbidden := range []string{"create", "update", "patch", "delete", "secrets"} {
-		if strings.Contains(rules, forbidden) {
-			t.Fatalf("console Role must not grant %q:\n%s", forbidden, rules)
+}
+
+// assertRuleGrantsNone fails if rules mentions any of forbidden.
+func assertRuleGrantsNone(t *testing.T, rules, label string, forbidden ...string) {
+	t.Helper()
+	for _, f := range forbidden {
+		if strings.Contains(rules, f) {
+			t.Fatalf("%s must not grant %q:\n%s", label, f, rules)
 		}
 	}
-	// exactly three groups: agentops.dev, apps (deployments) and core (pods)
-	if n := strings.Count(rules, "apiGroups:"); n != 3 {
-		t.Fatalf("console Role should cover exactly 3 API groups, found %d:\n%s", n, rules)
+}
+
+// assertExactlyAPIGroups fails unless rules names exactly len(want) apiGroups
+// entries, all of them in want.
+func assertExactlyAPIGroups(t *testing.T, rules, label string, want ...string) {
+	t.Helper()
+	if n := strings.Count(rules, "apiGroups:"); n != len(want) {
+		t.Fatalf("%s should cover exactly %d API groups, found %d:\n%s", label, len(want), n, rules)
 	}
-	for _, want := range []string{`apiGroups: ["agentops.dev"]`, `apiGroups: ["apps"]`, `apiGroups: [""]`} {
-		if !strings.Contains(rules, want) {
-			t.Fatalf("console Role missing %s:\n%s", want, rules)
+	for _, w := range want {
+		if !strings.Contains(rules, w) {
+			t.Fatalf("%s missing %s:\n%s", label, w, rules)
 		}
 	}
 }
@@ -540,6 +547,20 @@ func stripComments(doc string) string {
 	return strings.Join(kept, "\n")
 }
 
+// findDocByKindAndName returns the comment-stripped rendered doc whose OWN
+// kind line (immediately followed by metadata:, never a binding's nested
+// roleRef.kind) matches kind and name. Fails naming both when none renders.
+func findDocByKindAndName(t *testing.T, rendered, kind, name string) string {
+	t.Helper()
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, "kind: "+kind+"\nmetadata:") && strings.Contains(doc, "name: "+name) {
+			return stripComments(doc)
+		}
+	}
+	t.Fatalf("no %s named %s rendered", kind, name)
+	return ""
+}
+
 // ---- kubernetes events lane -------------------------------------------------
 
 // The events adapter now reads pods and replicasets to resolve an event's
@@ -555,19 +576,7 @@ func TestEventsAdapterRBACCoversPodsAndReplicaSets(t *testing.T) {
 			out := helmTemplate(t, "--set", "kubernetes.enabled=true",
 				"--set", "kubernetes.eventsAdapter.rbac.clusterWide="+mode.flag)
 
-			// Anchor on the document's OWN kind line, which is followed by
-			// metadata:. A binding names the same kind and the same name in
-			// its roleRef, so both "kind: Role" and the name are ambiguous.
-			var found string
-			for _, doc := range splitDocs(out) {
-				if strings.Contains(doc, "kind: "+mode.kind+"\nmetadata:") &&
-					strings.Contains(doc, "name: agentops-signal-k8s-events-events") {
-					found = stripComments(doc)
-				}
-			}
-			if found == "" {
-				t.Fatalf("no %s for the events adapter rendered", mode.kind)
-			}
+			found := findDocByKindAndName(t, out, mode.kind, "agentops-signal-k8s-events-events")
 			for _, needle := range []string{`resources: ["events"]`, `resources: ["pods"]`, `resources: ["replicasets"]`} {
 				if !strings.Contains(found, needle) {
 					t.Errorf("%s missing %s\n%s", mode.kind, needle, found)
@@ -597,14 +606,21 @@ func TestEventsSourceGroupsByWorkload(t *testing.T) {
 func TestDefaultRulesShape(t *testing.T) {
 	out := helmTemplate(t, "--set", "kubernetes.enabled=true")
 	src := eventsSourceDoc(t, out)
+	assertPastTenseReasonsNeverDwell(t, src)
+	assertEvictedDroppedWithSubstitutes(t, src)
+	assertLastRuleIsUndwelledCatchAll(t, src)
+}
 
-	// Reasons describing something that ALREADY happened must never dwell: a
-	// re-check would find the healthy replacement and erase the incident.
-	//
-	// Evicted is deliberately NOT in this list: it is dropped outright, not
-	// given a dwell. The two are different failures — a dwell would erase the
-	// incident silently, whereas the drop is justified below by the reasons
-	// that report the same incident from the cause end and the consequence end.
+// assertPastTenseReasonsNeverDwell: reasons describing something that
+// ALREADY happened must never dwell — a re-check would find the healthy
+// replacement and erase the incident.
+//
+// Evicted is deliberately NOT among them: it is dropped outright, not given
+// a dwell. The two are different failures — a dwell would erase the incident
+// silently, whereas the drop is justified by the reasons that report the
+// same incident from the cause end and the consequence end (see below).
+func assertPastTenseReasonsNeverDwell(t *testing.T, src string) {
+	t.Helper()
 	pastTense := []string{"OOMKilling", "SystemOOM", "BackoffLimitExceeded", "DeadlineExceeded"}
 	for _, reason := range pastTense {
 		line := ruleLineContaining(src, reason)
@@ -616,11 +632,14 @@ func TestDefaultRulesShape(t *testing.T) {
 			t.Errorf("past-tense reason %q must carry for: \"0\", got rule:\n%s", reason, line)
 		}
 	}
+}
 
-	// Evicted is dropped, and the drop is only defensible while BOTH of its
-	// substitutes survive. Pin them together: a later edit that re-tunes node
-	// pressure or FailedScheduling must not silently leave eviction unreported
-	// from every direction at once.
+// assertEvictedDroppedWithSubstitutes: the drop is only defensible while
+// BOTH substitutes survive. Pinned together so a later edit re-tuning node
+// pressure or FailedScheduling cannot silently leave eviction unreported
+// from every direction at once.
+func assertEvictedDroppedWithSubstitutes(t *testing.T, src string) {
+	t.Helper()
 	evicted := ruleLineContaining(src, "Evicted")
 	if evicted == "" {
 		t.Error("Evicted is not covered by any rule")
@@ -636,9 +655,12 @@ func TestDefaultRulesShape(t *testing.T) {
 	if line := ruleLineContaining(src, "FailedScheduling"); line == "" {
 		t.Error("dropping Evicted requires FailedScheduling to report pods that fail to come back")
 	}
+}
 
-	// The last rule must be a catch-all WITH a dwell, or an unanticipated
-	// reason is silently discarded instead of verified.
+// assertLastRuleIsUndwelledCatchAll: the last rule must be a catch-all WITH a
+// dwell, or an unanticipated reason is silently discarded instead of verified.
+func assertLastRuleIsUndwelledCatchAll(t *testing.T, src string) {
+	t.Helper()
 	rules := ruleBlocks(src)
 	if len(rules) == 0 {
 		t.Fatal("no default rules rendered")
@@ -707,30 +729,47 @@ func TestParentOwnsExactlyOneRuntime(t *testing.T) {
 		{"--set", "telegram.enabled=true"},
 		{"--set", "kubernetes.enabled=true", "--set", "telegram.enabled=true"},
 	} {
-		name := "defaults"
-		if len(combo) > 0 {
-			name = strings.Join(combo[1:], ",")
-		}
-		t.Run(name, func(t *testing.T) {
-			out := helmTemplate(t, combo...)
-			// the claude bundle's own CR plus the parent's `default` copy of it
-			if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 2 {
-				t.Errorf("want the claude runtime and its default copy, got %d", n)
-			}
-			var sas int
-			for _, doc := range splitDocs(out) {
-				if strings.Contains(doc, "kind: ServiceAccount\nmetadata:\n  name: agentops-runtime\n") {
-					sas++
-				}
-			}
-			if sas != 1 {
-				t.Errorf("want exactly 1 runtime ServiceAccount, got %d", sas)
-			}
-			// the bundle-named identity must be gone everywhere, bindings included
-			if strings.Contains(out, "agentops-runtime-k8s") {
-				t.Error("the bundle-named runtime ServiceAccount must not render")
-			}
+		t.Run(comboName(combo), func(t *testing.T) {
+			assertParentOwnsExactlyOneRuntime(t, combo)
 		})
+	}
+}
+
+// comboName derives a subtest name from a helmTemplate combo: "defaults" for
+// none, or the joined --set values otherwise.
+func comboName(combo []string) string {
+	if len(combo) == 0 {
+		return "defaults"
+	}
+	return strings.Join(combo[1:], ",")
+}
+
+// countDocsContaining counts the rendered docs whose text contains needle.
+func countDocsContaining(rendered, needle string) int {
+	n := 0
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, needle) {
+			n++
+		}
+	}
+	return n
+}
+
+// assertParentOwnsExactlyOneRuntime renders combo and checks the parent
+// still owns exactly one runtime: the claude bundle's own CR plus the
+// parent's `default` copy of it, one ServiceAccount, and no bundle-named
+// identity anywhere (bindings included).
+func assertParentOwnsExactlyOneRuntime(t *testing.T, combo []string) {
+	t.Helper()
+	out := helmTemplate(t, combo...)
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 2 {
+		t.Errorf("want the claude runtime and its default copy, got %d", n)
+	}
+	if sas := countDocsContaining(out, "kind: ServiceAccount\nmetadata:\n  name: agentops-runtime\n"); sas != 1 {
+		t.Errorf("want exactly 1 runtime ServiceAccount, got %d", sas)
+	}
+	if strings.Contains(out, "agentops-runtime-k8s") {
+		t.Error("the bundle-named runtime ServiceAccount must not render")
 	}
 }
 
@@ -799,31 +838,39 @@ func TestNothingIsGrantedUnlessAnAccountIsDeclared(t *testing.T) {
 			"--set", "global.demo.enabled=true", "--set", "kubernetes.allowMutations=true"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			out := helmTemplate(t, tc.args...)
-			for _, doc := range strings.Split(out, "\n---") {
-				if !strings.Contains(doc, "\nkind: ClusterRoleBinding\n") &&
-					!strings.Contains(doc, "\nkind: RoleBinding\n") {
-					continue
-				}
-				// The MCP server's and the adapters' own accounts are not the
-				// agent's — an agent reaches the cluster THROUGH the server,
-				// which is the point of the second identity.
-				if strings.Contains(doc, "name: agentops-mcp-") ||
-					strings.Contains(doc, "name: agentops-signal-") ||
-					strings.Contains(doc, "name: agentops-adapter-") ||
-					strings.Contains(doc, "name: agentops-manager") ||
-					strings.Contains(doc, "name: agentops-housekeeping") {
-					continue
-				}
-				if strings.Contains(doc, "name: agentops-runtime") {
-					t.Errorf("no runtime identity may be bound to anything when none is "+
-						"declared — silence must mean no power:\n%s", doc)
-				}
-			}
-			if strings.Contains(out, "name: cluster-admin") {
-				t.Error("cluster-admin must never be bound")
-			}
+			assertNoAccountGrantedWhenNoneDeclared(t, tc.args)
 		})
+	}
+}
+
+// assertNoAccountGrantedWhenNoneDeclared renders args and checks that no
+// runtime identity is bound to anything (silence must mean no power) and
+// cluster-admin is never bound.
+func assertNoAccountGrantedWhenNoneDeclared(t *testing.T, args []string) {
+	t.Helper()
+	out := helmTemplate(t, args...)
+	for _, doc := range strings.Split(out, "\n---") {
+		if !strings.Contains(doc, "\nkind: ClusterRoleBinding\n") &&
+			!strings.Contains(doc, "\nkind: RoleBinding\n") {
+			continue
+		}
+		// The MCP server's and the adapters' own accounts are not the
+		// agent's — an agent reaches the cluster THROUGH the server,
+		// which is the point of the second identity.
+		if strings.Contains(doc, "name: agentops-mcp-") ||
+			strings.Contains(doc, "name: agentops-signal-") ||
+			strings.Contains(doc, "name: agentops-adapter-") ||
+			strings.Contains(doc, "name: agentops-manager") ||
+			strings.Contains(doc, "name: agentops-housekeeping") {
+			continue
+		}
+		if strings.Contains(doc, "name: agentops-runtime") {
+			t.Errorf("no runtime identity may be bound to anything when none is "+
+				"declared — silence must mean no power:\n%s", doc)
+		}
+	}
+	if strings.Contains(out, "name: cluster-admin") {
+		t.Error("cluster-admin must never be bound")
 	}
 }
 
@@ -1825,17 +1872,18 @@ func TestHaDefaultRulesShape(t *testing.T) {
 	if len(blocks) == 0 {
 		t.Fatal("no default rules rendered")
 	}
+	assertHaPastTenseConditionsNeverDwell(t, blocks)
+	assertHaLastRuleIsUndwelledCatchAll(t, blocks)
+	assertHaGroupsByIntegrationWithNoWindow(t, src)
+}
 
-	// Anything describing something that ALREADY happened must never dwell: a
-	// re-check would find the recovered house and erase the incident.
+// assertHaPastTenseConditionsNeverDwell: anything describing something that
+// ALREADY happened must never dwell — a re-check would find the recovered
+// house and erase the incident.
+func assertHaPastTenseConditionsNeverDwell(t *testing.T, blocks []string) {
+	t.Helper()
 	for _, pastTense := range []string{"Error executing script", `level="CRITICAL"`} {
-		var line string
-		for _, b := range blocks {
-			if strings.Contains(b, pastTense) {
-				line = b
-				break
-			}
-		}
+		line := blockContaining(blocks, pastTense)
 		if line == "" {
 			t.Errorf("past-tense condition %q is not covered by any rule", pastTense)
 			continue
@@ -1844,7 +1892,20 @@ func TestHaDefaultRulesShape(t *testing.T) {
 			t.Errorf("past-tense condition %q must carry for: \"0\", got rule:\n%s", pastTense, line)
 		}
 	}
+}
 
+// blockContaining returns the first block containing needle, or "".
+func blockContaining(blocks []string, needle string) string {
+	for _, b := range blocks {
+		if strings.Contains(b, needle) {
+			return b
+		}
+	}
+	return ""
+}
+
+func assertHaLastRuleIsUndwelledCatchAll(t *testing.T, blocks []string) {
+	t.Helper()
 	last := blocks[len(blocks)-1]
 	if !strings.Contains(last, "matchers: []") {
 		t.Fatalf("the last rule must be a catch-all:\n%s", last)
@@ -1855,14 +1916,17 @@ func TestHaDefaultRulesShape(t *testing.T) {
 	if !strings.Contains(last, "for:") {
 		t.Fatalf("the catch-all must carry a dwell:\n%s", last)
 	}
+}
 
-	// Grouping by integration, never per record: one broken hub logs from
-	// several code paths and is one conversation.
+// assertHaGroupsByIntegrationWithNoWindow: grouping is by integration, never
+// per record, since one broken hub logs from several code paths and is one
+// conversation; and this adapter implements no time axis, so a window key
+// would be one it silently never honors rather than one it rejects.
+func assertHaGroupsByIntegrationWithNoWindow(t *testing.T, src string) {
+	t.Helper()
 	if !strings.Contains(src, "- integration") {
 		t.Fatalf("the log source must group by integration:\n%s", src)
 	}
-	// This adapter implements no time axis, so a window here would be a key it
-	// rejects rather than one that silently never fires.
 	for _, absent := range []string{"timeIntervals", "muteTimeIntervals"} {
 		if strings.Contains(src, absent) {
 			t.Errorf("the log source must declare no %s:\n%s", absent, src)
@@ -2312,18 +2376,36 @@ func TestCopilotBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
 	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
 		t.Fatalf("want claude, copilot and the default copy, got %d", n)
 	}
-	var rt, secret string
-	for _, doc := range splitDocs(out) {
-		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: copilot\n") {
-			rt = doc
-		}
-		if strings.Contains(doc, "kind: Secret\n") && strings.Contains(doc, "\n  name: agentops-copilot\n") {
-			secret = doc
-		}
-	}
+	rt := findDocByKindAndMetaName(out, "AgentRuntime", "copilot")
 	if rt == "" {
 		t.Fatal("no AgentRuntime named copilot rendered")
 	}
+	assertCopilotRuntimeShape(t, rt)
+	secret := findDocByKindAndMetaName(out, "Secret", "agentops-copilot")
+	if secret == "" || !strings.Contains(secret, "githubToken: \"ghp_placeholder\"") {
+		t.Errorf("a supplied token must render the credential Secret:\n%s", secret)
+	}
+	// no substrate: the ServiceAccount count is unchanged from the default render
+	if got, want := strings.Count(out, "kind: ServiceAccount\n"), strings.Count(helmTemplate(t), "kind: ServiceAccount\n"); got != want {
+		t.Errorf("the bundle must render no ServiceAccount: %d vs %d", got, want)
+	}
+}
+
+// findDocByKindAndMetaName returns the first doc whose kind and
+// metadata.name match, anchored on "\n  name: <name>\n" (the standard
+// 2-space-indented metadata block Helm renders). Empty when none match —
+// callers decide whether that is an error.
+func findDocByKindAndMetaName(rendered, kind, name string) string {
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, "kind: "+kind+"\n") && strings.Contains(doc, "\n  name: "+name+"\n") {
+			return doc
+		}
+	}
+	return ""
+}
+
+func assertCopilotRuntimeShape(t *testing.T, rt string) {
+	t.Helper()
 	for _, want := range []string{
 		`image: "ghcr.io/kostiantyn-matsebora/agentops-runtime-copilot:`,
 		"serviceAccountName: agentops-runtime\n", // the floor, inherited
@@ -2344,13 +2426,6 @@ func TestCopilotBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
 	if strings.Contains(rt, ".claude/projects") {
 		t.Error("the copilot runtime must not inherit claude-code's sync paths")
 	}
-	if secret == "" || !strings.Contains(secret, "githubToken: \"ghp_placeholder\"") {
-		t.Errorf("a supplied token must render the credential Secret:\n%s", secret)
-	}
-	// no substrate: the ServiceAccount count is unchanged from the default render
-	if got, want := strings.Count(out, "kind: ServiceAccount\n"), strings.Count(helmTemplate(t), "kind: ServiceAccount\n"); got != want {
-		t.Errorf("the bundle must render no ServiceAccount: %d vs %d", got, want)
-	}
 }
 
 // Without a token the runtime references the Secret by name and creates
@@ -2360,19 +2435,7 @@ func TestCopilotBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
 func TestCopilotBundleDefaultsAndBecomesDefault(t *testing.T) {
 	out := helmTemplate(t, "--set", "copilot.enabled=true")
 	for _, doc := range splitDocs(out) {
-		if strings.Contains(doc, "kind: Secret\n") && strings.Contains(doc, "agentops-copilot") {
-			t.Error("no token supplied, so no Secret may render")
-		}
-		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: copilot\n") {
-			for _, absent := range []string{"COPILOT_MODEL", "COPILOT_MAX_AI_CREDITS"} {
-				if strings.Contains(doc, absent) {
-					t.Errorf("unset %s must not render", absent)
-				}
-			}
-			if !strings.Contains(doc, "name: agentops-copilot") {
-				t.Error("the runtime must reference the credential Secret by name")
-			}
-		}
+		assertCopilotBundleDefaultDoc(t, doc)
 	}
 	alone := helmTemplate(t, "--set", "copilot.enabled=true", "--set", "claude.enabled=false")
 	if doc, src := defaultRuntimeDoc(alone); src != "copilot" || !strings.Contains(doc, "COPILOT_GITHUB_TOKEN") {
@@ -2380,6 +2443,26 @@ func TestCopilotBundleDefaultsAndBecomesDefault(t *testing.T) {
 	}
 	if strings.Count(alone, "\nkind: AgentRuntime\n") != 2 {
 		t.Error("copilot alone renders exactly copilot and default")
+	}
+}
+
+// assertCopilotBundleDefaultDoc checks one rendered doc against the
+// no-token-no-model-no-ceiling default shape.
+func assertCopilotBundleDefaultDoc(t *testing.T, doc string) {
+	t.Helper()
+	if strings.Contains(doc, "kind: Secret\n") && strings.Contains(doc, "agentops-copilot") {
+		t.Error("no token supplied, so no Secret may render")
+	}
+	if !strings.Contains(doc, "kind: AgentRuntime\n") || !strings.Contains(doc, "\n  name: copilot\n") {
+		return
+	}
+	for _, absent := range []string{"COPILOT_MODEL", "COPILOT_MAX_AI_CREDITS"} {
+		if strings.Contains(doc, absent) {
+			t.Errorf("unset %s must not render", absent)
+		}
+	}
+	if !strings.Contains(doc, "name: agentops-copilot") {
+		t.Error("the runtime must reference the credential Secret by name")
 	}
 }
 
@@ -2415,22 +2498,30 @@ func TestTelegramAPIBaseRendersOnlyWhenSet(t *testing.T) {
 	if strings.Contains(base, "TELEGRAM_API_BASE") || strings.Contains(base, "apiBase:") {
 		t.Fatalf("an unset apiBase must render no env entry and no Secret key")
 	}
-	// Generated credentials differ per render, so compare the telegram
-	// bundle's own documents rather than the whole output.
-	telegramDocs := func(out string) string {
-		var keep []string
-		for _, doc := range strings.Split(out, "\n---") {
-			if strings.Contains(doc, "/charts/telegram/templates/") {
-				keep = append(keep, doc)
-			}
-		}
-		return strings.Join(keep, "\n---")
-	}
 	explicitEmpty := helmTemplate(t, append(append([]string{}, surface...), "--set", "telegram.apiBase=")...)
-	if telegramDocs(explicitEmpty) != telegramDocs(base) || telegramDocs(base) == "" {
+	if telegramBundleDocs(explicitEmpty) != telegramBundleDocs(base) || telegramBundleDocs(base) == "" {
 		t.Fatalf("an explicit empty apiBase must render the telegram bundle byte-identically to the default")
 	}
 	set := helmTemplate(t, append(append([]string{}, surface...), "--set", "telegram.apiBase=http://fake-bot-api:8081/")...)
+	assertTelegramAPIBaseRendered(t, set)
+	assertChannelConfigHasNoAPIBase(t, set)
+}
+
+// telegramBundleDocs isolates the telegram bundle's own rendered documents:
+// generated credentials differ per render, so comparing the whole output
+// would never match even when the bundle itself is byte-identical.
+func telegramBundleDocs(out string) string {
+	var keep []string
+	for _, doc := range strings.Split(out, "\n---") {
+		if strings.Contains(doc, "/charts/telegram/templates/") {
+			keep = append(keep, doc)
+		}
+	}
+	return strings.Join(keep, "\n---")
+}
+
+func assertTelegramAPIBaseRendered(t *testing.T, set string) {
+	t.Helper()
 	for _, needle := range []string{
 		"- name: TELEGRAM_API_BASE\n              value: \"http://fake-bot-api:8081/\"",
 		"apiBase: \"http://fake-bot-api:8081/\"",
@@ -2439,15 +2530,21 @@ func TestTelegramAPIBaseRendersOnlyWhenSet(t *testing.T) {
 			t.Errorf("a set apiBase must render %q", needle)
 		}
 	}
-	// Never a Channel.spec.config key — that would let a channel edit move its
-	// own token.
-	if i := strings.Index(set, "kind: Channel"); i >= 0 {
-		doc := set[i:]
-		if j := strings.Index(doc, "\n---"); j >= 0 {
-			doc = doc[:j]
-		}
-		if strings.Contains(doc, "apiBase") {
-			t.Fatalf("the Channel must not carry apiBase in spec.config:\n%s", doc)
-		}
+}
+
+// assertChannelConfigHasNoAPIBase: never a Channel.spec.config key — that
+// would let a channel edit move its own token.
+func assertChannelConfigHasNoAPIBase(t *testing.T, set string) {
+	t.Helper()
+	i := strings.Index(set, "kind: Channel")
+	if i < 0 {
+		return
+	}
+	doc := set[i:]
+	if j := strings.Index(doc, "\n---"); j >= 0 {
+		doc = doc[:j]
+	}
+	if strings.Contains(doc, "apiBase") {
+		t.Fatalf("the Channel must not carry apiBase in spec.config:\n%s", doc)
 	}
 }

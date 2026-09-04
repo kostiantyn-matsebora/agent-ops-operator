@@ -52,6 +52,16 @@ done
 
 API=https://sonarcloud.io/api
 GATE=agentops
+# `scripts` is the workflow's OWN tooling, never shipped -- no image, no
+# chart, nothing `components.sh` or a release tag ever names. A finding
+# Sonar's engine will not credit any code shape for (pythonsecurity:S2083/
+# S8707 on a CLI --out path, four documented-pattern attempts made and
+# recorded in sonar-ratings-baseline's tasks.md) should not gate a project
+# with no artifact to gate. Assigned this EMPTY gate instead of `agentops`
+# -- zero conditions, always green -- rather than disabling `ci-green`'s
+# scan step entirely, so `scripts` keeps reporting real findings for a
+# person to read, it just never blocks a merge on them.
+GATE_UNENFORCED=agentops-unenforced
 BUILTIN='Sonar way'
 COVERAGE_THRESHOLD=80
 
@@ -141,12 +151,21 @@ else
 fi
 
 # WANTED = every condition of the built-in gate, verbatim, plus overall
-# coverage. Copied rather than listed here so upstream's set can change without
-# this script describing a gate contributors no longer see.
+# coverage and the three overall ratings (sonar-ratings-baseline). Copied
+# rather than listed here so upstream's set can change without this script
+# describing a gate contributors no longer see.
+#
+# 1.0-5.0, A=1 ... E=5 on all three -- `GT 2` fails worse than B, mirroring
+# `coverage LT 80`'s own numeric-scale condition. Maintainability keeps its
+# historical SQALE key; there is no separate "new" vs "overall" spelling to
+# confuse it with, unlike `new_coverage` vs `coverage` above.
 wanted=$(sq GET qualitygates/show "organization=$SONAR_ORG" "name=$BUILTIN" \
   | jq -r '.conditions[] | "\(.metric) \(.op) \(.error)"')
 wanted="$wanted
-coverage LT $COVERAGE_THRESHOLD"
+coverage LT $COVERAGE_THRESHOLD
+reliability_rating GT 2
+security_rating GT 2
+sqale_rating GT 2"
 
 printf '%s\n' "$wanted" | while read -r metric op error; do
   [ -n "$metric" ] || continue
@@ -180,16 +199,31 @@ else
   echo "gate set as the organisation default"
 fi
 
+# --- stage 2b: the unenforced gate, for `scripts` alone ---------------------
+#
+# Created once and never synced with conditions afterwards -- its whole
+# point is to carry NONE, ever, so there is nothing here to keep in step
+# with `agentops` or the built-in gate the way stage 2 does above.
+unenforced_id=$(printf '%s' "$gates" | jq -r --arg n "$GATE_UNENFORCED" \
+  'first(.qualitygates[] | select(.name == $n) | .id) // empty')
+if [ -z "$unenforced_id" ]; then
+  unenforced_id=$(sq POST qualitygates/create "organization=$SONAR_ORG" "name=$GATE_UNENFORCED" | jq -r '.id')
+  echo "gate created: $GATE_UNENFORCED ($unenforced_id)"
+else
+  echo "gate present: $GATE_UNENFORCED ($unenforced_id)"
+fi
+
 # EVERY PROJECT IS ASSIGNED EXPLICITLY, not left to the default. The default
 # only catches projects nobody has assigned, so a project moved onto another
 # gate by hand would keep it and report green against conditions this
 # repository never chose.
 # EVERY project, never the `$@` filter: the filter says which projects to
 # CREATE, and a gate assigned to the one component somebody happened to name
-# would leave the rest judged by whatever they were on. Same list stage 1
-# builds from, `scripts` included.
+# would leave the rest judged by whatever they were on. `scripts` is
+# assigned separately, to `GATE_UNENFORCED` rather than `agentops` --
+# see the constant's own comment for why.
 .github/components.sh images | jq -r --arg o "$SONAR_ORG" \
-  '(.[] | .component), "scripts" | $o + "_agent-ops-operator_" + .' | while read -r key; do
+  '(.[] | .component) | $o + "_agent-ops-operator_" + .' | while read -r key; do
   current=$(sq GET qualitygates/get_by_project "organization=$SONAR_ORG" "project=$key" \
     | jq -r '.qualityGate.name // empty')
   if [ "$current" = "$GATE" ]; then
@@ -199,3 +233,13 @@ fi
     echo "  assigned: $key"
   fi
 done
+
+scripts_key="${SONAR_ORG}_agent-ops-operator_scripts"
+scripts_current=$(sq GET qualitygates/get_by_project "organization=$SONAR_ORG" "project=$scripts_key" \
+  | jq -r '.qualityGate.name // empty')
+if [ "$scripts_current" = "$GATE_UNENFORCED" ]; then
+  echo "  assigned already: $scripts_key"
+else
+  sq POST qualitygates/select "organization=$SONAR_ORG" "gateId=$unenforced_id" "projectKey=$scripts_key" >/dev/null
+  echo "  assigned: $scripts_key -> $GATE_UNENFORCED"
+fi

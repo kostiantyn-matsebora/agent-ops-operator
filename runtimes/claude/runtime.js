@@ -14,7 +14,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { agentDeclaredTools, composeAllowedTools } = require('./tools');
+const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog, resolveBin, buildClaudeArgs } = require('./tools');
 const { DEFAULT_LIMIT, newSpinWatch, noteToolUse, spinMessage, discardedNotice } = require('./spin');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
@@ -25,14 +25,14 @@ const REPO_REF = process.env.REPO_REF || 'master';
 const GIT_AUTH_TYPE = process.env.GIT_AUTH_TYPE || '';
 const GIT_SSH_KEY = process.env.GIT_SSH_KEY || '';
 const GIT_TOKEN = process.env.GIT_TOKEN || '';
-const TTL_MS = (parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
+const TTL_MS = (Number.parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
 const WORKSPACE = process.env.WORKSPACE || '/data/workspace';
 const MCP_CONFIG = process.env.MCP_CONFIG || '/etc/agentops/mcp.json';
 // How many identical unparsable tool calls in a row end a run. 0 disables the
 // breaker entirely, which is a decision an install can make and this file will
 // not make for it.
 const SPIN_LIMIT = (() => {
-  const v = parseInt(process.env.RUNTIME_UNPARSED_REPEAT_LIMIT || '', 10);
+  const v = Number.parseInt(process.env.RUNTIME_UNPARSED_REPEAT_LIMIT || '', 10);
   return Number.isFinite(v) && v >= 0 ? v : DEFAULT_LIMIT;
 })();
 
@@ -42,6 +42,8 @@ if (!CONTROL_URL || !CONVO_ID) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const CLAUDE_BIN = resolveBin('claude');
 
 function gitEnv() {
   const env = { ...process.env };
@@ -120,7 +122,9 @@ function runClaude(unit) {
     let prompt = unit.promptText || '';
     if (!prompt && unit.promptFile) {
       try {
-        prompt = fs.readFileSync(path.join(WORKSPACE, unit.promptFile), 'utf8');
+        const file = safeJoin(WORKSPACE, unit.promptFile);
+        if (!file) throw new Error('promptFile escapes the workspace');
+        prompt = fs.readFileSync(file, 'utf8');
         for (const [k, v] of Object.entries(unit.promptVars || {})) {
           prompt = prompt.replaceAll(`{{${k}}}`, v);
         }
@@ -132,7 +136,7 @@ function runClaude(unit) {
 
     // The work unit carries the WIRING's tools and the mode; the agent's own
     // definition carries the rest, and only this process can read it.
-    const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(m));
+    const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
     const allowed = composeAllowedTools(declared, unit.allowedTools, unit.toolsMode);
 
     // --allowedTools is passed ALWAYS, even empty: nothing is substituted for
@@ -147,21 +151,19 @@ function runClaude(unit) {
     // not declare. The lane templates name the agent in the prompt instead.
     // Inline role text from a repo-less profile. APPENDED, so the runtime's own
     // system prompt survives — and it says nothing about tools: the allowlist
-    // above is the only permission authority.
-    const args = [
-      ...(contextIdOf(unit) ? ['--resume', contextIdOf(unit)] : []),
-      ...(unit.systemPrompt ? ['--append-system-prompt', unit.systemPrompt] : []),
-      '-p', prompt,
-      '--allowedTools', allowed.join(','),
-      '--permission-mode', 'dontAsk',
-      '--max-turns', String(unit.maxTurns || 60),
-      '--output-format', 'stream-json',
-      '--verbose',
-      '--strict-mcp-config',
-      '--mcp-config', MCP_CONFIG,
-    ];
-    console.log(`\n[runtime] run ${unit.runId}${contextIdOf(unit) ? ' continue=' + contextIdOf(unit) : ''} thread=${unit.threadId ?? 'general'}`);
-    console.log(`[runtime] tools agent=${unit.agent || '-'} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${unit.toolsMode || 'merge'} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
+    // above is the only permission authority. Argv shape (including the
+    // jssecurity:S6350 fix) lives in tools.js's buildClaudeArgs, asserted
+    // directly there.
+    const args = buildClaudeArgs({
+      contextId: contextIdOf(unit),
+      systemPrompt: unit.systemPrompt,
+      allowed,
+      maxTurns: unit.maxTurns,
+      mcpConfig: MCP_CONFIG,
+      prompt,
+    });
+    console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${contextIdOf(unit) ? ' continue=' + sanitizeLog(contextIdOf(unit)) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
+    console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
     if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
     resolve(spawnClaude(args, unit, Boolean(contextIdOf(unit))));
   });
@@ -182,7 +184,7 @@ function runClaude(unit) {
 async function spawnClaude(args, unit, isResume) {
   const attempt = (argv) =>
     new Promise((resolve) => {
-      const p = spawn('claude', argv, {
+      const p = spawn(CLAUDE_BIN, argv, {
         cwd: WORKSPACE,
         env: { ...process.env, RUN_ID: unit.runId, TG_THREAD_ID: unit.threadId != null ? String(unit.threadId) : '' },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -367,10 +369,12 @@ function strip({ stderr, ...rest }) {
   try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
 
   let lastWork = Date.now();
-  for (;;) {
+  let idle = false;
+  while (!idle) {
     if (Date.now() - lastWork > TTL_MS) {
       console.log('[runtime] idle TTL reached — exiting');
-      process.exit(0);
+      idle = true;
+      continue;
     }
     let res;
     try {
@@ -405,4 +409,5 @@ function strip({ stderr, ...rest }) {
       await sleep(10000);
     }
   }
+  process.exit(0);
 })();

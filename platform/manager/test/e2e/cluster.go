@@ -16,6 +16,25 @@ import (
 	"time"
 )
 
+const kubeconfigFlag = "--kubeconfig"
+
+// Resolved once, and used everywhere the harness shells out to kubectl or
+// helm — go:S4036 wants a caller to say explicitly where the binary comes
+// from rather than leaving PATH to answer implicitly at each call site. When
+// the binary is not on PATH the fallback is the bare name, so the resulting
+// exec error is the same "not found" a reader would already expect.
+var (
+	kubectlBin = lookupBin("kubectl")
+	helmBin    = lookupBin("helm")
+)
+
+func lookupBin(name string) string {
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return name
+}
+
 // Cluster is one k3d cluster and the kubeconfig that reaches it.
 type Cluster struct {
 	Name       string
@@ -39,9 +58,26 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 	if !exists {
 		// The registries file names the pull test's registry as plain HTTP;
 		// containerd reads it at start only, so it is given at creation.
-		regs := filepath.Join(os.TempDir(), "agentops-e2e-"+name+"-registries.yaml")
-		if err := os.WriteFile(regs, []byte(registriesYAML), 0o644); err != nil {
+		//
+		// CreateTemp, never a computed name under os.TempDir(): a predictable
+		// path in a world-writable directory is open to a symlink planted
+		// there ahead of us, which a fixed name cannot detect or refuse.
+		regsFile, err := os.CreateTemp("", "agentops-e2e-"+name+"-registries-*.yaml")
+		if err != nil {
 			return nil, err
+		}
+		regs := regsFile.Name()
+		// k3d reads it once, at `cluster create` below, and nothing after
+		// this function needs it -- unlike the kubeconfig, its lifetime is
+		// this function's, not the cluster's.
+		defer func() { _ = os.Remove(regs) }()
+		_, writeErr := regsFile.Write([]byte(registriesYAML))
+		closeErr := regsFile.Close()
+		if writeErr != nil {
+			return nil, writeErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
 		}
 		args := []string{"cluster", "create", name,
 			"--k3s-arg", "--disable=traefik@server:0",
@@ -60,9 +96,20 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 	if err != nil {
 		return nil, fmt.Errorf("k3d kubeconfig get: %w", err)
 	}
-	path := filepath.Join(os.TempDir(), "agentops-e2e-"+name+".kubeconfig")
-	if err := os.WriteFile(path, kc, 0o600); err != nil {
+	// CreateTemp, for the same reason as the registries file above: a fixed
+	// name under os.TempDir() is predictable, CreateTemp's is not.
+	kcFile, err := os.CreateTemp("", "agentops-e2e-"+name+"-*.kubeconfig")
+	if err != nil {
 		return nil, err
+	}
+	path := kcFile.Name()
+	_, writeErr := kcFile.Write(kc)
+	closeErr := kcFile.Close()
+	if writeErr != nil {
+		return nil, writeErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
 	}
 	c.Kubeconfig = path
 	// Wait for the node to be Ready and the local-path provisioner to exist —
@@ -73,21 +120,27 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 	return c, nil
 }
 
-// Delete tears the cluster down.
+// Delete tears the cluster down and removes the CreateTemp'd kubeconfig
+// that reached it -- unlike the registries file, this one lives for the
+// cluster's whole lifetime, so it is Delete's to remove rather than
+// EnsureCluster's.
 func (c *Cluster) Delete() {
 	_ = exec.Command("k3d", "cluster", "delete", c.Name).Run()
+	if c.Kubeconfig != "" {
+		_ = os.Remove(c.Kubeconfig)
+	}
 }
 
 // Kubectl runs kubectl against the cluster.
 func (c *Cluster) Kubectl(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "kubectl", append([]string{"--kubeconfig", c.Kubeconfig}, args...)...)
+	cmd := exec.CommandContext(ctx, kubectlBin, append([]string{kubeconfigFlag, c.Kubeconfig}, args...)...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
 // Helm runs helm against the cluster.
 func (c *Cluster) Helm(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "helm", append([]string{"--kubeconfig", c.Kubeconfig}, args...)...)
+	cmd := exec.CommandContext(ctx, helmBin, append([]string{kubeconfigFlag, c.Kubeconfig}, args...)...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -145,7 +198,7 @@ func (c *Cluster) Forward(namespace, target string, remotePort int) (*Forward, e
 	}
 	port := l.Addr().(*net.TCPAddr).Port
 	l.Close()
-	cmd := exec.Command("kubectl", "--kubeconfig", c.Kubeconfig, "-n", namespace, "port-forward", target,
+	cmd := exec.Command(kubectlBin, kubeconfigFlag, c.Kubeconfig, "-n", namespace, "port-forward", target,
 		fmt.Sprintf("%d:%d", port, remotePort))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

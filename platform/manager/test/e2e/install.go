@@ -131,9 +131,24 @@ func Install(ctx context.Context, c *Cluster, v *InstallValues) error {
 	if out, err := c.Kubectl(ctx, "-n", Namespace, "apply", "-f", filepath.Join(root, "test", "fakebotapi", "deploy", "fake-bot-api.yaml")); err != nil {
 		return fmt.Errorf("fake bot api: %v\n%s", err, out)
 	}
-	values := filepath.Join(os.TempDir(), "agentops-e2e-values.yaml")
-	if err := os.WriteFile(values, []byte(v.valuesYAML()), 0o600); err != nil {
+	// CreateTemp, not a fixed name under os.TempDir(): the old name was the
+	// SAME for every cluster, so two e2e runs on one machine would race on it
+	// too, not merely predictable to another local user.
+	valuesFile, err := os.CreateTemp("", "agentops-e2e-values-*.yaml")
+	if err != nil {
 		return err
+	}
+	values := valuesFile.Name()
+	// helm reads it once, at the upgrade/install call below, and nothing
+	// after this function needs it.
+	defer func() { _ = os.Remove(values) }()
+	_, writeErr := valuesFile.Write([]byte(v.valuesYAML()))
+	closeErr := valuesFile.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	if out, err := c.Helm(ctx, "dependency", "build", filepath.Join(root, "chart")); err != nil {
 		return fmt.Errorf("helm dependency build: %v\n%s", err, out)

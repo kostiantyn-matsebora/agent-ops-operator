@@ -109,6 +109,14 @@ func TestK8sEventsLane(t *testing.T) {
 		t.Fatalf("namespace: %v %s", err, out)
 	}
 	t.Cleanup(func() { _, _ = e.Cluster.Kubectl(context.Background(), "delete", "namespace", ns, "--wait=false") })
+	createUnpullableBrokenDeployment(t, ctx, e, ns)
+	waitFor(t, "a conversation about the broken workload", 12*time.Minute, func() (bool, error) {
+		return conversationAboutBrokenWorkloadExists(ctx, e, ns)
+	})
+}
+
+func createUnpullableBrokenDeployment(t *testing.T, ctx context.Context, e *Env, ns string) {
+	t.Helper()
 	one := int32(1)
 	d := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "broken"},
@@ -127,25 +135,26 @@ func TestK8sEventsLane(t *testing.T) {
 	if err := e.K.Create(ctx, d); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "a conversation about the broken workload", 12*time.Minute, func() (bool, error) {
-		items, err := e.K.Conversations(ctx)
-		if err != nil {
-			return false, err
+}
+
+func conversationAboutBrokenWorkloadExists(ctx context.Context, e *Env, ns string) (bool, error) {
+	items, err := e.K.Conversations(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range items {
+		if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents && strings.Contains(c.Spec.Title+c.Spec.Signature, ns) {
+			return true, nil
 		}
-		for _, c := range items {
-			if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents && strings.Contains(c.Spec.Title+c.Spec.Signature, ns) {
-				return true, nil
-			}
-			if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents {
-				for _, in := range c.Spec.Inputs {
-					if strings.Contains(in.Payload, ns) {
-						return true, nil
-					}
+		if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents {
+			for _, in := range c.Spec.Inputs {
+				if strings.Contains(in.Payload, ns) {
+					return true, nil
 				}
 			}
 		}
-		return false, nil
-	})
+	}
+	return false, nil
 }
 
 // 10.4 + 10.5 The Telegram lane against the fake: the router classifies and

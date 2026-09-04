@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -72,6 +73,27 @@ func TestActivityRecordsAConversationEndToEnd(t *testing.T) {
 	srv, acts := apiServerWithActivity()
 	h := srv.Handler()
 
+	convName := actAssertSignalOpensClaimedConversation(t, h, acts)
+	// The shared namespace is FIFO-sensitive: a conversation left needing a
+	// runtime pod jumps the capacity tests' queue. Every conversation a test
+	// creates gets cleaned up.
+	t.Cleanup(func() { cleanupConversation(t, convName) })
+
+	actDriveTopicAndDispatch(t, ctx, srv, convName)
+	actDispatchAndComplete(t, h, convName)
+
+	all, _ := acts.Since("", 0)
+	mine := convEvents(all, convName)
+	actAssertLifecycleOrder(t, mine)
+	actAssertRunEventsConsistent(t, mine)
+	actAssertChannelOpsRecorded(t, all)
+}
+
+// actAssertSignalOpensClaimedConversation posts the triggering signal and
+// returns the conversation it opened, having checked the claim and creation
+// events name the right nodes and land in the right order.
+func actAssertSignalOpensClaimedConversation(t *testing.T, h http.Handler, acts *activity.Log) string {
+	t.Helper()
 	rec := postSignal(t, h, testMasterToken, "src-act", []map[string]any{
 		{"fingerprint": "act-fp-1", "labels": map[string]string{"alertname": "ActTest"}, "payload": "disk full"},
 	})
@@ -92,10 +114,6 @@ func TestActivityRecordsAConversationEndToEnd(t *testing.T) {
 		t.Fatalf("no conversation.created in %v", kindsOf(all))
 	}
 	convName := created.Conversation
-	// The shared namespace is FIFO-sensitive: a conversation left needing a
-	// runtime pod jumps the capacity tests' queue. Every conversation a test
-	// creates gets cleaned up.
-	t.Cleanup(func() { cleanupConversation(t, convName) })
 	if created.From.Kind != activity.NodePipeline || created.From.Name != "act-pipe" {
 		t.Fatalf("conversation.created must flow from the CLAIMING pipeline: %+v", created.From)
 	}
@@ -113,15 +131,20 @@ func TestActivityRecordsAConversationEndToEnd(t *testing.T) {
 	if q := firstOf(all, activity.KindInputQueued); q == nil || q.InputID == "" || q.Conversation != convName {
 		t.Fatalf("input.queued must carry the input id and conversation: %+v", q)
 	}
+	return convName
+}
 
-	// A channel-bound conversation waits for a thread binding before its first
-	// dispatch, so drive the topic through the real op path — which also puts
-	// channel.op.enqueued and channel.op.completed on the log.
+// actDriveTopicAndDispatch: a channel-bound conversation waits for a thread
+// binding before its first dispatch, so drive the topic through the real op
+// path — which also puts channel.op.enqueued and channel.op.completed on
+// the log.
+func actDriveTopicAndDispatch(t *testing.T, ctx context.Context, srv *httpapi.Server, convName string) {
+	t.Helper()
 	if _, err := reconcilerWithOps(srv.Ops).Reconcile(ctx,
 		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: convName}}); err != nil {
 		t.Fatal(err)
 	}
-	rec = adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, testMasterToken)
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter=telegram&contract=2&wait=0", nil, testMasterToken)
 	if rec.Code != 200 {
 		t.Fatalf("ensure-topic op not queued: %d", rec.Code)
 	}
@@ -131,9 +154,13 @@ func TestActivityRecordsAConversationEndToEnd(t *testing.T) {
 		map[string]any{"threadId": "thread-act"}, testMasterToken); rec.Code != 200 {
 		t.Fatalf("op done: %d %s", rec.Code, rec.Body.String())
 	}
+}
 
-	// dispatch
-	rec = httptest.NewRecorder()
+// actDispatchAndComplete dispatches the conversation's next work unit and
+// reports it succeeded.
+func actDispatchAndComplete(t *testing.T, h http.Handler, convName string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/work?convo="+convName+"&wait=0", nil))
 	if rec.Code != 200 {
 		t.Fatalf("work: %d %s", rec.Code, rec.Body.String())
@@ -151,12 +178,13 @@ func TestActivityRecordsAConversationEndToEnd(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("done: %d %s", rec.Code, rec.Body.String())
 	}
+}
 
-	all, _ = acts.Since("", 0)
-	mine := convEvents(all, convName)
+// actAssertLifecycleOrder: the whole conversation-bearing lifecycle, in the
+// order it happened.
+func actAssertLifecycleOrder(t *testing.T, mine []activity.Event) {
+	t.Helper()
 	kinds := kindsOf(mine)
-
-	// The whole conversation-bearing lifecycle, in the order it happened.
 	want := []string{
 		activity.KindConversationCreated,
 		activity.KindInputQueued,
@@ -174,7 +202,10 @@ func TestActivityRecordsAConversationEndToEnd(t *testing.T) {
 		}
 		prev = i
 	}
+}
 
+func actAssertRunEventsConsistent(t *testing.T, mine []activity.Event) {
+	t.Helper()
 	dispatched, completed := firstOf(mine, activity.KindRunDispatched), firstOf(mine, activity.KindRunCompleted)
 	if dispatched.RunID == "" || dispatched.RunID != completed.RunID {
 		t.Fatalf("run events must share a runId: %q vs %q", dispatched.RunID, completed.RunID)
@@ -189,10 +220,14 @@ func TestActivityRecordsAConversationEndToEnd(t *testing.T) {
 		t.Fatalf("latency %dms is not consistent with %dms between the events",
 			completed.LatencyMs, elapsed)
 	}
+}
 
-	// The channel half: intent recorded on enqueue, delivery confirmed on
-	// completion — the two are separate events on purpose, so an edge can say
-	// "sent, unconfirmed" rather than claiming success.
+// actAssertChannelOpsRecorded: the channel half — intent recorded on
+// enqueue, delivery confirmed on completion — the two are separate events on
+// purpose, so an edge can say "sent, unconfirmed" rather than claiming
+// success.
+func actAssertChannelOpsRecorded(t *testing.T, all []activity.Event) {
+	t.Helper()
 	enq := firstOf(all, activity.KindChannelOpEnqueued)
 	if enq == nil || enq.To.Kind != activity.NodeChannel {
 		t.Fatalf("channel.op.enqueued must flow TO a channel node: %+v", enq)

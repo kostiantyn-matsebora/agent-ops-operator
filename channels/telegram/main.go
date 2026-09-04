@@ -51,6 +51,19 @@ import (
 	"time"
 )
 
+// sanitizeLog strips control characters (CR/LF and other C0) from an
+// error's text before it reaches a log line -- gosecurity:S5145's ask,
+// since an error here can carry Telegram-relayed content (a message's
+// text, ultimately) that could otherwise forge a second log line.
+func sanitizeLog(err error) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 {
+			return ' '
+		}
+		return r
+	}, err.Error())
+}
+
 // channelConfig is this adapter's interpretation of Channel spec.config.
 //
 // There is no pollingEnabled any more: this adapter never polls, so a channel
@@ -249,7 +262,7 @@ func (a *adapter) handler() http.Handler {
 func (a *adapter) refreshChannels(ctx context.Context) {
 	infos, err := a.mgr.Channels(ctx, a.channelType)
 	if err != nil {
-		log.Printf("list channels: %v", err)
+		log.Printf("list channels: %s", sanitizeLog(err))
 		return
 	}
 	next := map[string]servedChannel{}
@@ -337,49 +350,56 @@ func (a *adapter) client(sc servedChannel) *Telegram {
 func (a *adapter) opsLoop(ctx context.Context) {
 	a.refreshChannels(ctx)
 	for ctx.Err() == nil {
-		// PACE BEFORE CLAIMING, not before sending. Work this adapter cannot
-		// yet deliver stays queued in the manager, where it is still derivable
-		// from CR state and survives an adapter restart. Gating the send
-		// instead would hold a claim while waiting, and a crash mid-wait would
-		// strand the op until ReclaimAfter.
-		if !a.pace.wait(ctx, a.chatIDs()) {
-			continue
+		a.pollOnce(ctx)
+	}
+}
+
+// pollOnce is one iteration of opsLoop's body, split out so it is callable
+// directly with a mock manager rather than only through the infinite loop —
+// each of its error branches is otherwise unreachable from a test.
+func (a *adapter) pollOnce(ctx context.Context) {
+	// PACE BEFORE CLAIMING, not before sending. Work this adapter cannot
+	// yet deliver stays queued in the manager, where it is still derivable
+	// from CR state and survives an adapter restart. Gating the send
+	// instead would hold a claim while waiting, and a crash mid-wait would
+	// strand the op until ReclaimAfter.
+	if !a.pace.wait(ctx, a.chatIDs()) {
+		return
+	}
+	op, revision, err := a.mgr.NextOp(ctx, a.channelType, 25)
+	// The revision rides EVERY poll response, delivered op or not, so a
+	// vocabulary change reaches this adapter while it is otherwise idle —
+	// the manager cannot dial us. Acted on before the error check: a poll
+	// that failed may still have carried it.
+	a.syncCommands(ctx, revision)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("ops poll: %s", sanitizeLog(err))
+			sleepCtx(ctx, 5*time.Second)
 		}
-		op, revision, err := a.mgr.NextOp(ctx, a.channelType, 25)
-		// The revision rides EVERY poll response, delivered op or not, so a
-		// vocabulary change reaches this adapter while it is otherwise idle —
-		// the manager cannot dial us. Acted on before the error check: a poll
-		// that failed may still have carried it.
-		a.syncCommands(ctx, revision)
-		if err != nil {
-			if ctx.Err() == nil {
-				log.Printf("ops poll: %v", err)
-				sleepCtx(ctx, 5*time.Second)
-			}
-			continue
+		return
+	}
+	if op == nil {
+		return
+	}
+	// The claim window is the manager's to state and ours to respect: every
+	// Bot API call this op makes shares one retry budget, bounded well
+	// inside it.
+	// A redelivered id is answered as it was answered before, and the
+	// transport is not touched again: the effect happened once.
+	if tid, done := a.completed.seen(op.ID); done {
+		log.Printf("op %s redelivered; acknowledging without repeating it", op.ID)
+		if err := a.mgr.CompleteOp(ctx, op.ID, tid, ""); err != nil && ctx.Err() == nil {
+			log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
 		}
-		if op == nil {
-			continue
-		}
-		// The claim window is the manager's to state and ours to respect: every
-		// Bot API call this op makes shares one retry budget, bounded well
-		// inside it.
-		// A redelivered id is answered as it was answered before, and the
-		// transport is not touched again: the effect happened once.
-		if tid, done := a.completed.seen(op.ID); done {
-			log.Printf("op %s redelivered; acknowledging without repeating it", op.ID)
-			if err := a.mgr.CompleteOp(ctx, op.ID, tid, ""); err != nil && ctx.Err() == nil {
-				log.Printf("complete op %s: %v", op.ID, err)
-			}
-			continue
-		}
-		threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
-		if opErr == "" {
-			a.completed.add(op.ID, threadID)
-		}
-		if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
-			log.Printf("complete op %s: %v", op.ID, err)
-		}
+		return
+	}
+	threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
+	if opErr == "" {
+		a.completed.add(op.ID, threadID)
+	}
+	if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
+		log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
 	}
 }
 
@@ -453,7 +473,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 				name := renderTopicName(*op.Topic)
 				if err := tg.Send(ctx, sc.cfg.ChatID, nil,
 					`💬 <a href="`+escape(link)+`">`+escape(name)+`</a>`); err != nil {
-					log.Printf("point at topic %d: %v", id, err)
+					log.Printf("point at topic %d: %s", id, sanitizeLog(err))
 				}
 			}
 		}
@@ -550,8 +570,8 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 					"</code> was deleted, and its topic removed with it."); err != nil {
 				// The topic is already gone; failing the op would ask the
 				// manager to retry a deletion that succeeded.
-				log.Printf("delete-conversation %s: topic deleted but the general-surface note failed: %v",
-					op.Conversation, err)
+				log.Printf("delete-conversation %s: topic deleted but the general-surface note failed: %s",
+					op.Conversation, sanitizeLog(err))
 			}
 			return "", ""
 		}
@@ -642,7 +662,7 @@ func (a *adapter) dispatch(ctx context.Context, upd tgUpdate) {
 		}
 		threadID := strconv.FormatInt(m.MessageThreadID, 10)
 		if err := a.mgr.Inbound(ctx, name, &threadID, m.Text); err != nil {
-			log.Printf("inbound %s: %v", name, err)
+			log.Printf("inbound %s: %s", name, sanitizeLog(err))
 		}
 		return // first matching channel wins
 	}
@@ -686,7 +706,7 @@ func (a *adapter) handleOffsetGet(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := a.mgr.GetState(r.Context(), name, "telegram-offset")
 	if err != nil {
-		log.Printf("offset read %s: %v", name, err)
+		log.Printf("offset read %s: %s", name, sanitizeLog(err))
 		http.Error(w, "offset read failed", http.StatusBadGateway)
 		return
 	}
@@ -707,7 +727,7 @@ func (a *adapter) handleOffsetPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.mgr.PutState(r.Context(), name, "telegram-offset", in.Value); err != nil {
-		log.Printf("offset write %s: %v", name, err)
+		log.Printf("offset write %s: %s", name, sanitizeLog(err))
 		http.Error(w, "offset write failed", http.StatusBadGateway)
 		return
 	}

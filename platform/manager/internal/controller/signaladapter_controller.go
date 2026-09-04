@@ -29,6 +29,8 @@ func SignalAdapterDeploymentName(adapterName string) string {
 	return "agentops-signal-" + adapterName
 }
 
+const signalAdapterLabelKey = "agentops.dev/signal-adapter"
+
 // SignalAdapterReconciler owns signal-adapter workloads — the SignalAdapter
 // sibling of ChannelAdapterReconciler, on the shared workload machinery:
 // per-adapter derived token (signal derivation context), ADAPTER_NAME env, and
@@ -99,14 +101,14 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	labels := map[string]string{
-		"app.kubernetes.io/name":      "agentops-signal-adapter",
-		"agentops.dev/signal-adapter": adapter.Name,
+		"app.kubernetes.io/name": "agentops-signal-adapter",
+		signalAdapterLabelKey:    adapter.Name,
 	}
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
 		Owner:          &adapter,
 		Name:           SignalAdapterDeploymentName(adapter.Name),
 		Labels:         labels,
-		SelectorKey:    "agentops.dev/signal-adapter",
+		SelectorKey:    signalAdapterLabelKey,
 		Image:          adapter.Spec.Image,
 		Env:            env,
 		EnvFrom:        envFrom,
@@ -121,7 +123,7 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		Owner:       &adapter,
 		Name:        SignalAdapterDeploymentName(adapter.Name),
 		Labels:      labels,
-		SelectorKey: "agentops.dev/signal-adapter",
+		SelectorKey: signalAdapterLabelKey,
 		Port:        adapter.Spec.Port,
 	}); err != nil {
 		return ctrl.Result{}, err

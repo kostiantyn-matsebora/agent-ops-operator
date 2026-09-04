@@ -45,6 +45,8 @@ const (
 	AdapterAlertmngr = "alertmanager"
 )
 
+const bearerPrefix = "Bearer "
+
 func raw(v any) *runtime.RawExtension {
 	b, _ := json.Marshal(v)
 	return &runtime.RawExtension{Raw: b}
@@ -143,7 +145,7 @@ func (e *Env) PostTask(t *testing.T, source, fingerprint, payload string) map[st
 func (e *Env) PostSignal(t *testing.T, source string, signal map[string]any) map[string]any {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"source": source, "signals": []any{signal}})
-	code, out := e.do(t, "POST", e.Manager.URL()+"/signal/inbound", body, "Bearer "+e.Values.AdapterToken)
+	code, out := e.do(t, "POST", e.Manager.URL()+"/signal/inbound", body, bearerPrefix+e.Values.AdapterToken)
 	if code != 200 {
 		t.Fatalf("POST /signal/inbound: %d %s", code, out)
 	}
@@ -199,20 +201,20 @@ func (e *Env) WaitRun(t *testing.T, name string, n int, timeout time.Duration) *
 func (e *Env) ConsoleSend(t *testing.T, name, text string) (int, string) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"text": text})
-	return e.do(t, "POST", e.Console.URL()+"/api/conversations/"+name+"/messages", body, "Bearer "+e.Values.UIToken)
+	return e.do(t, "POST", e.Console.URL()+"/api/conversations/"+name+"/messages", body, bearerPrefix+e.Values.UIToken)
 }
 
 // ConsoleStart starts a conversation through the console.
 func (e *Env) ConsoleStart(t *testing.T, task string) (int, string) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"task": task})
-	return e.do(t, "POST", e.Console.URL()+"/api/conversations", body, "Bearer "+e.Values.UIToken)
+	return e.do(t, "POST", e.Console.URL()+"/api/conversations", body, bearerPrefix+e.Values.UIToken)
 }
 
 // ConsoleTranscript reads a conversation's transcript as JSON text.
 func (e *Env) ConsoleTranscript(t *testing.T, name string) string {
 	t.Helper()
-	_, out := e.do(t, "GET", e.Console.URL()+"/api/conversations/"+name, nil, "Bearer "+e.Values.UIToken)
+	_, out := e.do(t, "GET", e.Console.URL()+"/api/conversations/"+name, nil, bearerPrefix+e.Values.UIToken)
 	return out
 }
 

@@ -26,6 +26,8 @@ func AdapterDeploymentName(adapterName string) string {
 	return "agentops-adapter-" + adapterName
 }
 
+const channelAdapterLabelKey = "agentops.dev/adapter"
+
 // ChannelAdapterReconciler owns channel-adapter workloads: one Deployment
 // (+ zero-RBAC ServiceAccount) per ChannelAdapter, with the contract URL, a
 // derived per-adapter token, and every served Channel's projected credentials.
@@ -101,13 +103,13 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	labels := map[string]string{
 		"app.kubernetes.io/name": "agentops-adapter",
-		"agentops.dev/adapter":   adapter.Name,
+		channelAdapterLabelKey:   adapter.Name,
 	}
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
 		Owner:       &adapter,
 		Name:        AdapterDeploymentName(adapter.Name),
 		Labels:      labels,
-		SelectorKey: "agentops.dev/adapter",
+		SelectorKey: channelAdapterLabelKey,
 		Image:       adapter.Spec.Image,
 		Env:         env,
 		EnvFrom:     envFrom,
@@ -123,7 +125,7 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		Owner:       &adapter,
 		Name:        AdapterDeploymentName(adapter.Name),
 		Labels:      labels,
-		SelectorKey: "agentops.dev/adapter",
+		SelectorKey: channelAdapterLabelKey,
 		Port:        adapter.Spec.Port,
 	}); err != nil {
 		return ctrl.Result{}, err

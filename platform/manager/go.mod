@@ -3,6 +3,7 @@ module github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager
 go 1.25.0
 
 require (
+	github.com/google/gofuzz v1.2.0
 	github.com/prometheus/client_golang v1.19.1
 	github.com/prometheus/client_model v0.6.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
@@ -33,7 +34,6 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
-	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/imdario/mergo v0.3.6 // indirect
 	github.com/josharian/intern v1.0.0 // indirect

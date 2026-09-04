@@ -37,7 +37,25 @@ func fixture(t *testing.T, name string) []byte {
 var (
 	buildMu    sync.Mutex
 	buildCache = map[string]string{}
+	buildOnce  sync.Once
+	buildDir   string
 )
+
+// buildRoot returns a fresh, process-private directory for compiled
+// binaries — created once via MkdirTemp rather than a fixed name under
+// os.TempDir(), which a predictable path in a world-writable directory is
+// exposed to (another local user pre-creating it, or a symlink planted at the
+// name before this process gets there).
+func buildRoot(t *testing.T) string {
+	buildOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "agentops-conformance-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		buildDir = dir
+	})
+	return buildDir
+}
 
 // build compiles a module under the repository into a binary, once per test
 // run. Adapters are LISTED here by directory, never imported: the artifact
@@ -50,10 +68,7 @@ func build(t *testing.T, dir string, tags ...string) string {
 	if bin, ok := buildCache[key]; ok {
 		return bin
 	}
-	out := filepath.Join(os.TempDir(), "agentops-conformance", strings.ReplaceAll(dir, "/", "-"))
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	out := filepath.Join(buildRoot(t), strings.ReplaceAll(dir, "/", "-"))
 	args := []string{"build", "-o", out}
 	if len(tags) > 0 {
 		args = append(args, "-tags", strings.Join(tags, ","))

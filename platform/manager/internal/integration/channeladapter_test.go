@@ -74,19 +74,46 @@ func TestChannelAdapterDeployment(t *testing.T) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("cad-main")}, &deploy); err != nil {
 		t.Fatalf("adapter deployment not created: %v", err)
 	}
-	// ownerRef -> GC on adapter delete
+	assertOwnedSingletonDeployment(t, &deploy)
+	pod := deploy.Spec.Template.Spec
+	assertPodRunsAsFloorWithNoAdapterSA(t, ctx, &pod)
+	assertAdapterContractEnv(t, &pod, "cad-main")
+	assertChannelCredentialProjection(t, &pod, map[string]string{
+		controller.CredentialEnvPrefix("cad-chan-a"): "bot-secret-a",
+		controller.CredentialEnvPrefix("cad-chan-b"): "bot-secret-b",
+	})
+
+	var adapter agentopsv1alpha1.ChannelAdapter
+	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "cad-main"}, &adapter)
+	if adapter.Status.ServedChannels != 3 {
+		t.Fatalf("servedChannels: %d", adapter.Status.ServedChannels)
+	}
+	if !apimeta.IsStatusConditionTrue(adapter.Status.Conditions, controller.ConditionDeployed) {
+		t.Fatalf("Deployed condition: %+v", adapter.Status.Conditions)
+	}
+	if apimeta.IsStatusConditionTrue(adapter.Status.Conditions, controller.ConditionReady) {
+		t.Fatal("Ready should be false with no available replicas (no kubelet)")
+	}
+}
+
+// assertOwnedSingletonDeployment: ownerRef -> GC on adapter delete, and
+// singleton discipline (one replica, Recreate strategy).
+func assertOwnedSingletonDeployment(t *testing.T, deploy *appsv1.Deployment) {
+	t.Helper()
 	if len(deploy.OwnerReferences) == 0 || deploy.OwnerReferences[0].Kind != "ChannelAdapter" {
 		t.Fatalf("ownerRef missing: %+v", deploy.OwnerReferences)
 	}
-	// singleton discipline
 	if *deploy.Spec.Replicas != 1 || deploy.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
 		t.Fatalf("singleton not enforced: replicas=%d strategy=%s", *deploy.Spec.Replicas, deploy.Spec.Strategy.Type)
 	}
-	pod := deploy.Spec.Template.Spec
-	// ZERO AMBIENT AUTHORITY IS THE FLOOR NOW, not an unmounted token on an
-	// account the operator invented. The chart renders adapter identities
-	// beside the grants they carry; an adapter naming none runs as the account
-	// nothing is bound to, with its token mounted.
+}
+
+// assertPodRunsAsFloorWithNoAdapterSA: ZERO AMBIENT AUTHORITY IS THE FLOOR
+// NOW, not an unmounted token on an account the operator invented. The chart
+// renders adapter identities beside the grants they carry; an adapter naming
+// none runs as the account nothing is bound to, with its token mounted.
+func assertPodRunsAsFloorWithNoAdapterSA(t *testing.T, ctx context.Context, pod *corev1.PodSpec) {
+	t.Helper()
 	if pod.ServiceAccountName != testFloorServiceAccount {
 		t.Fatalf("pod runs as %q, want the floor %q", pod.ServiceAccountName, testFloorServiceAccount)
 	}
@@ -99,40 +126,39 @@ func TestChannelAdapterDeployment(t *testing.T) {
 		Name: controller.AdapterDeploymentName("cad-main")}, &sa); err == nil {
 		t.Fatal("the operator created a ServiceAccount for the adapter workload")
 	}
-	// contract wiring: MANAGER_URL, CHANNEL_TYPE (= adapter name), derived
-	// (never master) token
+}
+
+// assertAdapterContractEnv: MANAGER_URL, ADAPTER_NAME and a derived (never
+// master) ADAPTER_TOKEN.
+func assertAdapterContractEnv(t *testing.T, pod *corev1.PodSpec, adapterName string) {
+	t.Helper()
 	env := map[string]string{}
 	for _, e := range pod.Containers[0].Env {
 		env[e.Name] = e.Value
 	}
-	if env["MANAGER_URL"] != "http://manager:8080" || env["ADAPTER_NAME"] != "cad-main" {
+	if env["MANAGER_URL"] != "http://manager:8080" || env["ADAPTER_NAME"] != adapterName {
 		t.Fatalf("contract env wrong: %+v", env)
 	}
-	if want := chat.DeriveAdapterToken(testMasterToken, "cad-main"); env["ADAPTER_TOKEN"] != want {
+	if env["ADAPTER_TOKEN"] != chat.DeriveAdapterToken(testMasterToken, adapterName) {
 		t.Fatalf("ADAPTER_TOKEN not the derived token")
 	}
-	// credential projection: envFrom prefix per credentialed channel, none for
-	// the credential-less one
+}
+
+// assertChannelCredentialProjection: envFrom prefix per credentialed
+// channel, and nothing else (the credential-less channel projects none).
+func assertChannelCredentialProjection(t *testing.T, pod *corev1.PodSpec, want map[string]string) {
+	t.Helper()
 	prefixes := map[string]string{}
 	for _, ef := range pod.Containers[0].EnvFrom {
 		prefixes[ef.Prefix] = ef.SecretRef.Name
 	}
-	if prefixes[controller.CredentialEnvPrefix("cad-chan-a")] != "bot-secret-a" ||
-		prefixes[controller.CredentialEnvPrefix("cad-chan-b")] != "bot-secret-b" || len(prefixes) != 2 {
-		t.Fatalf("credential projection wrong: %+v", prefixes)
+	if len(prefixes) != len(want) {
+		t.Fatalf("credential projection wrong: got %+v, want %+v", prefixes, want)
 	}
-
-	// status
-	var adapter agentopsv1alpha1.ChannelAdapter
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "cad-main"}, &adapter)
-	if adapter.Status.ServedChannels != 3 {
-		t.Fatalf("servedChannels: %d", adapter.Status.ServedChannels)
-	}
-	if !apimeta.IsStatusConditionTrue(adapter.Status.Conditions, controller.ConditionDeployed) {
-		t.Fatalf("Deployed condition: %+v", adapter.Status.Conditions)
-	}
-	if apimeta.IsStatusConditionTrue(adapter.Status.Conditions, controller.ConditionReady) {
-		t.Fatal("Ready should be false with no available replicas (no kubelet)")
+	for prefix, secret := range want {
+		if prefixes[prefix] != secret {
+			t.Fatalf("credential projection wrong: got %+v, want %+v", prefixes, want)
+		}
 	}
 }
 

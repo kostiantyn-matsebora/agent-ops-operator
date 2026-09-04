@@ -64,6 +64,8 @@ import (
 // annotations (e.g. agentops.dev/adapter-state-offset).
 const StateAnnotationPrefix = "agentops.dev/adapter-state-"
 
+const errInvalidJSON = "invalid JSON"
+
 // Server carries dependencies for the HTTP surface.
 type Server struct {
 	Client    client.Client // cached
@@ -522,7 +524,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var d workDone
 	if err := json.Unmarshal(body, &d); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
 		return
 	}
 	ctx := r.Context()
@@ -892,7 +894,7 @@ func (s *Server) handleChannelOpDone(w http.ResponseWriter, r *http.Request) {
 	// success, and how any op says "done, nothing to report".
 	if len(bytes.TrimSpace(body)) > 0 {
 		if err := json.Unmarshal(body, &res); err != nil {
-			writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+			writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
 			return
 		}
 	}
@@ -1106,7 +1108,7 @@ func (s *Server) handleStatePut(w http.ResponseWriter, r *http.Request) {
 		Value string `json:"value"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
 		return
 	}
 	patch := client.MergeFrom(ch.DeepCopy())
@@ -1133,7 +1135,7 @@ func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
 		return
 	}
 	cond := metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "AdapterReady"}

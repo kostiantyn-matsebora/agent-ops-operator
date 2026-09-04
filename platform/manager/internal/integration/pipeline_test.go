@@ -20,6 +20,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
@@ -183,17 +184,7 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("inbound: %d %s", rec.Code, rec.Body.String())
 	}
-	var list agentopsv1alpha1.ConversationList
-	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
-	var conv *agentopsv1alpha1.Conversation
-	for i := range list.Items {
-		if list.Items[i].BoundTo("mc-a") && list.Items[i].BoundTo("mc-b") {
-			conv = &list.Items[i]
-		}
-	}
-	if conv == nil {
-		t.Fatal("conversation not bound to both pipeline channels")
-	}
+	conv := findConversationBoundToBoth(t, ctx, "mc-a", "mc-b")
 	defer cleanupConversation(t, conv.Name)
 
 	// gate: no bindings yet → no dispatch
@@ -206,25 +197,83 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: conv.Name}}); err != nil {
 		t.Fatal(err)
 	}
-	claimTopic := func(chanType, threadID string) {
-		t.Helper()
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
-		if rec.Code != 200 {
-			t.Fatalf("%s ensure-topic expected: %d", chanType, rec.Code)
-		}
-		var op chat.Op
-		_ = json.Unmarshal(rec.Body.Bytes(), &op)
-		if op.Kind != chat.OpEnsureTopic || op.Conversation != conv.Name {
-			t.Fatalf("op: %+v", op)
-		}
-		if rec := adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", op.ID),
-			chat.OpResult{ThreadID: threadID}, "test-adapter-token"); rec.Code != 200 {
-			t.Fatalf("done: %d", rec.Code)
+	// complete only channel A first — at-least-one gate lifts
+	claimTopic(t, srv, conv.Name, "mc-ta", "111")
+	unit := mirroringAssertDispatchAfterFirstBinding(t, srv, conv.Name)
+
+	// channel B's topic lands late — binding still recorded
+	claimTopic(t, srv, conv.Name, "mc-tb", "222")
+	mirroringAssertBothBindingsRecorded(t, ctx, conv.Name)
+	mirroringAssertOpeningMessageReachesLateChannelOnly(t, ctx, rc, srv, conv.Name)
+
+	// run completes → manager fans the result out to BOTH channels' threads
+	rec = adapterReq(srv, "POST", "/work/done",
+		map[string]any{"convo": conv.Name, "runId": unit.RunID, "status": "succeeded", "result": "the mirrored answer"}, "")
+	if rec.Code != 200 {
+		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
+	}
+	expectSend(t, srv, "mc-ta", "111", "the mirrored answer")
+	expectSend(t, srv, "mc-tb", "222", "the mirrored answer")
+
+	mirroringAssertThreadedReplyRelaysAndAcksBoth(t, ctx, srv, conv.Name)
+}
+
+// findConversationBoundToBoth returns the conversation bound to both
+// channels, failing the test when none renders.
+func findConversationBoundToBoth(t *testing.T, ctx context.Context, chA, chB string) *agentopsv1alpha1.Conversation {
+	t.Helper()
+	var list agentopsv1alpha1.ConversationList
+	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
+	for i := range list.Items {
+		if list.Items[i].BoundTo(chA) && list.Items[i].BoundTo(chB) {
+			return &list.Items[i]
 		}
 	}
-	// complete only channel A first — at-least-one gate lifts
-	claimTopic("mc-ta", "111")
-	rec = adapterReq(srv, "GET", "/work?convo="+conv.Name+"&wait=0", nil, "")
+	t.Fatal("conversation not bound to both pipeline channels")
+	return nil
+}
+
+// claimTopic answers a pending ensure-topic op for chanType with threadID.
+func claimTopic(t *testing.T, srv *httpapi.Server, convName, chanType, threadID string) {
+	t.Helper()
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
+	if rec.Code != 200 {
+		t.Fatalf("%s ensure-topic expected: %d", chanType, rec.Code)
+	}
+	var op chat.Op
+	_ = json.Unmarshal(rec.Body.Bytes(), &op)
+	if op.Kind != chat.OpEnsureTopic || op.Conversation != convName {
+		t.Fatalf("op: %+v", op)
+	}
+	if rec := adapterReq(srv, "POST", fmt.Sprintf("/channel/ops/%s/done", op.ID),
+		chat.OpResult{ThreadID: threadID}, "test-adapter-token"); rec.Code != 200 {
+		t.Fatalf("done: %d", rec.Code)
+	}
+}
+
+// expectSend answers a pending send op for chanType, asserting it targets
+// threadID and its body contains contains.
+func expectSend(t *testing.T, srv *httpapi.Server, chanType, threadID, contains string) chat.Op {
+	t.Helper()
+	rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
+	if rec.Code != 200 {
+		t.Fatalf("%s send expected: %d", chanType, rec.Code)
+	}
+	var op chat.Op
+	_ = json.Unmarshal(rec.Body.Bytes(), &op)
+	if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != threadID || !strings.Contains(opBody(op), contains) {
+		t.Fatalf("%s send op: %+v", chanType, op)
+	}
+	return op
+}
+
+func mirroringAssertDispatchAfterFirstBinding(t *testing.T, srv *httpapi.Server, convName string) struct {
+	RunID      string  `json:"runId"`
+	ThreadID   *string `json:"threadId"`
+	PromptText string  `json:"promptText"`
+} {
+	t.Helper()
+	rec := adapterReq(srv, "GET", "/work?convo="+convName+"&wait=0", nil, "")
 	if rec.Code != 200 {
 		t.Fatalf("dispatch after first binding: %d %s", rec.Code, rec.Body.String())
 	}
@@ -244,58 +293,47 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	if !strings.Contains(unit.PromptText, "Do not attempt to send chat messages yourself") {
 		t.Fatalf("prompt must forbid agent-side posting: %.200s", unit.PromptText)
 	}
+	return unit
+}
 
-	expectSend := func(chanType, threadID, contains string) chat.Op {
-		t.Helper()
-		rec := adapterReq(srv, "GET", "/channel/ops?adapter="+chanType+"&contract=2&wait=0", nil, "test-adapter-token")
-		if rec.Code != 200 {
-			t.Fatalf("%s send expected: %d", chanType, rec.Code)
-		}
-		var op chat.Op
-		_ = json.Unmarshal(rec.Body.Bytes(), &op)
-		if op.Kind != chat.OpSend || op.ThreadID == nil || *op.ThreadID != threadID || !strings.Contains(opBody(op), contains) {
-			t.Fatalf("%s send op: %+v", chanType, op)
-		}
-		return op
-	}
-	// channel B's topic lands late — binding still recorded
-	claimTopic("mc-tb", "222")
+func mirroringAssertBothBindingsRecorded(t *testing.T, ctx context.Context, convName string) {
+	t.Helper()
 	var bound agentopsv1alpha1.Conversation
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, &bound)
+	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: convName}, &bound)
 	if bound.ThreadFor("mc-a") == nil || bound.ThreadFor("mc-b") == nil {
 		t.Fatalf("expected both bindings: %+v", bound.Status.Threads)
 	}
-	// The message that STARTED the conversation reaches channel B, which never
-	// showed it — and not channel A, which is the surface it was typed on. One
-	// rule, per destination: the chat lane needs no clause of its own.
-	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: conv.Name}}); err != nil {
+}
+
+// mirroringAssertOpeningMessageReachesLateChannelOnly: the message that
+// STARTED the conversation reaches channel B, which never showed it — and
+// not channel A, which is the surface it was typed on. One rule, per
+// destination: the chat lane needs no clause of its own.
+func mirroringAssertOpeningMessageReachesLateChannelOnly(t *testing.T, ctx context.Context, rc *controller.ConversationReconciler, srv *httpapi.Server, convName string) {
+	t.Helper()
+	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: convName}}); err != nil {
 		t.Fatal(err)
 	}
-	opening := expectSend("mc-tb", "222", "mirror me")
+	opening := expectSend(t, srv, "mc-tb", "222", "mirror me")
 	if opening.Message.Kind != chat.MsgRelay || opening.Message.Origin != "mc-a" {
 		t.Fatalf("the opening message must arrive attributed to the surface it was typed on: %+v", opening.Message)
 	}
 	if rec := adapterReq(srv, "GET", "/channel/ops?adapter=mc-ta&contract=2&wait=0", nil, "test-adapter-token"); rec.Code != 204 {
 		t.Fatalf("the originating surface displayed the message already: %d %s", rec.Code, rec.Body.String())
 	}
+}
 
-	// run completes → manager fans the result out to BOTH channels' threads
-	rec = adapterReq(srv, "POST", "/work/done",
-		map[string]any{"convo": conv.Name, "runId": unit.RunID, "status": "succeeded", "result": "the mirrored answer"}, "")
-	if rec.Code != 200 {
-		t.Fatalf("work done: %d %s", rec.Code, rec.Body.String())
-	}
-	expectSend("mc-ta", "111", "the mirrored answer")
-	expectSend("mc-tb", "222", "the mirrored answer")
-
-	// threaded reply on channel B → same conversation; relay to A (attributed),
-	// acks on both
-	rec = adapterReq(srv, "POST", "/channel/inbound",
+// mirroringAssertThreadedReplyRelaysAndAcksBoth: a threaded reply on channel
+// B → same conversation; relay to A (attributed), acks on both.
+func mirroringAssertThreadedReplyRelaysAndAcksBoth(t *testing.T, ctx context.Context, srv *httpapi.Server, convName string) {
+	t.Helper()
+	rec := adapterReq(srv, "POST", "/channel/inbound",
 		map[string]any{"channel": "mc-b", "threadId": "222", "text": "and the disks?", "sender": "operator"}, "test-adapter-token")
 	if rec.Code != 202 {
 		t.Fatalf("threaded reply: %d %s", rec.Code, rec.Body.String())
 	}
-	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, &bound)
+	var bound agentopsv1alpha1.Conversation
+	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: convName}, &bound)
 	n := len(bound.Spec.Inputs)
 	if n == 0 || bound.Spec.Inputs[n-1].Type != agentopsv1alpha1.InputReply {
 		t.Fatalf("reply input expected: %+v", bound.Spec.Inputs)
@@ -308,14 +346,14 @@ func TestMultiChannelConversationMirroring(t *testing.T) {
 	// <b>…</b>: " prefix the manager composed. Each adapter decides how to mark
 	// somebody else's words, so asserting on markup here would be asserting on
 	// a decision the manager no longer makes.
-	relay := expectSend("mc-ta", "111", "and the disks?")
+	relay := expectSend(t, srv, "mc-ta", "111", "and the disks?")
 	if relay.Message.Kind != chat.MsgRelay ||
 		relay.Message.Origin != "mc-b" || relay.Message.Sender != "operator" {
 		t.Fatalf("relay attribution: %+v", relay.Message)
 	}
-	expectSend("mc-ta", "111", "Noted")
+	expectSend(t, srv, "mc-ta", "111", "Noted")
 	// origin channel B: ack only, never a relay of its own message
-	ack := expectSend("mc-tb", "222", "Noted")
+	ack := expectSend(t, srv, "mc-tb", "222", "Noted")
 	if ack.Message.Kind == chat.MsgRelay {
 		t.Fatalf("origin channel got a relay: %+v", ack.Message)
 	}

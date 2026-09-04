@@ -2,9 +2,15 @@ package chat
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
@@ -21,6 +27,61 @@ func testConv(name string) *agentopsv1alpha1.Conversation {
 	c.Name = name
 	c.Spec.Title = "t: " + name
 	return c
+}
+
+// tryFinishEnsureTopic's two error branches -- an adapter that reported it
+// could not create a topic at all, and one that reported success but no
+// thread id -- were untouched by any test before this: neither TopicReady
+// condition it writes had ever been asserted.
+func TestTryFinishEnsureTopicRecordsAnAdapterError(t *testing.T) {
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	done, err := q.tryFinishEnsureTopic(context.Background(),
+		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{Error: "rate limited"})
+	if !done || err == nil || !strings.Contains(err.Error(), "rate limited") {
+		t.Fatalf("done=%v err=%v, want an error naming the adapter's own message", done, err)
+	}
+
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(conv), &got); err != nil {
+		t.Fatal(err)
+	}
+	cond := apimeta.FindStatusCondition(got.Status.Conditions, ConditionTopicReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "AdapterError" {
+		t.Fatalf("condition = %+v, want False/AdapterError", cond)
+	}
+	if !strings.Contains(cond.Message, "rate limited") {
+		t.Fatalf("message = %q, want the adapter's reason", cond.Message)
+	}
+}
+
+func TestTryFinishEnsureTopicRecordsAMissingThreadID(t *testing.T) {
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	done, err := q.tryFinishEnsureTopic(context.Background(),
+		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{})
+	if !done || err == nil || !strings.Contains(err.Error(), "without a thread id") {
+		t.Fatalf("done=%v err=%v, want an error naming the missing thread id", done, err)
+	}
+
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(conv), &got); err != nil {
+		t.Fatal(err)
+	}
+	cond := apimeta.FindStatusCondition(got.Status.Conditions, ConditionTopicReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "AdapterError" {
+		t.Fatalf("condition = %+v, want False/AdapterError", cond)
+	}
 }
 
 func TestEnsureTopicDedupsByConversation(t *testing.T) {

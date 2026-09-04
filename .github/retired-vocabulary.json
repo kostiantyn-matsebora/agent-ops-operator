@@ -723,6 +723,21 @@
         "is now",
         "became"
       ]
+    },
+    {
+      "id": "sonarqube-mcp-docker",
+      "pattern": "sonarqube-mcp-server|SONARQUBE_READ_ONLY",
+      "says": "`.mcp.json` reads the analysis through SonarCloud's own hosted MCP endpoint (`https://api.sonarcloud.io/mcp`), not the Dockerised sonarqube-mcp-server -- see CONTRIBUTING.md, \"Code analysis\"",
+      "allow": [
+        "removed",
+        "retired",
+        "replaced",
+        "no longer",
+        "used to",
+        "was",
+        "is now",
+        "hosted endpoint"
+      ]
     }
   ]
 }

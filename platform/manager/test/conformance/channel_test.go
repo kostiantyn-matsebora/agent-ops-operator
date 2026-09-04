@@ -55,25 +55,47 @@ func completionsFor(mgr *FakeManager, id string) (int, Completion) {
 
 func TestChannelTelegramConformance(t *testing.T) {
 	mgr := NewFakeManager(t, "adapter-token")
+	bot := tgStartFakeBotAPI(t)
+	p := tgStartAdapterWithTwoChannels(t, mgr, bot)
 
-	// The Bot API double, as a BINARY too — the same one the e2e pack deploys.
+	tgAssertBrokenChannelReportedGoodChannelStaysUp(t, mgr, p)
+
+	topic := tgEnsureTopicAndAssertContract(t, mgr, bot)
+	send := tgSendAndAssertRendered(t, mgr, bot, topic)
+	tgAssertRedeliveredSendNotReposted(t, mgr, bot, send)
+	tgAssertInboundPushForwarded(t, mgr, p)
+	tgAssertNoRelayLoopOrUnauthenticated(t, mgr)
+	tgAssertCloseTopicIdempotent(t, mgr, topic)
+}
+
+// tgStartFakeBotAPI starts the Bot API double as a BINARY too — the same one
+// the e2e pack deploys.
+func tgStartFakeBotAPI(t *testing.T) *Process {
+	t.Helper()
 	botPort := freePort(t)
 	bot := start(t, "fake-bot-api", build(t, "test/fakebotapi"), []string{fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d", botPort)})
 	bot.Port = botPort
 	waitHealthy(t, bot)
-	botCalls := func(method string) []map[string]any {
-		resp, err := http.Get(bot.URL() + "/control/calls?method=" + method)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		var calls []map[string]any
-		_ = json.NewDecoder(resp.Body).Decode(&calls)
-		return calls
-	}
+	return bot
+}
 
-	// One good surface with a projected credential, one whose config the
-	// adapter cannot accept.
+// botCallsFor lists the Bot API double's recorded calls to method.
+func botCallsFor(t *testing.T, bot *Process, method string) []map[string]any {
+	t.Helper()
+	resp, err := http.Get(bot.URL() + "/control/calls?method=" + method)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var calls []map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&calls)
+	return calls
+}
+
+// tgStartAdapterWithTwoChannels serves one good surface with a projected
+// credential, and one whose config the adapter cannot accept.
+func tgStartAdapterWithTwoChannels(t *testing.T, mgr *FakeManager, bot *Process) *Process {
+	t.Helper()
 	mgr.ServeChannels(
 		ChannelInfo{Name: "ops", Config: json.RawMessage(`{"chatId":"-1001234567890"}`), CredentialEnvPrefix: "AGENTOPS_CRED_OPS_"},
 		ChannelInfo{Name: "broken", Config: json.RawMessage(`{"feedThreadId":1}`), CredentialEnvPrefix: "AGENTOPS_CRED_BROKEN_"},
@@ -88,8 +110,13 @@ func TestChannelTelegramConformance(t *testing.T) {
 	p.Port = port
 	waitHealthy(t, p)
 	waitFor(t, "the adapter to list its channels", 10*time.Second, func() bool { return mgr.Listed("channel", "telegram") > 0 })
+	return p
+}
 
-	// 6. Listing and status: the broken surface is reported, the good one served.
+// tgAssertBrokenChannelReportedGoodChannelStaysUp: listing and status — the
+// broken surface is reported, the good one served.
+func tgAssertBrokenChannelReportedGoodChannelStaysUp(t *testing.T, mgr *FakeManager, p *Process) {
+	t.Helper()
 	waitFor(t, "a status report for the broken channel", 10*time.Second, func() bool {
 		for _, s := range mgr.StatusReports() {
 			if s.Name == "broken" && !s.Ready {
@@ -101,8 +128,12 @@ func TestChannelTelegramConformance(t *testing.T) {
 	if p.Exited() {
 		t.Fatalf("an invalid channel config must not be fatal:\n%s", p.Output())
 	}
+}
 
-	// 1–3. Long-poll, contract, typed messages: ensure-topic then send.
+// tgEnsureTopicAndAssertContract: long-poll, contract, typed messages —
+// ensure-topic and the handshake it rides on.
+func tgEnsureTopicAndAssertContract(t *testing.T, mgr *FakeManager, bot *Process) Completion {
+	t.Helper()
 	mgr.QueueOp(map[string]any{"id": "op-topic", "channel": "ops", "conversation": "c1", "kind": "ensure-topic",
 		"topic": map[string]any{"conversation": "c1", "title": "disk is full", "kind": "alert", "source": "vm-alerts"}})
 	waitFor(t, "ensure-topic completion", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-topic"); return n > 0 })
@@ -110,11 +141,15 @@ func TestChannelTelegramConformance(t *testing.T) {
 	if topic.Error != "" || topic.ThreadID == "" {
 		t.Fatalf("ensure-topic must complete with a thread id: %+v", topic)
 	}
-	if len(botCalls("createForumTopic")) != 1 {
-		t.Fatalf("ensure-topic must create exactly one forum topic, calls=%v", botCalls("createForumTopic"))
+	if len(botCallsFor(t, bot, "createForumTopic")) != 1 {
+		t.Fatalf("ensure-topic must create exactly one forum topic, calls=%v", botCallsFor(t, bot, "createForumTopic"))
 	}
 	assertContractHandshake(t, mgr, "telegram")
+	return topic
+}
 
+func tgSendAndAssertRendered(t *testing.T, mgr *FakeManager, bot *Process, topic Completion) map[string]any {
+	t.Helper()
 	send := map[string]any{"id": "op-send", "channel": "ops", "conversation": "c1", "kind": "send", "threadId": topic.ThreadID,
 		"message": map[string]any{"kind": "answer", "body": "**found it** — the disk is full", "status": "succeeded"}}
 	mgr.QueueOp(send)
@@ -122,7 +157,7 @@ func TestChannelTelegramConformance(t *testing.T) {
 	if _, c := completionsFor(mgr, "op-send"); c.Error != "" {
 		t.Fatalf("send failed: %+v", c)
 	}
-	sends := botCalls("sendMessage")
+	sends := botCallsFor(t, bot, "sendMessage")
 	if len(sends) != 1 {
 		t.Fatalf("one send op must be one sendMessage, got %d", len(sends))
 	}
@@ -136,15 +171,24 @@ func TestChannelTelegramConformance(t *testing.T) {
 	if sends[0]["token"] != "123:ops-token" {
 		t.Fatalf("the send must use the surface's projected credential, got %v", sends[0]["token"])
 	}
+	return send
+}
 
-	// 4. At-least-once: the SAME op id again — acknowledged, not repeated.
+// tgAssertRedeliveredSendNotReposted: at-least-once — the SAME op id again
+// is acknowledged, not repeated.
+func tgAssertRedeliveredSendNotReposted(t *testing.T, mgr *FakeManager, bot *Process, send map[string]any) {
+	t.Helper()
 	mgr.QueueOp(send)
 	waitFor(t, "second completion of op-send", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-send"); return n >= 2 })
-	if got := len(botCalls("sendMessage")); got != 1 {
+	if got := len(botCallsFor(t, bot, "sendMessage")); got != 1 {
 		t.Fatalf("a redelivered op must not post again: %d sendMessage calls", got)
 	}
+}
 
-	// 5. Inbound push with threadId — the router's forwarded topic update.
+// tgAssertInboundPushForwarded: inbound push with threadId — the router's
+// forwarded topic update.
+func tgAssertInboundPushForwarded(t *testing.T, mgr *FakeManager, p *Process) {
+	t.Helper()
 	before := len(mgr.Inbound())
 	code, resp := postJSON(t, p.URL()+"/updates", fixture(t, "telegram-update-topic.json"), nil)
 	if code/100 != 2 {
@@ -155,8 +199,13 @@ func TestChannelTelegramConformance(t *testing.T) {
 	if in["threadId"] != "42" || in["channel"] != "ops" || !strings.Contains(fmt.Sprint(in["text"]), "memory") {
 		t.Fatalf("inbound must carry the thread, the channel and the text: %v", in)
 	}
+}
 
-	// 7. No relay loop: the outbound posts never came back as inbound.
+// tgAssertNoRelayLoopOrUnauthenticated: no relay loop — the outbound posts
+// never came back as inbound — and no unauthenticated request reached the
+// manager.
+func tgAssertNoRelayLoopOrUnauthenticated(t *testing.T, mgr *FakeManager) {
+	t.Helper()
 	time.Sleep(2 * time.Second)
 	for _, in := range mgr.Inbound() {
 		if strings.Contains(fmt.Sprint(in["text"]), "found it") {
@@ -166,7 +215,12 @@ func TestChannelTelegramConformance(t *testing.T) {
 	if mgr.Unauthorized() != 0 {
 		t.Fatalf("%d unauthenticated requests reached the manager", mgr.Unauthorized())
 	}
-	// Close-topic completes with an empty body, and a redelivery is not an error.
+}
+
+// tgAssertCloseTopicIdempotent: close-topic completes with an empty body,
+// and a redelivery is not an error.
+func tgAssertCloseTopicIdempotent(t *testing.T, mgr *FakeManager, topic Completion) {
+	t.Helper()
 	close := map[string]any{"id": "op-close", "channel": "ops", "conversation": "c1", "kind": "close-topic", "threadId": topic.ThreadID}
 	mgr.QueueOp(close)
 	mgr.QueueOp(close)

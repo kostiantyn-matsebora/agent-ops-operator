@@ -740,6 +740,15 @@ What this mode requires of the proxy:
   proxy that passes them through lets a caller choose their own identity. This
   is a requirement of every forward-auth deployment, not a peculiarity of this
   one — the console does not reimplement the check weakly.
+- **It must set `X-Forwarded-Proto` from the connection it actually
+  terminated, never relay a client's own copy.** The console reads it to
+  decide the session cookie's `Secure` flag (`Secure: r.TLS != nil ||
+  X-Forwarded-Proto == "https"`) — the same "only route to the Service" trust
+  boundary above, one header over. `ingress-nginx` does this by default,
+  computing the header from `$scheme` on the connection it received rather
+  than passing a client-sent one through. Only `use-forwarded-headers: true`
+  in its ConfigMap changes that, and it exists for a CHAIN of proxies this
+  console does not need. Leave it off.
 - **It should FORWARD one.** Without an identity the console is **read-only**:
   reads are served, writes are refused, and the masthead shows `unknown` with
   the reason. There is no `token` fallback in this mode — no token was proven,

@@ -1,21 +1,10 @@
 {
   "mcpServers": {
     "sonarqube": {
-      "command": "docker",
-      "args": [
-        "run",
-        "--init",
-        "-i",
-        "--rm",
-        "-e", "SONARQUBE_TOKEN",
-        "-e", "SONARQUBE_ORG",
-        "-e", "SONARQUBE_READ_ONLY",
-        "sonarsource/sonarqube-mcp"
-      ],
-      "env": {
-        "SONARQUBE_TOKEN": "${SONAR_TOKEN}",
-        "SONARQUBE_ORG": "${SONAR_ORG}",
-        "SONARQUBE_READ_ONLY": "true"
+      "type": "http",
+      "url": "https://api.sonarcloud.io/mcp",
+      "headers": {
+        "Authorization": "Bearer ${SONAR_TOKEN}"
       }
     }
   }

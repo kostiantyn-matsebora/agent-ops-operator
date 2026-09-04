@@ -46,7 +46,7 @@ export function visibleGraph(
   const hiddenSummary: HiddenSummary = {
     count: hiddenNodes.length,
     failing: hiddenNodes.filter((n) => n.health === 'bad').length,
-    classes: [...failingClasses].sort(),
+    classes: [...failingClasses].sort((a, b) => a.localeCompare(b)),
   }
 
   let nodes = topo.nodes.filter((n) => !isHidden(hidden, n.kind))
@@ -216,7 +216,7 @@ export function scopedGraph(
     outOfScope: {
       count: removed.length,
       failing: removed.filter((n) => n.health === 'bad').length,
-      classes: [...failingClasses].sort(),
+      classes: [...failingClasses].sort((a, b) => a.localeCompare(b)),
     },
     // Connected, but cut off by the depth limit rather than by not being
     // connected at all — two different reasons to be missing.
