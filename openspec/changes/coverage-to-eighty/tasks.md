@@ -142,10 +142,30 @@
 
 ## 8. egress-proxy (65.0% → 80%)
 
-- [ ] 8.1 In `platform/egress-proxy/`, add tests closing the gap (~92 of 216
+- [x] 8.1 In `platform/egress-proxy/`, add tests closing the gap (~92 of 216
   uncovered lines) across both subcommands (`install-redirect`, `proxy`).
   Verify: `-coverpkg=./...` run reports ≥80% total.
-- [ ] 8.2 Record the local before/after total in this task.
+
+  Added `redirect_cmd_test.go` (`run`/`runInstallRedirect`/`installFamily`
+  against real stubbed `iptables`/`ip6tables` scripts on PATH — no root/
+  NET_ADMIN needed), `main_test.go` (`main()` via subprocess re-exec, both
+  subcommands' usage/error/success paths), `proxy_test.go` (`route`'s
+  three-way dispatch, `pipeBuffered` over real TCP sockets, `serve`'s
+  listen-error and real accept-and-dispatch paths), `mcp_sse_test.go`
+  (`streamFiltered`/`writeResponseHead`/`cutPrefix` via a real SSE body),
+  plus additive cases in `endpoints_test.go` (`refreshLoop`), `schema_test.go`
+  (malformed-schema-shape guards, multi-branch-union case) and
+  `control_test.go` (malformed `learn()` body, non-keepalive loop exit). No
+  production code changed. `origDstV4`/`origDstV6`/`getsockoptBytes`'s
+  success branches are left uncovered — reading `SO_ORIGINAL_DST` only
+  returns a real address on a socket that actually went through an iptables
+  REDIRECT, requiring root+NET_ADMIN and live netfilter rules unavailable
+  here; their error branches are covered via a real syscall, and mocking the
+  return value was rejected as gate theater per design.md.
+- [x] 8.2 Record the local before/after total in this task.
+
+  Before: 65.0% (SonarCloud) / 62.3% local. After: **87.2%** local
+  (`-coverpkg=./... -coverprofile`, stable under `-race`).
 
 ## 9. context-sync (67.1% → 80%)
 

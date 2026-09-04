@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // The bug a live call caught: the builder passes `key=host:port`, and treating
 // the whole string as an address means nothing ever matches — so every tool
@@ -122,5 +125,44 @@ func TestAnUnrelatedHostOnAKnownPortIsNotClaimed(t *testing.T) {
 	e.resolve()
 	if _, isMCP, isControl := e.classifyBy("198.51.100.9:8080", "some-other-service.other-ns.svc:8080"); isMCP || isControl {
 		t.Fatal("a different host on the same port must be carried, not enforced against")
+	}
+}
+
+// refreshLoop had no test at all — it is what keeps the index current for the
+// life of the pod, re-resolving a Service name whose ClusterIP later changes.
+// A short real ticker proves both the tick path and the stop path, rather
+// than asserting resolve() was merely callable.
+func TestRefreshLoopReResolvesUntilStopped(t *testing.T) {
+	e := &endpoints{spec: []entry{{key: "kubernetes", host: "127.0.0.1", port: "8080"}}}
+	e.resolve()
+	first := e.resolved
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		e.refreshLoop(5*time.Millisecond, stop)
+		close(done)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		e.mu.RLock()
+		ticked := e.resolved.After(first)
+		e.mu.RUnlock()
+		if ticked {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("refreshLoop never re-resolved on its ticker")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	close(stop)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refreshLoop did not return after stop was closed")
 	}
 }
