@@ -72,6 +72,29 @@ test('an unclosed flow list is an error', () => {
   assert.ok(parseFrontmatterTools('---\ntools: [Read, Grep\n---\n').error);
 });
 
+test('a single-quoted flow item is unquoted too, not just double-quoted', () => {
+  // Every earlier flow-list test used double quotes; unquote's single-quote
+  // arm (`t[0] === "'" && t.endsWith("'")`) had never run.
+  assert.deepStrictEqual(
+    parseFrontmatterTools("---\ntools: [Read, 'Bash(git *)']\n---\n").tools,
+    ['Read', 'Bash(git *)'],
+  );
+});
+
+test('leading blank lines before the opening --- are skipped', () => {
+  assert.deepStrictEqual(
+    parseFrontmatterTools('\n\n---\ntools: Read\n---\n').tools,
+    ['Read'],
+  );
+});
+
+test('a blank line inside a block list does not end it', () => {
+  assert.deepStrictEqual(
+    parseFrontmatterTools('---\ntools:\n  - Read\n\n  - Grep\n---\n').tools,
+    ['Read', 'Grep'],
+  );
+});
+
 // ---- the path is this vendor's ----------------------------------------------
 
 test('the definition is read from .github/agents/<agent>.agent.md', () => {
@@ -168,6 +191,40 @@ test('resolveBin skips a non-executable file with the right name', () => {
   assert.strictEqual(resolveBin('agentops-not-exec', dir), 'agentops-not-exec');
 });
 
+test('resolveBin falls back to reading process.env.PATH when no pathEnv is passed', () => {
+  // Every other resolveBin test supplies pathEnv explicitly, so the default
+  // parameter `process.env.PATH || ''` has never been evaluated.
+  assert.strictEqual(resolveBin('agentops-surely-nowhere-on-path'), 'agentops-surely-nowhere-on-path');
+});
+
+test('resolveBin copes with no PATH in the environment at all', () => {
+  // The above only exercises the "process.env.PATH is set" half of that
+  // default; a runtime that somehow inherits no PATH must still fail closed
+  // to the bare name rather than throwing on a split of undefined.
+  const saved = process.env.PATH;
+  delete process.env.PATH;
+  try {
+    assert.strictEqual(resolveBin('agentops-surely-nowhere-either'), 'agentops-surely-nowhere-either');
+  } finally {
+    process.env.PATH = saved;
+  }
+});
+
+test('resolveBin skips an empty PATH segment (a leading or doubled separator)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-bin-'));
+  const bin = path.join(dir, 'agentops-fake-bin-2');
+  fs.writeFileSync(bin, '#!/bin/sh\n');
+  fs.chmodSync(bin, 0o755);
+  assert.strictEqual(resolveBin('agentops-fake-bin-2', `${path.delimiter}${dir}`), bin);
+});
+
+test('unparseable frontmatter with no log callback given uses the default no-op silently', () => {
+  // Every other agentDeclaredTools test supplies its own log callback; the
+  // default `log = () => {}` parameter had never been invoked.
+  const repo = mkRepo({ bad: '---\ntools: [Read\nnever closed\n' });
+  assert.deepStrictEqual(agentDeclaredTools(repo, 'bad'), []);
+});
+
 test('unparseable frontmatter is logged and contributes nothing', () => {
   const repo = mkRepo({ bad: '---\ntools: [Read\nnever closed\n' });
   const logs = [];
@@ -197,4 +254,17 @@ test('an unknown or absent mode reads as merge', () => {
 test('nothing composed stays nothing', () => {
   assert.deepStrictEqual(composeAllowedTools([], '', MODE_MERGE), []);
   assert.deepStrictEqual(composeAllowedTools(['Read'], '', MODE_OVERWRITE), []);
+});
+
+test('wiringTools already an array is used as-is, not re-split', () => {
+  // Every other composition test passes wiringTools as a comma string; the
+  // caller may also hand over an already-split array (e.g. relaying another
+  // component's parsed list), and Array.isArray(wiringTools) had never been true.
+  assert.deepStrictEqual(composeAllowedTools(['Read'], ['Bash', 'Edit'], MODE_MERGE), ['Read', 'Bash', 'Edit']);
+});
+
+test('agentTools passed as a comma string is split, not just arrays', () => {
+  // The reverse gap: every earlier test passed agentTools as an array, so
+  // Array.isArray(agentTools) had never been false.
+  assert.deepStrictEqual(composeAllowedTools('Read,Grep', 'Bash', MODE_MERGE), ['Read', 'Grep', 'Bash']);
 });

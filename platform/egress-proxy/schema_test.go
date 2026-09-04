@@ -142,6 +142,71 @@ func TestRepairAndFilterBothApply(t *testing.T) {
 	}
 }
 
+// A server publishing a malformed schema (not a JSON object where one is
+// expected) must be left alone rather than crash or panic the repair — each
+// of these hits a different `json.Unmarshal` guard in repairSchemas /
+// dropEmptyBranches that no well-formed fixture above ever reaches.
+func TestMalformedSchemaShapesAreLeftAlone(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "inputSchema is not an object",
+			body: `{"result":{"tools":[{"name":"x","inputSchema":["not","an","object"]}]}}`,
+		},
+		{
+			name: "inputSchema has no properties",
+			body: `{"result":{"tools":[{"name":"x","inputSchema":{"type":"object"}}]}}`,
+		},
+		{
+			name: "properties is not an object",
+			body: `{"result":{"tools":[{"name":"x","inputSchema":{"properties":"oops"}}]}}`,
+		},
+		{
+			name: "a property is not an object",
+			body: `{"result":{"tools":[{"name":"x","inputSchema":{"properties":{"p":"oops"}}}]}}`,
+		},
+		{
+			name: "anyOf is not an array",
+			body: `{"result":{"tools":[{"name":"x","inputSchema":{"properties":{"p":{"anyOf":"oops"}}}}]}}`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			state := &policy{}
+			state.set([]string{"*"})
+			_, changed := filterListing([]byte(c.body), "srv", state)
+			if changed {
+				t.Fatalf("a malformed schema must not be reported as repaired")
+			}
+		})
+	}
+}
+
+// When MORE than one branch survives, the union is still a union — the
+// single-branch inlining above does not apply, and no existing test left two
+// typed branches standing.
+func TestMultipleSurvivingBranchesStayAUnion(t *testing.T) {
+	body := `{"result":{"tools":[{"name":"x","inputSchema":{"type":"object","properties":{
+	  "p":{"anyOf":[{},{"type":"string"},{"type":"number"}]}}}}]}}`
+	state := &policy{}
+	state.set([]string{"*"})
+
+	out, changed := filterListing([]byte(body), "srv", state)
+	if !changed {
+		t.Fatal("dropping the empty branch must still count as a repair")
+	}
+	p := propOf(t, toolsOf(t, out)["x"], "p")
+	branches, ok := p["anyOf"].([]any)
+	if !ok {
+		t.Fatalf("two surviving branches must stay a union, not be inlined: %v", p)
+	}
+	if len(branches) != 2 {
+		t.Fatalf("want 2 surviving branches, got %d: %v", len(branches), branches)
+	}
+}
+
 // oneOf carries the same defect and the same fix.
 func TestOneOfIsRepairedToo(t *testing.T) {
 	body := `{"result":{"tools":[{"name":"x","inputSchema":{"type":"object","properties":{

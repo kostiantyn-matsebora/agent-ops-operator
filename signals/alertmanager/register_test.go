@@ -8,16 +8,20 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeAPI stands in for the Kubernetes API server: it stores one
-// VMAlertmanagerConfig per name and can be told to refuse writes.
+// VMAlertmanagerConfig per name and can be told to refuse writes, hide the
+// CRD, force an arbitrary GET status, or hand back an unparsable body.
 type fakeAPI struct {
-	mu      sync.Mutex
-	objects map[string]map[string]any
-	forbid  bool
-	noCRD   bool
-	writes  int
+	mu          sync.Mutex
+	objects     map[string]map[string]any
+	forbid      bool
+	noCRD       bool
+	forceStatus int  // nonzero: every GET answers with this status regardless of object state
+	corruptBody bool // GET 200 answers with unparsable JSON
+	writes      int
 }
 
 func (f *fakeAPI) client(t *testing.T) *kubeClient {
@@ -33,12 +37,20 @@ func (f *fakeAPI) client(t *testing.T) *kubeClient {
 			http.Error(w, "the server could not find the requested resource", 404)
 			return
 		}
+		if f.forceStatus != 0 {
+			http.Error(w, "forced status", f.forceStatus)
+			return
+		}
 		name := r.PathValue("name")
 		switch r.Method {
 		case "GET":
 			obj, ok := f.objects[name]
 			if !ok {
 				http.Error(w, "not found", 404)
+				return
+			}
+			if f.corruptBody {
+				_, _ = w.Write([]byte("{not-valid-json"))
 				return
 			}
 			_ = json.NewEncoder(w).Encode(obj)
@@ -242,5 +254,102 @@ func TestRegistrationDefaultsToAdapterNamespace(t *testing.T) {
 	}
 	if ns := api.objects["agentops-vm-alerts"]["metadata"].(map[string]any)["namespace"]; ns != "agent-ops" {
 		t.Fatalf("object namespace: %v", ns)
+	}
+}
+
+// TestNewInClusterClientNotMounted closes newInClusterClient's real
+// not-mounted branch: this test sandbox genuinely has no ServiceAccount
+// token at the fixed mount path, so this exercises the actual file-read
+// failure rather than faking an absent file.
+func TestNewInClusterClientNotMounted(t *testing.T) {
+	client, reason := newInClusterClient()
+	if client != nil || !strings.Contains(reason, "token not mounted") {
+		t.Fatalf("expected the not-mounted degradation, got client=%v reason=%q", client, reason)
+	}
+}
+
+// TestKubeClientDoMarshalError closes do()'s json.Marshal error branch: an
+// unmarshalable body must fail before any request is attempted.
+func TestKubeClientDoMarshalError(t *testing.T) {
+	k := &kubeClient{base: "http://unused", token: "t", http: http.DefaultClient}
+	_, _, err := k.do(context.Background(), "POST", "/x", make(chan int))
+	if err == nil {
+		t.Fatal("unmarshalable body should error before any request is sent")
+	}
+}
+
+// TestKubeClientDoInvalidMethodError closes do()'s
+// http.NewRequestWithContext error branch with a real invalid HTTP method.
+func TestKubeClientDoInvalidMethodError(t *testing.T) {
+	k := &kubeClient{base: "http://unused", token: "t", http: http.DefaultClient}
+	_, _, err := k.do(context.Background(), "BAD METHOD", "/x", nil)
+	if err == nil {
+		t.Fatal("invalid HTTP method should be rejected before any request is sent")
+	}
+}
+
+// TestEnsureRegistrationAPIUnreachable closes both do()'s real connection
+// error branch and ensureRegistration's "API unreachable" wrapping, against
+// a real refused TCP connection rather than a mock transport.
+func TestEnsureRegistrationAPIUnreachable(t *testing.T) {
+	k := &kubeClient{base: "http://127.0.0.1:1", token: "t", http: &http.Client{Timeout: 2 * time.Second}}
+	_, err := k.ensureRegistration(context.Background(), "vm-alerts", "monitoring", "http://svc/webhook/vm-alerts", testRegisterSpec())
+	if err == nil || !strings.Contains(err.Error(), "API unreachable") {
+		t.Fatalf("a refused connection should be reported as unreachable: %v", err)
+	}
+}
+
+// TestEnsureRegistrationUnreadableCurrentObject closes the branch where the
+// existing object's body cannot be parsed as JSON.
+func TestEnsureRegistrationUnreadableCurrentObject(t *testing.T) {
+	api := &fakeAPI{objects: map[string]map[string]any{"agentops-vm-alerts": {}}, corruptBody: true}
+	k := api.client(t)
+	_, err := k.ensureRegistration(context.Background(), "vm-alerts", "monitoring", "http://svc/webhook/vm-alerts", testRegisterSpec())
+	if err == nil || !strings.Contains(err.Error(), "unreadable current object") {
+		t.Fatalf("a corrupt existing object should be reported: %v", err)
+	}
+}
+
+// TestEnsureRegistrationUpdateFailureIsInstructive closes the repair-write
+// (PUT) failure branch, distinct from the create (POST) failure already
+// covered elsewhere: drift is detected against an existing object, and the
+// repair write is then refused.
+func TestEnsureRegistrationUpdateFailureIsInstructive(t *testing.T) {
+	api := &fakeAPI{objects: map[string]map[string]any{
+		"agentops-vm-alerts": desiredVMAC("vm-alerts", "monitoring", "http://old/webhook/vm-alerts", testRegisterSpec()),
+	}}
+	k := api.client(t)
+	api.mu.Lock()
+	api.forbid = true
+	api.mu.Unlock()
+	_, err := k.ensureRegistration(context.Background(), "vm-alerts", "monitoring", "http://new/webhook/vm-alerts", testRegisterSpec())
+	if err == nil || !strings.Contains(err.Error(), "update") {
+		t.Fatalf("a refused repair write should be reported as an update failure: %v", err)
+	}
+}
+
+// TestEnsureRegistrationUnexpectedStatusIsInstructive closes the default
+// branch of the GET status switch (anything but 200/404) and, with it,
+// apiFailure's default formatting case.
+func TestEnsureRegistrationUnexpectedStatusIsInstructive(t *testing.T) {
+	api := &fakeAPI{forceStatus: 500}
+	k := api.client(t)
+	_, err := k.ensureRegistration(context.Background(), "vm-alerts", "monitoring", "http://svc/webhook/vm-alerts", testRegisterSpec())
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Fatalf("an unexpected GET status should be reported verbatim: %v", err)
+	}
+}
+
+// TestApiFailureFormatsEveryCase closes apiFailure's remaining branches
+// directly: the plain-error path (called when the underlying request never
+// got an HTTP response at all) and the default status-code case. Both are
+// exercised indirectly above too, but a direct call pins the exact wording
+// this pure formatter owes an operator.
+func TestApiFailureFormatsEveryCase(t *testing.T) {
+	if err := apiFailure("update", "ns/name", 0, nil, context.DeadlineExceeded); !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("plain-error case should carry the error verbatim: %v", err)
+	}
+	if err := apiFailure("read", "ns/name", 500, []byte("boom"), nil); !strings.Contains(err.Error(), "500") || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("default case should carry the status and body: %v", err)
 	}
 }

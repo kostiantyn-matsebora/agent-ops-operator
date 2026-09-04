@@ -209,6 +209,37 @@ func TestMidnightSpanIsTwoEntries(t *testing.T) {
 	}
 }
 
+// Day-of-month selection, including Alertmanager's negative-count-from-the-
+// end form (-1 is the last day of the month) — nothing exercised this before,
+// since every other mute test leaves daysOfMonth empty (the "unconstrained"
+// fast path).
+func TestDaysOfMonthSelectionIncludingCountingFromMonthEnd(t *testing.T) {
+	rs := mustCompile(t, Route{
+		TimeIntervals: []TimeInterval{{
+			Name:        "month-boundaries",
+			Times:       []TimeRange{{StartTime: "00:00", EndTime: "23:59"}},
+			DaysOfMonth: []string{"1:2", "-1"},
+			Location:    "UTC",
+		}},
+		MuteTimeIntervals: []MuteTimeInterval{{Name: "month-boundaries"}},
+	})
+	sig := &Signal{}
+
+	if rs.MutedBy(sig, at(t, "UTC", "2026-08-01 12:00")) == "" {
+		t.Error("the 1st must be muted by the 1:2 range")
+	}
+	if rs.MutedBy(sig, at(t, "UTC", "2026-08-15 12:00")) != "" {
+		t.Error("the middle of the month must not be muted")
+	}
+	// August 2026 has 31 days: -1 must resolve to the 31st.
+	if rs.MutedBy(sig, at(t, "UTC", "2026-08-31 12:00")) == "" {
+		t.Error("the last day of the month must be muted by the -1 entry")
+	}
+	if rs.MutedBy(sig, at(t, "UTC", "2026-08-30 12:00")) != "" {
+		t.Error("the second-to-last day must not be muted by a bare -1 entry")
+	}
+}
+
 // No windows configured is the default, and must cost nothing.
 func TestNoIntervalsMutesNothing(t *testing.T) {
 	rs := mustCompile(t, Route{})

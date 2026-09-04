@@ -54,6 +54,16 @@ func TestParseConfigRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+// A rule compilation failure inside spec.config.rules/route must be wrapped
+// and reported as a config problem — parseConfig's own error path around
+// compileRules, distinct from compileRules' own validation tests.
+func TestParseConfigWrapsARuleCompilationFailure(t *testing.T) {
+	_, err := parseConfig(json.RawMessage(`{"rules":[{"for":"not-a-duration"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "spec.config:") {
+		t.Fatalf("expected a wrapped spec.config error, got %v", err)
+	}
+}
+
 func TestFilterSeverityAndNamespace(t *testing.T) {
 	f := mustFilter(t, `{"severities":["Warning"],"namespaces":["prod"]}`)
 	warnProd := evt("Warning", "prod", "Pod", "api-1", "BackOff")

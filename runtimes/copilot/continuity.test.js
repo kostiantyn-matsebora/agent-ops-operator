@@ -69,3 +69,51 @@ test('a missing root is plain absence', async () => {
 test('no handle is trivially missing', async () => {
   assert.strictEqual(await confirmContextMissing('/x', '', noSleep), true);
 });
+
+test('a root that exists but cannot be LISTED is not absence — re-throws past the ENOENT check', async (t) => {
+  // Traversal (stat of the missing child) needs only EXECUTE on the root, so it
+  // still resolves ENOENT; LISTING it (the root-must-answer readdir) needs READ
+  // too, and its absence is EACCES, not ENOENT — the one path that reaches the
+  // `pe.code !== 'ENOENT'` re-throw inside stateDirPresent, previously untested.
+  //
+  // The mode bits this relies on mean nothing to root — the kernel skips the
+  // permission check entirely for uid 0 — so a root-run container (the
+  // default for an unprivileged Docker image, as CI runs) would see readdir
+  // succeed and this assertion fail for a reason that has nothing to do with
+  // the behavior under test.
+  if (process.getuid && process.getuid() === 0) {
+    t.skip('running as root: permission bits are not enforced, so EACCES cannot occur');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-copilot-state-'));
+  const sessions = path.join(root, 'session-state');
+  fs.mkdirSync(sessions);
+  fs.chmodSync(sessions, 0o111); // execute-only: lookup works, listing does not
+  try {
+    await assert.rejects(stateDirPresent(sessions, 'abc'), /EACCES/);
+    assert.strictEqual(await confirmContextMissing(sessions, 'abc', noSleep), false);
+  } finally {
+    fs.chmodSync(sessions, 0o755); // restore, or the tmp cleanup itself fails
+  }
+});
+
+test('omitting delays falls back to DEFAULT_DELAYS_MS, not just a caller-supplied ladder', async () => {
+  // Every other test passes opts.delays explicitly, so `opts.delays ||
+  // DEFAULT_DELAYS_MS` had never taken its fallback. sleep is stubbed so the
+  // real three-step ladder costs nothing.
+  let calls = 0;
+  const got = await confirmContextMissing('/x', 'id', { sleep: async () => {}, probe: async () => { calls++; return false; } });
+  assert.strictEqual(got, true);
+  assert.strictEqual(calls, DEFAULT_DELAYS_MS.length);
+});
+
+test('the default ladder really sleeps, using the real timer when no override is given', async () => {
+  // Every other test supplies opts.sleep, so the module's own default sleep
+  // function (setTimeout-backed) has never run. Real, tiny delays keep this
+  // fast while still exercising it.
+  const s = mkStore();
+  const start = Date.now();
+  const got = await confirmContextMissing(s, 'gone', { delays: [5, 5] });
+  assert.strictEqual(got, true);
+  assert.ok(Date.now() - start >= 10, 'expected the real timer to have waited');
+});

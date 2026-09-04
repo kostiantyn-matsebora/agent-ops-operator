@@ -3,21 +3,32 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeManager serves the contract endpoints the adapter consumes and records
-// inbound pushes.
+// inbound pushes. The three fail* switches let a test flip one endpoint into
+// a real HTTP failure without a second, mocked implementation standing in.
 type fakeManager struct {
-	mu       sync.Mutex
-	sources  []SourceInfo
-	inbounds []map[string]any
-	statuses []string
+	mu          sync.Mutex
+	sources     []SourceInfo
+	inbounds    []map[string]any
+	statuses    []string
+	failList    bool
+	failInbound bool
+	failStatus  bool
+	// statusHit, when non-nil, receives the source name on every status POST
+	// — a synchronization point for tests driving the real registryLoop
+	// through main(), where polling a.reported would race the goroutine.
+	statusHit chan string
 }
 
 func (f *fakeManager) server(t *testing.T) *httptest.Server {
@@ -25,10 +36,22 @@ func (f *fakeManager) server(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /signal/sources", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		defer f.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(f.sources)
+		fail, srcs := f.failList, f.sources
+		f.mu.Unlock()
+		if fail {
+			http.Error(w, "sources temporarily unavailable", 503)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(srcs)
 	})
 	mux.HandleFunc("POST /signal/inbound", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		fail := f.failInbound
+		f.mu.Unlock()
+		if fail {
+			http.Error(w, "manager overloaded", 503)
+			return
+		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
@@ -39,14 +62,35 @@ func (f *fakeManager) server(t *testing.T) *httptest.Server {
 	})
 	mux.HandleFunc("POST /signal/sources/{name}/status", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.statuses = append(f.statuses, r.PathValue("name"))
+		fail := f.failStatus
 		f.mu.Unlock()
+		if fail {
+			http.Error(w, "status sink unavailable", 503)
+			return
+		}
+		name := r.PathValue("name")
+		f.mu.Lock()
+		f.statuses = append(f.statuses, name)
+		hit := f.statusHit
+		f.mu.Unlock()
+		if hit != nil {
+			select {
+			case hit <- name:
+			default:
+			}
+		}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
 }
+
+// errReader always fails, standing in for a client that hangs up mid-body —
+// a real io.Reader failure, not a flag flipped inside the handler under test.
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("simulated read failure") }
 
 func testAdapter(t *testing.T, f *fakeManager) *adapter {
 	t.Helper()
@@ -205,5 +249,209 @@ func TestSourceListRefresh(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("Ready reports for 'late': %d", n)
+	}
+}
+
+// TestHealthzOK closes the /healthz route, never exercised by any other
+// test here (every other test posts to /webhook/*).
+func TestHealthzOK(t *testing.T) {
+	a := &adapter{sources: map[string]string{}, reported: map[string]string{}}
+	rec := httptest.NewRecorder()
+	a.handler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("healthz: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleWebhookReadBodyError closes handleWebhook's io.ReadAll error
+// branch with a body that genuinely fails to read, rather than a size limit
+// or a closed connection standing in for it.
+func TestHandleWebhookReadBodyError(t *testing.T) {
+	f := &fakeManager{sources: []SourceInfo{{Name: "vm-alerts"}}}
+	a := testAdapter(t, f)
+	req := httptest.NewRequest("POST", "/webhook/vm-alerts", errReader{})
+	rec := httptest.NewRecorder()
+	a.handler().ServeHTTP(rec, req)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "read body") {
+		t.Fatalf("body-read failure should be 400: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleWebhookInvalidJSON closes handleWebhook's json.Unmarshal error
+// branch with a real malformed payload.
+func TestHandleWebhookInvalidJSON(t *testing.T) {
+	f := &fakeManager{sources: []SourceInfo{{Name: "vm-alerts"}}}
+	a := testAdapter(t, f)
+	rec := post(t, a.handler(), "/webhook/vm-alerts", "", "{not-json")
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "invalid Alertmanager webhook JSON") {
+		t.Fatalf("malformed JSON should be 400: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleWebhookInboundFailureIs502 closes handleWebhook's a.mgr.Inbound
+// error branch against a manager double that genuinely refuses the push.
+func TestHandleWebhookInboundFailureIs502(t *testing.T) {
+	f := &fakeManager{sources: []SourceInfo{{Name: "vm-alerts"}}, failInbound: true}
+	a := testAdapter(t, f)
+	body := `{"alerts":[{"status":"firing","fingerprint":"f1","labels":{"alertname":"X"}}]}`
+	rec := post(t, a.handler(), "/webhook/vm-alerts", "", body)
+	if rec.Code != 502 || !strings.Contains(rec.Body.String(), "manager rejected the signals") {
+		t.Fatalf("inbound failure should be 502: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestReportSkipsRecordingOnFailure closes report()'s error branch: a failed
+// status POST must not be recorded as reported, so the next refresh retries
+// it rather than believing the source's Ready state reached the manager.
+func TestReportSkipsRecordingOnFailure(t *testing.T) {
+	f := &fakeManager{sources: []SourceInfo{{Name: "vm-alerts"}}, failStatus: true}
+	a := testAdapter(t, f)
+	if got := a.reported["vm-alerts"]; got != "" {
+		t.Fatalf("a failed status post must not be recorded as reported: %q", got)
+	}
+
+	f.mu.Lock()
+	f.failStatus = false
+	f.mu.Unlock()
+	a.refreshSources(context.Background())
+	if got := a.reported["vm-alerts"]; got == "" {
+		t.Fatal("a successful status post must now be recorded")
+	}
+}
+
+// TestRefreshSourcesKeepsPreviousOnListError closes refreshSources' error
+// branch: a transient listing failure must not drop sources already known
+// to be served, or every hiccup would 404 every in-flight webhook.
+func TestRefreshSourcesKeepsPreviousOnListError(t *testing.T) {
+	f := &fakeManager{sources: []SourceInfo{{Name: "vm-alerts"}}}
+	a := testAdapter(t, f)
+
+	f.mu.Lock()
+	f.failList = true
+	f.mu.Unlock()
+	a.refreshSources(context.Background())
+
+	if _, served := a.source("vm-alerts"); !served {
+		t.Fatal("a failed source listing must not drop previously known sources")
+	}
+}
+
+// TestReconcileRegistrationNamespaceUnknownWithNoReason closes the defensive
+// fallback message reconcileRegistration renders when it has neither a
+// kubeReason nor a namespace to blame — a shape newInClusterClient itself
+// never produces (it always pairs a nil client with a reason), but the
+// degradation must still name something instead of an empty cause.
+func TestReconcileRegistrationNamespaceUnknownWithNoReason(t *testing.T) {
+	f := &fakeManager{}
+	a := testAdapter(t, f)
+	cfg := json.RawMessage(`{"register":{}}`)
+	reason, msg := a.reconcileRegistration(context.Background(), SourceInfo{Name: "vm-alerts", Config: cfg})
+	if reason != "RegistrationManual" || !strings.Contains(msg, "namespace unknown") {
+		t.Fatalf("expected the namespace-unknown fallback: %s %s", reason, msg)
+	}
+}
+
+// TestReconcileRegistrationEnsureRegistrationErrorDegradesToManual closes
+// the branch where kube access exists but the write itself fails.
+func TestReconcileRegistrationEnsureRegistrationErrorDegradesToManual(t *testing.T) {
+	f := &fakeManager{}
+	a := testAdapter(t, f)
+	a.podNS = "agent-ops"
+	api := &fakeAPI{forbid: true}
+	a.kube = api.client(t)
+	cfg := json.RawMessage(`{"register":{}}`)
+	reason, msg := a.reconcileRegistration(context.Background(), SourceInfo{Name: "vm-alerts", Config: cfg})
+	if reason != "RegistrationManual" || !strings.Contains(msg, "forbidden") {
+		t.Fatalf("ensureRegistration failure should degrade to manual instructions: %s %s", reason, msg)
+	}
+}
+
+func TestMustEnvReturnsValue(t *testing.T) {
+	t.Setenv("ALERTMANAGER_TEST_MUSTENV_VAL", "present")
+	if got := mustEnv("ALERTMANAGER_TEST_MUSTENV_VAL"); got != "present" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// TestMustEnvMissingExits closes mustEnv's log.Fatalf branch, which calls
+// os.Exit(1) — untestable in-process, so this re-execs the test binary as a
+// real subprocess (the standard Go idiom for testing os.Exit paths, already
+// used by signal-cron's own mustEnv test) and asserts its exit code and
+// stderr, rather than mocking the exit away.
+func TestMustEnvMissingExits(t *testing.T) {
+	if os.Getenv("ALERTMANAGER_TEST_MUSTENV_SUBPROCESS") == "1" {
+		mustEnv("ALERTMANAGER_TEST_DOES_NOT_EXIST")
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestMustEnvMissingExits")
+	cmd.Env = append(os.Environ(), "ALERTMANAGER_TEST_MUSTENV_SUBPROCESS=1")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected the subprocess to exit non-zero; output: %s", out)
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 1 {
+		t.Fatalf("expected exit code 1, got %v; output: %s", err, out)
+	}
+	if !strings.Contains(string(out), "missing required env") {
+		t.Errorf("expected the missing-env message in output, got: %s", out)
+	}
+}
+
+// TestMainRunsUntilSignaled closes main() itself: it starts the real process
+// loop (env defaulting, adapter construction, the real HTTP server,
+// registryLoop) against a real HTTP double for the manager, then cancels
+// baseContext directly — main()'s own signal.NotifyContext derives from it,
+// so this stops main() exactly as a real SIGTERM would, without sending any
+// OS signal that could also reach other tests sharing this process.
+func TestMainRunsUntilSignaled(t *testing.T) {
+	f := &fakeManager{sources: []SourceInfo{{Name: "vm-alerts"}}, statusHit: make(chan string, 4)}
+	mgrSrv := f.server(t)
+
+	prevURL, hadURL := os.LookupEnv("MANAGER_URL")
+	prevTok, hadTok := os.LookupEnv("ADAPTER_TOKEN")
+	prevName, hadName := os.LookupEnv("ADAPTER_NAME")
+	prevListen, hadListen := os.LookupEnv("LISTEN_ADDR")
+	os.Setenv("MANAGER_URL", mgrSrv.URL)
+	os.Setenv("ADAPTER_TOKEN", "t")
+	os.Unsetenv("ADAPTER_NAME") // exercise the default-name fill-in branch
+	os.Unsetenv("LISTEN_ADDR")  // exercise the default-listen fill-in branch
+	defer func() {
+		restore := func(had bool, key, prev string) {
+			if had {
+				os.Setenv(key, prev)
+			} else {
+				os.Unsetenv(key)
+			}
+		}
+		restore(hadURL, "MANAGER_URL", prevURL)
+		restore(hadTok, "ADAPTER_TOKEN", prevTok)
+		restore(hadName, "ADAPTER_NAME", prevName)
+		restore(hadListen, "LISTEN_ADDR", prevListen)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	origBaseContext := baseContext
+	baseContext = func() context.Context { return ctx }
+	defer func() { baseContext = origBaseContext }()
+
+	done := make(chan struct{})
+	go func() {
+		main()
+		close(done)
+	}()
+
+	select {
+	case <-f.statusHit:
+	case <-time.After(5 * time.Second):
+		t.Fatal("main() never completed a registry refresh")
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("main() did not return after its context was cancelled")
 	}
 }
