@@ -24,6 +24,20 @@ func TestParseCronRejects(t *testing.T) {
 	}
 }
 
+// TestCronNextNeverMatchesReturnsZero closes Next's un-exercised branch: an
+// expression that can never match (day-of-month 31 restricted to February,
+// which never has a 31st) must exhaust the ~400-day search window and return
+// the zero time, rather than looping forever or panicking.
+func TestCronNextNeverMatchesReturnsZero(t *testing.T) {
+	s, err := ParseCron("0 0 31 2 *")
+	if err != nil {
+		t.Fatalf("ParseCron: %v", err)
+	}
+	if got := s.Next(at("2026-08-06T00:00:00Z")); !got.IsZero() {
+		t.Fatalf("expected zero time for an impossible schedule, got %s", got)
+	}
+}
+
 func TestCronNext(t *testing.T) {
 	cases := []struct {
 		expr, after, want string

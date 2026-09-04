@@ -42,12 +42,25 @@
 
 ## 2. signal-cron (26.6% → 80%)
 
-- [ ] 2.1 In `signals/cron/`, add tests closing the gap (~100 of 138
+- [x] 2.1 In `signals/cron/`, add tests closing the gap (~100 of 138
   uncovered lines must become covered). Target the scheduler and cron-parser
   branches first via `go tool cover -func=coverage.out | sort -k3 -n`.
   Verify: `go test -coverpkg=./... -coverprofile=coverage.out ./...` in the
   `golang:1.25` container reports ≥80% total.
-- [ ] 2.2 Record the local before/after total in this task.
+
+  Added `manager_test.go` (every `Manager` method against real
+  `httptest.Server` round trips, `do`'s marshal/method/connection-error
+  branches), `main_test.go` (`refreshSources`'s full validation matrix and
+  idempotency, `evaluate`'s cursor lifecycle including malformed-cursor
+  reset, `sleepCtx`'s both branches by real elapsed time, `mustEnv`'s
+  fatal-exit path via subprocess re-exec, `main()` itself stopped by a real
+  SIGTERM), and one new case in `cron_test.go` for `Next`'s
+  never-matches-returns-zero branch (Feb 31st exhausting the search window).
+  No production code changed; no dead code found.
+- [x] 2.2 Record the local before/after total in this task.
+
+  Before: 26.6% (SonarCloud) / 28.7% local. After: **98.8%** local
+  (`-coverpkg=./... -coverprofile`, stable across 3x `-race` runs).
 
 ## 3. housekeeping (39.4% → 80%)
 
