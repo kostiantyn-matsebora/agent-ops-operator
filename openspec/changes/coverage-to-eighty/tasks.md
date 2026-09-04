@@ -134,11 +134,33 @@
 
 ## 7. runtime-claude (63.8% → 80%)
 
-- [ ] 7.1 In `runtimes/claude/`, add `node --test` cases closing the gap
+- [x] 7.1 In `runtimes/claude/`, add `node --test` cases closing the gap
   (~93 of 182 uncovered lines). Verify:
   `node --test --experimental-test-coverage` reports ≥80% (noting the runtime
   reports coverage only for files the suite loads, per `build-test.md`).
-- [ ] 7.2 Record the local before/after total in this task.
+
+  `runtime.js` (the `/work` main loop) had ZERO tests: it self-executes an
+  infinite long-poll loop and calls `process.exit(1)` at load if env vars
+  are missing, so it could not be `require()`d safely. One minimal,
+  justified production change: added `module.exports` and guarded both the
+  env-check exit and the bottom IIFE with `if (require.main === module)`
+  (mirroring `tools.js`/`spin.js`'s existing export style) — no logic
+  change, identical behavior when run as the real entry point. This let 8
+  new test files exercise pure functions directly, real git operations
+  against a real bare repo, real subprocess spawning of a fake `claude`
+  binary (including the resume/continuity ladder and spin-breaker), and the
+  main loop itself via `node runtime.js` as a real subprocess against a
+  local HTTP stub. One test added to existing `spin.test.js`
+  (`unparsedInput`'s circular-reference catch branch). Dead-code candidate
+  (not tested around): `runtime.js:330-333`, a defensive catch in
+  `confirmContextMissing` guarding a throw from `sessionFileExists`, which
+  swallows all its own errors internally and appears genuinely unreachable
+  as structured.
+- [x] 7.2 Record the local before/after total in this task.
+
+  Before: 63.8% (SonarCloud, composite of line+branch). After: **99.48%
+  line / 91.67% branch / 94.23% funcs** (108/108 tests pass),
+  `node --test --experimental-test-coverage`.
 
 ## 8. egress-proxy (65.0% → 80%)
 

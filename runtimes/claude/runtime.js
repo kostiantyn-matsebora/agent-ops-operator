@@ -36,7 +36,10 @@ const SPIN_LIMIT = (() => {
   return Number.isFinite(v) && v >= 0 ? v : DEFAULT_LIMIT;
 })();
 
-if (!CONTROL_URL || !CONVO_ID) {
+// Guarded on require.main so this file can be `require()`d by its own test
+// suite — coverage's only way to reach the functions below — without also
+// exiting the test process or starting the network loop at the bottom.
+if (require.main === module && (!CONTROL_URL || !CONVO_ID)) {
   console.error('[runtime] CONTROL_URL and CONVO_ID are required');
   process.exit(1);
 }
@@ -364,7 +367,16 @@ function strip({ stderr, ...rest }) {
   return rest
 }
 
-(async () => {
+// module.exports precedes the main loop so a test can `require()` this file
+// for its pure/subprocess-driving pieces without the IIFE below ever running
+// — that only happens when this file is the process entry point.
+module.exports = {
+  gitEnv, repoURL, run, clearDir, syncRepo, formatEvent, runClaude, spawnClaude,
+  confirmContextMissing, sessionFileExists, contextIdOf, strip,
+  SESSIONS_DIR, CLAUDE_BIN, WORKSPACE,
+};
+
+if (require.main === module) (async () => {
   console.log(`[runtime] claude runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE}`);
   try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
 
