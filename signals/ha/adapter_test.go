@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -24,11 +25,21 @@ type statusReport struct {
 type fakeManager struct {
 	srv *httptest.Server
 
-	mu      sync.Mutex
-	sources []SourceInfo
-	state   map[string]string
-	posted  []Signal
-	status  []statusReport
+	mu          sync.Mutex
+	sources     []SourceInfo
+	state       map[string]string
+	posted      []Signal
+	status      []statusReport
+	failInbound bool
+}
+
+// SetFailInbound makes /signal/inbound answer as an unreachable manager would,
+// so a test can exercise the post-failure and recovery reporting without a
+// real outage.
+func (m *fakeManager) SetFailInbound(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failInbound = v
 }
 
 func newFakeManager(t *testing.T, sources ...SourceInfo) *fakeManager {
@@ -41,6 +52,13 @@ func newFakeManager(t *testing.T, sources ...SourceInfo) *fakeManager {
 		_ = json.NewEncoder(w).Encode(m.sources)
 	})
 	mux.HandleFunc("/signal/inbound", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		fail := m.failInbound
+		m.mu.Unlock()
+		if fail {
+			http.Error(w, "manager unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		var in struct {
 			Source  string   `json:"source"`
 			Signals []Signal `json:"signals"`
@@ -411,6 +429,167 @@ func TestCredentialTokenErrors(t *testing.T) {
 	t.Setenv("NOPE_TOKEN", "x")
 	if got, err := credentialToken(SourceInfo{CredentialEnvPrefix: "NOPE_"}); err != nil || got != "x" {
 		t.Fatalf("uppercase TOKEN should be accepted, got %q %v", got, err)
+	}
+}
+
+// ---- the dwell verification ladder, wired end to end ------------------------
+
+// Everywhere else, health() is tested against a hand-built healthSnapshot
+// (TestHealthLadder). This test instead runs the REAL wiring the reconciler
+// exercises in production: a dwell rule defers a matched record into the
+// pending queue, runDwellFlusher's own ticker refreshes the snapshot from a
+// real Home Assistant session (system_log/list + config_entries/get), and the
+// flush decides it — none of runDwellFlusher, refreshSnapshots or
+// refreshSnapshot (all 0%/81.2% in the coverage profile before this test) were
+// reached by any other test.
+func TestDwellVerificationLadderEndToEnd(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	// A config entry stuck in setup_retry is rung 1 of the ladder: still
+	// broken, whatever the log itself says.
+	ha.SetEntries(configEntry{Domain: "hue", State: "setup_retry"})
+
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, map[string]any{
+		"rules": []map[string]any{{
+			"matchers": []string{`integration="hue"`},
+			"for":      "150ms",
+		}},
+	}))
+	a := newTestAdapter(fm)
+	ctx := runAdapter(t, a)
+	go a.runDwellFlusher(ctx)
+
+	<-ha.subscribed
+	ha.PushLogEvent(record("homeassistant.components.hue", "temporary failure", time.Now(), 1))
+
+	// dwellTick is 5s in production code, so the flusher's second tick is what
+	// actually decides this entry; give it generous room.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && len(fm.Posted()) == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	posted := fm.Posted()
+	if len(posted) != 1 {
+		t.Fatalf("expected exactly one dwell-verified signal, got %d: %+v", len(posted), posted)
+	}
+	if !strings.Contains(posted[0].Payload, "failing for") {
+		t.Fatalf("expected the dwell evidence in the payload, got %q", posted[0].Payload)
+	}
+}
+
+// ---- the emit cap and post failure/recovery reporting ------------------------
+
+// post() is the single exit from the adapter, and reportClipping/
+// reportPostFailure/reportPostRecovered were 25%/0%/66.7% — none of their
+// "already reported, do nothing again" branches, nor the len(allowed)==0 exit
+// from post() itself, were exercised.
+func TestPostReportsClippingOnceAndTakesTheZeroAllowedExit(t *testing.T) {
+	fm := newFakeManager(t)
+	a := newTestAdapter(fm)
+	a.cap = newEmitCap(1)
+	ctx := context.Background()
+
+	sigs := []Signal{{Fingerprint: "a"}, {Fingerprint: "b"}}
+	if !a.post(ctx, "src", sigs) {
+		t.Fatal("expected the signal within the cap to post")
+	}
+	if len(fm.Posted()) != 1 {
+		t.Fatalf("expected exactly the one signal under the cap, got %d", len(fm.Posted()))
+	}
+	clipReports := func() int {
+		n := 0
+		for _, s := range fm.Status() {
+			if s.Reason == "EmitCapReached" {
+				n++
+			}
+		}
+		return n
+	}
+	if clipReports() != 1 {
+		t.Fatalf("expected exactly one EmitCapReached report, got %d", clipReports())
+	}
+
+	// The window is still exhausted: this call finds zero room, so post()
+	// takes its len(allowed)==0 exit and never reaches mgr.Inbound.
+	if a.post(ctx, "src", sigs) {
+		t.Fatal("expected a fully-clipped batch to report false")
+	}
+	if len(fm.Posted()) != 1 {
+		t.Fatal("the fully-clipped batch must not have reached the manager")
+	}
+	if clipReports() != 2 {
+		t.Fatalf("expected the clip count CHANGE to be reported again, got %d reports", clipReports())
+	}
+}
+
+// A manager that rejects a post is reported once, not once per failed
+// attempt, and its recovery is reported once the next post succeeds.
+func TestPostReportsFailureOnceThenRecovers(t *testing.T) {
+	fm := newFakeManager(t)
+	fm.SetFailInbound(true)
+	a := newTestAdapter(fm)
+	ctx := context.Background()
+
+	if a.post(ctx, "src", []Signal{{Fingerprint: "x"}}) {
+		t.Fatal("expected the post to fail while the manager is down")
+	}
+	failReports := func() int {
+		n := 0
+		for _, s := range fm.Status() {
+			if s.Reason == "PostFailed" {
+				n++
+			}
+		}
+		return n
+	}
+	if failReports() != 1 {
+		t.Fatalf("expected exactly one PostFailed report, got %d", failReports())
+	}
+
+	// Still down: reportPostFailure's LoadOrStore guard must keep this quiet.
+	if a.post(ctx, "src", []Signal{{Fingerprint: "x"}}) {
+		t.Fatal("expected the post to keep failing")
+	}
+	if failReports() != 1 {
+		t.Fatalf("a repeated failure while already failing must not re-report, got %d", failReports())
+	}
+
+	fm.SetFailInbound(false)
+	if !a.post(ctx, "src", []Signal{{Fingerprint: "x"}}) {
+		t.Fatal("expected the post to succeed once the manager recovers")
+	}
+	recovered := false
+	for _, s := range fm.Status() {
+		if s.Reason == "AdapterReady" && s.Message == "posting to the manager again" {
+			recovered = true
+		}
+	}
+	if !recovered {
+		t.Fatal("expected the recovery to be reported")
+	}
+}
+
+// ---- small env-reading helpers ----------------------------------------------
+
+func TestMustEnvReturnsTheSetValue(t *testing.T) {
+	t.Setenv("HA_TEST_MUST_ENV", "configured")
+	if got := mustEnv("HA_TEST_MUST_ENV"); got != "configured" {
+		t.Fatalf("mustEnv = %q, want %q", got, "configured")
+	}
+}
+
+func TestEnvIntFallsBackOnUnsetOrUnparsable(t *testing.T) {
+	os.Unsetenv("HA_TEST_ENV_INT")
+	if got := envInt("HA_TEST_ENV_INT", 42); got != 42 {
+		t.Fatalf("unset: envInt = %d, want the fallback 42", got)
+	}
+	t.Setenv("HA_TEST_ENV_INT", "not-a-number")
+	if got := envInt("HA_TEST_ENV_INT", 42); got != 42 {
+		t.Fatalf("unparsable: envInt = %d, want the fallback 42", got)
+	}
+	t.Setenv("HA_TEST_ENV_INT", "7")
+	if got := envInt("HA_TEST_ENV_INT", 42); got != 7 {
+		t.Fatalf("envInt = %d, want the parsed value 7", got)
 	}
 }
 

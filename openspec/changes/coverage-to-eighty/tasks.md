@@ -212,12 +212,28 @@
 
 ## 15. signal-ha (73.7% → 80%)
 
-- [ ] 15.1 In `signals/ha/`, add tests closing the gap (~73 of 303 uncovered
+- [x] 15.1 In `signals/ha/`, add tests closing the gap (~73 of 303 uncovered
   lines) — `sonar-ratings-baseline` already touched this component for
   ratings; find the next-largest uncovered file (the WebSocket reconnect
   ladder and the dwell re-check are candidates) from the profile. Verify:
   `-coverpkg=./...` run reports ≥80% total.
-- [ ] 15.2 Record the local before/after total in this task.
+
+  Added `inhibit_test.go` (the inhibition rule set was entirely untested:
+  `Equal`-bound suppression, mismatched-label non-suppression, self-match
+  exclusion, TTL pruning, empty-ruleset no-op, `equalLabels` semantics), a
+  case in `ha_test.go` for `haSession.Err()`, and cases in `adapter_test.go`
+  for the dwell verification ladder end-to-end (`runDwellFlusher` +
+  `refreshSnapshots`, previously never invoked by any test), `post()`'s
+  clipping/failure/recovery reporting and its zero-allowed early exit, and
+  the env-parsing helpers. No production code changed (only test files, plus
+  a `SetFailInbound` toggle added to the existing `fakeManager` test
+  double). `main()` and one structurally-unreachable `default: return false`
+  in `rules.go`'s matcher left untested/unexcluded — process wiring and a
+  provably-dead branch respectively, not worth a test that asserts nothing.
+- [x] 15.2 Record the local before/after total in this task.
+
+  Before: 73.7% (SonarCloud) / 72.2% local. After: **80.5%** local
+  (`-coverpkg=./... -coverprofile`, build/vet clean).
 
 ## 16. console (76.0% → 80%)
 
