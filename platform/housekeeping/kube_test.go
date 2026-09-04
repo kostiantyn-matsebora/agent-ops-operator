@@ -64,7 +64,7 @@ func TestNewInClusterKubeRequiresHostAndPort(t *testing.T) {
 		t.Fatal("want an error when neither env var is set")
 	}
 
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "192.0.2.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
 	if _, err := NewInClusterKube("agent-ops"); err == nil {
 		t.Fatal("want an error when only the host is set")
@@ -76,7 +76,7 @@ func TestNewInClusterKubeRequiresHostAndPort(t *testing.T) {
 // rather than a client silently missing its CA pool.
 func TestNewInClusterKubeMissingCAFile(t *testing.T) {
 	withSADir(t) // an empty temp dir: no ca.crt inside it
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "192.0.2.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 
 	_, err := NewInClusterKube("agent-ops")
@@ -92,7 +92,7 @@ func TestNewInClusterKubeInvalidCAPEM(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), []byte("not a certificate"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "192.0.2.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 
 	_, err := NewInClusterKube("agent-ops")
@@ -108,14 +108,14 @@ func TestNewInClusterKubeSuccess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), selfSignedCAPEM(t), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.11.12.13")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "192.0.2.13")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "6443")
 
 	kube, err := NewInClusterKube("agent-ops")
 	if err != nil {
 		t.Fatalf("want a client, got error: %v", err)
 	}
-	if kube.BaseURL != "https://10.11.12.13:6443" {
+	if kube.BaseURL != "https://192.0.2.13:6443" {
 		t.Errorf("BaseURL = %q, want the joined host:port over https", kube.BaseURL)
 	}
 	if kube.Namespace != "agent-ops" {

@@ -180,7 +180,7 @@ func TestMainSucceedsWithNoRootsConfigured(t *testing.T) {
 	}
 	out, code := runMainSubprocess(t, map[string]string{
 		"POD_NAMESPACE":           "agent-ops",
-		"KUBERNETES_SERVICE_HOST": "10.11.12.13",
+		"KUBERNETES_SERVICE_HOST": "192.0.2.13",
 		"KUBERNETES_SERVICE_PORT": "6443",
 		"WORKSPACE_ROOT":          "",
 		"SESSIONS_ROOT":           "",
@@ -207,7 +207,7 @@ func TestMainRunsJobsAgainstUnmountedRoots(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "not-mounted-yet")
 	out, code := runMainSubprocess(t, map[string]string{
 		"POD_NAMESPACE":           "agent-ops",
-		"KUBERNETES_SERVICE_HOST": "10.11.12.13",
+		"KUBERNETES_SERVICE_HOST": "192.0.2.13",
 		"KUBERNETES_SERVICE_PORT": "6443",
 		"WORKSPACE_ROOT":          missing,
 		"SESSIONS_ROOT":           missing,
@@ -235,7 +235,7 @@ func TestMainExitsNonZeroWhenAJobFails(t *testing.T) {
 	}
 	out, code := runMainSubprocess(t, map[string]string{
 		"POD_NAMESPACE":           "agent-ops",
-		"KUBERNETES_SERVICE_HOST": "10.11.12.13",
+		"KUBERNETES_SERVICE_HOST": "192.0.2.13",
 		"KUBERNETES_SERVICE_PORT": "6443",
 		"WORKSPACE_ROOT":          notADir,
 		"SESSIONS_ROOT":           "",

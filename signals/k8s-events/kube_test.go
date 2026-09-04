@@ -91,7 +91,7 @@ func TestNewInClusterKubeRequiresHostAndPort(t *testing.T) {
 func TestNewInClusterKubeFailsWhenCAFileIsMissing(t *testing.T) {
 	dir := writeSAMount(t, nil, "sa-token")
 	t.Setenv("KUBERNETES_SERVICEACCOUNT_DIR", dir)
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "192.0.2.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 	if _, err := NewInClusterKube(); err == nil {
 		t.Fatal("expected an error when ca.crt is absent")
@@ -101,7 +101,7 @@ func TestNewInClusterKubeFailsWhenCAFileIsMissing(t *testing.T) {
 func TestNewInClusterKubeFailsWhenCAFileIsNotValidPEM(t *testing.T) {
 	dir := writeSAMount(t, []byte("this is not a certificate"), "sa-token")
 	t.Setenv("KUBERNETES_SERVICEACCOUNT_DIR", dir)
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "192.0.2.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 	if _, err := NewInClusterKube(); err == nil {
 		t.Fatal("expected an error when ca.crt is not valid PEM")
@@ -111,7 +111,7 @@ func TestNewInClusterKubeFailsWhenCAFileIsNotValidPEM(t *testing.T) {
 func TestNewInClusterKubeFailsWhenTokenCannotBeRead(t *testing.T) {
 	dir := writeSAMount(t, generateTestCA(t), "") // no token file written
 	t.Setenv("KUBERNETES_SERVICEACCOUNT_DIR", dir)
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "192.0.2.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 	if _, err := NewInClusterKube(); err == nil {
 		t.Fatal("expected an error when the token cannot be read at construction")
@@ -123,14 +123,14 @@ func TestNewInClusterKubeFailsWhenTokenCannotBeRead(t *testing.T) {
 func TestNewInClusterKubeBuildsAClientFromTheServiceAccountMount(t *testing.T) {
 	dir := writeSAMount(t, generateTestCA(t), "sa-token-v1\n")
 	t.Setenv("KUBERNETES_SERVICEACCOUNT_DIR", dir)
-	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "192.0.2.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "6443")
 
 	k, err := NewInClusterKube()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if k.BaseURL != "https://10.0.0.1:6443" {
+	if k.BaseURL != "https://192.0.2.1:6443" {
 		t.Fatalf("BaseURL: got %q", k.BaseURL)
 	}
 	if k.TokenPath != dir+"/token" {
