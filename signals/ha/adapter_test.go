@@ -477,6 +477,47 @@ func TestDwellVerificationLadderEndToEnd(t *testing.T) {
 	}
 }
 
+// A config-entry setup failure that never recurs is exactly the incident this
+// change fixes: before it, the record's mislabeled identity (the logger name,
+// never the domain) meant rung 1 could never apply, and a single occurrence
+// with no second log line was dropped as quiet by rung 2's recurrence check
+// (pending.go's stillRecurring) — even though the entry was genuinely still
+// broken. With the domain resolved correctly, rung 1's config-entry predicate
+// confirms it and the signal is emitted despite never recurring.
+func TestDwellVerificationLadderConfigEntryNeverRecurring(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	ha.SetEntries(configEntry{Domain: "tuya", State: "setup_retry"})
+
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, map[string]any{
+		"rules": []map[string]any{{
+			"matchers": []string{`integration="tuya"`},
+			"for":      "150ms",
+		}},
+	}))
+	a := newTestAdapter(fm)
+	ctx := runAdapter(t, a)
+	go a.runDwellFlusher(ctx)
+
+	<-ha.subscribed
+	ha.PushLogEvent(record(configEntriesLogger, "Error setting up entry someone@example.com for tuya", time.Now(), 1))
+
+	// A single record, never repeated — the exact shape rung 2 alone cannot
+	// confirm. dwellTick is 5s in production code, so the flusher's second
+	// tick is what decides this entry; give it generous room.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && len(fm.Posted()) == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	posted := fm.Posted()
+	if len(posted) != 1 {
+		t.Fatalf("expected exactly one dwell-verified signal despite no recurrence, got %d: %+v", len(posted), posted)
+	}
+	if posted[0].Labels["integration"] != "tuya" {
+		t.Fatalf("integration label = %q, want %q", posted[0].Labels["integration"], "tuya")
+	}
+}
+
 // ---- the emit cap and post failure/recovery reporting ------------------------
 
 // post() is the single exit from the adapter, and reportClipping/

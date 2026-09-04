@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -137,6 +138,49 @@ func integrationOf(logger string) string {
 	}
 }
 
+// configEntriesLogger is the core Home Assistant logger that reports
+// config-entry setup failures. Unlike every other logger this adapter reads,
+// its NAME carries no domain — homeassistant.components.<domain> and
+// custom_components.<domain> are the only prefixes integrationOf strips, and
+// this logger matches neither. The domain instead sits inside the message
+// text, which is why normalize() special-cases it below.
+const configEntriesLogger = "homeassistant.config_entries"
+
+// configEntryDomainPatterns extract the real Home Assistant domain from a
+// homeassistant.config_entries message, one per format string that logger
+// actually uses (the same shapes the shipped default rule already matches by
+// keyword). Anchored to each format string's LEADING literal structure —
+// never a bare "for (\w+)" — so free text elsewhere in a message cannot be
+// misattributed as a domain, and each capture is restricted to a valid Python
+// identifier shape (HA domains are lowercase snake_case module names). The
+// domain capture itself is bounded by a word boundary, never end-of-string:
+// anchoring on `$` would silently fail to match — falling back to the logger
+// name with nothing logged — the moment any wording HA appends after the
+// domain differs from what was observed live.
+var configEntryDomainPatterns = []*regexp.Regexp{
+	// "Error setting up entry <title> for <domain>"
+	regexp.MustCompile(`(?s)^Error setting up entry .+ for ([a-z][a-z0-9_]*)\b`),
+	// "Setup failed for '<domain>': <error>"
+	regexp.MustCompile(`(?s)^Setup failed for '([a-z][a-z0-9_]*)':`),
+	// "Config entry '<title>' for <domain> integration not ready yet: ..."
+	// "Config entry '<title>' for <domain> could not ..."
+	// "Config entry '<title>' for <domain> is not ready yet ..."
+	regexp.MustCompile(`(?s)^Config entry '.+' for ([a-z][a-z0-9_]*) (?:integration not ready yet|could not|is not ready)`),
+}
+
+// domainFromConfigEntryMessage reports the domain a config-entry setup
+// failure names, or "" when the message matches none of the recognized
+// shapes — callers fall back to the logger-derived identity in that case,
+// exactly as they did before this function existed.
+func domainFromConfigEntryMessage(text string) string {
+	for _, re := range configEntryDomainPatterns {
+		if m := re.FindStringSubmatch(text); m != nil {
+			return m[1]
+		}
+	}
+	return ""
+}
+
 func firstSegment(s string) string {
 	if i := strings.Index(s, "."); i > 0 {
 		return s[:i]
@@ -160,6 +204,11 @@ const maxTitleText = 120
 func normalize(source string, rec *logRecord) Signal {
 	integration := integrationOf(rec.Name)
 	text := rec.Text()
+	if rec.Name == configEntriesLogger {
+		if domain := domainFromConfigEntryMessage(text); domain != "" {
+			integration = domain
+		}
+	}
 
 	payload, _ := json.MarshalIndent(map[string]any{
 		"integration":   integration,
