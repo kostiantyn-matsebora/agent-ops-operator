@@ -95,9 +95,23 @@
 
 ## 5. signal-telegram (59.3% → 80%)
 
-- [ ] 5.1 In `signals/telegram/`, add tests closing the gap (~49 of 96
+- [x] 5.1 In `signals/telegram/`, add tests closing the gap (~49 of 96
   uncovered lines). Verify: `-coverpkg=./...` run reports ≥80% total.
-- [ ] 5.2 Record the local before/after total in this task.
+
+  Added `manager_test.go` (`Manager.do`/`Sources`/`ReportStatus`'s
+  marshal/request/transport-error branches, 204-skip-decode, ≥400
+  surfacing) and `adapter_test.go` (`refreshSources`'s full validation
+  matrix and reported-state dedup, `registryLoop`'s cancellation, `handler`
+  as a real HTTP round-trip, `handleUpdate`'s unreadable-body/malformed-
+  JSON/non-originating/manager-rejects branches, `mustEnv`/`main` via real
+  subprocesses including a genuine SIGTERM). No production code changed; no
+  dead code found. (Note: `go tool cover` under-attributes `main`'s own
+  coverage back through the subprocess boundary — a known tooling artifact,
+  not a test gap; overall total already clears the gate.)
+- [x] 5.2 Record the local before/after total in this task.
+
+  Before: 59.3% (SonarCloud) / 57.8% local. After: **89.3%** local
+  (`-coverpkg=./... -coverprofile`, stable across 3x runs and under `-race`).
 
 ## 6. gateway-telegram (60.1% → 80%)
 
