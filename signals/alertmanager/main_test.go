@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -401,10 +400,10 @@ func TestMustEnvMissingExits(t *testing.T) {
 
 // TestMainRunsUntilSignaled closes main() itself: it starts the real process
 // loop (env defaulting, adapter construction, the real HTTP server,
-// registryLoop) against a real HTTP double for the manager, then sends this
-// process a real SIGTERM — which main()'s own signal.NotifyContext must
-// catch, unwinding registryLoop and shutting the HTTP server down so main()
-// returns.
+// registryLoop) against a real HTTP double for the manager, then cancels
+// baseContext directly — main()'s own signal.NotifyContext derives from it,
+// so this stops main() exactly as a real SIGTERM would, without sending any
+// OS signal that could also reach other tests sharing this process.
 func TestMainRunsUntilSignaled(t *testing.T) {
 	f := &fakeManager{sources: []SourceInfo{{Name: "vm-alerts"}}, statusHit: make(chan string, 4)}
 	mgrSrv := f.server(t)
@@ -431,6 +430,11 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 		restore(hadListen, "LISTEN_ADDR", prevListen)
 	}()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	origBaseContext := baseContext
+	baseContext = func() context.Context { return ctx }
+	defer func() { baseContext = origBaseContext }()
+
 	done := make(chan struct{})
 	go func() {
 		main()
@@ -443,13 +447,11 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 		t.Fatal("main() never completed a registry refresh")
 	}
 
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM); err != nil {
-		t.Fatalf("signaling self: %v", err)
-	}
+	cancel()
 
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("main() did not return after SIGTERM")
+		t.Fatal("main() did not return after its context was cancelled")
 	}
 }
