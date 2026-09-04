@@ -11,14 +11,34 @@ GUARD="$ROOT/.github/scripts/publication-guard.py"
 
 tmp=$(mktemp -d)
 
-cat > "$tmp/bad.md" <<'MD'
-Reach it at tracker.widgets-fixture.io for details.
-Or the raw address 10.20.30.40 if DNS is down.
-Clone it from https://github.com/acme/internal-tool.git for now.
-The chat id: -1009876543210 is where it posts.
-A deep link: https://t.me/c/9876543210/5
-A bare literal in isolation: -9988776655443 here.
-Mail spool.owner@notreal-example.io picks it up.
+# Every forbidden shape below is assembled from two fragments, each on its
+# own line and each individually a non-match, so this file's OWN tracked
+# text never contains a literal publication-guard would trip on scanning
+# the repository itself — only the runtime-generated $tmp fixture (never
+# committed, never scanned) carries the full, genuinely-bad literal.
+host_a="tracker.widgets-fixture"; host_b=".io"
+host="$host_a$host_b"
+addr_a="10.20.30"; addr_b=".40"
+addr="$addr_a$addr_b"
+repo_a="https://github.com/ac"; repo_b="me/internal-tool.git"
+repo="$repo_a$repo_b"
+chat1_a="-10098"; chat1_b="76543210"
+chat1="$chat1_a$chat1_b"
+deeplink_a="https://t.me/c/98765"; deeplink_b="43210/5"
+deeplink="$deeplink_a$deeplink_b"
+chat2_a="-99887"; chat2_b="76655443"
+chat2="$chat2_a$chat2_b"
+mail_a="spool.owner@notreal-example"; mail_b=".io"
+mail="$mail_a$mail_b"
+
+cat > "$tmp/bad.md" <<MD
+Reach it at $host for details.
+Or the raw address $addr if DNS is down.
+Clone it from $repo for now.
+The chat id: $chat1 is where it posts.
+A deep link: $deeplink
+A bare literal in isolation: $chat2 here.
+Mail $mail picks it up.
 MD
 
 it "every rule fires once on a line built to trip it, and none of them crash the scan"
@@ -31,13 +51,13 @@ assert_contains "$out" "chat-identifier"
 assert_contains "$out" "email"
 
 it "the matched text is never printed by default, only file, line and rule"
-assert_not_contains "$out" "widgets-fixture"
-assert_not_contains "$out" "10.20.30.40"
+assert_not_contains "$out" "$host_a"
+assert_not_contains "$out" "$addr"
 
 it "--show prints what matched, for local fixing only"
 shown=$(python3 "$GUARD" --path "$tmp/bad.md" --show 2>&1)
-assert_contains "$shown" "widgets-fixture.io"
-assert_contains "$shown" "10.20.30.40"
+assert_contains "$shown" "$host"
+assert_contains "$shown" "$addr"
 
 it "--counts prints per-rule totals and nothing else, exit 1 when non-empty"
 counts=$(python3 "$GUARD" --path "$tmp/bad.md" --counts 2>&1)
