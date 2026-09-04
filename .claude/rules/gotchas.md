@@ -143,6 +143,32 @@ dial tcp 192.0.2.187:8080: connect: operation not permitted
 - **Confirm against the ENDPOINT LIST and the ReplicaSet timestamps before
   suspecting policy.** Three sessions read that line as a NetworkPolicy problem.
 
+**A CONFIG-ENTRY SETUP FAILURE LOGS UNDER `homeassistant.config_entries`, NEVER
+UNDER THE FAILING INTEGRATION'S OWN LOGGER.** Every other Home Assistant
+message names its integration in the LOGGER — `homeassistant.components.tuya.*`,
+`custom_components.frigate.*` — so `signal-ha`'s `integrationOf` strips a known
+prefix and is done. `Error setting up entry ... for tuya`, `Setup failed for
+'zwave_js': ...` and the `not ready yet` / `could not` family all come from the
+core `config_entries` module instead, reporting on behalf of whatever failed —
+so the domain that matters sits only in the MESSAGE TEXT, never the logger.
+
+- **A prefix-stripping classifier silently mislabels every one of these.**
+  `signal-ha` did exactly this until `signals/ha/config.go`'s
+  `domainFromConfigEntryMessage` was added: every config-entry failure was
+  labeled `"homeassistant.config_entries"` — a value that matches no real HA
+  domain — so the rung-1 health predicate (`config_entries/get`, keyed by real
+  domain) could never apply to the ONE failure class it exists to confirm, and
+  every such record fell to log-recurrence-only verification.
+- **The failure mode is silent and total, not degraded.** A config entry stuck
+  failing forever, logging once per retry (commonly minutes apart, longer than
+  most dwell windows), never recurs within its own window and is dropped as
+  quiet — a real, permanent incident produces no signal at all. Confirmed live:
+  every `homeassistant.config_entries` dwell entry the deployed adapter had
+  recorded (going back weeks) had been dropped this way.
+- **Any future log-based classifier keyed on logger-name structure owes this
+  the same special case** — the domain has to come out of the message, with a
+  fallback to today's identity when the message names none.
+
 **`reply_to_message` IS ONE LEVEL DEEP AND NEVER NESTS.**
 
 **A reply carries the message it answers, and no further.** That message holds

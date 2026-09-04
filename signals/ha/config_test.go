@@ -83,6 +83,77 @@ func TestIntegrationOf(t *testing.T) {
 	}
 }
 
+// The config_entries logger carries no domain in its NAME — unlike every
+// other logger, whose prefix integrationOf strips it from. The domain must
+// come out of the message instead, or the health predicate can never key
+// into config_entries/get for the one failure class it exists to confirm.
+func TestDomainFromConfigEntryMessage(t *testing.T) {
+	cases := map[string]string{
+		// The live-captured shape (title reduced to a placeholder — publication.md).
+		"Error setting up entry someone@example.com for tuya": "tuya",
+		"Setup failed for 'zwave_js': timeout talking to the stick":                                "zwave_js",
+		"Config entry 'Kitchen Hue Bridge' for hue integration not ready yet: connection refused":   "hue",
+		"Config entry 'Garage' for esphome could not authenticate: invalid password":                "esphome",
+		"Config entry 'Attic Sensor' for xiaomi_ble is not ready yet: bluetooth adapter unavailable": "xiaomi_ble",
+		// No recognizable shape: falls back to "", so the caller keeps the
+		// logger-derived identity unchanged.
+		"Unloading tuya config entry": "",
+		// An embedded "for" inside otherwise unrelated text must not be
+		// misattributed — the anchoring is what stops a coincidental match.
+		"Detected I/O inside the event loop; This is causing stability issues for zwave_js": "",
+	}
+	for text, want := range cases {
+		if got := domainFromConfigEntryMessage(text); got != want {
+			t.Errorf("domainFromConfigEntryMessage(%q) = %q, want %q", text, got, want)
+		}
+	}
+}
+
+// A config-entry setup failure must resolve to its real domain, not the
+// logger name, or the rung-1 health predicate can never apply to it.
+func TestNormalizeConfigEntryFailureResolvesDomain(t *testing.T) {
+	rec := logRecord{
+		Name:    configEntriesLogger,
+		Message: []string{"Error setting up entry someone@example.com for tuya"},
+		Level:   "ERROR",
+		Source:  []json.RawMessage{json.RawMessage(`"config_entries.py"`), json.RawMessage(`123`)},
+	}
+	sig := normalize("ha-logs", &rec)
+	if sig.Labels["integration"] != "tuya" {
+		t.Fatalf("integration label = %q, want %q", sig.Labels["integration"], "tuya")
+	}
+	if sig.Labels["alertname"] != "tuya" {
+		t.Fatalf("alertname label = %q, want %q", sig.Labels["alertname"], "tuya")
+	}
+}
+
+// A config_entries message naming no recognizable domain keeps today's
+// behavior: the logger name, unchanged.
+func TestNormalizeConfigEntryFailureFallsBackWithoutDomain(t *testing.T) {
+	rec := logRecord{
+		Name:    configEntriesLogger,
+		Message: []string{"Unloading tuya config entry"},
+		Level:   "ERROR",
+	}
+	sig := normalize("ha-logs", &rec)
+	if sig.Labels["integration"] != configEntriesLogger {
+		t.Fatalf("integration label = %q, want the logger name %q", sig.Labels["integration"], configEntriesLogger)
+	}
+}
+
+// Every other logger's path through normalize() is untouched by this change.
+func TestNormalizeNonConfigEntriesLoggerUnaffected(t *testing.T) {
+	rec := logRecord{
+		Name:    "homeassistant.components.zwave_js.climate",
+		Message: []string{"Failed to set temperature for hue"},
+		Level:   "ERROR",
+	}
+	sig := normalize("ha-logs", &rec)
+	if sig.Labels["integration"] != "zwave_js" {
+		t.Fatalf("integration label = %q, want %q", sig.Labels["integration"], "zwave_js")
+	}
+}
+
 // The fingerprint keys on Home Assistant's own dedup identity, never on the
 // occurrence: a recurring error must collapse into one conversation.
 func TestNormalizeFingerprintIsStableAcrossOccurrences(t *testing.T) {
