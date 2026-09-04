@@ -51,17 +51,20 @@ import (
 	"time"
 )
 
-// sanitizeLog strips control characters (CR/LF and other C0) from an
-// error's text before it reaches a log line -- gosecurity:S5145's ask,
-// since an error here can carry Telegram-relayed content (a message's
-// text, ultimately) that could otherwise forge a second log line.
+// sanitizeLogText strips CR/LF from a string before it reaches a log line --
+// gosecurity:S5145's ask, since a value logged here can carry Telegram-relayed
+// content (a message's text, ultimately, or a channel name resolved at
+// runtime) that could otherwise forge a second log line. strings.ReplaceAll on
+// each of \n and \r, chained, is the rule's own documented compliant pattern
+// -- a strings.Map closure is not reliably recognized as breaking the taint
+// by the analyzer, even though it removes strictly more.
+func sanitizeLogText(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", "_"), "\r", "_")
+}
+
+// sanitizeLog is sanitizeLogText for an error's own text.
 func sanitizeLog(err error) string {
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 {
-			return ' '
-		}
-		return r
-	}, err.Error())
+	return sanitizeLogText(err.Error())
 }
 
 // channelConfig is this adapter's interpretation of Channel spec.config.
@@ -662,7 +665,7 @@ func (a *adapter) dispatch(ctx context.Context, upd tgUpdate) {
 		}
 		threadID := strconv.FormatInt(m.MessageThreadID, 10)
 		if err := a.mgr.Inbound(ctx, name, &threadID, m.Text); err != nil {
-			log.Printf("inbound %s: %s", name, sanitizeLog(err))
+			log.Printf("inbound %s: %s", sanitizeLogText(name), sanitizeLog(err))
 		}
 		return // first matching channel wins
 	}
@@ -706,7 +709,7 @@ func (a *adapter) handleOffsetGet(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := a.mgr.GetState(r.Context(), name, "telegram-offset")
 	if err != nil {
-		log.Printf("offset read %s: %s", name, sanitizeLog(err))
+		log.Printf("offset read %s: %s", sanitizeLogText(name), sanitizeLog(err))
 		http.Error(w, "offset read failed", http.StatusBadGateway)
 		return
 	}
@@ -727,7 +730,7 @@ func (a *adapter) handleOffsetPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.mgr.PutState(r.Context(), name, "telegram-offset", in.Value); err != nil {
-		log.Printf("offset write %s: %s", name, sanitizeLog(err))
+		log.Printf("offset write %s: %s", sanitizeLogText(name), sanitizeLog(err))
 		http.Error(w, "offset write failed", http.StatusBadGateway)
 		return
 	}

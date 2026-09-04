@@ -111,7 +111,7 @@ func dockerBuild(ctx context.Context, img Image) error {
 		"-f", filepath.Join(root, img.Dockerfile),
 		"-t", img.Tag,
 		filepath.Join(root, img.Context)}
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, lookPath("docker"), args...)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	fmt.Fprintf(os.Stderr, "== docker build %s (%s)\n", img.Tag, img.Context)
 	if err := cmd.Run(); err != nil {

@@ -74,7 +74,14 @@ func build(t *testing.T, dir string, tags ...string) string {
 		args = append(args, "-tags", strings.Join(tags, ","))
 	}
 	args = append(args, ".")
-	cmd := exec.Command("go", args...)
+	// Resolved explicitly rather than handing exec.Command a bare "go" to
+	// search PATH itself — SonarCloud's go:S4036 flags that pattern as a
+	// PATH-hijack vector.
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("go not found on PATH: %v", err)
+	}
+	cmd := exec.Command(goBin, args...)
 	cmd.Dir = filepath.Join(repoRoot(), dir)
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if b, err := cmd.CombinedOutput(); err != nil {

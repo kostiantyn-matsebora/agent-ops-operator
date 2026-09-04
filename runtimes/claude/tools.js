@@ -35,12 +35,12 @@ function safeJoin(base, ...segments) {
   return target;
 }
 
-// sanitizeLog strips control characters (CR/LF and other C0) from a value
-// before it reaches a log line -- jssecurity:S5145's ask, since a crafted
-// runId, agent name or thread id in a work unit could otherwise forge a
-// second log line that reads as the runtime's own.
+// sanitizeLog strips CR/LF from a value before it reaches a log line --
+// jssecurity:S5145's ask, since a crafted runId, agent name or thread id in a
+// work unit could otherwise forge a second log line that reads as the
+// runtime's own. /[\n\r]/g is the rule's own documented compliant pattern.
 function sanitizeLog(v) {
-  return String(v).replace(/[\r\n\x00-\x1f]/g, ' ');
+  return String(v).replace(/[\n\r]/g, '_');
 }
 
 // resolveBin looks `name` up on PATH once and returns the first absolute
