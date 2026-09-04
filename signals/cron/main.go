@@ -65,6 +65,13 @@ func mustEnv(key string) string {
 	return v
 }
 
+// baseContext supplies the parent for main's signal-derived context. A test
+// swaps it to inject a context it can cancel directly, so it can call the
+// real main() in-process and stop it exactly as a real SIGTERM would —
+// without sending any OS signal that could also reach other tests sharing
+// this process.
+var baseContext = context.Background
+
 func main() {
 	sourceType := os.Getenv("ADAPTER_NAME")
 	if sourceType == "" {
@@ -76,7 +83,7 @@ func main() {
 		sources:    map[string]servedSource{},
 		reported:   map[string]string{},
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(baseContext(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	log.Printf("signal-cron adapter starting (adapter=%s)", sourceType)
 

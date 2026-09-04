@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -498,9 +497,11 @@ func TestMustEnvMissingExits(t *testing.T) {
 
 // TestMainRunsUntilSignaled closes main() itself: it starts the real
 // process loop (env parsing, adapter construction, the refresh/evaluate
-// loop, signal.NotifyContext) against a real HTTP double, then sends this
-// process a real SIGTERM — which main()'s own signal.NotifyContext must
-// catch and use to unwind sleepCtx immediately, letting main() return.
+// loop, signal.NotifyContext) against a real HTTP double, then cancels
+// baseContext directly — main()'s own signal.NotifyContext derives from
+// it, so this unwinds sleepCtx and returns exactly as a real SIGTERM
+// would, without sending any OS signal that could also reach other tests
+// sharing this process.
 func TestMainRunsUntilSignaled(t *testing.T) {
 	var mu sync.Mutex
 	var calls []statusCall
@@ -560,6 +561,11 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 		}
 	}()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	origBaseContext := baseContext
+	baseContext = func() context.Context { return ctx }
+	defer func() { baseContext = origBaseContext }()
+
 	done := make(chan struct{})
 	go func() {
 		main()
@@ -572,13 +578,11 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 		t.Fatal("main() never completed a full refresh/evaluate iteration")
 	}
 
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM); err != nil {
-		t.Fatalf("signaling self: %v", err)
-	}
+	cancel()
 
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("main() did not return after SIGTERM")
+		t.Fatal("main() did not return after its context was cancelled")
 	}
 }
