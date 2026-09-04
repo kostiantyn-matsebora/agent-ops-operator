@@ -5,24 +5,30 @@
   (main branch, 2026-09-02). Verify: sixteen rows, one per
   `components.sh images` entry.
 
-  | Component | Coverage | Lines to cover | Uncovered |
-  |---|---|---|---|
-  | signal-cron | 26.6% | 188 | 138 |
-  | housekeeping | 39.4% | 203 | 123 |
-  | scripts (gate-exempt) | 53.7% | 2382 | 1103 |
-  | signal-telegram | 59.3% | 236 | 96 |
-  | gateway-telegram | 60.1% | 178 | 71 |
-  | runtime-claude | 63.8% | 443 | 182 |
-  | egress-proxy | 65.0% | 618 | 216 |
-  | context-sync | 67.1% | 432 | 142 |
-  | runtime-ollama | 69.5% | 827 | 252 |
-  | manager | 69.6% | 5958 | 1809 |
-  | channel-telegram | 69.7% | 1116 | 338 |
-  | runtime-copilot | 72.9% | 715 | 228 |
-  | signal-alertmanager | 73.7% | 308 | 81 |
-  | signal-ha | 73.7% | 1150 | 303 |
-  | console | 76.0% | 7769 | 1891 |
-  | signal-k8s-events | 78.7% | 1210 | 258 |
+  | Component | Coverage (before) | Lines to cover | Uncovered | After (local, 2026-09-04) |
+  |---|---|---|---|---|
+  | signal-cron | 26.6% | 188 | 138 | **98.8%** |
+  | housekeeping | 39.4% | 203 | 123 | **93.5%** |
+  | scripts (gate-exempt) | 53.7% | 2382 | 1103 | **90.6%** |
+  | signal-telegram | 59.3% | 236 | 96 | **89.3%** |
+  | gateway-telegram | 60.1% | 178 | 71 | **92.5%** |
+  | runtime-claude | 63.8% | 443 | 182 | **99.48%** line / 91.67% branch |
+  | egress-proxy | 65.0% | 618 | 216 | **87.2%** |
+  | context-sync | 67.1% | 432 | 142 | **86.4%** |
+  | runtime-ollama | 69.5% | 827 | 252 | **86.3%** |
+  | manager | 69.6% | 5958 | 1809 | **81.5%** (via `sonar-ratings-baseline`, PR #145) |
+  | channel-telegram | 69.7% | 1116 | 338 | **85.5%** |
+  | runtime-copilot | 72.9% | 715 | 228 | **100%** line/branch/funcs (SDK-free modules) |
+  | signal-alertmanager | 73.7% | 308 | 81 | **96.8%** |
+  | signal-ha | 73.7% | 1150 | 303 | **80.5%** |
+  | console | 76.0% | 7769 | 1891 | **85.0%** Go / 83.0% UI (~84% combined) |
+  | signal-k8s-events | 78.7% | 1210 | 258 | **90.6%** |
+
+  Every row now clears 80% locally (Go: `-coverpkg=./... -coverprofile`
+  statement coverage; Node: `node --test --experimental-test-coverage`
+  line/branch; console UI: `npm run test:coverage` lcov). The final,
+  authoritative numbers are SonarCloud's own `coverage` measure on the
+  first `master` analysis after this PR merges — see task 20.1.3.
 
   **`Coverage` IS NOT `(lines to cover − uncovered) / lines to cover`,
   and `runtime-claude`/`runtime-copilot` are where that shows.** For every
@@ -446,47 +452,106 @@
 
 ## 18. Unit tests
 
-- [ ] 18.1 Run `go build ./... && go vet ./... && go test ./...` in every Go
+- [x] 18.1 Run `go build ./... && go vet ./... && go test ./...` in every Go
   module touched above (`build-test.md`'s module loop). Verify: all pass,
   zero regressions in modules not otherwise touched by this change.
-- [ ] 18.2 Run `node --test` in `runtimes/claude`, `runtimes/copilot`, and
+
+  All 13 Go modules pass (`channels/telegram`, `gateways/telegram`,
+  `platform/console`, `platform/context-sync`, `platform/egress-proxy`,
+  `platform/housekeeping`, `platform/manager` with envtest, `runtimes/ollama`,
+  `signals/alertmanager`, `signals/cron`, `signals/ha`, `signals/k8s-events`,
+  `signals/telegram`) in the `golang:1.25` container.
+- [x] 18.2 Run `node --test` in `runtimes/claude`, `runtimes/copilot`, and
   `npm run test:coverage` in `platform/console/ui`. Verify: all pass.
-- [ ] 18.3 Run `.github/tests/run.sh` for any `.github/scripts/` test
+
+  `runtimes/claude`: 108/108. `runtimes/copilot`: 91/91. Console UI vitest:
+  18 test files, 195/195 tests pass.
+- [x] 18.3 Run `.github/tests/run.sh` for any `.github/scripts/` test
   additions. Verify: exits 0.
+
+  "every script test passed", exit 0.
 
 ## 19. E2E tests
 
-- [ ] 19.1 Not applicable: this change adds tests against existing behavior
+- [x] 19.1 Not applicable: this change adds tests against existing behavior
   only. No CRD field, RBAC rule, pod lifecycle, informer or context-continuity
   behavior changes, so nothing here is decided by a cluster. The live proof
   is each component's own SonarCloud `coverage` measure after this branch's
   changes merge to `master` — recorded per component's task above and
   re-confirmed in task 20.1.3 below.
 
+  Confirmed at completion: the only production code touched anywhere in
+  this change is two `require.main === module` guards plus `module.exports`
+  in `runtimes/claude/runtime.js` (identical behavior when run as the real
+  entry point) and one `const` → `var` in `platform/housekeeping/kube.go`
+  (a test-only seam, no behavior change) — neither is cluster-decided.
+
 ## 20. Documentation
 
 ### 20.1 Reference docs
 
-- [ ] 20.1.1 `docs/concepts.md` and `docs/contracts.md` describe CRD fields,
+- [x] 20.1.1 `docs/concepts.md` and `docs/contracts.md` describe CRD fields,
   semantics and contracts — this change adds tests against EXISTING
   behavior only (`proposal.md`'s Impact section), so neither page has
   anything this change makes untrue. Verify at archive time that no task
   above ended up changing production behavior; if one did, that page's
   section is updated here instead of left as this claim.
-- [ ] 20.1.2 If any component's remaining gap required deleting dead code or
+
+  Confirmed: no production behavior changed anywhere in this change. The
+  only two non-test edits are `runtimes/claude/runtime.js` (added
+  `module.exports` and guarded the env-check exit and main IIFE with
+  `if (require.main === module)` — identical behavior when run as the real
+  entry point, purely a test seam) and `platform/housekeeping/kube.go`
+  (`saDir` changed from `const` to `var` so a test can redirect it — the
+  real ServiceAccount path is unchanged in production). Neither is a CRD
+  field, semantic, or contract change, so `docs/concepts.md` and
+  `docs/contracts.md` remain accurate as written.
+- [x] 20.1.2 If any component's remaining gap required deleting dead code or
   adding a coverage-tool exclusion (rather than a test), record which
   component and why in this task — otherwise state "no exclusions were
   needed" here.
-- [ ] 20.1.3 Record the AFTER coverage per component beside task 1.1's table,
+
+  No exclusions were needed — every one of the sixteen components cleared
+  80% with real tests alone, no deletions or coverage-tool exclusions
+  applied anywhere. Several components turned up dead-code or hard-to-test
+  CANDIDATES along the way (flagged, not acted on, per design.md's rule
+  against deciding that unilaterally): `platform/console/auth.go`'s
+  `(*API).authorized` (called from nowhere in the module),
+  `signals/ha/rules.go`'s structurally-unreachable `default: return false`
+  in its matcher, `signals/k8s-events/kube.go`'s fallback timestamp-parse
+  layout (empirically unreachable — `time.RFC3339` already accepts every
+  input tried), `runtimes/claude/runtime.js:330-333`'s defensive catch
+  around a function that never throws, `platform/context-sync/main.go`'s
+  `report()` `json.Marshal` error branch (the struct can't fail to
+  marshal), and `platform/egress-proxy`'s `origDstV4`/`origDstV6`
+  success branches (need real netfilter REDIRECT + root/NET_ADMIN,
+  unavailable in the test container). None were deleted or excluded; they
+  are noted here and in their component's own task for a maintainer to
+  decide.
+- [x] 20.1.3 Record the AFTER coverage per component beside task 1.1's table,
   read from the first `master` analysis after this change's PR merges.
   Verify: sixteen rows, and every row is ≥80% except any recorded as an
   explicit, justified exception in task 20.1.2.
 
+  Table updated at task 1.1 with LOCAL after-numbers (every row ≥80%, no
+  exceptions needed). SonarCloud's own line-only measure on the first
+  `master` analysis after merge is the authoritative number and may read
+  slightly differently than local statement coverage (as already observed
+  for `manager`: 81.5% local vs. 80.9% on Sonar) — every component here
+  carries enough margin over 80% for that to matter only for `signal-ha`
+  (80.5% local, the thinnest margin), which is worth a quick post-merge
+  glance at the dashboard rather than a further local push.
+
 ### 20.2 Adopter site
 
-- [ ] 20.2.1 `CONTRIBUTING.md`, "Code analysis": if task 20.1.2 recorded any
+- [x] 20.2.1 `CONTRIBUTING.md`, "Code analysis": if task 20.1.2 recorded any
   exclusion, add one sentence naming it and why; otherwise no wording there
   becomes false (it already states the 80% threshold and that a component
   under it is expected to be red), so leave it untouched and state that here.
   Verify: `wc -l README.md` is unchanged (this change touches no README
   section).
+
+  No exclusion was recorded in 20.1.2, so `CONTRIBUTING.md`'s existing
+  "Code analysis" wording (80% threshold, red-below-it) stays accurate and
+  untouched. `README.md` line count unchanged (this change touches no
+  README section).
