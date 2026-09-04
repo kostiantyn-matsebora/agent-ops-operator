@@ -276,16 +276,18 @@ func TestRouteStillForwardsWhenAcknowledgeFails(t *testing.T) {
 	}
 }
 
-// TestRunStartsAndStopsOnContextCancellation is the only way to close the gap
-// on main's own body: it wires loadConfig → NewDownstream/NewTelegram →
+// TestMainStartsAndStopsOnContextCancellation is the only way to close the
+// gap on main() itself: it wires loadConfig → NewDownstream/NewTelegram →
 // poll() under a signal.NotifyContext, and nothing else in the suite ever
-// calls it. run() takes signal.NotifyContext's PARENT context precisely so
-// this test can cancel it directly — the derived ctx sees that exactly as it
-// would a real SIGINT — without sending any OS signal to the test process
-// itself and without a fixed sleep to dodge a signal-registration race: the
-// first GetUpdates request proves poll() has actually entered its loop
-// before cancellation, deterministically.
-func TestRunStartsAndStopsOnContextCancellation(t *testing.T) {
+// calls it. baseContext is swapped so the test can cancel the SAME context
+// main() derives its signal context from, directly — the derived ctx sees
+// that exactly as it would a real SIGINT — without sending any OS signal
+// anywhere and without a fixed sleep to dodge a signal-registration race:
+// the first GetUpdates request proves poll() has actually entered its loop
+// before cancellation, deterministically. Calling the real main() in-process
+// (rather than a subprocess) is also what lets it show up in coverage at
+// all — coverage data does not cross a process boundary.
+func TestMainStartsAndStopsOnContextCancellation(t *testing.T) {
 	channelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/offset" {
 			_ = json.NewEncoder(w).Encode(map[string]string{"value": "1"})
@@ -309,9 +311,13 @@ func TestRunStartsAndStopsOnContextCancellation(t *testing.T) {
 	t.Setenv(apiBaseEnv, tgSrv.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	origBaseContext := baseContext
+	baseContext = func() context.Context { return ctx }
+	defer func() { baseContext = origBaseContext }()
+
 	done := make(chan struct{})
 	go func() {
-		run(ctx)
+		main()
 		close(done)
 	}()
 
@@ -325,6 +331,6 @@ func TestRunStartsAndStopsOnContextCancellation(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("run() did not return after its context was cancelled")
+		t.Fatal("main() did not return after its context was cancelled")
 	}
 }

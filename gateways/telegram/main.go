@@ -112,19 +112,17 @@ func loadConfig() config {
 	return c
 }
 
-func main() {
-	run(context.Background())
-}
+// baseContext supplies the parent for main's signal-derived context. A test
+// swaps it to inject a context it can cancel directly, so it can call the
+// real main() in-process and stop it exactly as a real SIGINT would —
+// without sending any OS signal to the test process itself.
+var baseContext = context.Background
 
-// run holds main's own body, taking the signal context's PARENT rather than
-// building it internally — so a test can cancel that parent directly and
-// stop poll() exactly as a real SIGINT would, without sending any OS signal
-// to the test process itself.
-func run(parent context.Context) {
+func main() {
 	cfg := loadConfig()
 	r := &router{cfg: cfg, down: NewDownstream(), tg: NewTelegram(cfg.Token, cfg.APIBase)}
 
-	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(baseContext(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	log.Printf("gateway-telegram starting (signal=%s channel=%s)", cfg.SignalTarget, cfg.ChannelTarget)
 
