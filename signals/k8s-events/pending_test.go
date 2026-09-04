@@ -209,6 +209,33 @@ func TestSlowStartDoesNotFalselyEscalate(t *testing.T) {
 	}
 }
 
+// A rule whose dwell is itself shorter than minEscalationDwell must not let
+// escalation extend the wait: the floor is clamped back down to the rule's
+// own dwell rather than overriding it. Neither the floor branch nor the
+// clamp-back-down branch of dueAt was reachable by the existing tests, which
+// all use dwells long enough that escalation's own division stays above the
+// floor.
+func TestEscalationDwellIsFlooredThenClampedBackToTheRule(t *testing.T) {
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	q, got := testQueue(t, fakeHealth{"api-a": verdictUnhealthy, "api-b": verdictUnhealthy}, base)
+	// dwell/escalationDivisor(4) = 7.5s, well under minEscalationDwell(1m) —
+	// the floor applies, and then must be clamped back down since 1m now
+	// exceeds this rule's own 30s dwell.
+	rule := compiledRule{dwell: 30 * time.Second, escalate: 2}
+
+	for _, n := range []string{"api-a", "api-b"} {
+		q.Add("src", sigFor("prod", "Deployment/api", "Pod", n, "Unhealthy"), rule)
+	}
+	q.Flush(base.Add(29 * time.Second))
+	if len(*got) != 0 {
+		t.Fatalf("must not fire before its own (clamped) dwell: %+v", *got)
+	}
+	q.Flush(base.Add(30 * time.Second))
+	if len(*got) != 1 {
+		t.Fatalf("must fire once its own dwell elapses: %+v", *got)
+	}
+}
+
 func TestBelowEscalationThresholdStillWaits(t *testing.T) {
 	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	q, got := testQueue(t, fakeHealth{"api-a": verdictUnhealthy, "api-b": verdictUnhealthy}, base)
@@ -366,6 +393,20 @@ func TestNonPodKindHasNoHealthPredicate(t *testing.T) {
 
 // ---- emit cap ------------------------------------------------------------------
 
+// A non-positive configured limit (unset EMIT_PER_MINUTE, or a bad value from
+// envInt's own fallback) must not disable the cap — it must fall back to the
+// default rather than becoming a limit of zero or negative that clips
+// everything.
+func TestNewEmitCapFallsBackOnANonPositiveLimit(t *testing.T) {
+	for _, limit := range []int{0, -5} {
+		c := newEmitCap(limit)
+		allowed, clipped := c.Allow("src", make([]Signal, 3))
+		if len(allowed) != 3 || clipped != 0 {
+			t.Fatalf("limit=%d: expected the default cap to apply, got allowed=%d clipped=%d", limit, len(allowed), clipped)
+		}
+	}
+}
+
 func TestEmitCapPassesNormalVolume(t *testing.T) {
 	c := newEmitCap(10)
 	sigs := make([]Signal, 5)
@@ -449,6 +490,25 @@ func TestPodOnHealthyNodeIsNotInhibited(t *testing.T) {
 	victim.Labels["node"] = "node-b"
 	if in.Inhibited("src", rs, &victim) {
 		t.Fatal("a pod on a different, healthy node must not be inhibited")
+	}
+}
+
+// A signal whose reason is not named by ANY inhibit rule's targetMatchers must
+// never be inhibited, however active a cause is — Inhibited's loop must
+// actually fall through the "target does not match" branch rather than
+// stopping at the first rule.
+func TestReasonNotNamedByAnyTargetIsNeverInhibited(t *testing.T) {
+	rs := inhibitRuleSet(t)
+	in := newInhibitor()
+
+	cause := sigFor("", "Node/node-a", "Node", "node-a", "NodeNotReady")
+	cause.Labels["node"] = "node-a"
+	in.Observe("src", rs, &cause)
+
+	unrelated := sigFor("prod", "Deployment/api", "Pod", "api-1", "OOMKilling")
+	unrelated.Labels["node"] = "node-a"
+	if in.Inhibited("src", rs, &unrelated) {
+		t.Fatal("a reason no inhibit rule targets must never be inhibited")
 	}
 }
 

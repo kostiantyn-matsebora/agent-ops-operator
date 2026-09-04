@@ -191,6 +191,38 @@ func TestEscalateAfterObjectsDefaults(t *testing.T) {
 	}
 }
 
+// A malformed matcher in either half of an inhibit rule must be reported by
+// NAME, distinguishing sourceMatchers from targetMatchers — parseMatchers'
+// error is wrapped separately for each in compileRules and neither wrap was
+// exercised before (the existing "half an inhibit rule" case only reaches the
+// later "both required" check with two matchers that already parse fine).
+func TestInhibitRuleMatcherSyntaxErrorsAreLocated(t *testing.T) {
+	if _, err := compileRules(nil, Route{InhibitRules: []InhibitRule{{
+		SourceMatchers: []string{"not a matcher"},
+		TargetMatchers: []string{`reason="X"`},
+	}}}); err == nil || !strings.Contains(err.Error(), "sourceMatchers") {
+		t.Fatalf("a bad sourceMatchers entry must be named as such, got %v", err)
+	}
+	if _, err := compileRules(nil, Route{InhibitRules: []InhibitRule{{
+		SourceMatchers: []string{`reason="X"`},
+		TargetMatchers: []string{"not a matcher"},
+	}}}); err == nil || !strings.Contains(err.Error(), "targetMatchers") {
+		t.Fatalf("a bad targetMatchers entry must be named as such, got %v", err)
+	}
+}
+
+// Alertmanager accepts an unquoted, bare value — unquote's fallthrough path,
+// never exercised because every other matcher test quotes its values.
+func TestBareUnquotedMatcherValueIsAccepted(t *testing.T) {
+	m, err := parseMatcher(`reason=BackOff`)
+	if err != nil {
+		t.Fatalf("a bare value must be accepted: %v", err)
+	}
+	if !m.matches(labelsFor("BackOff", nil)) {
+		t.Fatal("a bare-value matcher must match like a quoted one")
+	}
+}
+
 func TestInhibitRulesCompile(t *testing.T) {
 	rs, err := compileRules(nil, Route{InhibitRules: []InhibitRule{{
 		SourceMatchers: []string{`reason="NodeNotReady"`},

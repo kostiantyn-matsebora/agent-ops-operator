@@ -127,6 +127,19 @@ func TestUntrackedKindIsItsOwnWorkload(t *testing.T) {
 // A tracked kind the cache has no entry for yields NO workload. Falling back to
 // the pod's own name would silently reinstate per-pod grouping, which is the
 // bug this whole change removes.
+// An untracked kind with no name at all (a malformed or partial
+// involvedObject) has nothing to name a workload after, so it must yield no
+// workload rather than a bare "/" — the untracked branch's other half from
+// TestUntrackedKindIsItsOwnWorkload, never reached because every other test
+// gives the involved object a name.
+func TestUntrackedKindWithNoNameYieldsNoWorkload(t *testing.T) {
+	a := adapterWithCache(syncedCache())
+	e := evt("Warning", "", "", "", "Unknown")
+	if got := a.enrich(&e).Workload; got != "" {
+		t.Fatalf("workload: got %q want empty", got)
+	}
+}
+
 func TestUnknownPodYieldsNoWorkloadRatherThanItsOwnName(t *testing.T) {
 	a := adapterWithCache(syncedCache())
 	e := evt("Warning", "prod", "Pod", "api-7f9c8d4-xk2p9", "BackOff")

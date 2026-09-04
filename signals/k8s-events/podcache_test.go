@@ -225,6 +225,84 @@ func TestUnsyncedCacheAnswersNothing(t *testing.T) {
 	}
 }
 
+func TestSyncedReportsWhetherAListHasLanded(t *testing.T) {
+	c := newObjectCache()
+	if c.Synced() {
+		t.Fatal("a brand-new cache must not report itself synced")
+	}
+	c.markSynced()
+	if !c.Synced() {
+		t.Fatal("Synced() must report true once a list has landed")
+	}
+}
+
+// OwnedByAgentOps implements self-exclusion mechanism 2 directly on the real
+// cache — the "unknown", "absent", "labelled", "no owner" and multi-hop
+// branches, none of which the selfexclude tests reach because they go through
+// a stub objectLookup instead.
+func TestOwnedByAgentOpsUnknownWhenTheCacheHasNotSynced(t *testing.T) {
+	c := newObjectCache()
+	if owned, known := c.OwnedByAgentOps("prod", "Pod", "api-1"); owned || known {
+		t.Fatalf("an unsynced cache must not claim to know anything: owned=%v known=%v", owned, known)
+	}
+}
+
+func TestOwnedByAgentOpsSyncedAndAbsentIsKnownAndUnowned(t *testing.T) {
+	c := syncedCache()
+	owned, known := c.OwnedByAgentOps("prod", "Pod", "ghost")
+	if owned || !known {
+		t.Fatalf("a synced, absent object must be a definite 'not owned': owned=%v known=%v", owned, known)
+	}
+}
+
+func TestOwnedByAgentOpsLabelledObjectIsOwnedDirectly(t *testing.T) {
+	c := syncedCache()
+	putPod(t, c, podJSON("agentops", "console-abc", "node-a",
+		map[string]string{"app.kubernetes.io/name": "agentops-runtime"}, nil, true, "Running"))
+	owned, known := c.OwnedByAgentOps("agentops", "Pod", "console-abc")
+	if !owned || !known {
+		t.Fatalf("a labelled object must be owned: owned=%v known=%v", owned, known)
+	}
+}
+
+// No owner reference and no label: the loop never runs, and the object is a
+// definite "not ours".
+func TestOwnedByAgentOpsUnownedObjectWithNoOwnerIsNotOwned(t *testing.T) {
+	c := syncedCache()
+	putPod(t, c, podJSON("prod", "debug-shell", "node-a", nil, nil, true, "Running"))
+	owned, known := c.OwnedByAgentOps("prod", "Pod", "debug-shell")
+	if owned || !known {
+		t.Fatalf("a bare, unlabelled pod must not be owned: owned=%v known=%v", owned, known)
+	}
+}
+
+// The owner chain is walked past one hop: a pod owned by a replicaset that
+// carries no agent-ops label of its own, but whose OWNER is unknown to the
+// cache, must stop rather than loop or panic.
+func TestOwnedByAgentOpsStopsWhenTheChainLeavesTheCache(t *testing.T) {
+	c := syncedCache()
+	putPod(t, c, podJSON("prod", "api-1", "node-a", nil,
+		&ownerRef{Kind: "ReplicaSet", Name: "api-rs"}, true, "Running"))
+	// api-rs itself is never put into the cache.
+	owned, known := c.OwnedByAgentOps("prod", "Pod", "api-1")
+	if owned || !known {
+		t.Fatalf("a chain leaving the cache must resolve to 'not owned', known: owned=%v known=%v", owned, known)
+	}
+}
+
+// The label may be found a hop up the chain rather than on the object itself.
+func TestOwnedByAgentOpsFindsALabelOneHopUp(t *testing.T) {
+	c := syncedCache()
+	c.put(&objectInfo{Kind: "ReplicaSet", Namespace: "agentops", Name: "adapter-rs",
+		Labels: map[string]string{"agentops.dev/adapter": "console"}})
+	putPod(t, c, podJSON("agentops", "adapter-pod", "node-a", nil,
+		&ownerRef{Kind: "ReplicaSet", Name: "adapter-rs"}, true, "Running"))
+	owned, known := c.OwnedByAgentOps("agentops", "Pod", "adapter-pod")
+	if !owned || !known {
+		t.Fatalf("a label one hop up the owner chain must still mark the pod owned: owned=%v known=%v", owned, known)
+	}
+}
+
 // waitForMsg is waitFor with a failure message naming what was expected.
 func waitForMsg(t *testing.T, cond func() bool, msg string) {
 	t.Helper()

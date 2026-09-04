@@ -358,10 +358,30 @@
 
 ## 17. signal-k8s-events (78.7% → 80%)
 
-- [ ] 17.1 In `signals/k8s-events/`, add tests closing the gap (~16 of 258
+- [x] 17.1 In `signals/k8s-events/`, add tests closing the gap (~16 of 258
   uncovered lines — the smallest remaining gap in the org). Verify:
   `-coverpkg=./...` run reports ≥80% total.
-- [ ] 17.2 Record the local before/after total in this task.
+
+  Added `kube_test.go` (`NewInClusterKube`'s construction and `bearer()`'s
+  cached-token-on-transient-failure branches), `main_test.go` (adapter
+  lifecycle: `reconcileWatchers`/`reconcileCacheWatchers`/
+  `reportAccessError`/`stopAllWatchers`/`runDwellFlusher`/`envInt`/
+  `scopeName`/`mustEnv`), `manager_test.go` (`Manager.do`'s request-
+  construction failures), and additive cases across `podcache_test.go`
+  (`OwnedByAgentOps`'s six branches via the real cache), `mute_test.go`
+  (day-of-month mute incl. Alertmanager's negative form), `pending_test.go`
+  (escalation-dwell clamping, inhibition target-mismatch, emit-cap floor),
+  `rules_test.go` (matcher error naming), `events_test.go` (`parseConfig`'s
+  compile-failure wrap), and `enrich_test.go` (untracked-kind-no-name). No
+  production code changed. Dead-code candidate (not tested around):
+  `kube.go`'s fallback timestamp-parse layout after `time.RFC3339` fails —
+  empirically, Go's `time.Parse` already accepts every input tried under
+  either layout, so the fallback appears genuinely unreachable.
+- [x] 17.2 Record the local before/after total in this task.
+
+  Before: 78.7% (SonarCloud) / 78.2% local. After: **90.6%** local
+  (`-coverpkg=./... -coverprofile`, 137/137 tests pass, stable under
+  `-race`).
 
 ## 18. Unit tests
 
