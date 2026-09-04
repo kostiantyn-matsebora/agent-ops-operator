@@ -275,9 +275,27 @@
 
 ## 14. signal-alertmanager (73.7% → 80%)
 
-- [ ] 14.1 In `signals/alertmanager/`, add tests closing the gap (~19 of 81
+- [x] 14.1 In `signals/alertmanager/`, add tests closing the gap (~19 of 81
   uncovered lines). Verify: `-coverpkg=./...` run reports ≥80% total.
-- [ ] 14.2 Record the local before/after total in this task.
+
+  Added `manager_test.go` (`do`'s marshal/invalid-method/refused-connection/
+  500-response branches) and extended `register_test.go` (`newInClusterClient`'s
+  real not-mounted branch, `kubeClient.do`'s error branches, `ensureRegistration`'s
+  unreadable-body/update-failure/unexpected-status, `apiFailure`'s formatting)
+  and `main_test.go` (`/healthz`, webhook body-read/invalid-JSON/502 branches,
+  `report`'s skip-on-failure, `refreshSources`'s preserve-on-error,
+  `reconcileRegistration`'s degradation branches, `mustEnv`'s fatal path via
+  subprocess re-exec, and a full `main()` SIGTERM integration test). No
+  production code changed. `newInClusterClient` sits at 30% — needs either
+  root (to write the hardcoded SA token mount path) or a refactor to make it
+  injectable; left untouched per the no-refactor rule, flagged rather than
+  decided unilaterally. `main()`'s one remaining line is a genuine
+  `ListenAndServe` bind-failure `log.Fatalf`, not worth engineering a port
+  collision for.
+- [x] 14.2 Record the local before/after total in this task.
+
+  Before: 73.7% (SonarCloud) / 74.0% local. After: **96.8%** local
+  (`-coverpkg=./... -coverprofile`, 32/32 tests pass).
 
 ## 15. signal-ha (73.7% → 80%)
 
