@@ -87,11 +87,28 @@
 
 ## 4. scripts (53.7% → 80%, gate-exempt but still covered)
 
-- [ ] 4.1 In `.github/scripts/`, add or extend `.github/tests/*.test.sh`
+- [x] 4.1 In `.github/scripts/`, add or extend `.github/tests/*.test.sh`
   coverage closing the gap (~626 of 1103 uncovered lines) — the largest
   absolute gap in the org. Verify: the four-step Python coverage recipe in
   `build-test.md` reports ≥80% on `.github/coverage.xml`.
-- [ ] 4.2 Record the local before/after total in this task.
+
+  Seven of 22 scripts (~2347 lines, nearly the whole org-wide gap) had
+  ZERO coverage — nothing ever invoked them. Added `review-context.test.sh`,
+  `serviceaccount-guard.test.sh`, `retired-vocabulary-guard.test.sh`,
+  `publication-guard.test.sh` (each real fixture using the project's own
+  allowlist/vocabulary files, RFC 5737 addresses only), `crd-schemas.test.sh`,
+  and `docs-generate.test.sh` (runs the real generator's `--check`/
+  `--emit-templates` against this actual checkout, since both scripts
+  resolve paths from `__file__` — the only way to exercise them for real;
+  asserts neither mode writes under `docs/`). No production script changed.
+  No dead code found — the remaining gaps are legitimate defensive branches
+  expensive to hit without violating the subprocess-only testing style
+  already used throughout this suite.
+- [x] 4.2 Record the local before/after total in this task.
+
+  Before: 53.7% (SonarCloud). After: **90.6%** line coverage
+  (2294/2532 lines, `coverage.xml`'s `line-rate`, full four-step recipe),
+  all 51 `.github/tests/*.test.sh` files pass.
 
 ## 5. signal-telegram (59.3% → 80%)
 
