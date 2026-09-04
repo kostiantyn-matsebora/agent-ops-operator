@@ -166,7 +166,7 @@ function runClaude(unit) {
       prompt,
     });
     console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${contextIdOf(unit) ? ' continue=' + sanitizeLog(contextIdOf(unit)) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
-    console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${allowed.length ? allowed.join(',') : '(none)'}`);
+    console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
     if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
     resolve(spawnClaude(args, unit, Boolean(contextIdOf(unit))));
   });
