@@ -255,3 +255,17 @@ func TestOriginalDestinationRejectsNonTCPConnections(t *testing.T) {
 		t.Fatal("a non-TCP connection must not silently produce a destination")
 	}
 }
+
+// isSelfConnection is the guard against the self-connection loop found on
+// CI: some kernels return a plain, non-redirected connection's own local
+// address from SO_ORIGINAL_DST instead of erroring, which would otherwise
+// have handle() dial itself, get re-accepted, and dial itself again without
+// bound until the process runs out of OS threads.
+func TestIsSelfConnectionDetectsTheProxysOwnAddress(t *testing.T) {
+	if !isSelfConnection("127.0.0.1:15001", "127.0.0.1:15001") {
+		t.Fatal("a destination equal to the listener's own address must be detected as a self-connection")
+	}
+	if isSelfConnection("192.0.2.5:443", "127.0.0.1:15001") {
+		t.Fatal("a genuinely different destination must not be flagged as a self-connection")
+	}
+}

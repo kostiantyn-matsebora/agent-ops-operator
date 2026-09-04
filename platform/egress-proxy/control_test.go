@@ -27,9 +27,9 @@ func managerSide(t *testing.T, unit string) (net.Conn, chan string) {
 			got <- req.URL.Path
 			resp := &http.Response{
 				StatusCode: 200, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
-				Request: req,
-				Header:  http.Header{"Content-Type": []string{"application/json"}},
-				Body:    io.NopCloser(strings.NewReader(unit)),
+				Request:       req,
+				Header:        http.Header{"Content-Type": []string{"application/json"}},
+				Body:          io.NopCloser(strings.NewReader(unit)),
 				ContentLength: int64(len(unit)),
 			}
 			_ = resp.Write(srv)
