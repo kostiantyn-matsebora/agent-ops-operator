@@ -345,7 +345,7 @@ async function runCopilot(unit) {
   const id = contextIdOf(unit);
   console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${id ? ' continue=' + sanitizeLog(id) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
   console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
-  console.log(`[runtime] copilot available=${grant.available.length ? grant.available.join(',') : '(none)'}${grant.shell ? ` shell=${grant.shell.all ? 'any' : grant.shell.prefixes.map((x) => `"${x} *"`).join('|')}` : ''}`);
+  console.log(`[runtime] copilot available=${sanitizeLog(grant.available.length ? grant.available.join(',') : '(none)')}${grant.shell ? ` shell=${grant.shell.all ? 'any' : sanitizeLog(grant.shell.prefixes.map((x) => `"${x} *"`).join('|'))}` : ''}`);
   for (const u of grant.unmapped) console.log(`[runtime] UNMAPPED pattern withheld: ${sanitizeLog(u)} — no Copilot equivalent, granting nothing`);
   for (const r of grant.refused) console.log(`[runtime] REFUSED per-server wildcard: ${sanitizeLog(r)} — Copilot admits mcp:* or an exact name, and mcp:* would grant every bound server`);
   for (const f of mcp.failed) console.log(`[runtime] MCP server "${f.name}" not registered: ${f.reason}`);
