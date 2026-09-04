@@ -91,6 +91,11 @@ func TestDomainFromConfigEntryMessage(t *testing.T) {
 	cases := map[string]string{
 		// The live-captured shape (title reduced to a placeholder — publication.md).
 		"Error setting up entry someone@example.com for tuya": "tuya",
+		// The domain capture is bounded by a word boundary, not end-of-string —
+		// trailing text after it (a clause HA did not append in the live
+		// capture, but might in a future wording) must not silently defeat the
+		// whole match.
+		"Error setting up entry someone@example.com for tuya, giving up": "tuya",
 		"Setup failed for 'zwave_js': timeout talking to the stick":                                "zwave_js",
 		"Config entry 'Kitchen Hue Bridge' for hue integration not ready yet: connection refused":   "hue",
 		"Config entry 'Garage' for esphome could not authenticate: invalid password":                "esphome",

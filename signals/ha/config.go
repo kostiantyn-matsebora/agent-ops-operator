@@ -149,13 +149,17 @@ const configEntriesLogger = "homeassistant.config_entries"
 // configEntryDomainPatterns extract the real Home Assistant domain from a
 // homeassistant.config_entries message, one per format string that logger
 // actually uses (the same shapes the shipped default rule already matches by
-// keyword). Anchored to each format string's literal structure — never a bare
-// "for (\w+)" — so free text elsewhere in a message cannot be misattributed as
-// a domain, and each capture is restricted to a valid Python identifier shape
-// (HA domains are lowercase snake_case module names).
+// keyword). Anchored to each format string's LEADING literal structure —
+// never a bare "for (\w+)" — so free text elsewhere in a message cannot be
+// misattributed as a domain, and each capture is restricted to a valid Python
+// identifier shape (HA domains are lowercase snake_case module names). The
+// domain capture itself is bounded by a word boundary, never end-of-string:
+// anchoring on `$` would silently fail to match — falling back to the logger
+// name with nothing logged — the moment any wording HA appends after the
+// domain differs from what was observed live.
 var configEntryDomainPatterns = []*regexp.Regexp{
 	// "Error setting up entry <title> for <domain>"
-	regexp.MustCompile(`(?s)^Error setting up entry .+ for ([a-z][a-z0-9_]*)$`),
+	regexp.MustCompile(`(?s)^Error setting up entry .+ for ([a-z][a-z0-9_]*)\b`),
 	// "Setup failed for '<domain>': <error>"
 	regexp.MustCompile(`(?s)^Setup failed for '([a-z][a-z0-9_]*)':`),
 	// "Config entry '<title>' for <domain> integration not ready yet: ..."
