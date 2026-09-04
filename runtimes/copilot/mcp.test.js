@@ -61,8 +61,41 @@ test('a malformed server is reported, not registered', () => {
   assert.deepStrictEqual(failed.map((f) => f.name).sort(), ['a', 'b', 'c']);
 });
 
+test('a parsed document with no mcpServers key at all is an empty record, not a throw', () => {
+  // Every other translateServers test supplies a populated mcpServers object;
+  // the `(parsed && parsed.mcpServers) || {}` fallback had never fired.
+  assert.deepStrictEqual(translateServers({}, {}), { servers: {}, failed: [] });
+  assert.deepStrictEqual(translateServers(null, {}), { servers: {}, failed: [] });
+});
+
+test('an unresolvable placeholder in a STDIO server env fails that server, naming the variable', () => {
+  // The earlier missing-placeholder test only exercised the http headers arm;
+  // the stdio env arm's own `envMap.missing` branch had never been true.
+  const { servers, failed } = translateServers({ mcpServers: {
+    ok: { command: 'c' },
+    bad: { command: 'c', env: { KEY: '${MISSING}' } },
+  } }, {});
+  assert.deepStrictEqual(Object.keys(servers), ['ok']);
+  assert.strictEqual(failed.length, 1);
+  assert.strictEqual(failed[0].name, 'bad');
+  assert.match(failed[0].reason, /env/);
+  assert.match(failed[0].reason, /MISSING/);
+});
+
 test('an absent file is an empty record', () => {
   assert.deepStrictEqual(loadMcpServers('/nonexistent/agentops/mcp.json', {}), { servers: {}, failed: [] });
+});
+
+test('a read failure that is NOT ENOENT is one reported failure, distinct from an absent file', () => {
+  // The absent-file test only exercises the ENOENT arm of the catch; a
+  // directory where a file is expected fails readFileSync with EISDIR, which
+  // is the real-world shape of "the file exists but cannot be read".
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentops-mcp-'));
+  const got = loadMcpServers(dir, {});
+  assert.deepStrictEqual(got.servers, {});
+  assert.strictEqual(got.failed.length, 1);
+  assert.strictEqual(got.failed[0].name, dir);
+  assert.match(got.failed[0].reason, /^read: /);
 });
 
 test('an unparseable file is one reported failure', () => {

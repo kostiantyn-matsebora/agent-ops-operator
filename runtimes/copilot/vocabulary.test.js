@@ -102,6 +102,24 @@ test('parseMcpPattern refuses a pattern with no __ separator at all', () => {
   assert.strictEqual(parseMcpPattern('mcp__onlyone'), null);
 });
 
+test('parseShellPattern strips a bare trailing * with no colon or space before it', () => {
+  // Every other pattern test ends the prefix in ":*" or " *"; this is the third
+  // shape parseShellPattern's own else-if branch handles and nothing exercised.
+  assert.strictEqual(parseShellPattern('Bash(kubectl*)'), 'kubectl');
+});
+
+test('translate() with no patterns argument grants nothing, exercising the `patterns || []` fallback', () => {
+  const g = translate();
+  assert.deepStrictEqual(g.available, []);
+  assert.deepStrictEqual(g.unmapped, []);
+});
+
+test('a blank or whitespace-only pattern is skipped, never reported as unmapped', () => {
+  const g = translate(['', '   ', 'Read']);
+  assert.deepStrictEqual(g.available, ['builtin:view']);
+  assert.deepStrictEqual(g.unmapped, []);
+});
+
 // ---- sub-command matching ----------------------------------------------------
 
 test('a bare grant approves anything', () => {
@@ -174,6 +192,15 @@ test('a request kind no pattern can grant is denied', () => {
   for (const kind of ['url', 'memory', 'custom-tool', 'hook', 'factory', undefined]) {
     assert.strictEqual(decide(g, { kind }).allow, false, String(kind));
   }
+});
+
+test('a shell denial with no fullCommandText falls back to an empty string in the message', () => {
+  // Every other shell-denial test passes a real fullCommandText, so
+  // `request.fullCommandText || ''` inside the message template has never
+  // taken its fallback branch.
+  const d = decide(translate([]), { kind: 'shell' });
+  assert.strictEqual(d.allow, false);
+  assert.match(d.why, /no shell grant matches: $/);
 });
 
 test('nothing granted denies everything', () => {

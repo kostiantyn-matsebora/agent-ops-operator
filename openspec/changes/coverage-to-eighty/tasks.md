@@ -229,11 +229,29 @@
 
 ## 13. runtime-copilot (72.9% → 80%)
 
-- [ ] 13.1 In `runtimes/copilot/`, add `node --test` cases closing the gap
+- [x] 13.1 In `runtimes/copilot/`, add `node --test` cases closing the gap
   (~85 of 228 uncovered lines) — `vocabulary.js`'s permission-mapping
   branches and `continuity.js`'s resume ladder are the likely candidates.
   Verify: `node --test --experimental-test-coverage` reports ≥80%.
-- [ ] 13.2 Record the local before/after total in this task.
+
+  Added 19 tests across the four existing `*.test.js` files (continuity,
+  vocabulary, tools, mcp) closing specific previously-unexercised branches:
+  the EACCES-on-listing recovery arm in `stateDirPresent`, the real default
+  sleep timer, `parseShellPattern`'s bare-trailing-`*` arm, blank/whitespace
+  pattern entries, single-quoted YAML flow-list items, leading/embedded
+  blank lines in frontmatter parsing, `resolveBin`'s default-parameter
+  branches, `translateServers`'s no-`mcpServers`-key case, an unresolved
+  placeholder inside a stdio server's `env`, and `loadMcpServers`'s EISDIR
+  case. `runtime.js` itself is never `require()`'d by the suite by design
+  (top-level side effects on load: env checks, `process.exit`, a fetch
+  loop) — it is NOT covered by this number, matching runtime-claude's
+  identical, accepted caveat below. No production code changed; no dead
+  code found.
+- [x] 13.2 Record the local before/after total in this task.
+
+  Before: 72.9% (SonarCloud, composite). After: **100% line / 100% branch /
+  100% funcs** on all four SDK-free modules the suite loads (91/91 tests
+  pass), `node --test --experimental-test-coverage`.
 
 ## 14. signal-alertmanager (73.7% → 80%)
 
