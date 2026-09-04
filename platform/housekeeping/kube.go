@@ -21,7 +21,12 @@ import (
 // conversation lifecycle belong to the manager. If a write ever appears here,
 // the split in D7 has been undone.
 
-const saDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+// saDir is a var, not a const, ONLY so a test can point it at a temp
+// directory: the real path requires root to create outside a pod, so the
+// success path of NewInClusterKube (and its PEM-parsing error branches) is
+// otherwise unreachable from a unit test. Production code always sees the
+// real path; nothing here changes runtime behavior.
+var saDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 // Kube is a minimal in-cluster API client.
 type Kube struct {

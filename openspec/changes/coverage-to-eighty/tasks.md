@@ -51,12 +51,26 @@
 
 ## 3. housekeeping (39.4% → 80%)
 
-- [ ] 3.1 In `platform/housekeeping/`, add tests closing the gap (~82 of 123
+- [x] 3.1 In `platform/housekeeping/`, add tests closing the gap (~82 of 123
   uncovered lines). The reclaim job's disk-scan and etcd-list stages
   (`invariants.md`'s "phase-blind listing") are the likely largest gaps —
   confirm from the coverage profile rather than assuming. Verify:
   `-coverpkg=./...` run reports ≥80% total.
-- [ ] 3.2 Record the local before/after total in this task.
+
+  Added `kube_test.go` (`NewInClusterKube`'s env/cert/PEM branches plus
+  success, `ListConversations` over a real `httptest.Server` including the
+  retired-`sessionId` dual-read fallback), `main_test.go` (env-parsing
+  helpers, `main()` itself via the reentrant-subprocess pattern), and
+  `report_test.go` (`Report.String()`'s branches, `Options.now()`'s injected
+  clock). One minimal production change: `kube.go`'s `saDir` changed from
+  `const` to `var` so a test can point it at a temp dir — the real
+  ServiceAccount path needs root to create outside a pod, so
+  `NewInClusterKube`'s success/PEM-error paths were otherwise unreachable.
+  No behavior change. No dead code found.
+- [x] 3.2 Record the local before/after total in this task.
+
+  Before: 39.4% (SonarCloud) / 41.7% local. After: **93.5%** local
+  (`-coverpkg=./... -coverprofile`, build/vet/gofmt clean, 3x stable).
 
 ## 4. scripts (53.7% → 80%, gate-exempt but still covered)
 
