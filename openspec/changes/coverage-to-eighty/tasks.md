@@ -216,12 +216,31 @@
 
 ## 10. runtime-ollama (69.5% → 80%)
 
-- [ ] 10.1 In `runtimes/ollama/`, add tests closing the gap (~87 of 252
+- [x] 10.1 In `runtimes/ollama/`, add tests closing the gap (~87 of 252
   uncovered lines) — this session's `sonar-ratings-baseline` work already
   added `repo_test.go` and `gitexec_test.go`; find the next-largest
   uncovered file from the profile rather than re-testing those. Verify:
   `-coverpkg=./...` run reports ≥80% total.
-- [ ] 10.2 Record the local before/after total in this task.
+
+  Added `work_test.go` (`Control.Poll`/`Report` over real `httptest.Server`
+  including retry-then-give-up), `repo_sync_test.go` (`Repo.Sync`'s
+  clone/fetch+reset/hard-reset against real local git repos, `cloneURL`'s
+  token rule, `env`'s SSH-command injection rule), `main_test.go` (`env`/
+  `envInt`/`logf`), `ollama_more_test.go` (`newHTTPClient`, unreachable-
+  endpoint/non-2xx/decode-failure branches of `Check`/`Chat`), and
+  `mcpclient_more_test.go` (`readMCPConfig`, a genuine MCP handshake over
+  `httptest.Server` exercising `Connect`/`ListTools`/a real tool call),
+  plus `builtin_more_test.go` covering the built-in tools' resolve/`.git`-
+  skip/binary-skip/truncation/permission-failure branches. No production
+  code changed. `main()`'s wiring/loop body (~63 statements) intentionally
+  left uncovered — an infinite poll loop with a real 1-minute floor, not
+  practical to unit-test without a testability-only refactor the rules
+  disallow. A handful of I/O-failure edge branches (simulated disk-full,
+  malformed-URL) left as diminishing-returns, not dead code.
+- [x] 10.2 Record the local before/after total in this task.
+
+  Before: 69.5% (SonarCloud) / 70.2% local. After: **86.3%** local
+  (`-coverpkg=./... -coverprofile`, build/vet/gofmt clean).
 
 ## 11. manager (69.6% → 80%)
 
