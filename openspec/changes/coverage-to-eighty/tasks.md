@@ -135,11 +135,28 @@
 
 ## 9. context-sync (67.1% → 80%)
 
-- [ ] 9.1 In `platform/context-sync/`, add tests closing the gap (~56 of 142
+- [x] 9.1 In `platform/context-sync/`, add tests closing the gap (~56 of 142
   uncovered lines) — the generation/symlink-swap and quiesced-vs-best-effort
   copy paths are the likely candidates. Verify: `-coverpkg=./...` run reports
   ≥80% total.
-- [ ] 9.2 Record the local before/after total in this task.
+
+  Added cases across `main_test.go`, `store_test.go`, `manifest_test.go` and
+  `proxy_test.go`: `report`/`restore`/`tick`/`checkpoint`'s failure-report
+  branches, `Current`/`Meta`/`Restore`'s corrupt- and missing-metadata
+  handling, `Checkpoint`'s root-creation and path-collision failures, the
+  vanished-source-file skip, `copyFile`/`writeMeta`/`swapCurrent`/`prune`'s
+  permission-denied branches, and the proxy's unreachable-upstream 502. No
+  production code changed. Two branches left unexcluded and untested:
+  `report`'s `json.Marshal` error (the struct holds only strings/bools/an
+  int64, so it cannot fail to marshal — effectively unreachable) and the
+  copy loop's inner `MkdirAll` failure inside `Checkpoint` (structurally
+  very hard to hit deterministically given the monotonic generation
+  numbering). `main()` itself (pure orchestration) also left untested per
+  the non-goals.
+- [x] 9.2 Record the local before/after total in this task.
+
+  Before: 67.1% (SonarCloud) / 68.6% local. After: **86.4%** local
+  (`-coverpkg=./... -coverprofile`, build/vet clean).
 
 ## 10. runtime-ollama (69.5% → 80%)
 
