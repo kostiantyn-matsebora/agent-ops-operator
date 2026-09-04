@@ -101,7 +101,9 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	// ordinary sends are never suppressed
 	q.EnqueueMessage(ctx, ch, &thread, Notice("same words"))
 	q.EnqueueMessage(ctx, ch, &thread, Notice("same words"))
-	if q.Claim("slack") == nil || q.Claim("slack") == nil {
+	firstNotice := q.Claim("slack")
+	secondNotice := q.Claim("slack")
+	if firstNotice == nil || secondNotice == nil {
 		t.Fatal("repeated notices must both be delivered")
 	}
 }

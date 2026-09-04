@@ -51,8 +51,8 @@ type Registry struct {
 // file goes under the working directory instead.
 func StartRegistry(ctx context.Context, c *Cluster) (*Registry, error) {
 	r := &Registry{User: "e2e", Password: fmt.Sprintf("pw-%d", os.Getpid())}
-	if out, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", registryName).Output(); err == nil && strings.TrimSpace(string(out)) == "true" {
-		_ = exec.Command("docker", "rm", "-f", registryName).Run()
+	if out, err := exec.Command(lookPath("docker"), "inspect", "-f", "{{.State.Running}}", registryName).Output(); err == nil && strings.TrimSpace(string(out)) == "true" {
+		_ = exec.Command(lookPath("docker"), "rm", "-f", registryName).Run()
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(r.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -65,7 +65,7 @@ func StartRegistry(ctx context.Context, c *Cluster) (*Registry, error) {
 	if err := os.WriteFile(filepath.Join(dir, "htpasswd"), []byte(r.User+":"+string(hash)+"\n"), 0o644); err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "docker", "run", "-d", "--name", registryName,
+	cmd := exec.CommandContext(ctx, lookPath("docker"), "run", "-d", "--name", registryName,
 		"--network", "k3d-"+c.Name,
 		"-p", "127.0.0.1:0:5000",
 		"-v", dir+":/auth:ro",
@@ -76,7 +76,7 @@ func StartRegistry(ctx context.Context, c *Cluster) (*Registry, error) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("starting the registry: %v\n%s", err, out)
 	}
-	out, err := exec.Command("docker", "port", registryName, "5000/tcp").Output()
+	out, err := exec.Command(lookPath("docker"), "port", registryName, "5000/tcp").Output()
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func StartRegistry(ctx context.Context, c *Cluster) (*Registry, error) {
 }
 
 // Stop removes the container.
-func (r *Registry) Stop() { _ = exec.Command("docker", "rm", "-f", registryName).Run() }
+func (r *Registry) Stop() { _ = exec.Command(lookPath("docker"), "rm", "-f", registryName).Run() }
 
 // Push tags a local image into the registry and pushes it with the throwaway
 // credential — through a private docker config dir, so no credential helper
@@ -109,7 +109,7 @@ func (r *Registry) Push(ctx context.Context, localTag, name string) (string, err
 	// credentials and makes every later pod that lacks them re-pull it — so
 	// pushing the imported stub as-is poisoned that stub for the rest of the
 	// run: identical id, and the re-pull went to Docker Hub.
-	build := exec.CommandContext(ctx, "docker", "build", "-t", hostRef, "--label", "agentops.dev/e2e-pulled=true", "-")
+	build := exec.CommandContext(ctx, lookPath("docker"), "build", "-t", hostRef, "--label", "agentops.dev/e2e-pulled=true", "-")
 	build.Stdin = strings.NewReader("FROM " + localTag + "\nLABEL agentops.dev/e2e-pulled=true\n")
 	if out, err := build.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("docker build (derived): %v\n%s", err, out)
@@ -117,8 +117,8 @@ func (r *Registry) Push(ctx context.Context, localTag, name string) (string, err
 	// A private config dir also drops the CURRENT CONTEXT — on a desktop
 	// daemon that is how the socket is found — so the daemon's host is
 	// resolved from the user's context and handed over explicitly.
-	push := exec.CommandContext(ctx, "docker", "--config", cfgDir, "push", hostRef)
-	if host, err := exec.Command("docker", "context", "inspect", "-f", `{{(index .Endpoints "docker").Host}}`).Output(); err == nil && strings.TrimSpace(string(host)) != "" {
+	push := exec.CommandContext(ctx, lookPath("docker"), "--config", cfgDir, "push", hostRef)
+	if host, err := exec.Command(lookPath("docker"), "context", "inspect", "-f", `{{(index .Endpoints "docker").Host}}`).Output(); err == nil && strings.TrimSpace(string(host)) != "" {
 		push.Env = append(os.Environ(), "DOCKER_HOST="+strings.TrimSpace(string(host)))
 	}
 	if out, err := push.CombinedOutput(); err != nil {

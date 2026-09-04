@@ -48,9 +48,9 @@ type Cluster struct {
 // differently under test than in a typical install is false confidence.
 func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, error) {
 	c := &Cluster{Name: name}
-	exists := exec.Command("k3d", "cluster", "get", name).Run() == nil
+	exists := exec.Command(lookPath("k3d"), "cluster", "get", name).Run() == nil
 	if exists && !reuse {
-		if out, err := exec.CommandContext(ctx, "k3d", "cluster", "delete", name).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(ctx, lookPath("k3d"), "cluster", "delete", name).CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("deleting the stale cluster: %v\n%s", err, out)
 		}
 		exists = false
@@ -86,13 +86,13 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 			"--wait", "--timeout", "180s",
 			"--no-lb",
 		}
-		if out, err := exec.CommandContext(ctx, "k3d", args...).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(ctx, lookPath("k3d"), args...).CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("k3d cluster create: %v\n%s", err, out)
 		}
 	} else {
 		c.reused = true
 	}
-	kc, err := exec.CommandContext(ctx, "k3d", "kubeconfig", "get", name).Output()
+	kc, err := exec.CommandContext(ctx, lookPath("k3d"), "kubeconfig", "get", name).Output()
 	if err != nil {
 		return nil, fmt.Errorf("k3d kubeconfig get: %w", err)
 	}
@@ -125,7 +125,7 @@ func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, erro
 // cluster's whole lifetime, so it is Delete's to remove rather than
 // EnsureCluster's.
 func (c *Cluster) Delete() {
-	_ = exec.Command("k3d", "cluster", "delete", c.Name).Run()
+	_ = exec.Command(lookPath("k3d"), "cluster", "delete", c.Name).Run()
 	if c.Kubeconfig != "" {
 		_ = os.Remove(c.Kubeconfig)
 	}
@@ -155,7 +155,7 @@ func (c *Cluster) Import(ctx context.Context, images ...string) error {
 	for _, image := range images {
 		var last error
 		for attempt := 0; attempt < 3; attempt++ {
-			cmd := exec.CommandContext(ctx, "k3d", "image", "import", "-c", c.Name, "-m", "direct", image)
+			cmd := exec.CommandContext(ctx, lookPath("k3d"), "image", "import", "-c", c.Name, "-m", "direct", image)
 			out, err := cmd.CombinedOutput()
 			if err == nil {
 				last = nil

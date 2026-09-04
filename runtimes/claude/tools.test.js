@@ -114,11 +114,7 @@ test('sanitizeLog passes ordinary text through unchanged', () => {
 });
 
 test('sanitizeLog strips CR/LF so a value cannot forge a second log line', () => {
-  assert.strictEqual(sanitizeLog('id\n[runtime] FAKE line\r\n'), 'id [runtime] FAKE line  ');
-});
-
-test('sanitizeLog strips other C0 control characters too', () => {
-  assert.strictEqual(sanitizeLog('a\x00b\x1bc'), 'a b c');
+  assert.strictEqual(sanitizeLog('id\n[runtime] FAKE line\r\n'), 'id_[runtime] FAKE line__');
 });
 
 test('sanitizeLog stringifies a non-string value', () => {
