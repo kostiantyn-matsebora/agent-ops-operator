@@ -16,6 +16,18 @@ func scanAll(t *testing.T, live string) Manifest {
 	return m
 }
 
+// skipIfRoot skips a permission-denial test that relies on chmod'd mode
+// bits: the kernel skips the permission check entirely for uid 0, so a
+// root-run container (the default for an unprivileged Docker image, as CI
+// runs) would see the write/create succeed and the test fail for a reason
+// that has nothing to do with the behavior under test.
+func skipIfRoot(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits are not enforced, so this denial cannot occur")
+	}
+}
+
 func TestCheckpointAndRestoreRoundTrip(t *testing.T) {
 	live, root := t.TempDir(), t.TempDir()
 	write(t, live, "projects/a.jsonl", "hello")
@@ -302,6 +314,7 @@ func TestGenerationsOnMissingRootIsEmpty(t *testing.T) {
 // Checkpoint's own os.MkdirAll(s.Root) failure: a Root whose parent forbids
 // creating it must fail the checkpoint loudly.
 func TestCheckpointFailsWhenRootCannotBeCreated(t *testing.T) {
+	skipIfRoot(t)
 	live := t.TempDir()
 	write(t, live, "a.jsonl", "x")
 	parent := t.TempDir()
@@ -370,6 +383,7 @@ func TestCopyFileFailsWhenDestinationDirMissing(t *testing.T) {
 // chmod it ahead of time would itself count as a generation and shift the
 // number Checkpoint actually targets.
 func TestWriteMetaFailsWhenGenerationDirIsReadOnly(t *testing.T) {
+	skipIfRoot(t)
 	gen := t.TempDir()
 	if err := os.Chmod(gen, 0o555); err != nil {
 		t.Fatal(err)
@@ -401,6 +415,7 @@ func TestSwapCurrentFailsWhenTmpPathIsBlocked(t *testing.T) {
 // permissions block deleting its own contents must surface the error rather
 // than leave a torn, half-removed generation unreported.
 func TestPruneReturnsErrorWhenRemovalFails(t *testing.T) {
+	skipIfRoot(t)
 	root := t.TempDir()
 	for _, n := range []string{"gen-1", "gen-2"} {
 		if err := os.MkdirAll(filepath.Join(root, n), 0o755); err != nil {

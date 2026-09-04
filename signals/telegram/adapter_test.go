@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -363,17 +364,43 @@ func TestMainStartsServesAndShutsDownOnSIGTERM(t *testing.T) {
 		main()
 		return
 	}
+	// Reserve a specific port here, in the parent, rather than letting the
+	// child bind an ephemeral one -- the parent needs to know the address to
+	// poll it for readiness.
+	reserve, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := reserve.Addr().String()
+	reserve.Close()
+
 	cmd := exec.Command(os.Args[0], "-test.run=TestMainStartsServesAndShutsDownOnSIGTERM")
 	cmd.Env = append(os.Environ(), "BE_MAIN=1",
-		"MANAGER_URL=http://127.0.0.1:1", "ADAPTER_TOKEN=tok", "LISTEN_ADDR=127.0.0.1:0")
+		"MANAGER_URL=http://127.0.0.1:1", "ADAPTER_TOKEN=tok", "LISTEN_ADDR="+addr)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	// Give the server a moment to bind before asking it to stop.
-	time.Sleep(200 * time.Millisecond)
+
+	// Poll /healthz until it actually answers, rather than sleeping a fixed
+	// duration and hoping the server bound in time.
+	healthzURL := "http://" + addr + "/healthz"
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Get(healthzURL)
+		if err == nil {
+			resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatalf("main never became ready on %s; output: %s", addr, out.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
