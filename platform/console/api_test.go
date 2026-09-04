@@ -365,6 +365,164 @@ func TestInventoryCarriesConditionsVerbatim(t *testing.T) {
 	}
 }
 
+// metricsBackend falls back to the process-wide client when the served
+// Channel names no metrics URL, builds one from the config when it does, and
+// reuses that client across calls rather than rebuilding it every time --
+// only a CHANGED url should replace it.
+func TestMetricsBackendPrefersTheChannelConfigAndCachesIt(t *testing.T) {
+	f := newFakeManager(t, ChannelInfo{Name: "console"})
+	adapter, tr, cache := consoleUnderTest(t, f)
+	adapter.refreshChannels(context.Background())
+	fallback := NewMetricsClient("http://fallback:9090")
+	api := NewAPI(APIDeps{
+		Cache: cache, Transcripts: tr, Adapter: adapter,
+		Activity: NewActivityWindow(adapter.mgr, 500),
+		Manager:  adapter.mgr, Metrics: fallback,
+		Config: &Config{Namespace: "agent-ops", AdapterName: "console", UIToken: "tok", WriteEnabled: true, SignalSourceName: "console"},
+	})
+	if got := api.metricsBackend(); got != fallback {
+		t.Fatalf("a console with no configured metrics URL must fall back to the process client: %+v", got)
+	}
+
+	f.channels = []ChannelInfo{{Name: "console", Config: json.RawMessage(`{"metricsUrl":"http://from-config:9090"}`)}}
+	adapter.refreshChannels(context.Background())
+	first := api.metricsBackend()
+	if first == nil || first == fallback || first.BaseURL != "http://from-config:9090" {
+		t.Fatalf("a configured metrics URL must build its own client: %+v", first)
+	}
+	if second := api.metricsBackend(); second != first {
+		t.Fatalf("an unchanged URL must reuse the same client, got a new one: %+v vs %+v", first, second)
+	}
+
+	f.channels = []ChannelInfo{{Name: "console", Config: json.RawMessage(`{"metricsUrl":"http://changed:9090"}`)}}
+	adapter.refreshChannels(context.Background())
+	if third := api.metricsBackend(); third == first || third.BaseURL != "http://changed:9090" {
+		t.Fatalf("a changed URL must rebuild the client: %+v", third)
+	}
+}
+
+// inboundRefs is the detail view's "what points at this" panel. Every kind it
+// knows how to answer for gets one pipeline (or one profile/adapter) that
+// names it, so a regression narrowing the switch to fewer kinds shows up as a
+// missing row rather than as silently-empty everywhere.
+func TestInboundRefsFindsEveryKindOfPointer(t *testing.T) {
+	pipeline := obj("pipelines", "p", "1", `{
+		"profileRef":{"name":"prof"},
+		"signalSourceRefs":[{"name":"src"}],
+		"channelRefs":[{"name":"chan"}],
+		"toolsets":{"refs":[{"name":"ts"}]},
+		"mcpConfigs":{"refs":[{"name":"mc"}]}
+	}`, "{}")
+	profile := obj("agentprofiles", "prof", "1", `{"runtimeRef":{"name":"rt"}}`, "{}")
+	channel := obj("channels", "chan", "1", `{"adapter":"impl"}`, "{}")
+	signalAdapter := obj("signaladapters", "sa", "1", `{"servedBy":{"name":"impl"}}`, "{}")
+	// Every name the pipeline (or a served object) points at must also exist
+	// as its own object, or handleDetail 404s before inboundRefs ever runs.
+	targets := []*Object{
+		obj("signalsources", "src", "1", "{}", "{}"),
+		obj("mcptoolsets", "ts", "1", "{}", "{}"),
+		obj("mcpconfigs", "mc", "1", "{}", "{}"),
+		obj("channeladapters", "impl", "1", "{}", "{}"),
+		obj("agentruntimes", "rt", "1", "{}", "{}"),
+	}
+	api, _, _ := apiUnderTest(t, "tok", append([]*Object{pipeline, profile, channel, signalAdapter}, targets...)...)
+	h := api.Handler(http.NotFoundHandler())
+
+	usedBy := func(kind, name string) []InboundRef {
+		t.Helper()
+		rec := authed(t, h, "GET", "/api/config/"+kind+"/"+name, "")
+		var d Detail
+		if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+			t.Fatalf("%s/%s: %v (%s)", kind, name, err, rec.Body.String())
+		}
+		return d.UsedBy
+	}
+	has := func(refs []InboundRef, kind, name, field string) bool {
+		for _, r := range refs {
+			if r.Kind == kind && r.Name == name && r.Field == field {
+				return true
+			}
+		}
+		return false
+	}
+
+	if refs := usedBy("agentprofiles", "prof"); !has(refs, "pipelines", "p", "profileRef") {
+		t.Fatalf("agentprofiles: %+v", refs)
+	}
+	if refs := usedBy("signalsources", "src"); !has(refs, "pipelines", "p", "signalSourceRefs") {
+		t.Fatalf("signalsources: %+v", refs)
+	}
+	if refs := usedBy("channels", "chan"); !has(refs, "pipelines", "p", "channelRefs") {
+		t.Fatalf("channels: %+v", refs)
+	}
+	if refs := usedBy("mcptoolsets", "ts"); !has(refs, "pipelines", "p", "toolsets.refs") {
+		t.Fatalf("mcptoolsets: %+v", refs)
+	}
+	if refs := usedBy("mcpconfigs", "mc"); !has(refs, "pipelines", "p", "mcpConfigs.refs") {
+		t.Fatalf("mcpconfigs: %+v", refs)
+	}
+	if refs := usedBy("channeladapters", "impl"); !has(refs, "channels", "chan", "adapter") ||
+		!has(refs, "signaladapters", "sa", "servedBy") {
+		t.Fatalf("channeladapters: %+v", refs)
+	}
+	if refs := usedBy("agentruntimes", "rt"); !has(refs, "agentprofiles", "prof", "runtimeRef") {
+		t.Fatalf("agentruntimes: %+v", refs)
+	}
+}
+
+// kindColumns projects one CR into the list view's per-kind columns. Every
+// switch case is its own display contract, so each gets an object whose spec
+// actually exercises the fields that case reads.
+func TestInventoryColumnsCoverEveryKind(t *testing.T) {
+	pipeline := obj("pipelines", "p", "1", `{
+		"profileRef":{"name":"prof"},
+		"signalSourceRefs":[{"name":"src"}],
+		"channelRefs":[{"name":"chan"}],
+		"toolsets":{"mode":"merge","refs":[{"name":"ts"}]},
+		"mcpConfigs":{"refs":[{"name":"mc"}]}
+	}`, "{}")
+	profile := obj("agentprofiles", "prof", "1", `{"runtimeRef":{"name":"rt"},"repository":{"url":"https://example.com/org/repo.git","ref":"main"}}`, "{}")
+	channelAdapter := obj("channeladapters", "impl", "1", `{"image":"agentops-adapter-impl:1.0","servedBy":{"kind":"ChannelAdapter","name":"impl"}}`, "{}")
+	runtime := obj("agentruntimes", "rt", "1", `{"image":"agentops-runtime-claude:1.0"}`, "{}")
+	toolset := obj("mcptoolsets", "ts", "1", `{"tools":["Read","Bash(git:*)"]}`, "{}")
+	mcpConfig := obj("mcpconfigs", "mc", "1", `{"servers":{"z-server":{},"a-server":{}}}`, "{}")
+	convo := obj("conversations", "c", "1", `{"profileRef":{"name":"prof"}}`, `{"phase":"Working"}`)
+	api, _, _ := apiUnderTest(t, "tok", pipeline, profile, channelAdapter, runtime, toolset, mcpConfig, convo)
+	h := api.Handler(http.NotFoundHandler())
+
+	columns := func(kind string) map[string]string {
+		t.Helper()
+		rec := authed(t, h, "GET", "/api/config/"+kind, "")
+		var rows []InventoryRow
+		if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil || len(rows) != 1 {
+			t.Fatalf("%s: %v (%s)", kind, err, rec.Body.String())
+		}
+		return rows[0].Columns
+	}
+
+	if c := columns("pipelines"); c["toolsMode"] != "merge" || c["toolsets"] != "ts" || c["mcpConfigs"] != "mc" || c["sources"] != "src" || c["channels"] != "chan" {
+		t.Fatalf("pipelines columns: %+v", c)
+	}
+	if c := columns("agentprofiles"); c["runtime"] != "rt" || c["repository"] != "https://example.com/org/repo.git" {
+		t.Fatalf("agentprofiles columns: %+v", c)
+	}
+	if c := columns("channeladapters"); c["image"] == "" || c["servedBy"] != "ChannelAdapter/impl" {
+		t.Fatalf("channeladapters columns: %+v", c)
+	}
+	if c := columns("agentruntimes"); c["image"] == "" {
+		t.Fatalf("agentruntimes columns: %+v", c)
+	}
+	if c := columns("mcptoolsets"); c["tools"] != "Read, Bash(git:*)" {
+		t.Fatalf("mcptoolsets columns: %+v", c)
+	}
+	if c := columns("mcpconfigs"); c["servers"] != "a-server, z-server" {
+		t.Fatalf("mcpconfigs columns: %+v", c)
+	}
+	if c := columns("conversations"); c["phase"] != "Working" || c["profile"] != "prof" {
+		t.Fatalf("conversations columns: %+v", c)
+	}
+}
+
 func TestDetailReturnsOpaqueConfigUntouched(t *testing.T) {
 	ch := obj("channels", "tg", "1", `{"adapter":"telegram","config":{"chatId":"-100","approvers":[7]}}`, "{}")
 	api, _, _ := apiUnderTest(t, "tok", ch)

@@ -218,3 +218,38 @@ func decodeSession(t *testing.T, rec *httptest.ResponseRecorder) sessionView {
 	}
 	return s
 }
+
+// authorized answers the same verdict as admit, without the identity, for
+// the session endpoint and anything else that only needs a bool.
+func TestAuthorizedAnswersTheSameVerdictAsAdmit(t *testing.T) {
+	api, _ := authAPI(t, "tok", true, "")
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	if api.authorized(req) {
+		t.Fatal("a request with no credential must not be authorized")
+	}
+	req.Header.Set("Authorization", "Bearer tok")
+	if !api.authorized(req) {
+		t.Fatal("a request bearing the correct token must be authorized")
+	}
+}
+
+// stampRead is silent, best-effort bookkeeping: neither of its early returns
+// (no reader resolvable, or the named conversation is gone) has an observable
+// side effect to assert beyond "does not panic" -- called directly since
+// obj==nil cannot be reached through the HTTP handler, which already 404s on
+// a missing conversation before stampRead is ever called.
+func TestStampReadIsSilentWhenThereIsNothingToStamp(t *testing.T) {
+	api, _ := authAPI(t, "tok", true, "", joinedConversation("c"))
+
+	// No identity resolvable at all -- ReaderKey("") is "".
+	api.stampRead(httptest.NewRequest("GET", "/x", nil), "c")
+
+	// An identity resolves to a real reader key, but the named conversation
+	// does not exist. A salt must be projected for ReaderKey to return
+	// anything at all -- set directly, since this test does not exercise the
+	// AGENTOPS_CRED_<CHANNEL>_readerSalt projection path itself.
+	api.adapter.readerSalt = "test-salt"
+	req := httptest.NewRequest("GET", "/x", nil)
+	ctx := context.WithValue(req.Context(), identityKey{}, "alice@example.com")
+	api.stampRead(req.WithContext(ctx), "does-not-exist")
+}

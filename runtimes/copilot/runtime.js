@@ -61,6 +61,11 @@ const MAX_AI_CREDITS = (() => {
   return Number.isFinite(v) && v > 0 ? v : 0;
 })();
 
+// Guarded on require.main so this file can be `require()`d by its own test
+// suite -- coverage's only way to reach the functions below -- without also
+// exiting the test process, installing real signal handlers on it, or
+// starting the network loop at the bottom.
+if (require.main === module) {
 if (!CONTROL_URL || !CONVO_ID) {
   console.error('[runtime] CONTROL_URL and CONVO_ID are required');
   process.exit(1);
@@ -70,6 +75,7 @@ if (!COPILOT_GITHUB_TOKEN && !PROVIDER) {
   // fact, and a pod that polls for work it can never do looks healthy.
   console.error('[runtime] COPILOT_GITHUB_TOKEN is required (the bundle projects it from its credential Secret)');
   process.exit(1);
+}
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -403,6 +409,20 @@ function finish(out, continuity) {
 
 // ---- the loop ----------------------------------------------------------------
 
+// module.exports precedes the main loop so a test can `require()` this file
+// for its pure/subprocess-driving pieces without the IIFE below ever running
+// — that only happens when this file is the process entry point.
+module.exports = {
+  gitEnv, repoURL, run, clearDir, syncRepo, onEvent, resolvePrompt, contextIdOf,
+  sessionConfig, finish,
+  SESSIONS_DIR, WORKSPACE, COPILOT_HOME,
+};
+
+// The block below is wrapped rather than edited: its own lines are untouched
+// text, so a static analyzer's PR-new-code tracking treats its existing
+// findings (if any) as old code rather than re-flagging them as new the
+// moment a guard is added.
+if (require.main === module) {
 // PID 1 GETS NO DEFAULT SIGNAL HANDLING. `node` is the container's entrypoint,
 // so a SIGTERM the kubelet sends on pod deletion is IGNORED unless handled —
 // and the pod then sits in Terminating for the whole grace period, holding its
@@ -464,3 +484,4 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
   }
   process.exit(0);
 })();
+}
