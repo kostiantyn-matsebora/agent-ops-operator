@@ -20,6 +20,8 @@ can reply to.
 [![Chart](https://img.shields.io/github/v/tag/kostiantyn-matsebora/agent-ops-operator?filter=chart-v*&label=chart)](docs/CHANGELOG.md)
 [![CI](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml)
 [![Published images](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml)
+[![E2E nightly](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/e2e-full.yml/badge.svg)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/e2e-full.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=kostiantyn-matsebora_agent-ops-operator_manager&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=kostiantyn-matsebora_agent-ops-operator_manager)
 
 ### **→ [The documentation site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) is the main source of information.**
 
