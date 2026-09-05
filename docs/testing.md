@@ -114,6 +114,17 @@ On any failure the diagnostics are written unconditionally: a cluster that no
 longer exists is unreproducible, and a failure that did not capture its own
 context costs a full re-run to learn anything.
 
+**Every CI run of the pack — pass or fail — also appends a report to the
+Actions run's own summary page**, built by `.github/scripts/e2e-report.py`
+from the pack's `go test -json` output, so a result is readable without
+opening the job log. The two tiers get different depth, matched to how much
+of each is worth reading in full:
+
+| Tier | Report level | Because |
+|---|---|---|
+| `full` | summary — pass/fail/skip counts, total elapsed, and the names of anything that did not pass | it runs nightly across every lane including the real-runtime one, and is the larger of the two |
+| `smoke` | full — every test's name, status and elapsed, plus a failing test's captured output | it is short and gates a release, so its detail is cheap and worth having at a glance |
+
 ## What the repository must hold
 
 Three workflows share one definition, `.github/workflows/e2e.yml`, and `ci.yml` runs conformance on its own:
