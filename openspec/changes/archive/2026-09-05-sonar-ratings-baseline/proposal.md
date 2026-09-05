@@ -19,6 +19,19 @@ condition.
   maintainability ratings reach at least B. The Clean Code severity scale
   (Blocker, High, Medium, Low, Info), not the retired one — a finding's
   `impacts[]` name which rating it counts against.
+
+  **NOT WHAT ACTUALLY HAPPENED — narrowed on the way, recorded honestly in
+  tasks.md, and noted here on a review finding against the archiving pull
+  request (#169) so a reader of THIS file alone isn't left with the
+  unconditional claim above.** `manager` was read in full (73 findings); 47
+  across `manager` and several other components were fixed; 26 of
+  `manager`'s own findings — all production reconciler/dispatch/httpapi
+  code, none of it test helpers — were deliberately deferred as too risky
+  to reshape unsupervised in the same session, and moved to their own
+  change, `openspec/changes/sonar-production-complexity/` (issue #168). The
+  org-wide enumeration beyond `manager` (~11 more components) was never
+  completed and is dropped, by explicit decision, not carried anywhere.
+  Task 1.2's and 2.1's own entries in tasks.md are the fuller record.
 - **The quality gate gains three overall-rating conditions**: reliability
   rating, security rating and maintainability rating on the whole component,
   each failing worse than B — provisioned the same way the coverage condition
