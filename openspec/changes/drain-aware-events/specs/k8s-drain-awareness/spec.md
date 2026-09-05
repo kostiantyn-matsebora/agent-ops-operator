@@ -8,9 +8,12 @@ The adapter SHALL consider a node DRAINING when `spec.unschedulable` is true or
 when it carries a `NoSchedule` or `NoExecute` taint whose key is not one
 Kubernetes applies from node conditions (`node.kubernetes.io/not-ready`,
 `unreachable`, `memory-pressure`, `disk-pressure`, `pid-pressure`,
-`network-unavailable`, `unschedulable`). That set SHALL be the same one the
-manager's drain awareness excludes, pinned by test on both sides. A node that
-is merely unwell SHALL NOT count as draining.
+`network-unavailable`, `out-of-service`). That set SHALL be the same one the
+manager's drain awareness excludes, pinned by test on both sides.
+`node.kubernetes.io/unschedulable` is deliberately NOT in that set — it IS the
+cordon, the taint `kubectl cordon` adds alongside the flag, so treating it as a
+mere condition would make a cordon exclude itself. A node that is merely
+unwell SHALL NOT count as draining.
 
 #### Scenario: A cordon counts
 - **WHEN** a reboot manager cordons a node

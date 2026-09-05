@@ -269,11 +269,14 @@ however many DaemonSets have pods scheduled there.
 eventsAdapter:
   source:
     route:
-      # The default, spelled out. Narrow it, or opt out per source:
+      # drainingNodes: suppress is the DEFAULT — omit the whole block and you
+      # already have it, UNNARROWED (every event on the node's objects). What
+      # follows is how to change that, not what you start with:
       drainingNodes: suppress          # "report" evaluates as if this axis did not exist
-      drainingNodeMatchers:
+      drainingNodeMatchers:            # OPTIONAL narrowing — absent = everything
         - reason=~"NodeNotReady|Unhealthy|FailedMount|FailedScheduling"
       drainingNodeBound: 1h            # a drain nobody ends is reported once, past this
+                                        # (1h is also the default — shown here, not required)
 ```
 
 - **Needs `rbac.clusterWide: true`** (the default). Nodes are cluster-scoped,
