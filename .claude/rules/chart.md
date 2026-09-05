@@ -124,8 +124,9 @@ intents reach no configuration, so repairing needs a shell and only the ops
 route binds one.
 
 **The OPERATOR credential gates the fixing half AND the ingest lane.**
-`subscribe_events` is admin-only, so a control token authenticates and is then
-refused the subscription, which reads like a network fault.
+`system_log/list` — the listing the lane polls — and `subscribe_events` are
+both admin-only, so a control token authenticates and is then refused, which
+reads like a network fault.
 
 - **Never enabled by demo mode.**
 - **Two default-off routes, and BOTH claim the chat sources.** Wiring is

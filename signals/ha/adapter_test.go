@@ -635,3 +635,155 @@ func TestEnvIntFallsBackOnUnsetOrUnparsable(t *testing.T) {
 }
 
 var _ = fmt.Sprintf
+
+// ---- the poll: records are observed without Home Assistant firing events ----
+
+// Home Assistant fires `system_log_event` only under `system_log: fire_event:
+// true`, which is off by default. Before the poll, an adapter on such an
+// install saw the listing once per reconnect and nothing in between — the
+// reference install posted nothing for a day while a stream error recurred
+// forty-two times. The fake here fires no event unless a test pushes one,
+// which is exactly the default install.
+func TestPolledRecordBecomesASignal(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, nil))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	runAdapter(t, a)
+
+	<-ha.subscribed
+	waitFor(t, "the connect-time sweep", func() bool { return ha.ListCalls() >= 1 })
+	// Logged AFTER the connect, with no event to announce it.
+	ha.SetRecords(record("homeassistant.components.stream", "Error demuxing stream (Operation timed out)", time.Now(), 1))
+
+	waitFor(t, "the polled signal to be posted", func() bool { return len(fm.Posted()) == 1 })
+	if got := fm.Posted()[0].Labels["integration"]; got != "stream" {
+		t.Fatalf("integration = %q, want stream", got)
+	}
+	time.Sleep(200 * time.Millisecond) // several more polls: the same occurrence must not post again
+	if n := len(fm.Posted()); n != 1 {
+		t.Fatalf("one occurrence posted %d times", n)
+	}
+}
+
+// Recurrence is what the dwell's second rung is built on, and on a default
+// install the listing is the only place it can be seen: Home Assistant advances
+// a deduplicated entry's timestamp and count on each occurrence, so the poll
+// sees a recurring record as a newer one. Two records under one dwell rule, no
+// config-entry predicate for either: the one that keeps recurring through the
+// window is reported at the close; the one seen once is dropped as quiet.
+func TestPolledRecurrenceSurvivesTheDwell(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, map[string]any{
+		"rules": []map[string]any{{"matchers": []string{}, "for": "300ms"}},
+	}))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	ctx := runAdapter(t, a)
+	go a.runDwellFlusher(ctx)
+
+	<-ha.subscribed
+	waitFor(t, "the connect-time sweep", func() bool { return ha.ListCalls() >= 1 })
+	first := time.Now()
+	recurring := record("homeassistant.components.stream", "Error demuxing stream", first, 1)
+	once := record("homeassistant.components.hue", "one bad frame", first, 1)
+	ha.SetRecords(recurring, once)
+	calls := ha.ListCalls()
+	waitFor(t, "both records to be polled", func() bool { return ha.ListCalls() > calls })
+
+	// The stream error recurs: same entry, later timestamp, higher count.
+	recurring.Timestamp = float64(time.Now().UnixNano()) / 1e9
+	recurring.Count = 2
+	ha.SetRecords(recurring, once)
+
+	// dwellTick is 5s in production code, so the flusher's second tick is what
+	// decides these entries; give it generous room.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && len(fm.Posted()) == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond) // let a wrong second post show up
+	posted := fm.Posted()
+	if len(posted) != 1 {
+		t.Fatalf("expected exactly the recurring record, got %d: %+v", len(posted), posted)
+	}
+	if posted[0].Labels["integration"] != "stream" {
+		t.Fatalf("reported the wrong record: %+v", posted[0])
+	}
+	if !strings.Contains(posted[0].Payload, "failing for") {
+		t.Fatalf("expected the dwell evidence in the payload, got %q", posted[0].Payload)
+	}
+}
+
+// Where the instance does fire events, the event is the fast path and the
+// other path must not count the same occurrence again — in EITHER order. The
+// dedup is per record, on the occurrence's timestamp: event first, then the
+// listing shows it; and listing first, then the event for it arrives.
+func TestEventDeliveredRecordIsNotPolledTwice(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, nil))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	runAdapter(t, a)
+
+	<-ha.subscribed
+	rec := record("homeassistant.components.zwave_js", "Failed to set temperature", time.Now(), 1)
+	ha.PushLogEvent(rec)
+	waitFor(t, "the event-delivered signal", func() bool { return len(fm.Posted()) == 1 })
+
+	// The listing now shows the same occurrence, as it would on a real instance.
+	ha.SetRecords(rec)
+	calls := ha.ListCalls()
+	waitFor(t, "several polls over it", func() bool { return ha.ListCalls() >= calls+3 })
+	if n := len(fm.Posted()); n != 1 {
+		t.Fatalf("the poll re-posted an occurrence the event already delivered: %d posts", n)
+	}
+
+	// The other order: a new occurrence reaches the listing first (the sweep
+	// considers it), and its event arrives after.
+	rec.Timestamp = float64(time.Now().UnixNano()) / 1e9
+	rec.Count = 2
+	ha.SetRecords(rec)
+	waitFor(t, "the polled second occurrence", func() bool { return len(fm.Posted()) == 2 })
+	ha.PushLogEvent(rec)
+	time.Sleep(200 * time.Millisecond)
+	if n := len(fm.Posted()); n != 2 {
+		t.Fatalf("the event re-posted an occurrence the poll already considered: %d posts", n)
+	}
+}
+
+// `backfill: false` means "do not report what was logged while I was down". It
+// used to be implemented as "skip the connect-time read", which under polling
+// would skip every read; the intent survives as a cursor moved past the
+// listing on connect, with polling going on from there.
+func TestBackfillOffStillPolls(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	now := time.Now().UTC().Truncate(time.Second)
+	ha := newFakeHA(t, "secret")
+	ha.SetRecords(record("homeassistant.components.hue", "logged while we were down", now.Add(-time.Minute), 1))
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, map[string]any{"backfill": false}))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	runAdapter(t, a)
+
+	<-ha.subscribed
+	waitFor(t, "the cursor to be moved past the listing", func() bool {
+		return fm.State("ha-logs", "last-record") == now.Add(-time.Minute).Format(time.RFC3339)
+	})
+	waitFor(t, "a poll after the connect", func() bool { return ha.ListCalls() >= 2 })
+	if n := len(fm.Posted()); n != 0 {
+		t.Fatalf("backfill: false reported what predates the connect: %d posts", n)
+	}
+
+	ha.SetRecords(
+		record("homeassistant.components.hue", "logged while we were down", now.Add(-time.Minute), 1),
+		record("homeassistant.components.mqtt", "logged after we connected", time.Now(), 1),
+	)
+	waitFor(t, "the post-connect record", func() bool { return len(fm.Posted()) == 1 })
+	if got := fm.Posted()[0].Labels["integration"]; got != "mqtt" {
+		t.Fatalf("reported the wrong record: %q", got)
+	}
+}

@@ -304,9 +304,13 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
 
 **`signals/ha/`** — Home Assistant log signal adapter.
 
-- **Reads that instance's WebSocket API** over a hand-written RFC 6455 client:
-  `system_log_event`, with `system_log/list` for backfill and for the dwell
-  re-check's evidence.
+- **Reads that instance's WebSocket API** over a hand-written RFC 6455 client,
+  and **THE LOG LISTING IS POLLED** — `system_log/list` every fifteen seconds,
+  which is also the dwell re-check's evidence. `system_log_event` is
+  subscribed as a fast path ONLY: Home Assistant fires it solely under
+  `system_log: fire_event: true`, off by default, and the adapter that
+  depended on it posted nothing for a day on the reference install while
+  reporting Ready. The two paths share one cursor.
 - **NO Kubernetes client at all.** It names no ServiceAccount, so it runs as the
   release floor; credential projected per SOURCE.
 - **Same `rules`/`route` vocabulary as `signal-k8s-events`**, minus the time
