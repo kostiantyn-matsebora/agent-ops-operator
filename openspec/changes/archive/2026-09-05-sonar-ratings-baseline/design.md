@@ -122,8 +122,18 @@ smuggled into task 1.1's prose alone.
 - [A rating condition failing on a component this change does not reach —
   e.g. one with zero Blocker/High findings today but a borderline Medium
   backlog that trips B on a later push] → out of scope per the Goals above;
-  the gate's verdict stays informational exactly as coverage's does, so it
-  is visible rather than blocking.
+  accepted on the SAME grounds D2 already accepts for coverage: the
+  condition can start a component red the moment it is provisioned, and
+  that component's own next pull request is what turns it green, one at a
+  time.
+
+  CORRECTED after archiving, on a review finding against PR #169: this
+  entry originally said the gate's verdict "stays informational... visible
+  rather than blocking" — false. One project has ONE gate; `sonar-scan`'s
+  `sonar.qualitygate.wait=true` fails the step (and so `ci-green`) on that
+  gate's combined ERROR verdict, whichever condition failed it, ratings
+  included. The mitigation this risk actually rests on is D2's "deliberately
+  red is the expected state, not a regression" — not non-blocking.
 - [Fixing many findings across many components in one branch is a large,
   hard-to-review diff] → components are committed and, where the pull request
   grows unwieldy, split by component into separate follow-up pull requests

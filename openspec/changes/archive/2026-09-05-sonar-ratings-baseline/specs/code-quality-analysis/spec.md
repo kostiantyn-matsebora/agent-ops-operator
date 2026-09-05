@@ -47,7 +47,22 @@ before this evaluates the backlog a repository already carries.
 - **WHEN** a component carries an open Blocker or High finding that lowers its
   overall reliability, security or maintainability rating below B
 - **THEN** its project's gate fails on that condition, the verdict is visible
-  on the pull request, and the always-present check is unaffected
+  on the pull request, and the always-present check fails naming the
+  component — the SAME single verdict the overall-coverage condition already
+  fails on, since one project has one gate and the scanner step waits on its
+  combined ERROR/OK result, not on each condition separately
+
+  CORRECTED after archiving, on a review finding against PR #169: this
+  scenario originally read "and the always-present check is unaffected",
+  contradicting `sonar-provision.sh`'s actual conditions (all three ratings
+  on the SAME `agentops` gate coverage already gates) and
+  `.github/actions/sonar-scan`'s `sonar.qualitygate.wait=true` (one combined
+  verdict fails the step, which fails `ci-green`, for ANY failing
+  condition). Left correctable here — unlike the e2e-report-levels
+  precedent's design.md fix, this is a delta spec whose content was already
+  merged into `openspec/specs/code-quality-analysis/spec.md` verbatim, so an
+  uncorrected error here would keep misleading a reader even after the
+  canonical spec was fixed.
 
 #### Scenario: A component's overall rating reaches B
 
