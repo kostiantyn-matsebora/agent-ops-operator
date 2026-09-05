@@ -8,6 +8,12 @@
       `backfill`. Verify with `go build ./... && go vet ./...` in
       `signals/ha/` inside the build container, run against THIS WORKTREE's
       path (`docker exec -w "$PWD"`), never the main checkout's.
+      **Amended at review:** the two arrival paths deduplicate PER RECORD on
+      the occurrence's timestamp (`servedSource.seen`, pruned to the listing
+      on every sweep), not through the cursor — the cursor alone left an
+      event racing a sweep to a double post, which the spec's "not
+      considered again by the other" does not allow. `design.md` has the
+      reasoning; the event-then-poll test now covers both orders.
 - [x] 1.2 Add `pollEvery = 15 * time.Second` beside the other constants, with
       a comment stating why it is a constant, and a `runPoller` goroutine
       started by `runSession` after `startSession` succeeds that calls

@@ -717,10 +717,10 @@ func TestPolledRecurrenceSurvivesTheDwell(t *testing.T) {
 	}
 }
 
-// Where the instance does fire events, the event is the fast path and the poll
-// must not count the same occurrence again. The two paths share one cursor:
-// the event advances it to the record's timestamp, and the listing's entry at
-// that timestamp is then not newer than the cursor.
+// Where the instance does fire events, the event is the fast path and the
+// other path must not count the same occurrence again — in EITHER order. The
+// dedup is per record, on the occurrence's timestamp: event first, then the
+// listing shows it; and listing first, then the event for it arrives.
 func TestEventDeliveredRecordIsNotPolledTwice(t *testing.T) {
 	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
 	ha := newFakeHA(t, "secret")
@@ -740,6 +740,18 @@ func TestEventDeliveredRecordIsNotPolledTwice(t *testing.T) {
 	waitFor(t, "several polls over it", func() bool { return ha.ListCalls() >= calls+3 })
 	if n := len(fm.Posted()); n != 1 {
 		t.Fatalf("the poll re-posted an occurrence the event already delivered: %d posts", n)
+	}
+
+	// The other order: a new occurrence reaches the listing first (the sweep
+	// considers it), and its event arrives after.
+	rec.Timestamp = float64(time.Now().UnixNano()) / 1e9
+	rec.Count = 2
+	ha.SetRecords(rec)
+	waitFor(t, "the polled second occurrence", func() bool { return len(fm.Posted()) == 2 })
+	ha.PushLogEvent(rec)
+	time.Sleep(200 * time.Millisecond)
+	if n := len(fm.Posted()); n != 2 {
+		t.Fatalf("the event re-posted an occurrence the poll already considered: %d posts", n)
 	}
 }
 

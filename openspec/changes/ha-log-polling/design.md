@@ -74,19 +74,28 @@ listing at most five seconds old at the close.
   traffic for no precision, and a snapshot older than the record just
   considered is a snapshot that cannot see the recurrence that was just fed in.
 
-**The event path stays and deduplicates through the cursor.** `handleEvent`
-is unchanged: it considers the record and advances the cursor to the
-record's timestamp. The next poll sees that entry's timestamp equal to the
-cursor and skips it. Where events are off, the poll advances the cursor
-itself.
+**The event path stays, and the two paths deduplicate PER RECORD, on the
+occurrence's timestamp.** Each source keeps the latest timestamp it has
+considered for each record key. `consider` — the one entry both paths go
+through — drops a record whose timestamp has not moved past that, whichever
+path brought it: the poll re-listing what an event delivered, or an event for
+what a sweep just fed in. The map is pruned to the listing on every sweep, so
+it is bounded by Home Assistant's own cap.
 
-- *The ordering hazard, named:* an event for occurrence N+1 arriving while a
-  poll is mid-sweep over a listing that already shows N+1. `consider` for the
-  same record twice at the same timestamp coalesces in the dwell queue (same
-  member key, `countAtOpen` kept from the first sighting) and, for a zero-dwell
-  rule, posts twice with one fingerprint — which the manager's cooldown
-  absorbs, the same tolerance the post-then-persist cursor already relies on.
-  Accepted rather than locked against.
+- *Why not the cursor alone?* The cursor is one instant for the whole source.
+  Using it as the dedup would drop a second record logged at the same instant
+  as the one that advanced it, and it does not close the race between an event
+  and a sweep over the same occurrence — both see a timestamp newer than the
+  cursor until one of them has advanced it. A first draft accepted that race
+  as a double post the manager's cooldown absorbs; the spec's "not considered
+  again by the other" is the stronger claim, and per-record memory is what
+  makes it true rather than usually true.
+- *A record with no timestamp is never deduplicated.* It cannot be told apart
+  from its own last occurrence, and dropping it would be a loss; Home
+  Assistant's listing and events always carry one.
+- The cursor keeps its two jobs — restart resume, and skipping the bulk of an
+  unchanged listing before `consider` is reached — and is advanced by both
+  paths as before.
 
 **`backfill: false` seeds the cursor to the newest listed record on connect.**
 Its documented meaning is "do not report what was logged while I was down".

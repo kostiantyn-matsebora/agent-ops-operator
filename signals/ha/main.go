@@ -100,6 +100,15 @@ type servedSource struct {
 	key string
 	// snapshot is the verification ladder's view of this instance.
 	snapshot *healthSnapshot
+	// seen is the latest occurrence timestamp considered per record key —
+	// the dedup between the two arrival paths. The cursor cannot be it: a
+	// cursor is one instant for the whole source, so a second record logged
+	// at the same instant as the one that advanced it would be dropped, and
+	// an event racing a sweep over the same occurrence would be considered
+	// twice. Per record, the same occurrence is one timestamp, and is
+	// considered once whichever path brings it. Pruned to the listing on
+	// every sweep.
+	seen map[string]time.Time
 }
 
 type adapter struct {
@@ -205,12 +214,13 @@ func (a *adapter) refreshSources(ctx context.Context) {
 			continue
 		}
 
-		src := &servedSource{filter: f, token: token, key: f.endpoint + "\x00" + token}
+		src := &servedSource{filter: f, token: token, key: f.endpoint + "\x00" + token, seen: map[string]time.Time{}}
 		if prev, ok := a.sources[info.Name]; ok {
 			// Config edits must not replay history, and must not reconnect
 			// unless they changed where or as whom we connect.
 			src.cursor = prev.cursor
 			src.snapshot = prev.snapshot
+			src.seen = prev.seen
 			if prev.key == src.key {
 				src.cancel = prev.cancel
 			} else {
@@ -444,6 +454,27 @@ func (a *adapter) sweep(ctx context.Context, source string, sess *haSession, con
 		}
 		a.consider(ctx, source, &records[i])
 	}
+	a.pruneSeen(source, records)
+}
+
+// pruneSeen forgets the dedup timestamps of records Home Assistant no longer
+// lists. The listing is capped, so a key that left it and comes back arrives
+// with a new occurrence — a new timestamp — and needs no memory to be told
+// apart; keeping every key ever seen would only grow.
+func (a *adapter) pruneSeen(source string, records []logRecord) {
+	listed := make(map[string]bool, len(records))
+	for i := range records {
+		listed[records[i].Key()] = true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if src, ok := a.sources[source]; ok {
+		for key := range src.seen {
+			if !listed[key] {
+				delete(src.seen, key)
+			}
+		}
+	}
 }
 
 // handleEvent turns one live system_log_event into a signal.
@@ -472,6 +503,18 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 	if !ok {
 		a.mu.Unlock()
 		return
+	}
+	// One occurrence, one consideration, whichever path brought it: a record
+	// whose timestamp has not moved since it was last considered is the same
+	// occurrence again — the poll re-listing what an event delivered, or an
+	// event for what a sweep just fed in. A record with no timestamp cannot
+	// be told apart from its last occurrence, so it is never deduplicated.
+	if at := rec.At(); !at.IsZero() {
+		if last, dup := src.seen[rec.Key()]; dup && !at.After(last) {
+			a.mu.Unlock()
+			return
+		}
+		src.seen[rec.Key()] = at
 	}
 	f := src.filter
 	a.mu.Unlock()

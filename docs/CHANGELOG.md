@@ -60,10 +60,11 @@ for the source and the reference material beside this file.
   judged every record "quiet" because nothing ever recurred from its point
   of view, and posted nothing while its source reported `Ready=True`. It now
   POLLS `system_log/list` every fifteen seconds and feeds what is newer than
-  its cursor through the same rule path; the event stays as a lower-latency
-  path where the instance fires it. `backfill: false` keeps its meaning by
-  moving the cursor past the listing on connect. No configuration changes;
-  the bundle's pinned tag moves to 0.3.0.
+  its cursor through the same rule path. The event stays as a lower-latency
+  path where the instance fires it, and an occurrence is considered once
+  whichever path brings it. `backfill: false` keeps its meaning by moving
+  the cursor past the listing on connect. No configuration changes. The
+  bundle's pinned tag moves to 0.3.0.
 
 ## [13.3.0] — 2026-08-28
 
