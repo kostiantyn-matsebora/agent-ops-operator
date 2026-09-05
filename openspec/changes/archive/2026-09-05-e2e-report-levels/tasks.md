@@ -21,9 +21,15 @@
       `$E2E_ARTIFACT_DIR` before running tests (it is currently created only
       as the upload-artifact source, not by this job), switch the `go test`
       invocation to `-v -json`, and pipe it as
-      `| tee "$E2E_ARTIFACT_DIR/events.jsonl" | jq -rR 'try (fromjson |
-      select(.Action == "output") | .Output) catch .'` so the live log still
-      streams human-readable output. Verify with `bash -n` on the extracted
+      `| tee "$E2E_ARTIFACT_DIR/events.jsonl" | jq -rR '. as $raw | try
+      (fromjson | select(.Action == "output") | .Output) catch $raw'` so the
+      live log still streams human-readable output (`. as $raw` matters:
+      `catch`'s `.` is jq's error value, not the original line, so without it
+      a non-JSON line prints jq's parse error instead of the line itself).
+      Also add `set -o pipefail` as the run block's first line — this step
+      carries no `shell:` key, so it runs `bash -e {0}`, and pipefail is only
+      on by default for an explicit `shell: bash`; without it the step's exit
+      code would be jq's, always 0. Verify with `bash -n` on the extracted
       step script and by tracing through the pipeline against a small
       canned `go test -json` sample locally (`go test -json ./...` on any Go
       module in this repo, piped through the same `jq` filter, reproduces

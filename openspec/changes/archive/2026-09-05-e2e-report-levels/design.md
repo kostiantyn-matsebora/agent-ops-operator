@@ -62,10 +62,13 @@ error message, which reads as noise on top of noise. And
 `events.jsonl` still gets every line (including the non-JSON ones), which the
 report script filters itself.
 
-`set -o pipefail` (already implied by using `bash` `run:` blocks with
-`shell: bash`, GitHub Actions' default) keeps `go test`'s exit code as the
-step's exit code through the pipe, so the job still fails exactly when it
-does today.
+**`set -o pipefail` is added explicitly, as the run block's first line —
+NOT implied.** A step with no `shell:` key (this one) runs `bash -e {0}`;
+`-o pipefail` is only on by default for an EXPLICIT `shell: bash`, a
+distinction easy to get backwards. Without it, the step's exit code would be
+`jq`'s — always 0, since it only prints text — so a failing `go test` would
+report the job green. With it, `go test`'s exit code survives the pipe and
+the job still fails exactly when it does today.
 
 **One script, one `--level {summary,full}` flag, not two scripts.** Both
 levels read the same events and differ only in how much of the parsed result

@@ -77,6 +77,11 @@ jobs:
           # called by e2e-full.yml, which inherits the repository's secrets.
           CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.tier == 'full' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: |
+          # A step with no `shell:` key runs `bash -e {0}` — pipefail is NOT
+          # on by default; that is only true of an explicit `shell: bash`.
+          # Without it, this pipeline's exit code would be jq's (always 0),
+          # so a failing `go test` would report the job green.
+          set -o pipefail
           mkdir -p "$E2E_ARTIFACT_DIR"
           # -json alongside -v: the live log stays human-readable (jq prints
           # each Output event's text; a non-JSON line — a build failure, before
