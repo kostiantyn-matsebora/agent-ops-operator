@@ -71,7 +71,14 @@ func setupAgent(t *testing.T, e *Env) {
 	}
 	p := pipeline(agentPipeline, agentProfile, []string{agentSource}, []string{ChannelConsole})
 	p.Spec.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: agentRuntime}
-	p.Spec.Toolsets = &agentopsv1alpha1.ToolsetBinding{Refs: []agentopsv1alpha1.ObjectRef{{Name: "agentops-observe"}}}
+	// agentops-observe is filesystem-only (Read/Grep/Glob); the closed-form
+	// pod-name assertion below needs the kubernetes bundle's read MCP tools,
+	// which the e2e install renders only under the full tier (install.go's
+	// k8sMCP) — the one lane that reaches this test.
+	p.Spec.Toolsets = &agentopsv1alpha1.ToolsetBinding{Refs: []agentopsv1alpha1.ObjectRef{
+		{Name: "agentops-observe"}, {Name: "k8s-observability"},
+	}}
+	p.Spec.MCPConfigs = &agentopsv1alpha1.ToolingBinding{Refs: []agentopsv1alpha1.ObjectRef{{Name: "k8s-api"}}}
 	if err := ensure(ctx, e.K, p); err != nil {
 		t.Fatal(err)
 	}
@@ -111,14 +118,17 @@ func TestRealRuntime(t *testing.T) {
 	// 11.2 A closed-form question with a test-known answer.
 	fp := "e2e-agent-" + fmt.Sprint(time.Now().UnixNano())
 	nonce := fmt.Sprintf("kiwi-%d", time.Now().UnixNano()%1000000)
-	e.PostTask(t, agentSource, fp, "Remember this token exactly: "+nonce+". Reply with just OK.")
+	e.PostTask(t, agentSource, fp, "Remember this word exactly: "+nonce+". Reply with just OK.")
 	conv := e.ConversationFor(t, fp, 2*time.Minute)
 	first := e.WaitRun(t, conv.Name, 1, 10*time.Minute)
 	if first.Status.Runs[0].Status != "succeeded" {
 		t.Fatalf("the first run failed — the deployment is broken, not the agent: %+v", first.Status.Runs[0])
 	}
 
-	// 11.1 Continuity by nonce, across a runtime pod restart.
+	// 11.1 Continuity by word, across a runtime pod restart. "word", not
+	// "token" or "secret" — the model reads either of those literally and
+	// refuses to repeat the value back, which is not the boundary this
+	// assertion is testing.
 	if first.Status.RuntimePod != "" {
 		_ = e.K.Delete(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: first.Status.RuntimePod}})
 		waitFor(t, "the pod to be gone", 2*time.Minute, func() (bool, error) {
@@ -126,9 +136,9 @@ func TestRealRuntime(t *testing.T) {
 			return apierrors.IsNotFound(e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: first.Status.RuntimePod}, &p)), nil
 		})
 	}
-	answer := ask(t, e, conv.Name, "What was the token I asked you to remember? Reply with the token only.", 2)
+	answer := ask(t, e, conv.Name, "What was the word I asked you to remember? Reply with the word only.", 2)
 	if !strings.Contains(answer, nonce) {
-		t.Fatalf("the exact token must appear after the restart; got %q", answer)
+		t.Fatalf("the exact word must appear after the restart; got %q", answer)
 	}
 
 	// 11.2 Closed-form correctness: name the manager pod.

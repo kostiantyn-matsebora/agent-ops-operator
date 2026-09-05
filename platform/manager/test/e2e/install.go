@@ -41,8 +41,14 @@ func DefaultValues(tier string) *InstallValues {
 // the release's default runtime, so a route naming nothing runs on it.
 func (v *InstallValues) valuesYAML() string {
 	claude := "false"
+	// The real-runtime lane (TestRealRuntime) is the only consumer of the
+	// kubernetes MCP server — it asks the agent to read a live pod name
+	// through it. Off elsewhere: it is a real workload pull
+	// (containers/kubernetes-mcp-server) that no other lane exercises.
+	k8sMCP := "false"
 	if v.Tier == "full" {
 		claude = "true"
+		k8sMCP = "true"
 	}
 	return fmt.Sprintf(`# rendered by the e2e pack
 image:
@@ -100,9 +106,9 @@ kubernetes:
     enabled: true
     image: {repository: agentops-signal-k8s-events, tag: e2e}
   mcpServers:
-    enabled: false
+    enabled: %[7]s
   mcp:
-    enabled: false
+    enabled: %[7]s
   pipelines:
     enabled: false
 prometheus:
@@ -112,7 +118,7 @@ prometheus:
     image: {repository: agentops-signal-alertmanager, tag: e2e}
   pipelines:
     enabled: false
-`, v.AdapterToken, claude, v.Runtime, v.UIToken, v.ChatID, v.BotToken)
+`, v.AdapterToken, claude, v.Runtime, v.UIToken, v.ChatID, v.BotToken, k8sMCP)
 }
 
 // Install applies the CRDs, deploys the fake Bot API, and installs the chart
@@ -171,6 +177,12 @@ func WaitReady(ctx context.Context, k *Kube, v *InstallValues) error {
 		"agentops-manager", "agentops-adapter-console", "agentops-test-fake-bot-api",
 		"agentops-adapter-telegram", "agentops-signal-telegram", "agentops-gateway-telegram",
 		"agentops-signal-k8s-events", "agentops-signal-alertmanager",
+	}
+	// The kubernetes MCP server workload renders only under the full tier —
+	// see valuesYAML's k8sMCP — so it is the one Deployment this list adds
+	// conditionally rather than unconditionally.
+	if v.Tier == "full" {
+		deployments = append(deployments, "agentops-mcp-k8s")
 	}
 	for _, d := range deployments {
 		if err := k.WaitDeploymentAvailable(ctx, d, 5*time.Minute); err != nil {
