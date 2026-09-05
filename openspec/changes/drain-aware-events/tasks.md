@@ -95,22 +95,35 @@ resolve master and report success against it.
 
 ### 6.1 Reference docs
 
-- [ ] 6.1.1 `docs/integrations/kubernetes.md`: re-run
+- [x] 6.1.1 `docs/integrations/kubernetes.md`: re-run
       `python3 .github/scripts/docs-generate.py` for the renders table (the
-      grant changed); `--check` passes.
-- [ ] 6.1.2 `docs/security.md`: the events adapter's cluster-wide read grant
+      grant changed); `--check` passes. Verdict: 49 generated file(s) up to
+      date — the renders table lists object kind/name pairs, not RBAC verb
+      lists, and this change adds a verb to an existing ClusterRole rather
+      than a new rendered object, so nothing in that table moved.
+- [x] 6.1.2 `docs/security.md`: the events adapter's cluster-wide read grant
       now includes nodes, what that exposes (spec, no status kept), and that
       a namespaced install has none; re-run `python3 docs/diagrams/threat-model.py`
-      only if a flow crossed a boundary (it did not — state that).
-- [ ] 6.1.3 `docs/CHANGELOG.md`: the new default, the new grant, the tier-3
+      only if a flow crossed a boundary (it did not — state that). New
+      "The events adapter's own read access" subsection under *Cluster
+      authorization*. No boundary crossed: the adapter already crosses into
+      the cluster API; this widens an existing grant rather than adding a
+      new flow, so the threat-model diagrams are untouched.
+- [x] 6.1.3 `docs/CHANGELOG.md`: the new default, the new grant, the tier-3
       kind change and what an install that relied on pod-level
       `NodeNotReady` at `for: 0` should expect.
 
 ### 6.2 Adopter site
 
-- [ ] 6.2.1 `docs/integrations/kubernetes.md` prose: the reboot-manager
+- [x] 6.2.1 `docs/integrations/kubernetes.md` prose: the reboot-manager
       scenario, the three `route` values, the bound and what its signal
-      looks like, the `rbac.clusterWide: false` limitation.
-- [ ] 6.2.2 The landing page and `docs/introduction.md`: if either counts the
+      looks like, the `rbac.clusterWide: false` limitation. New "stay quiet
+      through a rolling reboot" section; the pre-existing nightly-mute
+      section reframed for what it is actually still for (no node state
+      changes at all); the "OOM kills" worked example stopped recommending
+      an unqualified `NodeNotReady` matcher.
+- [x] 6.2.2 The landing page and `docs/introduction.md`: if either counts the
       suppression axes (dwell, inhibition, time), add node state; otherwise
-      state that nothing there changed.
+      state that nothing there changed. Verdict: neither page enumerates the
+      suppression axes at all (confirmed by search), so nothing there
+      changed.

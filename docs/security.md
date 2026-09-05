@@ -120,6 +120,26 @@ Deployment and a patch to a pod template are the same path.
 Keys and worked examples in
 [The agent's power]({{ '/installation/' | relative_url }}#the-agents-power).
 
+#### The events adapter's own read access
+
+**A separate identity from the acting account above** —
+`agentops-signal-k8s-events`, granted `list`/`watch` on events, pods and
+replicasets, and (cluster-wide installs only) nodes, for drain awareness. No
+agent runs as it and it never calls a tool; it only decides which cluster
+Events become conversations.
+
+- **The grant is a resource, not a field list.** `nodes: list, watch` permits
+  reading whole Node objects — names, labels, addresses, allocatable
+  capacity — even though the adapter itself decodes only `spec.unschedulable`
+  and taints and keeps no node status. Kubernetes RBAC has no way to narrow a
+  grant to the fields code happens to read.
+- **Nothing here is a Secret**, and no adapter identity in this chart carries
+  a `secrets` verb.
+- **A namespaced install (`rbac.clusterWide: false`) has no nodes grant at
+  all** — nodes are cluster-scoped, so there is no namespaced equivalent to
+  fall back to. Drain awareness is simply off there, reported once on each
+  source's condition.
+
 ---
 
 ## The platform's own posture
