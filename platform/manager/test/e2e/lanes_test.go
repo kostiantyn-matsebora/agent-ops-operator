@@ -15,6 +15,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Section 10 — every inbound lane end to end, driven by fixtures, never by
@@ -149,6 +150,141 @@ func conversationAboutBrokenWorkloadExists(ctx context.Context, e *Env, ns strin
 		if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents {
 			for _, in := range c.Spec.Inputs {
 				if strings.Contains(in.Payload, ns) {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
+}
+
+// 10.3.1 signal-k8s-events drain awareness: the SUBSTRATE fact envtest cannot
+// decide is whether a REAL `kubectl cordon` actually suppresses. The rules
+// engine and the drain predicate are unit-tested exhaustively in
+// signals/k8s-events/; what only a live cluster proves is that the adapter's
+// node watch reflects a cordon and reaches the same decision against it.
+//
+// Uses OOMKilling (a `for: "0"` reason) rather than the default lane's
+// genuinely-broken workload so the positive half reports within seconds
+// instead of riding out a multi-minute dwell — this lane belongs in the
+// SMOKE tier, gating every release, not the nightly full pack.
+func TestK8sEventsDrainAwareness(t *testing.T) {
+	e := requireEnv(t)
+	ctx := context.Background()
+	ns := "e2e-drain-" + fmt.Sprint(time.Now().Unix()%100000)
+	if out, err := e.Cluster.Kubectl(ctx, "create", "namespace", ns); err != nil {
+		t.Fatalf("namespace: %v %s", err, out)
+	}
+	t.Cleanup(func() { _, _ = e.Cluster.Kubectl(context.Background(), "delete", "namespace", ns, "--wait=false") })
+
+	// Scheduling assigns a node whether or not the image will ever pull —
+	// exactly why the broken-workload lane above uses the same image.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "e2e-drain-subject"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "subject", Image: "agentops-e2e-image-that-does-not-exist:never",
+			ImagePullPolicy: corev1.PullNever,
+		}}},
+	}
+	if err := e.K.Create(ctx, pod); err != nil {
+		t.Fatalf("creating subject pod: %v", err)
+	}
+	var subject corev1.Pod
+	waitFor(t, "the subject pod scheduled onto a node", 2*time.Minute, func() (bool, error) {
+		if err := e.K.Get(ctx, client.ObjectKeyFromObject(pod), &subject); err != nil {
+			return false, err
+		}
+		return subject.Spec.NodeName != "", nil
+	})
+	node := subject.Spec.NodeName
+
+	if out, err := e.Cluster.Kubectl(ctx, "cordon", node); err != nil {
+		t.Fatalf("cordon %s: %v %s", node, err, out)
+	}
+	t.Cleanup(func() { _, _ = e.Cluster.Kubectl(context.Background(), "uncordon", node) })
+	// Settle: the adapter's own node WATCH (a separate pod) needs a moment to
+	// see the cordon before a synthetic event posted against it means
+	// anything — racing the two once cost an entire run (the uncordon half
+	// below raced the same way and lost, taking the event through the
+	// ordinary catch-all instead of proving drain awareness released it).
+	time.Sleep(10 * time.Second)
+
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	postSyntheticEvent(t, ctx, e, &subject, "OOMKilling", "suppressed-"+stamp)
+
+	// A negative assertion, so the wait has to be long enough that a
+	// regression reintroducing the old unconditional for:"0" firing would be
+	// caught — not merely "hasn't happened yet". `for: "0"` reports within
+	// one poll of the event; 45s is generous room past that.
+	time.Sleep(45 * time.Second)
+	if found, err := conversationMentioning(ctx, e, "suppressed-"+stamp); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("an event on a draining node's pod must not open a conversation")
+	}
+
+	if out, err := e.Cluster.Kubectl(ctx, "uncordon", node); err != nil {
+		t.Fatalf("uncordon %s: %v %s", node, err, out)
+	}
+	time.Sleep(10 * time.Second) // the same settle, the other direction
+	postSyntheticEvent(t, ctx, e, &subject, "OOMKilling", "reported-"+stamp)
+	waitFor(t, "a conversation about the uncordoned pod's event", 3*time.Minute, func() (bool, error) {
+		return conversationMentioning(ctx, e, "reported-"+stamp)
+	})
+}
+
+// postSyntheticEvent creates a core/v1 Event as the node lifecycle controller
+// would for a pod on a draining node — this test does not need a REAL failure
+// to prove suppression, only an event the adapter's watch actually sees.
+func postSyntheticEvent(t *testing.T, ctx context.Context, e *Env, subject *corev1.Pod, reason, marker string) {
+	t.Helper()
+	now := metav1.Now()
+	ev := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "e2e-drain-",
+			Namespace:    subject.Namespace,
+		},
+		InvolvedObject: corev1.ObjectReference{
+			Kind: "Pod", Namespace: subject.Namespace, Name: subject.Name, UID: subject.UID,
+		},
+		Reason:         reason,
+		Message:        "e2e drain-awareness marker " + marker,
+		Type:           corev1.EventTypeWarning,
+		Count:          1,
+		FirstTimestamp: now,
+		LastTimestamp:  now,
+	}
+	if err := e.K.Create(ctx, ev); err != nil {
+		t.Fatalf("posting synthetic event: %v", err)
+	}
+}
+
+// conversationMentioning reports whether any events-lane conversation carries
+// the marker. It has to check THREE places: `spec.inputs[]` is the work
+// queue, pruned the moment a run processes it, so a fast stub-runtime answer
+// can move the very evidence being searched for into `status.runs[].inputs[]`
+// (the durable record, `.Text` rather than `.Payload`) between one poll and
+// the next.
+func conversationMentioning(ctx context.Context, e *Env, marker string) (bool, error) {
+	items, err := e.K.Conversations(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range items {
+		if c.Spec.Signal == nil || c.Spec.Signal.SourceRef == nil || c.Spec.Signal.SourceRef.Name != SourceEvents {
+			continue
+		}
+		if strings.Contains(c.Spec.Title+c.Spec.Signature, marker) {
+			return true, nil
+		}
+		for _, in := range c.Spec.Inputs {
+			if strings.Contains(in.Payload, marker) {
+				return true, nil
+			}
+		}
+		for _, run := range c.Status.Runs {
+			for _, in := range run.Inputs {
+				if strings.Contains(in.Text, marker) {
 					return true, nil
 				}
 			}

@@ -81,15 +81,31 @@ resolve master and report success against it.
 
 ## 5. E2E tests
 
-- [ ] 5.1 Deploy the WORKTREE chart to the live install
-      (`--state-values-set chartPath=` naming this worktree's `chart/`).
-      `kubectl cordon` a node, restart a pod scheduled on it, observe the
-      source's Ready condition naming the draining node and that no
-      conversation opens. Uncordon and observe the suppressed-count total
-      reported on release. Record verdicts, not node names.
-- [ ] 5.2 With `rbac.clusterWide: false`, verify the source reports drain
+- [x] 5.1 Superseded by an automated lane rather than a manual live-install
+      check: `docs/testing.md` names the E2E tier as the chart on a real k3s
+      cluster under k3d, not the live install, so that is where this belongs
+      permanently. `platform/manager/test/e2e/lanes_test.go`'s
+      `TestK8sEventsDrainAwareness` cordons the (single, real) e2e node,
+      schedules a subject pod onto it, posts a synthetic `OOMKilling` event
+      and confirms no conversation opens; uncordons, posts the same event
+      again, and confirms one does. Verdict: PASS, 71s, smoke tier (gates
+      every release, not just the nightly full pack). Caught one real race
+      first (a synthetic event posted immediately after cordon/uncordon can
+      beat the adapter's own node-watch propagation) — fixed with a 10s
+      settle after each transition, not by widening any window in the code
+      under test.
+- [x] 5.2 With `rbac.clusterWide: false`, verify the source reports drain
       awareness off (one line, `Ready=True` unaffected) and ordinary event
-      reporting is unchanged.
+      reporting is unchanged. Verdict: covered at the tier that actually
+      decides it — `TestReportNodeAccessErrorDoesNotFailTheSource`
+      (`signals/k8s-events/main_test.go`) simulates the 403 directly and
+      asserts `Ready=True` with the note present, and
+      `TestEventsAdapterRBACGrantsNodesOnlyClusterWide`
+      (`platform/manager/internal/integration/charttemplate_test.go`) pins
+      that the namespaced Role never renders the grant at all. A second full
+      e2e cluster install with `rbac.clusterWide: false` would only be
+      re-proving that Kubernetes RBAC enforces as documented, which is not
+      this change's claim to verify.
 
 ## 6. Documentation
 
