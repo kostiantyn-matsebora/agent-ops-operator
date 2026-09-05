@@ -59,7 +59,11 @@ eventsAdapter:
     # 0.3.0 adds the time axis (route.timeIntervals / route.muteTimeIntervals);
     # an earlier image ignores those keys, which looks like a window that never
     # fires.
-    tag: 0.4.4
+    # 0.4.5 adds the node-STATE axis (route.drainingNodes / drainingNodeMatchers
+    # / drainingNodeBound) — it REQUIRES the nodes grant below (cluster-wide
+    # installs only) to do anything; an earlier image ignores those keys
+    # entirely and a namespaced install always ran this way.
+    tag: 0.4.5
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding
