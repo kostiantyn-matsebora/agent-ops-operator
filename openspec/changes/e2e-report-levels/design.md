@@ -50,12 +50,15 @@ The run step becomes:
 ```sh
 go test -tags e2e -count=1 -timeout 55m -v -json ./test/e2e/ \
   | tee "$E2E_ARTIFACT_DIR/events.jsonl" \
-  | jq -rR 'try (fromjson | select(.Action == "output") | .Output) catch .'
+  | jq -rR '. as $raw | try (fromjson | select(.Action == "output") | .Output) catch $raw'
 ```
 
 `fromjson` inside a `try`/`catch` falls back to printing the raw line when it
 is not valid JSON, which is what a build failure emits before `go test` ever
-reaches test2json — so the live log is never blanker than before, and
+reaches test2json — so the live log is never blanker than before. **`catch`'s
+`.` is jq's ERROR VALUE, not the original input** — `. as $raw` is what makes
+the fallback print the actual build-failure line rather than jq's own parse
+error message, which reads as noise on top of noise. And
 `events.jsonl` still gets every line (including the non-JSON ones), which the
 report script filters itself.
 

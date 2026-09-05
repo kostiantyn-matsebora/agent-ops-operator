@@ -77,7 +77,24 @@ jobs:
           # called by e2e-full.yml, which inherits the repository's secrets.
           CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.tier == 'full' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: |
-          go test -tags e2e -count=1 -timeout 55m -v ./test/e2e/
+          mkdir -p "$E2E_ARTIFACT_DIR"
+          # -json alongside -v: the live log stays human-readable (jq prints
+          # each Output event's text; a non-JSON line — a build failure, before
+          # go test ever reaches test2json — passes through unchanged instead
+          # of erroring), while the raw event stream is kept for the report
+          # below and for the diagnostics upload.
+          go test -tags e2e -count=1 -timeout 55m -v -json ./test/e2e/ \
+            | tee "$E2E_ARTIFACT_DIR/events.jsonl" \
+            | jq -rR '. as $raw | try (fromjson | select(.Action == "output") | .Output) catch $raw'
+      # if: always() — a report saying WHY nothing ran is owed on a build
+      # failure too. Never fails the job itself: "Run the pack" already does.
+      - name: Write e2e report
+        if: always()
+        run: |
+          python3 "$GITHUB_WORKSPACE/.github/scripts/e2e-report.py" \
+            --events "$E2E_ARTIFACT_DIR/events.jsonl" \
+            --level ${{ inputs.tier == 'full' && 'summary' || 'full' }} \
+            >> "$GITHUB_STEP_SUMMARY"
       # Unconditional: a failure that did not capture its own context costs a
       # full re-run to learn anything.
       - name: Upload diagnostics
