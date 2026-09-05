@@ -63,6 +63,63 @@ spec:
         description: >-
           Read the existing log listing on connect and report what is newer
           than the cursor (default true). Off makes a restart forget.
+      surfaces:
+        type: object
+        description: >-
+          The health surfaces beside the log, each with `enabled` and its one
+          knob. Every signal carries `surface=` (log, config-entry, repair,
+          sensor, update) for rules to select. A surface that is off is never
+          read. Unknown keys are refused by the adapter.
+        properties:
+          configEntries:
+            type: object
+            description: >-
+              Config entries in a failed state, one signal per entry with the
+              entry's own reason (default on; states setup_retry, setup_error,
+              migration_error).
+            properties:
+              enabled:
+                type: boolean
+              states:
+                type: array
+                items:
+                  type: string
+                  enum: [loaded, setup_error, migration_error, setup_retry, not_loaded, failed_unload, setup_in_progress]
+          repairs:
+            type: object
+            description: >-
+              The issue registry, one signal per issue (default on; severities
+              critical and error).
+            properties:
+              enabled:
+                type: boolean
+              severities:
+                type: array
+                items:
+                  type: string
+                  enum: [critical, error, warning]
+          sensors:
+            type: object
+            description: >-
+              binary_sensor entities of these device classes in their fault
+              state (default on; problem and connectivity). Only classes with
+              a fault polarity are accepted.
+            properties:
+              enabled:
+                type: boolean
+              deviceClasses:
+                type: array
+                items:
+                  type: string
+                  enum: [problem, connectivity, safety, tamper, smoke, gas, carbon_monoxide, moisture, heat, cold, battery]
+          updates:
+            type: object
+            description: >-
+              ONE digest signal listing every update.* entity in state on,
+              re-posted when the set grows (default off).
+            properties:
+              enabled:
+                type: boolean
       rules:
         type: array
         description: >-
@@ -76,9 +133,9 @@ spec:
               type: array
               description: >-
                 Alertmanager matcher syntax (=, !=, =~, !~) over the signal's
-                labels — integration, logger, level, location — plus `message`,
-                the record's text, which is match-only and never emitted as a
-                label. Empty = catch-all.
+                labels — surface, integration, logger, level, location — plus
+                `message`, the record's text, which is match-only and never
+                emitted as a label. Empty = catch-all.
               items:
                 type: string
             for:
@@ -165,6 +222,7 @@ spec:
   {{- with $src.rules }}{{ $_ := set $cfg "rules" . }}{{ end }}
   {{- with $src.route }}{{ $_ := set $cfg "route" . }}{{ end }}
   {{- if not $src.backfill }}{{ $_ := set $cfg "backfill" false }}{{ end }}
+  {{- with $src.surfaces }}{{ $_ := set $cfg "surfaces" . }}{{ end }}
   config:
 {{ toYaml $cfg | indent 4 }}
 {{- end }}

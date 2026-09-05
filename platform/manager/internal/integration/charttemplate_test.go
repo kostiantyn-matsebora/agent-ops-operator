@@ -2592,3 +2592,55 @@ func assertChannelConfigHasNoAPIBase(t *testing.T, set string) {
 		t.Fatalf("the Channel must not carry apiBase in spec.config:\n%s", doc)
 	}
 }
+
+// The health surfaces beside the log: rendered from values with the stated
+// defaults, each switchable, and their rules ahead of the log rules so a log
+// rule's message pattern cannot capture a repair's text.
+func TestHomeAssistantSourceRendersTheSurfacesWithDefaults(t *testing.T) {
+	src := stripComments(haDoc(t, helmTemplate(t, haArgs()...), "SignalSource", "ha-logs"))
+	for _, want := range []string{
+		"surfaces:",
+		"configEntries:", "states:", "setup_retry", "setup_error", "migration_error",
+		"repairs:", "severities:", "critical",
+		"sensors:", "deviceClasses:", "problem", "connectivity",
+		"updates:",
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("the source config must carry %q:\n%s", want, src)
+		}
+	}
+	// Three on, the digest off: exactly one `enabled: false` under surfaces.
+	surfaces := src[strings.Index(src, "surfaces:"):]
+	if n := strings.Count(surfaces, "enabled: false"); n != 1 {
+		t.Fatalf("expected the update digest alone to default off, got %d disabled surfaces:\n%s", n, surfaces)
+	}
+	if n := strings.Count(surfaces, "enabled: true"); n != 3 {
+		t.Fatalf("expected config entries, repairs and sensors on, got %d enabled surfaces:\n%s", n, surfaces)
+	}
+	// The surface rules come first, before any message rule.
+	rules := src[strings.Index(src, "rules:"):]
+	firstSurface := strings.Index(rules, `surface="config-entry"`)
+	firstMessage := strings.Index(rules, "message=~")
+	if firstSurface < 0 || firstMessage < 0 || firstSurface > firstMessage {
+		t.Fatalf("surface rules must precede the log rules:\n%s", rules)
+	}
+	for _, want := range []string{`surface="sensor"`, `surface="repair"`, `surface="update"`} {
+		if !strings.Contains(rules, want) {
+			t.Fatalf("missing the default rule for %s:\n%s", want, rules)
+		}
+	}
+}
+
+func TestHomeAssistantSurfaceCanBeSwitchedOffInValues(t *testing.T) {
+	src := stripComments(haDoc(t, helmTemplate(t, haArgs(
+		"--set", "home-assistant.logsAdapter.source.surfaces.sensors.enabled=false")...), "SignalSource", "ha-logs"))
+	surfaces := src[strings.Index(src, "surfaces:"):]
+	sensors := surfaces[strings.Index(surfaces, "sensors:"):]
+	sensors = sensors[:strings.Index(sensors, "updates:")]
+	if !strings.Contains(sensors, "enabled: false") {
+		t.Fatalf("sensors must render disabled:\n%s", sensors)
+	}
+	if n := strings.Count(surfaces, "enabled: true"); n != 2 {
+		t.Fatalf("switching one surface off must leave the other two on, got %d:\n%s", n, surfaces)
+	}
+}
