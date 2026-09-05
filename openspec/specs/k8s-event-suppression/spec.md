@@ -153,13 +153,27 @@ While an event is pending in the dwell queue, further events for the same involv
 ### Requirement: Inhibition suppresses consequences of a known cause
 `config.route.inhibitRules` SHALL suppress a matched event when another event matching the rule's `sourceMatchers` is active and every label named in `equal` has the same value on both. Inhibition SHALL be evaluated before the dwell queue, so an inhibited event never occupies the queue.
 
-#### Scenario: A down node does not page for each of its pods
-- **WHEN** an inhibit rule declares `sourceMatchers: ['reason="NodeNotReady"']`, `targetMatchers: ['reason=~"Unhealthy|FailedScheduling"']`, `equal: [node]`, a node reports NotReady, and its pods emit `Unhealthy`
-- **THEN** only the node signal is emitted and the pod events are suppressed
+A DRAINING NODE'S OWN CONSEQUENCES ARE NOT THIS REQUIREMENT'S CASE — see "Node state is the fourth suppression axis" below. Inhibition was tried for it and measured to fail: the pod-level consequences arrive within the same second as the node's own event, so "the cause must be seen first" is a race this axis loses, and inhibition's TTL is shorter than some drains actually run. Inhibition still suits an unrelated cause/consequence pair with a genuine cause EVENT, such as a volume failure inhibiting the pods that depend on it.
+
+#### Scenario: A failed volume does not page for each of its pods
+- **WHEN** an inhibit rule declares `sourceMatchers: ['reason="VolumeFailedDelete"']`, `targetMatchers: ['reason=~"FailedMount|FailedAttachVolume"']`, `equal: [name]`, a volume reports `VolumeFailedDelete`, and pods depending on it emit `FailedMount`
+- **THEN** only the volume signal is emitted and the pod events are suppressed
 
 #### Scenario: Inhibition is scoped by equal labels
-- **WHEN** the same inhibit rule is active and a pod on a DIFFERENT, healthy node emits `Unhealthy`
+- **WHEN** the same inhibit rule is active and a pod depending on a DIFFERENT, healthy volume emits `FailedMount`
 - **THEN** that event is not inhibited and follows its ordinary rule
+
+### Requirement: Node state is the fourth suppression axis
+Beside rules (`for:`), inhibition and time, suppression SHALL have a node-STATE
+axis: events on a draining node are suppressed for as long as the node drains,
+per the `k8s-drain-awareness` capability. It SHALL be evaluated before
+inhibition and the dwell queue, and SHALL need no cause event and no TTL,
+because the state it reads begins before the consequences and ends when the
+drain does.
+
+#### Scenario: Order of evaluation
+- **WHEN** an event arrives for a pod on a draining node that also matches an inhibit rule's target
+- **THEN** it is suppressed by the drain axis and never reaches inhibition or the queue
 
 ### Requirement: A source's emit rate is capped and clipping is reported
 The adapter SHALL cap the number of signals it emits per source per minute. When the cap is reached it SHALL stop emitting for the remainder of the window and report the clipping on that source's `Ready` condition, naming the count. Clipping SHALL NOT be silent.
