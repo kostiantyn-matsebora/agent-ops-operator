@@ -311,7 +311,10 @@ before this evaluates the backlog a repository already carries.
 - **WHEN** a component carries an open Blocker or High finding that lowers its
   overall reliability, security or maintainability rating below B
 - **THEN** its project's gate fails on that condition, the verdict is visible
-  on the pull request, and the always-present check is unaffected
+  on the pull request, and the always-present check fails naming the
+  component — the SAME single verdict the overall-coverage condition already
+  fails on, since one project has one gate and the scanner step waits on its
+  combined ERROR/OK result, not on each condition separately
 
 #### Scenario: A component's overall rating reaches B
 
