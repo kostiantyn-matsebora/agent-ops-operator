@@ -32,11 +32,11 @@ resolve master and report success against it.
 
 ## 3. Chart and rules
 
-- [ ] 3.1 `chart/charts/kubernetes/templates/events.yaml`: `nodes`
+- [x] 3.1 `chart/charts/kubernetes/templates/events.yaml`: `nodes`
       `list`/`watch` in the ClusterRole only; `values.yaml` documents
       `route.drainingNodes`, `drainingNodeMatchers`, `drainingNodeBound`.
-- [ ] 3.2 Tier 3 gains `kind="Node"` in the shipped rules.
-- [ ] 3.3 `.claude/rules/signal-rules.md`: the fourth axis, the evaluation
+- [x] 3.2 Tier 3 gains `kind="Node"` in the shipped rules.
+- [x] 3.3 `.claude/rules/signal-rules.md`: the fourth axis, the evaluation
       order, the shared taint set and where it is pinned twice.
 
 ## 4. Unit tests
@@ -60,21 +60,24 @@ resolve master and report success against it.
       the node stops and starts draining again.
 - [x] 4.6 Ready-condition test: the draining-nodes/suppressed-count message
       while active, and the total once on release.
-- [ ] 4.7 `chart/`: `helm template` both RBAC modes (`rbac.clusterWide: true`
+- [x] 4.7 `chart/`: `helm template` both RBAC modes (`rbac.clusterWide: true`
       and `false`) renders the `nodes` grant only in the cluster-wide
       ClusterRole; `python3 .github/scripts/serviceaccount-guard.py` passes.
-- [ ] 4.8 `platform/manager/internal/integration/charttemplate_test.go`: the
+- [x] 4.8 `platform/manager/internal/integration/charttemplate_test.go`: the
       pin for tier 3 gains `kind="Node"` (node pressure still reports at
       `for: 0`, now qualified), and a new scenario asserts a pod-level
       `NodeNotReady` event is NOT matched by tier 3 and reaches the
-      undwelled catch-all instead.
-- [ ] 4.9 Run every touched module's full suite green in the container per
+      undwelled catch-all instead (the mechanism-level half of that scenario
+      lives in `signals/k8s-events/rules_test.go`, since the module boundary
+      keeps the rules engine out of `platform/manager`).
+- [x] 4.9 Run every touched module's full suite green in the container per
       `.claude/rules/build-test.md`: `go build ./... && go vet ./... && go
       test ./...` in `signals/k8s-events/` and in `platform/manager/` (the
       latter with `KUBEBUILDER_ASSETS` set, for the envtest suite).
-- [ ] 4.10 `python3 .github/scripts/publication-guard.py` and
+- [x] 4.10 `python3 .github/scripts/publication-guard.py` and
       `python3 .github/scripts/retired-vocabulary-guard.py` pass; record the
-      verdict only, never the matched text.
+      verdict only, never the matched text. Verdicts: publication-guard clean
+      (109 files); retired-vocabulary-guard clean.
 
 ## 5. E2E tests
 
