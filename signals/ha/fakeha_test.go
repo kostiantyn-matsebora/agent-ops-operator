@@ -87,10 +87,14 @@ func (f *fakeHA) ListCalls() int {
 }
 
 // PushLogEvent delivers a system_log_event to every connected client.
+//
+// Written under f.mu, which dispatch() also holds while it answers a command:
+// a server's frames on one connection must be serialised, and an event written
+// while a command's result frame is mid-write interleaves the two — the client
+// then reads a frame header as JSON and the session dies with "invalid
+// character '\u0081'". It surfaced under -race, where the adapter's connect-time
+// commands and a test's push overlap far more often.
 func (f *fakeHA) PushLogEvent(rec logRecord) {
-	f.mu.Lock()
-	conns := append([]net.Conn(nil), f.conns...)
-	f.mu.Unlock()
 	payload, _ := json.Marshal(map[string]any{
 		"id":   1,
 		"type": "event",
@@ -99,7 +103,9 @@ func (f *fakeHA) PushLogEvent(rec logRecord) {
 			"data":       rec,
 		},
 	})
-	for _, c := range conns {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.conns {
 		_ = writeServerFrame(c, opText, payload)
 	}
 }
@@ -147,10 +153,14 @@ func (f *fakeHA) serve(conn net.Conn) {
 		_ = sendServerJSON(conn, map[string]any{"type": "auth_invalid", "message": "Invalid access token"})
 		return
 	}
-	_ = sendServerJSON(conn, map[string]any{"type": "auth_ok", "ha_version": "2026.8.0"})
-
+	// Registered BEFORE auth_ok goes out: the client returns from connect the
+	// moment it reads that frame, so a test that then calls Close() must find
+	// this connection in the list or the sever it asked for never happens.
+	// The frame goes out under the lock, as every other server write does —
+	// see PushLogEvent for why.
 	f.mu.Lock()
 	f.conns = append(f.conns, conn)
+	_ = sendServerJSON(conn, map[string]any{"type": "auth_ok", "ha_version": "2026.8.0"})
 	f.mu.Unlock()
 
 	for {

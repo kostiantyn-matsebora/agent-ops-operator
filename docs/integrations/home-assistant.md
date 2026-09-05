@@ -66,15 +66,20 @@ endpoint and a token no demo cluster has.
 | Token | Belongs to | Mint it as |
 |---|---|---|
 | the **control** token | the everyday agent, and the MCP path | the account that **uses** the house |
-| the **operator** token | the repair agent, and the log lane | an **admin** Home Assistant user |
+| the **operator** token | the repair agent, and the log lane | a **dedicated admin** Home Assistant user |
 
 **A token inherits its user's rights, and no toolset can narrow a credential.**
 That is why the split is two users rather than two settings.
 
+**Mint the operator user for the job, never from your own account.** The log
+lane drops any record whose text names its own user, so it cannot report an
+error an agent caused — and a token minted from the household owner's account
+silences every error that mentions them.
+
 > **The operator token is a prerequisite twice over.** Without it neither the
 > repair agent nor its route renders — and the **log lane needs it too**, because
-> `subscribe_events` is admin-only. A control token connects, passes auth, and is
-> then refused the subscription, which surfaces as `Ready=False,
+> `system_log/list` and `subscribe_events` are admin-only. A control token
+> connects, passes auth, and is then refused, which surfaces as `Ready=False,
 > reason=Unreachable` and reads like a network problem.
 {: .ao-callout}
 
@@ -240,6 +245,7 @@ key conversation grouping on the exact wording.
 | | |
 |---|---|
 | **`message` matchers** | available here, and nowhere else |
+| **How records are seen** | the log listing is **polled**, every fifteen seconds. Nothing in Home Assistant needs enabling; `system_log: fire_event: true` in its configuration only makes a record arrive sooner |
 | **The re-check** | asks the integration's config entry state, then falls back to *was it still recurring as the window closed* — the last third of the wait, never under thirty seconds. A blip that logged for thirty seconds and stopped is churn |
 | **No time axis** | `timeIntervals` and `muteTimeIntervals` are not implemented. An unknown key is a config error, not a window that silently never fires |
 
