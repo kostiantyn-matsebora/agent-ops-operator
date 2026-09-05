@@ -71,7 +71,14 @@ func setupAgent(t *testing.T, e *Env) {
 	}
 	p := pipeline(agentPipeline, agentProfile, []string{agentSource}, []string{ChannelConsole})
 	p.Spec.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: agentRuntime}
-	p.Spec.Toolsets = &agentopsv1alpha1.ToolsetBinding{Refs: []agentopsv1alpha1.ObjectRef{{Name: "agentops-observe"}}}
+	// agentops-observe is filesystem-only (Read/Grep/Glob); the closed-form
+	// pod-name assertion below needs the kubernetes bundle's read MCP tools,
+	// which the e2e install renders only under the full tier (install.go's
+	// k8sMCP) — the one lane that reaches this test.
+	p.Spec.Toolsets = &agentopsv1alpha1.ToolsetBinding{Refs: []agentopsv1alpha1.ObjectRef{
+		{Name: "agentops-observe"}, {Name: "k8s-observability"},
+	}}
+	p.Spec.MCPConfigs = &agentopsv1alpha1.ToolingBinding{Refs: []agentopsv1alpha1.ObjectRef{{Name: "k8s-api"}}}
 	if err := ensure(ctx, e.K, p); err != nil {
 		t.Fatal(err)
 	}
