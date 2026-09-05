@@ -594,9 +594,19 @@ func (a *adapter) sweepStates(ctx context.Context, source string, sess *haSessio
 			}
 		}
 		src.pendingUpdates = next
+		// The digest stands while anything is pending, so a rule that dwells
+		// it is answered by the ladder like any other surface condition.
+		if src.standing == nil {
+			src.standing = map[string]map[string]bool{}
+		}
+		rec := updateDigest(pending, now)
+		if len(pending) > 0 {
+			src.standing[surfaceUpdate] = map[string]bool{rec.Key(): true}
+		} else {
+			delete(src.standing, surfaceUpdate)
+		}
 		a.mu.Unlock()
 		if grew {
-			rec := updateDigest(pending, now)
 			a.consider(ctx, source, &rec)
 		}
 	}
@@ -921,12 +931,22 @@ func (a *adapter) readListing(ctx context.Context, source string, sess *haSessio
 		snap.records[r.Key()] = r
 	}
 	out := listing{records: records}
-	// config_entries/get is an ADMIN command. A read-only token simply gets no
-	// predicate, which is rung 2 — not an error worth reporting on the source.
-	if entries, err := sess.ConfigEntries(cctx); err == nil {
-		out.entries, out.entriesRead = entries, true
-		for _, e := range entries {
-			snap.entries[e.Domain] = append(snap.entries[e.Domain], e.State)
+	// config_entries/get serves two readers: the config-entry surface, and
+	// the dwell ladder's first rung for LOG records. With the surface off it
+	// is issued only while a dwell is pending — an install with nothing
+	// pending and the surface off issues it never. An ADMIN command: a
+	// read-only token simply gets no predicate, which is rung 2 — not an
+	// error worth reporting on the source.
+	wantEntries := a.pending.HasEntries()
+	if src := a.source(source); src != nil && src.filter.surfaces.configEntries.enabled {
+		wantEntries = true
+	}
+	if wantEntries {
+		if entries, err := sess.ConfigEntries(cctx); err == nil {
+			out.entries, out.entriesRead = entries, true
+			for _, e := range entries {
+				snap.entries[e.Domain] = append(snap.entries[e.Domain], e.State)
+			}
 		}
 	}
 	a.mu.Lock()

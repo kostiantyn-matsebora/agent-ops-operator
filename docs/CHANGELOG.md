@@ -23,6 +23,22 @@ for the source and the reference material beside this file.
   cordon is reported once (`kind: Node`, reason `NodeDrainExceeded`) and
   suppression on that node is released. Needs the events `ClusterRole`'s new
   `nodes` `list`/`watch` grant (cluster-wide installs only — see below).
+- **`signal-ha` 0.4.0: the Home Assistant lane watches the four health
+  surfaces beside the log.** Home Assistant reports most of what is wrong
+  with a house somewhere other than its log — an integration that cannot
+  reach its device sits in a config entry state and logs one line at
+  startup; a problem it has diagnosed is a repair; a device fault is a
+  `problem` or `connectivity` binary sensor; a package behind is an
+  `update.*` entity. Each is now a record kind on the same source, through
+  the same rules, dwell and self-exclusion, labelled `surface=`
+  (`log`, `config-entry`, `repair`, `sensor`, `update`) so a rule can select
+  it. One signal per failed entry (with its reason), per repair, per faulting
+  sensor; ONE digest listing every pending update, re-posted when the set
+  grows. Each surface is switchable and tunable under
+  `logsAdapter.source.surfaces` — config entries, repairs and sensors on by
+  default, the update digest off — and a surface that is off is never read.
+  The shipped rules open with one per surface, ahead of the log rules. A
+  values file that replaces `rules` replaces those too.
 
 ### Changed
 
@@ -49,25 +65,6 @@ for the source and the reference material beside this file.
   through `ci-green`. Contributor-facing only; nothing in the chart or the
   operator changes. See `CONTRIBUTING.md`, *Code analysis* and *Pull
   requests* (the `autofix` label).
-
-### Added
-
-- **`signal-ha` 0.4.0: the Home Assistant lane watches the four health
-  surfaces beside the log.** Home Assistant reports most of what is wrong
-  with a house somewhere other than its log — an integration that cannot
-  reach its device sits in a config entry state and logs one line at
-  startup; a problem it has diagnosed is a repair; a device fault is a
-  `problem` or `connectivity` binary sensor; a package behind is an
-  `update.*` entity. Each is now a record kind on the same source, through
-  the same rules, dwell and self-exclusion, labelled `surface=`
-  (`log`, `config-entry`, `repair`, `sensor`, `update`) so a rule can select
-  it. One signal per failed entry (with its reason), per repair, per faulting
-  sensor; ONE digest listing every pending update, re-posted when the set
-  grows. Each surface is switchable and tunable under
-  `logsAdapter.source.surfaces` — config entries, repairs and sensors on by
-  default, the update digest off — and a surface that is off is never read.
-  The shipped rules open with one per surface, ahead of the log rules. A
-  values file that replaces `rules` replaces those too.
 
 ### Fixed
 

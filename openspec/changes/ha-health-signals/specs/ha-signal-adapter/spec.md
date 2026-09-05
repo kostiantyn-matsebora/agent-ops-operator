@@ -52,7 +52,7 @@ fingerprint cooldown and signature window absorb it.
 
 #### Scenario: A disabled surface is not read
 - **WHEN** a surface is disabled in the source configuration
-- **THEN** the adapter issues no command for that surface and emits nothing from it
+- **THEN** the adapter issues no command on that surface's account and emits nothing from it — the config entry listing, which the log lane's dwell re-check also reads as its health predicate, is then read only while a dwell is pending
 
 #### Scenario: Recovery and recurrence
 - **WHEN** a reported condition goes away and later comes back

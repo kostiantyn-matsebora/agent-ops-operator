@@ -92,7 +92,8 @@
 - [x] 7.1 `docs/CHANGELOG.md` — an Unreleased entry naming the new `signal-ha`
       tag, the four surfaces, their defaults and the `surfaces` values.
 - [x] 7.2 `.claude/rules/structure.md` — the `signals/ha/` entry says what it
-      reads; it now names the five surfaces and the two cadences.
+      reads; it now names the four surfaces beside the log, and the two
+      cadences.
       `.claude/rules/chart.md` — the bundle section's "the log ingest lane"
       bullet names the surfaces and their switches. Verify by reading both
       back.
@@ -104,7 +105,8 @@
       reaches you" shows each surface's switch and knob, a rule dropping one
       surface, and enabling the digest; the "What differs from the cluster
       lane" table gains the surfaces row; the diagram's caption says it shows
-      one of five surfaces. Verify by reading the rendered sections and with
+      one of the surfaces, the log included. Verify by reading the rendered
+      sections and with
       `python3 .github/scripts/docs-generate.py --check` from the worktree.
       The diagram itself is kept as the design says; its caption now names
       the other surfaces as taking the same path.

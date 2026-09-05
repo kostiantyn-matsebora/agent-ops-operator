@@ -311,17 +311,20 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
   `system_log: fire_event: true`, off by default, and the adapter that
   depended on it posted nothing for a day on the reference install while
   reporting Ready. The two paths share one cursor.
-- **FIVE SURFACES, TWO CADENCES, ONE `consider` PATH.** Beside the log:
-  config entry state and the issue registry ride on the fifteen-second
-  sweep; `get_states` (the sensor and update surfaces) is read every minute,
-  with the entity registry every fifth read. `surfaces.go` shapes each
-  condition as a `logRecord` — the logger slot holds a hyphenated name no
-  Python logger can carry — so it takes the same self-exclusion, rules,
-  inhibition and dwell as a log record, labelled `surface=`. A condition is
-  a STATE: a per-surface standing set feeds it to `consider` once on
-  appearance and forgets it on clearance; the dwell re-check asks the
-  standing set. A surface record NEVER moves the log cursor. A surface that
-  is off issues no command.
+- **FOUR SURFACES BESIDE THE LOG, TWO CADENCES, ONE `consider` PATH.**
+  - **Config entry state and the issue registry ride on the fifteen-second
+    sweep.** `get_states` — the sensor and update surfaces — is read every
+    minute, the entity registry every fifth read.
+  - **`surfaces.go` shapes each condition as a `logRecord`**, the logger slot
+    holding a hyphenated name no Python logger can carry, so it takes the
+    same self-exclusion, rules, inhibition and dwell as a log record,
+    labelled `surface=`.
+  - **A condition is a STATE.** A per-surface standing set feeds it to
+    `consider` once on appearance and forgets it on clearance.
+  - **The dwell re-check asks the standing set**, for the digest too.
+  - **A surface record NEVER moves the log cursor.**
+  - **A surface that is off issues no command** — `config_entries/get`
+    included, which is then read only while a dwell needs its predicate.
 - **NO Kubernetes client at all.** It names no ServiceAccount, so it runs as the
   release floor; credential projected per SOURCE.
 - **Same `rules`/`route` vocabulary as `signal-k8s-events`**, minus the time

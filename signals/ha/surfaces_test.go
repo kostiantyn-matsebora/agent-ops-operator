@@ -266,7 +266,9 @@ func TestDisabledSurfacesIssueNoReads(t *testing.T) {
 	runAdapter(t, a)
 
 	waitFor(t, "several sweeps", func() bool { return ha.ListCalls() >= 4 })
-	for _, typ := range []string{"repairs/list_issues", "get_states", "config/entity_registry/list"} {
+	// config_entries/get included: with the surface off and nothing pending it
+	// has no reader, and the log lane's rung 1 reads it only while it needs to.
+	for _, typ := range []string{"repairs/list_issues", "get_states", "config/entity_registry/list", "config_entries/get"} {
 		if n := ha.Calls(typ); n != 0 {
 			t.Fatalf("%s was read %d times with its surface off", typ, n)
 		}
@@ -308,6 +310,39 @@ func TestConfigEntryDwellAsksTheSurfaceAtTheClose(t *testing.T) {
 	}
 	if !strings.Contains(posted[0].Payload, "failing for") {
 		t.Fatalf("expected the dwell evidence in the payload, got %q", posted[0].Payload)
+	}
+}
+
+// An unknown TOP-LEVEL key is refused exactly as an unknown surface key is:
+// the time axis the cluster lane has and this one does not is the documented
+// case, and it must not be a window that silently never fires.
+func TestUnknownTopLevelKeyIsRefused(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{"endpoint": "http://ha.example.org", "timeIntervals": []string{}})
+	if _, err := parseConfig(raw); err == nil || !strings.Contains(err.Error(), "timeIntervals") {
+		t.Fatalf("expected the unknown key to be named, got %v", err)
+	}
+}
+
+// The digest stands while anything is pending, so a rule that dwells it is
+// decided by the ladder like every other surface condition, not dropped as a
+// condition nobody tracks.
+func TestUpdateDigestSurvivesADwell(t *testing.T) {
+	ha := newFakeHA(t, "secret")
+	ha.SetStates(updateState("update.mushroom_update", "v5.2.2", "v5.2.3"))
+	fm, a := surfaceAdapter(t, ha, map[string]any{
+		"surfaces": map[string]any{"updates": map[string]any{"enabled": true}},
+		"rules":    []map[string]any{{"matchers": []string{`surface="update"`}, "for": "300ms"}},
+	})
+	ctx := runAdapter(t, a)
+	go a.runDwellFlusher(ctx)
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && len(fm.Posted()) == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	posted := fm.Posted()
+	if len(posted) != 1 || posted[0].Labels["surface"] != surfaceUpdate {
+		t.Fatalf("expected the dwelled digest to be emitted, got %+v", posted)
 	}
 }
 

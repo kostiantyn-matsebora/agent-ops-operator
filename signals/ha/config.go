@@ -192,8 +192,13 @@ type filter struct {
 func parseConfig(raw json.RawMessage) (*filter, error) {
 	cfg := sourceConfig{}
 	if len(raw) > 0 && string(raw) != "null" {
-		if err := json.Unmarshal(raw, &cfg); err != nil {
-			return nil, fmt.Errorf("spec.config is not valid JSON for the ha adapter: %w", err)
+		// Strict, as the surfaces block is: an unknown key here is a config
+		// error, never a window that silently never fires — the time axis
+		// (timeIntervals) is the documented case.
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&cfg); err != nil {
+			return nil, fmt.Errorf("spec.config is not valid for the ha adapter: %w", err)
 		}
 	}
 	if strings.TrimSpace(cfg.Endpoint) == "" {

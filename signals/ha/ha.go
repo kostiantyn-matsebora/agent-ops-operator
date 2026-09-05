@@ -19,13 +19,22 @@ import (
 // so every one of those fields would have to be recovered by regex and the
 // cursor would be a byte offset that log rotation invalidates.
 //
-// Three commands beyond the subscription, each earning its place:
+// The commands beyond the subscription, each earning its place:
 //
-//	system_log/list     backfill on connect, and the dwell re-check's evidence
-//	                    (a record's `count` rising means it is still happening)
-//	config_entries/get  the health predicate: an integration whose config entry
-//	                    sits in setup_error / setup_retry is still broken
-//	auth/current_user   self-exclusion mechanism 2 — who this adapter's token is
+//	system_log/list              polled every fifteen seconds — the log itself,
+//	                             and the dwell re-check's evidence (a record's
+//	                             `count` rising means it is still happening)
+//	config_entries/get           the config-entry surface, and the log lane's
+//	                             health predicate: an entry in setup_error /
+//	                             setup_retry is still broken
+//	repairs/list_issues          the repair surface, on the same sweep
+//	get_states                   the sensor and update surfaces, once a minute
+//	config/entity_registry/list  which integration owns a sensor, every fifth
+//	                             states read
+//	auth/current_user            self-exclusion mechanism 3 — who this
+//	                             adapter's token is
+//
+// A surface that is off issues none of its commands.
 //
 // Everything here is read-only. This adapter never calls a service, and holding
 // a token that could is the ops AGENT's business, not the ingest lane's.

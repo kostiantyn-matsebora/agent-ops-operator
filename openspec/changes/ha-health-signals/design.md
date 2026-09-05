@@ -35,7 +35,11 @@ See `proposal.md` — Why. What shapes the approach:
 
 - One route and one rules policy cover the log and the four surfaces, with a
   rule able to pick any one of them.
-- A disabled surface costs nothing: no read, no memory.
+- A disabled surface costs nothing: no read, no memory. The one shared read
+  is `config_entries/get`, which the log lane's dwell already used as its
+  first rung before any surface existed; with the surface off it is read
+  only while something is pending, so an install with nothing pending and
+  the surface off issues it never.
 - A standing condition is reported once per standing period, and is verified
   against its own surface at the close of a dwell.
 

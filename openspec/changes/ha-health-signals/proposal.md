@@ -12,7 +12,8 @@ not see:
 | a Tion device reports a warn-out through its `problem` binary sensor | entity state | nothing |
 | seven HACS packages have a newer version | `update.*` entities in state `on` | nothing |
 
-The log is one surface of five, and the one that misses a whole class: an
+The log is one of five surfaces the instance reports on, and the one that
+misses a whole class: an
 integration that fails quietly, a fault a device reports as a state, a problem
 Home Assistant has already diagnosed and filed as a repair. A person opening
 Settings sees all four as badges. The lane that exists to spare them that
@@ -98,7 +99,7 @@ reads the one place none of the four is written.
 
 - `docs/CHANGELOG.md` — the entry.
 - `.claude/rules/structure.md` — the `signals/ha/` entry says the adapter
-  reads the log; it reads five surfaces now.
+  reads the log; it reads the four surfaces beside it now.
 - `.claude/rules/chart.md` — the bundle section's "the log ingest lane" bullet.
 - `docs/configuration.md` is NOT affected: the values are a subchart's, so
   they belong on the integration page.
@@ -111,7 +112,8 @@ reads the one place none of the four is written.
   for the surfaces and their switches, the "What differs from the cluster
   lane" table, and the diagram's caption. The diagram itself
   (`assets/img/integrations/home-assistant-*.svg`) draws a log record as the
-  example; it stays, with a caption saying it is one of five surfaces — see
+  example; it stays, with a caption saying the other surfaces take the same
+  path — see
   the design's risks.
 - The landing page, Introduction, Getting started and Installation name the
   integration by link only and describe nothing this changes. Checked.
