@@ -52,6 +52,21 @@ The adapter SHALL NOT group signals or apply cooldown beyond its restart cursor 
 - **WHEN** an event's involved object is a bare pod with no owner references
 - **THEN** `workload` names that pod
 
+### Requirement: The object cache also holds nodes
+The read-only list/watch cache SHALL additionally hold nodes, retaining only
+name, `spec.unschedulable` and taints. Node access SHALL be granted externally
+like the rest; absent, the adapter SHALL run with drain awareness off and
+report that on each source without `Ready=False`, since nodes are
+cluster-scoped and a namespaced install has deliberately no view of them.
+
+#### Scenario: Nodes are cached from fields
+- **WHEN** a node is cordoned
+- **THEN** the cache reflects `unschedulable` within the watch's latency without holding the node's status
+
+#### Scenario: Missing node access is not a failure
+- **WHEN** the ServiceAccount lacks `list`/`watch` on `nodes`
+- **THEN** sources stay `Ready=True` and their condition names drain awareness as unavailable
+
 ### Requirement: Watching is restart-safe
 The adapter SHALL persist a per-source cursor (the maximum event `lastTimestamp` observed) through the contract state API and skip already-seen events on startup's initial list; on watch expiry (`410 Gone`) or stream error it SHALL relist and resume. Delivery is at-least-once: duplicates after an ill-timed restart are acceptable because deterministic fingerprints collapse under the manager's cooldown.
 
