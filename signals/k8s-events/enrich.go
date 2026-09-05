@@ -38,16 +38,20 @@ type enrichment struct {
 //
 // Two distinct "no answer" cases, deliberately handled differently:
 //
-//   - a kind the cache does NOT track (Node, PVC, Job, HPA, Ingress, any CRD)
-//     is its OWN workload. There is no controller to find and no degradation
-//     involved — a Node is a workload.
+//   - a kind the cache does NOT track (PVC, Job, HPA, Ingress, any CRD) is its
+//     OWN workload. There is no controller to find and no degradation
+//     involved. Node is NOT in this list: it is tracked, for drain awareness
+//     (drain.go) — but a Node still resolves to its own workload either way,
+//     since it carries no owner reference to walk.
 //
 //   - a kind the cache DOES track but has no entry for (a pod that has not
 //     landed yet, or a cold cache) yields NO workload label at all. Falling
 //     back to the pod's own name here would silently reinstate exactly the
 //     per-pod grouping this change exists to remove; leaving it empty groups
 //     the unresolvable ones together, which errs toward fewer conversations
-//     rather than more.
+//     rather than more. A Node absent from a SYNCED cache is a stronger
+//     claim — the node is gone — so this is the same rule paying for itself
+//     twice, not a new one.
 func (a *adapter) enrich(ev *Event) enrichment {
 	kind, name, ns := ev.InvolvedObject.Kind, ev.InvolvedObject.Name, ev.Namespace()
 	if a.cache == nil {

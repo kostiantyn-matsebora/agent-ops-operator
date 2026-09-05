@@ -383,9 +383,25 @@ func TestPodHealthPredicate(t *testing.T) {
 }
 
 // A kind with no predicate must report unknown, so rung 2 decides rather than
-// rung 1 guessing.
+// rung 1 guessing. (Node used to be this example; it is now TRACKED, for
+// drain awareness — health() still refuses it a predicate explicitly, see
+// TestTrackedNonPodKindStillHasNoHealthPredicate.)
 func TestNonPodKindHasNoHealthPredicate(t *testing.T) {
 	a := adapterWithCache(syncedCache())
+	if got := a.health(objectRef{ns: "prod", kind: "Job", name: "backup-27"}); got != verdictUnknown {
+		t.Fatalf("a Job must be unknown to the predicate, got %d", got)
+	}
+}
+
+// A Node is tracked now (drain.go), but tracked is not the same as having a
+// health predicate: only Pod does. Present in the cache, a Node must still
+// come back unknown rather than being read through the Pod-shaped switch
+// below it — a Node's zero-value Ready/Phase fields would otherwise read as
+// "unhealthy" by accident.
+func TestTrackedNonPodKindStillHasNoHealthPredicate(t *testing.T) {
+	c := syncedCache()
+	c.put(&objectInfo{Kind: "Node", Name: "node-1"})
+	a := adapterWithCache(c)
 	if got := a.health(objectRef{ns: "", kind: "Node", name: "node-1"}); got != verdictUnknown {
 		t.Fatalf("a Node must be unknown to the predicate, got %d", got)
 	}
