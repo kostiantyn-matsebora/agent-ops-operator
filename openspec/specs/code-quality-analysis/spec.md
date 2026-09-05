@@ -274,11 +274,13 @@ reproducible from the repository and never set by hand.
 
 A project that ships no delivered artifact — no image, no chart, nothing a
 release tag names — MAY instead be assigned the `agentops-unenforced` gate, a
-second gate that carries none of these conditions, PROVIDED the provisioning
-step still creates and analyzes its SonarCloud project, so its findings stay
-visible on its own dashboard even though nothing blocks a merge on them.
-This is a NAMED exception, not a general escape hatch: only a project
-meeting the no-artifact test above may be assigned to it, and the
+SEPARATE gate created empty and kept that way — carrying NONE of `agentops`'s
+conditions, not the rating ones added here and not the new-code or
+overall-coverage conditions that already gate `agentops` — PROVIDED the
+provisioning step still creates and analyzes its SonarCloud project, so its
+findings stay visible on its own dashboard even though nothing blocks a merge
+on them. This is a NAMED exception, not a general escape hatch: only a
+project meeting the no-artifact test above may be assigned to it, and the
 provisioning step's own source is where that assignment is made, never a
 preference set by hand.
 
