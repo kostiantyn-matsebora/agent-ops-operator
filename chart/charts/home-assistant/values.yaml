@@ -89,7 +89,7 @@ logsAdapter:
   name: home-assistant
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-ha
-    tag: 0.3.0
+    tag: 0.4.0
   resources: {}
   # The log source. It is INERT until a Pipeline claims it — wiring is
   # pipeline-only, so either turn the `pipelines:` component below on or declare
@@ -117,6 +117,39 @@ logsAdapter:
     # cursor. Off makes the lane lossy across restarts, on purpose only if you
     # want a restart to forget.
     backfill: true
+
+    # THE HEALTH SURFACES beside the log. Home Assistant reports most of what
+    # is wrong with a house somewhere other than its log: an integration that
+    # cannot reach its device sits in a config entry state and logs one line at
+    # startup; a problem it has already diagnosed is a repair; a device fault
+    # is a binary sensor; a package behind is an update entity. Each is read
+    # on its own cadence and takes the same rules path a log record does,
+    # labelled `surface=` so a rule can pick it out. A surface that is off is
+    # never read — no command, no memory.
+    surfaces:
+      # An entry in one of these states, one signal per entry, with the entry's
+      # own reason as the message. `not_loaded` is deliberately absent: a
+      # disabled integration is a choice.
+      configEntries:
+        enabled: true
+        states: [setup_retry, setup_error, migration_error]
+      # The issue registry, one signal per issue. Warning-severity repairs are
+      # deprecation and version notices — the same background hum `levels`
+      # keeps out of the log lane.
+      repairs:
+        enabled: true
+        severities: [critical, error]
+      # binary_sensor entities of these device classes in their fault state —
+      # `problem` on, `connectivity` off. Only classes with a fault polarity
+      # may be listed; a door being open is not a problem.
+      sensors:
+        enabled: true
+        deviceClasses: [problem, connectivity]
+      # ONE digest signal listing every update.* entity in state on, re-posted
+      # when a new one joins the set. Off: a list of pending packages is not an
+      # incident until you say you want to hear about it.
+      updates:
+        enabled: false
 
     # The suppression policy. Ordered, FIRST MATCH WINS.
     #
@@ -146,6 +179,26 @@ logsAdapter:
     # it never becomes a label, because a label carrying free text would key
     # conversation grouping on the exact wording.
     rules:
+      # 0 ── the health surfaces, ahead of the log rules ───────────────────
+      # Selected by `surface=`, so a log rule's message pattern cannot capture
+      # a repair whose text happens to say "Timeout". Config entries and
+      # sensors DWELL: a Home Assistant restart passes both through their
+      # failed states, and the re-check asks the surface itself at the close.
+      # Repairs and the update digest do not: a repair is a standing fact and
+      # a digest is a list — a re-check would find both exactly as they were.
+      - matchers:
+          - surface="config-entry"
+        for: 5m
+      - matchers:
+          - surface="sensor"
+        for: 5m
+      - matchers:
+          - surface="repair"
+        for: "0"
+      - matchers:
+          - surface="update"
+        for: "0"
+
       # 1 ── never actionable on their own ─────────────────────────────────
       # A slow update or a slow setup is Home Assistant telling you a device is
       # sleepy. If it is actually broken it also logs an error the tiers below

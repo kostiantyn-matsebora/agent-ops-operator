@@ -35,6 +35,135 @@ type sourceConfig struct {
 	// what is newer than the cursor. Default true: a restart that skipped the
 	// errors logged while it was down would make the lane quietly lossy.
 	Backfill *bool `json:"backfill,omitempty"`
+	// Surfaces switches and tunes the health surfaces beside the log. Kept raw
+	// so it can be decoded STRICTLY: a misspelt surface or knob here would
+	// otherwise be a silently ignored key, which for a switch means a surface
+	// somebody believes is off.
+	Surfaces json.RawMessage `json:"surfaces,omitempty"`
+}
+
+// surfacesConfig is `surfaces`: one object per surface, each with `enabled`
+// and the one knob that surface has.
+type surfacesConfig struct {
+	ConfigEntries *surfaceConfig `json:"configEntries"`
+	Repairs       *surfaceConfig `json:"repairs"`
+	Sensors       *surfaceConfig `json:"sensors"`
+	Updates       *surfaceConfig `json:"updates"`
+}
+
+// surfaceConfig is one surface's switch and knob. Each knob belongs to ONE
+// surface and is refused on any other: a `states` list under `sensors` is a
+// mistake, not a no-op.
+type surfaceConfig struct {
+	Enabled *bool `json:"enabled"`
+	// States are the config entry states that count (configEntries).
+	States []string `json:"states"`
+	// Severities are the repair severities that count (repairs).
+	Severities []string `json:"severities"`
+	// DeviceClasses are the binary_sensor device classes watched (sensors).
+	DeviceClasses []string `json:"deviceClasses"`
+}
+
+// surfacePolicy is one surface, compiled: on or off, and what counts.
+type surfacePolicy struct {
+	enabled bool
+	accept  map[string]bool
+}
+
+// surfacePolicies is every surface, compiled, with the defaults applied.
+type surfacePolicies struct {
+	configEntries surfacePolicy
+	repairs       surfacePolicy
+	sensors       surfacePolicy
+	updates       surfacePolicy
+}
+
+// defaultSurfaces: config entries, repairs and sensors on; the update digest
+// off — a list of pending packages is not an incident until somebody says
+// they want to hear about it. Warning-severity repairs are deprecation and
+// version notices, the same background hum `levels` keeps out of the log lane.
+func defaultSurfaces() surfacePolicies {
+	return surfacePolicies{
+		configEntries: surfacePolicy{enabled: true, accept: setOf("setup_retry", "setup_error", "migration_error")},
+		repairs:       surfacePolicy{enabled: true, accept: setOf("critical", "error")},
+		sensors:       surfacePolicy{enabled: true, accept: setOf("problem", "connectivity")},
+		updates:       surfacePolicy{enabled: false},
+	}
+}
+
+func setOf(values ...string) map[string]bool {
+	out := make(map[string]bool, len(values))
+	for _, v := range values {
+		out[v] = true
+	}
+	return out
+}
+
+// parseSurfaces validates the `surfaces` block against the defaults.
+func parseSurfaces(raw json.RawMessage) (surfacePolicies, error) {
+	out := defaultSurfaces()
+	if len(raw) == 0 || string(raw) == "null" {
+		return out, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	var cfg surfacesConfig
+	if err := dec.Decode(&cfg); err != nil {
+		return out, fmt.Errorf("spec.config.surfaces: %w (the surfaces are configEntries, repairs, sensors, updates; "+
+			"each takes `enabled` and its own knob)", err)
+	}
+	type knob struct {
+		name   string
+		values []string
+	}
+	apply := func(name string, c *surfaceConfig, p *surfacePolicy, own string, vocab map[string]bool, knobs ...knob) error {
+		if c == nil {
+			return nil
+		}
+		if c.Enabled != nil {
+			p.enabled = *c.Enabled
+		}
+		for _, k := range knobs {
+			if k.name != own && len(k.values) > 0 {
+				return fmt.Errorf("spec.config.surfaces.%s: `%s` is not a knob of this surface", name, k.name)
+			}
+			if k.name != own || len(k.values) == 0 {
+				continue
+			}
+			accept := map[string]bool{}
+			for _, v := range k.values {
+				v = strings.ToLower(strings.TrimSpace(v))
+				if !vocab[v] {
+					return fmt.Errorf("spec.config.surfaces.%s.%s: %q is not one of %s", name, own, v,
+						strings.Join(sortedKeys(vocab), ", "))
+				}
+				accept[v] = true
+			}
+			p.accept = accept
+		}
+		return nil
+	}
+	knobsOf := func(c *surfaceConfig) []knob {
+		if c == nil {
+			return nil
+		}
+		return []knob{{"states", c.States}, {"severities", c.Severities}, {"deviceClasses", c.DeviceClasses}}
+	}
+	sensorClasses := map[string]bool{}
+	for class := range sensorFaultState {
+		sensorClasses[class] = true
+	}
+	for _, step := range []error{
+		apply("configEntries", cfg.ConfigEntries, &out.configEntries, "states", configEntryStates, knobsOf(cfg.ConfigEntries)...),
+		apply("repairs", cfg.Repairs, &out.repairs, "severities", repairSeverities, knobsOf(cfg.Repairs)...),
+		apply("sensors", cfg.Sensors, &out.sensors, "deviceClasses", sensorClasses, knobsOf(cfg.Sensors)...),
+		apply("updates", cfg.Updates, &out.updates, "", nil, knobsOf(cfg.Updates)...),
+	} {
+		if step != nil {
+			return out, step
+		}
+	}
+	return out, nil
 }
 
 // validLevels are the Python logging levels Home Assistant emits.
@@ -50,6 +179,9 @@ type filter struct {
 	// rules is the compiled suppression policy. Integration include/exclude
 	// lists are translated into leading drop rules, so this is the single path.
 	rules *ruleSet
+	// surfaces is which health surfaces are read beside the log, and what
+	// counts on each.
+	surfaces surfacePolicies
 }
 
 // parseConfig validates a source's raw config into a filter.
@@ -60,8 +192,13 @@ type filter struct {
 func parseConfig(raw json.RawMessage) (*filter, error) {
 	cfg := sourceConfig{}
 	if len(raw) > 0 && string(raw) != "null" {
-		if err := json.Unmarshal(raw, &cfg); err != nil {
-			return nil, fmt.Errorf("spec.config is not valid JSON for the ha adapter: %w", err)
+		// Strict, as the surfaces block is: an unknown key here is a config
+		// error, never a window that silently never fires — the time axis
+		// (timeIntervals) is the documented case.
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&cfg); err != nil {
+			return nil, fmt.Errorf("spec.config is not valid for the ha adapter: %w", err)
 		}
 	}
 	if strings.TrimSpace(cfg.Endpoint) == "" {
@@ -83,6 +220,11 @@ func parseConfig(raw json.RawMessage) (*filter, error) {
 		return nil, fmt.Errorf("spec.config: %w", err)
 	}
 	f.rules = compiled
+	surfaces, err := parseSurfaces(cfg.Surfaces)
+	if err != nil {
+		return nil, err
+	}
+	f.surfaces = surfaces
 
 	if len(cfg.Levels) == 0 {
 		f.levels["ERROR"], f.levels["CRITICAL"] = true, true
@@ -105,6 +247,11 @@ func parseConfig(raw json.RawMessage) (*filter, error) {
 // are translated into leading drop rules by parseConfig, so selection by
 // integration has exactly one implementation.
 func (f *filter) Matches(rec *logRecord) bool {
+	// `levels` scopes LOG records. A surface condition is in scope by the
+	// surface being enabled; a rule is how one is silenced from there.
+	if rec.Surface != "" {
+		return true
+	}
 	return f.levels[strings.ToUpper(rec.Level)]
 }
 
@@ -209,8 +356,15 @@ func normalize(source string, rec *logRecord) Signal {
 			integration = domain
 		}
 	}
+	surface := rec.Surface
+	if surface == "" {
+		surface = surfaceLog
+	} else if rec.Integration != "" {
+		integration = rec.Integration
+	}
 
-	payload, _ := json.MarshalIndent(map[string]any{
+	fields := map[string]any{
+		"surface":       surface,
 		"integration":   integration,
 		"logger":        rec.Name,
 		"level":         strings.ToUpper(rec.Level),
@@ -220,7 +374,11 @@ func normalize(source string, rec *logRecord) Signal {
 		"firstOccurred": timeString(epoch(rec.FirstOccurred)),
 		"lastOccurred":  timeString(rec.At()),
 		"exception":     rec.Exception,
-	}, "", "  ")
+	}
+	for k, v := range rec.Extra {
+		fields[k] = v
+	}
+	payload, _ := json.MarshalIndent(fields, "", "  ")
 
 	labels := map[string]string{
 		"alertgroup":  "ha-logs",
@@ -230,6 +388,7 @@ func normalize(source string, rec *logRecord) Signal {
 		"level":       strings.ToUpper(rec.Level),
 		"location":    rec.Location(),
 		"source":      source,
+		"surface":     surface,
 	}
 
 	return Signal{

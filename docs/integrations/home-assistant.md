@@ -14,14 +14,16 @@ next:
   url: /agent-ops-operator/integrations/telegram/
 ---
 
-**Not everything worth watching is a cluster.** Home Assistant logs its own
+**Not everything worth watching is a cluster.** Home Assistant reports its own
 failures — an integration that stopped setting up, a device that will not
-answer, a token that expired — and nobody reads those either.
+answer, a problem it has already diagnosed as a repair, a package behind — in
+its log, its config entries, its repairs and its entities, and nobody reads
+those either.
 
-This bundle reads them, and gives you **two agents**: one that can use the
-house, one that can repair it.
+This bundle reads all of them, and gives you **two agents**: one that can use
+the house, one that can repair it.
 
-![A Home Assistant log record is re-checked by the rules, and opens a conversation on one of two routes: one that uses the house, one that repairs it.]({{ '/assets/img/integrations/home-assistant-light.svg' | relative_url }}){: .ao-diagram}
+![A Home Assistant record — a log error here, the same path for a failed integration, a repair or a faulting sensor — is re-checked by the rules, and opens a conversation on one of two routes: one that uses the house, one that repairs it.]({{ '/assets/img/integrations/home-assistant-light.svg' | relative_url }}){: .ao-diagram}
 
 ## What you get
 
@@ -29,7 +31,7 @@ house, one that can repair it.
 |---|---|
 | **An everyday agent** | Ask it to run a scene, dim the lights, check a sensor. Reached by an ordinary chat message. |
 | **A repair agent** | Reached by name, `/ha-ops <task>`, and never by accident. It reconfigures integrations and reads the logs. |
-| **Log failures that reach you** | A record that recurs, or an integration still failing, opens a conversation. A one-off retry does not. |
+| **Failures that reach you** | A log error that recurs, an integration still failing, a repair Home Assistant filed, a device reporting a fault — each opens a conversation. A one-off retry does not. |
 | **A split you can actually rely on** | The two agents hold **different Home Assistant credentials**, so the boundary is the token, not a setting. |
 
 **The split is use versus fix, not read versus act.** Home Assistant has no
@@ -226,6 +228,40 @@ Recovered means you never hear about it.
         action: drop
 ```
 
+### "Watch the house, not only its log"
+
+Four surfaces beside the log are on by default, and a fifth is one switch
+away. Each has one knob:
+
+```yaml
+logsAdapter:
+  source:
+    surfaces:
+      configEntries:                 # an integration in a failed state
+        enabled: true
+        states: [setup_retry, setup_error, migration_error]
+      repairs:                       # what Home Assistant filed under Repairs
+        enabled: true
+        severities: [critical, error]
+      sensors:                       # binary sensors reporting a fault
+        enabled: true
+        deviceClasses: [problem, connectivity]
+      updates:                       # ONE digest of every pending update
+        enabled: false               # the one that is off until you ask
+```
+
+Every signal carries `surface` — `log`, `config-entry`, `repair`, `sensor` or
+`update` — so a rule can pick one out:
+
+```yaml
+      - matchers: ['surface="sensor"']
+        action: drop
+```
+
+A surface that is off is never read. The shipped rules open with one per
+surface, ahead of the log rules. A values file that replaces `rules` replaces
+those too, so keep the `surface=` rules if you rewrite the list.
+
 ### "Ignore anything that says it will retry"
 
 ```yaml
@@ -246,6 +282,7 @@ key conversation grouping on the exact wording.
 |---|---|
 | **`message` matchers** | available here, and nowhere else |
 | **How records are seen** | the log listing is **polled**, every fifteen seconds. Nothing in Home Assistant needs enabling; `system_log: fire_event: true` in its configuration only makes a record arrive sooner |
+| **Four surfaces beside the log** | config entry state, repairs, fault sensors and pending updates, each a switch and a knob under `surfaces`. The house's entities are read once a minute. The cluster lane has one surface, the Events API |
 | **The re-check** | asks the integration's config entry state, then falls back to *was it still recurring as the window closed* — the last third of the wait, never under thirty seconds. A blip that logged for thirty seconds and stopped is churn |
 | **No time axis** | `timeIntervals` and `muteTimeIntervals` are not implemented. An unknown key is a config error, not a window that silently never fires |
 

@@ -19,13 +19,22 @@ import (
 // so every one of those fields would have to be recovered by regex and the
 // cursor would be a byte offset that log rotation invalidates.
 //
-// Three commands beyond the subscription, each earning its place:
+// The commands beyond the subscription, each earning its place:
 //
-//	system_log/list     backfill on connect, and the dwell re-check's evidence
-//	                    (a record's `count` rising means it is still happening)
-//	config_entries/get  the health predicate: an integration whose config entry
-//	                    sits in setup_error / setup_retry is still broken
-//	auth/current_user   self-exclusion mechanism 2 — who this adapter's token is
+//	system_log/list              polled every fifteen seconds — the log itself,
+//	                             and the dwell re-check's evidence (a record's
+//	                             `count` rising means it is still happening)
+//	config_entries/get           the config-entry surface, and the log lane's
+//	                             health predicate: an entry in setup_error /
+//	                             setup_retry is still broken
+//	repairs/list_issues          the repair surface, on the same sweep
+//	get_states                   the sensor and update surfaces, once a minute
+//	config/entity_registry/list  which integration owns a sensor, every fifth
+//	                             states read
+//	auth/current_user            self-exclusion mechanism 3 — who this
+//	                             adapter's token is
+//
+// A surface that is off issues none of its commands.
 //
 // Everything here is read-only. This adapter never calls a service, and holding
 // a token that could is the ops AGENT's business, not the ingest lane's.
@@ -60,6 +69,18 @@ type logRecord struct {
 	// started. It is what makes a dwell re-check possible: a record whose count
 	// has risen during the window is still happening.
 	Count int `json:"count"`
+
+	// Surface names which of the instance's health surfaces this record came
+	// from, and is EMPTY for a log record. Set by the surface normalisers in
+	// surfaces.go and never decoded: a condition of any surface is shaped as a
+	// record so that it takes the one consider path — self-exclusion, scope,
+	// rules, inhibition, dwell — rather than a second one that drifts.
+	Surface string `json:"-"`
+	// Integration is a surface record's own integration, where the logger
+	// derivation does not apply.
+	Integration string `json:"-"`
+	// Extra carries a surface record's own payload fields.
+	Extra map[string]any `json:"-"`
 }
 
 // Text joins the message list into one string.
@@ -110,6 +131,52 @@ type configEntry struct {
 	Title   string `json:"title"`
 	// State is "loaded", "setup_error", "setup_retry", "not_loaded", ...
 	State string `json:"state"`
+	// Reason is why the entry is in its state, in Home Assistant's own words —
+	// present on setup_retry and setup_error, and the message the config-entry
+	// surface carries.
+	Reason string `json:"reason"`
+}
+
+// repairIssue is one entry of the issue registry, as repairs/list_issues
+// returns it. Severity is "critical", "error" or "warning".
+type repairIssue struct {
+	Domain         string            `json:"domain"`
+	IssueID        string            `json:"issue_id"`
+	Severity       string            `json:"severity"`
+	IsFixable      bool              `json:"is_fixable"`
+	Created        string            `json:"created"`
+	TranslationKey string            `json:"translation_key"`
+	Placeholders   map[string]string `json:"translation_placeholders"`
+	LearnMoreURL   string            `json:"learn_more_url"`
+	BreaksIn       string            `json:"breaks_in_ha_version"`
+}
+
+// entityState is one entity from get_states. Attributes stay raw: a handful are
+// read here and the rest are the integration's own.
+type entityState struct {
+	EntityID    string         `json:"entity_id"`
+	State       string         `json:"state"`
+	Attributes  map[string]any `json:"attributes"`
+	LastChanged string         `json:"last_changed"`
+}
+
+// attr reads one attribute as text.
+func (e *entityState) attr(name string) string {
+	v, ok := e.Attributes[name]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
+}
+
+// registryEntry maps an entity to the integration (platform) that owns it —
+// the `integration` label a sensor condition groups by.
+type registryEntry struct {
+	EntityID string `json:"entity_id"`
+	Platform string `json:"platform"`
 }
 
 // currentUser identifies the token this adapter authenticated with.
@@ -394,6 +461,48 @@ func (s *haSession) ConfigEntries(ctx context.Context) ([]configEntry, error) {
 	var out []configEntry
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("decoding config_entries/get: %w", err)
+	}
+	return out, nil
+}
+
+// Repairs lists the issue registry.
+func (s *haSession) Repairs(ctx context.Context) ([]repairIssue, error) {
+	raw, err := s.Command(ctx, map[string]any{"type": "repairs/list_issues"})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Issues []repairIssue `json:"issues"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decoding repairs/list_issues: %w", err)
+	}
+	return out.Issues, nil
+}
+
+// States reads every entity's state — the whole house, which is why it is on
+// its own cadence.
+func (s *haSession) States(ctx context.Context) ([]entityState, error) {
+	raw, err := s.Command(ctx, map[string]any{"type": "get_states"})
+	if err != nil {
+		return nil, err
+	}
+	var out []entityState
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decoding get_states: %w", err)
+	}
+	return out, nil
+}
+
+// EntityRegistry reads which integration owns each entity.
+func (s *haSession) EntityRegistry(ctx context.Context) ([]registryEntry, error) {
+	raw, err := s.Command(ctx, map[string]any{"type": "config/entity_registry/list"})
+	if err != nil {
+		return nil, err
+	}
+	var out []registryEntry
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decoding config/entity_registry/list: %w", err)
 	}
 	return out, nil
 }

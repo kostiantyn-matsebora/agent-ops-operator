@@ -30,6 +30,10 @@ type fakeHA struct {
 	token    string
 	records  []logRecord
 	entries  []configEntry
+	issues   []repairIssue
+	states   []entityState
+	registry []registryEntry
+	calls    map[string]int
 	user     currentUser
 	adminErr bool // config_entries/get fails, as it does for a non-admin token
 	conns    []net.Conn
@@ -51,6 +55,7 @@ func newFakeHA(t *testing.T, token string) *fakeHA {
 		URL:        "http://" + ln.Addr().String(),
 		token:      token,
 		user:       currentUser{ID: "user-1", Name: "ops-bot"},
+		calls:      map[string]int{},
 		subscribed: make(chan struct{}, 8),
 	}
 	go f.accept()
@@ -84,6 +89,35 @@ func (f *fakeHA) ListCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.listCall
+}
+
+// SetIssues, SetStates and SetRegistry are the health surfaces' fixtures;
+// each is served on its next read, so a test can make a condition appear,
+// stand, or clear between reads.
+func (f *fakeHA) SetIssues(issues ...repairIssue) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issues = issues
+}
+
+func (f *fakeHA) SetStates(states ...entityState) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.states = states
+}
+
+func (f *fakeHA) SetRegistry(entries ...registryEntry) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.registry = entries
+}
+
+// Calls counts how many times one command was dispatched — what proves a
+// disabled surface issues no read.
+func (f *fakeHA) Calls(typ string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[typ]
 }
 
 // PushLogEvent delivers a system_log_event to every connected client.
@@ -184,6 +218,7 @@ func (f *fakeHA) serve(conn net.Conn) {
 func (f *fakeHA) dispatch(conn net.Conn, id int64, typ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.calls[typ]++
 	switch typ {
 	case "ping":
 		return sendServerJSON(conn, map[string]any{"id": id, "type": "pong"})
@@ -209,6 +244,26 @@ func (f *fakeHA) dispatch(conn net.Conn, id int64, typ string) error {
 		return sendServerJSON(conn, map[string]any{
 			"id": id, "type": "result", "success": true, "result": f.entries,
 		})
+	case "repairs/list_issues":
+		issues := f.issues
+		if issues == nil {
+			issues = []repairIssue{}
+		}
+		return sendServerJSON(conn, map[string]any{
+			"id": id, "type": "result", "success": true, "result": map[string]any{"issues": issues},
+		})
+	case "get_states":
+		states := f.states
+		if states == nil {
+			states = []entityState{}
+		}
+		return sendServerJSON(conn, map[string]any{"id": id, "type": "result", "success": true, "result": states})
+	case "config/entity_registry/list":
+		reg := f.registry
+		if reg == nil {
+			reg = []registryEntry{}
+		}
+		return sendServerJSON(conn, map[string]any{"id": id, "type": "result", "success": true, "result": reg})
 	case "auth/current_user":
 		return sendServerJSON(conn, map[string]any{
 			"id": id, "type": "result", "success": true, "result": f.user,

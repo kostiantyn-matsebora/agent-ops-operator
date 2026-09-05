@@ -56,6 +56,16 @@ const (
 	// rule gains at most this much latency, and every dwelled rule is
 	// measured in minutes.
 	pollEvery = 15 * time.Second
+	// statesEvery is the cadence of the states read — the whole house, several
+	// hundred kilobytes on a modest install — that feeds the sensor and update
+	// surfaces. A minute, not the poll interval: every rule that ships for
+	// those surfaces dwells for minutes, and reading the house four times a
+	// minute against a Raspberry Pi buys nothing anyone can observe.
+	statesEvery = time.Minute
+	// registryEveryReads is how many states reads pass between re-reads of
+	// the entity registry, which maps an entity to its integration and changes
+	// about as often as somebody adds a device.
+	registryEveryReads = 5
 	// cursorStaleSkew is how far the persisted cursor may sit ahead of the
 	// newest record Home Assistant still holds before it is treated as no
 	// longer valid upstream. Small clock differences are normal; a cursor
@@ -100,6 +110,20 @@ type servedSource struct {
 	key string
 	// snapshot is the verification ladder's view of this instance.
 	snapshot *healthSnapshot
+	// standing is, per surface, the set of condition keys currently standing
+	// — the dedup for STATES, as seen is for occurrences. A condition is fed to
+	// consider when it enters the set and forgotten when it leaves, so its
+	// next appearance is a new report. Memory only: a restart re-reports what
+	// stands, and the manager's cooldown absorbs that.
+	standing map[string]map[string]bool
+	// pendingUpdates is the update digest's current set of entity ids; the
+	// digest is re-fed when the set grows.
+	pendingUpdates map[string]bool
+	// registry maps entity id to the integration that owns it, for the
+	// sensor surface's `integration` label.
+	registry map[string]string
+	// statesReads counts states reads, pacing the registry re-read.
+	statesReads int
 	// seen is the latest occurrence timestamp considered per record key —
 	// the dedup between the two arrival paths. The cursor cannot be it: a
 	// cursor is one instant for the whole source, so a second record logged
@@ -140,6 +164,15 @@ type adapter struct {
 	sessions map[string]*haSession
 	// poll overrides pollEvery; zero means the constant. Tests shorten it.
 	poll time.Duration
+	// states overrides statesEvery the same way.
+	states time.Duration
+}
+
+func (a *adapter) statesInterval() time.Duration {
+	if a.states > 0 {
+		return a.states
+	}
+	return statesEvery
 }
 
 func (a *adapter) pollInterval() time.Duration {
@@ -221,6 +254,10 @@ func (a *adapter) refreshSources(ctx context.Context) {
 			src.cursor = prev.cursor
 			src.snapshot = prev.snapshot
 			src.seen = prev.seen
+			src.standing = prev.standing
+			src.pendingUpdates = prev.pendingUpdates
+			src.registry = prev.registry
+			src.statesReads = prev.statesReads
 			if prev.key == src.key {
 				src.cancel = prev.cancel
 			} else {
@@ -336,6 +373,7 @@ func (a *adapter) runSession(ctx context.Context, source string) {
 		}
 		a.report(ctx, source, "ok", true, "AdapterReady", "connected to "+endpoint)
 		go a.runPoller(ctx, source, sess)
+		go a.runStatesLoop(ctx, source, sess)
 
 		select {
 		case <-ctx.Done():
@@ -422,11 +460,16 @@ func (a *adapter) sweep(ctx context.Context, source string, sess *haSession, con
 	if src == nil {
 		return
 	}
-	records, err := a.readListing(ctx, source, sess)
+	lst, err := a.readListing(ctx, source, sess)
 	if err != nil {
 		log.Printf("%s: reading system_log: %v", source, err)
 		return
 	}
+	records := lst.records
+	// The two sweep-cadence surfaces ride on this read, whatever `consider`
+	// says: a surface condition is a state, and declining the log backfill
+	// says nothing about states.
+	defer a.observeSweepSurfaces(ctx, source, sess, lst)
 	newest := time.Time{}
 	for i := range records {
 		if at := records[i].At(); at.After(newest) {
@@ -455,6 +498,149 @@ func (a *adapter) sweep(ctx context.Context, source string, sess *haSession, con
 		a.consider(ctx, source, &records[i])
 	}
 	a.pruneSeen(source, records)
+}
+
+// observeSweepSurfaces feeds the config-entry and repair surfaces from the
+// sweep: the entries the listing read already fetched, and the issue registry
+// — one more small command, issued only while that surface is on.
+func (a *adapter) observeSweepSurfaces(ctx context.Context, source string, sess *haSession, lst listing) {
+	src := a.source(source)
+	if src == nil {
+		return
+	}
+	now := time.Now()
+	if p := src.filter.surfaces.configEntries; p.enabled && lst.entriesRead {
+		a.reconcile(ctx, source, surfaceConfigEntry, configEntryRecords(lst.entries, p.accept, now))
+	}
+	if p := src.filter.surfaces.repairs; p.enabled {
+		cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
+		issues, err := sess.Repairs(cctx)
+		cancel()
+		if err != nil {
+			log.Printf("%s: reading repairs: %v", source, err)
+		} else {
+			a.reconcile(ctx, source, surfaceRepair, repairRecords(issues, p.accept, now))
+		}
+	}
+}
+
+// runStatesLoop reads the house on its own cadence for the sensor and update
+// surfaces, for as long as the session lives. Nothing is read while both are
+// off.
+func (a *adapter) runStatesLoop(ctx context.Context, source string, sess *haSession) {
+	a.sweepStates(ctx, source, sess)
+	t := time.NewTicker(a.statesInterval())
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-sess.Done():
+			return
+		case <-t.C:
+			a.sweepStates(ctx, source, sess)
+		}
+	}
+}
+
+// sweepStates is one states read, and the registry read it paces.
+func (a *adapter) sweepStates(ctx context.Context, source string, sess *haSession) {
+	src := a.source(source)
+	if src == nil {
+		return
+	}
+	sp := src.filter.surfaces
+	if !sp.sensors.enabled && !sp.updates.enabled {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
+	defer cancel()
+	states, err := sess.States(cctx)
+	if err != nil {
+		log.Printf("%s: reading states: %v", source, err)
+		return
+	}
+	now := time.Now()
+	if sp.sensors.enabled {
+		a.mu.Lock()
+		reads := src.statesReads
+		src.statesReads++
+		registry := src.registry
+		a.mu.Unlock()
+		if registry == nil || reads%registryEveryReads == 0 {
+			if entries, err := sess.EntityRegistry(cctx); err != nil {
+				log.Printf("%s: reading the entity registry: %v", source, err)
+			} else {
+				registry = make(map[string]string, len(entries))
+				for _, e := range entries {
+					registry[e.EntityID] = e.Platform
+				}
+				a.mu.Lock()
+				src.registry = registry
+				a.mu.Unlock()
+			}
+		}
+		a.reconcile(ctx, source, surfaceSensor, sensorRecords(states, registry, sp.sensors.accept, now))
+	}
+	if sp.updates.enabled {
+		pending := pendingUpdates(states)
+		next := make(map[string]bool, len(pending))
+		grew := false
+		a.mu.Lock()
+		for _, u := range pending {
+			next[u.EntityID] = true
+			if !src.pendingUpdates[u.EntityID] {
+				grew = true
+			}
+		}
+		src.pendingUpdates = next
+		// The digest stands while anything is pending, so a rule that dwells
+		// it is answered by the ladder like any other surface condition.
+		if src.standing == nil {
+			src.standing = map[string]map[string]bool{}
+		}
+		rec := updateDigest(pending, now)
+		if len(pending) > 0 {
+			src.standing[surfaceUpdate] = map[string]bool{rec.Key(): true}
+		} else {
+			delete(src.standing, surfaceUpdate)
+		}
+		a.mu.Unlock()
+		if grew {
+			a.consider(ctx, source, &rec)
+		}
+	}
+}
+
+// reconcile replaces one surface's standing set with what a read found,
+// feeding the conditions that just appeared through consider. A condition
+// still standing is not fed again; one that left is forgotten, so its next
+// appearance is a new report.
+func (a *adapter) reconcile(ctx context.Context, source, surface string, current map[string]logRecord) {
+	a.mu.Lock()
+	src, ok := a.sources[source]
+	if !ok {
+		a.mu.Unlock()
+		return
+	}
+	if src.standing == nil {
+		src.standing = map[string]map[string]bool{}
+	}
+	prev := src.standing[surface]
+	next := make(map[string]bool, len(current))
+	var fresh []logRecord
+	for key, rec := range current {
+		next[key] = true
+		if !prev[key] {
+			fresh = append(fresh, rec)
+		}
+	}
+	src.standing[surface] = next
+	a.mu.Unlock()
+	sort.Slice(fresh, func(i, j int) bool { return fresh[i].Key() < fresh[j].Key() })
+	for i := range fresh {
+		a.consider(ctx, source, &fresh[i])
+	}
 }
 
 // pruneSeen forgets the dedup timestamps of records Home Assistant no longer
@@ -524,8 +710,16 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 	}
 	sig := normalize(source, rec)
 	rule, hasRule := f.Rule(&sig)
+	// The cursor is the LOG's read position. A surface record carries the
+	// time it was first seen, and moving the cursor to that would skip log
+	// records HA lists a moment later with an earlier timestamp.
+	advance := func() {
+		if rec.Surface == "" {
+			a.advance(ctx, source, rec.At())
+		}
+	}
 	if hasRule && rule.drop {
-		a.advance(ctx, source, rec.At())
+		advance()
 		return
 	}
 
@@ -533,7 +727,7 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 	// cause must not even occupy a window.
 	a.inhibit.Observe(source, f.rules, &sig)
 	if a.inhibit.Inhibited(source, f.rules, &sig) {
-		a.advance(ctx, source, rec.At())
+		advance()
 		return
 	}
 
@@ -543,11 +737,11 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 	// back instead would replay the whole window on every restart.
 	if hasRule && rule.dwell > 0 {
 		a.pending.Add(source, sig, rule, rec.Count)
-		a.advance(ctx, source, rec.At())
+		advance()
 		return
 	}
 	if a.post(ctx, source, []Signal{sig}) {
-		a.advance(ctx, source, rec.At())
+		advance()
 	}
 }
 
@@ -721,12 +915,12 @@ func (a *adapter) refreshSnapshot(ctx context.Context, source string, sess *haSe
 // A failed read leaves the previous snapshot in place rather than clearing it:
 // the ladder's answer for "cannot say" already exists, and clearing would turn
 // a momentary hiccup into a verdict.
-func (a *adapter) readListing(ctx context.Context, source string, sess *haSession) ([]logRecord, error) {
+func (a *adapter) readListing(ctx context.Context, source string, sess *haSession) (listing, error) {
 	cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
 	defer cancel()
 	records, err := sess.SystemLog(cctx)
 	if err != nil {
-		return nil, err
+		return listing{}, err
 	}
 	snap := &healthSnapshot{
 		records: make(map[string]logRecord, len(records)),
@@ -736,11 +930,23 @@ func (a *adapter) readListing(ctx context.Context, source string, sess *haSessio
 	for _, r := range records {
 		snap.records[r.Key()] = r
 	}
-	// config_entries/get is an ADMIN command. A read-only token simply gets no
-	// predicate, which is rung 2 — not an error worth reporting on the source.
-	if entries, err := sess.ConfigEntries(cctx); err == nil {
-		for _, e := range entries {
-			snap.entries[e.Domain] = append(snap.entries[e.Domain], e.State)
+	out := listing{records: records}
+	// config_entries/get serves two readers: the config-entry surface, and
+	// the dwell ladder's first rung for LOG records. With the surface off it
+	// is issued only while a dwell is pending — an install with nothing
+	// pending and the surface off issues it never. An ADMIN command: a
+	// read-only token simply gets no predicate, which is rung 2 — not an
+	// error worth reporting on the source.
+	wantEntries := a.pending.HasEntries()
+	if src := a.source(source); src != nil && src.filter.surfaces.configEntries.enabled {
+		wantEntries = true
+	}
+	if wantEntries {
+		if entries, err := sess.ConfigEntries(cctx); err == nil {
+			out.entries, out.entriesRead = entries, true
+			for _, e := range entries {
+				snap.entries[e.Domain] = append(snap.entries[e.Domain], e.State)
+			}
 		}
 	}
 	a.mu.Lock()
@@ -748,7 +954,17 @@ func (a *adapter) readListing(ctx context.Context, source string, sess *haSessio
 		src.snapshot = snap
 	}
 	a.mu.Unlock()
-	return records, nil
+	return out, nil
+}
+
+// listing is one read of the log listing and the config entries beside it.
+// entriesRead is false when the entries command failed — a non-admin token —
+// so the config-entry surface does not mistake "could not read" for "all
+// loaded".
+type listing struct {
+	records     []logRecord
+	entries     []configEntry
+	entriesRead bool
 }
 
 // health is the adapter's verification ladder over one source's snapshot.
@@ -772,10 +988,24 @@ func (a *adapter) health(ref recordRef, since time.Time) verdict {
 	a.mu.Lock()
 	src, ok := a.sources[ref.source]
 	var snap *healthSnapshot
+	standing, isSurface := false, false
 	if ok {
 		snap = src.snapshot
+		if surface := surfaceOfName(ref.logger); surface != "" {
+			isSurface = true
+			standing = src.standing[surface][ref.logger+"@"+ref.location]
+		}
 	}
 	a.mu.Unlock()
+	// A surface condition's own truth is whether it still stands on the
+	// latest read of its surface: an entry still failing, an issue still
+	// filed, a sensor still faulting. Cleared before the close is churn.
+	if isSurface {
+		if standing {
+			return verdictUnhealthy
+		}
+		return verdictHealthy
+	}
 	if snap == nil {
 		return verdictUnknown
 	}
