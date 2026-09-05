@@ -59,7 +59,11 @@ eventsAdapter:
     # 0.3.0 adds the time axis (route.timeIntervals / route.muteTimeIntervals);
     # an earlier image ignores those keys, which looks like a window that never
     # fires.
-    tag: 0.4.4
+    # 0.4.5 adds the node-STATE axis (route.drainingNodes / drainingNodeMatchers
+    # / drainingNodeBound) — it REQUIRES the nodes grant below (cluster-wide
+    # installs only) to do anything; an earlier image ignores those keys
+    # entirely and a namespaced install always ran this way.
+    tag: 0.4.5
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding
@@ -149,8 +153,21 @@ eventsAdapter:
         for: "0"
 
       # 3 ── node-level: one event, many workloads affected ────────────────
+      # kind="Node" is load-bearing, not decorative. NodeHasDiskPressure and
+      # NodeHasMemoryPressure are genuinely reported once, against the Node
+      # object itself, by the kubelet — that is what lets dropping Evicted
+      # above stay safe. NodeNotReady is NOT: the node lifecycle controller
+      # stamps it on every POD scheduled on the affected node, so without the
+      # kind qualifier one node blip fired once per DaemonSet, at `for: 0`,
+      # with no chance to notice the node came back in the next few seconds.
+      # A pod-level NodeNotReady now falls through to the catch-all below,
+      # which already re-checks the POD's own health before emitting — the
+      # same machinery that drops a rollout's transient Unhealthy — so a
+      # kured-style rolling reboot that recovers within the catch-all's dwell
+      # is reported never, and one that does not is reported once it recurs.
       - matchers:
           - reason=~"NodeNotReady|NodeHasDiskPressure|NodeHasMemoryPressure|NodeHasPIDPressure"
+          - kind="Node"
         for: "0"
 
       # 4 ── flappy by nature: long dwell, but escalate on breadth ─────────
@@ -182,16 +199,25 @@ eventsAdapter:
       - matchers: []
         for: 3m
 
-    # The Alertmanager half: inhibition and the TIME axis. Empty by default —
-    # both halves below are opt-in, and both are shown as worked examples.
+    # The Alertmanager half: inhibition and the TIME axis, plus the node-STATE
+    # axis below. inhibitRules and the time axis are empty by default — both
+    # are opt-in, and both are shown as worked examples. The node-state axis
+    # is different: it is ON by default (route.drainingNodes defaults to
+    # "suppress" even when this whole block is empty), because it needs no
+    # source-specific tuning to be safe — see below.
     #
     #   route:
     #     # Inhibition — suppress the CONSEQUENCES of a cause that is already
-    #     # reported. The canonical use: a draining node makes its pods noisy.
+    #     # reported. NOT the tool for a draining node: that is a STATE, not a
+    #     # cause EVENT, and the two arrive too close together in time for a
+    #     # "cause first" rule to reliably win the race (see drainingNodes
+    #     # below, which exists because this was tried and measured to fail).
+    #     # Inhibition still suits an unrelated cause/consequence pair, e.g. a
+    #     # PVC failure inhibiting the pods that depend on it:
     #     inhibitRules:
-    #       - sourceMatchers: ['reason="NodeNotReady"']
-    #         targetMatchers: ['reason=~"Unhealthy|FailedScheduling"']
-    #         equal: [node]
+    #       - sourceMatchers: ['reason="VolumeFailedDelete"']
+    #         targetMatchers: ['reason=~"FailedMount|FailedAttachVolume"']
+    #         equal: [name]
     #
     #     # Time intervals — the one axis the other three cannot express.
     #     # `for:` verifies a condition still holds, and during a scheduled
@@ -234,6 +260,27 @@ eventsAdapter:
     # the source says so on its Ready condition, and names the interval: a muted
     # lane and an idle lane look identical from outside, and only one of them
     # means the cluster is healthy.
+    #
+    #     # The node-STATE axis: while a node is cordoned or maintenance-
+    #     # tainted, every event on its objects (and on the Node itself) is
+    #     # suppressed, no matter which reason it carries — this is what makes
+    #     # a rolling reboot manager (kured is the canonical case) open zero
+    #     # conversations regardless of how many DaemonSets have pods there.
+    #     # Uncommented, this is already the DEFAULT: omitting it is
+    #     # `drainingNodes: suppress`, unnarrowed. Set it to "report" to opt
+    #     # this source out entirely, or narrow what it suppresses:
+    #     drainingNodes: suppress
+    #     drainingNodeMatchers:
+    #       - reason=~"NodeNotReady|Unhealthy|FailedMount|FailedScheduling"
+    #     # A drain nobody ends must not go silent forever: past this, ONE
+    #     # kind: Node signal (reason NodeDrainExceeded) is posted naming the
+    #     # node and how long it has been draining, and suppression on it
+    #     # stops until it drains again. Default 1h.
+    #     drainingNodeBound: 1h
+    #
+    # Needs the events ClusterRole's `nodes` grant (rbac.clusterWide: true,
+    # the default) — a namespaced install has no equivalent, since nodes are
+    # cluster-scoped, so this axis is off there and every source says so once.
     route: {}
     # SignalSource grouping policy (manager-side; defaults apply when empty).
     #

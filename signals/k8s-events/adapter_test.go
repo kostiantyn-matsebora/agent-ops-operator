@@ -282,12 +282,17 @@ func newTestAdapter(m *Manager, k *Kube, source string, f *filter) *adapter {
 	a := &adapter{
 		mgr: m, kube: k, name: "k8s-events",
 		// no POD_NAMESPACE in tests: mechanisms 1 and 2 apply, 3 is inert
-		self:          newSelfExcluder(),
+		self: newSelfExcluder(),
+		// unsynced, like a fresh adapter's — resolves nothing yet, exactly
+		// like the nil cache this used to be, so no enrichment test's
+		// expectations move.
+		cache:         newObjectCache(),
 		sources:       map[string]*servedSource{source: {filter: f}},
 		reported:      map[string]string{},
 		watchers:      map[string]context.CancelFunc{},
 		cacheWatchers: map[string]context.CancelFunc{},
 		inhibit:       newInhibitor(),
+		drain:         newDrainTracker(),
 		cap:           newEmitCap(defaultEmitPerMin),
 	}
 	a.pending = newPendingQueue(a.health, func(src string, sigs []Signal) {

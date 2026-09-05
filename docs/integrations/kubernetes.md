@@ -234,12 +234,19 @@ reported once, with the whole burst attached and the time of its last event.
 ### "Tell me immediately about OOM kills"
 
 ```yaml
-      - matchers: ['reason=~"OOMKilling|NodeNotReady"']
+      - matchers: ['reason="OOMKilling"']
         for: "0"
 ```
 
 **Anything already finished needs `for: "0"`.** Wait on an OOM kill and the
 re-check finds the healthy replacement, so the report is dropped.
+
+**Don't add `NodeNotReady` to this one.** The bundle's own shipped rule
+already reports it at `for: "0"` when it is genuinely a NODE-level event —
+qualified `kind="Node"`, on purpose. A bare `reason=~"...|NodeNotReady"` with
+no kind matcher catches the PER-POD copies the node lifecycle controller
+stamps on every workload scheduled there, so one reboot fires once per
+DaemonSet instead of dwelling to see whether the node came back.
 
 ### "Ignore my scratch namespace"
 
@@ -251,7 +258,44 @@ re-check finds the healthy replacement, so the report is dropped.
 Pod labels are copied onto the signal, so anything you already label by is
 available here.
 
-### "Stay quiet during the nightly reboot"
+### "A reboot manager cordons my nodes one at a time — stay quiet through that"
+
+This is already the default: **nothing to configure.** A node that is cordoned
+or maintenance-tainted (kured is the common case) suppresses every event on
+its objects for as long as it stays that way, whatever reason they carry and
+however many DaemonSets have pods scheduled there.
+
+```yaml
+eventsAdapter:
+  source:
+    route:
+      # drainingNodes: suppress is the DEFAULT — omit the whole block and you
+      # already have it, UNNARROWED (every event on the node's objects). What
+      # follows is how to change that, not what you start with:
+      drainingNodes: suppress          # "report" evaluates as if this axis did not exist
+      drainingNodeMatchers:            # OPTIONAL narrowing — absent = everything
+        - reason=~"NodeNotReady|Unhealthy|FailedMount|FailedScheduling"
+      drainingNodeBound: 1h            # a drain nobody ends is reported once, past this
+                                        # (1h is also the default — shown here, not required)
+```
+
+- **Needs `rbac.clusterWide: true`** (the default). Nodes are cluster-scoped,
+  so a namespaced install has no equivalent grant — drain awareness is off
+  there, and the source's condition says so once.
+- **A drain outliving the bound is reported, not hidden.** Past
+  `drainingNodeBound` (default `1h`) you get ONE conversation, `kind: Node`,
+  reason `NodeDrainExceeded`, naming the node and how long it has been
+  draining — a forgotten `kubectl cordon` should not go silent forever.
+- **This is the mechanism that fixed a real 18-conversation night**: one node
+  reboot used to fan out into one conversation per DaemonSet pod on it, each
+  closed as "already recovered". No time window, no schedule to guess at —
+  it starts when the cordon does and ends when the uncordon does.
+
+### "Stay quiet during the nightly reboot" (no node ever gets cordoned)
+
+The mute window below is for something the API server has NO state for at
+all — a router power-cycling, an ISP maintenance slot — where drain awareness
+above cannot help because no node's `spec.unschedulable` or taints ever change.
 
 ```yaml
 eventsAdapter:
@@ -274,6 +318,8 @@ eventsAdapter:
 - **Name the reasons.** With no `matchers` you silence everything, and an OOM
   kill at 04:05 is as real as one at noon.
 - **Anything still broken at 04:20 reports normally.**
+- **A rolling reboot drifting outside a fixed window is exactly why the
+  section above exists** — this axis has no clock to fall behind.
 
 ### "Don't drown me during an incident"
 

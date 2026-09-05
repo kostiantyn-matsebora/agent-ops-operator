@@ -8,19 +8,22 @@ import (
 	"sync"
 )
 
-// The object cache: a trimmed, read-only list/watch view of pods and
-// replicasets. It exists to answer three questions the Events stream cannot:
+// The object cache: a trimmed, read-only list/watch view of pods, replicasets
+// and nodes. It exists to answer four questions the Events stream cannot:
 //
 //	workload    which controller owns this pod (Pod -> ReplicaSet -> Deployment)
 //	health      is this object still unhealthy at the end of a dwell window
 //	ownership   is this object agent-ops' own machinery
+//	draining    is the node this object runs on being taken out of service
 //
 // It caches FIELDS, not objects: a large cluster's pod list is mostly spec, and
 // none of it is needed here. Whole-object caching is what makes an informer
 // expensive, and this adapter has no reason to pay that.
 //
 // Replicasets are cached for the SECOND owner hop only, so nothing but their
-// owner references and identity is kept.
+// owner references and identity is kept. Nodes are cached for drain awareness
+// only, so nothing but `spec.unschedulable` and taints is kept — no status, no
+// conditions: see drain.go for why conditions are deliberately never read here.
 
 // ownerRef is the slice of ownerReferences that matters: who controls this.
 type ownerRef struct {
@@ -42,6 +45,10 @@ type objectInfo struct {
 	Phase          string
 	Ready          bool
 	WaitingReasons []string
+
+	// drain state, meaningful for nodes only — see drain.go.
+	Unschedulable bool
+	Taints        []nodeTaint
 }
 
 // podObject is the subset of a core/v1 Pod that is decoded. Anything absent
@@ -127,6 +134,33 @@ func (r *replicaSetObject) info() *objectInfo {
 	}
 }
 
+// nodeObject is the subset of a core/v1 Node this adapter reads: enough to
+// decide whether it is DRAINING, and nothing about its status. Conditions are
+// what the drain predicate deliberately ignores (see drain.go), so they are
+// never decoded here at all.
+type nodeObject struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Spec struct {
+		Unschedulable bool        `json:"unschedulable"`
+		Taints        []nodeTaint `json:"taints"`
+	} `json:"spec"`
+}
+
+func (n *nodeObject) info() *objectInfo {
+	return &objectInfo{
+		Kind: "Node",
+		Name: n.Metadata.Name,
+		// A Node event's own involved object IS the node, so recording it here
+		// too lets every caller read "which node is this about" the same way
+		// for a Pod-kind event and a Node-kind event alike: enrichment.Node.
+		Node:          n.Metadata.Name,
+		Unschedulable: n.Spec.Unschedulable,
+		Taints:        n.Spec.Taints,
+	}
+}
+
 // controllerOf returns the CONTROLLING owner reference. A pod may carry several
 // ownerReferences; only the controller determines the workload.
 func controllerOf(refs []ownerRef) *ownerRef {
@@ -202,7 +236,23 @@ func (c *objectCache) Get(namespace, kind, name string) (*objectInfo, bool) {
 
 // tracks reports whether this cache holds the given kind at all.
 func (c *objectCache) tracks(kind string) bool {
-	return kind == "Pod" || kind == "ReplicaSet"
+	return kind == "Pod" || kind == "ReplicaSet" || kind == "Node"
+}
+
+// NodeDraining reports whether a node is currently draining, and whether the
+// cache can answer at all. An unsynced cache, or a node access grant that was
+// never made, both answer false,false — which callers must read as "not
+// suppressed", never as "not draining": failing toward REPORTING is the safe
+// direction here, exactly as an unknown object's node is never suppressed.
+func (c *objectCache) NodeDraining(name string) (draining bool, known bool) {
+	oi, known := c.Get("", "Node", name)
+	if !known {
+		return false, false
+	}
+	if oi == nil {
+		return false, true // the node is gone, which is a definite "not draining"
+	}
+	return nodeDraining(oi.Unschedulable, oi.Taints), true
 }
 
 // OwnedByAgentOps implements self-exclusion mechanism 2: an agent-ops label on
@@ -293,6 +343,13 @@ func replicaSetsPath(namespace string) string {
 	return "/apis/apps/v1/namespaces/" + url.PathEscape(namespace) + "/replicasets"
 }
 
+// nodesPath ignores its argument: nodes are CLUSTER-scoped, so there is no
+// namespaced form. It takes one for the same signature as podsPath and
+// replicaSetsPath, which is what lets cacheWatcher stay generic over all three.
+func nodesPath(string) string {
+	return "/api/v1/nodes"
+}
+
 func decodePod(raw json.RawMessage) (*objectInfo, error) {
 	var p podObject
 	if err := json.Unmarshal(raw, &p); err != nil {
@@ -307,6 +364,14 @@ func decodeReplicaSet(raw json.RawMessage) (*objectInfo, error) {
 		return nil, err
 	}
 	return r.info(), nil
+}
+
+func decodeNode(raw json.RawMessage) (*objectInfo, error) {
+	var n nodeObject
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return nil, err
+	}
+	return n.info(), nil
 }
 
 // run keeps one scope current: list, then watch, relisting on expiry. It

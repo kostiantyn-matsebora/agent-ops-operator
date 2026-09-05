@@ -31,6 +31,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -73,6 +74,9 @@ type adapter struct {
 	pending *pendingQueue
 	// inhibit suppresses consequences of an already-reported cause.
 	inhibit *inhibitor
+	// drain suppresses events on nodes being taken out of service on purpose.
+	// See drain.go.
+	drain *drainTracker
 	// cap bounds signals per source per minute, reporting what it clips.
 	cap *emitCap
 	// clipped records the last reported clip count per source, so the
@@ -81,6 +85,9 @@ type adapter struct {
 	// muted records the active mute window and its running count per source, so
 	// the condition changes when the situation does rather than per batch.
 	muted sync.Map
+	// drainReported records the last reported (nodes, total) pair per source,
+	// so the Draining condition is only rewritten when the situation changes.
+	drainReported sync.Map
 
 	mu       sync.Mutex
 	sources  map[string]*servedSource
@@ -99,6 +106,11 @@ type adapter struct {
 	// is always external (the operator grants adapters nothing), so a 403 is
 	// not something waiting fixes — every served source must say so.
 	accessErr atomic.Pointer[string]
+	// nodeAccessErr holds a permission failure reading nodes. Unlike accessErr
+	// this does NOT fail sources: nodes are cluster-scoped and a namespaced
+	// install has deliberately no view of them, so drain awareness degrades to
+	// off and every source notes it once, without Ready=False.
+	nodeAccessErr atomic.Pointer[string]
 }
 
 func mustEnv(key string) string {
@@ -131,6 +143,7 @@ func main() {
 		watchers:      map[string]context.CancelFunc{},
 		cacheWatchers: map[string]context.CancelFunc{},
 		inhibit:       newInhibitor(),
+		drain:         newDrainTracker(),
 		cap:           newEmitCap(envInt("EMIT_PER_MINUTE", defaultEmitPerMin)),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -139,6 +152,7 @@ func main() {
 		a.post(ctx, source, sigs)
 	})
 	go a.runDwellFlusher(ctx)
+	go a.runDrainSweep(ctx)
 	log.Printf("signal-k8s-events adapter starting (adapter=%s)", name)
 
 	for ctx.Err() == nil {
@@ -178,6 +192,13 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		state, ready, reason, message := "ok", true, "AdapterReady", "served by signal-k8s-events"
 		if msg := a.accessErr.Load(); msg != nil {
 			state, ready, reason, message = "access:"+*msg, false, "MissingPermissions", *msg
+		} else if msg := a.nodeAccessErr.Load(); msg != nil {
+			// Degraded, not broken: nodes are cluster-scoped, so a namespaced
+			// install has deliberately no view of them. Drain awareness turns
+			// off and says so once; everything else this source does is
+			// unaffected, so Ready stays true.
+			state = "ok-nodeaccess:" + *msg
+			message += " (drain awareness unavailable: " + *msg + ")"
 		}
 		if a.reported[info.Name] != state {
 			go func(n string) { _ = a.mgr.ReportStatus(ctx, n, ready, reason, message) }(info.Name)
@@ -267,12 +288,19 @@ func (a *adapter) reconcileWatchers(ctx context.Context) {
 }
 
 // reconcileCacheWatchers keeps the pod/replicaset cache covering exactly the
-// scopes the events watch covers.
+// scopes the events watch covers, plus one CLUSTER-WIDE node watcher whenever
+// at least one source is served.
 //
 // Sharing desiredScopes() is not an optimization, it is a requirement: the
 // chart renders a NAMESPACED Role when rbac.clusterWide is false, and the
 // pods/replicasets grant is namespaced identically. A cluster-wide pod watch
 // would 403 outright in that supported configuration.
+//
+// Nodes are different: they are cluster-scoped, so there is no namespaced form
+// to request and no per-scope reason to run more than one watcher. Whether it
+// is granted at all is a SEPARATE fact from the events/pods RBAC — a
+// namespaced install chose no view of nodes on purpose — so its failure
+// degrades drain awareness rather than the source.
 func (a *adapter) reconcileCacheWatchers(ctx context.Context) {
 	want := map[string]bool{}
 	for _, s := range a.desiredScopes() {
@@ -291,6 +319,7 @@ func (a *adapter) reconcileCacheWatchers(ctx context.Context) {
 				pathFor: replicaSetsPath, decode: decodeReplicaSet, onError: a.reportAccessError("replicasets")}
 		}},
 	}
+	const nodesKey = "nodes@"
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -299,6 +328,9 @@ func (a *adapter) reconcileCacheWatchers(ctx context.Context) {
 		for scope := range want {
 			live[spec.resource+"@"+scope] = true
 		}
+	}
+	if len(want) > 0 {
+		live[nodesKey] = true
 	}
 	for key, cancel := range a.cacheWatchers {
 		if !live[key] {
@@ -319,6 +351,16 @@ func (a *adapter) reconcileCacheWatchers(ctx context.Context) {
 			log.Printf("caching %s in scope %q", spec.resource, scopeName(scope))
 		}
 	}
+	if live[nodesKey] {
+		if _, running := a.cacheWatchers[nodesKey]; !running {
+			wctx, cancel := context.WithCancel(ctx)
+			a.cacheWatchers[nodesKey] = cancel
+			w := &cacheWatcher{kube: a.kube, cache: a.cache, kind: "Node",
+				pathFor: nodesPath, decode: decodeNode, onError: a.reportNodeAccessError()}
+			go w.run(wctx, "")
+			log.Printf("caching nodes cluster-wide")
+		}
+	}
 }
 
 // reportAccessError records a permission failure for one resource so every
@@ -330,6 +372,18 @@ func (a *adapter) reportAccessError(resource string) func(error) {
 			" — this adapter needs list/watch on " + resource +
 			" bound to its ServiceAccount (the operator grants adapters nothing; the chart binds it)"
 		a.accessErr.Store(&msg)
+	}
+}
+
+// reportNodeAccessError records a permission failure reading nodes. Unlike
+// reportAccessError this never fails a source: nodes are cluster-scoped, so a
+// namespaced install (rbac.clusterWide: false) has deliberately no grant for
+// them, and the correct response is drain awareness off, not Ready=False.
+func (a *adapter) reportNodeAccessError() func(error) {
+	return func(err error) {
+		msg := "cannot read nodes: " + err.Error() +
+			" — nodes are cluster-scoped, so this is expected under a namespaced install"
+		a.nodeAccessErr.Store(&msg)
 	}
 }
 
@@ -420,6 +474,15 @@ func (a *adapter) deliver(ctx context.Context, events []Event, fromList bool) {
 			sig := normalize(name, ev, a.enrich(ev))
 			rule, hasRule := src.filter.Rule(&sig)
 			if hasRule && rule.drop {
+				continue
+			}
+
+			// Node-state suppression BEFORE inhibition and the dwell queue: a
+			// rolling reboot's events describe the drain, not a fault, and the
+			// two axes must never interact (design.md decision 1). Timed by
+			// wall clock, not the event's own (sometimes unparsable, zero)
+			// timestamp — the episode tracks how long WE have been suppressing.
+			if a.drain.Suppress(name, sig.Labels["node"], src.filter.rules, a.cache, &sig, time.Now()) {
 				continue
 			}
 
@@ -634,6 +697,107 @@ func (a *adapter) runDwellFlusher(ctx context.Context) {
 		a.pending.Flush(time.Now())
 		sleepCtx(ctx, dwellTick)
 	}
+}
+
+// runDrainSweep advances every served source's drain episodes on a timer,
+// independent of event flow — a forgotten cordon with nothing left generating
+// events would otherwise never trip its bound.
+func (a *adapter) runDrainSweep(ctx context.Context) {
+	for ctx.Err() == nil {
+		a.mu.Lock()
+		names := make([]string, 0, len(a.sources))
+		bounds := map[string]time.Duration{}
+		for name, src := range a.sources {
+			names = append(names, name)
+			if src.filter != nil && src.filter.rules != nil {
+				bounds[name] = src.filter.rules.drainBound
+			}
+		}
+		a.mu.Unlock()
+
+		now := time.Now()
+		for _, name := range names {
+			for _, r := range a.drain.Sweep(name, a.cache, bounds[name], now) {
+				switch {
+				case r.exceeded:
+					a.emitDrainExceeded(ctx, name, r.node, r.start, r.suppressed)
+				case r.released:
+					a.reportDrainReleased(ctx, name, r.node, r.suppressed)
+				}
+			}
+			a.reportDrainActive(ctx, name)
+		}
+		sleepCtx(ctx, dwellTick)
+	}
+}
+
+// reportDrainActive surfaces the nodes currently suppressing a source's
+// events and the running total, rewriting the condition only when either
+// changes. Suppression is never silence: a source going quiet because a node
+// is draining and one going quiet because the cluster is healthy must be
+// distinguishable from outside.
+func (a *adapter) reportDrainActive(ctx context.Context, source string) {
+	nodes, total := a.drain.Active(source)
+	key := strings.Join(nodes, ",")
+	prev, _ := a.drainReported.Load(source)
+	cur, _ := prev.(drainReportState)
+	if key == "" {
+		if cur.nodesKey != "" {
+			a.drainReported.Delete(source)
+		}
+		return
+	}
+	if cur.nodesKey == key && cur.total == total {
+		return
+	}
+	a.drainReported.Store(source, drainReportState{nodesKey: key, total: total})
+	msg := fmt.Sprintf("node(s) %s draining — %d event(s) suppressed on purpose while they recover", key, total)
+	log.Printf("%s: %s", source, msg)
+	go func() { _ = a.mgr.ReportStatus(ctx, source, true, "Draining", msg) }()
+}
+
+// drainReportState is the last (nodes, total) pair reported for a source.
+type drainReportState struct {
+	nodesKey string
+	total    int
+}
+
+// reportDrainReleased fires once when a node stops draining, naming what its
+// drain cost — mirroring reportMute's "window closed" report one axis over.
+func (a *adapter) reportDrainReleased(ctx context.Context, source, node string, suppressed int) {
+	msg := fmt.Sprintf("node %s stopped draining: %d event(s) were suppressed while it was", node, suppressed)
+	log.Printf("%s: %s", source, msg)
+	go func() { _ = a.mgr.ReportStatus(ctx, source, true, "DrainEnded", msg) }()
+}
+
+// emitDrainExceeded posts the ONE signal a forgotten cordon earns: past the
+// bound, silence would be the one way this feature could hide an incident.
+// It bypasses mute deliberately — muting NOTIFICATIONS is exactly the silence
+// this signal exists to prevent — and bypasses the dwell queue and inhibition,
+// which drain suppression already sits ahead of.
+func (a *adapter) emitDrainExceeded(ctx context.Context, source, node string, start time.Time, suppressed int) {
+	sig := Signal{
+		Fingerprint: fmt.Sprintf("%s@/Node/%s/NodeDrainExceeded/%d", source, node, start.Unix()),
+		Labels: map[string]string{
+			"alertgroup": "k8s-events",
+			"alertname":  "NodeDrainExceeded",
+			"kind":       "Node",
+			"name":       node,
+			"node":       node,
+			"severity":   "Warning",
+			"source":     source,
+		},
+		Title: fmt.Sprintf("NodeDrainExceeded: Node/%s", node),
+		Payload: fmt.Sprintf("node %s has been draining since %s (over %s) — %d event(s) were suppressed "+
+			"on it while draining; suppression is now released and its events report normally until it stops draining",
+			node, start.UTC().Format(time.RFC3339), time.Since(start).Round(time.Minute), suppressed),
+		Kind: "alert",
+	}
+	if err := a.mgr.Inbound(ctx, source, []Signal{sig}); err != nil && ctx.Err() == nil {
+		log.Printf("posting NodeDrainExceeded for %s/%s: %v", source, node, err)
+		return
+	}
+	log.Printf("%s: node %s exceeded its drain bound — reported once, suppression released", source, node)
 }
 
 // envInt reads an integer env var, falling back when unset or unparsable.

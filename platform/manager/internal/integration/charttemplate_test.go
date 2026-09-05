@@ -586,6 +586,28 @@ func TestEventsAdapterRBACCoversPodsAndReplicaSets(t *testing.T) {
 	}
 }
 
+// Drain awareness needs a nodes grant, and ONLY the cluster-wide ClusterRole
+// can carry it — nodes are cluster-scoped, so a namespaced Role has no
+// equivalent. Pinned as its own test: this grant differs from the
+// pods/replicasets one above in exactly this respect, and a namespaced
+// install losing (or gaining) it must fail a test naming that difference,
+// not the pods/replicasets one.
+func TestEventsAdapterRBACGrantsNodesOnlyClusterWide(t *testing.T) {
+	clusterWide := helmTemplate(t, "--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.eventsAdapter.rbac.clusterWide=true")
+	role := findDocByKindAndName(t, clusterWide, "ClusterRole", "agentops-signal-k8s-events-events")
+	if !strings.Contains(role, `resources: ["nodes"]`) {
+		t.Errorf("the cluster-wide ClusterRole must grant nodes (drain awareness):\n%s", role)
+	}
+
+	namespaced := helmTemplate(t, "--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.eventsAdapter.rbac.clusterWide=false")
+	nsRole := findDocByKindAndName(t, namespaced, "Role", "agentops-signal-k8s-events-events")
+	if strings.Contains(nsRole, `"nodes"`) {
+		t.Errorf("a namespaced Role must NOT grant nodes — they are cluster-scoped:\n%s", nsRole)
+	}
+}
+
 // Grouping by pod name is what produced hundreds of conversations: pod names
 // are unique per replica and regenerated on every rollout, so the signature
 // never repeated and window reuse could never fire.
@@ -609,6 +631,28 @@ func TestDefaultRulesShape(t *testing.T) {
 	assertPastTenseReasonsNeverDwell(t, src)
 	assertEvictedDroppedWithSubstitutes(t, src)
 	assertLastRuleIsUndwelledCatchAll(t, src)
+	assertNodeConditionRuleIsNodeKind(t, src)
+}
+
+// assertNodeConditionRuleIsNodeKind: the shipped node-condition rule (tier 3)
+// must match kind="Node" — otherwise NodeNotReady, which the node lifecycle
+// controller stamps on every POD scheduled on the affected node, fires once
+// per workload at `for: 0` with no chance to notice a rolling reboot's node
+// coming back in the next few seconds. Pinned separately from the
+// Evicted-substitutes assertion below: that one is about WHICH reasons this
+// rule carries, this one is about WHAT KIND it is scoped to, and the two must
+// be free to be re-tuned independently of each other.
+func assertNodeConditionRuleIsNodeKind(t *testing.T, src string) {
+	t.Helper()
+	line := ruleLineContaining(src, "NodeNotReady")
+	if line == "" {
+		t.Fatal("NodeNotReady is not covered by any rule")
+	}
+	if !strings.Contains(line, `kind="Node"`) {
+		t.Fatalf("the node-condition rule must match kind=\"Node\", so a pod-level "+
+			"NodeNotReady falls to the catch-all's dwell and liveness re-check "+
+			"instead of firing per workload at for: 0, got rule:\n%s", line)
+	}
 }
 
 // assertPastTenseReasonsNeverDwell: reasons describing something that

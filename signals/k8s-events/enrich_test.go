@@ -114,10 +114,25 @@ func TestReplicasAndRolloutsShareOneWorkload(t *testing.T) {
 	}
 }
 
-// A kind the cache does not track is its own workload — a Node is a workload,
-// not a degraded pod.
+// A kind the cache does not track is its own workload — a Job is a workload,
+// not a degraded pod. (Node used to be this example; it is now TRACKED, for
+// drain awareness — see TestNodeWithNoOwnerIsItsOwnWorkload.)
 func TestUntrackedKindIsItsOwnWorkload(t *testing.T) {
 	a := adapterWithCache(syncedCache())
+	e := evt("Warning", "prod", "Job", "backup-27", "BackoffLimitExceeded")
+	if got := a.enrich(&e).Workload; got != "Job/backup-27" {
+		t.Fatalf("workload: got %q want Job/backup-27", got)
+	}
+}
+
+// A Node is TRACKED (drain.go needs its own view of it), but it still
+// resolves to its own workload: it carries no owner reference to walk, so the
+// tracked path lands on the same answer the untracked fallback used to give
+// directly.
+func TestNodeWithNoOwnerIsItsOwnWorkload(t *testing.T) {
+	c := syncedCache()
+	c.put(&objectInfo{Kind: "Node", Name: "node-1"})
+	a := adapterWithCache(c)
 	e := evt("Warning", "", "Node", "node-1", "NodeNotReady")
 	if got := a.enrich(&e).Workload; got != "Node/node-1" {
 		t.Fatalf("workload: got %q want Node/node-1", got)

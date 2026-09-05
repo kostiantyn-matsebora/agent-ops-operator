@@ -223,6 +223,30 @@ func TestBareUnquotedMatcherValueIsAccepted(t *testing.T) {
 	}
 }
 
+// The shipped tier-3 node-condition rule is scoped to kind="Node" (chart
+// 5.9.0's Evicted drop kept it at kind-agnostic reason=~"..." for years,
+// which is exactly what fired one NodeNotReady per DaemonSet on every
+// rolling reboot). A pod-level NodeNotReady must fall through to the
+// catch-all instead — this is what lets a self-healing reboot go unreported.
+func TestPodLevelNodeNotReadyFallsToTheCatchAll(t *testing.T) {
+	rs, err := compileRules([]Rule{
+		{Matchers: []string{`reason=~"NodeNotReady|NodeHasDiskPressure|NodeHasMemoryPressure|NodeHasPIDPressure"`, `kind="Node"`}, For: "0"},
+		{Matchers: nil, For: "3m"},
+	}, Route{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, _ := rs.Match(labelsFor("NodeNotReady", map[string]string{"kind": "Node"}))
+	if r.dwell != 0 {
+		t.Fatalf("a Node-kind NodeNotReady must still fire immediately: dwell=%v", r.dwell)
+	}
+	r, _ = rs.Match(labelsFor("NodeNotReady", nil)) // labelsFor defaults kind to "Pod"
+	if r.dwell != 3*time.Minute {
+		t.Fatalf("a pod-level NodeNotReady must reach the catch-all's dwell, got dwell=%v", r.dwell)
+	}
+}
+
 func TestInhibitRulesCompile(t *testing.T) {
 	rs, err := compileRules(nil, Route{InhibitRules: []InhibitRule{{
 		SourceMatchers: []string{`reason="NodeNotReady"`},

@@ -186,6 +186,29 @@ spec:
                     principal hazard of the feature.
                   items:
                     type: string
+          drainingNodes:
+            type: string
+            description: >-
+              The node-STATE suppression axis: "suppress" (default) silences
+              every event on a node this cluster is deliberately draining
+              (cordoned, or maintenance-tainted) for as long as the drain
+              lasts; "report" disables it, evaluating those events exactly as
+              the other axes would. Needs the ClusterRole's nodes grant —
+              absent that, this is a no-op and every source says so once.
+            enum: ["suppress", "report"]
+          drainingNodeMatchers:
+            type: array
+            description: >-
+              Narrows what a draining node suppresses. Absent = every event on
+              that node's objects, for as long as it drains.
+            items:
+              type: string
+          drainingNodeBound:
+            type: string
+            description: >-
+              How long a drain may suppress before it is reported once (a
+              Node-kind signal, reason NodeDrainExceeded) and released — a
+              forgotten cordon must not go silent forever. Default 1h.
 {{- if $ea.rbac.create }}
 {{- /* THE ADAPTER'S IDENTITY, RENDERED BESIDE THE GRANT IT CARRIES.
 
@@ -221,6 +244,12 @@ rules:
     verbs: ["list", "watch"]
   - apiGroups: ["apps"]
     resources: ["replicasets"]
+    verbs: ["list", "watch"]
+  # Drain awareness (route.drainingNodes): nodes are CLUSTER-scoped, so this
+  # exists only here — a namespaced install has no equivalent grant, and the
+  # adapter degrades to drain awareness off rather than 403ing a source.
+  - apiGroups: [""]
+    resources: ["nodes"]
     verbs: ["list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
