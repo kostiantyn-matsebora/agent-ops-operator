@@ -42,6 +42,16 @@ rather than inferred:
   labeller's permission through the collaborators API because a label event
   carries no `author_association` (`review-dispatch.yml`). Its vocabulary is
   `.github/review-triage.json`.
+- **The fixing loop's work list and trigger, today.** `collect` builds the
+  list from the open review threads plus, under the label, the analysis
+  service's open issues (`sonar-issues.py`); a round starts on a labelled pull
+  request when `claude-review` COMPLETES (`workflow_run`, conclusion success),
+  serialised per pull request by a `concurrency` group keyed on the number. A
+  red `ci-green` is neither an item nor a start: a failing test, a lint, the
+  docs generator's `--check`, the publication guard, or a quality gate — which
+  the scan step turns into a failed component job — leaves the pull request
+  blocked with the loop reporting the review clean. The `fix` job holds
+  `contents: read` and a checkout, so it can run the failing command itself.
 - **The sibling repository's `.mcp.json`** wraps each stdio server in
   `bash -c '[ "$CLAUDE_CODE_REMOTE" = "true" ] || exit 0; …wait…; exec …'`.
   The wait loop exists because the bootstrap can race MCP startup; the
@@ -71,8 +81,9 @@ rather than inferred:
   cluster is on the workstation and stays there; the visual-check rule is
   named workstation-only.
 - Merging or archiving from the routine. Both stay with a person.
-- Replacing `claude-review.yml` or `review-dispatch.yml`. The session feeds
-  them a pull request; they are unchanged.
+- Replacing `claude-review.yml`, or building a second loop. The session
+  feeds the review a pull request; `review-dispatch.yml` is EXTENDED (D10),
+  never duplicated in the routine.
 
 ## Decisions
 
@@ -236,6 +247,48 @@ reachable either way, and it removes a class of "403 host_not_allowed" that
 would otherwise be diagnosed once per new dependency. Revisit if the routine's
 reach ever needs narrowing.
 
+### D10. A failed required check is a work item, and a red `ci-green` starts a round
+
+Under the label, `collect` also reads the head sha's check runs from the
+checks API, keeps those with conclusion `failure` among the checks
+`ci-green` needs (excluding the review's own), and for each fetches the failed
+steps' log through `gh run view <run> --log-failed`, bounded to a tail of a
+stated number of lines per job. Each becomes a work item
+`{kind: "check", job, run_url, tail}` beside the threads and the analysis
+issues. The `fix` job treats a check item as a finding whose text is the log:
+reproduce with the job's own command from `ci.yml`, fix, and re-run it before
+the patch is cut — or DISPUTE with one pull request comment naming the job,
+exactly as an analysis issue is disputed. A fixed check needs no reply; the
+next CI run is its verdict.
+
+`review-dispatch.yml`'s `workflow_run` trigger gains `ci` beside
+`claude-review`: a `ci` run that completes with conclusion `failure` on a
+pull request carrying the label starts a round. The existing `concurrency`
+group serialises it with a round the review's completion may start for the
+same pull request, so two starts become two rounds in sequence, each
+collecting the current state — the second finds what the first left. Rounds
+are counted as today, whichever event started them; `MAX_ROUNDS` bounds both.
+
+- **Why the loop and not the routine.** The routine's session ended when the
+  pull request opened. Re-firing it on a red check is a second loop — a second
+  bound, a second summary, a second place a dispute can sit — on the same
+  branch as the first. The loop already lands through the deploy key, counts
+  rounds from the pull request, and knows how to dispute; a check is one more
+  kind of item.
+- **Why `collect` and not the model.** The same reason the analysis service's
+  API is read by a program: the model reads neither API, so it cannot be told
+  by a log what to fetch next. `actions: read` is granted to `collect` alone,
+  where no model runs.
+- **The platform's own auto-fix stays OFF for this repository.** The Claude
+  GitHub App can watch a pull request's check failures and push fixes itself.
+  Two machines pushing one branch, no round bound, no dispute path, no summary
+  — and the loop here would be counting rounds against commits it did not
+  make. Stated in `remote-session.md` so nobody enables it as a convenience.
+- **Alternatives rejected.** A separate `ci-fix` workflow: a second loop under
+  another name. The routine's session waiting for CI before ending: the
+  session would hold a sandbox idle for the length of every CI run and every
+  review, and still not own the later rounds.
+
 ## Risks / Trade-offs
 
 - **[A label starts a machine writing to the repository]** → the gate is write
@@ -266,6 +319,18 @@ reach ever needs narrowing.
   visibly on the issue, and two previous header versions keep working.
 - **[Runs count against the account's daily cap and subscription usage]** →
   one label is one run; nothing schedules or retries.
+- **[A check fails for a reason not in the tree — a runner outage, a rate
+  limit, a flaky download]** → the fixer finds nothing to fix and DISPUTES the
+  check with the log's reason; a round of disputes only ends the loop, the
+  summary names the job, and a person re-runs the check. Bounded by design,
+  and a false "fix" for a flake is what the reproduce-first rule prevents.
+- **[A log tail is handed to a model]** → the tail is what the pull request's
+  author already reads on the checks tab; GitHub masks registered secrets in
+  logs, and the `fix` job holds `contents: read` only, so nothing the log could
+  say lets it push.
+- **[Two rounds in sequence for one push — the review's and CI's]** → the
+  concurrency group serialises them and each collects the live state; the
+  second is short when the first left nothing, and both count toward the cap.
 
 ## Migration Plan
 

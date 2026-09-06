@@ -46,11 +46,18 @@ issue into one.
   promotes the issue in place, proposes, implements on `change/<name>`, runs
   the unit and chart tiers itself and dispatches the smoke e2e workflow for
   the rest, and opens the pull request saying `Closes #<n>`.
-- **The issue label is the owner's word for the fixing loop too.** The pull
-  request such a session opens carries `autofix` from creation, so the review's
-  findings are fixed or disputed round after round with nobody replying in
-  threads. What the loop cannot settle — a dispute, a gate — waits for a
-  person, exactly as today.
+- **The issue label is the owner's word for the fixing loop too, and the loop
+  fixes EVERYTHING that holds the merge.** The pull request such a session
+  opens carries `autofix` from creation. Under that label the loop's work list
+  is today the review's findings and the analysis service's open issues; it
+  gains every FAILED REQUIRED CHECK on the head — a red test, a lint, the docs
+  generator's check, a quality gate reported as a failed job — collected by a
+  program from the checks API with the failed step's log tail, and fixed or
+  disputed like any other item. A red `ci-green` starts a round, beside the
+  review's completion. Nothing about the loop's bound, its disputes or its one
+  summary changes; what it cannot settle waits for a person, exactly as today.
+  "Implement this issue" means a pull request that is green and reviewed, not
+  one that compiles.
 - **The routine's identity stays out of the tree.** The fire URL is a repository
   variable, the token a repository secret, the environment and routine are named
   in the rule and identified nowhere in the repository.
@@ -70,6 +77,11 @@ issue into one.
 - `change-issue-tracking`: "An inbound issue is promoted in place" gains the
   remote session as the promoter — the session started by a label on an issue
   promotes that issue, and the fire is recorded on it once, as a transition.
+- `automated-code-review`: "The work list of an approved pull request includes
+  the analysis service's issues" widens to the head's failed required checks,
+  each carrying its job name and log tail; "A landed fix on an approved pull
+  request starts the next round" gains a failed required check as a round's
+  start, under the same bound and the same summary.
 
 ## Impact
 
@@ -78,7 +90,11 @@ issue into one.
 - `.github/scripts/cloud-bootstrap.sh` (new), `.github/scripts/remote-implement.py`
   (new), `.github/workflows/remote-implement.yml` (new),
   `.github/routines/implement-issue.md` (new), `.github/review-triage.json`
-  (`implement_label`), `.github/tests/` (two new suites, `run.sh`).
+  (`implement_label`), `.github/tests/` (three new suites, `run.sh`).
+- `.github/workflows/review-dispatch.yml` (a `ci` failure as a round's start;
+  `collect` gathers failed checks under `actions: read`), `.github/scripts/failed-checks.py`
+  (new), `.github/scripts/land-dispatch.py` (checks in the summary), the fixer's
+  role file (a check item is reproduced, then fixed or disputed).
 - `.claude/settings.json` (a `SessionStart` verify hook), `.mcp.json` (the
   wrappers), `.claude/rules/remote-session.md` (new).
 - Outside the tree, once: the `agent-ops-operator` cloud environment, its
@@ -91,8 +107,10 @@ issue into one.
 - `.claude/rules/build-test.md`: "this workstation has no Go toolchain" and the
   container as the only way to build.
 - `.claude/rules/worktree-delivery.md`: the consent table gains the
-  `autoimplement` row; the lifecycle gains the remote session as a working
-  copy; the archive rule is unchanged.
+  `autoimplement` row and its `autofix` row says the work list includes failed
+  required checks; "THE REVIEW FOUND SOMETHING" names a red `ci-green` as a
+  round's start; the lifecycle gains the remote session as a working copy; the
+  archive rule is unchanged.
 - `.claude/rules/gotchas.md`: the routine push rules and the public-variables
   fact, measured, so nobody re-derives them.
 - `openspec/config.yaml` (`rules.tasks`) and `.claude/commands/opsx/apply.md`
@@ -100,7 +118,8 @@ issue into one.
 - `.claude/skills/openspec-apply-change`: where the `autofix` label is placed
   on the owner's word, the issue label now counts as that word.
 - `CONTRIBUTING.md`: "How a change is proposed here" and "The issue that
-  tracks it" gain the label and the remote path.
+  tracks it" gain the label and the remote path; "Pull requests" says the
+  labelled loop fixes failed checks beside findings and analysis issues.
 - `docs/CHANGELOG.md`: nothing — no chart, CRD or image changes.
 
 **Documents the change makes untrue — adopter site**

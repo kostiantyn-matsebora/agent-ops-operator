@@ -179,9 +179,12 @@ session and the cluster tier dispatched to the smoke end-to-end workflow on
 its branch. Nothing the session does SHALL merge or archive.
 
 **The label on the issue is the owner's word, given once**, and it reaches the
-pull request as the consent the fixing loop already reads. What that loop
-cannot settle — a dispute, an unanswered gate — waits for a person, as it does
-today.
+pull request as the consent the fixing loop already reads — over everything
+that holds the merge: the review's findings, the analysis service's issues and
+the failed required checks. What that loop cannot settle — a dispute, an
+unanswered gate — waits for a person, as it does today. The session SHALL NOT
+wait for the checks or the review before ending; the loop owns the pull
+request from the moment it opens.
 
 #### Scenario: The session opens the pull request
 
@@ -195,6 +198,12 @@ today.
 - **WHEN** the review posts findings on that pull request
 - **THEN** the fixing loop fixes or disputes them under the label, and no
   person is asked to reply in a thread first
+
+#### Scenario: A required check fails on the pull request
+
+- **WHEN** a required check fails on the pull request's head
+- **THEN** the fixing loop starts a round over it without a person, and the
+  check is fixed and re-run or disputed with the log's reason
 
 #### Scenario: The loop ends
 
