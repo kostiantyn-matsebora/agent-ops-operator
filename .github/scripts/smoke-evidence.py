@@ -128,8 +128,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except subprocess.CalledProcessError as exc:
-        print(f"{exc.cmd[0]} failed: {exc.stderr or exc}", file=sys.stderr)
-        sys.exit(1)
+    sys.exit(main())

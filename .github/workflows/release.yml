@@ -167,7 +167,9 @@ jobs:
   smoke:
     name: smoke
     needs: [determine, ci_is_green, smoke_is_green]
-    if: needs.smoke_is_green.outputs.smoked != 'true'
+    if: |
+      !cancelled() && needs.ci_is_green.result == 'success' &&
+      needs.smoke_is_green.outputs.smoked != 'true'
     permissions:
       contents: read
     uses: ./.github/workflows/e2e.yml
