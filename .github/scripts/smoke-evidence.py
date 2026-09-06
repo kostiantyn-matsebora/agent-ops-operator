@@ -95,7 +95,7 @@ def main() -> int:
     while True:
         try:
             state = classify(check_runs(args.repo, args.sha))
-        except (RuntimeError, json.JSONDecodeError) as exc:
+        except (RuntimeError, OSError, json.JSONDecodeError) as exc:
             print(f"smoked=false", file=sys.stdout)
             print(f"the check-run lookup failed ({exc}); running a smoke rather than publishing on missing evidence",
                   file=sys.stderr)

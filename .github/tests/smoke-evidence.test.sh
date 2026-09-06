@@ -135,6 +135,17 @@ assert_status 0 "$rc"
 assert_equals "smoked=false" "$out"
 assert_contains "$(cat "$tmp/err")" "lookup failed"
 
+it "gh MISSING entirely (not merely failing): smoked=false, never a crash"
+# An EMPTY PATH, so subprocess.run(["gh", ...]) raises FileNotFoundError --
+# python3 itself is invoked by absolute path, so this exercises "gh is not
+# installed" rather than "gh failed", which the GH_API_FAILS case above does.
+empty_path_dir=$(mktemp -d)
+out=$(PATH="$empty_path_dir" $(command -v python3) "$S" --repo o/r --sha deadbeef 2>"$tmp/err"); rc=$?
+rmdir "$empty_path_dir"
+assert_status 0 "$rc"
+assert_equals "smoked=false" "$out"
+assert_contains "$(cat "$tmp/err")" "lookup failed"
+
 # --- pagination --------------------------------------------------------------
 
 reset
