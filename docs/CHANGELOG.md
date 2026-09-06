@@ -16,7 +16,7 @@ for the source and the reference material beside this file.
   tag: a release publishing many artifacts from one commit now smokes it
   once, reusing a passed smoke from any earlier run on the commit and
   waiting — bounded — for one already in flight, instead of provisioning a
-  cluster per tag. Contributor-facing only; no published artifact changes.
+  cluster per tag. Contributor-facing only. No published artifact changes.
 
 ## [13.4.0] — 2026-09-06
 
