@@ -26,9 +26,11 @@ lines, each seconds after a reconnect, each a "dropped as quiet".
   recurring record as a newer one, which is exactly what the dwell's
   "still recurring at the close" rung needs.
 - **The event subscription stays as a fast path.** Where `fire_event` is on,
-  a record arrives within milliseconds and advances the cursor, so the next
-  poll does not consider it again. The two paths deduplicate through the
-  cursor they already share; no second bookkeeping is added.
+  a record arrives within milliseconds. The two paths deduplicate PER RECORD
+  on the occurrence's timestamp — the adapter remembers the latest timestamp
+  it considered for each record key — so an occurrence is considered once
+  whichever path brings it. The cursor is the restart position and the
+  coarse gate in front of that check.
 - **The connect-time backfill becomes the first poll**, and `backfill: false`
   keeps its meaning — do not report what was logged while the adapter was
   down — by moving the cursor to the newest record on connect instead of
