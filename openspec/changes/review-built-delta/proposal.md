@@ -87,7 +87,8 @@ _None._
 
 **Code:** `.github/workflows/claude-review.yml` (a build step before the
 model in `read`; the per-file process loop replacing the component session;
-the `full` dispatch input and the `REVIEW_QUIET_READS` variable; the coverage
+the `full` dispatch input and the `REVIEW_QUIET_READS` and `REVIEW_READERS`
+variables, the second being the width of the per-file loop; the coverage
 file crossing from `consolidate` to the posting program);
 `.github/scripts/review-input.py` (reads the coverage markers, decides per
 path, carries the rest); `.github/scripts/review-prompt.py` (`reader` emits a
@@ -99,7 +100,12 @@ marker); a new `.github/scripts/review-build.sh` (the recipe per group, the
 unbuilt reading on failure); `.github/scripts/review-reading-check.py`
 (merges per-file readings and verdicts into the component's, accepts the
 unbuilt shape); `.github/scripts/review-context.py` (measures one process's
-system prompt and prompt, diff from `since`); `.claude/agents/file-reviewer.md`
+system prompt and prompt, diff from `since`); `.github/scripts/review-trace.py`
+(reads each per-file process's stream and prints its cache usage, so the job
+log shows the shared prefix being hit); `.github/scripts/review-rules.py`
+(UNCHANGED — `reader-system` calls it to route the rule files into the cached
+prefix, and it stays on the restore list it is already on);
+`.claude/agents/file-reviewer.md`
 (a blind single-file role, no threads); a new `.claude/agents/thread-verdict.md`;
 `.claude/agents/review-coordinator.md` (dedup against threads, carried
 paths, the third summary line, the `unbuilt` row);
