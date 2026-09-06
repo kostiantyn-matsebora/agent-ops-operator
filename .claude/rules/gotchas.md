@@ -364,6 +364,17 @@ pins both halves — the release path shares the cache scope, so without it a
 stale layer reaches a PUBLISHED image. A same-day re-run still hits the
 cache; the next day's build, or an edit to the `RUN` line, is the refresh.
 
+**ON A `pull_request` RUN, `github.sha` IS THE MERGE COMMIT AND `base.sha` IS
+FROZEN AT THE PULL REQUEST'S OPENING — SO `base.sha..github.sha` IS EVERYTHING
+THE BASE GAINED SINCE, CHARGED TO THE PULL REQUEST.** `pr-closes` refused #174
+for not closing the issues of two changes #179 and #180 had archived on master
+days after its branch was cut. A rebase would not have helped: the head would
+then hold the archives too. A job that judges "what this pull request changes"
+diffs `origin/<base>...<head.sha>` — three-dot against the base branch AS IT
+STANDS, to the pull request's own head — and `.github/tests/pr-closes.test.sh`
+pins both the fixture and the workflow's range. `fetch-depth: 0` is what makes
+the merge base computable.
+
 **WRAPPING A TEST FUNCTION'S BODY IN `t.Run` DOES NOT LOWER SONAR'S
 `go:S3776` COGNITIVE COMPLEXITY SCORE FOR IT.** Confirmed against
 SonarSource's own answer on the mechanism (a maintainer, on the community
