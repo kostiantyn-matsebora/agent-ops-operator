@@ -8,7 +8,8 @@ program from the service's API, per component project, beside the open review
 threads — AND every required check that failed on the pull request's head,
 collected by a program from the checks API, each carrying the job's name, a
 link to its run and a bounded tail of its failed steps' log. The model SHALL
-NOT read any of the three APIs.
+NOT read any of the three — the review threads' API, the analysis service's
+or the checks'.
 
 An issue the analysis raised is a finding by another reviewer, and a failed
 check is a finding by a third; a loop that fixed one reviewer's findings while

@@ -257,9 +257,9 @@ stated number of lines per job. Each becomes a work item
 `{kind: "check", job, run_url, tail}` beside the threads and the analysis
 issues. The `fix` job treats a check item as a finding whose text is the log:
 reproduce with the job's own command from `ci.yml`, fix, and re-run it before
-the patch is cut — or DISPUTE with one pull request comment naming the job,
-exactly as an analysis issue is disputed. A fixed check needs no reply; the
-next CI run is its verdict.
+the patch is cut — or DISPUTE with one pull request comment naming the job and
+the log's reason, as an analysis issue is disputed by its key. A fixed check
+needs no reply; the next CI run is its verdict.
 
 `review-dispatch.yml`'s `workflow_run` trigger gains `ci` beside
 `claude-review`: a `ci` run that completes with conclusion `failure` on a

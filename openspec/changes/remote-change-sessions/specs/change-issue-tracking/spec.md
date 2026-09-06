@@ -14,9 +14,11 @@ pointing them at a different page. A promoted issue keeps the conversation and
 gains the phase label; nothing is duplicated and nothing is lost.
 
 A remote session started by the implement label on an issue SHALL promote that
-issue, in the same way and with the same script, and the comment recording the
-fire SHALL be the one transition record for the session's start — the phase
-label then advances as it does for any change.
+issue, in the same way and with the same script. The start of such a session
+adds exactly two automated comments to the issue: the one recording the fire,
+which is the transition record for the start, and the pointer the promotion
+leaves as it does for any promoted issue — the phase label then advances as it
+does for any change.
 
 #### Scenario: A filed issue becomes a change
 
@@ -28,8 +30,8 @@ label then advances as it does for any change.
 
 - **WHEN** the implement label starts a remote session for an issue
 - **THEN** that session promotes the same issue as the change's tracking issue,
-  the fire's comment is the only automated comment the start adds, and the
-  reporter's body is untouched
+  the fire's comment and the promotion's pointer are the only automated
+  comments the start adds, and the reporter's body is untouched
 
 #### Scenario: The change advances
 

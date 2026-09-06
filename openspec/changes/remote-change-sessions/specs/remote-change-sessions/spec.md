@@ -122,7 +122,9 @@ removed with a visible comment saying who may place it.
 
 The fire SHALL be recorded on the issue ONCE, as a comment carrying the
 session's link, and that record is the transition the issue's tracking
-requires — no further progress comments.
+requires. The promotion then leaves its pointer comment as it does for any
+promoted issue; nothing else automated is added to the issue by the start, and
+no progress comments follow.
 
 **Who may start a machine writing to a branch is the same question as who may
 dispatch a fix**, and it has the same answer: write access, read from the
