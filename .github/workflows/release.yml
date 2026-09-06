@@ -142,6 +142,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      checks: read
     outputs:
       smoked: ${{ steps.lookup.outputs.smoked }}
     steps:
