@@ -23,12 +23,16 @@ from a fork too — and reports through `ci-green`, the one required check.
 
 The cluster smoke — a thin k3s run on the stub runtime — gates a **release**
 instead: it runs on the tagged commit before an image or
-the chart is published, and on demand against any branch. It runs ONCE PER
-COMMIT, not once per tag: a release publishes many independently-versioned
-artifacts from one commit, so the release workflow looks up the commit's
-existing smoke result before provisioning a cluster, reuses a passed one from
-any earlier run, and waits — bounded — for one already in flight rather than
-racing it. Only a commit with no passed or in-flight smoke gets a fresh one.
+the chart is published, and on demand against any branch.
+
+**It runs ONCE PER COMMIT, not once per tag** — a release publishes many
+independently-versioned artifacts from one commit, so before provisioning a
+cluster the release workflow:
+
+- looks up the commit's existing smoke result
+- reuses a passed one from any earlier run
+- waits — bounded — for one already in flight rather than racing it
+- runs its own only where none passed and none is in flight
 
 The full pack, including the lane that drives the real agent runtime with a
 real credential, gates nothing:
