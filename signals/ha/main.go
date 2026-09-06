@@ -11,10 +11,13 @@
 //	cursor:   state key "last-record" via /signal/state (restart-safe)
 //	emitting: POST /signal/inbound, kind=alert, fingerprint "<source>@<logger>@<file:line>"
 //
-// The adapter normalizes and nothing more: no dedup, no grouping, no cooldown
-// beyond its restart cursor. Repetition collapses manager-side, which is why
-// the fingerprint keys on the LOGGER and SOURCE LOCATION — Home Assistant's own
-// deduplication key — rather than on the occurrence.
+// The adapter normalizes and nothing more: no grouping and no cooldown. What
+// it keeps is its restart cursor and, per record, the timestamp of the last
+// occurrence it considered — so one occurrence is considered once whichever
+// of the two arrival paths brings it. Repetition across occurrences collapses
+// manager-side, which is why the fingerprint keys on the LOGGER and SOURCE
+// LOCATION — Home Assistant's own deduplication key — rather than on the
+// occurrence.
 //
 // Run single-instance (the reconciler's singleton default): two sessions would
 // double-post every record.
@@ -46,6 +49,16 @@ const (
 	// `for: 30s` rule is not meaningfully delayed, coarse enough to cost
 	// nothing when the queue is empty.
 	dwellTick = 5 * time.Second
+	// pollEvery is how often a connected source's log listing is read and
+	// what is newer than the cursor is considered. THE LISTING IS THE SOURCE
+	// OF RECORDS, not the event: Home Assistant fires `system_log_event`
+	// only under `system_log: fire_event: true`, off by default, and an
+	// adapter that waited for it saw the log once per reconnect and nothing
+	// in between. A constant rather than a knob: fifty small objects every
+	// fifteen seconds cost nothing measurable on either side, a `for: 0`
+	// rule gains at most this much latency, and every dwelled rule is
+	// measured in minutes.
+	pollEvery = 15 * time.Second
 	// cursorStaleSkew is how far the persisted cursor may sit ahead of the
 	// newest record Home Assistant still holds before it is treated as no
 	// longer valid upstream. Small clock differences are normal; a cursor
@@ -90,6 +103,16 @@ type servedSource struct {
 	key string
 	// snapshot is the verification ladder's view of this instance.
 	snapshot *healthSnapshot
+	// seen is the latest occurrence timestamp considered per record key —
+	// the dedup between the two arrival paths. The cursor cannot be it: a
+	// cursor is one instant for the whole source, so a second record logged
+	// at the same instant as the one that advanced it would be dropped, and
+	// an event racing a sweep over the same occurrence would be considered
+	// twice. Per record, the same occurrence is one timestamp, and is
+	// considered once whichever path brings it — which is why the sweep
+	// skips only what is strictly OLDER than the cursor and lets a record AT
+	// it through to this check. Pruned to the listing on every sweep.
+	seen map[string]time.Time
 }
 
 type adapter struct {
@@ -119,6 +142,15 @@ type adapter struct {
 	// sessions holds the live Home Assistant session per source, for the
 	// health snapshot refresh.
 	sessions map[string]*haSession
+	// poll overrides pollEvery; zero means the constant. Tests shorten it.
+	poll time.Duration
+}
+
+func (a *adapter) pollInterval() time.Duration {
+	if a.poll > 0 {
+		return a.poll
+	}
+	return pollEvery
 }
 
 func mustEnv(key string) string {
@@ -186,12 +218,13 @@ func (a *adapter) refreshSources(ctx context.Context) {
 			continue
 		}
 
-		src := &servedSource{filter: f, token: token, key: f.endpoint + "\x00" + token}
+		src := &servedSource{filter: f, token: token, key: f.endpoint + "\x00" + token, seen: map[string]time.Time{}}
 		if prev, ok := a.sources[info.Name]; ok {
 			// Config edits must not replay history, and must not reconnect
 			// unless they changed where or as whom we connect.
 			src.cursor = prev.cursor
 			src.snapshot = prev.snapshot
+			src.seen = prev.seen
 			if prev.key == src.key {
 				src.cancel = prev.cancel
 			} else {
@@ -306,6 +339,7 @@ func (a *adapter) runSession(ctx context.Context, source string) {
 			continue
 		}
 		a.report(ctx, source, "ok", true, "AdapterReady", "connected to "+endpoint)
+		go a.runPoller(ctx, source, sess)
 
 		select {
 		case <-ctx.Done():
@@ -344,27 +378,57 @@ func (a *adapter) startSession(ctx context.Context, source string, sess *haSessi
 	a.mu.Lock()
 	a.sessions[source] = sess
 	a.mu.Unlock()
-	a.refreshSnapshot(ctx, source, sess)
-	a.backfill(ctx, source, sess)
+	// The first sweep is the backfill. Declining it (`backfill: false`) means
+	// "do not report what was logged while I was down", so the cursor is
+	// moved past the listing instead — polling goes on from there.
+	src := a.source(source)
+	a.sweep(ctx, source, sess, src != nil && src.filter.backfill)
 	return nil
 }
 
-// backfill reports what was logged while this adapter was down.
+// runPoller reads the listing on every tick for as long as the session lives.
+// It is the ordinary path a record takes; the event subscription is the fast
+// path an instance with `fire_event` on gets, and the cursor deduplicates the
+// two. A failed read is logged by the sweep and retried on the next tick; it
+// never ends the session — the ping loop owns that judgement.
+func (a *adapter) runPoller(ctx context.Context, source string, sess *haSession) {
+	t := time.NewTicker(a.pollInterval())
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-sess.Done():
+			return
+		case <-t.C:
+			a.sweep(ctx, source, sess, true)
+		}
+	}
+}
+
+// sweep reads the log listing once and does two things with it: stores it as
+// the source's health snapshot, and — when consider is set — feeds every record
+// newer than the cursor through the rule path. Home Assistant's listing is a
+// deduplicated map keyed exactly as the fingerprint is, whose entry's timestamp
+// and count advance on every recurrence, so a recurring record shows up here as
+// a newer one: that is what the dwell's "still recurring at the close" rung is
+// fed by on an install that fires no events.
 //
 // It is also where a stale cursor is recovered: a position minutes AHEAD of
 // everything Home Assistant still holds names a record that is gone (the log
 // was cleared, or this cursor was written against another instance), and
 // keeping it would silence the source forever. Re-read instead of stalling.
-func (a *adapter) backfill(ctx context.Context, source string, sess *haSession) {
+//
+// With consider unset the cursor is moved past the listing and nothing is
+// reported — the connect-time sweep of a source that declined the backfill.
+func (a *adapter) sweep(ctx context.Context, source string, sess *haSession, consider bool) {
 	src := a.source(source)
-	if src == nil || !src.filter.backfill {
+	if src == nil {
 		return
 	}
-	cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
-	defer cancel()
-	records, err := sess.SystemLog(cctx)
+	records, err := a.readListing(ctx, source, sess)
 	if err != nil {
-		log.Printf("%s: backfill: %v", source, err)
+		log.Printf("%s: reading system_log: %v", source, err)
 		return
 	}
 	newest := time.Time{}
@@ -373,7 +437,30 @@ func (a *adapter) backfill(ctx context.Context, source string, sess *haSession) 
 			newest = at
 		}
 	}
+	if !consider {
+		// Everything listed counts as seen: the cursor moves past it, and the
+		// records AT the new cursor are remembered so the strict gate does
+		// not hand them to consider on the next sweep.
+		a.mu.Lock()
+		if src, ok := a.sources[source]; ok {
+			for i := range records {
+				if at := records[i].At(); !at.IsZero() {
+					src.seen[records[i].Key()] = at
+				}
+			}
+		}
+		a.mu.Unlock()
+		if !newest.IsZero() {
+			a.setCursor(source, newest)
+			a.persistCursor(ctx, source, newest)
+		}
+		return
+	}
+	// The cursor is written under a.mu by advance and setCursor, from the
+	// event path as well as this one; read it the same way.
+	a.mu.Lock()
 	cursor := src.cursor
+	a.mu.Unlock()
 	if len(records) > 0 && !cursor.IsZero() && newest.Add(cursorStaleSkew).Before(cursor) {
 		log.Printf("%s: persisted cursor %s is ahead of everything Home Assistant still holds (newest %s) — "+
 			"re-reading the whole log", source, cursor.Format(time.RFC3339), newest.Format(time.RFC3339))
@@ -382,10 +469,39 @@ func (a *adapter) backfill(ctx context.Context, source string, sess *haSession) 
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].At().Before(records[j].At()) })
 	for i := range records {
-		if at := records[i].At(); !at.IsZero() && !cursor.IsZero() && !at.After(cursor) {
+		// STRICTLY older than the cursor is skipped. A record AT the cursor
+		// reaches consider, where the per-record timestamp memory tells the
+		// occurrence that advanced the cursor from a second record logged in
+		// the same instant — the cursor alone cannot. After a restart that
+		// memory is empty, so the one record at the persisted cursor is
+		// considered again; the manager's cooldown absorbs that.
+		if at := records[i].At(); !at.IsZero() && !cursor.IsZero() && at.Before(cursor) {
 			continue
 		}
 		a.consider(ctx, source, &records[i])
+	}
+	a.pruneSeen(source, records)
+}
+
+// pruneSeen forgets the dedup timestamps of records Home Assistant no longer
+// lists AND that are strictly older than the cursor — the gate skips those
+// anyway. A record delivered by event before the listing shows it is not yet
+// listed but sits AT the cursor, and forgetting it here is exactly what would
+// let the next sweep consider it a second time. Keeping every key ever seen
+// would only grow; this keeps the listing plus the cursor's instant.
+func (a *adapter) pruneSeen(source string, records []logRecord) {
+	listed := make(map[string]bool, len(records))
+	for i := range records {
+		listed[records[i].Key()] = true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if src, ok := a.sources[source]; ok {
+		for key, at := range src.seen {
+			if !listed[key] && at.Before(src.cursor) {
+				delete(src.seen, key)
+			}
+		}
 	}
 }
 
@@ -415,6 +531,18 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 	if !ok {
 		a.mu.Unlock()
 		return
+	}
+	// One occurrence, one consideration, whichever path brought it: a record
+	// whose timestamp has not moved since it was last considered is the same
+	// occurrence again — the poll re-listing what an event delivered, or an
+	// event for what a sweep just fed in. A record with no timestamp cannot
+	// be told apart from its last occurrence, so it is never deduplicated.
+	if at := rec.At(); !at.IsZero() {
+		if last, dup := src.seen[rec.Key()]; dup && !at.After(last) {
+			a.mu.Unlock()
+			return
+		}
+		src.seen[rec.Key()] = at
 	}
 	f := src.filter
 	a.mu.Unlock()
@@ -468,6 +596,10 @@ func (a *adapter) advance(ctx context.Context, source string, at time.Time) {
 	}
 	src.cursor = at
 	a.mu.Unlock()
+	a.persistCursor(ctx, source, at)
+}
+
+func (a *adapter) persistCursor(ctx context.Context, source string, at time.Time) {
 	if err := a.mgr.PutState(ctx, source, cursorKey, at.UTC().Format(time.RFC3339)); err != nil && ctx.Err() == nil {
 		log.Printf("persisting cursor for %s: %v", source, err)
 	}
@@ -599,18 +731,30 @@ func (a *adapter) refreshSnapshots(ctx context.Context) {
 	}
 }
 
-// refreshSnapshot reads the current log listing and config-entry states.
+// refreshSnapshot re-reads the health view for one source, for the dwell
+// flusher. The records it read are not considered here — that is the sweep's
+// job on its own cadence — so a pending entry is verified against a listing at
+// most one dwell tick old without the poll interval having to match it.
+func (a *adapter) refreshSnapshot(ctx context.Context, source string, sess *haSession) {
+	if _, err := a.readListing(ctx, source, sess); err != nil {
+		log.Printf("%s: reading system_log for verification: %v", source, err)
+	}
+}
+
+// readListing reads the current log listing and config-entry states, stores
+// them as the source's health snapshot, and returns the records for the caller
+// to consider. ONE read serves both jobs: a snapshot older than the record
+// just considered could not see the recurrence that was just fed in.
 //
 // A failed read leaves the previous snapshot in place rather than clearing it:
 // the ladder's answer for "cannot say" already exists, and clearing would turn
 // a momentary hiccup into a verdict.
-func (a *adapter) refreshSnapshot(ctx context.Context, source string, sess *haSession) {
+func (a *adapter) readListing(ctx context.Context, source string, sess *haSession) ([]logRecord, error) {
 	cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
 	defer cancel()
 	records, err := sess.SystemLog(cctx)
 	if err != nil {
-		log.Printf("%s: reading system_log for verification: %v", source, err)
-		return
+		return nil, err
 	}
 	snap := &healthSnapshot{
 		records: make(map[string]logRecord, len(records)),
@@ -632,6 +776,7 @@ func (a *adapter) refreshSnapshot(ctx context.Context, source string, sess *haSe
 		src.snapshot = snap
 	}
 	a.mu.Unlock()
+	return records, nil
 }
 
 // health is the adapter's verification ladder over one source's snapshot.
