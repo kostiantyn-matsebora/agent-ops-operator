@@ -10,6 +10,34 @@ for the source and the reference material beside this file.
 
 ## [13.4.0] — 2026-09-06
 
+**Every first-party image is rebuilt and re-pinned.** Beside the two entries
+below, each image carries what landed on it since its last tag:
+
+- `manager` 0.57.3 — status patches on ensure-topic use optimistic locking
+  and retry on conflict. Send op ids carry a per-process epoch, so a restart
+  cannot reuse one. `x/crypto` and `x/net` bumped.
+- `channel-telegram` 0.25.0 — the outbound base URL is configuration
+  (`TELEGRAM_API_BASE`, or the bot Secret's `apiBase` key), completed ops
+  are remembered in a bounded set, logs are sanitised.
+- `gateway-telegram` 0.6.0 — `TELEGRAM_API_BASE`, and the poll loop split
+  into named steps.
+- `signal-telegram` 0.6.4 — logs are sanitised.
+- `console` 0.38.3 — the session cookie is `Secure` behind TLS or
+  `X-Forwarded-Proto: https`. Logs are sanitised. The image builds with
+  `npm ci --ignore-scripts`.
+- `egress-proxy` 0.2.5 — refuses a connection whose original destination is
+  the proxy itself.
+- `runtime-claude` 0.9.0 — `@anthropic-ai/claude-code` pinned to 2.1.252
+  (was `@latest`) and installed with `--ignore-scripts` plus its own
+  installer. `apt-get upgrade`, so a cached layer cannot keep a patched CVE
+  out. The prompt file is confined to the workspace. Logs are sanitised.
+- `runtime-copilot` 0.1.1 and `runtime-ollama` 0.1.1 — the same image
+  hygiene: pinned npm, `--ignore-scripts`, `apt-get upgrade`, confined
+  prompt file, sanitised logs.
+- `signal-alertmanager` 0.7.4, `housekeeping` 0.2.4, `context-sync` 0.2.4 —
+  rebuilt on the current base image, no behaviour change.
+- `signal-ha` 0.4.0 and `signal-k8s-events` 0.4.5 — below.
+
 ### Added
 
 - **`signal-k8s-events` gained a fourth suppression axis: node STATE.** While

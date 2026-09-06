@@ -27,7 +27,7 @@ default: false
 
 # The runtime image, and the one place its tag is written. NO domain tooling in
 # it: what an agent may reach is wiring — see docs/concepts.md#runtime-images-are-generic.
-image: ghcr.io/kostiantyn-matsebora/agentops-runtime-ollama:0.1.0
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-ollama:0.1.1
 
 # WHERE THE MODEL IS. Required when the bundle is enabled; the render fails
 # naming this key otherwise, because a runtime with no endpoint would start,

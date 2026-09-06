@@ -28,7 +28,7 @@ default: false
 
 # The runtime image, and the one place its tag is written. NO domain tooling in
 # it: what an agent may reach is wiring — see docs/concepts.md#runtime-images-are-generic.
-image: ghcr.io/kostiantyn-matsebora/agentops-runtime-copilot:0.1.0
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-copilot:0.1.1
 
 # ONE secret with a GitHub token that has Copilot access. Projected as env via
 # valueFrom; the manager reads no Secrets.
