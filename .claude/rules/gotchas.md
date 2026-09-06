@@ -99,11 +99,15 @@ eight seconds when the runners are quiet — and a re-run changed nothing either
 time.
 
 - **The fix is a lookup, the same shape `ci_is_green` already uses**:
-  `smoke-evidence.py` reads the tagged commit's CHECK RUNS (`smoke / e2e /
-  smoke`, whichever workflow produced it) before `release.yml` provisions a
-  cluster, reuses a passed one, and waits — bounded — for one already in
-  flight rather than racing it. See `.claude/rules/documentation.md`'s
-  routing and `docs/testing.md`'s tier model for what it changed.
+  `smoke-evidence.py` reads the tagged commit's CHECK RUNS before
+  `release.yml` provisions a cluster, reuses a passed one, and waits —
+  bounded — for one already in flight rather than racing it. The check run's
+  name is `<caller job> / <called workflow> / <called job>`, and it really is
+  `smoke / e2e / smoke` — the CALLER job named `smoke`, the reusable workflow
+  `e2e.yml` displaying as `e2e`, the CALLED job inside it also named `smoke`
+  — whichever of `release.yml` or `e2e-smoke.yml` produced it. See
+  `.claude/rules/documentation.md`'s routing and `docs/testing.md`'s tier
+  model for what it changed.
 - **`gh api <path> -f k=v` WITH NO `--method GET` SENDS THE `-f` PARAMS AS A
   REQUEST BODY ON THIS ROUTE**, and `commits/<sha>/check-runs` answers a
   bodied GET with a plain 404 — not a permissions error, not an empty list.
