@@ -456,7 +456,11 @@ func (a *adapter) sweep(ctx context.Context, source string, sess *haSession, con
 		}
 		return
 	}
+	// The cursor is written under a.mu by advance and setCursor, from the
+	// event path as well as this one; read it the same way.
+	a.mu.Lock()
 	cursor := src.cursor
+	a.mu.Unlock()
 	if len(records) > 0 && !cursor.IsZero() && newest.Add(cursorStaleSkew).Before(cursor) {
 		log.Printf("%s: persisted cursor %s is ahead of everything Home Assistant still holds (newest %s) — "+
 			"re-reading the whole log", source, cursor.Format(time.RFC3339), newest.Format(time.RFC3339))

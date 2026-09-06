@@ -310,7 +310,8 @@ component, KEEP what names a VictoriaMetrics API OBJECT.**
   subscribed as a fast path ONLY: Home Assistant fires it solely under
   `system_log: fire_event: true`, off by default, and the adapter that
   depended on it posted nothing for a day on the reference install while
-  reporting Ready. The two paths share one cursor.
+  reporting Ready. The two paths deduplicate PER RECORD on the occurrence's
+  timestamp; the cursor is the restart position and the coarse gate only.
 - **NO Kubernetes client at all.** It names no ServiceAccount, so it runs as the
   release floor; credential projected per SOURCE.
 - **Same `rules`/`route` vocabulary as `signal-k8s-events`**, minus the time
