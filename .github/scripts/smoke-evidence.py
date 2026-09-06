@@ -50,8 +50,12 @@ def check_runs(repo: str, sha: str) -> list[dict]:
     runs: list[dict] = []
     page = 1
     while True:
+        # `--method GET` is NOT decoration: without it, `gh api` sends `-f`
+        # params as a request body rather than a query string on some routes,
+        # and this one answers a bodied GET with 404 rather than the list —
+        # confirmed against the live API, not merely read off the docs.
         out = subprocess.run(
-            ["gh", "api", f"repos/{repo}/commits/{sha}/check-runs",
+            ["gh", "api", "--method", "GET", f"repos/{repo}/commits/{sha}/check-runs",
              "-f", f"per_page=100", "-f", f"page={page}"],
             capture_output=True, text=True,
         )

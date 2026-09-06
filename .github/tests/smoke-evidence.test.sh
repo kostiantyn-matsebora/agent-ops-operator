@@ -154,5 +154,18 @@ assert_status 0 "$rc"
 assert_equals "smoked=true" "$out"
 assert_contains "$(cat "$GH_CALLS")" "page=2"
 
+# THE INVOCATION SHAPE ITSELF. `gh api <path> -f k=v` with no `--method GET`
+# sends the `-f` params as a POST-style request body on some routes, and this
+# route answers a bodied GET with 404 rather than the list — a bug that
+# reached a live release run once, silently, because every stubbed `gh` here
+# answers any invocation identically and could not have caught it.
+it "invokes gh api with --method GET, not the ambiguous default"
+reset
+cat > "$PAGES/1.json" <<'JSON'
+{"check_runs":[]}
+JSON
+run >/dev/null
+assert_contains "$(cat "$GH_CALLS")" "api --method GET repos/o/r/commits/deadbeef/check-runs"
+
 rm -rf "$tmp"
 summary
