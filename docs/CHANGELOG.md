@@ -8,6 +8,16 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## Unreleased
+
+### Changed
+
+- The release workflow's cluster smoke is keyed to the tagged COMMIT, not the
+  tag: a release publishing many artifacts from one commit now smokes it
+  once, reusing a passed smoke from any earlier run on the commit and
+  waiting — bounded — for one already in flight, instead of provisioning a
+  cluster per tag. Contributor-facing only; no published artifact changes.
+
 ## [13.4.0] — 2026-09-06
 
 **Every first-party image is rebuilt and re-pinned.** Beside the two entries
