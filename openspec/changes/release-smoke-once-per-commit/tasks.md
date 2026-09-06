@@ -1,6 +1,6 @@
 ## 1. The lookup
 
-- [ ] 1.1 Write `.github/scripts/smoke-evidence.py`: `--repo`, `--sha`,
+- [x] 1.1 Write `.github/scripts/smoke-evidence.py`: `--repo`, `--sha`,
       `--wait-minutes` (default 20), `--poll-seconds` (default 30, for
       tests); reads the commit's check runs through `gh api` with
       pagination, selects names ending in `e2e / smoke`, and prints
@@ -11,7 +11,7 @@
 
 ## 2. The workflow
 
-- [ ] 2.1 In `.github/workflows/release.yml`, add `smoke_is_green` after
+- [x] 2.1 In `.github/workflows/release.yml`, add `smoke_is_green` after
       `ci_is_green` (needs both `determine` and `ci_is_green`, `actions:
       read` and `contents: read`, restores nothing from the tag — the script
       is read from the checkout, which is the tagged commit itself) with
@@ -29,7 +29,7 @@
 
 ## 3. Unit tests
 
-- [ ] 3.1 Add `.github/tests/smoke-evidence.test.sh` against the stubbed
+- [x] 3.1 Add `.github/tests/smoke-evidence.test.sh` against the stubbed
       `gh`: a passed smoke is found; none means run; a failed one means run;
       in-progress then success waits and reports smoked; in-progress past
       the bound means run; a failing `gh` means run. Verify with
