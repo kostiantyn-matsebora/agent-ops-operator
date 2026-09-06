@@ -2592,3 +2592,107 @@ func assertChannelConfigHasNoAPIBase(t *testing.T, set string) {
 		t.Fatalf("the Channel must not carry apiBase in spec.config:\n%s", doc)
 	}
 }
+
+// The health surfaces beside the log: rendered from values with the stated
+// defaults, each switchable, and their rules ahead of the log rules so a log
+// rule's message pattern cannot capture a repair's text.
+func TestHomeAssistantSourceRendersTheSurfacesWithDefaults(t *testing.T) {
+	src := stripComments(haDoc(t, helmTemplate(t, haArgs()...), "SignalSource", "ha-logs"))
+	for _, want := range []string{
+		"surfaces:",
+		"configEntries:", "states:", "setup_retry", "setup_error", "migration_error",
+		"repairs:", "severities:", "critical",
+		"sensors:", "deviceClasses:", "problem", "connectivity",
+		"updates:",
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("the source config must carry %q:\n%s", want, src)
+		}
+	}
+	// Three on, the digest off: exactly one `enabled: false` under surfaces.
+	surfaces := src[strings.Index(src, "surfaces:"):]
+	if n := strings.Count(surfaces, "enabled: false"); n != 1 {
+		t.Fatalf("expected the update digest alone to default off, got %d disabled surfaces:\n%s", n, surfaces)
+	}
+	if n := strings.Count(surfaces, "enabled: true"); n != 3 {
+		t.Fatalf("expected config entries, repairs and sensors on, got %d enabled surfaces:\n%s", n, surfaces)
+	}
+	// EVERY surface rule comes before the first log rule — one that selects
+	// on the record's message — so a message pattern cannot capture a
+	// repair's text.
+	rules := src[strings.Index(src, "rules:"):]
+	firstMessage := strings.Index(rules, "message=~")
+	if firstMessage < 0 {
+		t.Fatalf("no log rule rendered:\n%s", rules)
+	}
+	for _, surface := range []string{"config-entry", "sensor", "repair", "update"} {
+		i := strings.Index(rules, `surface="`+surface+`"`)
+		if i < 0 || i > firstMessage {
+			t.Fatalf("the surface=%s rule must precede the log rules:\n%s", surface, rules)
+		}
+	}
+	// Config entries and sensors dwell (a restart churns both); repairs and
+	// the digest carry a zero dwell (a standing fact and a list — a re-check
+	// would find both exactly as they were).
+	// toYaml sorts keys, so a rule renders `for` BEFORE `matchers`; split the
+	// list into rule blocks at each item's first key rather than slicing from
+	// the matcher forward, which would read the NEXT rule's dwell.
+	blocks := splitRuleBlocks(rules)
+	for surface, wantZero := range map[string]bool{"config-entry": false, "sensor": false, "repair": true, "update": true} {
+		var rule string
+		for _, b := range blocks {
+			if strings.Contains(b, `surface="`+surface+`"`) {
+				rule = b
+				break
+			}
+		}
+		if rule == "" {
+			t.Fatalf("missing the default rule for surface=%s:\n%s", surface, rules)
+		}
+		zero := strings.Contains(rule, `for: "0"`)
+		if zero != wantZero {
+			t.Fatalf("surface=%s: zero dwell = %v, want %v:\n%s", surface, zero, wantZero, rule)
+		}
+	}
+}
+
+// splitRuleBlocks cuts a rendered rules list into one string per rule. A rule
+// item starts at a line whose first token after `- ` is one of the rule's
+// keys; a matcher entry (`- surface="…"`) carries no key and stays inside.
+func splitRuleBlocks(rules string) []string {
+	var blocks []string
+	var cur strings.Builder
+	for _, line := range strings.Split(rules, "\n") {
+		trimmed := strings.TrimLeft(line, " ")
+		isItem := false
+		for _, key := range []string{"for:", "matchers:", "action:", "escalateAfterObjects:"} {
+			if strings.HasPrefix(trimmed, "- "+key) {
+				isItem = true
+				break
+			}
+		}
+		if isItem && cur.Len() > 0 {
+			blocks = append(blocks, cur.String())
+			cur.Reset()
+		}
+		cur.WriteString(line + "\n")
+	}
+	if cur.Len() > 0 {
+		blocks = append(blocks, cur.String())
+	}
+	return blocks
+}
+
+func TestHomeAssistantSurfaceCanBeSwitchedOffInValues(t *testing.T) {
+	src := stripComments(haDoc(t, helmTemplate(t, haArgs(
+		"--set", "home-assistant.logsAdapter.source.surfaces.sensors.enabled=false")...), "SignalSource", "ha-logs"))
+	surfaces := src[strings.Index(src, "surfaces:"):]
+	sensors := surfaces[strings.Index(surfaces, "sensors:"):]
+	sensors = sensors[:strings.Index(sensors, "updates:")]
+	if !strings.Contains(sensors, "enabled: false") {
+		t.Fatalf("sensors must render disabled:\n%s", sensors)
+	}
+	if n := strings.Count(surfaces, "enabled: true"); n != 2 {
+		t.Fatalf("switching one surface off must leave the other two on, got %d:\n%s", n, surfaces)
+	}
+}

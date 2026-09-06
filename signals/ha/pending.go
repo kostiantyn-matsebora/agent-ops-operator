@@ -367,3 +367,16 @@ func (q *pendingQueue) HasEntries() bool {
 	defer q.mu.Unlock()
 	return len(q.entries) > 0
 }
+
+// HasEntriesFor reports whether ONE source has something pending — what
+// decides a read issued on that source's session alone.
+func (q *pendingQueue) HasEntriesFor(source string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, e := range q.entries {
+		if e.source == source {
+			return true
+		}
+	}
+	return false
+}
