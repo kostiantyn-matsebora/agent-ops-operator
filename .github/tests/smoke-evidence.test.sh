@@ -25,11 +25,8 @@ if [ -n "${GH_API_FAILS:-}" ]; then
   exit 1
 fi
 page=1
-prev=""
 for a in "$@"; do
-  case "$prev" in page=*) : ;; esac
   case "$a" in page=*) page="${a#page=}" ;; esac
-  prev="$a"
 done
 f="$PAGES/$page.json"
 if [ -f "$f" ]; then cat "$f"; else echo '{"check_runs":[]}'; fi
@@ -85,15 +82,16 @@ cat > "$PAGES/1.json" <<'JSON'
 JSON
 it "an in-flight smoke, then success on re-check: waits and reports smoked"
 (
-  # Flip the fixture to success after the first poll, in the background, so
-  # the second read (poll-seconds later) sees the new state.
-  sleep 1
+  # Flip the fixture to success WELL BEFORE the second poll fires, so the
+  # margin (0.2s write vs. a 2s poll interval) makes the ordering
+  # deterministic rather than a race between two equal sleeps.
+  sleep 0.2
   cat > "$PAGES/1.json" <<'JSON'
 {"check_runs":[{"name":"smoke / e2e / smoke","status":"completed","conclusion":"success"}]}
 JSON
 ) &
 bgpid=$!
-out=$(run --wait-minutes 1 --poll-seconds 1); rc=$?
+out=$(run --wait-minutes 1 --poll-seconds 2); rc=$?
 wait "$bgpid" 2>/dev/null
 assert_status 0 "$rc"
 assert_equals "smoked=true" "$out"
@@ -115,13 +113,13 @@ cat > "$PAGES/1.json" <<'JSON'
 JSON
 it "an in-flight smoke that finishes FAILED before the bound: smoked=false, run our own"
 (
-  sleep 1
+  sleep 0.2
   cat > "$PAGES/1.json" <<'JSON'
 {"check_runs":[{"name":"smoke / e2e / smoke","status":"completed","conclusion":"failure"}]}
 JSON
 ) &
 bgpid=$!
-out=$(run --wait-minutes 1 --poll-seconds 1); rc=$?
+out=$(run --wait-minutes 1 --poll-seconds 2); rc=$?
 wait "$bgpid" 2>/dev/null
 assert_status 0 "$rc"
 assert_equals "smoked=false" "$out"
