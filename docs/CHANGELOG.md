@@ -8,7 +8,7 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
-## [Unreleased]
+## [13.4.0] — 2026-09-06
 
 ### Added
 
