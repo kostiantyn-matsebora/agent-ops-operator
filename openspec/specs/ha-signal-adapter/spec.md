@@ -2,13 +2,17 @@
 
 ## Purpose
 
-The Home Assistant log signal adapter: a standalone dependency-free module
-reading that instance's WebSocket API, with no Kubernetes client at all.
+The Home Assistant signal adapter: a standalone dependency-free module
+reading that instance's WebSocket API, with no Kubernetes client at all. It
+polls the system log, and beside it four health surfaces — config entry
+state, repairs, fault sensors and pending updates — each switchable, on one
+source through one rules policy.
 
 It reuses the cluster-events rule vocabulary exactly rather than inventing a
 second one, fingerprints on Home Assistant's OWN dedup identity — logger plus
-source location, never the occurrence — resumes where it stopped, and takes its
-credential as environment projected per SOURCE.
+source location for a log record, the condition's own identity for a surface,
+never the occurrence — resumes where it stopped, and takes its credential as
+environment projected per SOURCE.
 
 Its loop breaker is the agent SURFACE: a failed agent call is logged there, and
 reporting it would reach the agent that made it.
