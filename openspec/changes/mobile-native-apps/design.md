@@ -72,15 +72,24 @@ The console is a small number of data-dense pages, not a page count or an
 interaction style (swipe, native gestures) that would justify a from-scratch
 native UI. Wrapping is the option that costs nothing already paid for.
 
-**`platform/console-mobile/` is a new component, but not a container
-image.** It holds the Capacitor project plus the Android and iOS native
-projects it generates into. `.github/components.sh` discovers components by
-`go.mod` or `Dockerfile` presence; this directory has neither, so it needs no
-exclusion rule (unlike `test/`, which carries both and had to be excluded
-explicitly) — it is simply invisible to image-based discovery, which is
-correct, since it publishes to app stores rather than GHCR. `structure.md`'s
-table gains a row noting this is the first non-image component; the
-path-to-image-name rule does not apply to it.
+**`console-mobile/` sits at the repository root, not under `platform/`.**
+`repository-layout`'s published "A component's directory states what it IS"
+requirement is explicit: `platform/` is a component group, and "directories
+that are not components — the chart, the documentation site, the specs, the
+repository's own tooling — SHALL NOT be placed in a component group." This
+directory publishes to app stores, not GHCR, so it is not a component in that
+requirement's sense and does not belong inside `platform/` beside `manager`,
+`console`, `housekeeping`, `context-sync` and `egress-proxy`, which all are.
+It holds the Capacitor project plus the Android and iOS native projects it
+generates into. `.github/components.sh` discovers components by `go.mod` or
+`Dockerfile` presence; this directory has neither, so it needs no exclusion
+rule (unlike `test/`, which carries both and had to be excluded explicitly) —
+it is simply invisible to image-based discovery, which is correct, since it
+publishes to app stores rather than GHCR. `structure.md` gains a line
+alongside its existing "THERE IS EXACTLY ONE `docs/`, AT THE ROOT" note,
+naming `console-mobile/` as the second root-level directory that is
+deliberately not a component; the path-to-image-name rule does not apply to
+it.
 
 **Native HTTP for every API call, never the WebView's fetch.** Capacitor's
 HTTP plugin routes requests through the native platform's networking stack,
