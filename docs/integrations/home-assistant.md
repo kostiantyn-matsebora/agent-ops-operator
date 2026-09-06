@@ -245,7 +245,7 @@ key conversation grouping on the exact wording.
 | | |
 |---|---|
 | **`message` matchers** | available here, and nowhere else |
-| **How records are seen** | the log listing is **polled**, every fifteen seconds. Nothing in Home Assistant needs enabling; `system_log: fire_event: true` in its configuration only makes a record arrive sooner |
+| **How records are seen** | the log listing is **polled**, every fifteen seconds. Nothing in Home Assistant needs enabling. `system_log: fire_event: true` in its configuration only makes a record arrive sooner |
 | **The re-check** | asks the integration's config entry state, then falls back to *was it still recurring as the window closed* — the last third of the wait, never under thirty seconds. A blip that logged for thirty seconds and stopped is churn |
 | **No time axis** | `timeIntervals` and `muteTimeIntervals` are not implemented. An unknown key is a config error, not a window that silently never fires |
 
