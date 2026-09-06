@@ -225,6 +225,15 @@ version available**. The job log names the package, the installed version and
 the version that fixes it, so the fix is nearly always a bump — a base image, a
 Go dependency, an npm package.
 
+**A finding on a Debian package whose fix the base already ships needs no
+bump at all.** The apt layer of every image that runs `apt-get` is rebuilt
+once a day — the workflows pass the date as the `APT_REFRESH` build argument,
+and the layer's `apt-get upgrade` picks the fix up. A scan that names a fixed
+version Debian has published means the layer was cached before it existed:
+the next day's build resolves it, and a change to that `RUN` line forces it
+today. An `apt-get upgrade` in a cached layer runs nothing, which is what the
+argument exists for.
+
 **What does not:** a finding with no fix released (`ignore-unfixed`). An
 unfixable upstream CVE is information, not a task, and a gate that cannot be
 made green is one somebody switches off. Severity below HIGH is not gated.

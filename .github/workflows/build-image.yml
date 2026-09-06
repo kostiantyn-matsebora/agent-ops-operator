@@ -90,6 +90,12 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ inputs.version }}
 
+      # The apt layer is rebuilt once a day — the same argument `ci.yml`'s
+      # `images` job passes, for the same reason: this job shares its cache
+      # scope, so a layer cached before a security fix would otherwise reach
+      # the PUBLISHED image.
+      - id: date
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
       - id: build
         uses: docker/build-push-action@v6
         with:
@@ -97,6 +103,7 @@ jobs:
           file: ${{ inputs.dockerfile }}
           platforms: ${{ inputs.platforms }}
           push: true
+          build-args: APT_REFRESH=${{ steps.date.outputs.date }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # ON THE INDEX, not only on each platform's image config. `labels:`

@@ -351,6 +351,19 @@ rules loaded on demand.
   ends the argument early and reads as a JSON error somewhere else. The suite
   counts them.
 
+**`apt-get upgrade` IN A CACHED LAYER PATCHES NOTHING — A CACHED LAYER RUNS NO
+COMMAND.** The build cache keys a `RUN` on its text and the build arguments it
+reads, so a layer built before a Debian security fix existed keeps the
+vulnerable package for as long as the instruction is unchanged. libexpat1 was
+the first time, and the upgrade line was added and read as the fix; libssh2
+(CVE-2026-7598) was the second, on a layer cached with that line already in
+it. The line only ever worked because adding it changed the text. Every
+Dockerfile that runs apt now reads `ARG APT_REFRESH`, `ci.yml` and
+`build-image.yml` pass the date, and `.github/tests/apt-refresh.test.sh`
+pins both halves — the release path shares the cache scope, so without it a
+stale layer reaches a PUBLISHED image. A same-day re-run still hits the
+cache; the next day's build, or an edit to the `RUN` line, is the refresh.
+
 **WRAPPING A TEST FUNCTION'S BODY IN `t.Run` DOES NOT LOWER SONAR'S
 `go:S3776` COGNITIVE COMPLEXITY SCORE FOR IT.** Confirmed against
 SonarSource's own answer on the mechanism (a maintainer, on the community
