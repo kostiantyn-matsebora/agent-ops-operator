@@ -106,8 +106,9 @@ type servedSource struct {
 	// at the same instant as the one that advanced it would be dropped, and
 	// an event racing a sweep over the same occurrence would be considered
 	// twice. Per record, the same occurrence is one timestamp, and is
-	// considered once whichever path brings it. Pruned to the listing on
-	// every sweep.
+	// considered once whichever path brings it — which is why the sweep
+	// skips only what is strictly OLDER than the cursor and lets a record AT
+	// it through to this check. Pruned to the listing on every sweep.
 	seen map[string]time.Time
 }
 
@@ -449,7 +450,13 @@ func (a *adapter) sweep(ctx context.Context, source string, sess *haSession, con
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].At().Before(records[j].At()) })
 	for i := range records {
-		if at := records[i].At(); !at.IsZero() && !cursor.IsZero() && !at.After(cursor) {
+		// STRICTLY older than the cursor is skipped. A record AT the cursor
+		// reaches consider, where the per-record timestamp memory tells the
+		// occurrence that advanced the cursor from a second record logged in
+		// the same instant — the cursor alone cannot. After a restart that
+		// memory is empty, so the one record at the persisted cursor is
+		// considered again; the manager's cooldown absorbs that.
+		if at := records[i].At(); !at.IsZero() && !cursor.IsZero() && at.Before(cursor) {
 			continue
 		}
 		a.consider(ctx, source, &records[i])

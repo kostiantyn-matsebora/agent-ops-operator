@@ -787,3 +787,30 @@ func TestBackfillOffStillPolls(t *testing.T) {
 		t.Fatalf("reported the wrong record: %q", got)
 	}
 }
+
+// Two records logged in the same instant: the first advances the cursor to
+// that instant, and the second must not be dropped for sharing it. The cursor
+// gate is strict, and the per-record memory is what tells them apart.
+func TestSecondRecordAtTheCursorInstantIsNotDropped(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, nil))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	runAdapter(t, a)
+
+	<-ha.subscribed
+	waitFor(t, "the connect-time sweep", func() bool { return ha.ListCalls() >= 1 })
+	instant := time.Now()
+	first := record("homeassistant.components.hue", "bridge lost", instant, 1)
+	ha.SetRecords(first)
+	waitFor(t, "the first record", func() bool { return len(fm.Posted()) == 1 })
+	// The second appears in the listing with the SAME timestamp.
+	ha.SetRecords(first, record("homeassistant.components.mqtt", "broker lost", instant, 1))
+	waitFor(t, "the second record at the same instant", func() bool { return len(fm.Posted()) == 2 })
+	calls := ha.ListCalls()
+	waitFor(t, "several more polls", func() bool { return ha.ListCalls() >= calls+3 })
+	if n := len(fm.Posted()); n != 2 {
+		t.Fatalf("expected exactly two posts, got %d", n)
+	}
+}
