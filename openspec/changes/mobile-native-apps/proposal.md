@@ -19,9 +19,10 @@ layout work is now a dependency of every target, not an alternative to one.
   that scrolls sideways — verified at a phone viewport. This is a
   precondition for the native shell below, not a separate deliverable.
 - A new `console-mobile/` directory wraps that same frontend bundle in a
-  native shell (Capacitor), producing three installable artifacts from one
-  UI: an Android app (phone and tablet, one APK/AAB — the layout is what
-  tells them apart), and an iOS app (iPhone and iPad, one universal build).
+  native shell (Capacitor), producing two installable artifacts from one
+  UI covering four device classes: an Android app (phone and tablet, one
+  APK/AAB — the layout is what tells them apart), and an iOS app (iPhone and
+  iPad, one universal build).
   It sits at the repository ROOT, not under `platform/` — `platform/` is a
   component group whose directories are each exactly one published container
   image, and this produces app-store artifacts instead, which

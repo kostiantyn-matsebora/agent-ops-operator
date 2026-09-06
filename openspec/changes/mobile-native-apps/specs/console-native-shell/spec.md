@@ -7,9 +7,9 @@ browser's origin and session.
 
 ## ADDED Requirements
 
-### Requirement: One frontend bundle, three installable targets
+### Requirement: One frontend bundle, two installable targets
 The native apps SHALL wrap the identical frontend bundle the browser is
-served, built once and packaged three ways: an Android app usable on phone and
+served, built once and packaged two ways: an Android app usable on phone and
 tablet, and an iOS app usable on iPhone and iPad. No app-specific fork of the
 frontend SHALL exist; a page or component available in the browser SHALL be
 available, unchanged, in the app.
