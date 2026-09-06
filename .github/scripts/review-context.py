@@ -3,18 +3,17 @@
 model runs and printed at the top of the job log.
 
 A context's cost is paid on every turn, so its size is the number that
-explains a slow job — and it was invisible: the coordinator's 76 k tokens a
-turn were found by downloading an execution artifact and counting, once. This
-prints it for every context, every run, from the files themselves:
+explains a slow job. This prints it for every context, every run, from the
+files themselves:
 
-  per FILE READER:   the role file, CLAUDE.md, the delegation message, the
-                     rule files routed to its path, its diff, the file itself
-  the COMPONENT SESSION: CLAUDE.md and the workflow instruction (it reads nothing)
-  the COORDINATOR:   its role file, CLAUDE.md, the message (readings + threads)
+  the SHARED PREFIX every file reader of the job holds: the role, the routed
+    rules, the delta specs — read from cache by every process after the first
+  ONE FILE READER: the shared prefix (size only) plus its own per-file prompt,
+    diff and file — for the entry's LARGEST file, the one that costs most
+  ONE VERDICT PASS: for the file with the most open threads, if any
+  the COORDINATOR: its role file, CLAUDE.md, the message (readings + threads)
 
-Bytes are exact; tokens are bytes / 4, an estimate stated as one. What a
-reader goes on to `Read` beyond this (a sibling it chooses to look at) is not
-here — this is the floor a context starts from, not a ceiling.
+Bytes are exact; tokens are bytes / 4, an estimate stated as one.
 
     review-context.py component --input review-input.json --group <g> [--base origin/master]
     review-context.py coordinator --input review-input.json --readings <dir>
@@ -22,7 +21,6 @@ here — this is the floor a context starts from, not a ceiling.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import pathlib
 import subprocess
@@ -33,6 +31,7 @@ ROOT = HERE.parents[1]
 
 
 def _prompt_module():
+    import importlib.util
     spec = importlib.util.spec_from_file_location("review_prompt", HERE / "review-prompt.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -65,17 +64,27 @@ def row(name: str, parts: dict[str, int]) -> str:
 
 def component(d: dict, group: str, base: str) -> list[str]:
     pm = _prompt_module()
-    a = pm.component_args(d, group)
-    claude_md = size("CLAUDE.md")
-    role = size(".claude/agents/file-reviewer.md")
-    lines = [f"CONTEXTS FOR {a['component']}{' chunk ' + a['chunk'] if a.get('chunk') else ''} ({len(a['files'])} file(s) over two queue readers; a queue reader's context is its rules once plus each file it reads in turn — per-file cost below). Bytes exact; tokens ≈ bytes/4.",
-             row("component session (runs the workflow)", {"CLAUDE.md": claude_md, "instruction": len(pm.reader(d, group).encode())})]
-    for f in a["files"]:
-        msg = len(json.dumps({k: v for k, v in f.items() if k != "rules"}).encode()) + 400
-        parts = {"role": role, "CLAUDE.md": claude_md, "message": msg,
-                 "rules": sum(size(r) for r in f["rules"]),
-                 "diff": diff_size(base, f["path"]), "file": size(f["path"])}
-        lines.append(row(f"  reader {f['path']}", parts))
+    entry = pm._entry(d, group)
+    prefix = pm.reader_system(d, group)
+    prefix_bytes = len(prefix.encode())
+    lines = [f"CONTEXTS FOR {entry['group']}{' chunk ' + entry['chunk'] if entry.get('chunk') else ''} "
+             f"({len(entry['paths'])} file(s), each its own process; shared system prefix below is read from cache after the first). "
+             "Bytes exact; tokens ≈ bytes/4.",
+             f"{'shared system prefix (role + routed rules + delta specs)':<44} {prefix_bytes:>8,} B {tok(prefix_bytes):>8}"]
+    if entry["paths"]:
+        largest = max(entry["paths"], key=lambda p: size(p))
+        msg = pm.reader(d, group, largest)
+        since = d.get("since", {}).get(largest) or base
+        parts = {"per-file prompt": len(msg.encode()), "diff": diff_size(since, largest), "file": size(largest)}
+        lines.append(row(f"  reader (largest file) {largest}", parts))
+        vp = pm.verdict_paths(d, group)
+        if vp:
+            busiest = max(vp, key=lambda p: sum(1 for t in d["threads"] if t["path"] == p and not t["isResolved"]))
+            vmsg = pm.verdict(d, group, busiest)
+            if vmsg is not None:
+                vsince = d.get("since", {}).get(busiest) or base
+                vparts = {"verdict message": len(vmsg.encode()), "diff": diff_size(vsince, busiest), "file": size(busiest)}
+                lines.append(row(f"  verdict (most threads) {busiest}", vparts))
     return lines
 
 

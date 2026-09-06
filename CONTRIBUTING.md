@@ -509,29 +509,46 @@ of them would fail every pull request for work it was not about.
 
 **Claude reviews the pull request** on open and on every push —
 `claude-review.yml`, four jobs: a program builds the queue of changed
-components, one job per component reads it, one job consolidates and posts,
-and one that runs no model resolves threads. The same review runs by hand
-against any pull request, `gh workflow run claude-review.yml -f number=<pr>`,
-and `-f dry_run=true` stops after the readings (the run's artifacts) without
-posting. It comments on specific lines and leaves one summary. It reads **per
-component, in parallel** — one runner per changed component, so a change
-touching eight components is read in the time of one — and within a
-component **per file**: one subagent per changed file, in a context that
-holds that file, its own threads and the two or three rule files that apply
-to its path, and nothing else. No context in the review inherits the rule
-files; a reader is told which to read, and what every context holds is
-printed at the top of its job log. A reading that fails is named
-`unreviewed` (a component) or `unread` (a file) in the summary, never
-dropped. Then **across files and components**: every
-identifier, field, path or env var the change added, removed or renamed is
-followed to its consumers — inside the change from what each file's reading
-declares and references, outside it by searching the repository — because
-this repository's modules import nothing from one another and a contract
-change breaks at runtime in a component the diff never names. The summary
-states that reach. It reads this project's own
+components — deciding, per path, whether it is READ this run or CARRIED from
+an earlier one (below) — one job per component with a read path reads it,
+one job consolidates and posts, and one that runs no model resolves threads.
+The same review runs by hand against any pull request, `gh workflow run
+claude-review.yml -f number=<pr>`, `-f dry_run=true` stops after the readings
+(the run's artifacts) without posting, and `-f full=true` ignores the
+coverage record and reads every changed path from the base. It comments on
+specific lines and leaves one summary. **It builds each component before
+reading it** — the same recipe CI uses — and a component that does not build
+is not read at all: no model runs, the summary names it `unbuilt` with the
+build's own tail, distinct from `unreviewed` (the job itself failed) or
+`unread` (a file's own reader returned nothing). It reads **per component, in
+parallel** — one runner per component with something to read — and within a
+component **per file, blind**: one process per changed file, holding no
+thread and no previous finding, so every read is an independent sample;
+several files run at once from the job's shell, each holding that file, and
+the rule files routed to its component's paths as a system prefix identical
+for every file of the job — paid once, served from cache after. No context
+in the review inherits the rule files, and what every context holds is
+printed at the top of its job log. A file carrying an unresolved thread gets
+a second, primed process judging just that thread — `fixed`, `standing`,
+`gone` or `detached` — and the coordinator is where "not made again" lives
+now: a blind finding matching an open thread is folded in, one matching a
+dismissed thread is dropped, one matching a thread judged `fixed` is posted,
+because the fix did not hold. **A file is read until independent reads add
+nothing, then CARRIED** — not re-read, its standing threads left as they
+are — from a record the review keeps on the pull request itself, a hidden
+line on its own summary; a rebase, a rule-file change, or `-f full=true`
+resets the record and reads everything again. The summary's third line says
+how many of the pull request's changed files were read this run, how many
+were carried quiet, and how many sit in unbuilt components. Then **across
+files and components** — carried ones included: every identifier, field,
+path or env var the change added, removed or renamed is followed to its
+consumers — inside the change from what each file's reading declares and
+references, outside it (and outside every carried file) by searching the
+repository — because this repository's modules import nothing from one
+another and a contract change breaks at runtime in a component the diff
+never names. The summary states that reach. It reads this project's own
 rules, so it raises a contradiction with a recorded invariant or a retired term
-as well as ordinary defects — and **it does not repeat a finding it has already
-made**, so what appears after a push is what is new. It resolves its own threads
+as well as ordinary defects. It resolves its own threads
 once you fix them, and it never touches anybody else's. A pull request cannot
 rewrite the review that judges it: the roles, the queue's builder and the
 prompt scripts are restored from the default branch before they run, the thread resolver runs from its checkout, and a pull request editing

@@ -7,22 +7,22 @@
 # every chart, and is visible only to a reader who knows what was decided before.
 #
 # FOUR JOBS, AND THE FAN-OUT IS THE MATRIX. `queue` is a program: what changed,
-# grouped into components, plus every review thread. `read` is one job per
-# changed component, all started at once, each running a fixed set of
-# `file-reviewer` queue readers over a queue of its changed files (the base
-# branch's role, each queue reader reading its rules once and its files one at a
-# time) and uploading the merged reading. `consolidate` runs the `review-coordinator` over the readings — the
-# only role that posts, in a context holding the readings and the threads and
-# no rule file. `reconcile`
-# holds the one privilege, runs no model, and refuses any thread the review did
-# not author.
+# which of it is READ this run versus CARRIED from an earlier one (from the
+# review's own coverage markers), grouped into components, plus every review
+# thread. `read` is one job per changed component with a read path: it BUILDS
+# the component first — the same recipe CI uses — and only then runs ONE
+# `claude -p` PER CHANGED FILE, blind (no thread, no previous finding), holding
+# the rules routed to the component's paths as a cached system prefix shared by
+# every file of the job; a file with an unresolved thread gets a second, primed
+# process over just that thread. `consolidate` runs the `review-coordinator`
+# over the readings — the only role that posts, in a context holding the
+# readings and the threads and no rule file — and writes the coverage marker
+# the next run reads. `reconcile` holds the one privilege, runs no model, and
+# refuses any thread the review did not author.
 #
-# THE LOOP USED TO BE A DYNAMIC WORKFLOW INSIDE ONE `claude -p` SESSION, and it
-# was correct and slow: the runtime pools concurrent readers at
-# `min(16, max(2, CPUs − 2))`, which on a four-core runner is TWO. On #106 eight
-# readers started in pairs over ten minutes and the last never started. A job
-# per reading is the same plan on a free, twenty-wide pool — see
-# openspec/specs/automated-code-review/spec.md.
+# See openspec/specs/automated-code-review/spec.md and
+# `.claude/rules/worktree-delivery.md`, "The review found something", for the
+# shape and the numbers behind it.
 #
 # TWO OF THE JOBS ARE SPLIT ON PRIVILEGE, AND THE SPLIT IS THE POINT. Resolving
 # a review thread requires `contents: write` — counter-intuitively, since it
@@ -41,7 +41,9 @@ on:
   pull_request:
     types: [opened, synchronize, ready_for_review]
   # BY HAND: the same jobs against any pull request. `dry_run` stops after the
-  # readings — they are the run's artifacts — and posts nothing.
+  # readings — they are the run's artifacts — and posts nothing. `full` ignores
+  # every coverage marker and reads every changed path from the base, whatever
+  # the record says.
   workflow_dispatch:
     inputs:
       number:
@@ -50,6 +52,11 @@ on:
         type: string
       dry_run:
         description: Read every component and stop; post nothing
+        required: false
+        type: boolean
+        default: false
+      full:
+        description: Ignore the coverage record; read every changed path from the base
         required: false
         type: boolean
         default: false
@@ -73,9 +80,8 @@ env:
   # NO CONTEXT IN THE REVIEW INHERITS A RULE FILE. `claudeMdExcludes` drops
   # every `.claude/rules/*.md`; CLAUDE.md itself stays (small: the index and
   # two named exceptions). A file reader is TOLD which rules to read for its
-  # path (`review-rules.py`); the coordinator reads none. MEASURED before this:
-  # the coordinator re-sent ~76 k tokens on each of 34 turns, of which its
-  # readings and threads were a few thousand. A relative path in this list
+  # path, as a fixed system prefix (`review-prompt.py reader-system`); the
+  # verdict pass and the coordinator read none. A relative path in this list
   # matches nothing; `**/` globs do.
   CLAUDE_SETTINGS: '{"claudeMdExcludes":["**/.claude/rules/*.md"]}'
   # THE MODEL AND ITS EFFORT ARE CHOSEN HERE, NOT INHERITED. A runner has no
@@ -85,6 +91,12 @@ env:
   # role says `model: inherit`, so these two flags reach every subagent.
   CLAUDE_MODEL: claude-sonnet-5
   CLAUDE_EFFORT: low
+  # THE WIDTH OF THE PER-FILE LOOP. API-bound, not a processor pool — the loop
+  # is a shell `xargs`, not a model deciding what to spawn.
+  REVIEW_READERS: 4
+  # HOW MANY CONSECUTIVE QUIET READS EARN A CARRY. 1 means: the first
+  # independent read of an unchanged file that adds nothing is believed.
+  REVIEW_QUIET_READS: 1
 
 jobs:
   # WHAT THIS DIFF IS, AS DATA. Runs no model: the hygiene guards, the
@@ -183,21 +195,23 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # THE QUEUE IS A PROGRAM. What changed, grouped by `review-queue.py`
-      # into one entry per component; every review thread, once; the change's
-      # delta specs. It used to be an agent asked to run these commands: 136 s
-      # and eleven refused commands on #106.
+      # THE QUEUE IS A PROGRAM. What changed, which of it is read versus
+      # carried (`review-input.py`, from the review's own coverage markers on
+      # the pull request), grouped by `review-queue.py` into one entry per
+      # component with a read path; every review thread, once; the change's
+      # delta specs.
       #
       # THE PROGRAM IS THE BASE BRANCH'S. A queue built by the pull request's
       # own copy could leave a component out of it, and an absent entry is not
-      # an `unreviewed` row — it is nothing. So the three files that decide
-      # the queue are restored first, exactly as the roles are.
+      # an `unreviewed` row — it is nothing. So the files that decide the
+      # queue are restored first, exactly as the roles are.
       - id: input
         if: steps.decide.outputs.run == 'true'
-        name: What changed, and who reads it
+        name: What changed, what is read this run, and who reads it
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE: origin/${{ steps.guard.outputs.base }}
+          FULL: ${{ github.event_name == 'workflow_dispatch' && inputs.full || 'false' }}
         run: |
           set -euo pipefail
           restored=""
@@ -207,7 +221,10 @@ jobs:
             git checkout "$BASE" -- "$f"
           done
           [ -z "$restored" ] || echo "::notice::This pull request edits the review's queue builder ($restored ); the queue is built by the base branch's copy, and the edit takes effect once merged."
-          python3 .github/scripts/review-input.py --repo "${{ github.repository }}" --number "$PR" --out review-input.json
+          full_flag=""
+          [ "$FULL" = "true" ] && full_flag="--full"
+          python3 .github/scripts/review-input.py --repo "${{ github.repository }}" --number "$PR" \
+            --out review-input.json --quiet-reads "$REVIEW_QUIET_READS" $full_flag
 
       - if: steps.decide.outputs.run == 'true'
         uses: actions/upload-artifact@v4
@@ -217,11 +234,17 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  # ONE JOB PER CHANGED COMPONENT, ALL AT ONCE. The matrix is the queue's
-  # entry list; a component the diff never touches has no entry and no job.
-  # The split is INSIDE the job — queue readers over a queue of files — because a
-  # job costs ~30-40 s before it reads anything. Each job runs the base branch's `file-reviewer` role, once per file, in its own
-  # `claude -p`, on its own runner, and uploads its reading as data.
+  # ONE JOB PER COMPONENT WITH A READ PATH THIS RUN, ALL AT ONCE. A component
+  # every one of whose paths is CARRIED has no entry and no job. Each job
+  # BUILDS the component first, with the same recipe CI uses for it — a
+  # component that does not build is not read, and the job records that fact
+  # as its reading rather than spending a model on a build error. A built
+  # component is then read ONE `claude -p` PER FILE, from the shell, several
+  # at once, each blind (no thread, no previous finding) and holding the
+  # rules routed to the component's paths as a system prefix identical for
+  # every file — paid once per job, served from cache to every reader after
+  # the first. A file with an unresolved thread gets a second, primed process
+  # over just that thread, after its blind reading.
   #
   # `continue-on-error`: a reading that fails is reported as failed under its
   # component's name (the workflow itself stays green) and is an `unreviewed`
@@ -248,94 +271,172 @@ jobs:
         with:
           name: review-input
 
-      # WHAT EVERY CONTEXT IN THIS JOB WILL HOLD — THE FIRST THING THE LOG
-      # SAYS. A context's size is paid on every turn, so it is the number that
+      # WHAT THIS JOB'S READERS WILL HOLD — THE FIRST THING THE LOG SAYS. A
+      # context's size is paid on every turn, so it is the number that
       # explains a slow reading; it is printed from the files before anything
-      # is installed or restored.
+      # is installed, built or restored.
       - name: What each context holds
         env:
           ENTRY: ${{ matrix.entry.slug }}
           BASE: origin/${{ needs.queue.outputs.base }}
         run: python3 .github/scripts/review-context.py component --input review-input.json --group "$ENTRY" --base "$BASE"
 
-      # THE ACTION IS RESTORED BEFORE `uses:` RESOLVES IT. A composite action
-      # is a file in the checkout, so a pull request could edit it; the role
-      # it goes on to restore would then be restored by the pull request's own
-      # code. A local action is read when its step runs, so a step before it
-      # decides what it says. The prompt-side scripts come with it.
       - name: The review's tooling is the base branch's
         env:
           BASE: origin/${{ needs.queue.outputs.base }}
         run: |
           set -euo pipefail
           restored=""
-          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/review-reading-check.py .github/scripts/review-rules.py .github/scripts/review-context.py .github/scripts/review-trace.py; do
+          for f in .github/actions/claude-cli/action.yml .github/scripts/review-build.sh .github/scripts/review-prompt.py .github/scripts/review-reading-check.py .github/scripts/review-rules.py .github/scripts/review-context.py .github/scripts/review-trace.py; do
             git cat-file -e "$BASE:$f" 2>/dev/null || continue
             git diff --quiet "$BASE" -- "$f" || restored="$restored $f"
             git checkout "$BASE" -- "$f"
           done
           [ -z "$restored" ] || echo "::notice::This pull request edits the review's tooling ($restored ); the reading uses the base branch's copy, and the edit takes effect once merged."
+
+      # WHAT THIS GROUP BUILDS WITH — derived the same way review-build.sh
+      # derives it, so the right toolchain is on PATH before the build runs.
+      - id: recipe
+        name: What this group builds with
+        env:
+          GROUP: ${{ matrix.entry.group }}
+        run: |
+          set -euo pipefail
+          go=false; node=false; helm=false
+          case "$GROUP" in
+            chart) helm=true ;;
+            runtimes/claude|runtimes/copilot) node=true ;;
+            platform/console) node=true; go=true ;;
+            *) [ -f "$GROUP/go.mod" ] && go=true ;;
+          esac
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+          echo "node=$node" >> "$GITHUB_OUTPUT"
+          echo "helm=$helm" >> "$GITHUB_OUTPUT"
+      - if: steps.recipe.outputs.go == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.entry.group }}/go.mod
+      - if: steps.recipe.outputs.node == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - if: steps.recipe.outputs.helm == 'true'
+        uses: azure/setup-helm@v4
+
+      # THE BUILD GATE. NO CREDENTIAL IN THIS STEP'S ENV — it runs the pull
+      # request's own code under `contents: read` alone. A failed build
+      # writes the component's reading itself and SKIPS every reader below.
+      - id: build
+        name: Build ${{ matrix.entry.group }} — the recipe CI uses, before any model runs
+        env:
+          PATHS: ${{ join(matrix.entry.paths, ',') }}
+        run: .github/scripts/review-build.sh "${{ matrix.entry.group }}" --out unbuilt-reading.json --paths "$PATHS"
+
       - id: cli
+        if: steps.build.outputs.built == 'true'
         uses: ./.github/actions/claude-cli
         with:
           base-ref: origin/${{ needs.queue.outputs.base }}
           restore: |
             .claude/agents/file-reviewer.md
-            .claude/workflows/review-component.js
+            .claude/agents/thread-verdict.md
       - if: steps.cli.outputs.restored != ''
         env:
           RESTORED: ${{ steps.cli.outputs.restored }}
         run: echo "::notice::This pull request edits the review's reader ($RESTORED); it is reviewed by the base branch's copy, and the edit takes effect once merged."
 
+      # ONE PROCESS PER FILE, BLIND, THEN ONE PER FILE WITH AN OPEN THREAD.
+      # `review-trace.py` reads each process's stream and prints its cache
+      # usage, so the job log shows the shared system prefix being hit from
+      # the second reader on.
       - name: Read ${{ matrix.entry.group }}
+        if: steps.build.outputs.built == 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GROUP: ${{ matrix.entry.group }}
-          ENTRY: ${{ matrix.entry.slug }}
-          # THE COMPONENT READING'S SHAPE — the workflow's merged return —
-          # ASKED FOR AS STRUCTURED OUTPUT AND CHECKED AGAIN BY
-          # `review-reading-check.py`: the schema is what the CLI enforces, the
-          # check is what the job trusts.
-          READING_SCHEMA: >-
-            {"type":"object","required":["component","findings","changedNames","threads"],
-             "properties":{"component":{"type":"string"},
+          GROUP: ${{ matrix.entry.slug }}
+          # ONE FILE READING — no thread, no verdict; the blind reader never
+          # sees either.
+          FILE_READING_SCHEMA: >-
+            {"type":"object","required":["path","findings","declares","references"],
+             "properties":{"path":{"type":"string"},
                "findings":{"type":"array","items":{"type":"object","required":["path","line","claim"],
                  "properties":{"path":{"type":"string"},"line":{"type":"integer"},"claim":{"type":"string"},
                    "where":{"type":"array","items":{"type":"string"}},"rule":{"type":"string"},"fix":{"type":"string"}}}},
-               "changedNames":{"type":"array","items":{"type":"string"}},
-               "files":{"type":"array","items":{"type":"object","required":["path","declares","references"],
-                 "properties":{"path":{"type":"string"},"declares":{"type":"array","items":{"type":"string"}},"references":{"type":"array","items":{"type":"string"}}}}},
-               "threads":{"type":"array","items":{"type":"object","required":["id","verdict"],
-                 "properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["fixed","standing","gone","detached"]}}}},
-               "unread":{"type":"array","items":{"type":"string"}}}}
-        # THE COMPONENT SESSION READS NOTHING. Its allowlist is the saved
-        # workflow and the one role it may spawn; the FILE READERS' allowlist is
-        # their role's `tools:` — read-only git plus the file tools.
-        # STREAM-JSON, SO THE JOB LOG SAYS WHERE THE TIME WENT: the session's
-        # turns and tokens, and each file reader's own duration from the
-        # workflow's progress — `review-trace.py` prints them and hands the
-        # final result to the validator.
+               "declares":{"type":"array","items":{"type":"string"}},
+               "references":{"type":"array","items":{"type":"string"}}}}
+          # ONE VERDICT PER OPEN THREAD ON A FILE — `finding` required only on
+          # `detached`, checked again by review-reading-check.py.
+          VERDICT_SCHEMA: >-
+            {"type":"object","required":["threads"],
+             "properties":{"threads":{"type":"array","items":{"type":"object","required":["id","verdict"],
+               "properties":{"id":{"type":"string"},
+                 "verdict":{"type":"string","enum":["fixed","standing","gone","detached"]},
+                 "finding":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"claim":{"type":"string"}}}}}}}}
+        run: |
+          set -uo pipefail
+          mkdir -p readings/raw readings/merge
+          python3 .github/scripts/review-prompt.py reader-system --input review-input.json --group "$GROUP" > readings/raw/system.md
+          TOOLS=$(python3 .github/scripts/review-prompt.py reader-tools)
+          export TOOLS GROUP FILE_READING_SCHEMA CLAUDE_CODE_OAUTH_TOKEN CLAUDE_MODEL CLAUDE_EFFORT CLAUDE_SETTINGS
+
+          read_file() {
+            local path="$1"
+            local slug; slug=$(printf '%s' "$path" | tr -c 'A-Za-z0-9._-' '_')
+            local prompt; prompt=$(python3 .github/scripts/review-prompt.py reader --input review-input.json --group "$GROUP" --path "$path")
+            claude -p "$prompt" --append-system-prompt "$(cat readings/raw/system.md)" \
+              --output-format stream-json --verbose --json-schema "$FILE_READING_SCHEMA" \
+              --model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT" --settings "$CLAUDE_SETTINGS" \
+              --allowedTools "$TOOLS" \
+              > "readings/raw/read-$slug.jsonl" 2>&1 || true
+            python3 .github/scripts/review-trace.py "readings/raw/read-$slug.jsonl" --out "readings/raw/read-$slug.json" || true
+            python3 .github/scripts/review-reading-check.py "readings/raw/read-$slug.json" --group "$GROUP" --kind file --out "readings/merge/file-$slug.json" || true
+          }
+          export -f read_file
+          python3 -c 'import json,sys; d=json.load(open("review-input.json")); e=next(x for x in d["entries"] if x["slug"]==sys.argv[1]); print("\n".join(e["paths"]))' "$GROUP" \
+            | xargs -r -P "$REVIEW_READERS" -I{} bash -c 'read_file "$@"' _ {}
+
+          VERDICT_TOOLS=$(python3 .github/scripts/review-prompt.py verdict-tools)
+          VERDICT_SYSTEM=$(python3 .github/scripts/review-prompt.py verdict-system)
+          export VERDICT_TOOLS VERDICT_SYSTEM VERDICT_SCHEMA
+
+          read_verdict() {
+            local path="$1"
+            local slug; slug=$(printf '%s' "$path" | tr -c 'A-Za-z0-9._-' '_')
+            local prompt
+            prompt=$(python3 .github/scripts/review-prompt.py verdict --input review-input.json --group "$GROUP" --path "$path") || return 0
+            claude -p "$prompt" --append-system-prompt "$VERDICT_SYSTEM" \
+              --output-format stream-json --verbose --json-schema "$VERDICT_SCHEMA" \
+              --model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT" --settings "$CLAUDE_SETTINGS" \
+              --allowedTools "$VERDICT_TOOLS" \
+              > "readings/raw/verdict-$slug.jsonl" 2>&1 || true
+            python3 .github/scripts/review-trace.py "readings/raw/verdict-$slug.jsonl" --out "readings/raw/verdict-$slug.json" || true
+            python3 .github/scripts/review-reading-check.py "readings/raw/verdict-$slug.json" --group "$GROUP" --kind verdict --out "readings/merge/verdict-$slug.json" || true
+          }
+          export -f read_verdict
+          python3 .github/scripts/review-prompt.py verdict-paths --input review-input.json --group "$GROUP" \
+            | xargs -r -P "$REVIEW_READERS" -I{} bash -c 'read_verdict "$@"' _ {}
+
+          PATHS=$(python3 -c 'import json,sys; d=json.load(open("review-input.json")); e=next(x for x in d["entries"] if x["slug"]==sys.argv[1]); print(",".join(e["paths"]))' "$GROUP")
+          python3 .github/scripts/review-reading-check.py readings/merge --group "$GROUP" --paths "$PATHS" --out readings/reading.json
+
+      # THE BUILD FAILED: THE READING IS THE ONE review-build.sh ALREADY
+      # WROTE. Validated as any other component reading — the unbuilt shape
+      # is accepted, never trusted unchecked.
+      - name: Record ${{ matrix.entry.group }} as unbuilt
+        if: steps.build.outputs.built != 'true'
         run: |
           set -euo pipefail
-          prompt=$(python3 .github/scripts/review-prompt.py reader --input review-input.json --group "$ENTRY")
-          claude -p "$prompt" \
-            --output-format stream-json --verbose --json-schema "$READING_SCHEMA" \
-            --model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT" --settings "$CLAUDE_SETTINGS" \
-            --allowedTools "Workflow,Agent(file-reviewer)" \
-            > read-execution.jsonl || true
-          python3 .github/scripts/review-trace.py read-execution.jsonl --out reader-output.json
-          python3 .github/scripts/review-reading-check.py reader-output.json --group "$GROUP" --out readings/reading.json
+          mkdir -p readings
+          python3 .github/scripts/review-reading-check.py unbuilt-reading.json --group "${{ matrix.entry.group }}" --kind component --out readings/reading.json
 
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: read-execution-${{ matrix.entry.slug }}
-          path: read-execution.jsonl
+          path: readings/raw
           retention-days: 1
           if-no-files-found: ignore
-      # THE FILE READERS' OWN TRANSCRIPTS — what each spent its turns on. The
-      # execution record above shows only the session; the subagents' turns
-      # are in the runner's project directory and were invisible until this.
+      # THE FILE READERS' OWN TRANSCRIPTS — what each spent its turns on.
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -402,7 +503,7 @@ jobs:
         run: |
           set -euo pipefail
           restored=""
-          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/review-rules.py .github/scripts/review-context.py .github/scripts/review-trace.py .github/scripts/review-post.py .github/scripts/mark-thread-resolved.sh; do
+          for f in .github/actions/claude-cli/action.yml .github/scripts/review-prompt.py .github/scripts/review-reading-check.py .github/scripts/review-rules.py .github/scripts/review-context.py .github/scripts/review-trace.py .github/scripts/review-post.py .github/scripts/mark-thread-resolved.sh; do
             git cat-file -e "$BASE:$f" 2>/dev/null || continue
             git diff --quiet "$BASE" -- "$f" || restored="$restored $f"
             git checkout "$BASE" -- "$f"
@@ -417,6 +518,11 @@ jobs:
         env:
           RESTORED: ${{ steps.cli.outputs.restored }}
         run: echo "::notice::This pull request edits the review's coordinator role ($RESTORED); it is reviewed by the base branch's copy, and the edit takes effect once merged."
+
+      # THE COVERAGE INPUT — written BEFORE the model runs, from the
+      # VALIDATED readings, never from the model's answer.
+      - name: What this run actually read, for the coverage marker
+        run: python3 .github/scripts/review-prompt.py coordinator --input review-input.json --readings readings --coverage coverage.json
 
       - id: review
         name: Consolidate and post
@@ -454,11 +560,11 @@ jobs:
           echo "conclusion=$conclusion"
           python3 .github/scripts/review-trace.py "$out" --out coordinator-output.json
           # THE JOB POSTS. The coordinator's answer is the posting document;
-          # `review-post.py` posts it and prints what it did, and that print is
-          # what the gate reads — never a count of comments already on the
-          # pull request, which is how a run that posted nothing once passed.
+          # `review-post.py` posts it, appends the coverage marker to the
+          # summary, and prints what it did — that print is what the gate
+          # reads, never a count of comments already on the pull request.
           python3 .github/scripts/review-reading-check.py --extract coordinator-output.json --out post.json || true
-          python3 .github/scripts/review-post.py post.json | tee post-result.json || true
+          python3 .github/scripts/review-post.py post.json --coverage coverage.json | tee post-result.json || true
 
       - if: always() && steps.review.outputs.execution_file != ''
         uses: actions/upload-artifact@v4

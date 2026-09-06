@@ -725,6 +725,44 @@
       ]
     },
     {
+      "id": "queue-reader",
+      "pattern": "queue reader|QUEUE_READERS",
+      "says": "a component is read PER FILE, each in its own `claude -p` process the `read` job starts from the shell, holding the rules routed to the component's paths as a cached system prefix — there is no queue of files inside one reader's context, and no reader pool to size",
+      "allow": [
+        "removed",
+        "retired",
+        "deleted",
+        "delete",
+        "gone",
+        "replaced",
+        "used to",
+        "no longer",
+        "was",
+        "is now",
+        "became",
+        "per FILE",
+        "per file"
+      ]
+    },
+    {
+      "id": "review-component-workflow",
+      "pattern": "review-component\\.js",
+      "says": "the read job is a shell loop over one `claude -p` per file; review-component.js and its saved-workflow indirection were deleted",
+      "allow": [
+        "removed",
+        "retired",
+        "deleted",
+        "delete",
+        "gone",
+        "replaced",
+        "used to",
+        "no longer",
+        "was",
+        "is now",
+        "became"
+      ]
+    },
+    {
       "id": "sonarqube-mcp-docker",
       "pattern": "sonarqube-mcp-server|SONARQUBE_READ_ONLY",
       "says": "`.mcp.json` reads the analysis through SonarCloud's own hosted MCP endpoint (`https://api.sonarcloud.io/mcp`), not the Dockerised sonarqube-mcp-server -- see CONTRIBUTING.md, \"Code analysis\"",
