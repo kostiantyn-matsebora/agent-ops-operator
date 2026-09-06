@@ -111,7 +111,11 @@ key serves both backends.
 
 The Home Assistant lane and a PRIVILEGE SPLIT:
 
-- **The log ingest lane.**
+- **The ingest lane: the log plus four health surfaces**, each switched and
+  tuned under `logsAdapter.source.surfaces` (config entries, repairs and
+  sensors on, the update digest off), with one rule per surface AHEAD of the
+  log rules in the shipped `rules`. Selected by `surface=`, never by
+  message: a log rule's pattern must not capture a repair's text.
 - **ONE `MCPConfig`**, server key FIXED at `homeassistant`, and NO server
   workload — the house serves its own MCP endpoint.
 - **TWO risk-split `MCPToolset`s.**
