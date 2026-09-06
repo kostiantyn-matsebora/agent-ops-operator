@@ -40,7 +40,7 @@ The pack SHALL be split into tiers with an explicit gating rule:
 
 #### Scenario: A commit already smoked is not smoked again
 - **WHEN** a tag is pushed on a commit whose smoke passed in an earlier release run or an on-demand run
-- **THEN** no cluster is provisioned, the run records the commit as smoked, and the image or chart publishes
+- **THEN** no cluster is provisioned, the lookup finds the commit already smoked, and the image or chart publishes
 
 #### Scenario: A smoke in flight on the commit is waited for
 - **WHEN** a tag is pushed while another run's smoke on the same commit is still running
