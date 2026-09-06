@@ -11,10 +11,13 @@
 //	cursor:   state key "last-record" via /signal/state (restart-safe)
 //	emitting: POST /signal/inbound, kind=alert, fingerprint "<source>@<logger>@<file:line>"
 //
-// The adapter normalizes and nothing more: no dedup, no grouping, no cooldown
-// beyond its restart cursor. Repetition collapses manager-side, which is why
-// the fingerprint keys on the LOGGER and SOURCE LOCATION — Home Assistant's own
-// deduplication key — rather than on the occurrence.
+// The adapter normalizes and nothing more: no grouping and no cooldown. What
+// it keeps is its restart cursor and, per record, the timestamp of the last
+// occurrence it considered — so one occurrence is considered once whichever
+// of the two arrival paths brings it. Repetition across occurrences collapses
+// manager-side, which is why the fingerprint keys on the LOGGER and SOURCE
+// LOCATION — Home Assistant's own deduplication key — rather than on the
+// occurrence.
 //
 // Run single-instance (the reconciler's singleton default): two sessions would
 // double-post every record.

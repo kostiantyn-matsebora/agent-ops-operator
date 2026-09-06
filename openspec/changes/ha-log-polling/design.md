@@ -27,8 +27,10 @@ See `proposal.md` — Why. What shapes the approach:
 
 - Every matching record, and every recurrence of one, is observed on an
   install whose `system_log` configuration is the default.
-- One code path for a record however it arrived; one cursor deduplicating
-  the two arrival paths.
+- One code path for a record however it arrived, and one occurrence
+  considered once whichever path brought it — per record, on the
+  occurrence's timestamp, with the cursor as the restart position and the
+  coarse gate in front of it.
 - No new configuration key, no new state key, no CRD or chart schema change.
 
 **Non-Goals:**
