@@ -119,6 +119,39 @@ jobs:
           echo "::error::Fix it, or re-run ci for that commit, then move the tag."
           exit 1
 
+  # THE SMOKE IS KEYED TO THE COMMIT, NOT THE TAG. A release is many tags on
+  # one commit — fourteen on 2026-09-06 — and each ran its own ten-minute
+  # cluster smoke in parallel on shared runners: a k3d image import deadlocked
+  # under the concurrent load, and the console lifecycle lane timed out on a
+  # step that takes eight seconds when the runners are quiet. Both failures
+  # were LOAD, not code, and a re-run changed nothing.
+  #
+  # This job answers "was this commit already smoked" the way `ci_is_green`
+  # answers "did ci already pass for this commit" — by looking up existing
+  # evidence rather than trusting the tag. The evidence is the commit's CHECK
+  # RUNS: the smoke is a reusable workflow called by a job named `smoke`, so
+  # every smoke — from this workflow or from `e2e-smoke.yml` — appears on the
+  # commit as `smoke / e2e / smoke`, whichever workflow produced it. Finding a
+  # passed one skips provisioning a cluster here; finding one still running
+  # waits for its verdict rather than racing it, since tags are pushed three
+  # at a time by rule and land on the commit together.
+  smoke_is_green:
+    name: smoke is green for this commit
+    needs: [determine, ci_is_green]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      smoked: ${{ steps.lookup.outputs.smoked }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: lookup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/smoke-evidence.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
   # ONE reusable job for all thirteen images. The component decides the context,
   # the Dockerfile and the platforms; nothing here is per-component.
   #
@@ -129,25 +162,42 @@ jobs:
   # images in isolation; this proves the chart installs and answers on a real
   # single-node cluster with the stub runtime. A pull request meets conformance
   # only and never this cluster; the smoke runs HERE, on the exact commit being
-  # published, because a tag can land on a commit ci passed days ago.
+  # published, because a tag can land on a commit ci passed days ago — UNLESS
+  # `smoke_is_green` already found a passed one for this commit, in which case
+  # running a second is exactly the load this two-job split exists to avoid.
   smoke:
     name: smoke
-    needs: [determine, ci_is_green]
+    needs: [determine, ci_is_green, smoke_is_green]
+    if: |
+      !cancelled() && needs.ci_is_green.result == 'success' &&
+      needs.smoke_is_green.outputs.smoked != 'true'
     permissions:
       contents: read
     uses: ./.github/workflows/e2e.yml
     with:
       tier: smoke
 
+  # GATED ON THE COMMIT BEING SMOKED, WHETHER THIS RUN PRODUCED IT OR FOUND IT.
+  # `!cancelled()` is what lets these run behind a `smoke` that was legitimately
+  # SKIPPED — the platform skips a job's dependants by default when a dependency
+  # is skipped, which would otherwise publish nothing on the reuse path this
+  # change adds. The rest of the condition states the two acceptable histories
+  # and no other: this run's own smoke passed, or none ran here because the
+  # lookup found an earlier one that did. A smoke that FAILED in this run never
+  # publishes, whatever the lookup said before it started.
   image:
     name: image (${{ needs.determine.outputs.component }})
-    needs: [determine, ci_is_green, smoke]
+    needs: [determine, ci_is_green, smoke_is_green, smoke]
     permissions:
       contents: read
       packages: write
       id-token: write
       attestations: write
-    if: needs.determine.outputs.is_image == 'true'
+    if: |
+      !cancelled() && needs.determine.outputs.is_image == 'true' &&
+      needs.ci_is_green.result == 'success' &&
+      (needs.smoke.result == 'success' ||
+       (needs.smoke.result == 'skipped' && needs.smoke_is_green.outputs.smoked == 'true'))
     uses: ./.github/workflows/build-image.yml
     with:
       component: ${{ needs.determine.outputs.component }}
@@ -158,11 +208,15 @@ jobs:
 
   chart:
     name: chart
-    needs: [determine, ci_is_green, smoke]
+    needs: [determine, ci_is_green, smoke_is_green, smoke]
     permissions:
       contents: read
       packages: write
-    if: needs.determine.outputs.is_chart == 'true'
+    if: |
+      !cancelled() && needs.determine.outputs.is_chart == 'true' &&
+      needs.ci_is_green.result == 'success' &&
+      (needs.smoke.result == 'success' ||
+       (needs.smoke.result == 'skipped' && needs.smoke_is_green.outputs.smoked == 'true'))
     uses: ./.github/workflows/build-chart.yml
     with:
       version: ${{ needs.determine.outputs.version }}

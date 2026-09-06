@@ -89,6 +89,42 @@ re-adding it describes a repository this is not.
   get` PRINTS THE SECRET. Attempt the push and read the error instead; a leaked
   token costs a rotation and a re-login everywhere it was used.
 
+**A RELEASE IS MANY TAGS ON ONE COMMIT, AND THE SMOKE USED TO RUN ONCE PER
+TAG.** Chart 13.4.0 shipped fourteen component images from one commit on
+2026-09-06: fourteen tags, fourteen identical ten-minute cluster smokes in
+parallel on shared runners, then a fifteenth on the chart tag. Both failures of
+that release were LOAD, not the code — a k3d image import deadlocked under the
+concurrent runs, and the console lifecycle lane timed out on a step that takes
+eight seconds when the runners are quiet — and a re-run changed nothing either
+time.
+
+- **The fix is a lookup, the same shape `ci_is_green` already uses**:
+  `smoke-evidence.py` reads the tagged commit's CHECK RUNS before
+  `release.yml` provisions a cluster, reuses a passed one, and waits —
+  bounded — for one already in flight rather than racing it. The check run's
+  name is `<caller job> / <called workflow> / <called job>`, and it really is
+  `smoke / e2e / smoke` — the CALLER job named `smoke`, the reusable workflow
+  `e2e.yml` displaying as `e2e`, the CALLED job inside it also named `smoke`
+  — whichever of `release.yml` or `e2e-smoke.yml` produced it. See
+  `.claude/rules/documentation.md`'s routing and `docs/testing.md`'s tier
+  model for what it changed.
+- **`gh api <path> -f k=v` WITH NO `--method GET` SENDS THE `-f` PARAMS AS A
+  REQUEST BODY ON THIS ROUTE**, and `commits/<sha>/check-runs` answers a
+  bodied GET with a plain 404 — not a permissions error, not an empty list.
+  Caught live: a first verification push showed `smoke_is_green` logging the
+  404 and falling back to "run one" on both a fresh tag and a same-commit
+  retag, which is SAFE (never smoked on missing evidence) but silently
+  defeats the whole point of the lookup. Always pass `--method GET`
+  explicitly on this endpoint; do not trust that an unadorned `gh api` GET
+  stays a GET.
+- **A `concurrency` GROUP KEYED BY THE COMMIT WAS CONSIDERED AND REJECTED**
+  for the same problem. The platform keeps one RUNNING and one PENDING run
+  per group and CANCELS the rest — so fourteen tags would become one smoke,
+  one wait, and TWELVE CANCELLED RELEASES, each publishing nothing, silently.
+  A cancelled release looks identical to a slow one until someone checks the
+  registry. Reach for the check-run lookup, never a concurrency group, for
+  "the same work happening N times on one commit."
+
 **`lookup` returns empty on any renderer without a cluster** — `helm template`,
 CI, a GitOps controller, `--dry-run=client`.
 

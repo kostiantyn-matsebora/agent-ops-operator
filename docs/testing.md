@@ -25,6 +25,15 @@ The cluster smoke — a thin k3s run on the stub runtime — gates a **release**
 instead: it runs on the tagged commit before an image or
 the chart is published, and on demand against any branch.
 
+**It runs ONCE PER COMMIT, not once per tag** — a release publishes many
+independently-versioned artifacts from one commit, so before provisioning a
+cluster the release workflow:
+
+- looks up the commit's existing smoke result
+- reuses a passed one from any earlier run
+- waits — bounded — for one already in flight rather than racing it
+- runs its own only where none passed and none is in flight
+
 The full pack, including the lane that drives the real agent runtime with a
 real credential, gates nothing:
 
@@ -132,7 +141,7 @@ Three workflows share one definition, `.github/workflows/e2e.yml`, and `ci.yml` 
 | Workflow | Runs | When |
 |---|---|---|
 | `ci.yml` | contract conformance only — no cluster | every pull request, reporting through `ci-green` |
-| `release.yml` | the smoke tier | on the tagged commit, before anything is published |
+| `release.yml` | the smoke tier — once per COMMIT, reused across every tag of a release | on the tagged commit, before anything is published |
 | `e2e-smoke.yml` | the smoke tier | on demand, on any branch |
 | `e2e-full.yml` | the full tier, real-runtime lane included | nightly at 03:17 UTC when master moved since its last successful run, and on demand |
 
