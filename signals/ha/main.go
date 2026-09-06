@@ -435,6 +435,18 @@ func (a *adapter) sweep(ctx context.Context, source string, sess *haSession, con
 		}
 	}
 	if !consider {
+		// Everything listed counts as seen: the cursor moves past it, and the
+		// records AT the new cursor are remembered so the strict gate does
+		// not hand them to consider on the next sweep.
+		a.mu.Lock()
+		if src, ok := a.sources[source]; ok {
+			for i := range records {
+				if at := records[i].At(); !at.IsZero() {
+					src.seen[records[i].Key()] = at
+				}
+			}
+		}
+		a.mu.Unlock()
 		if !newest.IsZero() {
 			a.setCursor(source, newest)
 			a.persistCursor(ctx, source, newest)
@@ -465,9 +477,11 @@ func (a *adapter) sweep(ctx context.Context, source string, sess *haSession, con
 }
 
 // pruneSeen forgets the dedup timestamps of records Home Assistant no longer
-// lists. The listing is capped, so a key that left it and comes back arrives
-// with a new occurrence — a new timestamp — and needs no memory to be told
-// apart; keeping every key ever seen would only grow.
+// lists AND that are strictly older than the cursor — the gate skips those
+// anyway. A record delivered by event before the listing shows it is not yet
+// listed but sits AT the cursor, and forgetting it here is exactly what would
+// let the next sweep consider it a second time. Keeping every key ever seen
+// would only grow; this keeps the listing plus the cursor's instant.
 func (a *adapter) pruneSeen(source string, records []logRecord) {
 	listed := make(map[string]bool, len(records))
 	for i := range records {
@@ -476,8 +490,8 @@ func (a *adapter) pruneSeen(source string, records []logRecord) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if src, ok := a.sources[source]; ok {
-		for key := range src.seen {
-			if !listed[key] {
+		for key, at := range src.seen {
+			if !listed[key] && at.Before(src.cursor) {
 				delete(src.seen, key)
 			}
 		}
