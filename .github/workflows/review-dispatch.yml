@@ -303,9 +303,10 @@ jobs:
           python3 -c '
           import json, sys
           threads = json.load(open(sys.argv[1])); sonar = json.load(open(sys.argv[2]))
-          work = threads + (sonar.get("issues") or [])
+          sonar_issues = sonar.get("issues") or []
+          work = threads + sonar_issues
           json.dump(work, open(sys.argv[3], "w"), indent=2)
-          print(f"{len(threads)} review finding(s) + {len(sonar.get(\"issues\") or [])} analysis issue(s) = {len(work)} item(s)")
+          print(f"{len(threads)} review finding(s) + {len(sonar_issues)} analysis issue(s) = {len(work)} item(s)")
           ' "$RUNNER_TEMP/dispatch/threads.json" "$RUNNER_TEMP/dispatch/sonar.json" "$RUNNER_TEMP/dispatch/work-list.json"
           echo "accepted=$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))))' "$RUNNER_TEMP/dispatch/work-list.json")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
