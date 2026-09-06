@@ -55,6 +55,11 @@ question was asked in. Values-named channels still win a place beside it. */ -}}
 {{- if and $mcp.enabled (include "kubernetes.mcpAdminEnabled" .) }}
 {{- $writeTools = append $writeTools $mcp.toolsets.admin.name }}
 {{- end }}
+{{- /* The admin route is already trusted to act on the cluster; web search is
+the one built-in bucket scoped to it alone, never to the read-only route. */ -}}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $writeTools = append $writeTools (dig "builtinToolsets" "websearch" "name" "agentops-websearch" $g) }}
+{{- end }}
 {{- $routes := list }}
 {{- if include "kubernetes.observePipelineEnabled" . }}
 {{- $routes = append $routes (dict "name" $p.observe.name "icon" ($p.observe.icon | default "")

@@ -166,6 +166,11 @@ Off, it explains. On, it can also fix.
 | **It can** | read pods, logs, events, nodes | those, plus delete, scale, restart, exec |
 | **The route is called** | `k8s-observe` | `k8s-operate` |
 
+**`k8s-operate` can also search the web** when `global.builtinToolsets` is
+enabled (`agentops-websearch`, the built-in `WebSearch` tool, on by default) —
+an unfamiliar error, a changelog, a vendor's known-issues page. `k8s-observe`
+stays scoped to the cluster and does not gain it.
+
 > **`allowPodExecution` is separate, and defaults off.** An agent that can start
 > a pod can read any Secret that pod mounts, whatever else you granted. Turn it
 > on deliberately.

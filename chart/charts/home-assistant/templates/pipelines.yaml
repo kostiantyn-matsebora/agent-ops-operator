@@ -49,6 +49,11 @@ house through a server the toolset split was never meant to bound. */ -}}
 {{- $opsOnlyTools = append $opsOnlyTools .Values.adminMcp.toolset.name }}
 {{- $opsOnlyConfigs = append $opsOnlyConfigs .Values.adminMcp.name }}
 {{- end }}
+{{- /* ha-ops is already trusted to repair the house; web search is the one
+built-in bucket scoped to it alone, never to the everyday control route. */ -}}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $opsOnlyTools = append $opsOnlyTools (dig "builtinToolsets" "websearch" "name" "agentops-websearch" $g) }}
+{{- end }}
 {{- /* The SHELL toolset opens the REST path, and it is per route: configuration
 is what the ops agent fixes and no Assist intent reaches configuration, while the
 everyday agent needs nothing beyond the intents. */ -}}

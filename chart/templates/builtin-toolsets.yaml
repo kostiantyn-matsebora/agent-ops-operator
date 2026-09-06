@@ -12,7 +12,7 @@ so they ship by default and double as live documentation
 */ -}}
 {{- if .Values.global.builtinToolsets.enabled }}
 {{- $bt := .Values.global.builtinToolsets }}
-{{- range $key := (list "observe" "shell" "edit") }}
+{{- range $key := (list "observe" "shell" "edit" "websearch") }}
 {{- $ts := index $bt $key }}
 {{- if $ts.tools }}
 ---

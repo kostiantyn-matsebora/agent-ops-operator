@@ -575,6 +575,9 @@ global:
     edit:
       name: agentops-edit
       tools: [Edit, Write]
+    websearch:
+      name: agentops-websearch
+      tools: [WebSearch]
 
 # Wiring — the ONLY place Pipelines are declared. No bundle ships one: a
 # Pipeline names a profile, sources and channels that routinely come from
@@ -586,7 +589,7 @@ global:
 #       profile: k8s-engineer         # REQUIRED
 #       signalSources: [cluster-events, k8s-ops-chat, home-ops]
 #       channels: [k8s-ops]
-#       toolsets: [agentops-observe, agentops-shell, k8s-observability]
+#       toolsets: [agentops-observe, agentops-shell, agentops-websearch, k8s-observability]
 #       toolsetsMode: merge           # optional: merge (default) | overwrite
 #       mcpConfigs: [k8s-api]
 #       runtimeRef: default           # optional: what EXECUTES this route

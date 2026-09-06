@@ -561,6 +561,11 @@ pipelines:
     # Named k8s-operate, not k8s-admin: k8s-admin is already the MCPToolset this
     # route binds, and "bind k8s-admin on k8s-admin" is a sentence nobody should
     # have to parse.
+    #
+    # This route ALSO binds global.builtinToolsets.websearch (agentops-websearch)
+    # when the catalog is enabled — the admin route is already trusted to act on
+    # the cluster, so it is the one that gets to look things up on the open
+    # internet too. k8s-observe stays read-only and does not gain it.
     name: k8s-operate
     icon: aops:operate
     # Optional per-route overrides of the two at the bottom of this stanza.

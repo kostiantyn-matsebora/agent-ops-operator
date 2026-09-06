@@ -34,6 +34,11 @@ the house, one that can repair it.
 | **Failures that reach you** | A log error that recurs, an integration still failing, a repair Home Assistant filed, a device reporting a fault — each opens a conversation. A one-off retry does not. |
 | **A split you can actually rely on** | The two agents hold **different Home Assistant credentials**, so the boundary is the token, not a setting. |
 
+**`ha-ops` can also search the web** when `global.builtinToolsets` is enabled
+(`agentops-websearch`, the built-in `WebSearch` tool, on by default) — a
+changelog, an unfamiliar error, a vendor's known-issues page. The everyday
+agent (`ha-control`) stays scoped to the house and does not gain it.
+
 **The split is use versus fix, not read versus act.** Home Assistant has no
 read-only role, so neither credential merely looks. Both agents act — what
 separates them is the job and the reach it needs.
