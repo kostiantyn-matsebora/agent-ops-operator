@@ -66,5 +66,33 @@ it "says nothing when there is no body to read"
 rm -f "$tmp/body"
 assert_equals "0" "$(status)"
 
+# WHAT THE BASE GAINED AFTER THE BRANCH POINT IS NOT THE PULL REQUEST'S. #174
+# was refused for not closing the issues of two changes that master archived
+# days after its branch was cut: the workflow diffed the event's frozen base
+# sha against the MERGE commit, which holds master as it is now. The range the
+# workflow hands over is the three-dot form, and this is the fixture it must
+# stay correct on: a branch that archives nothing, over a base that did.
+it "does not charge a pull request with an archive its base gained after the branch point"
+head=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" checkout -q -b topic "$base"
+echo "unrelated" > "$repo/NOTES.md"
+git -C "$repo" add -A; git -C "$repo" commit -qm "a topic commit"
+body "Refs #53"
+# master (the original HEAD) archived coordinated-agents; the topic did not.
+rc=0; (cd "$repo" && python3 "$guard" --body-file "$tmp/body" --range "$head...HEAD" --root .) >"$tmp/out" 2>&1 || rc=$?
+assert_equals "0" "$rc"
+assert_not_contains "$(cat "$tmp/out")" "ARCHIVES a change"
+it "and the two-dot form against the merge commit is the shape that did"
+git -C "$repo" merge -q --no-edit "$head" 2>/dev/null || git -C "$repo" merge -q --no-edit -m "merge" "$head"
+rc=0; (cd "$repo" && python3 "$guard" --body-file "$tmp/body" --range "$base..HEAD" --root .) >"$tmp/out" 2>&1 || rc=$?
+assert_equals "1" "$rc"
+
+# The workflow is the only caller, and the range is what it must not regress on.
+it "ci.yml diffs the live base branch three-dot to the pull request's head, never github.sha"
+job=$(awk '/^  pr-closes:/,/^  conformance:/' "$ROOT/.github/workflows/ci.yml")
+assert_contains "$job" '--range "origin/$BASE_REF...$HEAD_SHA"'
+assert_contains "$job" 'HEAD_SHA: ${{ github.event.pull_request.head.sha }}'
+assert_not_contains "$job" 'GITHUB_SHA'
+
 rm -rf "$repo" "$tmp"
 summary

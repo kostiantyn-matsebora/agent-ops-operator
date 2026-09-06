@@ -938,12 +938,30 @@ jobs:
           # remains the fallback for anything without a number to ask about.
           FALLBACK_BODY: ${{ github.event.pull_request.body }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # THE RANGE IS THE PULL REQUEST'S OWN COMMITS, AND NEITHER SHA THE
+          # EVENT HANDS OVER BOUNDS THEM.
+          #
+          # `github.sha` on a `pull_request` run is the MERGE commit, so it
+          # carries the base branch as it is now; `base.sha` is the base as it
+          # was when the pull request was OPENED, and a later push does not move
+          # it. `base.sha..github.sha` therefore holds every commit master
+          # gained since the pull request was opened — #174 was refused for not
+          # closing the issues of two changes that #179 and #180 had archived on
+          # master, days after its branch was cut, and a rebase would not have
+          # helped: the head would then hold the archives too. The range is the
+          # three-dot form against the base branch as it stands, which is the
+          # merge base to the pull request's HEAD and nothing else.
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # A hand run carries no base sha; the pull request it stands in for does.
-          [ -n "$BASE_SHA" ] || BASE_SHA=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json baseRefOid --jq .baseRefOid)
+          # A hand run carries neither; the pull request it stands in for does.
+          if [ -z "$BASE_REF" ] || [ -z "$HEAD_SHA" ]; then
+            BASE_REF=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json baseRefName --jq .baseRefName)
+            HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          fi
+          git fetch -q origin "$BASE_REF" "$HEAD_SHA"
           body="$RUNNER_TEMP/pr-body.md"
           if [ -n "${PR_NUMBER:-}" ] && gh pr view "$PR_NUMBER" --json body --jq .body > "$body" 2>/dev/null; then
             echo "read the pull request body as it stands now"
@@ -955,7 +973,7 @@ jobs:
           fi
           python3 .github/scripts/pr-closes-guard.py \
             --body-file "$body" \
-            --range "$BASE_SHA..$GITHUB_SHA" \
+            --range "origin/$BASE_REF...$HEAD_SHA" \
             --root .
 
   # CONTRACT CONFORMANCE: every adapter's built binary, black-box, against a
