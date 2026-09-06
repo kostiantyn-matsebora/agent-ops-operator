@@ -289,6 +289,40 @@ rules loaded on demand.
     queue of the files, the pool's width — readings as artifacts, the queue
     built by a program. The measurement is what settles "just add more agents": more
     `agent()` calls join the queue behind the two that run.
+    **KEPT AS HISTORY; IT NO LONGER APPLIES.** `review-built-delta` deleted the
+    queue reader and its component session entirely: the unit of a reading is
+    now a PROCESS, not a job's internal pool, and its width is the job's own
+    shell (`xargs -P $REVIEW_READERS`) — there is no runtime pool to size at
+    all, because nothing inside the job is a `claude -p` session spawning
+    subagents any more.
+  - **SIX MORE CLI FACTS, SETTLED LOCALLY ON 2026-09-05 BEFORE THAT DESIGN WAS
+    WRITTEN, SO NOBODY RE-DERIVES THEM** (the review's model and effort, `claude
+    -p`, no cluster):
+    1. `agent({agentType: 'fork'})` in a workflow script is refused under `-p`:
+       the type is not in the registry there.
+    2. The Agent tool's `subagent_type: fork` from the model's own turn under
+       `-p` is refused with the same message — the fork exists in an
+       interactive session and not here, confirmed TWICE, two different ways
+       of asking for one.
+    3. A skill with `context: fork` runs under `-p` ("forked execution") and
+       INHERITS NOTHING from the parent — asked for a nonce the parent had
+       just read, it answered UNKNOWN. A fork with `agent: <project role>`
+       runs as that role, its system prompt and its tools, and nothing else.
+    4. One such fork with a 35 KB fixed body created 9.4 k cache tokens; three
+       forks created 9.7 k — the body is written to cache once and read by
+       the others.
+    5. **Three separate `claude -p` PROCESSES with the same 35 KB in
+       `--append-system-prompt`: the first created 22.9 k cache tokens and
+       cost $0.096; the second and third created 3.6 k, read 37.8 k, and cost
+       $0.023 each.** THE PROMPT CACHE IS SERVER-SIDE, KEYED ON THE PREFIX
+       BYTES, AND CROSSES PROCESSES — which is the whole mechanism the
+       per-file reader loop spends: the rules routed to a component are the
+       same bytes for every file, so only the first process of a job pays
+       for them.
+    6. Under `-p` the workflow runtime's concurrent-agent pool is
+       `min(16, max(2, cpus − 2))`, two on the runner, with no override — fact
+       6 restates the measurement two bullets up, because it is the reason a
+       shell loop replaced the pool rather than trying to widen it.
 - **A RUNNER HAS NO CLAUDE SETTINGS, SO `claude -p` THERE RUNS WHATEVER THE
   DEFAULT IS — AND THAT WAS THE CAUSE OF EVERY SLOW REVIEW NUMBER.** Every
   CI session and every subagent ran sonnet-5 at its DEFAULT EFFORT. The same

@@ -1,125 +1,158 @@
 #!/usr/bin/env bash
-# The two programs that stand between the queue and the model: the one that
-# builds the review's input (no model, no network here — `gh` is stubbed), and
-# the one that assembles each role's delegation message from it.
+# review-input.py: reads the pull request's own coverage markers and decides,
+# per changed path, READ (from the base or from a delta) or CARRIED — the
+# read-until-quiet, then carry rule. No network — `gh` is stubbed.
 . "$(dirname "$0")/lib.sh"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 INPUT="$ROOT/.github/scripts/review-input.py"
-PROMPT="$ROOT/.github/scripts/review-prompt.py"
 
 tmp=$(mktemp -d)
-
-# --- review-input.py, against a stubbed gh ----------------------------------
-# A `gh` that answers the three calls the program makes, from fixtures.
 mkdir -p "$tmp/bin"
-cat > "$tmp/bin/gh" <<'STUB'
+
+# --- a real repository, so the git comparisons are real -------------------
+repo=$(mktemp -d)
+git -C "$repo" init -q -b master
+git -C "$repo" config user.email t@example.com
+git -C "$repo" config user.name T
+mkdir -p "$repo/docs" "$repo/signals/cron" "$repo/platform/manager" "$repo/.claude/rules"
+echo base > "$repo/README.md"
+echo "docs base" > "$repo/docs/a.md"
+echo "cron base" > "$repo/signals/cron/main.go"
+echo "mgr base" > "$repo/platform/manager/x.go"
+echo "rule base" > "$repo/.claude/rules/foo.md"
+git -C "$repo" add -A && git -C "$repo" commit -qm base
+
+# C1: the point a previous review "read" docs/a.md and signals/cron/main.go.
+echo "docs c1" > "$repo/docs/a.md"
+echo "cron c1" > "$repo/signals/cron/main.go"
+git -C "$repo" add -A && git -C "$repo" commit -qm c1
+C1=$(git -C "$repo" rev-parse HEAD)
+
+# HEAD: signals/cron/main.go changes again (since C1); docs/a.md does not;
+# platform/manager/x.go changes but was never read before.
+echo "cron c2" > "$repo/signals/cron/main.go"
+echo "mgr c2" > "$repo/platform/manager/x.go"
+git -C "$repo" add -A && git -C "$repo" commit -qm c2
+git -C "$repo" update-ref refs/remotes/origin/master "$(git -C "$repo" rev-parse HEAD~2)"
+
+PATHS_FILE="$tmp/paths"
+printf 'docs/a.md\nsignals/cron/main.go\nplatform/manager/x.go\n' > "$PATHS_FILE"
+
+stub_gh_with_comments() {  # stub_gh_with_comments <comments-file>
+  local comments="$1"
+  cat > "$tmp/bin/gh" <<STUB
 #!/usr/bin/env bash
-case "$*" in
-  "pr view"*)     echo '{"baseRefName":"master","headRefName":"change/thing","headRefOid":"abc1234"}' ;;
-  "pr diff"*)     printf 'docs/a.md\nsignals/cron/main.go\nsignals/cron/x.go\nsignals/cron/y.go\nplatform/manager/x.go\n' ;;
-  # TWO PAGES. The first says there is another and hands a cursor; the call
-  # that carries the cursor gets the second. A caller that stops at one page
-  # sees one thread and the test says so.
-  "api graphql"*"after=CUR"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"PRRT_2","isResolved":true,"isOutdated":false,"path":"signals/cron/main.go","line":1,"comments":{"nodes":[{"databaseId":8,"author":{"login":"bot"},"body":"**Claim:** y"}]}}]}}}}}' ;;
-  "api graphql"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"CUR"},"nodes":[{"id":"PRRT_1","isResolved":false,"isOutdated":false,"path":"docs/a.md","line":3,"comments":{"nodes":[{"databaseId":7,"author":{"login":"bot"},"body":"**Claim:** x"}]}}]}}}}}' ;;
+case "\$*" in
+  "pr view"*)     echo '{"baseRefName":"master","headRefName":"change/thing","headRefOid":"deadbeef"}' ;;
+  "pr diff"*)     cat "$PATHS_FILE" ;;
+  "api repos/o/r/issues/5/comments --paginate -q .[].body") cat "$comments" 2>/dev/null ;;
+  "api graphql"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}' ;;
 esac
 STUB
-chmod +x "$tmp/bin/gh"
+  chmod +x "$tmp/bin/gh"
+}
 
-repo=$(make_repo)
-mkdir -p "$repo/openspec/changes/thing/specs/cap" "$repo/docs" "$repo/signals/cron" "$repo/platform/manager"
-echo spec > "$repo/openspec/changes/thing/specs/cap/spec.md"
-git -C "$repo" add -A && git -C "$repo" commit -qm specs
+marker() {  # marker <sha> <path:quiet> ...
+  local sha="$1"; shift
+  local paths="{"
+  local first=true
+  for pq in "$@"; do
+    local p="${pq%%:*}" q="${pq##*:}"
+    $first || paths="$paths,"
+    first=false
+    paths="$paths\"$p\":{\"quiet\":$q}"
+  done
+  paths="$paths}"
+  echo "some text <!-- claude-review-coverage {\"sha\":\"$sha\",\"paths\":$paths} --> more text"
+}
 
-it "builds the input from the three gh calls and the checkout, and emits the matrix"
-out=$(cd "$repo" && PATH="$tmp/bin:$PATH" GITHUB_OUTPUT="$tmp/gho" python3 "$INPUT" --repo o/r --number 5 --chunk 2 --out "$tmp/input.json" 2>&1)
-assert_contains "$out" "3 component(s), 4 job(s), from 5 path(s), 2 thread(s), 1 delta spec(s)"
-assert_contains "$(cat "$tmp/gho")" 'count=4'
-assert_contains "$(cat "$tmp/gho")" 'base=master'
-assert_contains "$(cat "$tmp/gho")" '"group": "platform/manager", "slug": "platform__manager", "chunk": ""'
+# --- two markers on the pull request: the NEWER one wins per path ---------
+comments0="$tmp/comments0"
+{
+  marker "$C1" "docs/a.md:0" "signals/cron/main.go:0"
+  marker "$C1" "docs/a.md:1" "signals/cron/main.go:0"
+} > "$comments0"
+stub_gh_with_comments "$comments0"
 
-it "walks every page of threads — the second page's thread is there"
-assert_contains "$(cat "$tmp/input.json")" '"id": "PRRT_2"'
+it "two coverage markers on the pull request: the newer one's quiet count wins"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" python3 "$INPUT" --repo o/r --number 5 --out "$tmp/input0.json" 2>"$tmp/err0")
+assert_contains "$(cat "$tmp/err0")" "docs/a.md: carried (quiet 1)"
 
-it "a component over the chunk size is several jobs, named and slugged by chunk, its files split between them (--chunk 2 here; never by default)"
-g=$(cat "$tmp/gho")
-assert_contains "$g" '"group": "signals/cron", "slug": "signals__cron__1-of-2", "chunk": "1/2", "paths": ["signals/cron/main.go", "signals/cron/x.go"]'
-assert_contains "$g" '"slug": "signals__cron__2-of-2", "chunk": "2/2", "paths": ["signals/cron/y.go"]'
+# --- scenario 1: read-until-quiet, per path -------------------------------
+comments1="$tmp/comments1"
+marker "$C1" "docs/a.md:1" "signals/cron/main.go:0" > "$comments1"
+stub_gh_with_comments "$comments1"
 
-it "by default a component is one job, however many files"
-: > "$tmp/gho2"
-out=$(cd "$repo" && PATH="$tmp/bin:$PATH" GITHUB_OUTPUT="$tmp/gho2" python3 "$INPUT" --repo o/r --number 5 --out "$tmp/input2.json" 2>&1)
-assert_contains "$out" "3 component(s), 3 job(s)"
-assert_contains "$(cat "$tmp/gho2")" '"group": "signals/cron", "slug": "signals__cron", "chunk": ""'
+it "docs/a.md is unchanged since C1 and quiet already 1 (>= K=1): CARRIED"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" GITHUB_OUTPUT="$tmp/gho1" python3 "$INPUT" --repo o/r --number 5 --out "$tmp/input1.json" 2>"$tmp/err1")
+assert_contains "$(cat "$tmp/err1")" "docs/a.md: carried (quiet 1)"
+d=$(cat "$tmp/input1.json")
+assert_contains "$d" '"path": "docs/a.md"'
+assert_contains "$d" "\"since\": \"$C1\""
 
-it "the threads are flattened to the shape the roles read"
-assert_contains "$(cat "$tmp/input.json")" '"commentId": 7'
-assert_contains "$(cat "$tmp/input.json")" '"author": "bot"'
+it "signals/cron/main.go changed since C1: READ from C1 (a delta, not the base)"
+assert_contains "$(cat "$tmp/err1")" "signals/cron/main.go: read (since $C1, changed)"
+assert_contains "$d" "\"signals/cron/main.go\": \"$C1\""
 
-it "the delta specs are the head change's, and only on a change/ branch"
-assert_contains "$(cat "$tmp/input.json")" 'openspec/changes/thing/specs/cap/spec.md'
+it "platform/manager/x.go has no marker: READ from the base"
+assert_contains "$(cat "$tmp/err1")" "platform/manager/x.go: read (since origin/master, new)"
+assert_contains "$d" '"platform/manager/x.go": "origin/master"'
 
-# --- review-prompt.py, over that input --------------------------------------
+it "the matrix has no job for a component whose every path is carried, only for read paths"
+assert_contains "$(cat "$tmp/gho1")" '"paths": ["signals/cron/main.go"]'
+assert_not_contains "$(cat "$tmp/gho1")" '"paths": ["docs/a.md"]'
 
-it "the component's workflow args carry one entry per file: its threads and the rules routed to its path — and no other component's files"
-c=$(python3 "$PROMPT" component --input "$tmp/input.json" --group docs)
-assert_contains "$c" '"component": "docs"'
-assert_contains "$c" '"path": "docs/a.md"'
-assert_contains "$c" '"id": "PRRT_1"'
-assert_contains "$c" ".claude/rules/documentation.md"
-assert_contains "$c" "docs/CLAUDE.md"
-assert_contains "$c" "openspec/changes/thing/specs/cap/spec.md"
-assert_not_contains "$c" "signals/cron"
+it "the carried list names the path, its sha and its quiet count"
+assert_contains "$d" '"carried": [
+  {
+   "path": "docs/a.md",
+   "since": "'"$C1"'",
+   "quiet": 1,'
 
-it "a file's threads are its own, not the component's"
-c=$(python3 "$PROMPT" component --input "$tmp/input.json" --group signals__cron__1-of-2)
-assert_contains "$c" '"id": "PRRT_2"'
-assert_not_contains "$c" '"id": "PRRT_1"'
-assert_contains "$c" ".claude/rules/signal-rules.md"
+# --- scenario 2: quiet below the threshold keeps reading ------------------
+comments2="$tmp/comments2"
+marker "$C1" "docs/a.md:0" "signals/cron/main.go:0" > "$comments2"
+stub_gh_with_comments "$comments2"
 
-it "a chunk's args carry its own files, the chunk index, and the rest of the component as siblings"
-assert_contains "$c" '"chunk": "1/2"'
-assert_contains "$c" '"siblings": [
-  "signals/cron/y.go"
- ]'
-assert_not_contains "$c" '"path": "signals/cron/y.go"'
+it "unchanged, but quiet 0 < K=1: still READ, not carried"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" python3 "$INPUT" --repo o/r --number 5 --out "$tmp/input2.json" 2>"$tmp/err2")
+assert_contains "$(cat "$tmp/err2")" "docs/a.md: read (since $C1, quiet 0 < 1)"
 
-it "the component session's instruction is to run the workflow with those args and read nothing"
-r=$(python3 "$PROMPT" reader --input "$tmp/input.json" --group platform__manager)
-assert_contains "$r" 'saved workflow `review-component`'
-assert_contains "$r" '"component": "platform/manager"'
-assert_contains "$r" "Do not read the diff"
-assert_contains "$r" "do NOT produce structured output, until its completion notification"
+it "--quiet-reads 2 keeps a quiet-1 path read rather than carried"
+comments2b="$tmp/comments2b"
+marker "$C1" "docs/a.md:1" "signals/cron/main.go:0" > "$comments2b"
+stub_gh_with_comments "$comments2b"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" python3 "$INPUT" --repo o/r --number 5 --quiet-reads 2 --out "$tmp/input2b.json" 2>"$tmp/err2b")
+assert_contains "$(cat "$tmp/err2b")" "docs/a.md: read (since $C1, quiet 1 < 2)"
 
-it "an unknown component is refused"
-python3 "$PROMPT" reader --input "$tmp/input.json" --group nope >/dev/null 2>&1
-assert_status 1 "$?"
+# --- scenario 3: a rebase invalidates the recorded sha for that path ------
+comments3="$tmp/comments3"
+marker "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" "docs/a.md:5" > "$comments3"
+stub_gh_with_comments "$comments3"
 
-it "the coordinator's message holds one reading per queued component, null where none was produced"
-mkdir -p "$tmp/readings/reading-docs" "$tmp/readings/reading-signals__cron__1-of-2"
-echo '{"component":"docs","findings":[],"changedNames":["A"],"files":[{"path":"docs/a.md","declares":["A"],"references":[]}],"threads":[]}' > "$tmp/readings/reading-docs/reading.json"
-echo '{"component":"signals/cron","findings":[{"path":"signals/cron/main.go","line":1,"claim":"x"}],"changedNames":["B"],"files":[{"path":"signals/cron/main.go","declares":["B"],"references":["A"]},{"path":"signals/cron/x.go","declares":[],"references":[]}],"threads":[],"unread":[]}' > "$tmp/readings/reading-signals__cron__1-of-2/reading.json"
-c=$(python3 "$PROMPT" coordinator --input "$tmp/input.json" --readings "$tmp/readings" 2>"$tmp/err")
-assert_contains "$c" '"group": "platform/manager",
-  "reading": null'
-assert_contains "$c" '"changedNames": [
-    "A"
-   ]'
-assert_contains "$(cat "$tmp/err")" "unreviewed: platform/manager"
+it "the recorded sha is not an ancestor of head: READ from the base, named rebased"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" python3 "$INPUT" --repo o/r --number 5 --out "$tmp/input3.json" 2>"$tmp/err3")
+assert_contains "$(cat "$tmp/err3")" "docs/a.md: read (since origin/master, rebased)"
 
-it "a component read in chunks is ONE reading, and a chunk that produced none leaves its files unread by name"
-assert_equals "1" "$(printf '%s' "$c" | grep -c '"component": "signals/cron"')"
-assert_contains "$c" '"unread": [
-    "signals/cron/y.go"
-   ]'
-assert_contains "$c" '"path": "signals/cron/x.go"'
-assert_contains "$c" "HEAD SHA: abc1234"
-assert_contains "$c" "CHANGED PATHS:"
-assert_contains "$c" "REVIEW THREADS:"
+# --- scenario 4: a rule file change invalidates the WHOLE record ----------
+echo "rule changed" > "$repo/.claude/rules/foo.md"
+git -C "$repo" add -A && git -C "$repo" commit -qm "change a rule"
 
-it "a readings directory that does not exist is every component unreviewed, not a crash"
-c=$(python3 "$PROMPT" coordinator --input "$tmp/input.json" --readings "$tmp/nowhere" 2>"$tmp/err")
-assert_contains "$(cat "$tmp/err")" "unreviewed: docs, platform/manager, signals/cron"
+comments4="$tmp/comments4"
+marker "$C1" "docs/a.md:1" "signals/cron/main.go:1" > "$comments4"
+stub_gh_with_comments "$comments4"
+
+it "a rule file changed since a recorded sha: EVERY path is read, named in the reason"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" python3 "$INPUT" --repo o/r --number 5 --out "$tmp/input4.json" 2>"$tmp/err4")
+assert_contains "$(cat "$tmp/err4")" "docs/a.md: read (since origin/master, a rule file or the change's delta specs changed since a path was read)"
+assert_contains "$(cat "$tmp/err4")" "signals/cron/main.go: read (since origin/master,"
+assert_contains "$(cat "$tmp/input4.json")" '"coverageInvalidated": "a rule file or the change'"'"'s delta specs changed since a path was read"'
+
+# --- scenario 5: --full ignores every marker -------------------------------
+it "--full reads every path from the base, whatever the record says"
+out=$(cd "$repo" && PATH="$tmp/bin:$PATH" python3 "$INPUT" --repo o/r --number 5 --full --out "$tmp/input5.json" 2>"$tmp/err5")
+assert_contains "$(cat "$tmp/err5")" "docs/a.md: read (since origin/master, a full review was requested)"
+assert_contains "$(cat "$tmp/input5.json")" '"coverageInvalidated": "a full review was requested"'
 
 rm -rf "$tmp" "$repo"
 summary

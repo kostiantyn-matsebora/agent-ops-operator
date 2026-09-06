@@ -21,6 +21,16 @@ A finding's `line` must be a line of the diff; the API refuses otherwise,
 and the refusal is printed with the finding, never swallowed. The resolve
 list goes through `mark-thread-resolved.sh`, which validates the ids and
 writes the file `reconcile` reads.
+
+`--coverage <file>` (`{"sha": "...", "paths": {"<path>": {"quietBefore": N}}}`,
+from `review-prompt.py coordinator --coverage`): for every path in it, this
+run's quiet count is `quietBefore + 1` when no finding was successfully
+posted on that path this run, else `0`. The result is appended to the
+summary, as its last line, before posting —
+`<!-- claude-review-coverage {"sha":"...","paths":{"<path>":{"quiet":N}}} -->`
+— hidden in rendered markdown. A coverage file that cannot be read or
+serialised is an ERROR: the summary is never posted without it, because a
+summary posted without the marker is a review the next run cannot see.
 """
 from __future__ import annotations
 
@@ -58,9 +68,23 @@ def gh(*args: str, stdin: str | None = None) -> tuple[int, str]:
     raise AssertionError("unreachable: the last attempt returns")
 
 
+def coverage_marker(coverage_file: pathlib.Path, posted_paths: set[str]) -> str:
+    """The hidden marker line, from the coverage input and which paths this
+    run actually posted a finding on. Raises on anything unreadable — a
+    summary must never post without it."""
+    doc = json.loads(coverage_file.read_text())
+    paths = {}
+    for p, info in (doc.get("paths") or {}).items():
+        before = int(info.get("quietBefore", 0) or 0)
+        paths[p] = {"quiet": 0 if p in posted_paths else before + 1}
+    marker = {"sha": doc.get("sha", ""), "paths": paths}
+    return f"<!-- claude-review-coverage {json.dumps(marker)} -->"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("file", nargs="?", help="the JSON document; stdin when absent")
+    ap.add_argument("--coverage", type=pathlib.Path, help="the coverage input; appends the marker to the summary")
     args = ap.parse_args()
     text = pathlib.Path(args.file).read_text() if args.file else sys.stdin.read()
     d = json.loads(text)
@@ -97,12 +121,14 @@ def main() -> int:
         return 1
 
     posted = failed = 0
+    posted_paths: set[str] = set()
     for f in d.get("findings", []):
         rc, out = gh("api", f"repos/{repo}/pulls/{number}/comments",
                      "-f", f"commit_id={sha}", "-f", f"path={f['path']}", "-F", f"line={int(f['line'])}",
                      "-f", "side=RIGHT", "-f", f"body={f['body']}")
         if rc == 0:
             posted += 1
+            posted_paths.add(f["path"])
         else:
             failed += 1
             print(f"::warning::finding at {f['path']}:{f['line']} not posted: {out[:200]}", file=sys.stderr)
@@ -125,16 +151,24 @@ def main() -> int:
         else:
             print(f"::warning::resolve list not recorded: {(p.stdout + p.stderr).strip()[:200]}", file=sys.stderr)
 
+    summary = d.get("summary") or ""
+    if summary and args.coverage:
+        try:
+            summary = summary.rstrip("\n") + "\n" + coverage_marker(args.coverage, posted_paths)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(f"::error::coverage file unreadable, summary not posted: {e}", file=sys.stderr)
+            return 1
+
     summary_posted = False
-    if d.get("summary"):
-        rc, out = gh("pr", "comment", str(number), "-R", repo, "--body", d["summary"])
+    if summary:
+        rc, out = gh("pr", "comment", str(number), "-R", repo, "--body", summary)
         summary_posted = rc == 0
         if not summary_posted:
             print(f"::error::summary not posted: {out[:200]}", file=sys.stderr)
 
     print(json.dumps({"summaryPosted": summary_posted, "inline": posted, "inlineFailed": failed,
                       "replies": replied, "resolved": recorded}))
-    return 0 if summary_posted or not d.get("summary") else 1
+    return 0 if summary_posted or not summary else 1
 
 
 if __name__ == "__main__":

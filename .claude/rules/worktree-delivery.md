@@ -115,35 +115,62 @@ finding block the merge, below.
 ### THE REVIEW FOUND SOMETHING. NOW WHAT
 
 `claude-review.yml` posts findings as review threads, and an open thread blocks
-the merge. **The review is four jobs and two roles** — `queue` is a program
-(`review-input.py` over `review-queue.py`), `read` is a matrix of one job per
-changed component, all at once, each running `review-component.js`: one
-`file-reviewer` subagent per changed file, two at a time, in a context holding
-that file, its threads and the rules `review-rules.py` routes to its path —
-NO context inherits a rule file, and `review-context.py` prints what each one
-holds at the top of the job. `consolidate` runs the `review-coordinator` —
-the only role that posts, holding the readings and threads and no rules —
-which cross-reviews from what the files declare and reference, never
-re-reads the diff, and posts everything through ONE command,
-`review-post.py`, which RECORDS each addressed thread with
-`mark-thread-resolved.sh` (a list, no privilege). The model and its effort
-are the workflow's (`--model`, `--effort` — `gotchas.md` has why);
+the merge. **The review is four jobs and three roles** — `queue` is a program
+(`review-input.py` over `review-queue.py`) that also decides, per changed
+path, READ or CARRIED (below). `read` is a matrix of one job per component
+with a read path, all at once. EACH JOB BUILDS ITS COMPONENT FIRST —
+`review-build.sh`, the SAME RECIPE CI uses, no credential in that step's env —
+and a failed build SKIPS EVERY READER: the job writes the reading itself,
+`unbuilt` with the build's own tail, and no model runs. A built component is
+then read ONE `claude -p` PROCESS PER FILE, blind — no thread, no previous
+finding — several at once from the shell (`xargs -P $REVIEW_READERS`), each
+holding the `file-reviewer` role and the rules `review-rules.py` routes to
+the component's paths as a SHARED SYSTEM PREFIX (`review-prompt.py
+reader-system`) — the same bytes for every file, paid once and served from
+cache after. NO CONTEXT INHERITS A RULE FILE, and `review-context.py` prints
+what each one holds at the top of the job. A file carrying an UNRESOLVED
+THREAD also gets a second, primed process — the `thread-verdict` role, no
+rules — judging `fixed`/`standing`/`gone`/`detached` for that thread alone; a
+`detached` verdict's relocated finding folds into the file's findings.
+`review-reading-check.py` merges a job's file and verdict readings into the
+component's (or, unbuilt, passes through the build step's own reading).
+`consolidate` runs the `review-coordinator` — the only role that posts,
+holding the readings and threads and no rules — which is where "not made
+again" now lives: a blind finding matching an OPEN thread is folded in
+(`carried over`), one matching a DISMISSED thread is dropped (`dismissed`),
+one matching a thread judged `fixed` is posted (the fix did not hold). It
+cross-reviews from what the files declare and reference, never re-reads the
+diff, and posts everything through ONE command, `review-post.py`, which
+RECORDS each addressed thread with `mark-thread-resolved.sh` (a list, no
+privilege) and APPENDS THE COVERAGE MARKER — a hidden HTML comment on the
+summary, `{"sha", "paths": {path: {"quiet": N}}}` — so the NEXT run knows
+what it read and how many consecutive reads found nothing new. The model and
+its effort are the workflow's (`--model`, `--effort` — `gotchas.md` has why);
 `reconcile` RESOLVES the recorded threads with no model and the one
 `contents: write`. It runs by hand too: `gh workflow run claude-review.yml -f
-number=<pr>` (`-f dry_run=true` posts nothing). NOTHING THE REVIEW RUNS COMES
-FROM THE PULL REQUEST: `queue` restores `review-input.py`, `review-queue.py`
-and `components.sh` from the BASE branch before building the queue; `read`
-restores the composite action, `review-prompt.py`, `review-reading-check.py`,
+number=<pr>` (`-f dry_run=true` posts nothing; `-f full=true` ignores the
+coverage record and reads every changed path from the base — the same
+override `REVIEW_QUIET_READS`, a workflow variable, tunes: how many
+consecutive quiet reads of an unchanged path earn a CARRY, default one).
+NOTHING THE REVIEW RUNS COMES FROM THE PULL REQUEST: `queue` restores
+`review-input.py`, `review-queue.py` and `components.sh` from the BASE
+branch before building the queue; `read` restores the composite action,
+`review-build.sh`, `review-prompt.py`, `review-reading-check.py`,
 `review-rules.py`, `review-context.py` and `review-trace.py`, and
-`consolidate` the action, `review-prompt.py`, `review-rules.py`,
-`review-context.py`, `review-trace.py`, `review-post.py` and
-`mark-thread-resolved.sh`; both then install the CLI through
-`.github/actions/claude-cli`, which restores the job's role file (and, for
-`read`, `review-component.js`); `reconcile` checks out the base branch
-itself. So a pull request cannot rewrite the review that judges it, shrink
-its own queue, or resolve a thread it did not earn. The
+`consolidate` the action, `review-prompt.py`, `review-reading-check.py`,
+`review-rules.py`, `review-context.py`, `review-trace.py`, `review-post.py`
+and `mark-thread-resolved.sh`; both then install the CLI through
+`.github/actions/claude-cli`, which restores the job's role files (`read`
+restores `file-reviewer.md` AND `thread-verdict.md`); `reconcile` checks out
+the base branch itself. So a pull request cannot rewrite the review that
+judges it, shrink its own queue, or resolve a thread it did not earn. The
 fan-out is the matrix and not a pool inside one session: `gotchas.md` has the
-measurement. Triage happens IN THE THREAD, in a stated vocabulary, and one
+measurement, and the per-file loop replaces the retired `review-component.js`
+saved workflow entirely — the loop is the job's shell now, one level in from
+where it was. A component the build step could not build is `unbuilt`,
+DISTINCT from `unreviewed` (the job itself failed) and `unread` (a file's own
+reader returned nothing) — three different gaps, in the summary's table by
+name. Triage happens IN THE THREAD, in a stated vocabulary, and one
 comment acts on everything accepted:
 
 | You type | Where | It means |
