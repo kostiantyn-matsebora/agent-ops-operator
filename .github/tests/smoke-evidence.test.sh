@@ -24,6 +24,9 @@ if [ -n "${GH_API_FAILS:-}" ]; then
   echo "gh: connection reset" >&2
   exit 1
 fi
+if [ -n "${GH_API_HANGS:-}" ]; then
+  sleep 5
+fi
 page=1
 for a in "$@"; do
   case "$a" in page=*) page="${a#page=}" ;; esac
@@ -33,7 +36,7 @@ if [ -f "$f" ]; then cat "$f"; else echo '{"check_runs":[]}'; fi
 STUB
 chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
 
-reset() { : > "$GH_CALLS"; rm -f "$PAGES"/*.json; unset GH_API_FAILS; }
+reset() { : > "$GH_CALLS"; rm -f "$PAGES"/*.json; unset GH_API_FAILS GH_API_HANGS; }
 run() { python3 "$S" --repo o/r --sha deadbeef "$@" 2>"$tmp/err"; }
 
 # --- one page, each classification -----------------------------------------
@@ -107,6 +110,18 @@ assert_status 0 "$rc"
 assert_equals "smoked=false" "$out"
 assert_contains "$(cat "$tmp/err")" "still running"
 
+it "the final wait does not OVERSHOOT the deadline by a full poll-seconds"
+# --wait-minutes cannot go below one full minute via the CLI, so this
+# genuinely exercises wall-clock: a 60s bound against a 55s poll leaves ~5s
+# after the first sleep, and the fix caps the SECOND sleep to that remainder
+# rather than sleeping another 55s past the bound. Slow (~65s) but exact.
+started=$(date +%s)
+out=$(run --wait-minutes 1 --poll-seconds 55); rc=$?
+elapsed=$(( $(date +%s) - started ))
+assert_status 0 "$rc"
+assert_equals "smoked=false" "$out"
+[ "$elapsed" -lt 75 ] && pass || fail "took ${elapsed}s; expected under 75s (60s bound + one 55s poll would be 115s if uncapped)"
+
 reset
 cat > "$PAGES/1.json" <<'JSON'
 {"check_runs":[{"name":"smoke / e2e / smoke","status":"in_progress"}]}
@@ -145,6 +160,19 @@ rmdir "$empty_path_dir"
 assert_status 0 "$rc"
 assert_equals "smoked=false" "$out"
 assert_contains "$(cat "$tmp/err")" "lookup failed"
+
+reset
+export GH_API_HANGS=1
+it "gh HANGS (not merely failing): smoked=false after --api-timeout, never blocks past it"
+started=$(date +%s)
+out=$(run --api-timeout 1); rc=$?
+elapsed=$(( $(date +%s) - started ))
+unset GH_API_HANGS
+assert_status 0 "$rc"
+assert_equals "smoked=false" "$out"
+assert_contains "$(cat "$tmp/err")" "lookup failed"
+it "  ...and did not wait for the stub's full 5s sleep"
+[ "$elapsed" -lt 5 ] && pass || fail "took ${elapsed}s, expected under 5s (api-timeout was 1s)"
 
 # --- pagination --------------------------------------------------------------
 

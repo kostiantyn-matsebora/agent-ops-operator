@@ -44,9 +44,11 @@ import time
 SUFFIX = "e2e / smoke"
 
 
-def check_runs(repo: str, sha: str) -> list[dict]:
+def check_runs(repo: str, sha: str, api_timeout: int) -> list[dict]:
     """Every check run on the commit, paginated. Raises on a `gh` failure --
-    the caller treats that as "not smoked", never as "no check runs"."""
+    the caller treats that as "not smoked", never as "no check runs" -- and
+    on a hung call past `api_timeout`, so a stalled network never blocks past
+    the bounded wait this script promises."""
     runs: list[dict] = []
     page = 1
     while True:
@@ -57,7 +59,7 @@ def check_runs(repo: str, sha: str) -> list[dict]:
         out = subprocess.run(
             ["gh", "api", "--method", "GET", f"repos/{repo}/commits/{sha}/check-runs",
              "-f", f"per_page=100", "-f", f"page={page}"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=api_timeout,
         )
         if out.returncode != 0:
             raise RuntimeError(out.stderr.strip() or "gh api failed")
@@ -88,14 +90,16 @@ def main() -> int:
                      help="how long to wait for an in-flight smoke on the commit before giving up and running one")
     ap.add_argument("--poll-seconds", type=int, default=30,
                      help="interval between re-checks while waiting; lowered by the suite, never by the workflow")
+    ap.add_argument("--api-timeout", type=int, default=30,
+                     help="seconds before a single gh api call is treated as hung; lowered by the suite, never by the workflow")
     args = ap.parse_args()
 
     deadline = time.monotonic() + args.wait_minutes * 60
     waited = False
     while True:
         try:
-            state = classify(check_runs(args.repo, args.sha))
-        except (RuntimeError, OSError, json.JSONDecodeError) as exc:
+            state = classify(check_runs(args.repo, args.sha, args.api_timeout))
+        except (RuntimeError, OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
             print(f"smoked=false", file=sys.stdout)
             print(f"the check-run lookup failed ({exc}); running a smoke rather than publishing on missing evidence",
                   file=sys.stderr)
@@ -123,8 +127,9 @@ def main() -> int:
                   "running our own rather than waiting forever", file=sys.stderr)
             return 0
         waited = True
-        print(f"a smoke is in flight for {args.sha}; waiting ({args.poll_seconds}s)...", file=sys.stderr)
-        time.sleep(args.poll_seconds)
+        sleep_for = min(args.poll_seconds, deadline - time.monotonic())
+        print(f"a smoke is in flight for {args.sha}; waiting ({sleep_for:.0f}s)...", file=sys.stderr)
+        time.sleep(max(sleep_for, 0))
 
 
 if __name__ == "__main__":
