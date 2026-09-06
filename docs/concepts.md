@@ -877,6 +877,7 @@ The chart ships the built-in tool vocabulary as `MCPToolset` CRs, split by risk
 | `agentops-observe` | `Read`, `Grep`, `Glob` |
 | `agentops-shell` | `Bash` |
 | `agentops-edit` | `Edit`, `Write` |
+| `agentops-websearch` | `WebSearch` |
 
 One profile can therefore serve a route that observes and a route that executes,
 with no profile edit and no cloning.
@@ -959,7 +960,7 @@ pipelines:
     # names no account: the floor, so no cluster power at all
   - name: k8s-operate
     profile: k8s-engineer
-    toolsets: [agentops-observe, k8s-observability, k8s-admin]
+    toolsets: [agentops-observe, k8s-observability, k8s-admin, agentops-websearch]
     serviceAccountName: agentops-runtime-acting
 ```
 

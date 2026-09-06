@@ -305,6 +305,7 @@ spec:
       - name: agentops-observe
       - name: ha-observability
       - name: ha-actions
+      - name: agentops-websearch
       - name: agentops-shell
   mcpConfigs:
     refs:

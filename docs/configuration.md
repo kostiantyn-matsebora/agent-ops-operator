@@ -201,7 +201,7 @@ pipelines:
 
   - name: k8s-operate
     profile: k8s-engineer
-    toolsets: [agentops-observe, k8s-observability, k8s-admin]
+    toolsets: [agentops-observe, k8s-observability, k8s-admin, agentops-websearch]
     serviceAccountName: agentops-runtime-acting
 ```
 

@@ -10,6 +10,16 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+### Added
+
+- A fourth built-in, risk-split toolset, `agentops-websearch` (`WebSearch`),
+  beside `agentops-observe`/`-shell`/`-edit`. The kubernetes bundle's admin
+  route (`k8s-operate`) and the home-assistant bundle's ops route (`ha-ops`)
+  bind it by default when that bundle's own wiring is enabled — the
+  read-only/control routes (`k8s-observe`, `ha-control`) do not gain it. Not
+  breaking: both routes are off by default, and an install declaring its own
+  Pipeline is unaffected until it adds the toolset name itself.
+
 ### Changed
 
 - The release workflow's cluster smoke is now keyed to the tagged COMMIT, not

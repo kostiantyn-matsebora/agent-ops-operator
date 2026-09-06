@@ -720,6 +720,11 @@ pipelines:
     serviceAccountName: ""
   ops:
     # The ops route. Claims ha-logs and NOTHING ELSE — see chatSources.
+    #
+    # This route ALSO binds global.builtinToolsets.websearch (agentops-websearch)
+    # when the catalog is enabled — ha-ops is already trusted to repair the
+    # house, so it is the one that gets to look things up on the open internet
+    # too. ha-control stays scoped to the house and does not gain it.
     name: ha-ops
     icon: aops:operate
     # Optional per-route overrides of the two at the bottom of this stanza.
