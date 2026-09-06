@@ -69,10 +69,10 @@ The bundle SHALL render two `AgentProfile` objects with distinct jobs:
   prerequisite: it SHALL render only when that credential is configured, and MCP
   configuration SHALL be optional for it.
 
-Each profile SHALL carry identity only — role prompt, connectivity env,
-turn limit, optional runtime reference. Neither SHALL declare tools or MCP
-servers, because an `AgentProfile` carries no capabilities; what each agent may
-do comes from the Pipeline routing it.
+Each profile SHALL carry behaviour and no reach — role prompt, connectivity
+env, turn limit, optional runtime reference. Neither SHALL declare tools or
+MCP servers, because an `AgentProfile` carries no capabilities; what each
+agent may do comes from the Pipeline routing it.
 
 Each profile SHALL carry an inline role prompt, because neither has a repository
 to hold an agent definition.
