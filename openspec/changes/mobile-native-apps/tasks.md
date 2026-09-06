@@ -14,7 +14,7 @@
 ## 3. Repository placement
 
 - [ ] 3.1 Create `console-mobile/` at the repository ROOT (not under `platform/` — see design.md's decision and `repository-layout`'s "not placed in a component group" rule); verify `git ls-files console-mobile | head` shows it sibling to `platform/`, `runtimes/`, `docs/` rather than nested.
-- [ ] 3.2 `.claude/rules/structure.md`: add a line beside the existing "THERE IS EXACTLY ONE `docs/`, AT THE ROOT" note, naming `console-mobile/` as the second root-level directory that is deliberately not a component (app-store artifacts, not a container image) and stating why `.github/components.sh` does not need an exclusion for it; verify the new line names a path that actually exists and matches design.md's decision.
+- [ ] 3.2 `.claude/rules/structure.md`: add a row to the "Group | Holds | The type" component table itself — `| `console-mobile/` | (Capacitor project, Android/iOS builds) | **NOT a component** — app-store artifacts, not a container image; `components.sh` needs no exclusion since the directory carries neither `go.mod` nor `Dockerfile` |`, mirroring the existing `test/` row's shape rather than adding separate prose; verify the row's path exists and matches design.md's decision.
 
 ## 4. Native shell scaffolding
 

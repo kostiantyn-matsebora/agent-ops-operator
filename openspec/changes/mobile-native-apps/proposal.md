@@ -66,10 +66,9 @@ and served, which a native client added on top does not change)
 - `console-mobile/` — new top-level directory (sibling of `platform/`,
   `runtimes/`, `docs/`): the Capacitor project, its Android and iOS native
   projects, the connection-settings screen, and its own build/test tooling.
-  Not a container image, and not placed in a component group — `structure.md`
-  and the published `repository-layout` spec gain a line calling it out, the
-  same way `docs/` is already called out as a root-level non-component
-  directory. `.github/components.sh` discovers components by
+  Not a container image, and not placed in a component group — `structure.md`'s
+  own component table gains a row calling it out, shaped like the existing
+  `test/` row's **NOT a component** verdict. `.github/components.sh` discovers components by
   `go.mod`/`Dockerfile`, and this directory has neither, so it is naturally
   invisible to that discovery (no exclusion rule needed, unlike `test/`).
 - No Go, CRD, chart value or manager contract change.

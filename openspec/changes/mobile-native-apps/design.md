@@ -85,11 +85,11 @@ generates into. `.github/components.sh` discovers components by `go.mod` or
 `Dockerfile` presence; this directory has neither, so it needs no exclusion
 rule (unlike `test/`, which carries both and had to be excluded explicitly) —
 it is simply invisible to image-based discovery, which is correct, since it
-publishes to app stores rather than GHCR. `structure.md` gains a line
-alongside its existing "THERE IS EXACTLY ONE `docs/`, AT THE ROOT" note,
-naming `console-mobile/` as the second root-level directory that is
-deliberately not a component; the path-to-image-name rule does not apply to
-it.
+publishes to app stores rather than GHCR. `structure.md`'s own "Group | Holds |
+The type" component table gains a row for it, shaped exactly like its existing
+`test/` row — a group, what it holds, and an explicit **NOT a component**
+verdict with the reason — rather than a separate prose note elsewhere; the
+path-to-image-name rule does not apply to it.
 
 **Native HTTP for every API call, never the WebView's fetch.** Capacitor's
 HTTP plugin routes requests through the native platform's networking stack,
