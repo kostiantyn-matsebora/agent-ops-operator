@@ -110,13 +110,14 @@ spec:
 ```
 <!-- /generated -->
 
-The chart ships three built-in toolsets, split by risk:
+The chart ships four built-in toolsets, split by risk:
 
 | Toolset | Tools |
 |---|---|
 | `agentops-observe` | `Read` `Grep` `Glob` |
 | `agentops-shell` | `Bash` |
 | `agentops-edit` | `Edit` `Write` |
+| `agentops-websearch` | `WebSearch` |
 
 ## Bind them to the Pipeline
 
