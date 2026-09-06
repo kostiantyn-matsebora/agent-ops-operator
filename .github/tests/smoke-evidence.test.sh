@@ -77,6 +77,15 @@ out=$(run); rc=$?
 assert_status 0 "$rc"
 assert_equals "smoked=false" "$out"
 
+reset
+cat > "$PAGES/1.json" <<'JSON'
+{"check_runs":[{"name":"pre-e2e / smoke","status":"completed","conclusion":"success"}]}
+JSON
+it "a name that merely ENDS in the bare characters 'e2e / smoke' with no leading '/' is NOT matched"
+out=$(run); rc=$?
+assert_status 0 "$rc"
+assert_equals "smoked=false" "$out"
+
 # --- in-flight: waits, then re-classifies -----------------------------------
 
 reset
@@ -111,10 +120,13 @@ assert_equals "smoked=false" "$out"
 assert_contains "$(cat "$tmp/err")" "still running"
 
 it "the final wait does not OVERSHOOT the deadline by a full poll-seconds"
-# --wait-minutes cannot go below one full minute via the CLI, so this
-# genuinely exercises wall-clock: a 60s bound against a 55s poll leaves ~5s
-# after the first sleep, and the fix caps the SECOND sleep to that remainder
-# rather than sleeping another 55s past the bound. Slow (~65s) but exact.
+# --wait-minutes is an integer of whole MINUTES, so the smallest bound this
+# test can express above zero is one full minute -- 0 itself is used above
+# for the immediately-expired case, but that never sleeps at all, so it
+# cannot exercise an overshoot. This genuinely exercises wall-clock: a 60s
+# bound against a 55s poll leaves ~5s after the first sleep, and the fix
+# caps the SECOND sleep to that remainder rather than sleeping another 55s
+# past the bound. Slow (~65s) but exact.
 started=$(date +%s)
 out=$(run --wait-minutes 1 --poll-seconds 55); rc=$?
 elapsed=$(( $(date +%s) - started ))

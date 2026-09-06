@@ -14,9 +14,11 @@ the smoke, over CHECK RUNS rather than workflow runs: the smoke is a reusable
 workflow called by a job named `smoke`, so every smoke -- from `release.yml` or
 from `e2e-smoke.yml` -- appears on the commit as a check run named
 `smoke / e2e / smoke`. The commit's check runs are the one place all of them
-meet, whatever workflow produced them. Matching the TAIL (`e2e / smoke`) rather
-than the full name keeps a renamed caller job from silently switching reuse
-off.
+meet, whatever workflow produced them. Matching the TAIL (` / e2e / smoke`,
+WITH the leading separator) rather than the full name keeps a renamed caller
+job from silently switching reuse off, while the leading `/` keeps an
+unrelated check run whose name merely ENDS in the bare characters "e2e /
+smoke" (no `/` before them) from being mistaken for one.
 
 Classification, per the design:
 
@@ -41,7 +43,7 @@ import subprocess
 import sys
 import time
 
-SUFFIX = "e2e / smoke"
+SUFFIX = " / e2e / smoke"
 
 
 def check_runs(repo: str, sha: str, api_timeout: int) -> list[dict]:
