@@ -29,7 +29,13 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -
 
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/agent-ops-operator
-RUN apt-get update -qq && \
+# The same daily rebuild the runtimes carry (their Dockerfiles state why):
+# the base's own packages get security fixes too, and a cached layer applies
+# none of them.
+ARG APT_REFRESH=unset
+RUN echo "apt refresh: ${APT_REFRESH}" && \
+    apt-get update -qq && \
+    apt-get upgrade -y -qq && \
     apt-get install -y -qq --no-install-recommends iptables && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/egress-proxy /egress-proxy
