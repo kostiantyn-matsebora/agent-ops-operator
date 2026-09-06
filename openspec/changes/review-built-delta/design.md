@@ -228,9 +228,14 @@ reading is the drift `structure.md` names.
 - **A VERDICT process per file with unresolved threads**, after the blind
   read, from `.claude/agents/thread-verdict.md`: handed the threads (id,
   path, line, body, resolved), the file and its diff from `since`, returning
-  `{threads: [{id, verdict}]}` in the existing vocabulary — `fixed`,
-  `standing`, `gone`, `detached` (with the new location as a finding of the
-  same claim). It is meant to be primed. Resolved threads are handed to
+  `{threads: [{id, verdict, finding?}]}` in the existing vocabulary —
+  `fixed`, `standing`, `gone`, `detached`. A `detached` verdict REQUIRES
+  `finding`, a `{path, line, claim}` in the file reading's own finding shape
+  naming the new location of the same claim, and any other verdict carries
+  none; the merge (`review-reading-check.py`) lifts those findings into the
+  component's `findings` beside the blind reader's, so the coordinator posts
+  a moved remark through the same dedup as a new one. It is meant to be
+  primed. Resolved threads are handed to
   nobody: a person's dismissal and a fix already recorded are history, as
   today. The program settles what it can first: a thread whose anchor lines
   are outside the file's current length is `gone` without a model.
