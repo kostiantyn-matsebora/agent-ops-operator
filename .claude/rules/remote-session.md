@@ -31,6 +31,10 @@ cd /home/user/agent-ops-operator && bash .github/scripts/cloud-bootstrap.sh
 | serena | the `.mcp.json` stdio server never connects |
 | Go, only when the image's is below the floor | `platform/manager` and `runtimes/ollama` will not build |
 
+- **The environment's variables are `SONAR_ORG` and `KUBEBUILDER_ASSETS`.** The
+  second is the path the bootstrap PRINTS when it installs the envtest assets
+  (`/home/user/.envtest/k8s/<version>-linux-amd64`); the manager's integration
+  suite reads it and starts no API server without it.
 - **A tool it cannot install is NAMED on stderr and fails nothing else.** The
   platform reads a non-zero setup as a failed session, and a session missing
   one tool is more useful than no session.

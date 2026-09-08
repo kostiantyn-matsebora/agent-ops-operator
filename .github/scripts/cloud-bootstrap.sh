@@ -167,10 +167,15 @@ install_go() {
   fi
   note "installing go$GO_FLOOR.0 (the image's is older than the floor)"
   local tmp; tmp=$(mktemp -d)
+  # NOT `-C $HOME`. The tarball unpacks to `./go`, and `$HOME/go` is GOPATH's
+  # DEFAULT — so extracting there drops the toolchain's own bin/pkg/src into
+  # the module cache's directory. It works until something writes the other's
+  # tree, and then it fails as a build error naming neither.
   if curl -fsSL "https://go.dev/dl/go${GO_FLOOR}.0.linux-amd64.tar.gz" -o "$tmp/go.tgz" \
-     && tar -xzf "$tmp/go.tgz" -C "$HOME" \
-     && ln -sf "$HOME/go/bin/go" "$HOME/.local/bin/go" \
-     && ln -sf "$HOME/go/bin/gofmt" "$HOME/.local/bin/gofmt"; then
+     && rm -rf "$HOME/.local/go" && mkdir -p "$HOME/.local" \
+     && tar -xzf "$tmp/go.tgz" -C "$HOME/.local" \
+     && ln -sf "$HOME/.local/go/bin/go" "$HOME/.local/bin/go" \
+     && ln -sf "$HOME/.local/go/bin/gofmt" "$HOME/.local/bin/gofmt"; then
     note "go $(go version 2>/dev/null | awk '{print $3}' || echo installed)"
   else
     missing go
