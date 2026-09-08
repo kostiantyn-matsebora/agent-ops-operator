@@ -111,6 +111,13 @@ answer to "is this behaviour intended".
   refuses one that does not. GitHub closes on the keyword and on nothing else;
   the script's `close` is a second step, and #38 and #67 stayed open under
   `opsx:archived` because both were skipped.
+- **AND EVERY EARLIER PULL REQUEST OF THAT CHANGE MUST SAY `Refs #<n>`.** The
+  same check refuses a `Closes` that would end a tracking issue whose change is
+  merely being PROPOSED or APPLIED — the issue has to follow the change through
+  review and archiving, and merging is not where it ends. The two halves are one
+  rule read from both sides, and typing `Closes` out of habit on an applying
+  pull request is how it is broken: #198 did exactly that and the check caught
+  it.
 
 ### THE GATES ARE ALREADY REQUIRED — THROUGH ONE CHECK
 
