@@ -99,7 +99,8 @@ rules:
       which is the whole cost the prototype was committed to avoid.
     - >-
       THIS CHANGE WILL BE DELIVERED ON ITS OWN BRANCH, `change/<name>`, from its
-      own git worktree, as ONE pull request — see
+      own git worktree — or, in a remote session, the session's clone with
+      `change/<name>` checked out in place — as ONE pull request — see
       .claude/rules/worktree-delivery.md. A task list MUST NOT instruct
       committing to the default branch, and MUST NOT restate the delivery
       mechanism as work: creating the worktree, opening the tracking issue and

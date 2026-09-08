@@ -27,6 +27,13 @@ Implement tasks from an OpenSpec change.
 
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx:apply <other>`).
 
+1.5 **Work in the change's own working copy — THIS REPOSITORY'S STEP**
+
+   The change is implemented on `change/<name>`, from its own git worktree — or,
+   in a remote session, the session's clone with `change/<name>` checked out in
+   place, never a worktree added beside it
+   (`.claude/rules/worktree-delivery.md`, `.claude/rules/remote-session.md`).
+
 2. **Check status to understand the schema**
    ```bash
    openspec status --change "<name>" --json
@@ -102,6 +109,11 @@ Implement tasks from an OpenSpec change.
      in so many words: "Is this change approved for automatic fixing — shall I
      label the pull request `autofix`?" Never place it by default, never infer
      it from a green run or from the owner's silence.
+   - **THE WORD MAY ALREADY HAVE BEEN GIVEN, ON THE ISSUE.** A change started by
+     the `autoimplement` label on its issue, placed by someone with write access,
+     carries that person's approval already: the pull request is opened WITH
+     `autofix` and the description says whose label it came from. Do not ask
+     again (`.claude/rules/remote-session.md`).
    - **On the owner's explicit word**, place it under their credentials and
      say so:
 

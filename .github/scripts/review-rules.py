@@ -27,15 +27,16 @@ RULES = ".claude/rules"
 
 # Rules that are NOT REVIEW CRITERIA, and why. A reader reads a rule to judge
 # a diff against it; these govern something else:
-#   - the six SESSION rules: how a person builds, delivers, names a window,
-#     keeps a private thing private, looks at a UI, answers in chat;
+#   - the SEVEN SESSION rules: how a person builds, delivers, names a window,
+#     keeps a private thing private, looks at a UI, answers in chat, and works
+#     in a cloud session rather than on the workstation;
 #   - gotchas: operational lore for somebody running helm or docker — nothing
 #     in it is a property of a diff;
 #   - structure: a MAP. Its one enforceable rule (a directory is a component,
 #     one docs/) is routed to the files that derive the tree, below, and to
 #     nothing else — a reader of a Go file does not need the repository map.
 NOT_REVIEW = {"build-test", "worktree-delivery", "session-naming", "publication",
-              "visual-check", "answering", "gotchas"}
+              "visual-check", "answering", "gotchas", "remote-session"}
 
 # Every path gets these.
 ALWAYS = ["retired-vocabulary"]

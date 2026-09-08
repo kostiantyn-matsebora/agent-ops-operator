@@ -22,6 +22,19 @@ they shared one HEAD **and one set of files**:
   one shared checkout again will re-derive it.
 - **A worktree removes the CAUSE.** Own HEAD, own files, own index.
 
+### A REMOTE SESSION'S CLONE IS THE OTHER WORKING COPY
+
+**A change is worked in a working copy dedicated to it, and there are exactly
+two shapes of that** — a worktree on this workstation, or a cloud session's own
+clone with `change/<name>` checked out IN PLACE.
+
+- **The clone IS the isolation the worktree rule was written to create.** Own
+  HEAD, own files, own index, by construction.
+- **NEVER `git worktree add` in a remote session.** A second copy of the tree
+  there breaks the two readers below for no isolation it did not already have.
+- **`.claude/rules/remote-session.md` owns the rest** — what that environment
+  installs, what a label on an issue starts, and what stays workstation-only.
+
 ### PLACEMENT IS FORCED, NOT PREFERRED
 
 ```
@@ -78,6 +91,11 @@ request template does not carry a "which openspec change" field, and anything
 needing the name reads the branch.
 
 ### ARCHIVE INSIDE THE PULL REQUEST
+
+**UNCHANGED BY EVERY LOOP ABOVE, AND STATED SO.** Neither the fixing loop nor a
+remote session archives anything: a machine may write to the branch, and a
+person merges and archives. `/opsx:archive` is refused while a round is running
+or a dispute is unanswered.
 
 `openspec archive` folds the delta specs into `openspec/specs/`, so doing it on
 the branch means **the diff shows the contract changing** — which is what a
@@ -179,7 +197,8 @@ comment acts on everything accepted:
 | anything else, or nothing | the thread | not accepted; the thread and the code stay as they are |
 | `/fix-accepted` | a comment on the pull request | DISPATCH — one run, one commit, over everything accepted |
 | resolve the thread yourself | the thread | dismissed; the review counts it and does not raise it again |
-| the `autofix` LABEL | the pull request | APPROVED AS A WHOLE — every open finding and every open SonarCloud issue is fixed or DISPUTED by CI, round after round, no reply and no dispatch needed. Placed by the session on the OWNER's word (`gh pr edit <n> --add-label autofix`), never by default |
+| the `autofix` LABEL | the pull request | APPROVED AS A WHOLE — every open finding, every open SonarCloud issue AND every FAILED REQUIRED CHECK on the head is fixed or DISPUTED by CI, round after round, no reply and no dispatch needed. Placed by the session on the OWNER's word (`gh pr edit <n> --add-label autofix`), never by default |
+| the `autoimplement` LABEL | an ISSUE | APPROVED TO BE BUILT — a remote session proposes, implements and opens the pull request, which carries `autofix` from creation. Placed by a person with WRITE access; anyone else's is removed with a comment. See `remote-session.md` |
 | a reply under `<!-- autofix:disputed -->` | a thread (or a pull request comment, for a Sonar issue) | THE LOOP DISAGREES — the code is untouched, the thread stays open, you are mentioned. Answer it (a reply, or resolve to dismiss); nothing re-disputes it |
 
 - **THE VOCABULARY IS A FILE, MATCHED BY A PROGRAM** —
@@ -199,6 +218,23 @@ comment acts on everything accepted:
   `resolve-review-threads.py`. A thread is resolved only where its patch landed;
   a stale patch pushes nothing, resolves nothing, and says so — rebase and
   dispatch again.
+- **A RED `ci-green` STARTS A ROUND TOO, AND A FAILED CHECK IS A WORK ITEM.**
+  Under the label, `review-dispatch.yml` also runs on a `ci` run that COMPLETED
+  WITH `failure`, and `collect` reads the head's failed required checks
+  (`failed-checks.py`, under `actions: read` — that job alone, where no model
+  runs). Which checks count is read from `ci-green`'s own `needs:`, never
+  restated; the review's jobs and `ci-green` itself are excluded, the one being
+  another reviewer and the other the aggregate.
+  - **The fixer REPRODUCES a check before fixing it**, with the job's own
+    command, and re-runs it before the patch is cut. A failure the tree does
+    not explain — an outage, a rate limit, a flake — is DISPUTED with the log's
+    reason, because a false fix for a flake is worse than the flake.
+  - **A fixed check gets no reply.** There is no thread to reply in, and the
+    check's next run on the landed commit is its verdict; the round's summary
+    is where it is accounted for.
+  - **Two starts for one head run in SEQUENCE**, serialised by the existing
+    `concurrency` group — the review's completion and CI's failure — each
+    collecting the live state, both counting toward `MAX_ROUNDS`.
 - **AN UNTRIAGED FINDING KEEPS ITS THREAD OPEN, AND THE MERGE BLOCKED.** That
   is the feature: a finding nobody accepted and nobody dismissed is a decision
   still owed.

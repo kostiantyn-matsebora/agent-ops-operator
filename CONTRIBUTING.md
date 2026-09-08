@@ -18,6 +18,15 @@ and a security problem goes to [SECURITY.md](SECURITY.md), never to an issue.
   trying to do before what you want built: the second is often not the cheapest
   answer to the first.
 
+**A maintainer may hand an issue straight to a session.** An issue labelled
+`autoimplement` by somebody with write access starts one cloud session that
+proposes a change from what you wrote, implements it on its own branch and
+opens a pull request; the issue gains one comment linking that session. The
+label is refused from anyone without write access, and it changes nothing about
+what happens next — the proposal, the pull request and the review are read by a
+person, and a person merges. Nobody has to use it: an issue nobody labels is
+picked up the ordinary way.
+
 **Please open one before a large pull request.** This project has strong
 opinions about its model — what a `Pipeline` is allowed to carry, where wiring
 lives, what the manager may never read — and several of them were arrived at by
@@ -58,6 +67,11 @@ git worktree add -b change/<name> ../agent-ops-worktrees/<name> origin/master
 cd ../agent-ops-worktrees/<name>
 ```
 
+**A remote session's clone is the other shape of that working copy.** A change
+worked in a cloud session checks out `change/<name>` in the session's own clone
+and adds no worktree beside it: the clone is already its own HEAD, files and
+index, which is the whole of what the worktree rule asks for.
+
 - **The worktree lives OUTSIDE the repository, and that is forced.** The release
   inventory is derived by searching the tree for module manifests and container
   recipes, so a second copy beneath the root reports twice as many components and
@@ -92,7 +106,8 @@ directory and the pull request; the rationale, design, specs and tasks live in
 
 **If you filed an issue that becomes a change, your issue becomes the tracking
 issue.** It is not closed in favour of one we wrote — your thread is where the
-conversation already is.
+conversation already is. An issue handed to a session by the `autoimplement`
+label is promoted in exactly the same way, by the same script.
 
 ## Documentation is part of the change, not a follow-up
 
@@ -571,12 +586,16 @@ including what the landed commit still needs from you, is
 
 **Or approve the whole pull request for fixing, once.** The `autofix` label
 (placed by someone with write access — anyone else's is removed with a
-comment) is change-level consent: every open review finding and every open
-SonarCloud issue on the pull request is on the work list, and each is FIXED or
-DISPUTED — a dispute is a reply that stays open and mentions you. The landed
-commit is pushed through a write deploy key, so CI and the review run on it
-and the review's completion starts the next round, up to three; a round that
-changes nothing ends the loop early, and every ending is one summary comment.
+comment) is change-level consent: every open review finding, every open
+SonarCloud issue AND every failed required check on the head is on the work
+list, and each is FIXED or DISPUTED — a dispute is a reply that stays open and
+mentions you. A failed check is reproduced with the job's own command before it
+is fixed, and a failure the tree does not explain is disputed rather than
+guessed at; a fixed check gets no reply, because its next run is the verdict.
+The landed commit is pushed through a write deploy key, so CI and the review
+run on it, and the next round starts either when the review completes or when
+CI fails, up to three; a round that changes nothing ends the loop early, and
+every ending is one summary comment.
 The loop never marks anything in SonarCloud, and it cannot merge. Removing the
 label stops it at the next round; an unanswered dispute holds both the merge
 and `/opsx:archive`.

@@ -29,15 +29,22 @@ assert_equals "issue_comment pull_request pull_request_review_comment workflow_d
 it "the pull_request trigger is the label event alone — never opened or synchronize, which would run on every push"
 assert_equals "['labeled']" "$(py 'print(d[True]["pull_request"]["types"])')"
 
-it "the review-completion trigger names the review workflow and completes only"
-assert_equals "['claude-review'] ['completed']" "$(py 'print(d[True]["workflow_run"]["workflows"], d[True]["workflow_run"]["types"])')"
+it "the workflow_run trigger names the review AND ci, and completes only"
+assert_equals "['claude-review', 'ci'] ['completed']" "$(py 'print(d[True]["workflow_run"]["workflows"], d[True]["workflow_run"]["types"])')"
 
 it "the label the gate prefilters on is the one the vocabulary file states"
 label=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["approve_label"])')
 assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.label.name == '$label'"
 
 it "a review that did not complete successfully starts no round"
-assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.conclusion == 'success'"
+assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.name == 'claude-review' && github.event.workflow_run.conclusion == 'success'"
+
+# THE TWO RUNS START A ROUND FOR OPPOSITE REASONS, so the prefilter names each
+# workflow with the conclusion that matters for it. A green CI run starting a
+# round would be a round over nothing, every push.
+it "a ci run starts a round only when it FAILED"
+assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.name == 'ci' && github.event.workflow_run.conclusion == 'failure'"
+assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "workflow_run.name == 'ci' && github.event.workflow_run.conclusion == 'success'"
 
 it "the gate reads the vocabulary from the default branch on every event but a hand run"
 assert_contains "$(py 'print(d["jobs"]["gate"]["steps"][0]["with"]["ref"])')" "github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch"
@@ -57,9 +64,16 @@ assert_not_contains "$fixjob" "SONAR_TOKEN"
 assert_not_contains "$fixjob" "secrets.GITHUB_TOKEN"
 assert_contains "$fixjob" "secrets.CLAUDE_CODE_OAUTH_TOKEN"
 
-it "no job may dispatch a workflow — a dispatched run's checks never reach the merge box, so the loop pushes instead"
-assert_equals "" "$(py 'print(" ".join(j for j,v in d["jobs"].items() if v["permissions"].get("actions")))')"
+# `actions: READ` IS NOT `actions: write`, AND THE DIFFERENCE IS THE WHOLE RULE.
+# A dispatched run's check runs never reach the merge box (#131, gotchas.md), so
+# nothing here may START a workflow. Reading a failed run's log is what makes a
+# red check a work item, and it is granted to `collect` — the job with no model
+# in it — and to no other.
+it "no job may dispatch a workflow: only collect may read runs, and none may write them"
+assert_equals "collect" "$(py 'print(" ".join(j for j,v in d["jobs"].items() if v["permissions"].get("actions")))')"
+assert_equals "read" "$(py 'print(d["jobs"]["collect"]["permissions"]["actions"])')"
 assert_not_contains "$(py 'print(d["jobs"]["land"])')" "workflow run"
+assert_equals "" "$(py 'print(d["jobs"]["fix"]["permissions"].get("actions",""))')"
 
 it "the push credential is read by the landing job alone, on a labelled pull request only, and the model's job cannot name it"
 assert_equals "land" "$(py 'print(" ".join(j for j,v in d["jobs"].items() if "AUTOFIX_DEPLOY_KEY" in str(v)))')"
@@ -69,6 +83,26 @@ assert_contains "$cred" "secrets.AUTOFIX_DEPLOY_KEY"
 
 it "the landing program is told whether the push starts workflows, and only when the credential was configured"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["env"]["STARTS"])')" "steps.cred.outputs.starts == 'true' && '--push-starts-workflows'"
+
+# THE THIRD SOURCE. A red required check holds the merge exactly as a thread
+# does, so the work list is threads, then analysis issues, then checks — in that
+# order, which is the order a person reads them in.
+it "the work list merges three sources, in order, and only under the label"
+collect=$(py 'print(d["jobs"]["collect"]["steps"][1]["run"])')
+assert_contains "$collect" "accepted-findings.py"
+assert_contains "$collect" "sonar-issues.py"
+assert_contains "$collect" "failed-checks.py"
+assert_contains "$collect" "threads + sonar_issues + check_items"
+assert_contains "$collect" 'if [ "$MODE" = "all" ]'
+
+it "the landing program is handed the checks, so its summary can account for them"
+assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" "--checks"
+
+it "the fixer is told to reproduce a check before fixing it, and may run the job's command"
+fixstep=$(py 'print([s for s in d["jobs"]["fix"]["steps"] if s.get("id")=="model"][0])')
+assert_contains "$fixstep" "source: check"
+assert_contains "$fixstep" "REPRODUCE IT FIRST"
+assert_contains "$fixstep" "Bash(go:*)"
 
 it "the bound is a workflow constant the landing job passes through"
 assert_equals "3" "$(py 'print(d["env"]["MAX_ROUNDS"])')"
@@ -116,5 +150,34 @@ assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "startsWith(github.even
 
 it "does not cancel a dispatch in progress"
 assert_not_contains "$(py 'print(d["concurrency"])')" "cancel-in-progress"
+
+# ---------------------------------------------------------------------------
+# THE OTHER WORKFLOW A LABEL STARTS. It holds a token that starts a machine
+# writing to this repository, so its shape is pinned in the same file as the
+# fixing loop's: one event, one job, one permission.
+R="$ROOT/.github/workflows/remote-implement.yml"
+rpy() { python3 -c "
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+$1
+" "$R"; }
+
+it "remote-implement triggers on a labelled issue and nothing else"
+assert_equals "issues" "$(rpy 'print(" ".join(sorted(d[True])))')"
+assert_equals "['labeled']" "$(rpy 'print(d[True]["issues"]["types"])')"
+
+it "remote-implement grants nothing at the top level, and its one job only issues: write"
+assert_equals "{}" "$(rpy 'print(d["permissions"])')"
+assert_equals "fire" "$(rpy 'print(" ".join(d["jobs"]))')"
+assert_equals "{'issues': 'write'}" "$(rpy 'print(d["jobs"]["fire"]["permissions"])')"
+
+it "remote-implement prefilters on the label the vocabulary file states"
+label=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["implement_label"])')
+assert_contains "$(rpy 'print(d["jobs"]["fire"]["if"])')" "github.event.label.name == '$label'"
+
+it "the fire endpoint and its token are not in the tree"
+job=$(rpy 'print(d["jobs"]["fire"])')
+assert_contains "$job" "vars.ROUTINE_FIRE_URL"
+assert_contains "$job" "secrets.ROUTINE_FIRE_TOKEN"
 
 summary

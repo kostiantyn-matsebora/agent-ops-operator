@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# A LABEL STARTS A MACHINE WRITING TO THIS REPOSITORY, so who may place it is a
+# decision, not a transformation — and decisions are what these suites exist
+# for. Three properties, each of which somebody could simplify away:
+#
+#   the gate    anyone with TRIAGE may label an issue, and triage is NOT write.
+#               A gate reading the label rather than the labeller would let a
+#               drive-by start a session.
+#   the record  the fire's session link is posted once. A second comment reads
+#               as two sessions racing on one issue.
+#   the payload the number and nothing else. The platform wraps fire text as
+#               untrusted; sending a stranger's title and body would put their
+#               prose where the routine's prompt is.
+#
+# NO NETWORK: `gh` is stubbed and the fire endpoint is a local file-backed stub
+# reached through --fire-url, so a run can neither comment nor start anything.
+. "$(dirname "$0")/lib.sh"
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+S="$ROOT/.github/scripts/remote-implement.py"
+
+# A `gh` that answers a permission question and records every call.
+stub_gh_perm() {  # stub_gh_perm <bindir> <permission>
+  local bin="$1"; mkdir -p "$bin"
+  cat > "$bin/gh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\$GH_CALLS"
+case "\$*" in
+  *"collaborators/"*"/permission"*) echo "$2" ;;
+  *"issues/"*"/comments"*)          cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || true ;;
+  *) : ;;
+esac
+exit 0
+STUB
+  chmod +x "$bin/gh"
+}
+
+# The fire endpoint, as a file the program POSTs to over http. `python3 -m
+# http.server` cannot answer a POST, so this is a 20-line handler.
+start_endpoint() {  # start_endpoint <status> <body-file> <record-file>
+  ENDPOINT_PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  python3 - "$1" "$2" "$3" "$ENDPOINT_PORT" <<'PY' &
+import http.server, json, sys
+status, body_file, record, port = int(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
+
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("content-length") or 0)
+        payload = self.rfile.read(n).decode()
+        with open(record, "w") as f:
+            json.dump({"body": payload, "headers": dict(self.headers)}, f)
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(open(body_file, "rb").read())
+    def log_message(self, *a): pass
+
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+PY
+  ENDPOINT_PID=$!
+  for _ in $(seq 50); do
+    (exec 3<>/dev/tcp/127.0.0.1/"$ENDPOINT_PORT") 2>/dev/null && break
+    sleep 0.1
+  done
+}
+stop_endpoint() { [ -n "${ENDPOINT_PID:-}" ] && kill "$ENDPOINT_PID" 2>/dev/null; wait "$ENDPOINT_PID" 2>/dev/null; ENDPOINT_PID=""; }
+trap stop_endpoint EXIT
+
+event() {  # event <file> <label> <number> <sender> [pull_request]
+  local pr=""; [ -n "${5:-}" ] && pr=', "pull_request": {"url": "u"}'
+  cat > "$1" <<JSON
+{"action": "labeled",
+ "label": {"name": "$2"},
+ "issue": {"number": $3, "title": "A thing that is broken"$pr},
+ "sender": {"login": "$4"}}
+JSON
+}
+
+setup() {
+  DIR=$(mktemp -d); BIN="$DIR/bin"; export GH_CALLS="$DIR/calls"; : > "$GH_CALLS"
+  EVENT="$DIR/event.json"; RECORD="$DIR/fired.json"; BODY="$DIR/reply.json"
+  echo '{"session_url": "https://claude.ai/code/session_abc"}' > "$BODY"
+}
+
+run_it() {  # run_it [extra args]
+  PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r ROUTINE_FIRE_TOKEN="${TOKEN-tok}" \
+    python3 "$S" --event "$EVENT" --repo o/r "$@" 2>&1
+}
+
+# --- the wrong label ---------------------------------------------------------
+
+it "another label does nothing at all: this workflow sees every label event"
+setup; stub_gh_perm "$BIN" admin
+event "$EVENT" "bug" 7 someone
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_equals "" "$(cat "$GH_CALLS")"
+
+# --- the gate ----------------------------------------------------------------
+
+for perm in read triage none; do
+  it "a $perm labeller starts nothing: the label comes off and one comment says who may place it"
+  setup; stub_gh_perm "$BIN" "$perm"
+  event "$EVENT" autoimplement 7 stranger
+  out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+  assert_status 1 "$status"
+  assert_contains "$(cat "$GH_CALLS")" "issue edit 7 --repo o/r --remove-label autoimplement"
+  assert_contains "$(cat "$GH_CALLS")" "issue comment 7"
+  assert_not_contains "$out" "fired"
+done
+
+it "a pull request carrying the label fires nothing: it is an issue to that API, not a request to implement"
+setup; stub_gh_perm "$BIN" admin
+event "$EVENT" autoimplement 7 owner pr
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_not_contains "$(cat "$GH_CALLS")" "issue comment"
+
+# --- the fire ----------------------------------------------------------------
+
+it "a writer's label fires once, carrying the NUMBER and the beta header, and comments the session link"
+setup; stub_gh_perm "$BIN" write
+event "$EVENT" autoimplement 42 maintainer
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_equals '{"text": "42"}' "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["body"])' "$RECORD")"
+assert_contains "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["headers"])' "$RECORD")" "experimental-cc-routine"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
+assert_contains "$(cat "$GH_CALLS")" "https://claude.ai/code/session_abc"
+
+it "the comment carries the marker, so a second run does not post a second one"
+setup; stub_gh_perm "$BIN" write
+event "$EVENT" autoimplement 42 maintainer
+echo '<!-- remote-implement:fired -->' > "$DIR/comments"
+GH_COMMENTS="$DIR/comments"; export GH_COMMENTS
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+unset GH_COMMENTS
+assert_status 0 "$status"
+assert_not_contains "$(cat "$GH_CALLS")" "issue comment"
+
+# --- the endpoint says no ----------------------------------------------------
+
+it "a 5xx from the endpoint comments the status and fails the job, rather than failing silently"
+setup; stub_gh_perm "$BIN" admin
+event "$EVENT" autoimplement 9 owner
+start_endpoint 503 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 1 "$status"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 9"
+assert_contains "$(cat "$GH_CALLS")" "503"
+
+it "no endpoint configured says so on the issue instead of starting nothing quietly"
+setup; stub_gh_perm "$BIN" admin
+event "$EVENT" autoimplement 9 owner
+out=$(PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r python3 "$S" --event "$EVENT" --repo o/r --fire-url "" 2>&1); status=$?
+assert_status 1 "$status"
+assert_contains "$(cat "$GH_CALLS")" "no routine"
+
+# --- the payload -------------------------------------------------------------
+
+it "an event whose issue number is not a number never reaches the fire"
+setup; stub_gh_perm "$BIN" admin
+cat > "$EVENT" <<'JSON'
+{"action":"labeled","label":{"name":"autoimplement"},
+ "issue":{"number":"7; rm -rf /","title":"t"},"sender":{"login":"owner"}}
+JSON
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 1 "$status"
+assert_equals "" "$(cat "$GH_CALLS")"
+
+summary

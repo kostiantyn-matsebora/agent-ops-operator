@@ -23,10 +23,13 @@ Implement tasks from an OpenSpec change.
 
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx:apply <other>`).
 
-1.5 **Work in the change's own worktree — THIS REPOSITORY'S RULE**
+1.5 **Work in the change's own working copy — THIS REPOSITORY'S RULE**
 
-   Every openspec change is implemented in its own worktree on its own branch and
-   lands as a pull request. See `.claude/rules/worktree-delivery.md`.
+   Every openspec change is implemented in its own working copy on its own branch
+   and lands as a pull request: on a workstation its own git worktree — or, in a
+   remote session, the session's clone with `change/<name>` checked out in place,
+   never a worktree added beside it. See `.claude/rules/worktree-delivery.md` and
+   `.claude/rules/remote-session.md`.
 
    ```bash
    git worktree list                                  # is one already open?

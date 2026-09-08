@@ -1,10 +1,43 @@
 {
+  "_comment": [
+    "EACH STDIO SERVER RUNS DIRECTLY WHERE ITS BINARY EXISTS, AND WAITS FOR THE",
+    "BOOTSTRAP WHERE IT DOES NOT. A workstation that has the binary execs it at",
+    "once and is unchanged; a remote session starts before",
+    ".github/scripts/cloud-bootstrap.sh has finished installing serena, so there",
+    "the wrapper waits up to 180 seconds and then execs.",
+    "",
+    "NEVER `exit 0` ON A WORKSTATION. The obvious wrapper — exit 0 unless the",
+    "remote marker is set — makes every stdio server remote-only, which would",
+    "silently disable the two that work here today. A workstation missing the",
+    "binary exits NON-ZERO and fails to connect, exactly as it does without any",
+    "wrapper: a server that is meant to be there and is not must say so.",
+    "",
+    "`sonarqube` is http, not stdio: nothing is installed for it, and remotely",
+    "the credential proxy attaches the token for its host."
+  ],
   "mcpServers": {
+    "docker": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-c",
+        "command -v uvx >/dev/null 2>&1 && exec uvx mcp-server-docker; [ \"$CLAUDE_CODE_REMOTE\" = \"1\" ] || [ \"$CLAUDE_CODE_REMOTE\" = \"true\" ] || exit 1; for _ in $(seq 180); do command -v uvx >/dev/null 2>&1 && exec uvx mcp-server-docker; sleep 1; done; exit 1"
+      ]
+    },
+    "serena": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-c",
+        "command -v serena >/dev/null 2>&1 && exec serena start-mcp-server --context claude-code --project-from-cwd; [ \"$CLAUDE_CODE_REMOTE\" = \"1\" ] || [ \"$CLAUDE_CODE_REMOTE\" = \"true\" ] || exit 1; for _ in $(seq 180); do command -v serena >/dev/null 2>&1 && exec serena start-mcp-server --context claude-code --project-from-cwd; sleep 1; done; exit 1"
+      ]
+    },
     "sonarqube": {
       "type": "http",
       "url": "https://api.sonarcloud.io/mcp",
       "headers": {
-        "Authorization": "Bearer ${SONAR_TOKEN}"
+        "Authorization": "Bearer ${SONAR_TOKEN}",
+        "SONARQUBE_ORG": "${SONAR_ORG}"
       }
     }
   }

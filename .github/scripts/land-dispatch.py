@@ -143,6 +143,12 @@ def where(item: dict) -> str:
 def describe(item: dict) -> str:
     if item.get("source") == "sonar":
         return f"`{where(item)}` — {item.get('rule')}: {first_line(item.get('message', ''))}"
+    if item.get("source") == "check":
+        # A CHECK IS NAMED BY ITS JOB, never by a path. Its `path` is the
+        # workflow file, which is where the job is DEFINED and almost never
+        # where the failure is.
+        run = f" ([run]({item['run_url']}))" if item.get("run_url") else ""
+        return f"the `{item.get('job')}` check{run}"
     return f"`{where(item)}` — {first_line(item.get('finding', ''))}"
 
 
@@ -167,15 +173,20 @@ class Round:
         self.markers = markers
         self.work = work
         self.number = self.count_rounds() + 1
-        self.sonar = self.read_sonar()
+        self.sonar = self.read_json(self.args.sonar)
+        self.checks = self.read_json(getattr(self.args, "checks", None))
 
-    def read_sonar(self) -> dict:
-        if self.args.sonar and self.args.sonar.is_file():
+    @staticmethod
+    def read_json(path) -> dict:
+        if path and pathlib.Path(path).is_file():
             try:
-                return json.loads(self.args.sonar.read_text() or "{}")
+                return json.loads(pathlib.Path(path).read_text() or "{}")
             except json.JSONDecodeError:
                 return {}
         return {}
+
+    def read_sonar(self) -> dict:
+        return self.read_json(self.args.sonar)
 
     def count_rounds(self) -> int:
         """Landing comments carrying the round marker, since the label was
@@ -226,6 +237,18 @@ class Round:
             else:
                 lines.append(f"\nThe analysis service reported {plural(len(self.sonar.get('issues') or []), 'open issue')}"
                              " for the head commit.")
+        if self.checks:
+            # A FIXED CHECK GETS NO REPLY — there is no thread to reply in, and
+            # the check's next run on the landed commit is its verdict. The
+            # summary is where it is accounted for.
+            if not self.checks.get("consulted"):
+                lines.append("\nThe required checks were NOT consulted this round: none had reported on "
+                             "the head commit. They run on the commit this round landed.")
+            else:
+                failed = len(self.checks.get("items") or [])
+                lines.append(f"\nThe required checks reported {plural(failed, 'failure')} on the head commit"
+                             + ("; each was fixed or disputed above, and the next run is the verdict."
+                                if failed else "."))
         if a.run_url:
             lines.append(f"\n[run]({a.run_url})")
         pr_comment(a.repo, a.pr, "\n".join(lines))
@@ -251,6 +274,7 @@ def main() -> int:
     ap.add_argument("--since", default="", help="--mode all: when the label was placed (ISO 8601); rounds are counted from then")
     ap.add_argument("--max-rounds", type=int, default=3)
     ap.add_argument("--sonar", type=pathlib.Path, help="--mode all: sonar-issues.py output, for the summary")
+    ap.add_argument("--checks", type=pathlib.Path, help="--mode all: failed-checks.py output, for the summary")
     ap.add_argument("--vocabulary", type=pathlib.Path, default=DEFAULT_VOCABULARY)
     ap.add_argument("--push-starts-workflows", action="store_true",
                     help="--mode all: the push goes through a credential that starts CI and the review "
@@ -292,13 +316,27 @@ def main() -> int:
     patch_empty = args.patch.stat().st_size == 0
     touched = set() if patch_empty else patch_paths(args.patch)
 
+    def evidence(item: dict) -> tuple[bool, str]:
+        """IS THERE A CHANGE BEHIND THIS CLAIM. A review or analysis finding
+        points at a LINE, so the patch must touch that file — the check that
+        catches a model reporting a fix it did not make. A CHECK points at a
+        JOB, and the fix for a red job is wherever the failure actually is
+        (a test, a template, a document), never the workflow file the item
+        names; so its evidence is that the patch is not empty. Asking for
+        `ci.yml` would dispute every genuine fix."""
+        if item.get("source") == "check":
+            return (not patch_empty), "reported fixed, but the patch is empty"
+        return item["path"] in touched, f"reported fixed, but the patch does not touch `{item['path']}`"
+
     fixed: list[str] = []
     disputed: dict[str, str] = {}
     for item_id, item in work.items():
-        if item_id in claimed_fixed and item["path"] in touched:
-            fixed.append(item_id)
-        elif item_id in claimed_fixed:
-            disputed[item_id] = f"reported fixed, but the patch does not touch `{item['path']}`"
+        if item_id in claimed_fixed:
+            ok, why = evidence(item)
+            if ok:
+                fixed.append(item_id)
+            else:
+                disputed[item_id] = why
         else:
             disputed[item_id] = claimed_disputed.get(item_id, "not addressed by the fixing step")
 
@@ -325,6 +363,17 @@ def main() -> int:
                        f"{markers['dispute']}\nThe fixing step disputes {plural(len(sonar), 'analysis issue')}, "
                        f"for @{args.approver}. Nothing was changed in the analysis service; mark them there "
                        f"if you agree, or answer here.\n\n{lines}{run}")
+        # A CHECK HAS NO THREAD, so a disputed one is a pull request comment,
+        # exactly as an analysis issue is. The check stays red and the merge
+        # stays blocked, which is right: a failure nobody explained is a
+        # decision still owed.
+        checks = {t: why for t, why in disputed.items() if work[t]["source"] == "check"}
+        if checks:
+            lines = "\n".join(f"- {describe(work[t])}: {why}" for t, why in checks.items())
+            pr_comment(args.repo, args.pr,
+                       f"{markers['dispute']}\nThe fixing step disputes {plural(len(checks), 'failed check')}, "
+                       f"for @{args.approver}. The tree was not changed for them — re-run the check if you "
+                       f"agree it was not the code, or answer here.\n\n{lines}{run}")
 
     if not fixed:
         print("no finding was fixed, so nothing is committed and nothing is resolved")
@@ -359,10 +408,12 @@ def main() -> int:
     sh("git", "apply", "--index", str(args.patch))
 
     n_review = sum(1 for t in fixed if work[t]["source"] == "review")
-    n_sonar = len(fixed) - n_review
+    n_sonar = sum(1 for t in fixed if work[t]["source"] == "sonar")
+    n_check = sum(1 for t in fixed if work[t]["source"] == "check")
     if rnd:
         parts = [plural(n_review, "review finding")] if n_review else []
         parts += [plural(n_sonar, "analysis issue")] if n_sonar else []
+        parts += [plural(n_check, "failed check")] if n_check else []
         subject = f"fix(review): address {' and '.join(parts)} (autofix round {rnd.number})"
     else:
         subject = f"fix(review): address {len(fixed)} accepted review finding{'s' if len(fixed) != 1 else ''}"
