@@ -94,8 +94,12 @@ grep -rl '^<n>$' openspec/changes/*/.github-issue 2>/dev/null
 
    The title becomes the squashed commit's subject, so it obeys the commit
    convention; a CI check enforces that. The body MUST say:
-   - `Closes #<n>` — GitHub closes on the keyword and on nothing else, and the
-     `pr-closes` check refuses a pull request without it.
+   - **`Refs #<n>`, NEVER `Closes #<n>`.** Step 1 promoted that issue into this
+     change's TRACKING issue, and a tracking issue closes at ARCHIVE, not at
+     merge — `pr-closes-guard.py` refuses a pull request that would close one
+     whose change it merely proposes, and it is right to: the issue has to
+     follow the change through review and archiving. The archiving pull request
+     is where `Closes #<n>` belongs, and the guard refuses THAT one without it.
    - **That approval came from the issue's label, and who placed it.** The
      `autofix` label is on this pull request because that person's word was
      given once, on the issue.

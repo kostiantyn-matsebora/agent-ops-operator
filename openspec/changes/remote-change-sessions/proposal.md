@@ -45,7 +45,8 @@ issue into one.
   committed instruction file (`.github/routines/implement-issue.md`), which
   promotes the issue in place, proposes, implements on `change/<name>`, runs
   the unit and chart tiers itself and dispatches the smoke e2e workflow for
-  the rest, and opens the pull request saying `Closes #<n>`.
+  the rest, and opens the pull request referencing the issue (`Refs #<n>` —
+  the tracking issue closes at archive, and a guard enforces that).
 - **The issue label is the owner's word for the fixing loop too, and the loop
   fixes EVERYTHING that holds the merge.** The pull request such a session
   opens carries `autofix` from creation. Under that label the loop's work list
