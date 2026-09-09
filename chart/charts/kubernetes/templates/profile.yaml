@@ -22,11 +22,27 @@ spec:
   # comes from the Pipelines routing it: the bundle's own wiring component when
   # it is on, otherwise whatever the install declared.
   maxTurns: {{ $p.maxTurns }}
-  {{- with $p.systemPrompt }}
+  {{- /* THE POSTURE PARAGRAPH IS THE THIRD WALL ON allowPodExecution. The
+  parent helper is the one reading of the value — the same one
+  agentops.runtimeWriteRules gates on and mcp-server.yaml includes — so the
+  prompt cannot say one thing while the RBAC does another. Appended after the
+  role, whether shipped or the operator's own, and absent while the gate is on
+  or the value is emptied. */ -}}
+  {{- $posture := "" }}
+  {{- if ne (include "agentops.runtimePodExecutionAllowed" .) "true" }}
+  {{- $posture = $p.podExecutionWithheldPrompt | default "" | trim }}
+  {{- end }}
+  {{- $role := $p.systemPrompt | default "" | trim }}
+  {{- if and $role $posture }}
+  {{- $role = printf "%s\n\n%s" $role $posture }}
+  {{- else if $posture }}
+  {{- $role = $posture }}
+  {{- end }}
+  {{- with $role }}
   # Inline role, because this profile has no repository to hold a definition
   # file. Appended to the runtime's system prompt; it grants nothing.
   systemPrompt: |
-{{ . | trim | indent 4 }}
+{{ . | indent 4 }}
   {{- end }}
   # REQUIRED, and with no default on purpose: `none` leaves output unformatted
   # unless this profile's prompt says otherwise, and `blocks` shapes it by

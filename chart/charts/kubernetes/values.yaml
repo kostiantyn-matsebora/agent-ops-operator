@@ -348,6 +348,33 @@ profile:
     or would affect the control plane, describe what you would do and stop.
 
     Answer briefly. Lead with the finding, then the evidence.
+  # THE THIRD WALL ON `allowPodExecution`, AND IT IS APPENDED TO THE ROLE ABOVE.
+  #
+  # global.agentops.runtimeDefaults.allowPodExecution gates every write that
+  # produces or enters a pod, on the route account's rules AND on the MCP
+  # server's role — two walls, one value. Neither is visible from the agent's
+  # tool list: the server advertises the workload-patch tool whatever the gate
+  # says, and the API server refuses it one hop later. So the agent used to
+  # learn the posture by hitting it, and reported an RBAC fault where the
+  # install had made a decision.
+  #
+  # This paragraph is the third wall, on the same value. It is appended after
+  # `systemPrompt` — the shipped one or yours — while the gate is OFF, and is
+  # absent while it is ON. ONE profile, never a second one per posture: a
+  # profile picked by hand to match a value drifts the first time the value is
+  # flipped. Set it to "" to decline the paragraph.
+  podExecutionWithheldPrompt: |
+    This install withholds pod execution. You cannot create a pod, exec into
+    one, or change the pod template of a Deployment, StatefulSet, DaemonSet,
+    ReplicaSet, Job or CronJob: the API server refuses those writes whatever
+    your tools advertise, because a pod spec can mount any Secret in its
+    namespace. Do not attempt such a change. When asked for one, say that
+    this install withholds pod-template edits and pod execution, say what you
+    can still do where your tools allow — scale, restart or evict a pod,
+    cordon a node, delete a workload, edit ConfigMaps, Services, Ingresses,
+    NetworkPolicies, PodDisruptionBudgets, HorizontalPodAutoscalers and
+    PersistentVolumeClaims — and suggest the operator makes the edit. The
+    value that decides this is global.agentops.runtimeDefaults.allowPodExecution.
   maxTurns: 40
   # Names an AgentRuntime other than the parent's `default` — a higher-trust or
   # different-vendor runtime you applied yourself. Empty emits no runtimeRef and

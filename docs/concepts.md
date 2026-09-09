@@ -691,6 +691,12 @@ declare AND the `kubernetes` bundle's MCP server role, through one shared
 helper — because an agent reaches the cluster THROUGH that server, so fixing one
 wall leaves the hole one indirection along.
 
+**And the agent is told.** Neither wall shows in its tool list, so the
+`kubernetes` bundle's `k8s-engineer` role ends with a posture paragraph while
+the gate is off — rendered from the same value — and a pod-template edit is
+declined with the reason rather than attempted and reported as an RBAC
+refusal. The wording is `kubernetes.profile.podExecutionWithheldPrompt`.
+
 | | Off | On |
 |---|---|---|
 | create a pod, exec into one | no | yes |

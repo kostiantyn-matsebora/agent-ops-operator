@@ -2227,6 +2227,105 @@ func TestOutputFormatCanBeDeclined(t *testing.T) {
 	}
 }
 
+// THE POSTURE PARAGRAPH IS THE THIRD WALL ON allowPodExecution.
+//
+// The route account's rules and the MCP server's role are gated by one value,
+// and neither is visible from the agent's tool list: the server advertises the
+// workload-patch tool whatever the gate says, and the API server refuses it one
+// hop later. On the reference install the acting route was asked to add a
+// nodeSelector to a Deployment, tried the patch, and reported an RBAC fault
+// where the install had made a decision. So the kubernetes bundle's profile is
+// TOLD, from the same value — one profile, never a second one per posture,
+// because a profile picked by hand to match a value drifts the first time it
+// is flipped. These pin the three states the spec names.
+
+// k8sEngineerRole returns the rendered systemPrompt body of the bundle's
+// profile, de-indented, with the outputFormat line that follows it cut off.
+func k8sEngineerRole(t *testing.T, args ...string) string {
+	t.Helper()
+	out := helmTemplate(t, append([]string{"--set", "kubernetes.enabled=true"}, args...)...)
+	doc := findDocByKindAndName(t, out, "AgentProfile", "k8s-engineer")
+	_, after, ok := strings.Cut(doc, "systemPrompt: |\n")
+	if !ok {
+		t.Fatalf("k8s-engineer renders no systemPrompt:\n%s", doc)
+	}
+	body, _, _ := strings.Cut(after, "\n  outputFormat:")
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimPrefix(strings.TrimRight(line, " "), "    ")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+const postureMarker = "This install withholds pod execution"
+
+func TestK8sProfileStatesTheWithheldPosture(t *testing.T) {
+	role := k8sEngineerRole(t)
+	at := strings.Index(role, postureMarker)
+	if at < 0 {
+		t.Fatalf("with allowPodExecution off (the default) the role must state the posture:\n%s", role)
+	}
+	// LAST in the role: the shipped role precedes it, nothing follows it.
+	if job := strings.Index(role, "You are a Kubernetes site reliability engineer"); job < 0 || job > at {
+		t.Errorf("the posture paragraph must follow the shipped role, not replace or precede it:\n%s", role)
+	}
+	paragraph := role[at:]
+	if strings.Contains(paragraph, "\n\n") {
+		t.Errorf("the posture paragraph must be the last thing in the role:\n%s", paragraph)
+	}
+	// It names every workload kind runtimeWriteRules gates — widening the helper
+	// without widening the text fails here.
+	for _, kind := range []string{"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob"} {
+		if !strings.Contains(paragraph, kind) {
+			t.Errorf("the posture paragraph does not name %s, which the gate refuses to patch", kind)
+		}
+	}
+	// ...and what the spec's scenario says it must say: the reason, what remains
+	// possible, and the operator as the one to make the edit.
+	for _, phrase := range []string{
+		"Do not attempt",
+		"where your tools allow",
+		"suggest the operator makes the edit",
+		"global.agentops.runtimeDefaults.allowPodExecution",
+	} {
+		if !strings.Contains(paragraph, phrase) {
+			t.Errorf("the posture paragraph lacks %q:\n%s", phrase, paragraph)
+		}
+	}
+}
+
+func TestK8sProfilePostureFollowsTheGate(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
+	if strings.Contains(role, postureMarker) {
+		t.Fatalf("with the gate on the RBAC grants the writes, so the role must not say they are withheld:\n%s", role)
+	}
+	if !strings.Contains(role, "You are a Kubernetes site reliability engineer") {
+		t.Errorf("turning the gate on must leave the shipped role in place:\n%s", role)
+	}
+}
+
+func TestK8sProfilePostureSurvivesAnOperatorsOwnRole(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "kubernetes.profile.systemPrompt=Custom role text.")
+	if !strings.HasPrefix(role, "Custom role text.") {
+		t.Fatalf("the operator's role must come first:\n%s", role)
+	}
+	if !strings.Contains(role, "Custom role text.\n\n"+postureMarker) {
+		t.Errorf("the posture paragraph must follow the operator's role after one blank line — the posture is the chart's fact, not the prompt author's:\n%s", role)
+	}
+}
+
+// Emptying the value is how an install declines the paragraph, and the role
+// then renders exactly as it did before the value existed.
+func TestK8sProfilePostureCanBeDeclined(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "kubernetes.profile.podExecutionWithheldPrompt=")
+	if strings.Contains(role, postureMarker) {
+		t.Fatalf("an emptied value must render no posture paragraph:\n%s", role)
+	}
+	if !strings.HasSuffix(role, "Lead with the finding, then the evidence.") {
+		t.Errorf("declining the paragraph must leave the shipped role exactly as it was:\n%s", role)
+	}
+}
+
 // RWX IS THE SHIPPED DEFAULT ON BOTH VOLUMES, AND NOTHING CHECKED IT.
 //
 // It is the mode a MULTI-NODE install needs: concurrent conversations mount one
