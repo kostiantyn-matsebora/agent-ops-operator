@@ -6,7 +6,7 @@
 
 ## 2. Unit tests
 
-- [ ] 2.1 In `platform/manager/internal/integration/charttemplate_test.go`, add a render test for the k8s-engineer `AgentProfile` in three states: gate off (default) → paragraph present, last in `systemPrompt`, and names every workload kind `runtimeWriteRules` gates (deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs); gate on → absent; gate off with `--set kubernetes.profile.systemPrompt=...` → the operator's text first, the paragraph after it. Verify: the new test fails on the pre-change template and passes on the changed one.
+- [ ] 2.1 In `platform/manager/internal/integration/charttemplate_test.go`, add a render test for the k8s-engineer `AgentProfile` in three states: gate off (default) → paragraph present, last in `systemPrompt`, states pod execution is withheld, names every workload kind `runtimeWriteRules` gates (deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs), names what remains possible, and points at the operator making the edit — matching spec.md's "The withheld posture is stated to the agent" scenario in full, not the workload-kind list alone; gate on → absent; gate off with `--set kubernetes.profile.systemPrompt=...` → the operator's text first, the paragraph after it. Verify: the new test fails on the pre-change template and passes on the changed one.
 - [ ] 2.2 Run the chart render suite from the worktree in the build container: `docker exec -i -w "$PWD/platform/manager" agentops-go go test ./internal/integration/ -run 'Chart' -count=1` from the WORKTREE path, and confirm the run did not skip for a missing `helm` (memory `go-125-build-container`). Verify: the k8s-bundle profile tests, the identity tests and the runtimes tests all pass.
 
 ## 3. E2E tests

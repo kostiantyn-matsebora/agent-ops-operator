@@ -1,12 +1,14 @@
 ## Why
 
-On the reference install, `k8s-operate` was asked to add a `nodeSelector` to a
-Deployment. It called the patch tool, the API server refused it, and the agent
-reported "the MCP server works but the service account lacks permission". The
-refusal was correct — `global.agentops.runtimeDefaults.allowPodExecution`
-defaults off and gates every write to a pod template — but the agent learned
-the posture only by hitting it, and the person read a permissions fault instead
-of a decision the install made on purpose.
+On the reference install, `k8s-operate` (the kubernetes bundle's admin route,
+binding the `k8s-engineer` `AgentProfile`) was asked to add a `nodeSelector` to
+a Deployment. It called the patch tool, the API server refused it, and the
+agent reported "the MCP server works but the service account lacks
+permission". The refusal was correct —
+`global.agentops.runtimeDefaults.allowPodExecution` defaults off and gates
+every write to a pod template — but the agent learned the posture only by
+hitting it, and the person read a permissions fault instead of a decision the
+install made on purpose.
 
 The profile's prompt already tells the agent "if a tool is not in your
 allowlist, say so plainly". That covers the toolset wall and not this one: the
