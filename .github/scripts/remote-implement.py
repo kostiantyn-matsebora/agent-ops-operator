@@ -206,7 +206,7 @@ def main() -> int:
             f"{MARKER}\n"
             f"Implementing this issue: {where} started, approved by @{sender}.\n\n"
             f"It proposes a change, implements it on its own branch and opens a pull request "
-            f"saying `Closes #{number}`, carrying `{vocabulary(args.vocabulary)['approve_label']}` "
+            f"referencing this issue, carrying `{vocabulary(args.vocabulary)['approve_label']}` "
             f"so the review's findings are fixed without a reply in each thread. "
             f"Nothing merges or archives without a person.")
     print(f"fired for #{number}" + (f": {url}" if url else ""))

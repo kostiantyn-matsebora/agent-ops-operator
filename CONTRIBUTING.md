@@ -21,7 +21,9 @@ and a security problem goes to [SECURITY.md](SECURITY.md), never to an issue.
 **A maintainer may hand an issue straight to a session.** An issue labelled
 `autoimplement` by somebody with write access starts one cloud session that
 proposes a change from what you wrote, implements it on its own branch and
-opens a pull request; the issue gains one comment linking that session. The
+opens a pull request. The issue gains exactly two automated comments: one
+linking that session, and the pointer the promotion leaves as it does for any
+promoted issue. The
 label is refused from anyone without write access, and it changes nothing about
 what happens next — the proposal, the pull request and the review are read by a
 person, and a person merges. Nobody has to use it: an issue nobody labels is

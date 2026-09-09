@@ -104,8 +104,13 @@ done
 pass
 assert_contains "$out" "helm missing"
 
+# ITS OWN RUN, not the previous case's `$out`. Reusing that variable made this
+# assertion pass without calling the script at all — a test that cannot fail.
 it "--verify names the Go floor when the toolchain is older than the modules need"
+make_env absent
+out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap --verify)
 assert_contains "$out" "go missing"
+assert_contains "$out" "need >= "
 
 it "--verify says present for what is there"
 make_env present

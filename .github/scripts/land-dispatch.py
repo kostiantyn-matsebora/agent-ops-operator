@@ -185,8 +185,6 @@ class Round:
                 return {}
         return {}
 
-    def read_sonar(self) -> dict:
-        return self.read_json(self.args.sonar)
 
     def count_rounds(self) -> int:
         """Landing comments carrying the round marker, since the label was

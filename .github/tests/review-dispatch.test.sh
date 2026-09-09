@@ -130,11 +130,24 @@ assert_equals "land" "$(py 'print(" ".join(j for j,v in d["jobs"].items() if v["
 it "runs no model in the landing job"
 assert_not_contains "$(py 'print(d["jobs"]["land"])')" "claude"
 
-it "gives the model no gh, no git push, and no git commit"
-tools=$(py 'print([s for s in d["jobs"]["fix"]["steps"] if "claude-code-action" in s.get("uses","")][0]["with"]["claude_args"])')
-assert_not_contains "$tools" "gh"
-assert_not_contains "$tools" "git push"
-assert_not_contains "$tools" "git commit"
+# THE GRANTED TOOLS, NOT THE PROSE AROUND THEM. This read the whole
+# `claude_args` string, so a COMMENT containing "through" or a path holding
+# `.github` failed it — a security assertion that fires on a word is one
+# somebody deletes. It now parses the allowlist and asks what is actually
+# granted, which is the property: no `gh`, no push, no commit, and no shell.
+it "gives the model no gh, no git push, no git commit and no bare shell"
+tools=$(py '
+import re
+args = [s for s in d["jobs"]["fix"]["steps"] if "claude-code-action" in s.get("uses","")][0]["with"]["claude_args"]
+m = re.search(r"--allowedTools \"([^\"]*)\"", args)
+print(",".join(t.strip() for t in m.group(1).split(",")))')
+assert_not_contains "$tools" "Bash(gh"
+assert_not_contains "$tools" "Bash(git push"
+assert_not_contains "$tools" "Bash(git commit"
+# A bare shell would make every entry beside it decoration.
+assert_not_contains "$tools" "Bash(bash"
+assert_not_contains "$tools" "Bash(sh:"
+assert_not_contains "$tools" "Bash(python3:"
 
 it "uploads the patch with hidden files included, and fails on nothing found"
 up=$(py 'print([s["with"] for s in d["jobs"]["fix"]["steps"] if "upload-artifact" in s.get("uses","")][0])')
@@ -166,10 +179,14 @@ it "remote-implement triggers on a labelled issue and nothing else"
 assert_equals "issues" "$(rpy 'print(" ".join(sorted(d[True])))')"
 assert_equals "['labeled']" "$(rpy 'print(d[True]["issues"]["types"])')"
 
-it "remote-implement grants nothing at the top level, and its one job only issues: write"
+it "remote-implement grants nothing at the top level, and its one job only what it uses"
 assert_equals "{}" "$(rpy 'print(d["permissions"])')"
 assert_equals "fire" "$(rpy 'print(" ".join(d["jobs"]))')"
-assert_equals "{'issues': 'write'}" "$(rpy 'print(d["jobs"]["fire"]["permissions"])')"
+# `contents: read` for the checkout, `issues: write` to comment and to remove
+# the label from somebody who may not push. Nothing else — in particular no
+# `contents: write`: this job starts a session, it never writes to the tree.
+assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["fire"]["permissions"])')"
+assert_equals "" "$(rpy 'print(d["jobs"]["fire"]["permissions"].get("contents","") if d["jobs"]["fire"]["permissions"].get("contents")=="write" else "")')"
 
 it "remote-implement prefilters on the label the vocabulary file states"
 label=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["implement_label"])')

@@ -45,10 +45,14 @@ import re
 import subprocess
 import sys
 
-# The review's own jobs, and the aggregate. Names, because that is what a check
-# run carries.
+# The aggregate, excluded by NAME because that is what a check run carries.
+# `ci-green` fails BECAUSE one of its needs did, so reporting both hands the
+# fixer the symptom beside the cause with no way to tell them apart.
+#
+# The review's own jobs need no list: they are not in `ci-green`'s `needs:`, so
+# the required-jobs test already excludes them. A second list naming them would
+# be a copy to keep in step for nothing.
 EXCLUDED = {"ci-green"}
-EXCLUDED_WORKFLOWS = {"claude-review", "review-dispatch"}
 
 
 def gh(*args: str) -> str:
@@ -70,7 +74,10 @@ def required_jobs(ci: pathlib.Path) -> set[str]:
             needs = [needs]
         if needs:
             return {str(n).strip() for n in needs}
-    except (ImportError, AttributeError, TypeError, ValueError):
+    except Exception:  # noqa: BLE001 -- ANY parse failure falls back to the regex
+        # A malformed or unreadable ci.yml must not crash the collector: the
+        # regex below reads the same line, and reporting no required jobs is
+        # safer than reporting none at all by dying.
         pass
     m = re.search(r"^  ci-green:.*?^    needs:\s*\[(.*?)\]", ci.read_text(), re.S | re.M)
     return {n.strip() for n in m.group(1).split(",")} if m else set()

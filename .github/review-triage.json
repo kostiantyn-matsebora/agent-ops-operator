@@ -41,8 +41,8 @@
     "`issues: labeled` event, checks the labeller may push here (the",
     "collaborators API, as the label gate does \u2014 a label event carries no",
     "`author_association`), and fires one remote session for the issue's NUMBER;",
-    "placed by anyone else it is removed with a visible comment. The session that",
-    "session opens its pull request WITH `approve_label` already on it: the word",
+    "placed by anyone else it is removed with a visible comment. That session",
+    "opens its pull request WITH `approve_label` already on it: the word",
     "was given once, on the issue, by someone who may push, and asking for it a",
     "second time on the pull request would be asking the same person the same",
     "question. See .claude/rules/remote-session.md."

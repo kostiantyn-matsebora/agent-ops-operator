@@ -59,6 +59,12 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
   advice names a worktree, this file is the correction.
 - **`worktree-delivery.md` still owns everything else** — the squash, the
   title, `Closes #<n>`, archiving inside the pull request.
+- **THE ROUTINE'S PUSH RULES, MEASURED.** It clones the DEFAULT branch and may
+  push any branch that is NOT protected, carries no open pull request by
+  somebody else and no commits by somebody else — so a fresh `change/<name>` is
+  accepted and a branch a person is already working is not.
+  `allowed_push_branches` is set to `change/*` where the API takes it, which
+  states the same bound from the other side.
 
 ### AN ISSUE LABEL STARTS ONE
 

@@ -446,7 +446,12 @@ jobs:
             Every `id` from the work list appears exactly once, with `action`
             `fixed` or `disputed`. Return nothing else.
           claude_args: |
-            --allowedTools "Read,Edit,MultiEdit,Write,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(go:*),Bash(npm:*),Bash(node:*),Bash(python3:*),Bash(helm:*),Bash(bash:*),Bash(.github/tests/run.sh:*),Bash(.github/scripts/:*)"
+            # THE REPRODUCE GRANT IS THE TEST RUNNERS, NOT A SHELL. A check
+            # item is reproduced by running the job's own command, so the
+            # toolchains are here — and `Bash(bash:*)` is NOT, because it grants
+            # every command there is and would make this list decoration. The
+            # suite has its own entry rather than arriving through `bash`.
+            --allowedTools "Read,Edit,MultiEdit,Write,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(go:*),Bash(npm:*),Bash(node:*),Bash(helm:*),Bash(python3 .github/scripts/:*),Bash(.github/tests/run.sh:*)"
 
       # A MODEL THAT DID NOT RUN MUST NOT READ AS A MODEL THAT FIXED NOTHING.
       # The action skips itself, successfully, whenever this workflow file

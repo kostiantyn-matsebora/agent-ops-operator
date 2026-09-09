@@ -6,14 +6,22 @@
     ".github/scripts/cloud-bootstrap.sh has finished installing serena, so there",
     "the wrapper waits up to 180 seconds and then execs.",
     "",
-    "NEVER `exit 0` ON A WORKSTATION. The obvious wrapper — exit 0 unless the",
-    "remote marker is set — makes every stdio server remote-only, which would",
+    "NEVER `exit 0` ON A WORKSTATION. The obvious wrapper \u2014 exit 0 unless the",
+    "remote marker is set \u2014 makes every stdio server remote-only, which would",
     "silently disable the two that work here today. A workstation missing the",
     "binary exits NON-ZERO and fails to connect, exactly as it does without any",
     "wrapper: a server that is meant to be there and is not must say so.",
     "",
     "`sonarqube` is http, not stdio: nothing is installed for it, and remotely",
-    "the credential proxy attaches the token for its host."
+    "the credential proxy attaches the token for its host.",
+    "",
+    "`sonarqube`'s headers are the WORKSTATION's, and they are deliberately",
+    "unconditional for now. Remotely the credential proxy attaches the token for",
+    "that host, and whether it OVERRIDES a header the client sends or requires it",
+    "absent is not yet measured \u2014 design D6 records it as the question the first",
+    "remote session settles. Guessing a `CLAUDE_CODE_REMOTE` conditional here",
+    "would encode an answer nobody has; if the proxy needs the header absent, the",
+    "fix is one line and it lands with the measurement."
   ],
   "mcpServers": {
     "docker": {

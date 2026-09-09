@@ -32,8 +32,12 @@ Implement tasks from an OpenSpec change.
    `.claude/rules/remote-session.md`.
 
    ```bash
+   # on a workstation:
    git worktree list                                  # is one already open?
    git worktree add -b change/<name> ../agent-ops-worktrees/<name> origin/master
+
+   # in a REMOTE session, the clone IS the working copy — never `worktree add`:
+   git checkout -b change/<name> origin/master        # or check out the existing branch
    ```
 
    - **The worktree lives OUTSIDE the repository.** One inside it doubles the

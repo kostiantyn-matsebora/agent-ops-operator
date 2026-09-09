@@ -41,8 +41,11 @@ jobs:
     if: github.event.label.name == 'autoimplement'
     runs-on: ubuntu-latest
     permissions:
+      # To read the vocabulary file and the program: the checkout below needs
+      # it, and a default that happens to grant it is not a declaration.
+      contents: read
       # To comment on the issue, and to remove the label from somebody who may
-      # not push. Nothing else: this job never touches contents.
+      # not push. Nothing beyond these two.
       issues: write
     steps:
       - uses: actions/checkout@v4

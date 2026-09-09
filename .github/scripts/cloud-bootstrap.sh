@@ -200,12 +200,16 @@ main() {
     exit 0
   fi
 
+  # GO FIRST. `install_envtest` runs `go run` to fetch the assets, so with an
+  # image older than the floor it would build them with the toolchain this
+  # script is about to replace — and the ORDER is the only thing that decides
+  # which one it used.
+  install_go
   install_helm
   install_openspec
   install_pyyaml
   install_envtest
   install_serena
-  install_go
 
   if [ ${#MISSING[@]} -gt 0 ]; then
     # NAMED, NEVER FATAL. The setup must exit 0 or the platform reports a
