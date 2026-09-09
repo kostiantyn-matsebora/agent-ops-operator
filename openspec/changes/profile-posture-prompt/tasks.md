@@ -1,0 +1,29 @@
+## 1. Chart: the posture paragraph
+
+- [ ] 1.1 Add `profile.podExecutionWithheldPrompt` to `chart/charts/kubernetes/values.yaml` with the default paragraph (pod execution withheld; decline a pod-template edit on Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob with that reason; name what stays possible "where your tools allow"; suggest the operator makes the edit) and a comment saying it is the third wall on `allowPodExecution` and why it is not a second profile. Verify: `helm lint chart/charts/kubernetes` passes and `helm show values` prints the key.
+- [ ] 1.2 In `chart/charts/kubernetes/templates/profile.yaml`, when `agentops.runtimePodExecutionAllowed` is not `"true"` and the value is non-empty, append the paragraph after `profile.systemPrompt` inside the same `systemPrompt` block (one blank line between; the combined text still `trim`med and indented). Verify: `helm template chart` with defaults shows the paragraph at the END of the k8s-engineer `systemPrompt`; with `--set global.agentops.runtimeDefaults.allowPodExecution=true` it is absent.
+- [ ] 1.3 Bump `chart/charts/kubernetes/Chart.yaml` `version` (patch) and the parent `chart/Chart.yaml` dependency entry if it pins it. Verify: `helm dependency list chart` shows no version mismatch and `helm template chart` renders.
+
+## 2. Unit tests
+
+- [ ] 2.1 In `platform/manager/internal/integration/charttemplate_test.go`, add a render test for the k8s-engineer `AgentProfile` in three states: gate off (default) → paragraph present, last in `systemPrompt`, and names every workload kind `runtimeWriteRules` gates (deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs); gate on → absent; gate off with `--set kubernetes.profile.systemPrompt=...` → the operator's text first, the paragraph after it. Verify: the new test fails on the pre-change template and passes on the changed one.
+- [ ] 2.2 Run the chart render suite from the worktree in the build container: `docker exec -i -w "$PWD/platform/manager" agentops-go go test ./internal/integration/ -run 'Chart' -count=1` from the WORKTREE path, and confirm the run did not skip for a missing `helm` (memory `go-125-build-container`). Verify: the k8s-bundle profile tests, the identity tests and the runtimes tests all pass.
+
+## 3. E2E tests
+
+- [ ] 3.1 Not applicable: nothing here is decided by a cluster. The change is a rendered string in an `AgentProfile`, which `helm template` settles; whether the agent then obeys the paragraph is model behaviour outside every tier `docs/testing.md` defines. RBAC is untouched, and `agent-runtime-ownership`'s existing gate scenarios already cover it. A hand check against the live install after deploy (ask k8s-operate for a `nodeSelector` change; expect a decline with the reason and no patch call) is recorded in the pull request, not as a lane.
+
+## 4. Documentation
+
+### 4.1 Reference docs
+
+- [ ] 4.1.1 `docs/configuration.md`, the `allowPodExecution` section: the gate moves three walls — the route account's rules, the MCP server's role, and what the kubernetes bundle's agent is TOLD — and the paragraph's text is `kubernetes.profile.podExecutionWithheldPrompt`, empty to suppress. Verify: the page names the key and the third wall in one place, beside the two it already names.
+- [ ] 4.1.2 `docs/integrations/kubernetes.md`: the `allowPodExecution` callout says the agent knows the posture and declines a pod-template edit with the reason rather than reporting an RBAC refusal; the bundle's values reference lists the new key. Verify: `bundle exec jekyll build` (or the docs lint the repo uses) passes and the page's callout reads correctly.
+- [ ] 4.1.3 `docs/CHANGELOG.md`, `[Unreleased]`: the kubernetes bundle's profile now states the pod-execution posture; an install overriding `profile.systemPrompt` gains the paragraph on upgrade, and sets `podExecutionWithheldPrompt: ""` to decline it. Verify: the entry is under Unreleased, newest first.
+- [ ] 4.1.4 `.claude/rules/wiring.md`, "BOTH WALLS MOVE TOGETHER": name the prompt as the third wall on the same value, in one line, with why (the tool list cannot show an RBAC gate). Verify: the bullet reads three walls and names `profile.yaml`.
+- [ ] 4.1.5 Run `python3 .github/scripts/docs-generate.py` — `docs/guides/agent-profile.md` carries a generated `example preset=tier1 kind=AgentProfile name=k8s-engineer` block that quotes the shipped `systemPrompt`, so the paragraph lands there by regeneration, never by hand — then `python3 .github/scripts/docs-generate.py --check`. Verify: `--check` exits 0 and the guide's block shows the paragraph.
+
+### 4.2 Adopter site
+
+- [ ] 4.2.1 Read the landing page, `docs/introduction.md`, `docs/getting-started.md`, `docs/installation.md` and `docs/guides/*` for any sentence describing how the agent answers an action the install withholds, or promising it "will try"; update any found, and record "checked, none untrue" here if none. Verify: `grep -rn -i 'allowPodExecution\|pod execution' docs/*.md docs/guides/` reviewed line by line.
+- [ ] 4.2.2 Run `python3 .github/scripts/retired-vocabulary-guard.py` and `python3 .github/scripts/publication-guard.py`. Verify: both pass on the worktree.
