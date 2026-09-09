@@ -73,6 +73,14 @@ issue runs the PLAIN lane.
 | opsx | `openspec/changes/*/.github-issue` holds the number, OR an `opsx:` phase label is present | propose → apply → fix → archive |
 | plain | neither | implement → fix, ending at the merge |
 
+**PROPOSE AND APPLY ARE ONE STATION, AND `conveyor:implement` DRIVES IT.** There
+is no `conveyor:propose`: an issue on the opsx lane that carries no change yet
+gets one proposed and implemented by the same session, in that order, because a
+proposal nobody implements is not a station a person would ever want to stop
+at — and one that already carries a change is continued rather than proposed
+again, which the routine file's existing binding check already does. The lane's
+stations are therefore three and two, not four and two.
+
 - **BOTH TESTS ARE FACTS A PROGRAM READS**, and both are written by
   `opsx-issue.sh` rather than typed by anyone. This project's rules are explicit
   that what decides code gets written to a branch may not be a judgement call —
@@ -119,7 +127,12 @@ The rule that fixes #201, stated as a rule rather than a patch:
 
 `pull_request: closed` with `merged == true`. The job reads the pull request's
 body for its `Refs #<n>`, reads that issue's labels, and places
-`conveyor:archive` if `conveyor:run` is there.
+`conveyor:archive` ON THE ISSUE if `conveyor:run` is there.
+
+- **On the issue, because the pull request is gone.** It merged; it is closed,
+  and a label on a closed pull request drives nothing and is read by nobody. The
+  tracking issue is what survives every station and is where the last one is
+  asked for.
 
 - **`Refs #<n>` is already required** by `pr-closes-guard.py` on every applying
   pull request, so the link is guaranteed to exist and is already validated.

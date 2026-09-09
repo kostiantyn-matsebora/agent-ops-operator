@@ -72,8 +72,13 @@ because a person drove it past the bound by hand.
   that says so, and `conveyor:keep-going` restarts it.
 - `change-issue-tracking`: the tracking issue carries the standing instruction,
   so its labels are read at each transition rather than at the start.
-- `remote-change-sessions`: the session opens its pull request carrying NO
-  label, and the workflow labels it — the inverse of what shipped.
+- `remote-change-sessions`: **not modified as a capability, and deliberately
+  so.** Its spec says the session delivers "carrying the approve label for
+  automatic fixing from creation", which this change makes false — but that spec
+  is not yet published: it lives in the unarchived `remote-change-sessions`
+  change. Editing a delta that has not landed would put two changes in a race
+  over one file. Whichever archives second reconciles it, and the task list says
+  so.
 
 ## Impact
 
