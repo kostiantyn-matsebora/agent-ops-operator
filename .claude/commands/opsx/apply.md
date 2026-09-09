@@ -23,21 +23,30 @@ Implement tasks from an OpenSpec change.
 
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx:apply <other>`).
 
-1.5 **Work in the change's own worktree — THIS REPOSITORY'S RULE**
+1.5 **Work in the change's own working copy — THIS REPOSITORY'S RULE**
 
-   Every openspec change is implemented in its own worktree on its own branch and
-   lands as a pull request. See `.claude/rules/worktree-delivery.md`.
+   Every openspec change is implemented in its own working copy on its own branch
+   and lands as a pull request: on a workstation its own git worktree — or, in a
+   remote session, the session's clone with `change/<name>` checked out in place,
+   never a worktree added beside it. See `.claude/rules/worktree-delivery.md` and
+   `.claude/rules/remote-session.md`.
 
    ```bash
+   # on a workstation:
    git worktree list                                  # is one already open?
    git worktree add -b change/<name> ../agent-ops-worktrees/<name> origin/master
+
+   # in a REMOTE session, the clone IS the working copy — never `worktree add`:
+   git checkout -b change/<name> origin/master        # or check out the existing branch
    ```
 
    - **The worktree lives OUTSIDE the repository.** One inside it doubles the
-     derived component inventory and breaks CI's matrices, silently.
+     derived component inventory and breaks CI's matrices, silently — and that
+     is why a remote session adds none: its clone already is the working copy.
    - **Reuse an existing worktree** rather than creating a second; `git worktree
      list` is the check.
-   - **Everything below runs in that worktree**, including the commits.
+   - **Everything below runs in that working copy**, including the commits —
+     the worktree on a workstation, the clone in a remote session.
    - **Advance the tracking issue** to `opsx:applying` and say so once:
 
      ```bash

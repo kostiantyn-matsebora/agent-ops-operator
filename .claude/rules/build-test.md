@@ -111,15 +111,17 @@ The Python row, step by step (what ci.yml's `scripts` job does):
   component rooted one level above its browser application.
 - **All four outputs are ignored by git.** They are artifacts, never commits.
 
-### No local Go: use a PERSISTENT container, not `docker run --rm`
+### RUN THE TOOLCHAIN ON YOUR PATH. WHERE THERE IS NONE, ONE PERSISTENT CONTAINER
 
-**This workstation has no Go toolchain**, so every command above runs in a
-container.
+**Where Go is installed, run it directly** — a remote session's image ships it,
+and so may a workstation now. Check with `go version` rather than assume.
 
-**Start ONE long-lived container and `docker exec` into it.** A throwaway
-`docker run --rm` pays container setup per invocation and throws the build cache
-away with it — warm rebuilds are ~2s through `exec` and are not through
-`run --rm`.
+**WHERE THERE IS NO TOOLCHAIN, every command above runs in a container**, and
+the container below is the ONLY one. Never `docker run --rm` per command: a
+throwaway pays container setup every invocation and throws the build cache away
+with it — warm rebuilds are ~2s through `exec` and are not through `run --rm`.
+
+**Start ONE long-lived container and `docker exec` into it.**
 
 ```sh
 docker volume create agentops-gomodcache; docker volume create agentops-gocache

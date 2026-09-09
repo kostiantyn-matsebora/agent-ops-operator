@@ -1,0 +1,57 @@
+# A LABEL ON AN ISSUE STARTS A REMOTE SESSION THAT IMPLEMENTS IT.
+#
+# WHY THIS WORKFLOW EXISTS AT ALL, WHEN A ROUTINE COULD SUBSCRIBE TO EVENTS
+# ITSELF: a routine's GitHub triggers are `pull_request` and `release`. There is
+# no `issues` event, so a label cannot reach a routine directly — and the hop
+# through an Actions run is what buys the two things a direct trigger could not:
+#
+#   the gate    anyone with TRIAGE may label an issue, and triage is not write.
+#               A routine's filters read labels, never who placed them. Here the
+#               labeller is read off the event and checked against the
+#               collaborators API — the same gate `review-dispatch.yml` uses,
+#               because a label event carries no `author_association`.
+#
+#   the record  the fire returns a session url, posted once on the issue. A
+#               routine's own trigger leaves nothing on the issue at all.
+#
+# NEVER `pull_request_target`, here or anywhere in this repository: it runs with
+# the base repository's secrets against a head a stranger controls. This runs on
+# an ordinary `issues` event of THIS repository, and the job that holds the fire
+# token runs no model and checks out nothing but the default branch's programs.
+#
+# THE ENDPOINT IS NOT IN THE TREE. `ROUTINE_FIRE_URL` is a repository variable
+# (its path carries the routine's id) and `ROUTINE_FIRE_TOKEN` a secret. Without
+# both the program says so on the issue rather than failing silently.
+name: remote-implement
+
+run-name: remote-implement for #${{ github.event.issue.number }}
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  fire:
+    # The vocabulary file is the authority and the program reads it; this
+    # expression is the prefilter, and it is the one place the label's name is
+    # repeated — an expression cannot read a file. It must AGREE with
+    # `implement_label` in .github/review-triage.json.
+    if: github.event.label.name == 'autoimplement'
+    runs-on: ubuntu-latest
+    permissions:
+      # To read the vocabulary file and the program: the checkout below needs
+      # it, and a default that happens to grant it is not a declaration.
+      contents: read
+      # To comment on the issue, and to remove the label from somebody who may
+      # not push. Nothing beyond these two.
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Who labelled this, and start the session
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+        run: python3 .github/scripts/remote-implement.py

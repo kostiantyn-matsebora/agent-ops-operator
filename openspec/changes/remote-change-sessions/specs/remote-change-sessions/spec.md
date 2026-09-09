@@ -175,7 +175,8 @@ lives in the file.
 ### Requirement: The session delivers the change through the existing loop
 
 The remote session SHALL deliver the change as one pull request from
-`change/<name>` saying `Closes #<n>`, carrying the approve label for
+`change/<name>` REFERENCING the issue without a closing keyword, carrying the
+approve label for
 automatic fixing from creation, with the unit and chart tiers run in the
 session and the cluster tier dispatched to the smoke end-to-end workflow on
 its branch. Nothing the session does SHALL merge or archive.
@@ -191,9 +192,11 @@ request from the moment it opens.
 #### Scenario: The session opens the pull request
 
 - **WHEN** the remote session finishes implementing the change
-- **THEN** one pull request exists from `change/<name>`, it says `Closes #<n>`,
-  it carries the approve label, and its description states which verifications
-  were run here and which are workstation-only
+- **THEN** one pull request exists from `change/<name>`, it REFERENCES the
+  issue without closing it — the issue it promoted is now the change's tracking
+  issue, and that closes when the change is ARCHIVED — it carries the approve
+  label, and its description states which verifications were run here and which
+  are workstation-only
 
 #### Scenario: The review finds something
 

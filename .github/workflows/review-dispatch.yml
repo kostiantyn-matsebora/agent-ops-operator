@@ -38,6 +38,20 @@
 # ordinary event on THIS repository, gated on who sent it, and the model never
 # holds the privilege at all. A CI assertion pins the trigger set.
 #
+# A RED `ci-green` IS THE LOOP'S TOO, AND IT IS A WORK ITEM LIKE ANY OTHER. The
+# review posts threads, the analysis service posts issues, and CI posts a
+# verdict; all three hold the merge, so a loop that fixed two of them would end
+# with the pull request still blocked and nobody told why. Under the label
+# `collect` also reads the head's failed required checks (`failed-checks.py`,
+# under `actions: read` — that job only, where no model runs), each carrying its
+# job name, its run and a bounded tail of the failed steps' log, and a `ci` run
+# completing with `failure` starts a round beside the review's completion. The
+# `concurrency` group serialises the two, so one head can produce two rounds in
+# sequence, each collecting the live state; `MAX_ROUNDS` bounds both. A check is
+# FIXED only after the fixer reproduced it with the job's own command, or
+# DISPUTED with the log's reason — a runner outage and a rate limit are not
+# things the tree can fix.
+#
 # A PUSH MADE WITH `GITHUB_TOKEN` STARTS NO WORKFLOW. GitHub withholds
 # `pull_request: synchronize` from commits the workflow token pushes, so an
 # UNLABELLED dispatch's commit gets neither `ci-green` nor a review until
@@ -71,8 +85,11 @@ on:
   # trigger runs the DEFAULT branch's copy of this file, whatever the pull
   # request holds — the same property the review has — and it keeps the
   # review's own jobs free of any write.
+  # A CI RUN THAT FAILED is the other start, on a labelled pull request: the
+  # merge is blocked by something the loop can act on. `claude-review`
+  # completing is unchanged.
   workflow_run:
-    workflows: [claude-review]
+    workflows: [claude-review, ci]
     types: [completed]
   # A hand-run for verifying THIS file before it is on the default branch —
   # `issue_comment` runs the default branch's copy, so a branch's edit is
@@ -121,7 +138,8 @@ jobs:
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/fix-accepted')) ||
       (github.event_name == 'pull_request_review_comment' && startsWith(github.event.comment.body, '/fix-accepted')) ||
       (github.event_name == 'pull_request' && github.event.label.name == 'autofix') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+      (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'claude-review' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'ci' && github.event.workflow_run.conclusion == 'failure')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -158,6 +176,7 @@ jobs:
           PR: ${{ github.event.issue.number || github.event.pull_request.number || inputs.pr }}
           REVIEW_TITLE: ${{ github.event.workflow_run.display_title }}
           REVIEW_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
           INPUT_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
@@ -218,12 +237,32 @@ jobs:
               mode=all
               ;;
             workflow_run)
-              # THE REVIEWED PULL REQUEST, from the run's name (`Review of #N`)
-              # or, where the event carries it, its pull request list.
+              # WHICH PULL REQUEST THIS RUN CONCERNS, and the two runs answer
+              # it differently. The REVIEW names it in its own run name
+              # (`Review of #N`); a CI run's name is a commit subject, so it is
+              # found from the event's pull request list or, failing that, from
+              # the head sha — a `workflow_run` on a branch of this repository
+              # carries the list, and the sha lookup is the belt for the case
+              # where it does not.
               PR=$(printf '%s' "$REVIEW_TITLE" | sed -n 's/.*#\([0-9]\{1,\}\).*/\1/p' | head -1)
               [ -n "$PR" ] || PR="$REVIEW_PR"
+              if [ -z "$PR" ] && [ -n "$RUN_HEAD" ]; then
+                # EXACTLY ONE OPEN PULL REQUEST, OR NONE. A sha can belong to
+                # several — a branch cut from another, a shared head — and
+                # taking `first` would start a round on whichever the API
+                # happened to list, against a pull request nobody labelled.
+                # Ambiguity is answered by doing nothing, which the notice says.
+                mapfile -t candidates < <(gh api --method GET \
+                  "repos/$GITHUB_REPOSITORY/commits/$RUN_HEAD/pulls" \
+                  --jq '.[] | select(.state == "open") | .number' 2>/dev/null || true)
+                if [ "${#candidates[@]}" -eq 1 ]; then
+                  PR="${candidates[0]}"
+                elif [ "${#candidates[@]}" -gt 1 ]; then
+                  echo "::notice::${RUN_HEAD:0:7} is the head of ${#candidates[@]} open pull requests (${candidates[*]}); this run names none, so nothing starts"
+                fi
+              fi
               if [ -z "$PR" ]; then
-                echo "::notice::the review run '$REVIEW_TITLE' names no pull request; nothing to do"
+                echo "::notice::the run '$REVIEW_TITLE' names no pull request; nothing to do"
                 echo "mode=none" >> "$GITHUB_OUTPUT"; exit 0
               fi
               mode=all
@@ -267,6 +306,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # THE ONLY JOB THAT MAY READ A RUN'S LOG, and no model runs in it. A
+      # failed check's log tail is a work item's text, so the permission that
+      # fetches it stays where the programs are.
+      actions: read
     outputs:
       accepted: ${{ steps.list.outputs.accepted }}
     steps:
@@ -278,7 +321,7 @@ jobs:
       # the dispatch comment, the label event or either API; a person cannot
       # direct work through any of them.
       - id: list
-        name: What is accepted, read from the threads and the analysis
+        name: What is accepted, read from the threads, the analysis and the checks
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODE: ${{ needs.gate.outputs.mode }}
@@ -297,17 +340,29 @@ jobs:
             python3 .github/scripts/sonar-issues.py \
               --organization "$SONAR_ORG" --pr "${{ needs.gate.outputs.pr }}" --head "$HEAD" \
               --out "$RUNNER_TEMP/dispatch/sonar.json"
+            # THE THIRD SOURCE: what is red on the head. Under the label only,
+            # because a per-thread dispatch acts on the threads a person named.
+            python3 .github/scripts/failed-checks.py \
+              --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" --sha "$HEAD" \
+              --out "$RUNNER_TEMP/dispatch/checks.json"
           else
             echo '{"consulted":false,"issues":[],"projects":[]}' > "$RUNNER_TEMP/dispatch/sonar.json"
+            echo '{"consulted":false,"checks":[],"items":[]}' > "$RUNNER_TEMP/dispatch/checks.json"
           fi
+          # THE ORDER IS THE READING ORDER: what the reviewers said, then what
+          # the analysis found, then what is red. Stable, so a report naming an
+          # id is read the same way every round.
           python3 -c '
           import json, sys
           threads = json.load(open(sys.argv[1])); sonar = json.load(open(sys.argv[2]))
+          checks = json.load(open(sys.argv[3]))
           sonar_issues = sonar.get("issues") or []
-          work = threads + sonar_issues
-          json.dump(work, open(sys.argv[3], "w"), indent=2)
-          print(f"{len(threads)} review finding(s) + {len(sonar_issues)} analysis issue(s) = {len(work)} item(s)")
-          ' "$RUNNER_TEMP/dispatch/threads.json" "$RUNNER_TEMP/dispatch/sonar.json" "$RUNNER_TEMP/dispatch/work-list.json"
+          check_items = checks.get("items") or []
+          work = threads + sonar_issues + check_items
+          json.dump(work, open(sys.argv[4], "w"), indent=2)
+          print(f"{len(threads)} review finding(s) + {len(sonar_issues)} analysis issue(s)"
+                f" + {len(check_items)} failed check(s) = {len(work)} item(s)")
+          ' "$RUNNER_TEMP/dispatch/threads.json" "$RUNNER_TEMP/dispatch/sonar.json" "$RUNNER_TEMP/dispatch/checks.json" "$RUNNER_TEMP/dispatch/work-list.json"
           echo "accepted=$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))))' "$RUNNER_TEMP/dispatch/work-list.json")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
@@ -315,6 +370,7 @@ jobs:
           path: |
             ${{ runner.temp }}/dispatch/work-list.json
             ${{ runner.temp }}/dispatch/sonar.json
+            ${{ runner.temp }}/dispatch/checks.json
           retention-days: 1
           if-no-files-found: error
 
@@ -362,6 +418,15 @@ jobs:
               `path`, `line`, `rule`, `severity`, `message`. Fix it IN THE CODE
               only; you cannot reach the service, and nothing you write may
               claim to have marked, closed or dismissed an issue there.
+            - `source: check` — a REQUIRED CI CHECK THAT FAILED on this head:
+              `job`, `run_url` and `tail`, the tail being the failed steps' own
+              log. REPRODUCE IT FIRST: find that job in
+              `.github/workflows/ci.yml`, run its own command in this checkout,
+              and see the failure yourself. Then fix it, and RE-RUN that command
+              before you finish — a check you did not re-run is a check you did
+              not fix. If the tree is not the cause (a runner outage, a rate
+              limit, a flaky download, a network 5xx), DISPUTE it and name what
+              the log said; a false fix for a flake is worse than the flake.
             Read it first.
 
             Address EVERY item, and nothing else:
@@ -391,7 +456,12 @@ jobs:
             Every `id` from the work list appears exactly once, with `action`
             `fixed` or `disputed`. Return nothing else.
           claude_args: |
-            --allowedTools "Read,Edit,MultiEdit,Write,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*)"
+            # THE REPRODUCE GRANT IS THE TEST RUNNERS, NOT A SHELL. A check
+            # item is reproduced by running the job's own command, so the
+            # toolchains are here — and `Bash(bash:*)` is NOT, because it grants
+            # every command there is and would make this list decoration. The
+            # suite has its own entry rather than arriving through `bash`.
+            --allowedTools "Read,Edit,MultiEdit,Write,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(go:*),Bash(npm:*),Bash(node:*),Bash(helm:*),Bash(python3 .github/scripts/:*),Bash(.github/tests/run.sh:*)"
 
       # A MODEL THAT DID NOT RUN MUST NOT READ AS A MODEL THAT FIXED NOTHING.
       # The action skips itself, successfully, whenever this workflow file
@@ -484,6 +554,7 @@ jobs:
         run: |
           : > "$RUNNER_TEMP/dispatch/fix.patch"
           echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
+          [ -f "$RUNNER_TEMP/dispatch/checks.json" ] || echo '{"consulted":false,"checks":[],"items":[]}' > "$RUNNER_TEMP/dispatch/checks.json"
       # THE PROGRAMS THIS JOB RUNS ARE NOT THE PULL REQUEST'S. The checkout
       # above is the branch being fixed, and a pull request that could rewrite
       # the lander — or the resolver it delegates to — could resolve a person's
@@ -546,4 +617,5 @@ jobs:
             --dispatched-by "${{ needs.gate.outputs.dispatcher }}" \
             --mode "$MODE" --approver "$APPROVER" --since "$SINCE" \
             --max-rounds "$MAX_ROUNDS" --sonar "$RUNNER_TEMP/dispatch/sonar.json" \
+            --checks "$RUNNER_TEMP/dispatch/checks.json" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

@@ -125,6 +125,25 @@ time.
   registry. Reach for the check-run lookup, never a concurrency group, for
   "the same work happening N times on one commit."
 
+**A CLOUD ROUTINE'S PUSH RULES AND ITS ENVIRONMENT'S VARIABLES, MEASURED
+2026-09-06 SO NOBODY RE-DERIVES THEM.** A routine clones the DEFAULT branch and
+may push any branch that is NOT protected, has no open pull request by somebody
+else, and carries no commits by somebody else — so a fresh `change/<name>` is
+accepted and a branch a person is already working is not. Its GitHub triggers
+are `pull_request` and `release` ONLY; there is no `issues` event, which is why
+a label reaches a routine through an Actions workflow and its `/fire` endpoint
+rather than directly (`.claude/rules/remote-session.md`).
+
+- **THE ENVIRONMENT'S VARIABLES ARE PUBLIC TO EVERY SESSION IT RUNS**, and the
+  form says so on its face. A token typed there is published; a credential goes
+  under API credentials, where the proxy attaches it per host and makes that
+  host reachable whatever the network level.
+- **Fire text arrives wrapped in a `<routine-fire-payload>` block labelled
+  untrusted**, and the saved prompt must opt in to reading it. That is why the
+  payload here is an issue NUMBER and nothing else: a number can be validated
+  before it is used, and the session reads the issue itself.
+- **Runs count against the account's daily routine cap.**
+
 **`lookup` returns empty on any renderer without a cluster** — `helm template`,
 CI, a GitOps controller, `--dry-run=client`.
 

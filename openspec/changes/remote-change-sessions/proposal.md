@@ -45,7 +45,8 @@ issue into one.
   committed instruction file (`.github/routines/implement-issue.md`), which
   promotes the issue in place, proposes, implements on `change/<name>`, runs
   the unit and chart tiers itself and dispatches the smoke e2e workflow for
-  the rest, and opens the pull request saying `Closes #<n>`.
+  the rest, and opens the pull request referencing the issue (`Refs #<n>` —
+  the tracking issue closes at archive, and a guard enforces that).
 - **The issue label is the owner's word for the fixing loop too, and the loop
   fixes EVERYTHING that holds the merge.** The pull request such a session
   opens carries `autofix` from creation. Under that label the loop's work list
@@ -92,9 +93,16 @@ issue into one.
   `.github/routines/implement-issue.md` (new), `.github/review-triage.json`
   (`implement_label`), `.github/tests/` (three new suites, `run.sh`).
 - `.github/workflows/review-dispatch.yml` (a `ci` failure as a round's start;
-  `collect` gathers failed checks under `actions: read`), `.github/scripts/failed-checks.py`
-  (new), `.github/scripts/land-dispatch.py` (checks in the summary), the fixer's
-  role file (a check item is reproduced, then fixed or disputed).
+  `collect` gathers failed checks under `actions: read`; the FIXER'S PROMPT —
+  which lives inline in that workflow, not in a role file: `review-prompt.py`
+  serves the review's reading roles only), `.github/scripts/failed-checks.py`
+  (new), `.github/scripts/land-dispatch.py` (checks in the summary and in a
+  fixed round's commit body).
+- `.github/scripts/review-rules.py` (`remote-session` joins the session rules
+  that are not review criteria, beside `worktree-delivery` — otherwise
+  `--check` fails on a rule no path routes to) and
+  `.github/publication-allowlist.json` (serena's clone url, which the bootstrap
+  installs from).
 - `.claude/settings.json` (a `SessionStart` verify hook), `.mcp.json` (the
   wrappers), `.claude/rules/remote-session.md` (new).
 - Outside the tree, once: the `agent-ops-operator` cloud environment, its
@@ -114,7 +122,12 @@ issue into one.
 - `.claude/rules/gotchas.md`: the routine push rules and the public-variables
   fact, measured, so nobody re-derives them.
 - `openspec/config.yaml` (`rules.tasks`) and `.claude/commands/opsx/apply.md`
-  step 1.5: "from its own git worktree" becomes "or a remote session's clone".
+  step 1.5: "from its own git worktree" becomes "or a remote session's clone",
+  and the deploy-or-build rule names THIS WORKING COPY rather than the worktree.
+  `.claude/rules/worktree-delivery.md` also states the `pr-closes-guard.py` rule
+  from BOTH sides — an applying pull request says `Refs #<n>`, only the
+  archiving one says `Closes` — which the guard already enforced and no document
+  stated.
 - `.claude/skills/openspec-apply-change`: where the `autofix` label is placed
   on the owner's word, the issue label now counts as that word.
 - `CONTRIBUTING.md`: "How a change is proposed here" and "The issue that

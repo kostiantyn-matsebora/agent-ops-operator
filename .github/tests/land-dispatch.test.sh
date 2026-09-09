@@ -220,7 +220,9 @@ land_all() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
              (cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
                 --work-list "${WORK:-$tmp/work-all.json}" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report-all.json}" \
                 --dispatched-by github-actions --mode all --approver an-approver --since 2026-08-29T10:00:00Z \
-                --max-rounds 3 --sonar "$tmp/sonar.json" ${STARTS---push-starts-workflows} 2>&1); }
+                --max-rounds 3 --sonar "$tmp/sonar.json" --checks "${CHECKS:-$tmp/checks-none.json}" \
+                ${STARTS---push-starts-workflows} 2>&1); }
+printf '{"consulted":true,"checks":[],"items":[]}' > "$tmp/checks-none.json"
 
 fresh_repo
 out=$(land_all); rc=$?
@@ -337,5 +339,59 @@ assert_not_contains "$(cat "$S")" "workflow run"
 it "contains no model invocation of its own"
 assert_not_contains "$(cat "$S")" "claude"
 
+# ---------------------------------------------------------------------------
+# A RED REQUIRED CHECK IS THE THIRD KIND OF WORK ITEM, and it is accounted for
+# differently from the other two: it has NO THREAD, so a fixed one gets no reply
+# (the check's next run is its verdict) and a disputed one is a pull request
+# comment, as an analysis issue is.
+
+cat > "$tmp/work-check.json" <<'JSON'
+[{"id":"check:operator","source":"check","kind":"check","job":"operator","run_url":"https://github.com/o/r/actions/runs/555","path":".github/workflows/ci.yml","line":null,"tail":"FAIL TestThing"}]
+JSON
+printf '{"consulted":true,"checks":[{"job":"operator","conclusion":"failure"}],"items":[{"id":"check:operator"}]}' > "$tmp/checks-one.json"
+
+it "a fixed check is committed and counted by its JOB, with no reply anywhere"
+fresh_repo
+printf '{"items":[{"id":"check:operator","action":"fixed","reason":""}]}' > "$tmp/report-check.json"
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check.json" CHECKS="$tmp/checks-one.json" land_all); rc=$?
+assert_status 0 "$rc"
+# THE PATCH TOUCHES a.go, NOT ci.yml — and that is the point. A check's fix is
+# wherever the failure is, so its evidence is a non-empty patch; asking the
+# patch to touch the workflow file the item NAMES would dispute every genuine
+# fix. A fixed check gets no reply: there is no thread, and the check's next
+# run on the landed commit is its verdict.
+assert_contains "$(git -C "$ORIGIN" log -1 --format=%s "$BRANCH")" "1 failed check"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+
+it "a check claimed fixed by an EMPTY patch is disputed, not believed"
+fresh_repo
+: > "$tmp/empty.patch"
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check.json" CHECKS="$tmp/checks-one.json" PATCH="$tmp/empty.patch" land_all)
+assert_contains "$out" "reported fixed, but the patch is empty"
+
+it "a disputed check is ONE pull request comment under the marker, and the code is untouched"
+fresh_repo
+printf '{"items":[{"id":"check:operator","action":"disputed","reason":"the runner could not reach the registry"}]}' > "$tmp/report-check-d.json"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check-d.json" CHECKS="$tmp/checks-one.json" land_all)
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_contains "$(cat "$GH_CALLS")" "disputes 1 failed check"
+assert_contains "$(cat "$GH_CALLS")" "the runner could not reach the registry"
+
+# THE SUMMARY IS AN ENDING'S, never a round that goes on — so the check
+# paragraph is asserted where one actually exists: the disputes-only ending
+# just above, and the clean ending below.
+it "an ending's summary names the check by its job and says how many failed"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "the \`operator\` check"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "The required checks reported 1 failure"
+
+it "with no check collected the summary says the checks had not reported, never that they were green"
+fresh_repo
+printf '{"consulted":false,"checks":[],"items":[]}' > "$tmp/checks-absent.json"
+out=$(WORK="$tmp/none.json" CHECKS="$tmp/checks-absent.json" land_all)
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "The required checks were NOT consulted"
+assert_not_contains "$(grep 'autofix:summary' "$GH_CALLS")" "The required checks reported"
+
 rm -rf "$tmp"
+
 summary

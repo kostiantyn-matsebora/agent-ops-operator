@@ -24,6 +24,19 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/cloud-bootstrap.sh --verify",
+            "timeout": 10,
+            "statusMessage": "Checking what a remote session has"
+          }
+        ]
+      }
     ]
   }
 }

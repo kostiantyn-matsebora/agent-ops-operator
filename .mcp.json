@@ -1,10 +1,53 @@
 {
+  "_comment": [
+    "EACH STDIO SERVER RUNS DIRECTLY WHERE ITS BINARY EXISTS. A workstation that",
+    "has the binary execs it at once and is unchanged; where it is absent, what",
+    "happens next depends on whether anything is going to install it.",
+    "",
+    "`serena` WAITS REMOTELY, `docker` DOES NOT. .github/scripts/cloud-bootstrap.sh",
+    "installs serena and a remote session can start before it has finished, so",
+    "that wrapper waits for the binary to appear. Nothing installs `uvx`, and",
+    "there is no dockerd socket to reach in the sandbox either, so a wait there",
+    "would stall three minutes and fail with exactly the error it started from.",
+    "",
+    "NEVER `exit 0` ON A WORKSTATION. The obvious wrapper \u2014 exit 0 unless the",
+    "remote marker is set \u2014 makes every stdio server remote-only, which would",
+    "silently disable the two that work here today. A workstation missing the",
+    "binary exits NON-ZERO and fails to connect, exactly as it does without any",
+    "wrapper: a server that is meant to be there and is not must say so.",
+    "",
+    "`sonarqube` is http rather than stdio, so nothing is installed for it and no",
+    "wrapper applies. Its headers are the WORKSTATION's and are deliberately",
+    "unconditional: remotely the credential proxy attaches the token for that",
+    "host, and whether it OVERRIDES a header the client sends or requires it",
+    "absent is not yet measured \u2014 design D6 records that as the question the",
+    "first remote session settles. Guessing a `CLAUDE_CODE_REMOTE` conditional",
+    "here would encode an answer nobody has; if the proxy needs the header",
+    "absent, the fix is one line and it lands with the measurement."
+  ],
   "mcpServers": {
+    "docker": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-c",
+        "command -v uvx >/dev/null 2>&1 && exec uvx mcp-server-docker; exit 1"
+      ]
+    },
+    "serena": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-c",
+        "command -v serena >/dev/null 2>&1 && exec serena start-mcp-server --context claude-code --project-from-cwd; [ \"$CLAUDE_CODE_REMOTE\" = \"1\" ] || [ \"$CLAUDE_CODE_REMOTE\" = \"true\" ] || exit 1; for _ in $(seq 180); do command -v serena >/dev/null 2>&1 && exec serena start-mcp-server --context claude-code --project-from-cwd; sleep 1; done; exit 1"
+      ]
+    },
     "sonarqube": {
       "type": "http",
       "url": "https://api.sonarcloud.io/mcp",
       "headers": {
-        "Authorization": "Bearer ${SONAR_TOKEN}"
+        "Authorization": "Bearer ${SONAR_TOKEN}",
+        "SONARQUBE_ORG": "${SONAR_ORG}"
       }
     }
   }
