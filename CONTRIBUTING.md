@@ -23,10 +23,13 @@ and a security problem goes to [SECURITY.md](SECURITY.md), never to an issue.
 proposes a change from what you wrote, implements it on its own branch and
 opens a pull request. The issue gains exactly two automated comments: one
 linking that session, and the pointer the promotion leaves as it does for any
-promoted issue. The label is refused from anyone without write access, and it
-changes nothing about what happens next — the proposal, the pull request and
-the review are read by a person, and a person merges. Nobody has to use it: an
-issue nobody labels is picked up the ordinary way.
+promoted issue. The label is refused from anyone without write access. That
+pull request opens carrying `autofix` already — labelling the issue is the same
+word, given once, so the review's findings are fixed without a reply in each
+thread. What it does not change is who decides: the proposal, the pull request
+and the review are read by a person, a dispute waits for one, and a person
+merges. Nobody has to use it: an issue nobody labels is picked up the ordinary
+way.
 
 **Please open one before a large pull request.** This project has strong
 opinions about its model — what a `Pipeline` is allowed to carry, where wiring
