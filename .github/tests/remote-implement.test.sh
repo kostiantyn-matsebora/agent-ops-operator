@@ -180,6 +180,46 @@ out=$(PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r python3 "$S" --event "$EVENT" --re
 assert_status 1 "$status"
 assert_contains "$(cat "$GH_CALLS")" "no routine"
 
+# A COPIED URL CARRIES A NEWLINE, AND THAT REALLY HAPPENED. The first live fire
+# crashed in http.client with `URL can't contain control characters` — a stack
+# trace on the runner and nothing on the issue, where a person would look.
+it "a fire url carrying an EMBEDDED newline is refused with one line, not a stack trace"
+setup; stub_gh_perm "$BIN" admin
+event "$EVENT" autoimplement 42 maintainer
+# THE SHAPE THAT ACTUALLY HAPPENED: `gh variable set` stored a value copied out
+# of a wrapped display, so the break sits INSIDE the id rather than at the end.
+# `.strip()` cannot help there — http.client raises InvalidURL from four frames
+# down, and the issue gets nothing.
+out=$(run_it --fire-url "https://api.anthropic.com/v1/routines/trig_01ABC
+DEF/fire"); status=$?
+assert_status 1 "$status"
+assert_not_contains "$out" "Traceback"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
+
+it "a fire url that is not a url at all is REFUSED on the issue, never a stack trace"
+setup; stub_gh_perm "$BIN" admin
+event "$EVENT" autoimplement 42 maintainer
+out=$(run_it --fire-url "trig_01ABC/fire"); status=$?
+assert_status 1 "$status"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
+assert_contains "$out" "not a URL"
+assert_not_contains "$out" "Traceback"
+
+# THE TOKEN BREAKS THE SAME WAY AND READS WORSE. A newline in a header is
+# refused like the url's; a token that merely lost characters comes back 401,
+# indistinguishable from a revoked credential.
+it "a token carrying a line break is refused before it is sent, and never printed"
+setup; stub_gh_perm "$BIN" admin
+event "$EVENT" autoimplement 42 maintainer
+out=$(PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r ROUTINE_FIRE_TOKEN="$(printf 'sk-ant-oat01-AAA\nBBB')" \
+  python3 "$S" --event "$EVENT" --repo o/r --fire-url "http://127.0.0.1:1/fire" 2>&1); status=$?
+assert_status 1 "$status"
+assert_contains "$out" "ROUTINE_FIRE_TOKEN contains whitespace"
+# THE VALUE ITSELF NEVER APPEARS — not in the log, not in the comment.
+assert_not_contains "$out" "sk-ant-oat01-AAA"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
+assert_not_contains "$(cat "$GH_CALLS")" "sk-ant-oat01-AAA"
+
 # --- the payload -------------------------------------------------------------
 
 it "an event whose issue number is not a number never reaches the fire"
