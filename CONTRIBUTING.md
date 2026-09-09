@@ -24,10 +24,9 @@ proposes a change from what you wrote, implements it on its own branch and
 opens a pull request. The issue gains exactly two automated comments: one
 linking that session, and the pointer the promotion leaves as it does for any
 promoted issue. The label is refused from anyone without write access, and it
-changes nothing about
-what happens next — the proposal, the pull request and the review are read by a
-person, and a person merges. Nobody has to use it: an issue nobody labels is
-picked up the ordinary way.
+changes nothing about what happens next — the proposal, the pull request and
+the review are read by a person, and a person merges. Nobody has to use it: an
+issue nobody labels is picked up the ordinary way.
 
 **Please open one before a large pull request.** This project has strong
 opinions about its model — what a `Pipeline` is allowed to carry, where wiring
