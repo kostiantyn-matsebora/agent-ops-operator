@@ -121,11 +121,13 @@ issue into one.
   archive rule is unchanged.
 - `.claude/rules/gotchas.md`: the routine push rules and the public-variables
   fact, measured, so nobody re-derives them.
-- `.claude/rules/worktree-delivery.md` states the `pr-closes-guard.py` rule from
-  BOTH sides — an applying pull request says `Refs #<n>`, only the archiving one
-  says `Closes` — which the guard already enforced and no document stated.
 - `openspec/config.yaml` (`rules.tasks`) and `.claude/commands/opsx/apply.md`
-  step 1.5: "from its own git worktree" becomes "or a remote session's clone".
+  step 1.5: "from its own git worktree" becomes "or a remote session's clone",
+  and the deploy-or-build rule names THIS WORKING COPY rather than the worktree.
+  `.claude/rules/worktree-delivery.md` also states the `pr-closes-guard.py` rule
+  from BOTH sides — an applying pull request says `Refs #<n>`, only the
+  archiving one says `Closes` — which the guard already enforced and no document
+  stated.
 - `.claude/skills/openspec-apply-change`: where the `autofix` label is placed
   on the owner's word, the issue label now counts as that word.
 - `CONTRIBUTING.md`: "How a change is proposed here" and "The issue that

@@ -139,6 +139,28 @@ unset GH_COMMENTS
 assert_status 0 "$status"
 assert_not_contains "$(cat "$GH_CALLS")" "issue comment"
 
+# AN UNREADABLE COMMENT LIST FAILS CLOSED. Answering "not fired" on a rate
+# limit or a dropped connection starts a SECOND session on the same issue, which
+# is the case the marker exists to prevent; refusing is recoverable by
+# re-labelling, a duplicate run is not.
+it "a comments read that FAILS is treated as already fired, never as a licence to fire again"
+setup; mkdir -p "$BIN"
+cat > "$BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+case "$*" in
+  *"collaborators/"*"/permission"*) echo "admin" ;;
+  *"issues/"*"/comments"*) echo "the comments API is unavailable" >&2; exit 1 ;;
+esac
+exit 0
+STUB
+chmod +x "$BIN/gh"
+event "$EVENT" autoimplement 42 maintainer
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_not_contains "$out" "fired for"
+assert_contains "$out" "already fired"
+
 # --- the endpoint says no ----------------------------------------------------
 
 it "a 5xx from the endpoint comments the status and fails the job, rather than failing silently"

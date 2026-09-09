@@ -41,10 +41,12 @@ Implement tasks from an OpenSpec change.
    ```
 
    - **The worktree lives OUTSIDE the repository.** One inside it doubles the
-     derived component inventory and breaks CI's matrices, silently.
+     derived component inventory and breaks CI's matrices, silently — and that
+     is why a remote session adds none: its clone already is the working copy.
    - **Reuse an existing worktree** rather than creating a second; `git worktree
      list` is the check.
-   - **Everything below runs in that worktree**, including the commits.
+   - **Everything below runs in that working copy**, including the commits —
+     the worktree on a workstation, the clone in a remote session.
    - **Advance the tracking issue** to `opsx:applying` and say so once:
 
      ```bash

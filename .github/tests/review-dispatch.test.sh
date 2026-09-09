@@ -186,7 +186,6 @@ assert_equals "fire" "$(rpy 'print(" ".join(d["jobs"]))')"
 # the label from somebody who may not push. Nothing else — in particular no
 # `contents: write`: this job starts a session, it never writes to the tree.
 assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["fire"]["permissions"])')"
-assert_equals "" "$(rpy 'print(d["jobs"]["fire"]["permissions"].get("contents","") if d["jobs"]["fire"]["permissions"].get("contents")=="write" else "")')"
 
 it "remote-implement prefilters on the label the vocabulary file states"
 label=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["implement_label"])')

@@ -247,9 +247,19 @@ jobs:
               PR=$(printf '%s' "$REVIEW_TITLE" | sed -n 's/.*#\([0-9]\{1,\}\).*/\1/p' | head -1)
               [ -n "$PR" ] || PR="$REVIEW_PR"
               if [ -z "$PR" ] && [ -n "$RUN_HEAD" ]; then
-                PR=$(gh api --method GET "repos/$GITHUB_REPOSITORY/commits/$RUN_HEAD/pulls" \
-                       --jq '[.[] | select(.state == "open")] | first | .number' 2>/dev/null || true)
-                [ "$PR" = "null" ] && PR=""
+                # EXACTLY ONE OPEN PULL REQUEST, OR NONE. A sha can belong to
+                # several — a branch cut from another, a shared head — and
+                # taking `first` would start a round on whichever the API
+                # happened to list, against a pull request nobody labelled.
+                # Ambiguity is answered by doing nothing, which the notice says.
+                mapfile -t candidates < <(gh api --method GET \
+                  "repos/$GITHUB_REPOSITORY/commits/$RUN_HEAD/pulls" \
+                  --jq '.[] | select(.state == "open") | .number' 2>/dev/null || true)
+                if [ "${#candidates[@]}" -eq 1 ]; then
+                  PR="${candidates[0]}"
+                elif [ "${#candidates[@]}" -gt 1 ]; then
+                  echo "::notice::${RUN_HEAD:0:7} is the head of ${#candidates[@]} open pull requests (${candidates[*]}); this run names none, so nothing starts"
+                fi
               fi
               if [ -z "$PR" ]; then
                 echo "::notice::the run '$REVIEW_TITLE' names no pull request; nothing to do"

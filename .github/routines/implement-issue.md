@@ -55,7 +55,10 @@ grep -rl '^<n>$' openspec/changes/*/.github-issue 2>/dev/null
 3. **Take the branch, in the clone.**
 
    ```sh
-   git checkout -b change/<name> origin/master
+   # the branch may already exist — a re-fire continues a change rather than
+   # proposing it again, and `checkout -b` fails on a branch that is there.
+   git fetch origin
+   git checkout "change/<name>" 2>/dev/null || git checkout -b "change/<name>" origin/master
    ```
 
    **NEVER `git worktree add`.** The session's clone IS the working copy — see

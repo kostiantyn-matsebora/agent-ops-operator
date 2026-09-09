@@ -75,8 +75,15 @@ def already_fired(repo: str, number: int) -> bool:
     try:
         raw = gh("api", f"repos/{repo}/issues/{number}/comments", "--paginate",
                  "--jq", ".[].body")
-    except RuntimeError:
-        return False
+    except RuntimeError as exc:
+        # UNREADABLE IS "ALREADY FIRED", not "fire again". Answering False on a
+        # rate limit or a dropped connection starts a SECOND session on the same
+        # issue — two sessions on one branch, which is the case the marker
+        # exists to prevent. Refusing to fire is recoverable by re-labelling;
+        # a duplicate run is not.
+        print(f"::warning::could not read #{number}'s comments ({exc}); "
+              "treating it as already fired rather than risking a second session")
+        return True
     return MARKER in raw
 
 

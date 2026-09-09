@@ -4,7 +4,6 @@
     "BOOTSTRAP WHERE IT DOES NOT. A workstation that has the binary execs it at",
     "once and is unchanged; a remote session starts before",
     ".github/scripts/cloud-bootstrap.sh has finished installing serena, so there",
-    "the wrapper waits up to 180 seconds and then execs.",
     "",
     "NEVER `exit 0` ON A WORKSTATION. The obvious wrapper \u2014 exit 0 unless the",
     "remote marker is set \u2014 makes every stdio server remote-only, which would",
@@ -21,7 +20,13 @@
     "absent is not yet measured \u2014 design D6 records it as the question the first",
     "remote session settles. Guessing a `CLAUDE_CODE_REMOTE` conditional here",
     "would encode an answer nobody has; if the proxy needs the header absent, the",
-    "fix is one line and it lands with the measurement."
+    "fix is one line and it lands with the measurement.",
+    "",
+    "`docker` DOES NOT WAIT, and `serena` does. The bootstrap installs serena,",
+    "so a remote session's wrapper waits for it to appear; nothing installs",
+    "`uvx`, and there is no dockerd socket to reach in the sandbox either \u2014 so a",
+    "wait there would stall 180 seconds and fail anyway. It exits at once where",
+    "the binary is absent, on a workstation and remotely alike."
   ],
   "mcpServers": {
     "docker": {
@@ -29,7 +34,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "command -v uvx >/dev/null 2>&1 && exec uvx mcp-server-docker; [ \"$CLAUDE_CODE_REMOTE\" = \"1\" ] || [ \"$CLAUDE_CODE_REMOTE\" = \"true\" ] || exit 1; for _ in $(seq 180); do command -v uvx >/dev/null 2>&1 && exec uvx mcp-server-docker; sleep 1; done; exit 1"
+        "command -v uvx >/dev/null 2>&1 && exec uvx mcp-server-docker; exit 1"
       ]
     },
     "serena": {
