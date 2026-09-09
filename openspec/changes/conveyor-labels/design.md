@@ -40,7 +40,9 @@ See proposal.md — Why. What shapes the approach, measured rather than assumed:
 **Non-Goals:**
 
 - Giving the app write access, or exempting any actor from the gate.
-- Merging. A person merges at every stage, twice per change.
+- Merging. A person merges every pull request the line opens — twice on the
+  opsx lane (the change, then its archive) and once on the plain lane, which
+  archives nothing.
 - Replacing the review or the fixing loop. Both are extended, not rebuilt.
 - A state machine stored anywhere but the labels themselves.
 

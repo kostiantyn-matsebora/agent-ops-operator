@@ -55,7 +55,7 @@ line at the next station while leaving work already running to finish.
 **The decision is made once, at the moment there is something to decide about.**
 Asking again when the pull request opens, and again when it merges, asks the
 same person the same question about work they already approved — while the
-moments they actually decide something are the two merges.
+moments they actually decide something are the merges.
 
 #### Scenario: The line runs end to end
 
