@@ -125,6 +125,23 @@ time.
   registry. Reach for the check-run lookup, never a concurrency group, for
   "the same work happening N times on one commit."
 
+**`gh variable set` STORES WHATEVER IT IS HANDED, AND A URL COPIED OUT OF A
+WRAPPED DISPLAY CARRIES THE BREAK.** The first live fire of `remote-implement`
+failed with `http.client.InvalidURL: URL can't contain control characters`,
+because `ROUTINE_FIRE_URL` held `trig_01UBwPZ\nb9cN68hvcKxZTx2WH/fire` — the id
+split across two lines exactly where a terminal had wrapped it.
+
+- **`.strip()` DOES NOT REACH IT.** The break is INSIDE the value, not at its
+  ends, so anything validating a configured URL checks for control characters
+  rather than trimming.
+- **THE FAILURE SURFACES FOUR FRAMES DOWN, IN THE WRONG PLACE.** `urllib` raises
+  from `http.client`, so the runner shows a traceback and the ISSUE — the one
+  place a person looks — says nothing at all. A program acting on a label owes a
+  readable refusal wherever the label was placed.
+- **`printf` rather than `echo`, and read it back with `cat -A`:** a value that
+  looks right in `gh variable list` may be wrapped for display rather than
+  actually one line.
+
 **A CLOUD ROUTINE'S PUSH RULES AND ITS ENVIRONMENT'S VARIABLES, MEASURED
 2026-09-06 SO NOBODY RE-DERIVES THEM.** A routine clones the DEFAULT branch and
 may push any branch that is NOT protected, has no open pull request by somebody

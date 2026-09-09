@@ -183,8 +183,26 @@ def main() -> int:
         print(f"::notice::#{number} already carries a fire record; not firing again")
         return 0
 
-    token = os.environ.get("ROUTINE_FIRE_TOKEN", "")
-    if not args.fire_url or not token:
+    # STRIPPED, BECAUSE A COPIED URL CARRIES A NEWLINE. `gh variable set` stores
+    # whatever it is handed, a wrapped terminal display invites copying the line
+    # break with it, and `urllib` then raises InvalidURL deep in http.client —
+    # a stack trace on the runner and NOTHING on the issue, which is the one
+    # place a person would look. Measured on the first live fire, 2026-09-09.
+    fire_url = (args.fire_url or "").strip()
+    token = os.environ.get("ROUTINE_FIRE_TOKEN", "").strip()
+    # A BREAK INSIDE THE VALUE, not only at its ends. The stored variable held
+    # `trig_01UBwPZ\nb9cN68hvcKxZTx2WH` — copied out of a wrapped display — and
+    # `.strip()` cannot reach that. http.client refuses control characters four
+    # frames down, so without this the run dies in a traceback and the issue,
+    # the one place a person looks, says nothing at all.
+    if fire_url and (any(c in fire_url for c in "\r\n\t ")
+                     or not fire_url.lower().startswith(("http://", "https://"))):
+        comment(args.repo, number,
+                f"`{want}` was placed by @{sender}, but this repository's `ROUTINE_FIRE_URL` "
+                "is not a URL. Nothing started; check the variable and place the label again.")
+        print(f"::error::ROUTINE_FIRE_URL is not a URL: {fire_url[:60]!r}")
+        return 1
+    if not fire_url or not token:
         comment(args.repo, number,
                 f"`{want}` was placed by @{sender}, but this repository has no routine "
                 "configured (`ROUTINE_FIRE_URL` / `ROUTINE_FIRE_TOKEN`). Nothing started.")
@@ -192,7 +210,7 @@ def main() -> int:
         return 1
 
     try:
-        payload = fire(args.fire_url, token, number)
+        payload = fire(fire_url, token, number)
     except urllib.error.HTTPError as exc:
         comment(args.repo, number,
                 f"Starting a session for this issue failed: the routine's endpoint answered "
@@ -200,7 +218,7 @@ def main() -> int:
                 "again once it is fixed.")
         print(f"::error::fire failed: {exc.code} {exc.reason}")
         return 1
-    except (urllib.error.URLError, TimeoutError) as exc:
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
         comment(args.repo, number,
                 f"Starting a session for this issue failed: the routine's endpoint could not "
                 f"be reached (`{exc}`). Nothing started.")
