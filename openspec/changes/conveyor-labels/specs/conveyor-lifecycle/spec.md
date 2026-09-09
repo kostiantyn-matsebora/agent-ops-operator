@@ -113,6 +113,12 @@ green, the guards clean, the review answered.
   request is driven to mergeable, and the line ends at the merge with nothing
   archived
 
+#### Scenario: A lane's line ends
+
+- **WHEN** the last station of an issue's lane completes
+- **THEN** no label is placed for a station that lane does not have, and the
+  line is over
+
 #### Scenario: Two issues that read alike
 
 - **WHEN** two issues describe similar work and only one tracks a change

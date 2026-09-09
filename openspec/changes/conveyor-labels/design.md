@@ -128,8 +128,16 @@ The rule that fixes #201, stated as a rule rather than a patch:
 ### D3. The merge transition is a new trigger, because none exists
 
 `pull_request: closed` with `merged == true`. The job reads the pull request's
-body for its `Refs #<n>`, reads that issue's labels, and places
-`conveyor:archive` ON THE ISSUE if `conveyor:run` is there.
+body for its `Refs #<n>`, reads that issue's labels and its LANE, and places
+`conveyor:archive` ON THE ISSUE only when `conveyor:run` is there AND the issue
+is on the opsx lane.
+
+- **THE PLAIN LANE HAS NO ARCHIVE STATION, so nothing is placed for it.** Its
+  line ends at this merge — there is no change to fold into the published
+  contract. Labelling such an issue would ask for a station that does not exist
+  and leave a label nothing consumes. `carry-grant.py` therefore reads the lane
+  (D1a) before it places anything, and a merge on the plain lane is a no-op that
+  says so.
 
 - **On the issue, because the pull request is gone.** It merged; it is closed,
   and a label on a closed pull request drives nothing and is read by nobody. The

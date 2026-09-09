@@ -10,13 +10,6 @@ continuous-integration run completes with a failure on one; two starts for one
 head SHALL run in sequence, each over the pull request's current state, and both
 SHALL count toward the loop's bound.
 
-**THE BOUND IS A NAMED CONSTANT WITH A STATED DEFAULT OF FIVE**, not a number
-buried in a workflow. Reaching it SHALL end the loop with one summary naming the
-rounds used, what was fixed, what is disputed and how to grant more. A stated
-label SHALL grant another set of rounds and SHALL be removed as it is taken, so
-that continuing is always a fresh decision made knowing what the last rounds
-produced.
-
 A push made with the workflow's own token starts nothing, so the landed commit
 of an unlabelled dispatch has no checks and no review until somebody pushes
 again — a limitation this project documented as the safe side. The loop makes
@@ -28,17 +21,6 @@ model-free landing step.
 - **WHEN** the landing step pushes a fix
 - **THEN** the review and the required checks run on that commit, and the pull
   request's merge gate sees them on its head
-
-#### Scenario: The loop reaches its bound
-
-- **WHEN** the configured number of rounds has run and work remains
-- **THEN** the loop ends with one summary naming the rounds used and the label
-  that grants another set
-
-#### Scenario: Another set of rounds is granted
-
-- **WHEN** a person places the extending label on a bounded pull request
-- **THEN** the loop runs another set, and the label is removed as it is taken
 
 #### Scenario: The checks fail on a labelled pull request
 
@@ -113,6 +95,58 @@ is new.
 - **WHEN** no report was written by the fixing step at all
 - **THEN** the round ends as its own outcome saying the step returned nothing,
   and no item is reported as disputed
+
+### Requirement: The loop is bounded and every ending is summarised
+
+Rounds on one pull request SHALL be capped at a stated number, and a round
+that changes nothing — every item disputed, or no patch applied — SHALL end
+the loop early. Every ending SHALL post ONE summary comment stating what was
+fixed, what was disputed, how many rounds ran, what remains open, and mention
+the approver.
+
+**THE CAP SHALL BE A NAMED CONSTANT WITH A STATED DEFAULT OF FIVE**, declared
+where the vocabulary the programs read is declared rather than buried in a
+workflow. A stated label SHALL grant another set of rounds and SHALL be REMOVED
+as it is taken, so that continuing is always a fresh decision made knowing what
+the last rounds produced. The summary of an ending on the cap SHALL name that
+label as the way to grant more.
+
+The review's verdicts vary between runs of the same file, and the reviewer
+reviews the fixer's own commits; without a bound, a self-reviewing loop can
+oscillate indefinitely at a cost nobody approved. Five rather than three because
+a bound of three was measured stopping a loop mid-progress: four rounds produced
+fourteen, ten, eight and one finding, nearly all of them new each round.
+
+#### Scenario: No finding remains
+
+- **WHEN** a round's review posts no finding and the analysis reports no open
+  issue
+- **THEN** the loop ends and the summary says the pull request is clean
+
+#### Scenario: Only disputes remain
+
+- **WHEN** a round disputes every item and fixes none
+- **THEN** the loop ends, the summary lists each dispute, and the approver is
+  mentioned
+
+#### Scenario: The cap is reached
+
+- **WHEN** the stated number of rounds has run and findings remain
+- **THEN** no further round starts, and the summary lists what remains, names
+  the label that grants another set, and mentions the approver
+
+#### Scenario: A round's patch is stale
+
+- **WHEN** the branch moved between collection and landing so the patch does
+  not apply
+- **THEN** the round lands nothing, the loop ends, and the summary says so
+
+#### Scenario: Another set of rounds is granted
+
+- **WHEN** a person places the extending label on a pull request whose loop
+  ended on the cap
+- **THEN** the loop runs another set of rounds, and the label is removed as it
+  is taken
 
 ### Requirement: A dispatch is authorised by who sent it
 
