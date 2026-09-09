@@ -98,10 +98,14 @@ make_env absent
 out=$(CLAUDE_CODE_REMOTE=1 run_bootstrap --verify); status=$?
 assert_status 0 "$status"
 assert_equals "" "$(cat "$CALLS")"
-for tool in helm openspec envtest serena go; do
-  case "$out" in *"$tool "*) ;; *) fail "no line for $tool"; break ;; esac
+# EVERY tool --verify reports, pyyaml included, and `pass` only if none failed:
+# calling `pass` unconditionally after the loop printed an ok line beside the
+# failure, so the case read as green in the summary.
+missing_line=""
+for tool in helm openspec pyyaml envtest serena go; do
+  case "$out" in *"$tool "*) ;; *) missing_line="$tool" ;; esac
 done
-pass
+[ -z "$missing_line" ] && pass || fail "no --verify line for $missing_line"
 assert_contains "$out" "helm missing"
 
 # ITS OWN RUN, not the previous case's `$out`. Reusing that variable made this

@@ -23,8 +23,8 @@ and a security problem goes to [SECURITY.md](SECURITY.md), never to an issue.
 proposes a change from what you wrote, implements it on its own branch and
 opens a pull request. The issue gains exactly two automated comments: one
 linking that session, and the pointer the promotion leaves as it does for any
-promoted issue. The
-label is refused from anyone without write access, and it changes nothing about
+promoted issue. The label is refused from anyone without write access, and it
+changes nothing about
 what happens next — the proposal, the pull request and the review are read by a
 person, and a person merges. Nobody has to use it: an issue nobody labels is
 picked up the ordinary way.

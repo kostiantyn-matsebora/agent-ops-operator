@@ -145,6 +145,24 @@ run_it >/dev/null
 assert_equals "False" "$(read_out consulted)"
 assert_equals "[]" "$(read_out items)"
 
+# A RUN HALF-WAY THROUGH IS NOT A VERDICT EITHER. Some required jobs have
+# reported and some have not; reading that as consulted lets a round say the
+# checks are clean while the job that was going to fail has not spoken yet.
+it "a partially reported run is NOT consulted: every required job must have spoken"
+setup; runs_file
+add_run operator success; add_run chart success      # `images` has not reported
+stub_checks "$RUNS"
+run_it >/dev/null
+assert_equals "False" "$(read_out consulted)"
+
+it "every required job reporting IS consulted, whatever they concluded"
+setup; runs_file
+add_run operator success; add_run chart success; add_run images failure
+stub_checks "$RUNS"
+run_it >/dev/null
+assert_equals "True" "$(read_out consulted)"
+assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
+
 it "the checks API refusing is not consulted either, and never a crash"
 setup; runs_file
 cat > "$BIN/gh" <<'STUB'

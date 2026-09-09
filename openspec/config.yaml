@@ -103,7 +103,8 @@ rules:
       `change/<name>` checked out in place — as ONE pull request — see
       .claude/rules/worktree-delivery.md. A task list MUST NOT instruct
       committing to the default branch, and MUST NOT restate the delivery
-      mechanism as work: creating the worktree, opening the tracking issue and
+      mechanism as work: creating the worktree — or, in a remote session,
+      checking the branch out in the clone — opening the tracking issue and
       opening the pull request are the opsx commands' own steps, not tasks.
     - >-
       WHERE A TASK'S VERIFICATION IS A DEPLOY OR A BUILD, it MUST say that it

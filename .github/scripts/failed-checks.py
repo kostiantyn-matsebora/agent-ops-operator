@@ -154,8 +154,12 @@ def main() -> int:
     # CONSULTED means CI reported on this sha at all — any conclusion, any of
     # its jobs. Absent, the round proceeds over the other sources and the
     # summary says the checks were not consulted, rather than implying green.
+    # EVERY required job, not any one of them. A run half-way through has some
+    # jobs reported and some not; reading that as "consulted" lets a round say
+    # the checks are clean while the job that was going to fail has not spoken.
+    # `>=` on sets is superset: every required job has a check run.
     seen = {job_name(c.get("name") or "") for c in runs}
-    consulted = bool(seen & required)
+    consulted = bool(required) and seen >= required
 
     items: list[dict] = []
     checks: list[dict] = []

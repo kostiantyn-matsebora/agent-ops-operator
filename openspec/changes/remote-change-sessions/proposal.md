@@ -93,9 +93,16 @@ issue into one.
   `.github/routines/implement-issue.md` (new), `.github/review-triage.json`
   (`implement_label`), `.github/tests/` (three new suites, `run.sh`).
 - `.github/workflows/review-dispatch.yml` (a `ci` failure as a round's start;
-  `collect` gathers failed checks under `actions: read`), `.github/scripts/failed-checks.py`
-  (new), `.github/scripts/land-dispatch.py` (checks in the summary), the fixer's
-  role file (a check item is reproduced, then fixed or disputed).
+  `collect` gathers failed checks under `actions: read`; the FIXER'S PROMPT —
+  which lives inline in that workflow, not in a role file: `review-prompt.py`
+  serves the review's reading roles only), `.github/scripts/failed-checks.py`
+  (new), `.github/scripts/land-dispatch.py` (checks in the summary and in a
+  fixed round's commit body).
+- `.github/scripts/review-rules.py` (`remote-session` joins the session rules
+  that are not review criteria, beside `worktree-delivery` — otherwise
+  `--check` fails on a rule no path routes to) and
+  `.github/publication-allowlist.json` (serena's clone url, which the bootstrap
+  installs from).
 - `.claude/settings.json` (a `SessionStart` verify hook), `.mcp.json` (the
   wrappers), `.claude/rules/remote-session.md` (new).
 - Outside the tree, once: the `agent-ops-operator` cloud environment, its
@@ -114,6 +121,9 @@ issue into one.
   archive rule is unchanged.
 - `.claude/rules/gotchas.md`: the routine push rules and the public-variables
   fact, measured, so nobody re-derives them.
+- `.claude/rules/worktree-delivery.md` states the `pr-closes-guard.py` rule from
+  BOTH sides — an applying pull request says `Refs #<n>`, only the archiving one
+  says `Closes` — which the guard already enforced and no document stated.
 - `openspec/config.yaml` (`rules.tasks`) and `.claude/commands/opsx/apply.md`
   step 1.5: "from its own git worktree" becomes "or a remote session's clone".
 - `.claude/skills/openspec-apply-change`: where the `autofix` label is placed

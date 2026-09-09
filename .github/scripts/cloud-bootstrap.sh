@@ -193,7 +193,12 @@ main() {
   fi
 
   mkdir -p "$HOME/.local/bin"
-  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+  # PREPENDED UNCONDITIONALLY, and the "already there" case is exactly why. If
+  # the image puts `~/.local/bin` on PATH but AFTER `/usr/local/go/bin`, a
+  # skipped prepend leaves the image's older `go` winning every lookup — so the
+  # toolchain this script just installed would be invisible, which is the one
+  # failure `install_go` exists to prevent. A duplicate entry costs nothing.
+  export PATH="$HOME/.local/bin:$PATH"
 
   if [ "$VERIFY_ONLY" = 1 ]; then
     verify

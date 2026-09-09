@@ -415,9 +415,16 @@ def main() -> int:
         subject = f"fix(review): address {' and '.join(parts)} (autofix round {rnd.number})"
     else:
         subject = f"fix(review): address {len(fixed)} accepted review finding{'s' if len(fixed) != 1 else ''}"
-    body = "\n".join(f"- {work[t]['path']}:{work[t].get('line') or '?'} — "
-                     f"{first_line(work[t].get('finding') or work[t].get('message', ''))}"
-                     for t in fixed)
+    # A CHECK IS NAMED BY ITS JOB. Its `path` is the workflow file and it
+    # carries no `finding` or `message`, so the finding-shaped line rendered as
+    # `.github/workflows/ci.yml:? — ` with nothing after the dash.
+    def body_line(item: dict) -> str:
+        if item.get("source") == "check":
+            return f"- the `{item.get('job')}` check"
+        return (f"- {item['path']}:{item.get('line') or '?'} — "
+                f"{first_line(item.get('finding') or item.get('message', ''))}")
+
+    body = "\n".join(body_line(work[t]) for t in fixed)
     trailer = f"Dispatched-By: {args.dispatched_by}"
     sh("git", "commit", "-q", "-m", subject, "-m", body, "-m", trailer)
     sha = sh("git", "rev-parse", "HEAD").stdout.strip()

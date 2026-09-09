@@ -132,7 +132,7 @@ else, and carries no commits by somebody else — so a fresh `change/<name>` is
 accepted and a branch a person is already working is not. Its GitHub triggers
 are `pull_request` and `release` ONLY; there is no `issues` event, which is why
 a label reaches a routine through an Actions workflow and its `/fire` endpoint
-rather than directly (`remote-session.md`).
+rather than directly (`.claude/rules/remote-session.md`).
 
 - **THE ENVIRONMENT'S VARIABLES ARE PUBLIC TO EVERY SESSION IT RUNS**, and the
   form says so on its face. A token typed there is published; a credential goes
