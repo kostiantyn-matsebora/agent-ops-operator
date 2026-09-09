@@ -115,6 +115,11 @@ grep -rl '^<n>$' openspec/changes/*/.github-issue 2>/dev/null
    - **That approval came from the issue's label, and who placed it.** The
      `autofix` label is on this pull request because that person's word was
      given once, on the issue.
+   - **THE SMOKE RUN YOU DISPATCHED IN STEP 6, BY LINK.** You did not wait for
+     its verdict, so the link is how a reviewer reaches one — without it the
+     dispatch is invisible and reads as a tier nobody ran. The first live run of
+     this file omitted it for exactly that reason: step 6 asked for it and this
+     list did not.
    - **Which verifications are workstation-only and were NOT run here**: the
      local cluster, any deploy, the visual check. A reviewer must see the gap
      rather than infer it.
