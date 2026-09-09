@@ -202,6 +202,19 @@ def main() -> int:
                 "is not a URL. Nothing started; check the variable and place the label again.")
         print(f"::error::ROUTINE_FIRE_URL is not a URL: {fire_url[:60]!r}")
         return 1
+    # THE TOKEN IS COPIED FROM THE SAME DIALOG AND BREAKS THE SAME WAY, and its
+    # failure is worse to read: a header carrying a newline is refused by
+    # http.client exactly as the url is, and one that merely lost characters
+    # comes back 401 — indistinguishable from a revoked credential. NEVER print
+    # or comment the value; the name is enough to fix it by.
+    if any(c in token for c in "\r\n\t "):
+        comment(args.repo, number,
+                f"`{want}` was placed by @{sender}, but this repository's "
+                "`ROUTINE_FIRE_TOKEN` contains a line break or space — it was probably "
+                "copied out of a wrapped display. Nothing started; set it again and "
+                "place the label back.")
+        print("::error::ROUTINE_FIRE_TOKEN contains whitespace; refusing to send it")
+        return 1
     if not fire_url or not token:
         comment(args.repo, number,
                 f"`{want}` was placed by @{sender}, but this repository has no routine "
