@@ -1,0 +1,54 @@
+## 1. The vocabulary, and the labels themselves (design D1, D4, D5)
+
+- [ ] 1.1 `.github/review-triage.json`: `approve_label` becomes `conveyor:fix`; add `run_label` (`conveyor:run`), `implement_label` (`conveyor:implement`), `archive_label` (`conveyor:archive`), `keep_going_label` (`conveyor:keep-going`) and `max_rounds` (5), each with a `_comment` paragraph saying what a person means by placing it and that a program may only carry or consume one. Verify: `python3 -c 'import json;d=json.load(open(".github/review-triage.json"));print(d["approve_label"], d["run_label"], d["max_rounds"])'` prints `conveyor:fix conveyor:run 5`.
+- [ ] 1.2 Add `autofix` to `.github/retired-vocabulary.json` with `says` naming `conveyor:fix`, and confirm the guard then FAILS on a tree still using the old name. Verify: `python3 .github/scripts/retired-vocabulary-guard.py` reports the remaining uses, and reports clean once section 2 and section 5 have landed.
+- [ ] 1.3 Create the five labels on the repository with descriptions stating scope and who may place them (`gh label create`), keeping `autofix` until the migration's last step. Verify: `gh label list --json name -q '.[].name' | grep -c '^conveyor:'` is 5.
+
+## 2. The line: one instruction, carried at every transition (design D1, D2, D3)
+
+- [ ] 2.1 `.github/scripts/remote-implement.py`: the trigger label is `run_label` OR `implement_label` read from the vocabulary; the refusal, the marker comment and the fire are unchanged. Verify: the suite in 5.1.
+- [ ] 2.2 Write `.github/scripts/carry-grant.py --issue <n> --pr <n> --station fix|archive`: reads the issue's CURRENT labels, does nothing unless `run_label` is present, checks the person who placed it still has write access (the collaborators API, as the gate does), places the station's label on the pull request and comments ONCE under a marker naming whose instruction it carried. Exits 0 doing nothing when the instruction is absent — that is the ordinary case, not an error. Verify: the suite in 5.2.
+- [ ] 2.3 `.github/workflows/remote-implement.yml`: a second job on `pull_request: closed` where `merged == true`, reading the merged pull request's body for `Refs #<n>`, then calling `carry-grant.py --station archive`. `issues: write` and `pull-requests: write`, nothing else; an archive pull request (which carries `Closes`, not `Refs`) is a no-op. Verify: the suite in 5.4.
+- [ ] 2.4 The same workflow gains the OPEN transition: on `pull_request: opened` from a branch named `change/*`, read the body's `Refs #<n>` and call `carry-grant.py --station fix`. Verify: the suite in 5.4 asserts both transitions and that neither runs on a fork.
+- [ ] 2.5 `.github/routines/implement-issue.md` gains the LANE READ as its first step: the issue is on the opsx lane when `openspec/changes/*/.github-issue` holds its number or an `opsx:` phase label is present, and on the plain lane otherwise — read, never judged from the issue's wording. The opsx path is the file's current process; the PLAIN path implements what the issue describes, opens the pull request and stops at the merge, owing no proposal, task list or delta spec but the same green bar. Verify: the file states both lanes and the test that selects them, and `grep -c 'never.*judg\|read, never' .github/routines/implement-issue.md` ≥ 1.
+- [ ] 2.6 `.github/routines/implement-issue.md`: the session opens its pull request with NO label, and the file says why — it acts as an application with no write access, so a label it places is removed by the gate; the workflow labels it instead. Verify: `grep -c 'autofix\|--label' .github/routines/implement-issue.md` shows no label flag on `gh pr create`.
+
+## 3. The bound, and the label that extends it (design D4)
+
+- [ ] 3.1 `.github/workflows/review-dispatch.yml`: `MAX_ROUNDS: 3` becomes `CONVEYOR_MAX_ROUNDS`, read from the vocabulary file's `max_rounds` by the gate and passed through, so the number is stated once. The gate's prefilter and its label read use `approve_label` from the file, which is now `conveyor:fix`. Verify: the suite in 5.4.
+- [ ] 3.2 `.github/scripts/land-dispatch.py`: the bounded ending's summary names the rounds used and the extending label as the way to grant another set; the model-free landing job REMOVES `keep_going_label` when a round runs under it. Verify: the suite in 5.3 asserts the summary text and the removal.
+- [ ] 3.3 `review-dispatch.yml`'s gate admits a round when the pull request carries `approve_label` AND either a person placed it or `carry-grant.py` did with a standing instruction that is STILL present — re-read, never trusted from the carry. Verify: the suite in 5.4 covers a carried label whose instruction was removed.
+
+## 4. Outside the tree (design D5, Migration)
+
+- [ ] 4.1 Relabel any open pull request carrying `autofix` to `conveyor:fix`, then delete the `autofix` label once none carries it. Verify: `gh label list --json name -q '.[].name' | grep -c '^autofix$'` is 0 and no open pull request lost its grant.
+- [ ] 4.2 Live proof, once: place `conveyor:run` on a throwaway issue and watch the whole line — the session implements and opens an UNLABELLED pull request, the workflow labels it `conveyor:fix` naming the approver, the loop drives it, a person merges, the workflow labels the change `conveyor:archive`, and the archive pull request opens. Then close everything and delete the branches. Verify: the pull request's label was placed by the workflow and not the session, and the gate accepted it.
+- [ ] 4.3 Prove the refusal too: have the session's own label be placed (or simulate it) and confirm it is removed with a visible comment, so the #201 defect cannot return unnoticed. Verify: recorded in `gotchas.md` as measured, or stated as not testable without the app's credentials.
+
+## 5. Unit tests
+
+- [ ] 5.1 Extend `.github/tests/remote-implement.test.sh`: fires on `run_label` and on `implement_label`, on neither for any other label, and the existing gate, marker and payload cases still hold with the renamed vocabulary. Verify: `.github/tests/run.sh` passes.
+- [ ] 5.1a New `.github/tests/conveyor-lane.test.sh`, wired into `run.sh`: the lane is read from a fixture tree — a `.github-issue` holding the number → opsx; an `opsx:` phase label and no binding → opsx; neither → plain; a binding for a DIFFERENT issue → plain. The wording of the issue changes nothing in any case, which the suite asserts by running the same body through both fixtures. Verify: `run.sh` passes.
+- [ ] 5.2 New `.github/tests/carry-grant.test.sh`, wired into `run.sh`, with a stubbed `gh`: no standing instruction → exits 0, places nothing; instruction present and its placer has write access → places the station label and comments once under the marker naming them; the placer has LOST write access → places nothing and says so; already carried (marker present) → no second comment; a pull request body with no `Refs #<n>` → no-op. Verify: `run.sh` passes.
+- [ ] 5.3 Extend `.github/tests/land-dispatch.test.sh`: the bound is read rather than hardcoded; a bounded ending names the rounds used and the extending label; `keep_going_label` is removed when a round runs under it and not otherwise. Verify: `run.sh` passes.
+- [ ] 5.4 Extend `.github/tests/review-dispatch.test.sh`: the renamed label throughout; the bound comes from the vocabulary file; and for `remote-implement.yml` the two new transitions — `pull_request: opened` on `change/*` and `closed` with `merged == true` — each with the job's permissions pinned, no `pull_request_target` anywhere, and a fork refused. Verify: `run.sh` passes.
+- [ ] 5.5 Run the whole suite and both guards from the working copy, plus the CI `scripts` job's coverage step per `build-test.md`, so `carry-grant.py` is measured. Verify: all exit 0 and `.github/coverage.xml` names the new file.
+
+## 6. E2E tests
+
+- [ ] 6.1 Not applicable: nothing here is decided by a cluster — the change is two workflows, three programs and a vocabulary file, and every program's behaviour is pinned by section 5. The live proof this change owes is the platform's, not a cluster's, and it is task 4.2. Verify: this task claims nothing a cluster decides.
+
+## 7. Documentation
+
+### 7.1 Reference docs
+
+- [ ] 7.1.1 `.claude/rules/worktree-delivery.md`: the consent table becomes the five `conveyor:` labels with who may place each; a new short section states that a program may CARRY or CONSUME a grant and never mint one, naming #201 as what it cost; the round bound names the constant and its default. Verify: `grep -c 'conveyor:' .claude/rules/worktree-delivery.md` ≥ 5 and `grep -c autofix` is 0 outside a retired-name record.
+- [ ] 7.1.2 `.claude/rules/remote-session.md`: the label table, and the sentence saying the pull request carries the approve label from creation becomes its inverse — the session labels nothing and the workflow carries the grant. Verify: the file names all five labels and states the session places none.
+- [ ] 7.1.3 `CONTRIBUTING.md`: the paragraph on handing an issue to a session names `conveyor:run` and what it carries, and the pull-request section names `conveyor:fix`, the bound and `conveyor:keep-going`. Verify: `grep -c 'conveyor:' CONTRIBUTING.md` ≥ 3.
+- [ ] 7.1.4 `.claude/skills/openspec-apply-change/SKILL.md`: the step asking for the owner's word names the new label and says a session may not place it. Verify: the file names `conveyor:fix` and states the session does not place it.
+- [ ] 7.1.5 `.claude/rules/gotchas.md`: one entry recording #201 — a session acts as the app, holds no write access, and a label it places is removed by the gate; the fix is that programs carry grants rather than mint them. Verify: the entry names the pull request and the actor.
+- [ ] 7.1.6 The four delta specs are archived into `openspec/specs/` by `/opsx:archive` on the branch; `openspec validate --all` passes before that. Verify: the command exits 0.
+
+### 7.2 Adopter site
+
+- [ ] 7.2.1 None of the landing page, introduction, getting started, installation, the integration pages or the guides describes how this project is developed, and no shipped behaviour changed — so no site page is touched, stated here as a claim a reviewer can dispute rather than an omission. Verify: `git diff --stat master -- docs/` is empty for this change.
