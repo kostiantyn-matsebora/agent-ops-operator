@@ -53,6 +53,47 @@ model-free landing step.
 - **THEN** behaviour is unchanged: the landing comment says a further push is
   needed
 
+### Requirement: A fixing step that said nothing is not a fixing step that disagreed
+
+The outcome recorded for a work item SHALL distinguish what the fixing step
+actually said about it. An item the step declined with a reason SHALL be
+recorded as DISPUTED. An item the step's report never mentions SHALL be recorded
+as UNADDRESSED, and SHALL NOT be reported as disputed. A round whose fixing step
+produced NO report at all SHALL end as its own stated outcome, naming that the
+step returned nothing.
+
+**Silence and refusal are different facts, and only one of them is a decision.**
+A dispute is the fixing step's honest answer that a finding is wrong, and it
+waits for a person and holds the merge. An item nobody looked at waits for
+nothing and has decided nothing — reporting it as disputed tells a reader the
+machine considered their finding and declined it, when no model spoke at all.
+
+Measured: three findings on one pull request were reported "disputed by the
+fixing step: not addressed by the fixing step". The pull request changed no
+code, the step produced nothing, and an empty report was substituted before the
+recording step ran.
+
+An unaddressed item SHALL remain eligible for a later round rather than being
+treated as settled.
+
+#### Scenario: The fixing step declines a finding
+
+- **WHEN** the step reports an item as disputed with a reason
+- **THEN** it is recorded as disputed, waits for a person, and holds the archive
+
+#### Scenario: The fixing step omits an item from its report
+
+- **WHEN** a work item appears in neither the fixed nor the disputed list of a
+  report that exists
+- **THEN** it is recorded as unaddressed, is not described as disputed, and is
+  eligible for a later round
+
+#### Scenario: The fixing step produced no report
+
+- **WHEN** no report was written by the fixing step at all
+- **THEN** the round ends as its own outcome saying the step returned nothing,
+  and no item is reported as disputed
+
 ### Requirement: A dispatch is authorised by who sent it
 
 A dispatch SHALL act only for a person the platform says may push to this

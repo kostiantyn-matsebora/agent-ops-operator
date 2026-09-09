@@ -52,6 +52,15 @@ because a person drove it past the bound by hand.
 - **THE BOUND IS A NAMED CONSTANT, DEFAULT 5**, and `conveyor:keep-going` buys
   another 5 and is CONSUMED when taken — one placement, one grant, so continuing
   is always a fresh decision made knowing what the last rounds produced.
+- **A FIXER THAT SAID NOTHING IS NOT A FIXER THAT DISAGREED.** When the model
+  writes no report, the workflow substitutes an empty one and every item lands
+  as "disputed: not addressed by the fixing step" — which reads as considered
+  refusal and is silence. Measured on #205, where three findings came back that
+  way and no model had spoken. A round whose fixer returned NOTHING ends as its
+  own outcome, named; an item merely missing from a real report is UNADDRESSED,
+  not disputed. The distinction matters more under this change than before it:
+  five unattended rounds of phantom disputes reads as a machine that considered
+  the work five times.
 - **`autofix` IS RETIRED INTO `conveyor:fix`**, with the old name recorded in
   `.github/retired-vocabulary.json` so it cannot quietly return.
 

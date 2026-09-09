@@ -70,7 +70,7 @@ issue runs the PLAIN lane.
 
 | Lane | Selected when | Stations |
 |---|---|---|
-| opsx | `openspec/changes/*/.github-issue` holds the number, OR an `opsx:` phase label is present | propose → apply → fix → archive |
+| opsx | `openspec/changes/*/.github-issue` holds the number, OR an `opsx:` phase label is present | implement → fix → archive |
 | plain | neither | implement → fix, ending at the merge |
 
 **PROPOSE AND APPLY ARE ONE STATION, AND `conveyor:implement` DRIVES IT.** There
@@ -159,6 +159,37 @@ the vocabulary file naming the label that extends it.
 - **A bounded ending says so.** The summary already names its ending; it gains
   "place `conveyor:keep-going` for another N" so the next action is in the text
   a person is already reading.
+
+### D4a. Three outcomes, not two: fixed, disputed, and never spoken about
+
+`land-dispatch.py` reads the model's report and classifies every work item as
+fixed or disputed. There is no third state, so an item the report never mentions
+becomes `disputed: not addressed by the fixing step` — the same word used when
+the fixer looked at a finding and declined it, with a reason.
+
+| The report | Today | Proposed |
+|---|---|---|
+| names the item `fixed`, and the patch backs it | fixed | unchanged |
+| names it `disputed` with a reason | disputed | unchanged |
+| does not name it | **disputed** | **UNADDRESSED**, named as such |
+| does not exist at all | every item disputed | **the round ends as `no report`**, and says so |
+
+- **MEASURED ON #205.** Three findings came back "disputed by the fixing step:
+  not addressed by the fixing step". No model had spoken: the pull request
+  touched only `openspec/changes/`, the fixer produced nothing, and
+  `review-dispatch.yml` substituted `{"items":[]}` before the lander ever ran.
+  A reader sees a machine that considered three findings and declined them.
+- **The empty-report substitution stays**, because a missing file must not be a
+  missing input — but the lander is told WHICH it got, so it can end the round
+  honestly instead of inventing three refusals.
+- **A disputed item and an unaddressed one need different endings.** A dispute
+  waits for a person and blocks the archive, correctly. An unaddressed item is a
+  defect in the run, and the next round should retry it rather than treat it as
+  settled.
+- **THIS CHANGE FIXES IT BECAUSE THIS CHANGE MAKES IT WORSE.** Under a bound of
+  three it wasted three rounds; under five, driven unattended by
+  `conveyor:run`, it wastes five and reports five considered refusals that never
+  happened.
 
 ### D5. `autofix` is retired, not aliased
 
