@@ -53,33 +53,53 @@ model-free landing step.
 - **THEN** behaviour is unchanged: the landing comment says a further push is
   needed
 
-### Requirement: A fixing step that said nothing is not a fixing step that disagreed
+### Requirement: A finding is fixed or disputed, never dropped
 
-The outcome recorded for a work item SHALL distinguish what the fixing step
-actually said about it. An item the step declined with a reason SHALL be
-recorded as DISPUTED. An item the step's report never mentions SHALL be recorded
-as UNADDRESSED, and SHALL NOT be reported as disputed. A round whose fixing step
-produced NO report at all SHALL end as its own stated outcome, naming that the
-step returned nothing.
+Under whole-pull-request approval, the fixing step SHALL either fix each item
+or DISPUTE it with a stated reason, and SHALL NOT leave an item unaddressed.
 
-**Silence and refusal are different facts, and only one of them is a decision.**
-A dispute is the fixing step's honest answer that a finding is wrong, and it
-waits for a person and holds the merge. An item nobody looked at waits for
-nothing and has decided nothing — reporting it as disputed tells a reader the
-machine considered their finding and declined it, when no model spoke at all.
+**WHERE IT NEVERTHELESS SAID NOTHING, THE ROUND SHALL SAY SO RATHER THAN CALL
+IT A DISPUTE.** An item the step's report never mentions SHALL be recorded as
+UNADDRESSED and SHALL NOT be reported as disputed; a round whose fixing step
+produced NO report at all SHALL end as its own stated outcome naming that the
+step returned nothing. An unaddressed item SHALL remain eligible for a later
+round rather than being treated as settled.
 
-Measured: three findings on one pull request were reported "disputed by the
-fixing step: not addressed by the fixing step". The pull request changed no
-code, the step produced nothing, and an empty report was substituted before the
+Silence and refusal are different facts, and only one of them is a decision.
+Reporting an item nobody looked at as disputed tells a reader the machine
+considered their finding and declined it. Observed while this capability's own
+change was under review: three findings came back "disputed by the fixing step:
+not addressed by the fixing step" on a pull request that changed no code, where
+the step produced nothing and an empty report was substituted before the
 recording step ran.
 
-An unaddressed item SHALL remain eligible for a later round rather than being
-treated as settled.
+A dispute SHALL be posted as a reply in the finding's thread, or — for an
+analysis issue, which has no thread — as one comment on the pull request naming
+the issue's key. A disputed thread SHALL stay open, and the dispute SHALL NOT be
+recorded in the analysis service. The person who approved the pull request
+SHALL be mentioned in the round's summary for every dispute.
 
-#### Scenario: The fixing step declines a finding
+A disagreement is a decision still owed to a person. An open thread already
+holds the merge, so a dispute costs nothing new — it is the notification that
+is new.
 
-- **WHEN** the step reports an item as disputed with a reason
-- **THEN** it is recorded as disputed, waits for a person, and holds the archive
+#### Scenario: The fixer disagrees with a finding
+
+- **WHEN** the fixing step judges a finding wrong
+- **THEN** the thread receives a reply stating why, the thread stays open, the
+  code is untouched, and the summary names the thread and mentions the approver
+
+#### Scenario: The fixer disagrees with an analysis issue
+
+- **WHEN** the fixing step judges an analysis issue wrong
+- **THEN** one pull request comment names the issue key and the reason, the
+  issue is left as the service reports it, and the summary mentions the approver
+
+#### Scenario: A previously disputed finding is raised again
+
+- **WHEN** a later round finds a thread already carrying a dispute
+- **THEN** the thread is not disputed a second time and is not fixed; it is
+  counted as awaiting the person
 
 #### Scenario: The fixing step omits an item from its report
 
