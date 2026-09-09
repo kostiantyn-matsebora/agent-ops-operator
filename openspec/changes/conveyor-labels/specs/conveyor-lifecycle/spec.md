@@ -60,9 +60,10 @@ moments they actually decide something are the two merges.
 #### Scenario: The line runs end to end
 
 - **WHEN** a person places the standing instruction on an issue
-- **THEN** a change is proposed and implemented, its pull request is opened and
-  driven to mergeable, and after a person merges it the change is archived —
-  with no further label placed by anyone
+- **THEN** a change is implemented, its pull request is opened and driven to
+  mergeable, and after a person merges it the change is archived — with no
+  further label placed BY A PERSON, each station's label carried by a workflow
+  on the strength of that one instruction
 
 #### Scenario: The instruction is removed mid-flight
 

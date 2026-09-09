@@ -55,8 +55,9 @@ because a person drove it past the bound by hand.
 - **A FIXER THAT SAID NOTHING IS NOT A FIXER THAT DISAGREED.** When the model
   writes no report, the workflow substitutes an empty one and every item lands
   as "disputed: not addressed by the fixing step" — which reads as considered
-  refusal and is silence. Measured on #205, where three findings came back that
-  way and no model had spoken. A round whose fixer returned NOTHING ends as its
+  refusal and is silence. Observed while this change was itself under review:
+  three findings on a proposal-only pull request came back that way, and no
+  model had spoken — the fixing step had no code to act on and produced nothing. A round whose fixer returned NOTHING ends as its
   own outcome, named; an item merely missing from a real report is UNADDRESSED,
   not disputed. The distinction matters more under this change than before it:
   five unattended rounds of phantom disputes reads as a machine that considered

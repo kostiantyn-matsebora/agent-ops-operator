@@ -174,11 +174,12 @@ the fixer looked at a finding and declined it, with a reason.
 | does not name it | **disputed** | **UNADDRESSED**, named as such |
 | does not exist at all | every item disputed | **the round ends as `no report`**, and says so |
 
-- **MEASURED ON #205.** Three findings came back "disputed by the fixing step:
-  not addressed by the fixing step". No model had spoken: the pull request
-  touched only `openspec/changes/`, the fixer produced nothing, and
-  `review-dispatch.yml` substituted `{"items":[]}` before the lander ever ran.
-  A reader sees a machine that considered three findings and declined them.
+- **MEASURED WHILE THIS CHANGE WAS ITSELF UNDER REVIEW.** Three findings on its
+  proposal came back "disputed by the fixing step: not addressed by the fixing
+  step". No model had spoken: the pull request touched only
+  `openspec/changes/`, the fixer produced nothing, and `review-dispatch.yml`
+  substituted `{"items":[]}` before the lander ever ran. A reader sees a machine
+  that considered three findings and declined them.
 - **The empty-report substitution stays**, because a missing file must not be a
   missing input — but the lander is told WHICH it got, so it can end the round
   honestly instead of inventing three refusals.
