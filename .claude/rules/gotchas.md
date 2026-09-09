@@ -125,6 +125,27 @@ time.
   registry. Reach for the check-run lookup, never a concurrency group, for
   "the same work happening N times on one commit."
 
+**A ROUTINE SESSION IS SLOWER THAN ITS LOG LOOKS, AND AN IDLE `worker_status`
+IS NOT A FINISHED RUN.** The first live run of
+`.github/routines/implement-issue.md` dispatched `e2e-smoke.yml`, said "I'll
+stop here and wait for the background task notification", and sat at
+`worker_status: idle`. Read at that moment it looks exactly like a session that
+ended its turn and died — the failure `claude -p` really does have. It had not:
+ten minutes later it opened its pull request, correctly labelled.
+
+- **`list_runs` reports `status: active` with `worker_status: idle` for a
+  session that is merely between turns.** Neither field distinguishes "waiting
+  on a background task" from "over", so a log tail is a SNAPSHOT and not a
+  verdict.
+- **Check the ARTIFACT, never the transcript**, when asking whether an
+  unattended run finished: the pull request, the branch, the comment. This
+  repository's own rule for the review says the same thing about a tag and a
+  registry.
+- **It still argues for dispatch-and-carry-on** in an instruction file: those
+  ten minutes bought nothing, and the pull request is what makes a dispatched
+  run visible. But the session was not lost, and writing that it was would put a
+  fiction in this file.
+
 **`gh variable set` STORES WHATEVER IT IS HANDED, AND A URL COPIED OUT OF A
 WRAPPED DISPLAY CARRIES THE BREAK.** The first live fire of `remote-implement`
 failed with `http.client.InvalidURL: URL can't contain control characters`,

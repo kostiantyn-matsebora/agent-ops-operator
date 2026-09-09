@@ -80,14 +80,23 @@ grep -rl '^<n>$' openspec/changes/*/.github-issue 2>/dev/null
      `python3 .github/scripts/retired-vocabulary-guard.py`,
      `python3 .github/scripts/docs-generate.py --check`.
 
-6. **Dispatch the cluster tier; do not carry a cluster.**
+6. **Dispatch the cluster tier, and DO NOT WAIT FOR IT.**
 
    ```sh
    gh workflow run e2e-smoke.yml --ref change/<name>
    ```
 
-   Wait for the run's conclusion and record it. The e2e pack needs docker, k3d
-   and a cluster, and that tier already runs on a runner of this shape.
+   **Do not idle waiting for it.** The first live run of this file dispatched
+   the smoke tier and then spent ten minutes waiting for a notification, which
+   bought nothing: the run reports on the branch by itself, and the pull request
+   is what makes it visible.
+
+   - **Dispatch it, name the run in the pull request, and CARRY ON to step 7.**
+   - **The e2e pack needs docker, k3d and a cluster**, which this machine does
+     not have; that tier already runs on a runner of this shape.
+   - If you genuinely need its verdict first, POLL it in a foreground command
+     that exits — `until`, with a bound — rather than ending your turn and
+     hoping to be woken.
 
 7. **Open the pull request.**
 
