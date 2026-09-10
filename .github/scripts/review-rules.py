@@ -67,15 +67,15 @@ TABLE: list[tuple[str, list[str]]] = [
     ("platform/**", ["invariants", "terminology", "adapters"]),
     ("chart/**", ["chart", "wiring", "invariants", "terminology"]),
     ("docs/assets/css/**", ["palette-and-mark"]),
-    ("docs/**", ["documentation", "terminology", "docs/CLAUDE.md"]),
-    (".claude/**", ["authoring", "terminology"]),
-    ("openspec/**", ["authoring", "terminology", "documentation", "change-tests"]),
+    ("docs/**", ["documentation", "writing", "terminology", "docs/CLAUDE.md"]),
+    (".claude/**", ["authoring", "writing", "terminology"]),
+    ("openspec/**", ["authoring", "writing", "terminology", "documentation", "change-tests"]),
     (".github/components.sh", ["structure"]),
     (".github/workflows/**", ["structure"]),
     ("**/Dockerfile", ["structure"]),
     ("**/go.mod", ["structure"]),
-    (".github/**", ["authoring"]),
-    ("*", ["authoring", "documentation"]),   # a root file: README, CONTRIBUTING, CLAUDE.md
+    (".github/**", ["authoring", "writing"]),
+    ("*", ["authoring", "writing", "documentation"]),   # a root file: README, CONTRIBUTING, CLAUDE.md
 ]
 
 
