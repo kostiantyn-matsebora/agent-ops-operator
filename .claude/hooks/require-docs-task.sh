@@ -100,11 +100,14 @@ EOF
 fi
 
 # THE SECOND QUESTION: IS THE PULL REQUEST'S FIXING LOOP STILL OPEN. A change
-# whose pull request carries the `autofix` label may have a round about to land
-# a commit, or a dispute the fixing step posted that no person has answered.
-# `.github/scripts/autofix-guard.py` reads that off the pull request of the
-# worktree's branch, fails open on everything it cannot read (no gh, no pull
-# request, no label), and CI's docs-task job asks the same script.
+# whose pull request carries the `conveyor:fix` label (the retired `autofix`)
+# may have a round about to land a commit, or a dispute the fixing step
+# posted that no person has answered.
+# `.github/scripts/autofix-guard.py` (script filename unchanged; it reads
+# `approve_label` from the vocabulary file rather than a hardcoded name) reads
+# that off the pull request of the worktree's branch, fails open on everything
+# it cannot read (no gh, no pull request, no label), and CI's docs-task job
+# asks the same script.
 autofix="$root/.github/scripts/autofix-guard.py"
 [ -r "$autofix" ] || exit 0
 if message=$(cd "$root" && python3 "$autofix" 2>&1); then

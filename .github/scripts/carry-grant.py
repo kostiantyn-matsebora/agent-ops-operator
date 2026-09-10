@@ -73,13 +73,28 @@ def issue_labels(repo: str, issue: int) -> set[str]:
     return {l.get("name") for l in doc.get("labels") or [] if l.get("name")}
 
 
+def parse_paginated(raw: str) -> list:
+    """`gh api --paginate` (WITHOUT `--jq`) concatenates each page's JSON
+    array back to back rather than merging them into one -- a bare
+    `json.loads` then raises on any issue whose timeline spans more than one
+    page. Same shape as land-dispatch.py's own parse_comments."""
+    try:
+        return json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        events: list = []
+        for chunk in raw.replace("][", "]\n[").splitlines():
+            if chunk.strip():
+                events.extend(json.loads(chunk))
+        return events
+
+
 def label_placement(repo: str, issue: int, label: str) -> tuple[str, str] | None:
     """(login, iso timestamp) of the LATEST placement of `label` on the
     issue's timeline, or None if the timeline shows nobody placing it. The
     latest counts, exactly as review-dispatch.yml's own gate reads it."""
     raw = gh("api", f"repos/{repo}/issues/{issue}/timeline", "--paginate")
     try:
-        events = json.loads(raw or "[]")
+        events = parse_paginated(raw)
     except json.JSONDecodeError:
         return None
     placements = [e for e in events

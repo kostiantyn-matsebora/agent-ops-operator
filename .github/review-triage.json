@@ -103,5 +103,5 @@
   "max_rounds": 5,
   "dispute_marker": "<!-- conveyor:disputed -->",
   "round_marker": "<!-- conveyor:round",
-  "grant_marker": "<!-- conveyor:grant"
+  "grant_marker": "<!-- conveyor:grant -->"
 }

@@ -148,7 +148,7 @@ assert_contains "$(cat "$GH_CALLS")" "issue comment 43"
 assert_contains "$(cat "$GH_CALLS")" "carries it forward as"
 assert_contains "$(cat "$GH_CALLS")" "conveyor:fix"
 
-it "neither conveyor:run nor conveyor:implement does nothing, same as any other label"
+it "another conveyor: label (conveyor:fix, which belongs to the fixing loop, not this program) does nothing"
 setup; stub_gh_perm "$BIN" admin
 event "$EVENT" "conveyor:fix" 7 someone
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?

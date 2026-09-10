@@ -222,7 +222,8 @@ carried to it.
 
 #### Scenario: A required check fails on the pull request
 
-- **WHEN** a required check fails on the pull request's head
+- **WHEN** a required check fails on the pull request's head AND it carries
+  the approve label
 - **THEN** the fixing loop starts a round over it without a person, and the
   check is fixed and re-run or disputed with the log's reason
 

@@ -174,10 +174,11 @@ it is not one here: the lane is read, never judged from the issue's wording.
 for CI, and it does not wait for the review. **The fixing loop owns green from
 here, once a workflow carries the grant** — the review's findings, the
 analysis service's issues and every failed required check are its work list,
-round after round, under the label a workflow places once it reads
-`conveyor:run` still standing on the tracking issue (`carry-grant.py`; the
-session itself placed none). Waiting would hold a sandbox idle for the length
-of every CI run and still not own the later rounds.
+round after round, under `conveyor:fix`, which a workflow places on THIS pull
+request once it reads `conveyor:run` still standing on the tracking issue
+(`carry-grant.py`; the session itself placed no label at all). Waiting would
+hold a sandbox idle for the length of every CI run and still not own the
+later rounds.
 
 ## What you never do
 

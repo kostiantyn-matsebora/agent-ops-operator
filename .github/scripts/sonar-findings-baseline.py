@@ -2,7 +2,7 @@
 """The branch-wide Blocker/High backlog, per component per rating (design D1, D3).
 
 WHY A SECOND SCRIPT, NOT A `sonar-issues.py` MODE. That script's whole contract
-is "one pull request's issues, for the autofix loop" -- keyed on `--pr` and
+is "one pull request's issues, for the fixing loop" -- keyed on `--pr` and
 `--head`, and every caller today is a workflow that always passes both. This
 reads a component's BRANCH-WIDE backlog instead: no `pullRequest` filter, run
 once by hand, never by CI.

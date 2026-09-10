@@ -169,4 +169,18 @@ assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label convey
 assert_contains "$(cat "$GH_CALLS")" "@maintainer"
 assert_not_contains "$(cat "$GH_CALLS")" "@ex-writer"
 
+# `gh api --paginate` (without --jq) CONCATENATES each page's JSON array back
+# to back rather than merging them -- a bare json.loads on that raises, and a
+# long-lived tracking issue's timeline genuinely spans pages.
+it "a MULTI-PAGE timeline (concatenated arrays, not one merged array) is still parsed correctly"
+setup
+mark_opsx 1
+printf '{"labels":[{"name":"conveyor:run"}]}' > "$LABELS_FILE"
+printf '[{"event":"labeled","label":{"name":"conveyor:run"},"actor":{"login":"maintainer"},"created_at":"2026-09-01T10:00:00Z"}][{"event":"commented","actor":{"login":"someone"}}]' \
+  > "$TIMELINE_FILE"
+out=$(run_it --issue 1 --station fix --pr 5); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label conveyor:fix"
+assert_contains "$(cat "$GH_CALLS")" "@maintainer"
+
 summary

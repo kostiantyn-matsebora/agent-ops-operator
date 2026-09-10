@@ -119,7 +119,7 @@ def load_markers(path: pathlib.Path) -> dict:
         doc = {}
     return {"dispute": doc.get("dispute_marker", "<!-- conveyor:disputed -->"),
             "round": doc.get("round_marker", "<!-- conveyor:round"),
-            "grant": doc.get("grant_marker", "<!-- conveyor:grant"),
+            "grant": doc.get("grant_marker", "<!-- conveyor:grant -->"),
             "keep_going": doc.get("keep_going_label", "conveyor:keep-going")}
 
 

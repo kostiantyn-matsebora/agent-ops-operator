@@ -73,9 +73,10 @@ Archive a completed change in the experimental workflow.
 
    A `PreToolUse` hook (`.claude/hooks/require-docs-task.sh`, through
    `.github/scripts/autofix-guard.py`) REFUSES `openspec archive` while the
-   change's pull request carries the `autofix` label and either a
-   `review-dispatch` round is still running or a dispute the loop posted has no
-   reply from a person. CI's `docs-task` job asks the same script.
+   change's pull request carries the `conveyor:fix` label (the retired
+   `autofix`) and either a `review-dispatch` round is still running or a
+   dispute the loop posted has no reply from a person. CI's `docs-task` job
+   asks the same script.
 
    - **A running round**: wait for it to land (the pull request shows the
      landing comment), then archive.

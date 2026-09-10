@@ -19,8 +19,8 @@
 #
 #   fire     `issues: labeled` on `conveyor:run` or `conveyor:implement` — starts
 #            the session, which opens its pull request UNLABELLED.
-#   open     `pull_request: opened` from `change/*` — reads the merged pull
-#            request's `Refs #<n>` and carries `conveyor:run` forward as
+#   open     `pull_request: opened` from `change/*` — reads the just-opened
+#            pull request's `Refs #<n>` and carries `conveyor:run` forward as
 #            `conveyor:fix` on THIS pull request, via carry-grant.py.
 #   archive  `pull_request: closed` with `merged == true` — reads the SAME
 #            `Refs #<n>` and carries `conveyor:run` forward as `conveyor:archive`

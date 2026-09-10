@@ -76,8 +76,9 @@ re-decided per thread.
 #### Scenario: The owner approves the change
 
 - **WHEN** the owner tells the session the change is approved for fixing
-- **THEN** the label reaches the change's pull request from someone with
-  write access, and the owner is told so
+- **THEN** the session asks for the owner's OWN `gh` session to place the
+  label under the owner's own credentials — the session itself places
+  nothing, since it acts as an application with no write access — and says so
 
 #### Scenario: The owner labelled the issue
 

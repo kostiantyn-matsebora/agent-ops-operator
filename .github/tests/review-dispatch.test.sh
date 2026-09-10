@@ -128,8 +128,8 @@ assert_contains "$fixstep" "REPRODUCE IT FIRST"
 assert_contains "$fixstep" "Bash(go:*)"
 
 # THE BOUND IS READ FROM THE VOCABULARY FILE, NOT DECLARED IN THIS WORKFLOW.
-# A workflow's env: block cannot read a file, so CONVEYOR_MAX_ROUNDS no longer
-# exists as a static workflow constant — the gate reads max_rounds from
+# A workflow's env: block cannot read a file, so MAX_ROUNDS no longer exists
+# as a static workflow constant — the gate reads max_rounds from
 # .github/review-triage.json and passes it down as an output.
 it "the bound is read from the vocabulary file's max_rounds, not a workflow constant"
 assert_not_contains "$(py 'print(list(d.keys()))')" "'env'"

@@ -263,7 +263,8 @@ workflow placed it.
     is where it is accounted for.
   - **Two starts for one head run in SEQUENCE**, serialised by the existing
     `concurrency` group — the review's completion and CI's failure — each
-    collecting the live state, both counting toward `MAX_ROUNDS`.
+    collecting the live state, both counting toward `max_rounds`
+    (`.github/review-triage.json`).
 - **AN UNTRIAGED FINDING KEEPS ITS THREAD OPEN, AND THE MERGE BLOCKED.** That
   is the feature: a finding nobody accepted and nobody dismissed is a decision
   still owed.
@@ -303,7 +304,9 @@ workflow placed it.
   `ci-green`. The loop never marks anything in Sonar — a disputed issue is a
   comment for you, and the service's state is yours to change in its UI.
 - **`/opsx:archive` IS REFUSED WHILE THE LOOP IS OPEN** — a round running, or
-  a dispute no person has answered. `autofix-guard.py`, in the same hook as
+  a dispute no person has answered. `autofix-guard.py` (the script keeps its
+  original filename; it reads `approve_label` — `conveyor:fix` — from the
+  vocabulary file rather than a hardcoded name), in the same hook as
   the documentation gate and the same CI job; it fails open on anything it
   cannot read.
 

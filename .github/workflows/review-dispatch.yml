@@ -19,8 +19,8 @@
 # are on the work list, each is FIXED or DISPUTED (a dispute is a reply that
 # stays open and names the approver), the landed commit is pushed so that CI
 # and the review run on it, and the review's completion starts the next round
-# — bounded by `CONVEYOR_MAX_ROUNDS` (`.github/review-triage.json`,
-# `max_rounds`), every ending summarised in ONE comment, and
+# — bounded by `max_rounds` (`.github/review-triage.json`),
+# every ending summarised in ONE comment, and
 # `conveyor:keep-going` grants another set, consumed as it is taken. Without
 # the label, nothing here changes.
 #
@@ -53,7 +53,7 @@
 # job name, its run and a bounded tail of the failed steps' log, and a `ci` run
 # completing with `failure` starts a round beside the review's completion. The
 # `concurrency` group serialises the two, so one head can produce two rounds in
-# sequence, each collecting the live state; `CONVEYOR_MAX_ROUNDS` bounds both. A check is
+# sequence, each collecting the live state; `max_rounds` bounds both. A check is
 # FIXED only after the fixer reproduced it with the job's own command, or
 # DISPUTED with the log's reason — a runner outage and a rate limit are not
 # things the tree can fix.
@@ -124,11 +124,11 @@ concurrency:
 
 permissions: {}
 
-# THE BOUND IS READ, NOT DECLARED HERE. `CONVEYOR_MAX_ROUNDS` used to be a
-# static `env:` entry (`MAX_ROUNDS: 3`); a workflow's `env:` block cannot read
-# a file, so the number is now read once, in the gate job, from
-# `.github/review-triage.json`'s `max_rounds` — the same file that names the
-# label — and passed down as `needs.gate.outputs.max_rounds`. Stated once,
+# THE BOUND IS READ, NOT DECLARED HERE. This used to be a static `env:` entry
+# (`MAX_ROUNDS: 3`); a workflow's `env:` block cannot read a file, so the
+# number is now read once, in the gate job, from `.github/review-triage.json`'s
+# `max_rounds` — the same file that names the label — and passed down as
+# `needs.gate.outputs.max_rounds`. Stated once,
 # where the rest of this vocabulary already lives.
 
 jobs:

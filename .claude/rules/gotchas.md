@@ -533,7 +533,8 @@ were a separate unit.
 **A REMOTE SESSION CANNOT APPROVE ITS OWN WORK, AND IT COST A PULL REQUEST
 ITS AUTOMATIC FIXING — MEASURED LIVE ON #201.** `.github/routines/
 implement-issue.md` told a session to open its pull request with
-`gh pr create --label autofix`, exactly as `change-delivery`'s spec then said
+`gh pr create --label autofix` (RETIRED — `conveyor-labels` renamed it
+`conveyor:fix`, below), exactly as `change-delivery`'s spec then said
 to. `review-dispatch.yml`'s gate asked the collaborators API whether the
 labeller may push here; the labeller was `claude[bot]`, an application with
 no write access; the answer was `none`; the gate removed the label and posted
