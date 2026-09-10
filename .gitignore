@@ -2,6 +2,7 @@ bin/
 *.exe
 .envtest/
 .serena/
+__pycache__/
 
 # local Jekyll preview output (the site is built by GitHub Pages, not here)
 docs/_site/

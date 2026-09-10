@@ -48,8 +48,13 @@ class Finding(NamedTuple):
 
 
 def is_rules_file(path: pathlib.Path) -> bool:
+    """`.claude/rules/*.md`, or `docs/.claude/*.md` -- authoring.md governs
+    both, since a site's own shell context follows the same one-`## `-heading,
+    one-topic convention every other rules file does."""
     parts = path.resolve().parts
-    return len(parts) >= 3 and parts[-3] == ".claude" and parts[-2] == "rules" and path.suffix == ".md"
+    if len(parts) >= 3 and parts[-3] == ".claude" and parts[-2] == "rules" and path.suffix == ".md":
+        return True
+    return len(parts) >= 2 and parts[-2] == ".claude" and path.suffix == ".md" and "docs" in parts[:-2]
 
 
 def prose_lines(text: str) -> list[tuple[int, str, bool]]:
