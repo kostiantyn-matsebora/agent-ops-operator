@@ -77,7 +77,7 @@ import subprocess
 import sys
 
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
-SUMMARY_MARKER = "<!-- autofix:summary -->"
+SUMMARY_MARKER = "<!-- conveyor:summary -->"
 
 
 def sh(*cmd: str, check: bool = True, **kw) -> subprocess.CompletedProcess:
@@ -117,8 +117,9 @@ def load_markers(path: pathlib.Path) -> dict:
         doc = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         doc = {}
-    return {"dispute": doc.get("dispute_marker", "<!-- autofix:disputed -->"),
-            "round": doc.get("round_marker", "<!-- autofix:round"),
+    return {"dispute": doc.get("dispute_marker", "<!-- conveyor:disputed -->"),
+            "round": doc.get("round_marker", "<!-- conveyor:round"),
+            "grant": doc.get("grant_marker", "<!-- conveyor:grant"),
             "keep_going": doc.get("keep_going_label", "conveyor:keep-going")}
 
 
@@ -186,24 +187,41 @@ class Round:
         self.number = self.count_rounds() + 1
         self.sonar = self.read_json(self.args.sonar)
         self.checks = self.read_json(getattr(self.args, "checks", None))
+        # THE EFFECTIVE CAP, not the bare constant. Each grant ADDS a full set
+        # of `max_rounds`, so a loop that has been extended once stops at
+        # 2 * max_rounds, extended twice at 3 * max_rounds -- "another SET of
+        # rounds", not one extra round.
+        self.grants = self.count_grants()
+        self.cap = self.args.max_rounds * (1 + self.grants)
         self.consume_keep_going()
 
     def consume_keep_going(self) -> None:
-        """CONSUMED, NOT DECLARED. A permanent extension is not a decision, so
-        the grant is removed the moment a round runs under it -- placing it
-        again is a fresh judgement made with newer evidence. Checked and
-        cleared on EVERY round while it is present, not only when the cap was
-        just reached: the round it was placed to unblock is the one that
-        should consume it."""
+        """CONSUMED ONLY WHEN IT TAKES EFFECT, never on an ordinary round.
+        `self.cap` already reflects every grant COUNTED SO FAR (comments
+        posted by earlier calls to this method, on earlier rounds), so a
+        round landing at or under it needed no new extension -- this round
+        is the one a fresh `conveyor:keep-going` exists to unblock exactly
+        when it lands PAST that cap. Consuming it on an ordinary round below
+        the cap would spend the grant on a round that needed no extension at
+        all."""
+        if self.number <= self.cap:
+            return
         label = self.markers["keep_going"]
         try:
             current = gh("pr", "view", str(self.args.pr), "--repo", self.args.repo,
                          "--json", "labels", "--jq", ".labels[].name")
         except subprocess.CalledProcessError:
             return
-        if label in current.splitlines():
-            gh("pr", "edit", str(self.args.pr), "--repo", self.args.repo, "--remove-label", label)
-            print(f"consumed `{label}`: a round is running under it")
+        if label not in current.splitlines():
+            return
+        old_cap = self.cap
+        gh("pr", "edit", str(self.args.pr), "--repo", self.args.repo, "--remove-label", label)
+        pr_comment(self.args.repo, self.args.pr,
+                   f"{self.markers['grant']}\nround {self.number} is running past the previous cap of "
+                   f"{old_cap} under `{label}`, which is now consumed.")
+        self.grants += 1
+        self.cap = self.args.max_rounds * (1 + self.grants)
+        print(f"consumed `{label}`: round {self.number} extends the cap to {self.cap}")
 
     @staticmethod
     def read_json(path) -> dict:
@@ -215,21 +233,24 @@ class Round:
         return {}
 
 
-    def count_rounds(self) -> int:
-        """Landing comments carrying the round marker, since the label was
-        placed. The label's timestamp is what makes re-labelling a fresh count."""
+    def _comments_since(self) -> list[dict]:
         try:
             raw = gh("api", f"repos/{self.args.repo}/issues/{self.args.pr}/comments", "--paginate")
         except subprocess.CalledProcessError:
-            return 0
-        n = 0
-        for c in parse_comments(raw):
-            if self.markers["round"] not in (c.get("body") or ""):
-                continue
-            if self.args.since and (c.get("created_at") or "") < self.args.since:
-                continue
-            n += 1
-        return n
+            return []
+        return [c for c in parse_comments(raw)
+                if not self.args.since or (c.get("created_at") or "") >= self.args.since]
+
+    def count_rounds(self) -> int:
+        """Landing comments carrying the round marker, since the label was
+        placed. The label's timestamp is what makes re-labelling a fresh count."""
+        return sum(1 for c in self._comments_since() if self.markers["round"] in (c.get("body") or ""))
+
+    def count_grants(self) -> int:
+        """Comments carrying the grant marker, since the label was placed --
+        one per `conveyor:keep-going` this program has already consumed, so
+        the effective cap grows by a full `max_rounds` for each."""
+        return sum(1 for c in self._comments_since() if self.markers["grant"] in (c.get("body") or ""))
 
     def marker(self) -> str:
         return f"{self.markers['round']} {self.number} -->"
@@ -244,7 +265,7 @@ class Round:
         lines = [SUMMARY_MARKER, f"**Autofix on #{a.pr}: {ending}** — @{a.approver}"]
         if note:
             lines.append(note)
-        lines.append(f"Rounds used: {used} of {a.max_rounds}.")
+        lines.append(f"Rounds used: {used} of {self.cap}.")
         if fixed:
             lines.append(f"\nFixed{f' in {sha[:7]}' if sha else ''} ({len(fixed)}):")
             lines += [f"- {describe(self.work[t])}" for t in fixed]
@@ -547,11 +568,11 @@ def main() -> int:
         # announces the landing. Then either the cap ends the loop, or the
         # next round is started by `workflow_dispatch`.
         pr_comment(args.repo, args.pr,
-                   f"{rnd.marker()}\nAutofix round {rnd.number} of {args.max_rounds}: {sha[:7]} addresses "
+                   f"{rnd.marker()}\nAutofix round {rnd.number} of {rnd.cap}: {sha[:7]} addresses "
                    f"{plural(len(fixed), 'item')}{left}.{run}")
-        if rnd.number >= args.max_rounds:
+        if rnd.number >= rnd.cap:
             rnd.summary("round cap reached", fixed, disputed, sha=sha, unaddressed=unaddressed,
-                        note=f"{args.max_rounds} rounds have run; no further round starts. "
+                        note=f"{rnd.cap} rounds have run; no further round starts. "
                              f"Place `{markers['keep_going']}` to grant another {args.max_rounds}.")
         elif not args.push_starts_workflows:
             # THE TOKEN PUSHED IT, so nothing runs on it. The loop cannot

@@ -53,8 +53,17 @@ it is not one here: the lane is read, never judged from the issue's wording.
   is not one. But "mergeable" means the same thing on both lanes: CI green,
   both guards clean, the docs generator satisfied, and the review answered.
   Implement what the issue describes directly on a `change/<n>-<kebab-title>`
-  branch, skip Propose and Implement below, and go straight to opening the
-  pull request.
+  branch, and go straight to opening the pull request.
+- **THE PLAIN LANE SKIPS EVERY STEP BELOW THAT TOUCHES AN OPENSPEC CHANGE, NOT
+  ONLY STEPS 2 AND 4.** There is no change to promote the issue into, so step
+  1 (`opsx-issue.sh open ... --promote`) is never run — the issue stays an
+  ordinary issue, and `git checkout -b change/<n>-<kebab-title>` in step 3 is
+  the plain lane's own start. Step 2 (`/opsx:propose`) and step 4
+  (`/opsx:apply`) are the opsx lane's, and so is step 8 (`opsx-issue.sh phase`)
+  — a plain-lane issue carries no `opsx:` phase label to advance, and gains
+  none. Steps 5, 6 and 7 — running what this machine can, dispatching the
+  cluster tier, opening the pull request — are owed by BOTH lanes, since
+  mergeable means the same thing on both.
 
 ## The process
 
@@ -154,18 +163,21 @@ it is not one here: the lane is read, never judged from the issue's wording.
      local cluster, any deploy, the visual check. A reviewer must see the gap
      rather than infer it.
 
-8. **Advance the phase, and stop.**
+8. **On the opsx lane, advance the phase.** `opsx-issue.sh phase <name> review`
+   — a step the plain lane skips, since it carries no `opsx:` phase label.
 
    ```sh
    .github/scripts/opsx-issue.sh phase <name> review
    ```
 
 **THEN THE SESSION STOPS.** It stops at the open pull request: it does not wait
-for CI, and it does not wait for the review. **The fixing loop owns green from here** — the review's findings,
-the analysis service's issues and every failed required check are its work
-list, round after round, under the label this pull request already carries.
-Waiting would hold a sandbox idle for the length of every CI run and still not
-own the later rounds.
+for CI, and it does not wait for the review. **The fixing loop owns green from
+here, once a workflow carries the grant** — the review's findings, the
+analysis service's issues and every failed required check are its work list,
+round after round, under the label a workflow places once it reads
+`conveyor:run` still standing on the tracking issue (`carry-grant.py`; the
+session itself placed none). Waiting would hold a sandbox idle for the length
+of every CI run and still not own the later rounds.
 
 ## What you never do
 

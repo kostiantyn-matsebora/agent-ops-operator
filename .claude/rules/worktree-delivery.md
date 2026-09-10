@@ -209,7 +209,7 @@ comment acts on everything accepted:
 | the `conveyor:run` LABEL | an ISSUE | THE STANDING INSTRUCTION — implement, drive the pull request to mergeable, archive once merged: the whole line for that issue's LANE, read at every transition rather than recorded at the first. Removing it halts the line at the next station |
 | the `conveyor:archive` LABEL | the tracking ISSUE of a MERGED pull request | ARCHIVE, ONE STATION — placed by a person with write access, or carried forward the same way `conveyor:fix` is. Only the opsx lane has this station; the plain lane's line ends at the merge |
 | the `conveyor:keep-going` LABEL | a pull request whose loop stopped on the round cap | GRANTS ANOTHER SET of rounds, and is REMOVED the moment a round runs under it — one placement, one grant |
-| a reply under `<!-- autofix:disputed -->` | a thread (or a pull request comment, for a Sonar issue) | THE LOOP DISAGREES — the code is untouched, the thread stays open, you are mentioned. Answer it (a reply, or resolve to dismiss); nothing re-disputes it |
+| a reply under `<!-- conveyor:disputed -->` | a thread (or a pull request comment, for a Sonar issue) | THE LOOP DISAGREES — the code is untouched, the thread stays open, you are mentioned. Answer it (a reply, or resolve to dismiss); nothing re-disputes it |
 
 **A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.**
 Every label above that authorises unattended work is placed by a person whose
@@ -281,7 +281,7 @@ workflow placed it.
   lands with the token and the summary says the loop cannot go on.
 - **THE LOOP IS BOUNDED AND EVERY ENDING IS ONE SUMMARY.** `max_rounds`
   (`.github/review-triage.json`, default 5) is read once by `review-dispatch.yml`'s
-  gate and passed down, counted from the landing comments' `<!-- autofix:round
+  gate and passed down, counted from the landing comments' `<!-- conveyor:round
   N -->` markers since the label was placed — so removing and re-adding the
   label starts the count afresh. A round that changes nothing (every item
   disputed, or a stale patch) ends it early. The summary names what was fixed,

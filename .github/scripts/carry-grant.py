@@ -95,6 +95,13 @@ def label_placement(repo: str, issue: int, label: str) -> tuple[str, str] | None
 
 
 def permission(repo: str, login: str) -> str:
+    """What the platform says this person may do here. UNREADABLE IS `none`,
+    DELIBERATELY, not merely a lookup that happened to fail closed: this
+    answers a security gate, and re-raising on a transient error (a rate
+    limit, a dropped connection) would crash the whole carry rather than
+    decline it -- the caller then sees no grant carried, the ordinary shape
+    of "nothing to carry", instead of a job failure that reads as broken.
+    Same pattern, same reasoning, as remote-implement.py's permission()."""
     try:
         return gh("api", f"repos/{repo}/collaborators/{login}/permission", "--jq", ".permission")
     except RuntimeError:

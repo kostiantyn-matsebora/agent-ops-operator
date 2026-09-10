@@ -143,7 +143,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/fix-accepted')) ||
       (github.event_name == 'pull_request_review_comment' && startsWith(github.event.comment.body, '/fix-accepted')) ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'conveyor:fix') ||
+      (github.event_name == 'pull_request' && (github.event.label.name == 'conveyor:fix' || github.event.label.name == 'conveyor:keep-going')) ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'claude-review' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'ci' && github.event.workflow_run.conclusion == 'failure')
     runs-on: ubuntu-latest
@@ -185,6 +185,7 @@ jobs:
           REVIEW_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
           INPUT_MODE: ${{ inputs.mode }}
+          EVENT_LABEL: ${{ github.event.label.name }}
         run: |
           set -euo pipefail
           LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["approve_label"])')
@@ -238,6 +239,10 @@ jobs:
               esac
               ;;
             pull_request)
+              # TWO LABELS REACH THIS CASE, AND EACH IS CHECKED AGAINST ITSELF
+              # — never against the other's name, or a `conveyor:keep-going`
+              # event would be refused for not being `conveyor:fix`.
+              THIS_LABEL="$EVENT_LABEL"
               # THE LABEL IS CONSENT ONLY FROM SOMEONE WHO MAY PUSH — DIRECTLY,
               # OR CARRIED BY A WORKFLOW RELAYING A STANDING INSTRUCTION THAT
               # IS STILL THERE. A program may carry a grant forward; it may
@@ -246,22 +251,24 @@ jobs:
               # workflow placed it.
               if can_push "$SENDER"; then
                 mode=all
-              elif [ "$SENDER" = "github-actions[bot]" ]; then
+              elif [ "$SENDER" = "github-actions[bot]" ] && [ "$THIS_LABEL" = "$LABEL" ]; then
                 # THE ORIGINATING ISSUE, from `Refs #<n>` in the pull
                 # request's own body — the same field carry-grant.py itself
-                # read to place this label.
+                # read to place this label. Only `conveyor:fix` is ever
+                # CARRIED this way; `conveyor:keep-going` is placed by a
+                # person only, so a bot placing it falls through to refusal.
                 BODY_TEXT=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
                 ISSUE=$(printf '%s' "$BODY_TEXT" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
                 RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
                 STANDING=$([ -n "$ISSUE" ] && gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx "$RUN_LABEL" && echo yes || echo no)
                 if [ -z "$ISSUE" ] || [ "$STANDING" != "yes" ]; then
-                  gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL"
-                  refuse "\`$LABEL\` was carried from an issue's \`$RUN_LABEL\`, but that instruction is no longer there (or no issue was named). The \`$LABEL\` label was removed."
+                  gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$THIS_LABEL"
+                  refuse "\`$THIS_LABEL\` was carried from an issue's \`$RUN_LABEL\`, but that instruction is no longer there (or no issue was named). The \`$THIS_LABEL\` label was removed."
                 fi
                 mode=all
               else
-                gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL"
-                refuse "write access is required to approve a pull request for automatic fixing, and \`$SENDER\` cannot push here. The \`$LABEL\` label was removed."
+                gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$THIS_LABEL"
+                refuse "write access is required to place \`$THIS_LABEL\`, and \`$SENDER\` cannot push here. The \`$THIS_LABEL\` label was removed."
               fi
               ;;
             workflow_run)

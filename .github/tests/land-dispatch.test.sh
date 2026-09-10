@@ -234,36 +234,36 @@ assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
 assert_contains "$(git -C "$ORIGIN" log -1 --format=%s "$BRANCH")" "fix(review): address 1 review finding (autofix round 1)"
 
 it "labelled: a disputed thread gets a MARKED reply naming the approver, and is not resolved"
-assert_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- autofix:disputed -->"
+assert_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- conveyor:disputed -->"
 assert_contains "$(cat "$GH_CALLS")" "Disputed by the fixing step: B is exported and used by the tests"
 assert_contains "$(cat "$GH_CALLS")" "Left open for @an-approver"
 assert_equals "PRRT_a" "$(cat "$tmp/work/.resolve-threads")"
 
 it "labelled: disputed analysis issues go in ONE pull request comment under the marker, naming the key, and nothing touches the service"
 assert_equals "1" "$(grep -c 'The fixing step disputes 1 analysis issue' "$GH_CALLS")"
-assert_contains "$(grep 'disputes 1 analysis issue' "$GH_CALLS")" "<!-- autofix:disputed -->"
+assert_contains "$(grep 'disputes 1 analysis issue' "$GH_CALLS")" "<!-- conveyor:disputed -->"
 assert_contains "$(cat "$GH_CALLS")" "\`AZ1\` (go:S1234, \`b.go:1\`): the function is the package API"
 assert_not_contains "$(cat "$GH_CALLS")" "sonarcloud"
 
 it "labelled: the landing comment carries the round marker, and dispatches nothing — the push itself is what starts CI and the review"
-assert_contains "$(cat "$GH_CALLS")" "<!-- autofix:round 1 -->"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 1 -->"
 assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
 assert_contains "$out" "the push starts CI and the review, and the review's completion starts the next round"
 
 it "labelled: a round that goes on posts NO summary — the summary is the ending's"
-assert_not_contains "$(cat "$GH_CALLS")" "<!-- autofix:summary -->"
+assert_not_contains "$(cat "$GH_CALLS")" "<!-- conveyor:summary -->"
 assert_not_contains "$(cat "$GH_CALLS")" "Push again"
 
 # ENDING: the cap. Two rounds already on the pull request since the label.
 it "labelled: counts rounds from its own marked comments since the label, and at the cap posts ONE summary mentioning the approver instead of re-triggering"
 fresh_repo
-printf '[{"body":"<!-- autofix:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- autofix:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- autofix:round 9 -->\\nfrom before the label","created_at":"2026-08-28T12:00:00Z"}]' > "$GH_COMMENTS"
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- conveyor:round 9 -->\\nfrom before the label","created_at":"2026-08-28T12:00:00Z"}]' > "$GH_COMMENTS"
 out=$(land_all); rc=$?
 assert_status 0 "$rc"
-assert_contains "$(cat "$GH_CALLS")" "<!-- autofix:round 3 -->"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 3 -->"
 assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
-assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
-summary_line=$(grep '<!-- autofix:summary -->' "$GH_CALLS")
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+summary_line=$(grep '<!-- conveyor:summary -->' "$GH_CALLS")
 assert_contains "$summary_line" "round cap reached** — @an-approver"
 assert_contains "$summary_line" "Rounds used: 3 of 3"
 assert_contains "$summary_line" "Disputed (2)"
@@ -273,13 +273,20 @@ printf '[]' > "$GH_COMMENTS"
 # CONSUMED, THE MOMENT A ROUND RUNS UNDER IT. `conveyor:keep-going` is on the
 # pull request already (the fixture `gh pr view --json labels` names it); a
 # round running under it REMOVES it, never re-adds or re-checks it later.
-it "labelled: conveyor:keep-going is REMOVED the moment a round runs under it"
+# CONSUMED ONLY WHEN IT TAKES EFFECT. Three rounds already ran (the same
+# fixture the cap test above uses), so this round is number 4 of a max-rounds-3
+# loop -- exactly the round `conveyor:keep-going` exists to unblock -- and
+# extends the cap to 6 (another FULL SET, not one extra round).
+it "labelled: conveyor:keep-going past the cap is REMOVED, extends the cap to another full set, and posts the grant marker"
 fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- conveyor:round 3 -->\\nround three","created_at":"2026-08-29T13:00:00Z"}]' > "$GH_COMMENTS"
 mkdir -p "$tmp/bin2"
 cat > "$tmp/bin2/gh" <<STUB
 #!/usr/bin/env bash
 case "\$*" in
   "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "issue comments"*|"api repos/"*"/issues/"*"/comments --paginate")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
   "api repos/"*"/replies"*)
     printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
   *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
@@ -293,6 +300,34 @@ chmod +x "$tmp/bin2/gh"
 out=$(PATH="$tmp/bin2:$PATH" land_all); rc=$?
 assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
+assert_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+assert_contains "$out" "extends the cap to 6"
+printf '[]' > "$GH_COMMENTS"
+
+# AN ORDINARY ROUND (below the cap) MUST NOT CONSUME THE LABEL, even when it
+# is present -- the bug this whole rewrite exists to fix: consuming it on
+# round 1 would spend the grant on a round that needed no extension.
+it "labelled: conveyor:keep-going present but NOT past the cap is left untouched"
+fresh_repo
+mkdir -p "$tmp/bin3"
+cat > "$tmp/bin3/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
+esac
+case "\$*" in
+  "api graphql"*) cat "\$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin3/gh"
+out=$(PATH="$tmp/bin3:$PATH" land_all); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "--remove-label conveyor:keep-going"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:grant"
 
 # ENDING: disputes only.
 it "labelled: with everything disputed, commits nothing, posts the disputes, and ONE summary saying so"
@@ -302,9 +337,9 @@ printf '{"items":[{"id":"PRRT_a","action":"disputed","reason":"A is fine"},{"id"
 out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-disp.json" land_all); rc=$?
 assert_status 0 "$rc"
 assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
-assert_equals "2" "$(grep -c 'replies -f body=<!-- autofix:disputed -->' "$GH_CALLS")"
-assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "disputes only** — @an-approver"
+assert_equals "2" "$(grep -c 'replies -f body=<!-- conveyor:disputed -->' "$GH_CALLS")"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "disputes only** — @an-approver"
 assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
 assert_not_contains "$(cat "$GH_CALLS")" "resolveReviewThread"
 
@@ -314,15 +349,15 @@ fresh_repo
 printf '[]' > "$tmp/none.json"
 out=$(WORK="$tmp/none.json" land_all); rc=$?
 assert_status 0 "$rc"
-assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "clean** — @an-approver"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "clean** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
 
 it "labelled: says when the analysis was not consulted"
 printf '{"consulted":false,"stale":["manager"],"projects":[],"issues":[]}' > "$tmp/sonar.json"
 out=$(WORK="$tmp/none.json" land_all)
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "The analysis service was NOT consulted this round"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "(stale for manager)"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The analysis service was NOT consulted this round"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "(stale for manager)"
 printf '{"consulted":true,"stale":[],"projects":[],"issues":[]}' > "$tmp/sonar.json"
 
 # ENDING: stale patch.
@@ -334,8 +369,8 @@ before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
 out=$(land_all); rc=$?
 assert_status 1 "$rc"
 assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
-assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "stale patch** — @an-approver"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "stale patch** — @an-approver"
 assert_not_contains "$(cat "$GH_CALLS")" "/replies"
 assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
 
@@ -355,8 +390,8 @@ out=$(REPORT="$tmp/report-partial.json" MAX_ROUNDS=1 land_all)
 assert_contains "$out" "unaddressed PRRT_b (b.go): not named in the fixing step's report"
 assert_contains "$out" "unaddressed sonar:AZ1 (b.go): not named in the fixing step's report"
 assert_not_contains "$out" "disputed PRRT_b"
-assert_not_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- autofix:disputed -->"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "Unaddressed (2)"
+assert_not_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- conveyor:disputed -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Unaddressed (2)"
 
 # A ROUND WHOSE FIXING STEP PRODUCED NO REPORT AT ALL ends as its OWN outcome,
 # disputing nothing -- the case observed on this change's own proposal: three
@@ -367,8 +402,8 @@ out=$(REPORT_MISSING=1 land_all); rc=$?
 assert_status 0 "$rc"
 assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
 assert_not_contains "$(cat "$GH_CALLS")" "/replies"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "no report** — @an-approver"
-assert_not_contains "$(grep 'autofix:summary' "$GH_CALLS")" "Disputed ("
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no report** — @an-approver"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
 
 # THE TOKEN PUSHED IT. Without the push credential the workflow does not pass
 # --push-starts-workflows, and a landed round cannot be followed by another.
@@ -377,10 +412,10 @@ fresh_repo
 out=$(STARTS="" land_all); rc=$?
 assert_status 1 "$rc"
 assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
-assert_equals "1" "$(grep -c '<!-- autofix:summary -->' "$GH_CALLS")"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "could not start the next round** — @an-approver"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "AUTOFIX_DEPLOY_KEY"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "Push again"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "could not start the next round** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "AUTOFIX_DEPLOY_KEY"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Push again"
 
 it "never dispatches a workflow: a dispatched run's checks never reach the merge box"
 assert_not_contains "$(cat "$S")" "workflow run"
@@ -431,15 +466,15 @@ assert_contains "$(cat "$GH_CALLS")" "the runner could not reach the registry"
 # paragraph is asserted where one actually exists: the disputes-only ending
 # just above, and the clean ending below.
 it "an ending's summary names the check by its job and says how many failed"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "the \`operator\` check"
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "The required checks reported 1 failure"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "the \`operator\` check"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The required checks reported 1 failure"
 
 it "with no check collected the summary says the checks had not reported, never that they were green"
 fresh_repo
 printf '{"consulted":false,"checks":[],"items":[]}' > "$tmp/checks-absent.json"
 out=$(WORK="$tmp/none.json" CHECKS="$tmp/checks-absent.json" land_all)
-assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "The required checks were NOT consulted"
-assert_not_contains "$(grep 'autofix:summary' "$GH_CALLS")" "The required checks reported"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The required checks were NOT consulted"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The required checks reported"
 
 rm -rf "$tmp"
 

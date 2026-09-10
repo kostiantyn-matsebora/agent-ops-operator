@@ -37,6 +37,11 @@ label=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-t
 assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.label.name == '$label'"
 assert_equals "conveyor:fix" "$label"
 
+it "the keep-going label ALSO prefilters the pull_request trigger, so placing it re-triggers a round"
+keep_going=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["keep_going_label"])')
+assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.label.name == '$keep_going'"
+assert_equals "conveyor:keep-going" "$keep_going"
+
 it "a review that did not complete successfully starts no round"
 assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.name == 'claude-review' && github.event.workflow_run.conclusion == 'success'"
 
@@ -70,7 +75,10 @@ assert_contains "$gate" "STANDING"
 
 it "a carried label whose originating instruction is gone is refused exactly as a non-writer's is"
 assert_contains "$gate" "no longer there"
-assert_contains "$gate" "--remove-label \"\$LABEL\""
+assert_contains "$gate" "--remove-label \"\$THIS_LABEL\""
+
+it "the pull_request trigger's label event is checked against ITSELF, not hardcoded to the fix label — a keep-going event is never refused for not being conveyor:fix"
+assert_contains "$gate" 'THIS_LABEL="$EVENT_LABEL"'
 
 it "the collect job holds the analysis token and the model job holds none — no secret reaches the fixing step but its own credential"
 assert_contains "$(py 'print(d["jobs"]["collect"]["steps"][1]["env"])')" "SONAR_TOKEN"
@@ -265,6 +273,9 @@ it "the archive job fires only when the pull request MERGED, never on a plain cl
 archive_if=$(rpy 'print(d["jobs"]["archive"]["if"])')
 assert_contains "$archive_if" "github.event.action == 'closed'"
 assert_contains "$archive_if" "github.event.pull_request.merged == true"
+
+it "the archive job also carries the change/* branch guard, same as open"
+assert_contains "$archive_if" "startsWith(github.event.pull_request.head.ref, 'change/')"
 
 it "the archive job calls carry-grant.py --station archive with no --pr, on the issue"
 archive_run=$(rpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
