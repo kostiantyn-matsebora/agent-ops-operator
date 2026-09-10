@@ -68,6 +68,7 @@ rest have working defaults, and `helm show values` is the full list.
 | `eventsAdapter.enabled` | `true` | `false` if you post cluster events yourself |
 | `eventsAdapter.source.create` | `true` | `false` to declare your own `SignalSource` |
 | `profile.enabled` | `true` | `false` if you bring your own agent |
+| `profile.podExecutionWithheldPrompt` | the shipped paragraph | your own wording, or `""` to leave the agent untold while `allowPodExecution` is off |
 | `mcp.enabled` | `true` | `false` for an agent with no cluster reach |
 | `mcpServers.enabled` | `true` | `false` to point at an MCP server you already run |
 
@@ -173,7 +174,11 @@ stays scoped to the cluster and does not gain it.
 
 > **`allowPodExecution` is separate, and defaults off.** An agent that can start
 > a pod can read any Secret that pod mounts, whatever else you granted. Turn it
-> on deliberately.
+> on deliberately. **With it off, the agent knows:** the shipped role ends with
+> a paragraph saying pod execution and pod-template edits are withheld, so a
+> request to change a Deployment is declined with that reason — never tried and
+> reported back as an RBAC refusal. The wording is
+> `profile.podExecutionWithheldPrompt`, `""` to leave it out.
 {: .ao-callout}
 
 **One flag moves both walls together**, because an operator who asks for an

@@ -282,6 +282,13 @@ unreadable everywhere. Nor is `secrets`, nor `clusterroles`.
 - **BOTH WALLS MOVE TOGETHER.** kubernetes's MCP server is the other wall on the
   same path — an agent reaches the cluster THROUGH it — so it carries the same
   split from the same values. Fixing one leaves the hole one indirection along.
+- **AND THE THIRD WALL IS WHAT THE AGENT IS TOLD.** Neither RBAC wall shows in
+  the tool list — the server advertises the workload-patch tool whatever the
+  gate says, and the API server refuses it one hop later — so
+  `chart/charts/kubernetes/templates/profile.yaml` appends a posture paragraph
+  to the role from the SAME value, and the agent declines a pod-template edit
+  with the reason instead of reporting an RBAC fault. ONE profile, never one
+  per posture: a profile picked by hand to match a value drifts when it flips.
 - **The manager keeps the stricter rule already**, holding no `secrets` verbs at
   all. The component running untrusted model output must not out-rank the one
   orchestrating it.

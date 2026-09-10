@@ -268,6 +268,19 @@ cannot do is run new code.
 **Turn it on only if you accept the agent reading every Secret in the
 cluster.** The grants are cluster-wide, so that is the scope.
 
+**Three walls move on that one value, and the third is what the agent is
+told.** The route account's rules and the kubernetes bundle's MCP server role
+are the two RBAC walls. Neither is visible from the agent's tool list — the
+server advertises the workload-patch tool whatever the gate says, and the API
+server refuses it one hop later — so with the gate off the bundle's
+`k8s-engineer` role also ends with a paragraph saying pod execution is
+withheld, which workload kinds it cannot edit, what it can still do, and that
+the operator makes the edit. Asked to change a Deployment, the agent declines
+with that reason instead of trying and reporting an RBAC refusal. The text is
+`kubernetes.profile.podExecutionWithheldPrompt`; set it to `""` to leave it
+out. One profile, not two: a profile picked by hand to match the value would
+drift the first time it was flipped.
+
 ### What the roles grant
 
 Every grant is a role this chart writes out — no `cluster-admin`, and no
@@ -506,7 +519,7 @@ What this bounds, and what it does not, is on
 |---|---|
 | `rbac.runtime.serviceAccounts` | the identities this install DECLARES, each with its own posture, for a Pipeline to NAME. Default `[]` — the only source of runtime permissions |
 | `global.agentops.runtimeDefaults.serviceAccountName` | the identity every route INHERITS. A REFERENCE this chart does not create. Default `agentops-runtime`, the floor |
-| `global.agentops.runtimeDefaults.allowPodExecution` | may it create or enter a pod. Default `false` |
+| `global.agentops.runtimeDefaults.allowPodExecution` | may it create or enter a pod. Default `false` — and the kubernetes bundle's agent is told so, see above |
 
 Each `serviceAccounts` entry takes:
 

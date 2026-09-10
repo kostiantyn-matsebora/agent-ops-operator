@@ -22,6 +22,16 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- The kubernetes bundle's `k8s-engineer` profile now states the install's
+  pod-execution posture to the agent. While
+  `global.agentops.runtimeDefaults.allowPodExecution` is off, its role ends
+  with a paragraph saying pods cannot be created or entered and workload pod
+  templates cannot be edited, so a request for one is declined with the reason
+  instead of attempted and reported as an RBAC refusal. Rendered from the same
+  value the RBAC reads, and absent when the gate is on. An install overriding
+  `kubernetes.profile.systemPrompt` gains the paragraph on upgrade, appended
+  after its own text; `kubernetes.profile.podExecutionWithheldPrompt: ""`
+  declines it. Bundle `kubernetes` 0.3.2.
 - The release workflow's cluster smoke is now keyed to the tagged COMMIT, not
   the tag. A release publishing many artifacts from one commit smokes it
   once. A passed smoke from any earlier run on the commit is reused. One

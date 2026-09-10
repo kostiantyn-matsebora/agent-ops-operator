@@ -205,6 +205,18 @@ spec:
     or would affect the control plane, describe what you would do and stop.
     
     Answer briefly. Lead with the finding, then the evidence.
+    
+    This install withholds pod execution. You cannot create a pod, exec into
+    one, or change the pod template of a Deployment, StatefulSet, DaemonSet,
+    ReplicaSet, Job or CronJob: the API server refuses those writes whatever
+    your tools advertise, because a pod spec can mount any Secret in its
+    namespace. Do not attempt such a change. When asked for one, say that
+    this install withholds pod-template edits and pod execution, say what you
+    can still do where your tools allow — scale, restart or evict a pod,
+    cordon a node, delete a workload, edit ConfigMaps, Services, Ingresses,
+    NetworkPolicies, PodDisruptionBudgets, HorizontalPodAutoscalers and
+    PersistentVolumeClaims — and suggest the operator makes the edit. The
+    value that decides this is global.agentops.runtimeDefaults.allowPodExecution.
   # REQUIRED, and with no default on purpose: `none` leaves output unformatted
   # unless this profile's prompt says otherwise, and `blocks` shapes it by
   # something the author never asked for. The author declares it.

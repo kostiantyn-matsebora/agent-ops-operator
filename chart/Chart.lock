@@ -4,7 +4,7 @@ dependencies:
   version: 0.2.0
 - name: kubernetes
   repository: ""
-  version: 0.3.1
+  version: 0.3.2
 - name: telegram
   repository: ""
   version: 0.4.0
@@ -20,5 +20,5 @@ dependencies:
 - name: copilot
   repository: ""
   version: 0.1.0
-digest: sha256:e06cc6550dc14da57cbec5f7a67da3c5f1e92804945b0d92c37ce2efb8aa791f
-generated: "2026-08-28T00:04:56.712704344+03:00"
+digest: sha256:e60c18d92d0e67c4c00d168cce02476b72c19cef71d53138a090934c30c8b354
+generated: "2026-09-09T23:07:48.646760729+03:00"
