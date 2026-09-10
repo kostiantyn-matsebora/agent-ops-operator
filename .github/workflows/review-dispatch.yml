@@ -134,11 +134,16 @@ permissions: {}
 jobs:
   gate:
     # THE PREFILTER. A comment that does not start with the dispatch form, a
-    # label that is not the approval label, a review that did not complete —
-    # none starts anything beyond this expression; the run appears skipped in
-    # the list. The exact match against the vocabulary file happens one step
-    # down; this must AGREE with it, and is the one place the form and the
-    # label are repeated, because an expression cannot read a file.
+    # label that is neither the approval label NOR the extending label, a
+    # review that did not complete — none starts anything beyond this
+    # expression; the run appears skipped in the list. The exact match
+    # against the vocabulary file happens one step down (both labels, read
+    # from .github/review-triage.json); this expression must AGREE with it,
+    # and is the one place either label's literal name is repeated, because
+    # a job's `if:` is evaluated before any checkout and cannot read a file.
+    # `conveyor:keep-going` is here because placing it must RE-TRIGGER a
+    # round on a pull request whose loop already ended on the cap — the same
+    # structural constraint as `conveyor:fix` right beside it.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/fix-accepted')) ||

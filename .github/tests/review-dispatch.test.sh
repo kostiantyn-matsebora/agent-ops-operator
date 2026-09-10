@@ -284,7 +284,7 @@ assert_contains "$archive_run" "--station archive"
 assert_not_contains "$archive_run" "--pr \"\${{"
 assert_contains "$archive_run" "Refs #"
 
-it "the archive job is granted issues: write and pull-requests: read only, no contents: write"
-assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'read'}" "$(rpy 'print(d["jobs"]["archive"]["permissions"])')"
+it "the archive job is granted issues: write alone — the pull request's body comes from the event payload, no API call needed"
+assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["archive"]["permissions"])')"
 
 summary

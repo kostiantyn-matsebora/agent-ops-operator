@@ -122,10 +122,14 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'change/')
     runs-on: ubuntu-latest
+    # ISSUES: write ONLY -- the pull request's body comes from the EVENT
+    # PAYLOAD (github.event.pull_request.body, no API call), and
+    # carry-grant.py --station archive labels and comments the ISSUE alone
+    # through gh issue edit / gh issue comment. pull-requests: read is never
+    # actually exercised here.
     permissions:
       contents: read
       issues: write
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
       - name: Carry conveyor:run forward as the archive-station label

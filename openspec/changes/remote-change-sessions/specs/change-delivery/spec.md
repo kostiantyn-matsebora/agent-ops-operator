@@ -75,10 +75,21 @@ re-decided per thread.
 
 #### Scenario: The owner approves the change
 
-- **WHEN** the owner tells the session the change is approved for fixing
-- **THEN** the session asks for the owner's OWN `gh` session to place the
-  label under the owner's own credentials — the session itself places
-  nothing, since it acts as an application with no write access — and says so
+- **WHEN** the owner tells a remote session the change is approved for
+  fixing, and no standing instruction on the issue exists for a program to
+  relay
+- **THEN** the session places no label — it acts as an application with no
+  write access, and there is no interactive `gh` session of the owner's to
+  hand the command to mid-run — and instead names the exact command in its
+  own pull request description, for the owner to run afterward under their
+  own credentials
+
+#### Scenario: The owner approves interactively, on a workstation
+
+- **WHEN** the owner asks an interactive session running under their own `gh`
+  login whether the change is approved for fixing, and confirms it is
+- **THEN** the assistant tells the owner the command rather than running it,
+  and only the owner's own `gh` session — never the assistant — executes it
 
 #### Scenario: The owner labelled the issue
 
