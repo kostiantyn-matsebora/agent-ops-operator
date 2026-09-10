@@ -249,6 +249,21 @@ jobs:
               # never mint one, so a carried label is RE-CHECKED against the
               # grant it claims to carry rather than trusted because a
               # workflow placed it.
+              #
+              # `SENDER == github-actions[bot]` NAMES AN IDENTITY, NOT
+              # carry-grant.py SPECIFICALLY. The GitHub timeline API attaches
+              # no workflow-run provenance to a labeled event, so there is no
+              # field here that could name the caller more precisely — every
+              # workflow using the default token labels as this same actor.
+              # WHAT ACTUALLY GATES THE DECISION is the block below: it
+              # re-reads the pull request's OWN `Refs #<n>`, the NAMED
+              # issue's CURRENT `conveyor:run`, and that label's placer's
+              # CURRENT write access — all three, fresh, regardless of who or
+              # what placed the label being checked. A label placed by any
+              # other `github-actions[bot]` caller is refused unless a real
+              # standing instruction from a writer genuinely exists on the
+              # issue the pull request names right now, which is the same
+              # substantive grant a legitimate carry would also require.
               if can_push "$SENDER"; then
                 mode=all
               elif [ "$SENDER" = "github-actions[bot]" ] && [ "$THIS_LABEL" = "$LABEL" ]; then

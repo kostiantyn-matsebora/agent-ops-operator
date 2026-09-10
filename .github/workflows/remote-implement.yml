@@ -90,10 +90,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'change/')
     runs-on: ubuntu-latest
+    # ISSUES: write ONLY -- carry-grant.py labels and comments through
+    # `gh issue edit` / `gh issue comment`, and a pull request is an issue to
+    # that API. pull-requests: write is never actually exercised here.
     permissions:
       contents: read
       issues: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - name: Carry conveyor:run forward as the fix-station label

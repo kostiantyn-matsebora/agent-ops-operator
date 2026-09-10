@@ -215,7 +215,14 @@ class Round:
         if label not in current.splitlines():
             return
         old_cap = self.cap
-        gh("pr", "edit", str(self.args.pr), "--repo", self.args.repo, "--remove-label", label)
+        try:
+            gh("pr", "edit", str(self.args.pr), "--repo", self.args.repo, "--remove-label", label)
+        except subprocess.CalledProcessError:
+            # A FAILED REMOVAL MUST NOT ABORT A ROUND THAT OTHERWISE LANDS.
+            # The fix this round produces is real work; losing it because the
+            # label-removal call hit a transient error would be worse than
+            # leaving the label in place for a re-check next round.
+            return
         pr_comment(self.args.repo, self.args.pr,
                    f"{self.markers['grant']}\nround {self.number} is running past the previous cap of "
                    f"{old_cap} under `{label}`, which is now consumed.")
@@ -262,7 +269,7 @@ class Round:
         a = self.args
         unaddressed = unaddressed or {}
         used = self.number if sha else self.number - 1
-        lines = [SUMMARY_MARKER, f"**Autofix on #{a.pr}: {ending}** — @{a.approver}"]
+        lines = [SUMMARY_MARKER, f"**Conveyor fix on #{a.pr}: {ending}** — @{a.approver}"]
         if note:
             lines.append(note)
         lines.append(f"Rounds used: {used} of {self.cap}.")
@@ -508,7 +515,7 @@ def main() -> int:
         parts = [plural(n_review, "review finding")] if n_review else []
         parts += [plural(n_sonar, "analysis issue")] if n_sonar else []
         parts += [plural(n_check, "failed check")] if n_check else []
-        subject = f"fix(review): address {' and '.join(parts)} (autofix round {rnd.number})"
+        subject = f"fix(review): address {' and '.join(parts)} (conveyor round {rnd.number})"
     else:
         subject = f"fix(review): address {len(fixed)} accepted review finding{'s' if len(fixed) != 1 else ''}"
     # A CHECK IS NAMED BY ITS JOB. Its `path` is the workflow file and it
@@ -568,7 +575,7 @@ def main() -> int:
         # announces the landing. Then either the cap ends the loop, or the
         # next round is started by `workflow_dispatch`.
         pr_comment(args.repo, args.pr,
-                   f"{rnd.marker()}\nAutofix round {rnd.number} of {rnd.cap}: {sha[:7]} addresses "
+                   f"{rnd.marker()}\nConveyor round {rnd.number} of {rnd.cap}: {sha[:7]} addresses "
                    f"{plural(len(fixed), 'item')}{left}.{run}")
         if rnd.number >= rnd.cap:
             rnd.summary("round cap reached", fixed, disputed, sha=sha, unaddressed=unaddressed,

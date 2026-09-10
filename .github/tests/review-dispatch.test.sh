@@ -263,8 +263,8 @@ assert_contains "$open_run" "--station fix"
 assert_contains "$open_run" "--pr \"\${{ github.event.pull_request.number }}\""
 assert_contains "$open_run" "Refs #"
 
-it "the open job is granted only what carrying the grant needs"
-assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'write'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
+it "the open job is granted only what carrying the grant needs — issues: write alone, since carry-grant.py labels a pull request through the issues API"
+assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
 
 # THE ARCHIVE TRANSITION: this pull request merged. Carry the standing
 # instruction forward as the archive-station label ON THE ISSUE, since the

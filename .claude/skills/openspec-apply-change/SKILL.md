@@ -106,24 +106,26 @@ Implement tasks from an OpenSpec change.
    (`.claude/rules/worktree-delivery.md`, "The review found something").
 
    - **The label is the OWNER'S decision about the change, given ONCE.** Ask,
-     in so many words: "Is this change approved for automatic fixing — shall I
-     label the pull request `conveyor:fix`?" Never place it by default, never
-     infer it from a green run or from the owner's silence.
+     in so many words: "Is this change approved for automatic fixing — if so,
+     place `conveyor:fix` on the pull request yourself." Never offer to place
+     it, never place it by default, never infer approval from a green run or
+     from the owner's silence.
    - **THE WORD MAY ALREADY HAVE BEEN GIVEN, ON THE ISSUE.** A change started by
      `conveyor:run` on its issue, placed by someone with write access, carries
      that person's approval already: a WORKFLOW places `conveyor:fix` on the
      pull request once it opens, recording whose instruction it carried
      (`.claude/rules/remote-session.md`). Do not ask again, and do not place it
      yourself in this case either.
-   - **A REMOTE SESSION MAY NOT PLACE THE LABEL, EVER — ON THIS ISSUE OR THIS
-     PULL REQUEST.** It acts as an application with no write access of its
-     own; a label it places on its own work is refused and removed by the gate
-     that checks who labelled (#201, measured live). Only a person's OWN `gh`
-     session — interactive on a workstation, under the owner's own
-     credentials — may run the command below. A program may CARRY a grant
-     forward or CONSUME one; it may never MINT one.
-   - **On the owner's explicit word, from the owner's own session**, place it
-     and say so:
+   - **NEITHER THE ASSISTANT NOR ANY SESSION MAY EVER RUN THIS COMMAND —
+     ON THIS ISSUE OR THIS PULL REQUEST, IN ANY MODE, ON ANY WORD.** A session
+     acts as an application with no write access of its own; a label it
+     places on its own work is refused and removed by the gate that checks
+     who labelled (#201, measured live). A program may CARRY a grant forward
+     or CONSUME one; it may never MINT one — and running this command on the
+     owner's behalf, even when asked, is minting it.
+   - **On the owner's explicit word, TELL THE OWNER THE COMMAND — do not run
+     it.** Only the owner's own `gh` session, under their own credentials,
+     may execute it:
 
      ```bash
      gh pr edit <n> --add-label conveyor:fix
