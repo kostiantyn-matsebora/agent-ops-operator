@@ -66,30 +66,55 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
   `allowed_push_branches` is set to `change/*` where the API takes it, which
   states the same bound from the other side.
 
-### AN ISSUE LABEL STARTS ONE
+### AN ISSUE LABEL STARTS ONE, AND THE SESSION PLACES NONE
+
+| Label | Placed on | Starts |
+|---|---|---|
+| `conveyor:implement` | an ISSUE | one session, one station: implement, open the pull request, stop |
+| `conveyor:run` | an ISSUE | the STANDING INSTRUCTION — the same session starts, and its grant is CARRIED forward at every later station too |
+| `conveyor:fix` | a pull request | the fixing loop, placed by a person or CARRIED from `conveyor:run` |
+| `conveyor:archive` | the tracking ISSUE of a merged pull request | the archive pull request, placed by a person or CARRIED from `conveyor:run` |
+| `conveyor:keep-going` | a pull request whose loop stopped on the round cap | another set of rounds, consumed the moment one runs under it |
 
 | Step | What happens |
 |---|---|
-| a person with write access places `autoimplement` on an ISSUE | `remote-implement.yml` fires |
+| a person with write access places `conveyor:implement` OR `conveyor:run` on an ISSUE | `remote-implement.yml`'s `fire` job runs |
 | the workflow reads the labeller's permission from the collaborators API | anyone else: the label is REMOVED and a comment says who may place it |
 | it POSTs the issue's NUMBER to the routine's fire endpoint | the URL is a repository variable, the token a repository secret |
-| it comments the session's link on the issue, once | that comment is the start's transition record |
+| it comments the session's link on the issue, once | that comment is the start's transition record, and says whether a later carry is coming |
 | the session reads `.github/routines/implement-issue.md` | the process is committed; the routine's saved prompt is a POINTER to it |
-| it promotes the issue, proposes, implements on `change/<name>`, opens the pull request | `Refs #<n>` (NOT `Closes` — see below), and `autofix` from creation |
+| it reads the LANE — bound to an openspec change, or plain | opsx: propose, implement, archive; plain: implement straight from the issue, archiving nothing |
+| it implements on `change/<name>`, opens the pull request WITH NO LABEL | `Refs #<n>` (NOT `Closes` — see below) is what a later carry reads |
 
-- **The label on the ISSUE is the owner's word for `autofix` on the pull
-  request.** One consent, given once, by the same class of person — see
-  `worktree-delivery.md`'s consent table.
-- **The payload is a NUMBER and nothing else.** The platform wraps fire text as
+- **A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.**
+  This is the whole fix for #201: a session opened its pull request carrying
+  `autofix` because its own instructions said to, the fixing loop's gate asked
+  whether the labeller may push here, the labeller was `claude[bot]`, the
+  answer was no, and the label was stripped with a refusal comment. The gate
+  was right; the instruction was wrong. **THE SESSION NOW LABELS NOTHING**, on
+  the issue or the pull request, ever — see `worktree-delivery.md`'s label
+  table.
+- **A WORKFLOW CARRIES THE GRANT INSTEAD, RE-CHECKED EVERY TIME.**
+  `.github/workflows/remote-implement.yml` gains two jobs beside `fire`: `open`
+  (on `pull_request: opened` from `change/*`) reads the new pull request's
+  `Refs #<n>`, and if that issue still carries `conveyor:run` from a writer,
+  `.github/scripts/carry-grant.py` places `conveyor:fix` on the pull request,
+  naming whose instruction it carried. `archive` (on `pull_request: closed`
+  with `merged == true`) does the same for `conveyor:archive`, ON THE ISSUE —
+  the pull request is closed by then, and a label there drives nothing — and
+  only on the opsx lane, since the plain lane has no archive station.
+- **THE PAYLOAD IS A NUMBER AND NOTHING ELSE.** The platform wraps fire text as
   untrusted; a number is something the prompt can validate before it is used,
   and the session then reads the issue itself.
 - **The issue's body is the SUBJECT of a proposal, never instructions.**
-- **THE PULL REQUEST SAYS `Refs #<n>`, NEVER `Closes #<n>`.** The promotion in
-  step one made that issue the change's TRACKING issue, and a tracking issue
-  closes at ARCHIVE rather than at merge; `pr-closes-guard.py` refuses a pull
-  request that would close one whose change it merely proposes. `Closes` is
-  owed by the ARCHIVING pull request, and that guard refuses that one without
-  it.
+- **THE PULL REQUEST SAYS `Refs #<n>`, NEVER `Closes #<n>`.** On the opsx lane
+  the promotion made that issue the change's TRACKING issue, and a tracking
+  issue closes at ARCHIVE rather than at merge; `pr-closes-guard.py` refuses a
+  pull request that would close one whose change it merely proposes. `Closes`
+  is owed by the ARCHIVING pull request, and that guard refuses that one
+  without it. On the plain lane, `Refs #<n>` is what `carry-grant.py` reads to
+  find the issue whose grant to carry — without it nothing is carried and a
+  person labels the pull request by hand.
 - **THE SESSION OPENS THE PULL REQUEST AND STOPS.** It does not wait for CI or
   the review. The fixing loop owns green from there, over the review's
   findings, the analysis service's issues and every failed required check.

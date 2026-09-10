@@ -47,38 +47,48 @@ inventory for no isolation it did not already have.
 
 ### Requirement: A change is approved for automatic fixing by its owner, once
 
-The owner of a change SHALL approve its pull request for automatic fixing
-ONCE, by a stated label on the pull request, and that label SHALL be placed by
-the session working the change on the owner's explicit word, under the owner's
-own credentials.
+**THIS BLOCK IS SUPERSEDED BY `conveyor-labels`, WHICHEVER OF THE TWO CHANGES
+ARCHIVES SECOND CORRECTS IT.** The published requirement already carries a
+defect — "the session working the change" places the approve label "under
+the owner's own credentials" — that a session cannot actually do: it acts as
+an application with no write access, and placing the label that way is
+exactly what #201 measured failing live (the gate refused it and stripped the
+label). This change's own contribution is the SECOND scenario below, stated
+so it does not depend on that broken claim continuing to be there;
+`conveyor-labels` carries the fully corrected requirement (the session places
+NO label; a workflow carries the owner's standing instruction forward
+instead) in its own `specs/change-delivery/spec.md` delta, and whichever of
+the two changes archives second is what leaves `openspec/specs/` correct.
 
-The owner's word SHALL be given in one of two forms: told to the session
-working the change, or the implement label placed by the owner on the issue
-the change was started from. In the second form the session SHALL place the
-approve label on the pull request at creation.
+The owner of a change SHALL approve its pull request for automatic fixing
+ONCE, by a stated label on the pull request, placed by someone with write
+access to this repository — directly, or by a program relaying that person's
+standing instruction. The owner's word MAY be given as the implement label
+placed on the issue the change was started from, before the pull request
+exists.
 
 The approval is the change's, not the finding's: the owner has read the
-proposal — or, having labelled the issue, has said the issue is to be built and
-its reviewers satisfied — and is saying "make the reviewers happy", which is a
-decision about the change. What the reviewers then say is not re-decided per
-thread.
+proposal — or, having labelled the issue, has said the issue is to be built
+and its reviewers satisfied — and is saying "make the reviewers happy", which
+is a decision about the change. What the reviewers then say is not
+re-decided per thread.
 
 #### Scenario: The owner approves the change
 
 - **WHEN** the owner tells the session the change is approved for fixing
-- **THEN** the session places the label on the change's pull request, and says
-  so
+- **THEN** the label reaches the change's pull request from someone with
+  write access, and the owner is told so
 
 #### Scenario: The owner labelled the issue
 
-- **WHEN** a change was started by the implement label on its issue, placed by
-  a person with write access
-- **THEN** the session opening its pull request places the approve label at
-  creation, and the pull request's description says the approval came from the
-  issue
+- **WHEN** a change was started by the implement label on its issue, placed
+  by a person with write access
+- **THEN** the pull request that opens for it carries the approve label
+  before it needs to be asked for again, and its description says the
+  approval came from the issue
 
 #### Scenario: The label is placed with nobody's word
 
-- **WHEN** a session has no explicit approval from the owner in either form
-- **THEN** it does not place the label, and a pull request without it is
-  triaged per thread
+- **WHEN** no explicit approval from the owner exists in either form
+- **THEN** no label is placed, and a pull request without one is triaged per
+  thread

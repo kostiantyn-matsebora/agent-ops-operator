@@ -27,7 +27,7 @@ esac
 STUB
 chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
 
-labelled() { printf '{"number":7,"headRefName":"change/thing","state":"OPEN","labels":[{"name":"autofix"}]}' > "$FX/pr.json"; }
+labelled() { printf '{"number":7,"headRefName":"change/thing","state":"OPEN","labels":[{"name":"conveyor:fix"}]}' > "$FX/pr.json"; }
 unlabelled() { printf '{"number":7,"headRefName":"change/thing","state":"OPEN","labels":[]}' > "$FX/pr.json"; }
 threads() { cat > "$FX/threads.json"; }
 none_running() { rm -f "$FX"/runs-*.json; }
@@ -49,7 +49,7 @@ unlabelled
 out=$(run); rc=$?
 it "allows, without asking further, a pull request that does not carry the label"
 assert_status 0 "$rc"
-assert_contains "$out" "does not carry \`autofix\`"
+assert_contains "$out" "does not carry \`conveyor:fix\`"
 assert_not_contains "$(cat "$GH_CALLS")" "run list"
 
 # REFUSAL ONE: a round is running — by branch, or by the number in the run's name.
@@ -133,7 +133,7 @@ assert_status 0 "$rc"
 assert_contains "$out" "no pull request to read"
 
 it "allows a closed pull request"
-printf '{"number":7,"headRefName":"change/thing","state":"MERGED","labels":[{"name":"autofix"}]}' > "$FX/pr.json"
+printf '{"number":7,"headRefName":"change/thing","state":"MERGED","labels":[{"name":"conveyor:fix"}]}' > "$FX/pr.json"
 out=$(run); rc=$?
 assert_status 0 "$rc"
 

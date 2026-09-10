@@ -776,6 +776,32 @@
         "is now",
         "hosted endpoint"
       ]
+    },
+    {
+      "id": "autofix",
+      "pattern": "(?<![\\w-])autofix(?![\\w-])|autoimplement",
+      "says": "conveyor:fix — the approve label, renamed; conveyor:implement replaces autoimplement, and conveyor:run, conveyor:archive and conveyor:keep-going are the rest of the five conveyor: labels. A program may only CARRY or CONSUME a grant, never mint one -- #201 is what minting one cost",
+      "allow": [
+        "removed",
+        "retired",
+        "renamed",
+        "former",
+        "no longer",
+        "is gone",
+        "was gone",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "history",
+        "flag day",
+        "conveyor:",
+        "gone"
+      ]
     }
   ]
 }

@@ -1,4 +1,5 @@
-# A LABEL ON AN ISSUE STARTS A REMOTE SESSION THAT IMPLEMENTS IT.
+# A LABEL ON AN ISSUE STARTS A REMOTE SESSION THAT IMPLEMENTS IT, AND THE
+# STANDING INSTRUCTION IT MAY CARRY IS RELAYED AT THE TWO LATER TRANSITIONS.
 #
 # WHY THIS WORKFLOW EXISTS AT ALL, WHEN A ROUTINE COULD SUBSCRIBE TO EVENTS
 # ITSELF: a routine's GitHub triggers are `pull_request` and `release`. There is
@@ -14,31 +15,55 @@
 #   the record  the fire returns a session url, posted once on the issue. A
 #               routine's own trigger leaves nothing on the issue at all.
 #
+# THREE JOBS, ONE STANDING INSTRUCTION READ THREE TIMES:
+#
+#   fire     `issues: labeled` on `conveyor:run` or `conveyor:implement` — starts
+#            the session, which opens its pull request UNLABELLED.
+#   open     `pull_request: opened` from `change/*` — reads the merged pull
+#            request's `Refs #<n>` and carries `conveyor:run` forward as
+#            `conveyor:fix` on THIS pull request, via carry-grant.py.
+#   archive  `pull_request: closed` with `merged == true` — reads the SAME
+#            `Refs #<n>` and carries `conveyor:run` forward as `conveyor:archive`
+#            on the ISSUE (the pull request is closed by now, and a label there
+#            drives nothing). A no-op on the plain lane, and on an archive pull
+#            request (which carries `Closes`, never `Refs`).
+#
+# A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.
+# `carry-grant.py` re-reads the issue's CURRENT labels and re-checks the
+# placer's write access every time it is called — it never trusts that a
+# label exists because a workflow called it before.
+#
 # NEVER `pull_request_target`, here or anywhere in this repository: it runs with
-# the base repository's secrets against a head a stranger controls. This runs on
-# an ordinary `issues` event of THIS repository, and the job that holds the fire
-# token runs no model and checks out nothing but the default branch's programs.
+# the base repository's secrets against a head a stranger controls. Every job
+# here runs on an ordinary event of THIS repository, gated on who sent it, and
+# a fork's pull request is refused before anything is read.
 #
 # THE ENDPOINT IS NOT IN THE TREE. `ROUTINE_FIRE_URL` is a repository variable
 # (its path carries the routine's id) and `ROUTINE_FIRE_TOKEN` a secret. Without
 # both the program says so on the issue rather than failing silently.
 name: remote-implement
 
-run-name: remote-implement for #${{ github.event.issue.number }}
+run-name: >-
+  ${{ github.event_name == 'issues' && format('remote-implement for #{0}', github.event.issue.number)
+      || format('remote-implement carry for #{0}', github.event.pull_request.number) }}
 
 on:
   issues:
     types: [labeled]
+  pull_request:
+    types: [opened, closed]
 
 permissions: {}
 
 jobs:
   fire:
     # The vocabulary file is the authority and the program reads it; this
-    # expression is the prefilter, and it is the one place the label's name is
-    # repeated — an expression cannot read a file. It must AGREE with
-    # `implement_label` in .github/review-triage.json.
-    if: github.event.label.name == 'autoimplement'
+    # expression is the prefilter, and it is the one place the labels' names
+    # are repeated — an expression cannot read a file. It must AGREE with
+    # `implement_label` / `run_label` in .github/review-triage.json.
+    if: >-
+      github.event_name == 'issues' &&
+      (github.event.label.name == 'conveyor:implement' || github.event.label.name == 'conveyor:run')
     runs-on: ubuntu-latest
     permissions:
       # To read the vocabulary file and the program: the checkout below needs
@@ -55,3 +80,64 @@ jobs:
           ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
           ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
         run: python3 .github/scripts/remote-implement.py
+
+  # THE OPEN TRANSITION: a session's own pull request just appeared, carrying
+  # no label. If the issue it references still carries `conveyor:run` from a
+  # writer, carry it forward as the fix-station label on THIS pull request.
+  open:
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'opened' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'change/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Carry conveyor:run forward as the fix-station label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          issue=$(printf '%s' "$BODY" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          if [ -z "$issue" ]; then
+            echo "this pull request's body carries no 'Refs #<n>'; nothing to carry"
+            exit 0
+          fi
+          python3 .github/scripts/carry-grant.py --repo "$GITHUB_REPOSITORY" \
+            --issue "$issue" --station fix --pr "${{ github.event.pull_request.number }}"
+
+  # THE ARCHIVE TRANSITION: this pull request just merged. Read its `Refs #<n>`
+  # and carry `conveyor:run` forward as the archive-station label ON THE ISSUE
+  # — the pull request is closed now, and a label there drives nothing.
+  archive:
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Carry conveyor:run forward as the archive-station label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          issue=$(printf '%s' "$BODY" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          if [ -z "$issue" ]; then
+            # AN ARCHIVE PULL REQUEST CARRIES Closes, NEVER Refs -- this is how
+            # this job tells the last station of a lane from every other merge,
+            # and does nothing on it.
+            echo "this pull request's body carries no 'Refs #<n>'; nothing to carry"
+            exit 0
+          fi
+          python3 .github/scripts/carry-grant.py --repo "$GITHUB_REPOSITORY" \
+            --issue "$issue" --station archive

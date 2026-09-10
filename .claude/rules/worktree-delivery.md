@@ -204,9 +204,31 @@ comment acts on everything accepted:
 | anything else, or nothing | the thread | not accepted; the thread and the code stay as they are |
 | `/fix-accepted` | a comment on the pull request | DISPATCH — one run, one commit, over everything accepted |
 | resolve the thread yourself | the thread | dismissed; the review counts it and does not raise it again |
-| the `autofix` LABEL | the pull request | APPROVED AS A WHOLE — every open finding, every open SonarCloud issue AND every FAILED REQUIRED CHECK on the head is fixed or DISPUTED by CI, round after round, no reply and no dispatch needed. Placed by the session on the OWNER's word (`gh pr edit <n> --add-label autofix`), never by default |
-| the `autoimplement` LABEL | an ISSUE | APPROVED TO BE BUILT — a remote session proposes, implements and opens the pull request, which carries `autofix` from creation. Placed by a person with WRITE access; anyone else's is removed with a comment. See `remote-session.md` |
+| the `conveyor:fix` LABEL | a pull request | APPROVED AS A WHOLE — every open finding, every open SonarCloud issue AND every FAILED REQUIRED CHECK on the head is fixed or DISPUTED by CI, round after round, no reply and no dispatch needed. Placed by a person with WRITE access, or CARRIED forward by a workflow relaying a `conveyor:run` instruction still standing on the tracking issue — never by a session |
+| the `conveyor:implement` LABEL | an ISSUE | APPROVED TO BE BUILT, ONE STATION — a remote session proposes, implements and opens the pull request, UNLABELLED. Placed by a person with WRITE access; anyone else's is removed with a comment |
+| the `conveyor:run` LABEL | an ISSUE | THE STANDING INSTRUCTION — implement, drive the pull request to mergeable, archive once merged: the whole line for that issue's LANE, read at every transition rather than recorded at the first. Removing it halts the line at the next station |
+| the `conveyor:archive` LABEL | the tracking ISSUE of a MERGED pull request | ARCHIVE, ONE STATION — placed by a person with write access, or carried forward the same way `conveyor:fix` is. Only the opsx lane has this station; the plain lane's line ends at the merge |
+| the `conveyor:keep-going` LABEL | a pull request whose loop stopped on the round cap | GRANTS ANOTHER SET of rounds, and is REMOVED the moment a round runs under it — one placement, one grant |
 | a reply under `<!-- autofix:disputed -->` | a thread (or a pull request comment, for a Sonar issue) | THE LOOP DISAGREES — the code is untouched, the thread stays open, you are mentioned. Answer it (a reply, or resolve to dismiss); nothing re-disputes it |
+
+**A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.**
+Every label above that authorises unattended work is placed by a person whose
+write access the platform confirms — directly, or CARRIED forward by
+`.github/scripts/carry-grant.py`, which records whose instruction it relayed
+and is RE-CHECKED at the point it is acted on, never trusted because a
+workflow placed it.
+
+- **THIS IS THE WHOLE FIX FOR #201.** A remote session opened its pull request
+  carrying `autofix` because its own instructions said to; it acts as an
+  application with no write access, so the gate that checks who labelled
+  removed the label and refused, and the pull request sat green, reviewed and
+  unlabelled with no session left to act. The gate was right; the instruction
+  was wrong. The session now opens its pull request with NO LABEL, and a
+  workflow reads the issue's `conveyor:run` again once the pull request opens
+  (or merges) and carries it forward.
+- **THE BOUND IS A NAMED CONSTANT**, `max_rounds` in `.github/review-triage.json`,
+  default 5 — read once by the gate and passed down, rather than a static
+  workflow constant, because a workflow's `env:` block cannot read a file.
 
 - **THE VOCABULARY IS A FILE, MATCHED BY A PROGRAM** —
   `.github/review-triage.json`, read by `accepted-findings.py`. Whole reply,
@@ -257,12 +279,23 @@ comment acts on everything accepted:
   measured first and REJECTED: a `workflow_dispatch` run's check runs never
   reach the merge box (#131, `gotchas.md`). Without the secret the round
   lands with the token and the summary says the loop cannot go on.
-- **THE LOOP IS BOUNDED AND EVERY ENDING IS ONE SUMMARY.** `MAX_ROUNDS: 3` in
-  `review-dispatch.yml`, counted from the landing comments' `<!-- autofix:round
+- **THE LOOP IS BOUNDED AND EVERY ENDING IS ONE SUMMARY.** `max_rounds`
+  (`.github/review-triage.json`, default 5) is read once by `review-dispatch.yml`'s
+  gate and passed down, counted from the landing comments' `<!-- autofix:round
   N -->` markers since the label was placed — so removing and re-adding the
   label starts the count afresh. A round that changes nothing (every item
   disputed, or a stale patch) ends it early. The summary names what was fixed,
-  what was disputed, the rounds used and the approver.
+  what was disputed, what was UNADDRESSED (an item the fixing step's report
+  never named — worded as such, never as a dispute nobody made), the rounds
+  used and the approver — and, at the cap, that `conveyor:keep-going` grants
+  another set, consumed the moment a round runs under it.
+- **SILENCE IS NOT A DECISION.** A round whose fixing step wrote NO report at
+  all ends as its own outcome, `no report`, disputing nothing — distinct from
+  a report that named every item disputed. Reading a missing report as "every
+  item disputed" tells a person the machine considered each finding and
+  declined it, when nobody looked; measured while this rule's own change was
+  under review, where three findings on a proposal-only pull request came back
+  "disputed... not addressed" and no model had spoken.
 - **THE SECOND REVIEWER IS SONARCLOUD, AND ITS GATE IS REQUIRED.** `collect`
   reads its open issues per component project (`sonar-issues.py`, the token in
   the model-free job only) beside the threads; the scan step waits on the

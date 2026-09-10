@@ -174,33 +174,49 @@ lives in the file.
 
 ### Requirement: The session delivers the change through the existing loop
 
-The remote session SHALL deliver the change as one pull request from
-`change/<name>` REFERENCING the issue without a closing keyword, carrying the
-approve label for
-automatic fixing from creation, with the unit and chart tiers run in the
-session and the cluster tier dispatched to the smoke end-to-end workflow on
-its branch. Nothing the session does SHALL merge or archive.
+**CORRECTED BY `conveyor-labels`** — this requirement, and its scenarios below,
+originally said the session opens its pull request "carrying the approve label
+for automatic fixing from creation." A session acts as an application with no
+write access, so a label it places on its own work is refused and removed by
+the fixing loop's own gate — measured live on #201. The text below is the
+corrected version: the session places NO label, ever, and a WORKFLOW carries
+the issue's standing instruction forward once the pull request exists.
 
-**The label on the issue is the owner's word, given once**, and it reaches the
-pull request as the consent the fixing loop already reads — over everything
-that holds the merge: the review's findings, the analysis service's issues and
-the failed required checks. What that loop cannot settle — a dispute, an
-unanswered gate — waits for a person, as it does today. The session SHALL NOT
-wait for the checks or the review before ending; the loop owns the pull
-request from the moment it opens.
+The remote session SHALL deliver the change as one pull request from
+`change/<name>` REFERENCING the issue without a closing keyword, carrying NO
+label, with the unit and chart tiers run in the session and the cluster tier
+dispatched to the smoke end-to-end workflow on its branch. Nothing the session
+does SHALL merge, archive, or place a label.
+
+**The label on the issue is the owner's word, given once**, and a WORKFLOW —
+never the session — carries it to the pull request as the consent the fixing
+loop already reads — over everything that holds the merge: the review's
+findings, the analysis service's issues and the failed required checks. What
+that loop cannot settle — a dispute, an unanswered gate — waits for a person,
+as it does today. The session SHALL NOT wait for the checks or the review
+before ending; the loop owns the pull request from the moment its label is
+carried to it.
 
 #### Scenario: The session opens the pull request
 
 - **WHEN** the remote session finishes implementing the change
 - **THEN** one pull request exists from `change/<name>`, it REFERENCES the
   issue without closing it — the issue it promoted is now the change's tracking
-  issue, and that closes when the change is ARCHIVED — it carries the approve
-  label, and its description states which verifications were run here and which
-  are workstation-only
+  issue, and that closes when the change is ARCHIVED — it carries NO LABEL, and
+  its description states which verifications were run here and which are
+  workstation-only
+
+#### Scenario: A workflow carries the owner's standing instruction to the pull request
+
+- **WHEN** the issue this pull request references still carries the owner's
+  standing instruction for automatic fixing
+- **THEN** a workflow places the approve label on the pull request, recording
+  whose instruction authorised it — never the session
 
 #### Scenario: The review finds something
 
-- **WHEN** the review posts findings on that pull request
+- **WHEN** the review posts findings on that pull request AND it carries the
+  approve label
 - **THEN** the fixing loop fixes or disputes them under the label, and no
   person is asked to reply in a thread first
 

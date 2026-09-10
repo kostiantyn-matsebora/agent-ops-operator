@@ -8,15 +8,21 @@
 # stays open — and, since branch protection requires conversation resolution,
 # keeps the merge blocked until a person deals with it. That is the feature.
 #
-# OR THE WHOLE PULL REQUEST IS APPROVED AT ONCE. The `autofix` label
-# (`.github/review-triage.json`, `approve_label`) is change-level consent,
-# placed by a person with write access: every open finding of the review's and
-# every open issue the analysis service reports are on the work list, each is
-# FIXED or DISPUTED (a dispute is a reply that stays open and names the
-# approver), the landed commit is pushed so that CI and the review run on it,
-# and the review's completion starts the next round —
-# bounded by MAX_ROUNDS, every ending summarised in ONE comment. Without the
-# label, nothing here changes.
+# OR THE WHOLE PULL REQUEST IS APPROVED AT ONCE. The `conveyor:fix` label
+# (`.github/review-triage.json`, `approve_label`, renamed from `autofix`) is
+# change-level consent, placed by a person with write access — directly, or
+# CARRIED forward by `.github/scripts/carry-grant.py` relaying a person's
+# standing instruction on the tracking issue (`conveyor:run`); a program may
+# only carry or consume a grant, never mint one, and a carried label is
+# re-checked against the grant it claims rather than trusted: every open
+# finding of the review's and every open issue the analysis service reports
+# are on the work list, each is FIXED or DISPUTED (a dispute is a reply that
+# stays open and names the approver), the landed commit is pushed so that CI
+# and the review run on it, and the review's completion starts the next round
+# — bounded by `CONVEYOR_MAX_ROUNDS` (`.github/review-triage.json`,
+# `max_rounds`), every ending summarised in ONE comment, and
+# `conveyor:keep-going` grants another set, consumed as it is taken. Without
+# the label, nothing here changes.
 #
 # FOUR JOBS, AND THE SPLITS ARE THE POINT:
 #
@@ -47,7 +53,7 @@
 # job name, its run and a bounded tail of the failed steps' log, and a `ci` run
 # completing with `failure` starts a round beside the review's completion. The
 # `concurrency` group serialises the two, so one head can produce two rounds in
-# sequence, each collecting the live state; `MAX_ROUNDS` bounds both. A check is
+# sequence, each collecting the live state; `CONVEYOR_MAX_ROUNDS` bounds both. A check is
 # FIXED only after the fixer reproduced it with the job's own command, or
 # DISPUTED with the log's reason — a runner outage and a rate limit are not
 # things the tree can fix.
@@ -118,12 +124,12 @@ concurrency:
 
 permissions: {}
 
-env:
-  # THE BOUND. The reviewer's verdicts vary between runs and it reviews the
-  # fixer's own commits, so an unbounded loop could argue with itself at a
-  # cost nobody approved. Three rounds; a third round still disagreeing is a
-  # reviewer-prompt problem, not a reason to raise this.
-  MAX_ROUNDS: 3
+# THE BOUND IS READ, NOT DECLARED HERE. `CONVEYOR_MAX_ROUNDS` used to be a
+# static `env:` entry (`MAX_ROUNDS: 3`); a workflow's `env:` block cannot read
+# a file, so the number is now read once, in the gate job, from
+# `.github/review-triage.json`'s `max_rounds` — the same file that names the
+# label — and passed down as `needs.gate.outputs.max_rounds`. Stated once,
+# where the rest of this vocabulary already lives.
 
 jobs:
   gate:
@@ -137,7 +143,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/fix-accepted')) ||
       (github.event_name == 'pull_request_review_comment' && startsWith(github.event.comment.body, '/fix-accepted')) ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'autofix') ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'conveyor:fix') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'claude-review' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'ci' && github.event.workflow_run.conclusion == 'failure')
     runs-on: ubuntu-latest
@@ -155,6 +161,7 @@ jobs:
       approver: ${{ steps.who.outputs.approver }}
       since: ${{ steps.who.outputs.since }}
       head: ${{ steps.who.outputs.head }}
+      max_rounds: ${{ steps.who.outputs.max_rounds }}
     steps:
       # THE TRUSTED COPY, NOT THE PULL REQUEST'S. On `pull_request_review_comment`
       # and on `pull_request: labeled` `github.ref` is the pull request's MERGE
@@ -181,6 +188,10 @@ jobs:
         run: |
           set -euo pipefail
           LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["approve_label"])')
+          # THE BOUND, STATED ONCE — read here rather than declared in this
+          # workflow's own env:, so the vocabulary file is the one place a
+          # person changes it.
+          echo "max_rounds=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["max_rounds"])')" >> "$GITHUB_OUTPUT"
           echo "dispatcher=$SENDER" >> "$GITHUB_OUTPUT"
 
           refuse() {
@@ -227,14 +238,31 @@ jobs:
               esac
               ;;
             pull_request)
-              # THE LABEL IS CONSENT ONLY FROM SOMEONE WHO MAY PUSH. Placed by
-              # anyone else it is REMOVED, with a comment: a refusal that left
-              # it in place would look like a loop that broke.
-              if ! can_push "$SENDER"; then
+              # THE LABEL IS CONSENT ONLY FROM SOMEONE WHO MAY PUSH — DIRECTLY,
+              # OR CARRIED BY A WORKFLOW RELAYING A STANDING INSTRUCTION THAT
+              # IS STILL THERE. A program may carry a grant forward; it may
+              # never mint one, so a carried label is RE-CHECKED against the
+              # grant it claims to carry rather than trusted because a
+              # workflow placed it.
+              if can_push "$SENDER"; then
+                mode=all
+              elif [ "$SENDER" = "github-actions[bot]" ]; then
+                # THE ORIGINATING ISSUE, from `Refs #<n>` in the pull
+                # request's own body — the same field carry-grant.py itself
+                # read to place this label.
+                BODY_TEXT=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+                ISSUE=$(printf '%s' "$BODY_TEXT" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+                RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
+                STANDING=$([ -n "$ISSUE" ] && gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx "$RUN_LABEL" && echo yes || echo no)
+                if [ -z "$ISSUE" ] || [ "$STANDING" != "yes" ]; then
+                  gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL"
+                  refuse "\`$LABEL\` was carried from an issue's \`$RUN_LABEL\`, but that instruction is no longer there (or no issue was named). The \`$LABEL\` label was removed."
+                fi
+                mode=all
+              else
                 gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL"
                 refuse "write access is required to approve a pull request for automatic fixing, and \`$SENDER\` cannot push here. The \`$LABEL\` label was removed."
               fi
-              mode=all
               ;;
             workflow_run)
               # WHICH PULL REQUEST THIS RUN CONCERNS, and the two runs answer
@@ -495,22 +523,37 @@ jobs:
 
       # THE PATCH IS THE WHOLE OF WHAT CROSSES. `--binary` so a changed image
       # survives; `add -N` so a NEW file is in the diff at all. A missing report
-      # becomes "nothing fixed" rather than a missing input — the lander then
-      # leaves every thread open and says so, which is the honest reading of a
-      # run that produced changes it did not account for.
+      # is substituted with an empty one so the lander always has a file to
+      # read -- but SILENCE AND REFUSAL ARE DIFFERENT FACTS: a `no-report`
+      # sentinel rides beside it, so land-dispatch.py can tell "the fixing step
+      # ran and disputed nothing" from "the fixing step wrote nothing at all"
+      # rather than reading the second as three phantom disputes (measured
+      # while this very change was under review: three findings on a
+      # proposal-only pull request came back "disputed... not addressed",
+      # and no model had spoken).
       - name: The patch, and the report
         run: |
           set -euo pipefail
           git add -N .
           git diff --binary > "$RUNNER_TEMP/dispatch/fix.patch"
-          [ -f "$RUNNER_TEMP/dispatch/report.json" ] || echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
+          if [ -f "$RUNNER_TEMP/dispatch/report.json" ]; then
+            rm -f "$RUNNER_TEMP/dispatch/report.no-report"
+          else
+            echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
+            : > "$RUNNER_TEMP/dispatch/report.no-report"
+          fi
           echo "patch: $(wc -c < "$RUNNER_TEMP/dispatch/fix.patch") bytes"; cat "$RUNNER_TEMP/dispatch/report.json"
       - uses: actions/upload-artifact@v4
         with:
           name: dispatch-fix
+          # `report.no-report` is OPTIONAL -- present only when the report was
+          # missing and substituted above. `fix.patch` and `report.json` are
+          # written unconditionally, so the overall match is never empty and
+          # `if-no-files-found: error` still catches a genuinely broken step.
           path: |
             ${{ runner.temp }}/dispatch/fix.patch
             ${{ runner.temp }}/dispatch/report.json
+            ${{ runner.temp }}/dispatch/report.no-report
           retention-days: 1
           # The dotfile trap that made `.resolve-threads` a no-op for a day:
           # upload-artifact v4 excludes hidden files by default. Nothing here
@@ -605,8 +648,14 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # shellcheck disable=SC2086 -- STARTS is one flag or nothing
-          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS \
+          # A MISSING REPORT AND AN EMPTY ONE ARE DIFFERENT FACTS. The sentinel
+          # rides beside report.json only when the fixing step wrote nothing at
+          # all; its presence is what tells the lander to end the round as
+          # `no report` rather than inventing a dispute for every work item.
+          REPORT_MISSING=""
+          [ -f "$RUNNER_TEMP/dispatch/report.no-report" ] && REPORT_MISSING="--report-missing"
+          # shellcheck disable=SC2086 -- STARTS and REPORT_MISSING are each one flag or nothing
+          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS $REPORT_MISSING \
             --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" \
             --branch "${{ needs.gate.outputs.branch }}" \
             --work-list "$RUNNER_TEMP/dispatch/work-list.json" \
@@ -616,6 +665,6 @@ jobs:
             --vocabulary "$RUNNER_TEMP/review-triage.json" \
             --dispatched-by "${{ needs.gate.outputs.dispatcher }}" \
             --mode "$MODE" --approver "$APPROVER" --since "$SINCE" \
-            --max-rounds "$MAX_ROUNDS" --sonar "$RUNNER_TEMP/dispatch/sonar.json" \
+            --max-rounds "${{ needs.gate.outputs.max_rounds }}" --sonar "$RUNNER_TEMP/dispatch/sonar.json" \
             --checks "$RUNNER_TEMP/dispatch/checks.json" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

@@ -100,7 +100,7 @@ it "answers the unfixed thread with the reason, and leaves it open"
 assert_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=Not addressed by the dispatch (B is exported and used by the tests). Left open."
 
 it "says on the pull request that a token push starts no CI"
-assert_contains "$(cat "$GH_CALLS")" "pr comment 7 --repo o/r --body Dispatch by @a-maintainer: $sha addresses 1 accepted finding, 1 left open."
+assert_contains "$(cat "$GH_CALLS")" "pr comment 7 --repo o/r --body Dispatch by @a-maintainer: $sha addresses 1 accepted finding, 1 item left open."
 assert_contains "$(cat "$GH_CALLS")" "CI and the review have NOT run on it"
 
 it "hands only the fixed thread to the resolver"
@@ -220,8 +220,8 @@ land_all() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
              (cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
                 --work-list "${WORK:-$tmp/work-all.json}" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report-all.json}" \
                 --dispatched-by github-actions --mode all --approver an-approver --since 2026-08-29T10:00:00Z \
-                --max-rounds 3 --sonar "$tmp/sonar.json" --checks "${CHECKS:-$tmp/checks-none.json}" \
-                ${STARTS---push-starts-workflows} 2>&1); }
+                --max-rounds "${MAX_ROUNDS:-3}" --sonar "$tmp/sonar.json" --checks "${CHECKS:-$tmp/checks-none.json}" \
+                ${STARTS---push-starts-workflows} ${REPORT_MISSING:+--report-missing} 2>&1); }
 printf '{"consulted":true,"checks":[],"items":[]}' > "$tmp/checks-none.json"
 
 fresh_repo
@@ -267,7 +267,32 @@ summary_line=$(grep '<!-- autofix:summary -->' "$GH_CALLS")
 assert_contains "$summary_line" "round cap reached** — @an-approver"
 assert_contains "$summary_line" "Rounds used: 3 of 3"
 assert_contains "$summary_line" "Disputed (2)"
+assert_contains "$summary_line" "conveyor:keep-going"
 printf '[]' > "$GH_COMMENTS"
+
+# CONSUMED, THE MOMENT A ROUND RUNS UNDER IT. `conveyor:keep-going` is on the
+# pull request already (the fixture `gh pr view --json labels` names it); a
+# round running under it REMOVES it, never re-adds or re-checks it later.
+it "labelled: conveyor:keep-going is REMOVED the moment a round runs under it"
+fresh_repo
+mkdir -p "$tmp/bin2"
+cat > "$tmp/bin2/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
+esac
+case "\$*" in
+  "api graphql"*) cat "\$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin2/gh"
+out=$(PATH="$tmp/bin2:$PATH" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
 
 # ENDING: disputes only.
 it "labelled: with everything disputed, commits nothing, posts the disputes, and ONE summary saying so"
@@ -314,12 +339,36 @@ assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "stale patch** — @an-a
 assert_not_contains "$(cat "$GH_CALLS")" "/replies"
 assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
 
-it "labelled: an item the report neither fixed nor disputed is DISPUTED as unaddressed, never dropped"
+# SILENCE AND REFUSAL ARE DIFFERENT FACTS. An item a REAL report simply never
+# names is UNADDRESSED -- worded as such, never folded into "disputed" (which
+# reads as the fixing step having looked at it and declined), and it carries
+# no dispute-marked reply: nobody looked, so there is nothing to leave a
+# marked reply about, and it stays eligible for the next round.
+it "labelled: an item a real report omits is UNADDRESSED, never disputed and never dropped"
 fresh_repo
+# THE FIXTURE work-all.json CARRIES THREE ITEMS (PRRT_a, PRRT_b, sonar:AZ1);
+# naming only PRRT_a fixed leaves the other two unaddressed.
 printf '{"items":[{"id":"PRRT_a","action":"fixed","reason":""}]}' > "$tmp/report-partial.json"
-out=$(REPORT="$tmp/report-partial.json" land_all)
-assert_contains "$out" "disputed PRRT_b (b.go): not addressed by the fixing step"
-assert_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- autofix:disputed -->"
+# max-rounds 1: this round is terminal, so its ending posts the itemised
+# summary rather than only the round-landing comment.
+out=$(REPORT="$tmp/report-partial.json" MAX_ROUNDS=1 land_all)
+assert_contains "$out" "unaddressed PRRT_b (b.go): not named in the fixing step's report"
+assert_contains "$out" "unaddressed sonar:AZ1 (b.go): not named in the fixing step's report"
+assert_not_contains "$out" "disputed PRRT_b"
+assert_not_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- autofix:disputed -->"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "Unaddressed (2)"
+
+# A ROUND WHOSE FIXING STEP PRODUCED NO REPORT AT ALL ends as its OWN outcome,
+# disputing nothing -- the case observed on this change's own proposal: three
+# findings came back "disputed... not addressed" when no model had spoken.
+it "labelled: no report at all ends the round as its own outcome, disputing nothing"
+fresh_repo
+out=$(REPORT_MISSING=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+assert_contains "$(grep 'autofix:summary' "$GH_CALLS")" "no report** — @an-approver"
+assert_not_contains "$(grep 'autofix:summary' "$GH_CALLS")" "Disputed ("
 
 # THE TOKEN PUSHED IT. Without the push credential the workflow does not pass
 # --push-starts-workflows, and a landed round cannot be followed by another.

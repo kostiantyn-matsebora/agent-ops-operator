@@ -101,24 +101,32 @@ Implement tasks from an OpenSpec change.
 8. **Once the pull request exists, ASK whether it is approved for automatic fixing — THIS REPOSITORY'S STEP**
 
    The review posts findings as threads and SonarCloud reports issues; a pull
-   request carrying the `autofix` label has both fixed or disputed by CI, round
-   after round, with no per-thread `fix it` and no hand push
+   request carrying the `conveyor:fix` label has both fixed or disputed by CI,
+   round after round, with no per-thread `fix it` and no hand push
    (`.claude/rules/worktree-delivery.md`, "The review found something").
 
    - **The label is the OWNER'S decision about the change, given ONCE.** Ask,
      in so many words: "Is this change approved for automatic fixing — shall I
-     label the pull request `autofix`?" Never place it by default, never infer
-     it from a green run or from the owner's silence.
+     label the pull request `conveyor:fix`?" Never place it by default, never
+     infer it from a green run or from the owner's silence.
    - **THE WORD MAY ALREADY HAVE BEEN GIVEN, ON THE ISSUE.** A change started by
-     the `autoimplement` label on its issue, placed by someone with write access,
-     carries that person's approval already: the pull request is opened WITH
-     `autofix` and the description says whose label it came from. Do not ask
-     again (`.claude/rules/remote-session.md`).
-   - **On the owner's explicit word**, place it under their credentials and
-     say so:
+     `conveyor:run` on its issue, placed by someone with write access, carries
+     that person's approval already: a WORKFLOW places `conveyor:fix` on the
+     pull request once it opens, recording whose instruction it carried
+     (`.claude/rules/remote-session.md`). Do not ask again, and do not place it
+     yourself in this case either.
+   - **A REMOTE SESSION MAY NOT PLACE THE LABEL, EVER — ON THIS ISSUE OR THIS
+     PULL REQUEST.** It acts as an application with no write access of its
+     own; a label it places on its own work is refused and removed by the gate
+     that checks who labelled (#201, measured live). Only a person's OWN `gh`
+     session — interactive on a workstation, under the owner's own
+     credentials — may run the command below. A program may CARRY a grant
+     forward or CONSUME one; it may never MINT one.
+   - **On the owner's explicit word, from the owner's own session**, place it
+     and say so:
 
      ```bash
-     gh pr edit <n> --add-label autofix
+     gh pr edit <n> --add-label conveyor:fix
      ```
 
    - **Without that word**, leave the pull request unlabelled; it is triaged

@@ -100,17 +100,17 @@ assert_equals "" "$(cat "$GH_CALLS")"
 for perm in read triage none; do
   it "a $perm labeller starts nothing: the label comes off and one comment says who may place it"
   setup; stub_gh_perm "$BIN" "$perm"
-  event "$EVENT" autoimplement 7 stranger
+  event "$EVENT" conveyor:implement 7 stranger
   out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
   assert_status 1 "$status"
-  assert_contains "$(cat "$GH_CALLS")" "issue edit 7 --repo o/r --remove-label autoimplement"
+  assert_contains "$(cat "$GH_CALLS")" "issue edit 7 --repo o/r --remove-label conveyor:implement"
   assert_contains "$(cat "$GH_CALLS")" "issue comment 7"
   assert_not_contains "$out" "fired"
 done
 
 it "a pull request carrying the label fires nothing: it is an issue to that API, not a request to implement"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 7 owner pr
+event "$EVENT" conveyor:implement 7 owner pr
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 0 "$status"
 assert_not_contains "$(cat "$GH_CALLS")" "issue comment"
@@ -119,7 +119,7 @@ assert_not_contains "$(cat "$GH_CALLS")" "issue comment"
 
 it "a writer's label fires once, carrying the NUMBER and the beta header, and comments the session link"
 setup; stub_gh_perm "$BIN" write
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 start_endpoint 200 "$BODY" "$RECORD"
 out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
 stop_endpoint
@@ -128,10 +128,36 @@ assert_equals '{"text": "42"}' "$(python3 -c 'import json,sys;print(json.load(op
 assert_contains "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["headers"])' "$RECORD")" "experimental-cc-routine"
 assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
 assert_contains "$(cat "$GH_CALLS")" "https://claude.ai/code/session_abc"
+# THE SESSION PLACES NO LABEL ON ITS OWN WORK -- #201's fix. The comment says
+# a workflow carries the grant forward, never that this pull request already
+# carries one.
+assert_contains "$(cat "$GH_CALLS")" "unlabelled"
+assert_not_contains "$(cat "$GH_CALLS")" "carrying \`conveyor:fix\` already on it"
+
+# conveyor:run FIRES THE SAME SESSION, and its comment says the standing
+# instruction is what a workflow reads again later to carry the grant forward.
+it "a writer's conveyor:run fires the same session, and says the grant will be CARRIED forward, not placed now"
+setup; stub_gh_perm "$BIN" write
+event "$EVENT" conveyor:run 43 maintainer
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_equals '{"text": "43"}' "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["body"])' "$RECORD")"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 43"
+assert_contains "$(cat "$GH_CALLS")" "carries it forward as"
+assert_contains "$(cat "$GH_CALLS")" "conveyor:fix"
+
+it "neither conveyor:run nor conveyor:implement does nothing, same as any other label"
+setup; stub_gh_perm "$BIN" admin
+event "$EVENT" "conveyor:fix" 7 someone
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_equals "" "$(cat "$GH_CALLS")"
 
 it "the comment carries the marker, so a second run does not post a second one"
 setup; stub_gh_perm "$BIN" write
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 echo '<!-- remote-implement:fired -->' > "$DIR/comments"
 GH_COMMENTS="$DIR/comments"; export GH_COMMENTS
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
@@ -155,7 +181,7 @@ esac
 exit 0
 STUB
 chmod +x "$BIN/gh"
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 0 "$status"
 assert_not_contains "$out" "fired for"
@@ -165,7 +191,7 @@ assert_contains "$out" "already fired"
 
 it "a 5xx from the endpoint comments the status and fails the job, rather than failing silently"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 9 owner
+event "$EVENT" conveyor:implement 9 owner
 start_endpoint 503 "$BODY" "$RECORD"
 out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
 stop_endpoint
@@ -175,7 +201,7 @@ assert_contains "$(cat "$GH_CALLS")" "503"
 
 it "no endpoint configured says so on the issue instead of starting nothing quietly"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 9 owner
+event "$EVENT" conveyor:implement 9 owner
 out=$(PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r python3 "$S" --event "$EVENT" --repo o/r --fire-url "" 2>&1); status=$?
 assert_status 1 "$status"
 assert_contains "$(cat "$GH_CALLS")" "no routine"
@@ -185,7 +211,7 @@ assert_contains "$(cat "$GH_CALLS")" "no routine"
 # trace on the runner and nothing on the issue, where a person would look.
 it "a fire url carrying an EMBEDDED newline is refused with one line, not a stack trace"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 # THE SHAPE THAT ACTUALLY HAPPENED: `gh variable set` stored a value copied out
 # of a wrapped display, so the break sits INSIDE the id rather than at the end.
 # `.strip()` cannot help there — http.client raises InvalidURL from four frames
@@ -198,7 +224,7 @@ assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
 
 it "a fire url that is not a url at all is REFUSED on the issue, never a stack trace"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 out=$(run_it --fire-url "trig_01ABC/fire"); status=$?
 assert_status 1 "$status"
 assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
@@ -210,7 +236,7 @@ assert_not_contains "$out" "Traceback"
 # indistinguishable from a revoked credential.
 it "a token carrying a line break is refused before it is sent, and never printed"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 out=$(PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r ROUTINE_FIRE_TOKEN="$(printf 'sk-ant-oat01-AAA\nBBB')" \
   python3 "$S" --event "$EVENT" --repo o/r --fire-url "http://127.0.0.1:1/fire" 2>&1); status=$?
 assert_status 1 "$status"
@@ -225,7 +251,7 @@ assert_not_contains "$(cat "$GH_CALLS")" "sk-ant-oat01-AAA"
 it "an event whose issue number is not a number never reaches the fire"
 setup; stub_gh_perm "$BIN" admin
 cat > "$EVENT" <<'JSON'
-{"action":"labeled","label":{"name":"autoimplement"},
+{"action":"labeled","label":{"name":"conveyor:implement"},
  "issue":{"number":"7; rm -rf /","title":"t"},"sender":{"login":"owner"}}
 JSON
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
