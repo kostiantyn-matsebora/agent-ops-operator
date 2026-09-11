@@ -280,10 +280,12 @@ jobs:
                 mode=all
               elif [ "$SENDER" = "github-actions[bot]" ] && [ "$THIS_LABEL" = "$LABEL" ]; then
                 # THE ORIGINATING ISSUE, from `Refs #<n>` in the pull
-                # request's own body — the same field carry-grant.py itself
-                # read to place this label. Only `conveyor:fix` is ever
-                # CARRIED this way; `conveyor:keep-going` is placed by a
-                # person only, so a bot placing it falls through to refusal.
+                # request's own body — the same field remote-implement.yml
+                # parsed and passed to carry-grant.py as `--issue <n>` to
+                # place this label; carry-grant.py itself never reads the
+                # body. Only `conveyor:fix` is ever CARRIED this way;
+                # `conveyor:keep-going` is placed by a person only, so a bot
+                # placing it falls through to refusal.
                 BODY_TEXT=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
                 ISSUE=$(printf '%s' "$BODY_TEXT" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
                 RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
