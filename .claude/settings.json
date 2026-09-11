@@ -25,6 +25,19 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/rules_compliance.py",
+            "timeout": 10,
+            "statusMessage": "Checking the writing rules"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "",
