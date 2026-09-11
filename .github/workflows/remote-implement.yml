@@ -121,16 +121,18 @@ jobs:
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    # ISSUES: write TO CARRY -- carry-grant.py labels and comments through
-    # `gh issue edit` / `gh issue comment`, and a pull request is an issue to
-    # that API. PULL-REQUESTS: read TO FIND -- resolving which pull request a
-    # workflow_run concerns needs `commits/<sha>/pulls`, which 403s under
-    # issues alone (measured live); read is enough, since this job never
-    # writes to the pull request itself.
+    # PULL-REQUESTS: write -- MEASURED, NOT ASSUMED. `gh issue edit <pr>
+    # --add-label` accepts a pull request's number (the REST shape is
+    # shared), but the GRAPHQL MUTATION IT USES REQUIRES pull-requests:
+    # write on the pull request TARGET -- `issues: write` alone 403s
+    # (`addLabelsToLabelable`), confirmed live. Read is what resolving WHICH
+    # pull request a workflow_run concerns needs (`commits/<sha>/pulls`);
+    # write is what LABELLING it needs. ISSUES: write stays for the marker
+    # comment carry-grant.py posts, through `gh issue comment`.
     permissions:
       contents: read
       issues: write
-      pull-requests: read
+      pull-requests: write
     steps:
       # THE TRUSTED COPY, NOT THE PULL REQUEST'S. See the header comment --
       # this ALSO buys the trusted checkout, exactly as review-dispatch.yml's
