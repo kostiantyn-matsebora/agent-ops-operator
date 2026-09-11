@@ -49,13 +49,18 @@ class Finding(NamedTuple):
 
 
 def is_rules_file(path: pathlib.Path) -> bool:
-    """`.claude/rules/*.md`, or the repo-root `docs/.claude/*.md` -- authoring.md
-    governs both, since a site's own shell context follows the same
+    """`.claude/rules/*.md`, or `docs/.claude/*.md` -- authoring.md governs
+    both, since a site's own shell context follows the same
     one-`## `-heading, one-topic convention every other rules file does.
-    ANCHORED AT THE TRAILING SHAPE, not "docs anywhere in the path" -- a
-    resolved absolute path carries the whole filesystem prefix, and a repo
-    checked out under a directory that happens to be named docs (or holding
-    a deeper, unrelated docs/ of its own) must not match on that account."""
+    ANCHORED AT THE TRAILING SHAPE (`.../docs/.claude/<file>.md`), not "docs
+    anywhere in the path": a resolved absolute path carries the whole
+    filesystem prefix, so unanchored matching would fire on a repo checked
+    out under a directory coincidentally named docs. This is NOT the same as
+    requiring docs/ to be the repository ROOT -- a nested
+    `some/other/docs/.claude/*.md` still matches by this same trailing
+    shape, which is harmless only because structure.md's own invariant
+    keeps this repository's docs/ singular and root-level; the function
+    itself does not check or enforce that."""
     parts = path.resolve().parts
     if len(parts) >= 3 and parts[-3] == ".claude" and parts[-2] == "rules" and path.suffix == ".md":
         return True
