@@ -223,4 +223,26 @@ assert_status 0 "$rc"
 assert_contains "$out" "plain lane"
 assert_not_contains "$(cat "$GH_CALLS")" "add-label conveyor:archive"
 
+# A GRANT THAT EXISTED AND WAS WITHDRAWN IS NOT THE ORDINARY CASE -- unlike
+# run_label never being placed at all, a log line nobody reads is the "reads
+# as a broken bot" failure this program exists to avoid.
+it "a placer who has since LOST write access gets a visible refusal comment, not just a log line"
+setup
+with_run_label ex-writer 2026-09-01T10:00:00Z
+echo -n "read" > "$PERM_FILE"
+out=$(run_it --issue 1 --station fix --pr 5); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "add-label conveyor:fix"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 5 --repo o/r --body"
+assert_contains "$(cat "$GH_CALLS")" "access-lost"
+
+it "the lost-access refusal comment is posted ONCE, not on every re-check"
+setup
+with_run_label ex-writer 2026-09-01T10:00:00Z
+echo -n "read" > "$PERM_FILE"
+printf '<!-- carry-grant:fix:access-lost -->\nalready posted' > "$COMMENTS_FILE"
+out=$(run_it --issue 1 --station fix --pr 5); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "issue comment 5 --repo o/r --body"
+
 summary

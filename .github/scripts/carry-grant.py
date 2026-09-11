@@ -187,6 +187,23 @@ def main() -> int:
     placer, since = placed
     perm = permission(args.repo, placer)
     if perm not in MAY_PUSH:
+        # A GRANT THAT EXISTED AND WAS WITHDRAWN IS NOT THE ORDINARY CASE --
+        # unlike `run_label` never being placed at all, this is a standing
+        # instruction that WAS honoured once and has now silently stopped
+        # working, for a person who may still believe it is in force. A log
+        # line nobody reads is the "reads as a broken bot" failure this
+        # program exists to avoid. Comment once, on the object the label
+        # would have gone to, under the SAME marker a successful carry uses
+        # -- so a later successful carry (the person's access restored)
+        # still posts, since already_carried never saw THIS marker's body.
+        gone_marker = f"<!-- carry-grant:{args.station}:access-lost -->"
+        gone_target = args.pr if args.station == "fix" else args.issue
+        if not already_carried(args.repo, gone_target, gone_marker):
+            comment(args.repo, gone_target,
+                    f"{gone_marker}\n"
+                    f"`{run_label}` was placed by @{placer} on #{args.issue}, but they now have "
+                    f"`{perm}` there. Nothing was carried. Someone with write access can place "
+                    f"`{station_label}` directly, or re-place `{run_label}`.")
         print(f"::notice::#{args.issue}'s `{run_label}` was placed by {placer}, who now has `{perm}`; "
               "nothing carried")
         return 0

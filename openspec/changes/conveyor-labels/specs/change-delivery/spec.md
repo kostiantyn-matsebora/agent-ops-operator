@@ -36,7 +36,7 @@ re-decided per thread.
 
 - **WHEN** the owner tells the session the change is approved for fixing
 - **THEN** the owner places the label themselves, or places the standing
-  instruction on the issue; the session places nothing and says so
+  instruction on the issue. The session places nothing and says so
 
 #### Scenario: The owner approves interactively, on a workstation
 

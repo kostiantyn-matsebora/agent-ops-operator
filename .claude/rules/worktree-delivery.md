@@ -294,7 +294,7 @@ workflow placed it.
   all ends as its own outcome, `no report`, disputing nothing — distinct from
   a report that named every item disputed. Reading a missing report as "every
   item disputed" tells a person the machine considered each finding and
-  declined it, when nobody looked; measured while this rule's own change was
+  declined it, when nobody looked. Measured while this rule's own change was
   under review, where three findings on a proposal-only pull request came back
   "disputed... not addressed" and no model had spoken.
 - **THE SECOND REVIEWER IS SONARCLOUD, AND ITS GATE IS REQUIRED.** `collect`
