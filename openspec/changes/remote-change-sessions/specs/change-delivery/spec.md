@@ -47,19 +47,6 @@ inventory for no isolation it did not already have.
 
 ### Requirement: A change is approved for automatic fixing by its owner, once
 
-**THIS BLOCK IS SUPERSEDED BY `conveyor-labels`, WHICHEVER OF THE TWO CHANGES
-ARCHIVES SECOND CORRECTS IT.** The published requirement already carries a
-defect — "the session working the change" places the approve label "under
-the owner's own credentials" — that a session cannot actually do: it acts as
-an application with no write access, and placing the label that way is
-exactly what #201 measured failing live (the gate refused it and stripped the
-label). This change's own contribution is the SECOND scenario below, stated
-so it does not depend on that broken claim continuing to be there;
-`conveyor-labels` carries the fully corrected requirement (the session places
-NO label; a workflow carries the owner's standing instruction forward
-instead) in its own `specs/change-delivery/spec.md` delta, and whichever of
-the two changes archives second is what leaves `openspec/specs/` correct.
-
 The owner of a change SHALL approve its pull request for automatic fixing
 ONCE, by a stated label on the pull request, placed by someone with write
 access to this repository — directly, or by a program relaying that person's

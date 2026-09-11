@@ -266,6 +266,13 @@ assert_contains "$open_run" "Refs #"
 it "the open job is granted only what carrying the grant needs — issues: write alone, since carry-grant.py labels a pull request through the issues API"
 assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
 
+# THE TRUSTED COPY, NOT THE PULL REQUEST'S. A bare checkout on a pull_request
+# event resolves the pull request's own head; this job must pin the default
+# branch explicitly so it runs the trusted carry-grant.py, not whatever the
+# branch's own commits put there.
+it "the open job's checkout is pinned to the default branch, not the pull request's own head"
+assert_equals "\${{ github.event.repository.default_branch }}" "$(rpy 'print(d["jobs"]["open"]["steps"][0]["with"]["ref"])')"
+
 # THE ARCHIVE TRANSITION: this pull request merged. Carry the standing
 # instruction forward as the archive-station label ON THE ISSUE, since the
 # pull request that carried the change is closed by the time this runs.
@@ -286,5 +293,8 @@ assert_contains "$archive_run" "Refs #"
 
 it "the archive job is granted issues: write alone — the pull request's body comes from the event payload, no API call needed"
 assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["archive"]["permissions"])')"
+
+it "the archive job's checkout is ALSO pinned to the default branch, same reason as open"
+assert_equals "\${{ github.event.repository.default_branch }}" "$(rpy 'print(d["jobs"]["archive"]["steps"][0]["with"]["ref"])')"
 
 summary

@@ -145,15 +145,16 @@ it is not one here: the lane is read, never judged from the issue's wording.
 
    The title becomes the squashed commit's subject, so it obeys the commit
    convention; a CI check enforces that. The body MUST say:
-   - **`Refs #<n>`, NEVER `Closes #<n>`.** On the opsx lane, step 1 promoted
-     that issue into this change's TRACKING issue, and a tracking issue closes
-     at ARCHIVE, not at merge — `pr-closes-guard.py` refuses a pull request
-     that would close one whose change it merely proposes, and it is right to:
-     the issue has to follow the change through review and archiving. The
-     archiving pull request is where `Closes #<n>` belongs, and the guard
-     refuses THAT one without it. On the plain lane `Refs #<n>` is what tells
-     `carry-grant.py` which issue's grant to carry forward — without it
-     nothing is carried and a person labels this pull request by hand.
+   - **`Refs #<n>`, NEVER `Closes #<n>`.**
+     - **On the opsx lane**, step 1 promoted that issue into this change's
+       TRACKING issue, and a tracking issue closes at ARCHIVE, not at merge —
+       `pr-closes-guard.py` refuses a pull request that would close one whose
+       change it merely proposes, and it is right to: the issue has to follow
+       the change through review and archiving. The archiving pull request is
+       where `Closes #<n>` belongs, and the guard refuses THAT one without it.
+     - **On the plain lane**, `Refs #<n>` is what tells `carry-grant.py` which
+       issue's grant to carry forward — without it nothing is carried and a
+       person labels this pull request by hand.
    - **THE SMOKE RUN YOU DISPATCHED IN STEP 6, BY LINK.** You did not wait for
      its verdict, so the link is how a reviewer reaches one — without it the
      dispatch is invisible and reads as a tier nobody ran. The first live run of

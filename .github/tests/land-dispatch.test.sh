@@ -302,6 +302,10 @@ assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
 assert_contains "$(cat "$GH_CALLS")" "conveyor:grant"
 assert_contains "$out" "extends the cap to 6"
+# THE ROUND THE EXTENDED CAP UNBLOCKS ACTUALLY LANDS ITS FIX, not just the
+# cap bookkeeping around it.
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 4 -->"
 printf '[]' > "$GH_COMMENTS"
 
 # A FAILED LABEL-REMOVAL MUST NOT ABORT A ROUND THAT OTHERWISE LANDS. The fix

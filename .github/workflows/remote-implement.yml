@@ -97,7 +97,16 @@ jobs:
       contents: read
       issues: write
     steps:
+      # THE TRUSTED COPY, NOT THE PULL REQUEST'S. A bare checkout on a
+      # `pull_request` event resolves the PULL REQUEST'S OWN HEAD, so this
+      # job would otherwise run whatever the branch's own commits put in
+      # carry-grant.py -- for a mechanism whose whole point is that a
+      # program may carry a grant, never mint one, running the pull
+      # request's own version of that program is exactly the trust
+      # boundary it exists to hold. Same pattern review-dispatch.yml uses.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
       - name: Carry conveyor:run forward as the fix-station label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -131,7 +140,14 @@ jobs:
       contents: read
       issues: write
     steps:
+      # THE TRUSTED COPY, NOT THE PULL REQUEST'S -- same reasoning as the
+      # open job above, even though this event fires post-merge: a
+      # `pull_request` event's default checkout still resolves through the
+      # pull request's own ref shape, and pinning explicitly is what makes
+      # this job's guarantee the same regardless of GitHub's own timing.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
       - name: Carry conveyor:run forward as the archive-station label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
