@@ -194,7 +194,7 @@ loop already reads — over everything that holds the merge: the review's
 findings, the analysis service's issues and the failed required checks. What
 that loop cannot settle — a dispute, an unanswered gate — waits for a person,
 as it does today. The session SHALL NOT wait for the checks or the review
-before ending; the loop owns the pull request from the moment its label is
+before ending. The loop owns the pull request from the moment its label is
 carried to it.
 
 #### Scenario: The session opens the pull request
