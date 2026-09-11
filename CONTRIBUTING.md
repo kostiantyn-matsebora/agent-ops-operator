@@ -20,19 +20,26 @@ and a security problem goes to [SECURITY.md](SECURITY.md), never to an issue.
 
 **A maintainer may hand an issue straight to a session.** An issue labelled
 `conveyor:implement` (one station) or `conveyor:run` (the standing instruction
-that carries the change through every later station) by somebody with write
-access starts one cloud session that proposes a change from what you wrote,
-implements it on its own branch and opens a pull request. The issue gains
-exactly two automated comments: one linking that session, and the pointer the
-promotion leaves as it does for any promoted issue. The label is refused from
-anyone without write access. That pull request opens UNLABELLED — the session
-holds no write access of its own, so it places nothing — and, where
-`conveyor:run` authorised it, a workflow reads the issue again once the pull
-request opens and carries that instruction forward as `conveyor:fix`, so the
-review's findings are fixed without a reply in each thread. What it does not
-change is who decides: the proposal, the pull request and the review are read
-by a person, a dispute waits for one, and a person merges. Nobody has to use
-it: an issue nobody labels is picked up the ordinary
+that carries the change through every later station), by somebody with write
+access, starts one cloud session. The label is refused from anyone without
+write access.
+
+That session proposes a change from what you wrote, implements it on its own
+branch and opens a pull request.
+
+The issue gains exactly two automated comments: one linking that session, and
+the pointer the promotion leaves as it does for any promoted issue.
+
+That pull request opens UNLABELLED — the session holds no write access of its
+own, so it places nothing.
+
+Where `conveyor:run` authorised it, a workflow reads the issue again once the
+pull request opens and carries that instruction forward as `conveyor:fix`, so
+the review's findings are fixed without a reply in each thread.
+
+What it does not change is who decides. The proposal, the pull request and
+the review are read by a person, a dispute waits for one, and a person
+merges. Nobody has to use it: an issue nobody labels is picked up the ordinary
 way.
 
 **Please open one before a large pull request.** This project has strong
