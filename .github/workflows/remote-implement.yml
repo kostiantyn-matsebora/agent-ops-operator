@@ -19,19 +19,40 @@
 #
 #   fire     `issues: labeled` on `conveyor:run` or `conveyor:implement` — starts
 #            the session, which opens its pull request UNLABELLED.
-#   open     `pull_request: opened` from `change/*` — reads the just-opened
-#            pull request's `Refs #<n>` and carries `conveyor:run` forward as
-#            `conveyor:fix` on THIS pull request, via carry-grant.py.
-#   archive  `pull_request: closed` with `merged == true` — reads the SAME
-#            `Refs #<n>` and carries `conveyor:run` forward as `conveyor:archive`
-#            on the ISSUE (the pull request is closed by now, and a label there
-#            drives nothing). A no-op on the plain lane, and on an archive pull
+#   open     `workflow_run` after `ci` completes on a `pull_request` event —
+#            reads the pull request's `Refs #<n>` and carries `conveyor:run`
+#            forward as `conveyor:fix` on THIS pull request, via carry-grant.py.
+#   archive  `workflow_run` after `ci` completes on a `push` to the default
+#            branch — reads the merged pull request's SAME `Refs #<n>` and
+#            carries `conveyor:run` forward as `conveyor:archive` on the ISSUE
+#            (the pull request is closed by now, and a label there drives
+#            nothing). A no-op on the plain lane, and on an archive pull
 #            request (which carries `Closes`, never `Refs`).
+#
+# `open`/`archive` READ `workflow_run`, NEVER `pull_request`, DIRECTLY —
+# MEASURED, NOT ASSUMED. `pull_request`-triggered runs carry a `GITHUB_TOKEN`
+# with NO write access in this repository AT ALL, confirmed live: the token's
+# own `.permissions` (`repos/<owner>/<repo>`, queried from inside such a run)
+# came back `{admin: false, maintain: false, push: false, triage: false,
+# pull: false}` — every one of `default_workflow_permissions: write`, the
+# job's own `permissions: issues: write`, and every fork-PR-workflow toggle
+# left it exactly there. `workflow_run` sidesteps this because it is not the
+# `pull_request` event itself; the token it carries is the ordinary
+# repository-scoped one `review-dispatch.yml`'s own `workflow_run` jobs
+# already rely on, which is also why THAT file uses the identical trigger for
+# an unrelated reason (the trusted-checkout problem) — two problems, one fix.
+# `ci` is the anchor because it already runs on every `pull_request: opened`
+# and every `push` to the default branch, so its completion is a reliable
+# "a pull request now exists" / "a merge just landed" signal without a
+# dedicated workflow of this file's own.
 #
 # A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.
 # `carry-grant.py` re-reads the issue's CURRENT labels and re-checks the
 # placer's write access every time it is called — it never trusts that a
-# label exists because a workflow called it before.
+# label exists because a workflow called it before, and it is also what
+# makes `ci` running MORE THAN ONCE per pull request (opened, then every
+# `synchronize`) harmless: the marker comment it posts on first carry
+# dedupes every later invocation.
 #
 # NEVER `pull_request_target`, here or anywhere in this repository: it runs with
 # the base repository's secrets against a head a stranger controls. Every job
@@ -45,13 +66,18 @@ name: remote-implement
 
 run-name: >-
   ${{ github.event_name == 'issues' && format('remote-implement for #{0}', github.event.issue.number)
-      || format('remote-implement carry for #{0}', github.event.pull_request.number) }}
+      || format('remote-implement carry after {0}', github.event.workflow_run.display_title) }}
 
 on:
   issues:
     types: [labeled]
-  pull_request:
-    types: [opened, closed]
+  # THE TRUSTED TOKEN, NOT THE PULL REQUEST'S OWN. See the header comment —
+  # `pull_request` directly grants no write access in this repository at all,
+  # measured live; `workflow_run` is the ordinary repository-scoped token
+  # `review-dispatch.yml`'s own `workflow_run` jobs already carry.
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
 
 permissions: {}
 
@@ -84,11 +110,16 @@ jobs:
   # THE OPEN TRANSITION: a session's own pull request just appeared, carrying
   # no label. If the issue it references still carries `conveyor:run` from a
   # writer, carry it forward as the fix-station label on THIS pull request.
+  #
+  # Fires on `ci` completing FOR a `pull_request` event -- `ci` runs on every
+  # `opened` AND every `synchronize`, so this job runs more than once per pull
+  # request. Harmless: carry-grant.py's marker comment dedupes every carry
+  # after the first, and re-adding an already-present label is a no-op.
   open:
     if: >-
-      github.event_name == 'pull_request' && github.event.action == 'opened' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'change/')
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     # ISSUES: write ONLY -- carry-grant.py labels and comments through
     # `gh issue edit` / `gh issue comment`, and a pull request is an issue to
@@ -97,69 +128,93 @@ jobs:
       contents: read
       issues: write
     steps:
-      # THE TRUSTED COPY, NOT THE PULL REQUEST'S. A bare checkout on a
-      # `pull_request` event resolves the PULL REQUEST'S OWN HEAD, so this
-      # job would otherwise run whatever the branch's own commits put in
-      # carry-grant.py -- for a mechanism whose whole point is that a
-      # program may carry a grant, never mint one, running the pull
-      # request's own version of that program is exactly the trust
-      # boundary it exists to hold. Same pattern review-dispatch.yml uses.
+      # THE TRUSTED COPY, NOT THE PULL REQUEST'S. See the header comment --
+      # this ALSO buys the trusted checkout, exactly as review-dispatch.yml's
+      # own workflow_run jobs already rely on it for. Even on a same-repo,
+      # non-fork pull request, `carry-grant.py` deciding what a grant means
+      # must run the version this repository's own default branch ships.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
       - name: Carry conveyor:run forward as the fix-station label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
-          issue=$(printf '%s' "$BODY" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          # A workflow_run payload carries no pull_request.body directly --
+          # resolve the pull request from the run's head sha, same fallback
+          # review-dispatch.yml's `who` step already uses, then read its body
+          # through the API instead of the event.
+          pr=$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
+            --jq '.[] | select(.state == "open") | .number' | head -1 || true)
+          if [ -z "$pr" ]; then
+            echo "no open pull request for ${GITHUB_SHA:0:7}; nothing to carry"
+            exit 0
+          fi
+          head_repo=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json headRepositoryOwner,headRefName \
+            --jq '.headRepositoryOwner.login + "/" + .headRefName')
+          case "$head_repo" in
+            "${GITHUB_REPOSITORY%%/*}"/change/*) ;;
+            *)
+              echo "pull request #$pr is not a same-repo change/* branch; nothing to carry"
+              exit 0
+              ;;
+          esac
+          body=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
+          issue=$(printf '%s' "$body" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
           if [ -z "$issue" ]; then
-            echo "this pull request's body carries no 'Refs #<n>'; nothing to carry"
+            echo "pull request #$pr's body carries no 'Refs #<n>'; nothing to carry"
             exit 0
           fi
           python3 .github/scripts/carry-grant.py --repo "$GITHUB_REPOSITORY" \
-            --issue "$issue" --station fix --pr "${{ github.event.pull_request.number }}"
+            --issue "$issue" --station fix --pr "$pr"
 
-  # THE ARCHIVE TRANSITION: this pull request just merged. Read its `Refs #<n>`
-  # and carry `conveyor:run` forward as the archive-station label ON THE ISSUE
-  # — the pull request is closed now, and a label there drives nothing.
+  # THE ARCHIVE TRANSITION: a merge just landed on the default branch. Find
+  # the pull request that merge came from, read its `Refs #<n>` and carry
+  # `conveyor:run` forward as the archive-station label ON THE ISSUE -- the
+  # pull request is closed by now, and a label there drives nothing.
   archive:
     if: >-
-      github.event_name == 'pull_request' && github.event.action == 'closed' &&
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'change/')
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    # ISSUES: write ONLY -- the pull request's body comes from the EVENT
-    # PAYLOAD (github.event.pull_request.body, no API call), and
-    # carry-grant.py --station archive labels and comments the ISSUE alone
-    # through gh issue edit / gh issue comment. pull-requests: read is never
-    # actually exercised here.
+    # ISSUES: write ONLY -- carry-grant.py --station archive labels and
+    # comments the ISSUE alone through gh issue edit / gh issue comment.
+    # pull-requests: read is never actually exercised here.
     permissions:
       contents: read
       issues: write
     steps:
-      # THE TRUSTED COPY, NOT THE PULL REQUEST'S -- same reasoning as the
-      # open job above, even though this event fires post-merge: a
-      # `pull_request` event's default checkout still resolves through the
-      # pull request's own ref shape, and pinning explicitly is what makes
-      # this job's guarantee the same regardless of GitHub's own timing.
+      # THE TRUSTED COPY, NOT THE MERGED COMMIT'S -- same reasoning as the
+      # open job above.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
       - name: Carry conveyor:run forward as the archive-station label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
-          issue=$(printf '%s' "$BODY" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          # A push-triggered `ci` run has no pull request of its own -- the
+          # merge commit it ran on is the head of exactly one now-closed pull
+          # request. `search` is the only API that finds a MERGED (closed,
+          # non-open) pull request by commit.
+          pr=$(gh api --method GET search/issues \
+            -f "q=repo:$GITHUB_REPOSITORY is:pr is:merged ${{ github.event.workflow_run.head_sha }}" \
+            --jq '.items[0].number' || true)
+          if [ -z "$pr" ] || [ "$pr" = "null" ]; then
+            echo "no merged pull request found for ${{ github.event.workflow_run.head_sha }}; nothing to carry"
+            exit 0
+          fi
+          body=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
+          issue=$(printf '%s' "$body" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
           if [ -z "$issue" ]; then
             # AN ARCHIVE PULL REQUEST CARRIES Closes, NEVER Refs -- this is how
             # this job tells the last station of a lane from every other merge,
             # and does nothing on it.
-            echo "this pull request's body carries no 'Refs #<n>'; nothing to carry"
+            echo "pull request #$pr's body carries no 'Refs #<n>'; nothing to carry"
             exit 0
           fi
           python3 .github/scripts/carry-grant.py --repo "$GITHUB_REPOSITORY" \

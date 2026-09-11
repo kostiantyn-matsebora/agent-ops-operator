@@ -217,13 +217,15 @@ d = yaml.safe_load(open(sys.argv[1]))
 $1
 " "$R"; }
 
-it "remote-implement triggers on a labelled issue and on the pull_request open/closed transitions, and nothing else"
-assert_equals "issues pull_request" "$(rpy 'print(" ".join(sorted(d[True])))')"
+it "remote-implement triggers on a labelled issue and on ci's workflow_run completing, and nothing else"
+assert_equals "issues workflow_run" "$(rpy 'print(" ".join(sorted(d[True])))')"
 assert_equals "['labeled']" "$(rpy 'print(d[True]["issues"]["types"])')"
-assert_equals "['opened', 'closed']" "$(rpy 'print(d[True]["pull_request"]["types"])')"
+assert_equals "['ci']" "$(rpy 'print(d[True]["workflow_run"]["workflows"])')"
+assert_equals "['completed']" "$(rpy 'print(d[True]["workflow_run"]["types"])')"
 
-it "never triggers on pull_request_target"
+it "never triggers on pull_request or pull_request_target directly — the token those events carry has no write access here"
 assert_not_contains "$(rpy 'print(d[True])')" "pull_request_target"
+assert_not_contains "$(rpy 'print(list(d[True]))')" "pull_request"
 
 it "remote-implement grants nothing at the top level, and each job only what it uses"
 assert_equals "{}" "$(rpy 'print(d["permissions"])')"
@@ -249,49 +251,68 @@ assert_contains "$job" "secrets.ROUTINE_FIRE_TOKEN"
 
 # THE OPEN TRANSITION: a session's own pull request appears, unlabelled; if
 # its originating issue still carries the standing instruction, carry it
-# forward as the fix-station label ON THIS PULL REQUEST.
-it "the open job fires only on a change/* branch opened in this repository, never a fork"
+# forward as the fix-station label ON THIS PULL REQUEST. Anchored on `ci`
+# completing FOR a pull_request event, never on `pull_request` directly — a
+# GITHUB_TOKEN issued to a pull_request-triggered run carries no write
+# access in this repository at all, measured live (see the workflow's own
+# header comment).
+it "the open job fires on ci completing for a pull_request event, never pull_request directly"
 open_if=$(rpy 'print(d["jobs"]["open"]["if"])')
-assert_contains "$open_if" "github.event.action == 'opened'"
-assert_contains "$open_if" "startsWith(github.event.pull_request.head.ref, 'change/')"
-assert_contains "$open_if" "github.event.pull_request.head.repo.full_name == github.repository"
+assert_contains "$open_if" "github.event_name == 'workflow_run'"
+assert_contains "$open_if" "github.event.workflow_run.event == 'pull_request'"
+assert_contains "$open_if" "github.event.workflow_run.conclusion == 'success'"
+assert_not_contains "$open_if" "github.event.pull_request"
 
-it "the open job calls carry-grant.py --station fix with the pull request's own number"
+it "the open job resolves the pull request from the workflow_run's head sha, not from a pull_request event payload"
 open_run=$(rpy 'print(d["jobs"]["open"]["steps"][-1]["run"])')
+assert_contains "$open_run" "commits/\${{ github.event.workflow_run.head_sha }}/pulls"
+assert_contains "$open_run" "select(.state == \"open\")"
+
+it "the open job still refuses anything that is not a same-repo change/* branch"
+assert_contains "$open_run" "change/*"
+assert_contains "$open_run" "headRepositoryOwner"
+
+it "the open job calls carry-grant.py --station fix with the resolved pull request's own number"
 assert_contains "$open_run" "carry-grant.py"
 assert_contains "$open_run" "--station fix"
-assert_contains "$open_run" "--pr \"\${{ github.event.pull_request.number }}\""
+assert_contains "$open_run" '--pr "$pr"'
 assert_contains "$open_run" "Refs #"
 
 it "the open job is granted only what carrying the grant needs — issues: write alone, since carry-grant.py labels a pull request through the issues API"
 assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
 
-# THE TRUSTED COPY, NOT THE PULL REQUEST'S. A bare checkout on a pull_request
-# event resolves the pull request's own head; this job must pin the default
-# branch explicitly so it runs the trusted carry-grant.py, not whatever the
-# branch's own commits put there.
-it "the open job's checkout is pinned to the default branch, not the pull request's own head"
+# THE TRUSTED COPY, NOT THE PULL REQUEST'S OR THE MERGE COMMIT'S. A
+# workflow_run job's default checkout already resolves the TRIGGERING
+# workflow's repository ref, but pinning explicitly keeps the guarantee
+# independent of that default — same pattern review-dispatch.yml uses for
+# its own workflow_run jobs.
+it "the open job's checkout is pinned to the default branch"
 assert_equals "\${{ github.event.repository.default_branch }}" "$(rpy 'print(d["jobs"]["open"]["steps"][0]["with"]["ref"])')"
 
-# THE ARCHIVE TRANSITION: this pull request merged. Carry the standing
-# instruction forward as the archive-station label ON THE ISSUE, since the
-# pull request that carried the change is closed by the time this runs.
-it "the archive job fires only when the pull request MERGED, never on a plain close"
+# THE ARCHIVE TRANSITION: a merge just landed on the default branch. Carry
+# the standing instruction forward as the archive-station label ON THE
+# ISSUE, since the pull request that carried the change is closed by the
+# time this runs. Anchored on `ci` completing FOR a push event, since a
+# merge to the default branch is what triggers that run.
+it "the archive job fires on ci completing for a push event"
 archive_if=$(rpy 'print(d["jobs"]["archive"]["if"])')
-assert_contains "$archive_if" "github.event.action == 'closed'"
-assert_contains "$archive_if" "github.event.pull_request.merged == true"
+assert_contains "$archive_if" "github.event_name == 'workflow_run'"
+assert_contains "$archive_if" "github.event.workflow_run.event == 'push'"
+assert_contains "$archive_if" "github.event.workflow_run.conclusion == 'success'"
 
-it "the archive job also carries the change/* branch guard, same as open"
-assert_contains "$archive_if" "startsWith(github.event.pull_request.head.ref, 'change/')"
+it "the archive job resolves the merged pull request via a merged-pull-request search on the pushed commit"
+archive_run=$(rpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
+assert_contains "$archive_run" "search/issues"
+assert_contains "$archive_run" "is:pr is:merged"
+assert_contains "$archive_run" "github.event.workflow_run.head_sha"
 
 it "the archive job calls carry-grant.py --station archive with no --pr, on the issue"
-archive_run=$(rpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
 assert_contains "$archive_run" "carry-grant.py"
 assert_contains "$archive_run" "--station archive"
 assert_not_contains "$archive_run" "--pr \"\${{"
 assert_contains "$archive_run" "Refs #"
 
-it "the archive job is granted issues: write alone — the pull request's body comes from the event payload, no API call needed"
+it "the archive job is granted issues: write alone"
 assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["archive"]["permissions"])')"
 
 it "the archive job's checkout is ALSO pinned to the default branch, same reason as open"
