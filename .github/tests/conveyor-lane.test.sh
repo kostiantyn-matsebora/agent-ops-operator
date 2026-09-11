@@ -14,6 +14,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 S="$ROOT/.github/scripts/carry-grant.py"
 
 tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 
 # A `gh` answering `issue view --json labels` from a fixture, and recording

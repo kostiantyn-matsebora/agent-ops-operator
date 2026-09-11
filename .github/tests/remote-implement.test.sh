@@ -128,11 +128,13 @@ assert_equals '{"text": "42"}' "$(python3 -c 'import json,sys;print(json.load(op
 assert_contains "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["headers"])' "$RECORD")" "experimental-cc-routine"
 assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
 assert_contains "$(cat "$GH_CALLS")" "https://claude.ai/code/session_abc"
-# THE SESSION PLACES NO LABEL ON ITS OWN WORK -- #201's fix. The comment says
-# a workflow carries the grant forward, never that this pull request already
-# carries one.
+# THE SESSION PLACES NO LABEL ON ITS OWN WORK -- #201's fix. conveyor:implement
+# is a single-station label, so the comment says a PERSON places the next
+# one, never that a workflow carries the grant forward (that only happens
+# when the fire itself was conveyor:run -- see the next test).
 assert_contains "$(cat "$GH_CALLS")" "unlabelled"
-assert_not_contains "$(cat "$GH_CALLS")" "carrying \`conveyor:fix\` already on it"
+assert_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixing loop"
+assert_not_contains "$(cat "$GH_CALLS")" "a workflow reads"
 
 # conveyor:run FIRES THE SAME SESSION, and its comment says the standing
 # instruction is what a workflow reads again later to carry the grant forward.

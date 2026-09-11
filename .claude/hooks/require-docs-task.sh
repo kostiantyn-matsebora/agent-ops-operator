@@ -104,7 +104,8 @@ fi
 # may have a round about to land a commit, or a dispute the fixing step
 # posted that no person has answered.
 # `.github/scripts/autofix-guard.py` (script filename unchanged; it reads
-# `approve_label` from the vocabulary file rather than a hardcoded name) reads
+# `approve_label` from `.github/review-triage.json` rather than a hardcoded
+# name) reads
 # that off the pull request of the worktree's branch, fails open on everything
 # it cannot read (no gh, no pull request, no label), and CI's docs-task job
 # asks the same script.

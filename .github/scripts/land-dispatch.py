@@ -486,11 +486,21 @@ def main() -> int:
         print("no finding was fixed, so nothing is committed and nothing is resolved")
         if rnd:
             post_disputes()
-            ending = "disputes only" if disputed and not unaddressed else "nothing addressed"
-            rnd.summary(ending, [], disputed, unaddressed=unaddressed,
-                        note="Every item this round was disputed and none was fixed, so the loop ends here."
-                             if disputed and not unaddressed else
-                             "Nothing was fixed this round; every item is still open for the next.")
+            # THREE DISTINCT ENDINGS, NOT TWO. "nothing addressed" is true
+            # only when NEITHER a dispute nor an unaddressed item exists --
+            # a round with some of each is a genuinely MIXED outcome, and
+            # calling it "nothing addressed" would contradict the very
+            # Disputed and Unaddressed sections the same comment lists.
+            if disputed and unaddressed:
+                ending = "disputed and unaddressed"
+                note = "Every item this round was either disputed or left unaddressed, so none was fixed."
+            elif disputed:
+                ending = "disputes only"
+                note = "Every item this round was disputed and none was fixed, so the loop ends here."
+            else:
+                ending = "nothing addressed"
+                note = "Nothing was fixed this round; every item is still open for the next."
+            rnd.summary(ending, [], disputed, unaddressed=unaddressed, note=note)
             return 0
         lines = "\n".join(f"- `{work[t]['path']}`: {why}" for t, why in disputed.items())
         lines += ("\n" if lines and unaddressed else "") + \

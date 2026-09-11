@@ -469,6 +469,20 @@ assert_not_contains "$out" "disputed PRRT_b"
 assert_not_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- conveyor:disputed -->"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Unaddressed (2)"
 
+# A MIXED ROUND -- SOME DISPUTED, SOME UNADDRESSED, NOTHING FIXED -- IS ITS
+# OWN ENDING, not "nothing addressed": that label would contradict the very
+# Disputed and Unaddressed sections the same summary comment lists.
+it "labelled: a round with SOME disputed and SOME unaddressed, nothing fixed, is its own ending"
+fresh_repo
+printf '{"items":[{"id":"PRRT_a","action":"disputed","reason":"A is fine"}]}' > "$tmp/report-mixed.json"
+out=$(REPORT="$tmp/report-mixed.json" MAX_ROUNDS=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "disputed and unaddressed** — @an-approver"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "nothing addressed** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed (1)"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Unaddressed (2)"
+
 # A ROUND WHOSE FIXING STEP PRODUCED NO REPORT AT ALL ends as its OWN outcome,
 # disputing nothing -- the case observed on this change's own proposal: three
 # findings came back "disputed... not addressed" when no model had spoken.
