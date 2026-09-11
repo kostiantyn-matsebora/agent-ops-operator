@@ -194,11 +194,19 @@ def main() -> int:
     marker = MARKER.format(station=args.station)
     target_kind = "pr" if args.station == "fix" else "issue"
     target = args.pr if args.station == "fix" else args.issue
+
+    # THE LABEL IS RE-ASSERTED EVERY TIME, EVEN WHEN THE MARKER COMMENT
+    # ALREADY EXISTS. `gh issue edit --add-label` on a label that is already
+    # there is a no-op, so this is always safe to repeat -- and it is what
+    # makes a hand-removed label come back on the next carry rather than
+    # staying off because this program once announced it. Only the COMMENT,
+    # never the label, is deduplicated by the marker.
+    gh("issue", "edit", str(target), "--repo", args.repo, "--add-label", station_label)
+
     if already_carried(args.repo, target, marker):
-        print(f"#{target} already carries the `{args.station}` grant; not commenting again")
+        print(f"#{target} already carries the `{args.station}` grant; label re-asserted, not commenting again")
         return 0
 
-    gh("issue", "edit", str(target), "--repo", args.repo, "--add-label", station_label)
     where = "pull request" if args.station == "fix" else "issue"
     comment(args.repo, target,
             f"{marker}\n"

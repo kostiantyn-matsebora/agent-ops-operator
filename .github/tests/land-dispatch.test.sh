@@ -344,6 +344,8 @@ cat > "$tmp/bin3/gh" <<STUB
 #!/usr/bin/env bash
 case "\$*" in
   "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "issue comments"*|"api repos/"*"/issues/"*"/comments --paginate")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
   "api repos/"*"/replies"*)
     printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
   *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;

@@ -95,9 +95,10 @@ re-decided per thread.
 
 - **WHEN** a change was started by the implement label on its issue, placed
   by a person with write access
-- **THEN** the pull request that opens for it carries the approve label
-  before it needs to be asked for again, and its description says the
-  approval came from the issue
+- **THEN** a WORKFLOW — never the session — places the approve label on the
+  pull request that opens for it, recording whose instruction authorised it,
+  before it needs to be asked for again, and the pull request's description
+  says the approval came from the issue
 
 #### Scenario: The label is placed with nobody's word
 

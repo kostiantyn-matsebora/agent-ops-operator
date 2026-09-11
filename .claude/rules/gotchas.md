@@ -531,9 +531,9 @@ were a separate unit.
   can call directly, without writing its own extraction.
 
 **A REMOTE SESSION CANNOT APPROVE ITS OWN WORK, AND IT COST A PULL REQUEST
-ITS AUTOMATIC FIXING — MEASURED LIVE ON #201.** `.github/routines/
-implement-issue.md` told a session to open its pull request with
-`gh pr create --label autofix` (RETIRED — `conveyor-labels` renamed it
+ITS AUTOMATIC FIXING — MEASURED LIVE ON #201.**
+`.github/routines/implement-issue.md` told a session to open its pull request
+with `gh pr create --label autofix` (RETIRED — `conveyor-labels` renamed it
 `conveyor:fix`; how that label now REACHES the pull request without the
 session placing it is the second bullet below), exactly as `change-delivery`'s
 spec then said to. `review-dispatch.yml`'s gate asked the collaborators API

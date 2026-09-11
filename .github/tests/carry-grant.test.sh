@@ -124,7 +124,7 @@ assert_contains "$out" "who now has \`read\`"
 
 # --- already carried: no second comment --------------------------------------
 
-it "already carried (marker present on the target): no second comment"
+it "already carried (marker present on the target): no second comment, but the label IS re-asserted"
 setup
 mark_opsx 1
 with_run_label maintainer 2026-09-01T10:00:00Z
@@ -132,7 +132,22 @@ printf 'earlier text\n<!-- carry-grant:fix -->\nalready carried' > "$COMMENTS_FI
 out=$(run_it --issue 1 --station fix --pr 5); rc=$?
 assert_status 0 "$rc"
 assert_not_contains "$(cat "$GH_CALLS")" "issue comment 5"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label conveyor:fix"
 assert_contains "$out" "already carries"
+
+# THE BUG THIS RE-ASSERTION FIXES: a person hand-removes the station label
+# (to pause the loop) while the marker comment stays. Without re-asserting
+# the label every time, the NEXT carry would see the marker, print "already
+# carried", and leave the label off forever -- the grant is real but never
+# reaches the object the gate reads.
+it "a HAND-REMOVED label with the marker still present is put back, not left off forever"
+setup
+mark_opsx 1
+with_run_label maintainer 2026-09-01T10:00:00Z
+printf 'earlier text\n<!-- carry-grant:fix -->\nalready carried' > "$COMMENTS_FILE"
+out=$(run_it --issue 1 --station fix --pr 5); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label conveyor:fix"
 
 # --- the plain lane has no archive station -----------------------------------
 
