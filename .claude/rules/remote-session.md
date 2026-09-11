@@ -95,14 +95,15 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
   the issue or the pull request, ever — see `worktree-delivery.md`'s label
   table.
 - **A WORKFLOW CARRIES THE GRANT INSTEAD, RE-CHECKED EVERY TIME.**
-  `.github/workflows/remote-implement.yml` gains two jobs beside `fire`: `open`
-  (on `pull_request: opened` from `change/*`) reads the new pull request's
-  `Refs #<n>`, and if that issue still carries `conveyor:run` from a writer,
-  `.github/scripts/carry-grant.py` places `conveyor:fix` on the pull request,
-  naming whose instruction it carried. `archive` (on `pull_request: closed`
-  with `merged == true`) does the same for `conveyor:archive`, ON THE ISSUE —
-  the pull request is closed by then, and a label there drives nothing — and
-  only on the opsx lane, since the plain lane has no archive station.
+  `.github/workflows/remote-implement.yml` gains two jobs beside `fire`, both
+  on `workflow_run` after `ci` completes — NEVER `pull_request` directly. A
+  `GITHUB_TOKEN` issued to a `pull_request`-triggered run carries no write
+  access in this repository at all, measured live.
+
+  | Job | Fires after `ci` completes for | Does |
+  |---|---|---|
+  | `open` | a `pull_request` event, from `change/*` | resolves the pull request from the run's head sha, reads its `Refs #<n>`, and — if that issue still carries `conveyor:run` from a writer — `.github/scripts/carry-grant.py` places `conveyor:fix` on the pull request, naming whose instruction it carried |
+  | `archive` | a `push` to the default branch | resolves the just-merged pull request from the pushed commit and does the same for `conveyor:archive`, ON THE ISSUE — the pull request is closed by then, and a label there drives nothing — only on the opsx lane, since the plain lane has no archive station |
 - **THE PAYLOAD IS A NUMBER AND NOTHING ELSE.** The platform wraps fire text as
   untrusted; a number is something the prompt can validate before it is used,
   and the session then reads the issue itself.

@@ -336,6 +336,10 @@ out=$(PATH="$tmp/bin4:$PATH" land_all); rc=$?
 assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
 assert_not_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+# THE ROUND ITSELF STILL LANDS, even though removing the label it consumed
+# failed -- the same "real work already pushed" assertion the extended-cap
+# test above makes for its own round.
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
 printf '[]' > "$GH_COMMENTS"
 
 # AN ORDINARY ROUND (below the cap) MUST NOT CONSUME THE LABEL, even when it

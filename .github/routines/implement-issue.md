@@ -52,7 +52,9 @@ written to a branch is not a judgement call anywhere else in this project.
   is not one. But "mergeable" means the same thing on both lanes: CI green,
   both guards clean, the docs generator satisfied, and the review answered.
   Implement what the issue describes directly on a `change/<n>-<kebab-title>`
-  branch, and go straight to opening the pull request.
+  branch, then run steps 5–7 the same as the opsx lane — build and test what
+  this machine can, dispatch the cluster tier, and only then open the pull
+  request.
 - **THE PLAIN LANE SKIPS EVERY STEP BELOW THAT TOUCHES AN OPENSPEC CHANGE, NOT
   ONLY STEPS 2 AND 4.** There is no change to promote the issue into, so step
   1 (`opsx-issue.sh open ... --promote`) is never run — the issue stays an
@@ -170,15 +172,18 @@ written to a branch is not a judgement call anywhere else in this project.
    .github/scripts/opsx-issue.sh phase <name> review
    ```
 
-**THEN THE SESSION STOPS.** It stops at the open pull request: it does not wait
-for CI, and it does not wait for the review. **The fixing loop owns green from
-here, once a workflow carries the grant** — the review's findings, the
-analysis service's issues and every failed required check are its work list,
-round after round, under `conveyor:fix`, which a workflow places on THIS pull
-request once it reads `conveyor:run` still standing on the tracking issue
-(`carry-grant.py`; the session itself placed no label at all). Waiting would
-hold a sandbox idle for the length of every CI run and still not own the
-later rounds.
+**THEN THE SESSION STOPS.** It stops at the open pull request, waiting on
+neither CI nor the review. Waiting would hold a sandbox idle for the length
+of every CI run, and still not own the later rounds.
+
+**THE FIXING LOOP OWNS GREEN FROM HERE, ONCE A WORKFLOW CARRIES THE GRANT.**
+The review's findings, the analysis service's issues and every failed
+required check are its work list, round after round, under `conveyor:fix`.
+
+`carry-grant.py` places that label on THIS pull request once it reads
+`conveyor:run` still standing on the issue it opened from — the tracking
+issue on the opsx lane, the plain issue itself on the plain lane. The session
+itself placed no label at all.
 
 ## What you never do
 
