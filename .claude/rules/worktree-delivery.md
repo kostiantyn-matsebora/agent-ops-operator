@@ -205,7 +205,7 @@ comment acts on everything accepted:
 | `/fix-accepted` | a comment on the pull request | DISPATCH — one run, one commit, over everything accepted |
 | resolve the thread yourself | the thread | dismissed; the review counts it and does not raise it again |
 | the `conveyor:fix` LABEL | a pull request | APPROVED AS A WHOLE — every open finding, every open SonarCloud issue AND every FAILED REQUIRED CHECK on the head is fixed or DISPUTED by CI, round after round, no reply and no dispatch needed. Placed by a person with WRITE access, or CARRIED forward by a workflow relaying a `conveyor:run` instruction still standing on the issue it opened from (the tracking issue on the opsx lane, the plain issue itself on the plain lane) — never by a session |
-| the `conveyor:implement` LABEL | an ISSUE | APPROVED TO BE BUILT, ONE STATION — a remote session proposes, implements and opens the pull request, UNLABELLED. Placed by a person with WRITE access; anyone else's is removed with a comment |
+| the `conveyor:implement` LABEL | an ISSUE | APPROVED TO BE BUILT, ONE STATION — a remote session proposes, implements and opens the pull request, UNLABELLED. Placed by a person with WRITE access. Anyone else's is removed with a comment |
 | the `conveyor:run` LABEL | an ISSUE | THE STANDING INSTRUCTION — implement, drive the pull request to mergeable, archive once merged: the whole line for that issue's LANE, read at every transition rather than recorded at the first. Removing it halts the line at the next station |
 | the `conveyor:archive` LABEL | the tracking ISSUE of a MERGED pull request | ARCHIVE, ONE STATION — placed by a person with write access, or carried forward the same way `conveyor:fix` is. Only the OPSX LANE has this station, bound to an openspec change (`remote-session.md`) — the PLAIN LANE, implemented straight from the issue, ends its line at the merge |
 | the `conveyor:keep-going` LABEL | a pull request whose loop stopped on the round cap | GRANTS ANOTHER SET of rounds, and is REMOVED the moment a round runs under it — one placement, one grant |
@@ -219,10 +219,10 @@ and is RE-CHECKED at the point it is acted on, never trusted because a
 workflow placed it.
 
 - **THIS IS THE WHOLE FIX FOR #201.** A remote session opened its pull request
-  carrying `autofix` because its own instructions said to; it acts as an
+  carrying `autofix` because its own instructions said to. It acts as an
   application with no write access, so the gate that checks who labelled
   removed the label and refused, and the pull request sat green, reviewed and
-  unlabelled with no session left to act. The gate was right; the instruction
+  unlabelled with no session left to act. The gate was right. The instruction
   was wrong. The session now opens its pull request with NO LABEL, and a
   workflow reads the issue's `conveyor:run` again once the pull request opens
   (or merges) and carries it forward.
