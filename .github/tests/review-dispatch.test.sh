@@ -278,8 +278,8 @@ assert_contains "$open_run" "--station fix"
 assert_contains "$open_run" '--pr "$pr"'
 assert_contains "$open_run" "Refs #"
 
-it "the open job is granted only what carrying the grant needs — issues: write alone, since carry-grant.py labels a pull request through the issues API"
-assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
+it "the open job is granted issues: write to carry the grant, plus pull-requests: read to find which pull request a workflow_run concerns"
+assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'read'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
 
 # THE TRUSTED COPY, NOT THE PULL REQUEST'S OR THE MERGE COMMIT'S. A
 # workflow_run job's default checkout already resolves the TRIGGERING
@@ -312,8 +312,8 @@ assert_contains "$archive_run" "--station archive"
 assert_not_contains "$archive_run" "--pr \"\${{"
 assert_contains "$archive_run" "Refs #"
 
-it "the archive job is granted issues: write alone"
-assert_equals "{'contents': 'read', 'issues': 'write'}" "$(rpy 'print(d["jobs"]["archive"]["permissions"])')"
+it "the archive job is granted issues: write to carry the grant, plus pull-requests: read to find the merged pull request"
+assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'read'}" "$(rpy 'print(d["jobs"]["archive"]["permissions"])')"
 
 it "the archive job's checkout is ALSO pinned to the default branch, same reason as open"
 assert_equals "\${{ github.event.repository.default_branch }}" "$(rpy 'print(d["jobs"]["archive"]["steps"][0]["with"]["ref"])')"

@@ -121,12 +121,16 @@ jobs:
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    # ISSUES: write ONLY -- carry-grant.py labels and comments through
+    # ISSUES: write TO CARRY -- carry-grant.py labels and comments through
     # `gh issue edit` / `gh issue comment`, and a pull request is an issue to
-    # that API. pull-requests: write is never actually exercised here.
+    # that API. PULL-REQUESTS: read TO FIND -- resolving which pull request a
+    # workflow_run concerns needs `commits/<sha>/pulls`, which 403s under
+    # issues alone (measured live); read is enough, since this job never
+    # writes to the pull request itself.
     permissions:
       contents: read
       issues: write
+      pull-requests: read
     steps:
       # THE TRUSTED COPY, NOT THE PULL REQUEST'S. See the header comment --
       # this ALSO buys the trusted checkout, exactly as review-dispatch.yml's
@@ -180,12 +184,15 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    # ISSUES: write ONLY -- carry-grant.py --station archive labels and
+    # ISSUES: write TO CARRY -- carry-grant.py --station archive labels and
     # comments the ISSUE alone through gh issue edit / gh issue comment.
-    # pull-requests: read is never actually exercised here.
+    # PULL-REQUESTS: read TO FIND -- resolving the merged pull request from
+    # the pushed commit uses the search API, which needs the same scope as
+    # the open job's commit lookup.
     permissions:
       contents: read
       issues: write
+      pull-requests: read
     steps:
       # THE TRUSTED COPY, NOT THE MERGED COMMIT'S -- same reasoning as the
       # open job above.
