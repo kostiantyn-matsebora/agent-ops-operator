@@ -30,7 +30,7 @@ grep -rl '^<n>$' openspec/changes/*/.github-issue 2>/dev/null
 **THE LANE IS READ, NEVER JUDGED.** An issue is on the OPSX lane when a
 change's `.github-issue` already names it (the grep above), OR the issue
 carries an `opsx:` phase label. Every other issue is on the PLAIN lane. Both
-are FACTS a program can read; neither is a reading of how the issue sounds,
+are FACTS a program can read. Neither is a reading of how the issue sounds,
 its size, or whether it "deserves" a proposal — what decides that code is
 written to a branch is not a judgement call anywhere else in this project.
 
@@ -141,11 +141,11 @@ written to a branch is not a judgement call anywhere else in this project.
    reviewed and unlabelled with no session left to act. A WORKFLOW —
    `.github/workflows/remote-implement.yml`, `carry-grant.py` — reads this
    issue's labels again once the pull request opens and carries the standing
-   instruction forward if it is still there and still a writer's; that is what
-   labels this pull request, not this step.
+   instruction forward if it is still there and still a writer's. THAT is
+   what labels this pull request, not this step.
 
    The title becomes the squashed commit's subject, so it obeys the commit
-   convention; a CI check enforces that. The body MUST say:
+   convention. A CI check enforces that. The body MUST say:
    - **`Refs #<n>`, NEVER `Closes #<n>`.**
      - **On the opsx lane**, step 1 promoted that issue into this change's
        TRACKING issue, and a tracking issue closes at ARCHIVE, not at merge —

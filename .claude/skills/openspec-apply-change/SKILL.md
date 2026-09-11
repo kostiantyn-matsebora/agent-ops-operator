@@ -118,10 +118,10 @@ Implement tasks from an OpenSpec change.
      yourself in this case either.
    - **NEITHER THE ASSISTANT NOR ANY SESSION MAY EVER RUN THIS COMMAND —
      ON THIS ISSUE OR THIS PULL REQUEST, IN ANY MODE, ON ANY WORD.** A session
-     acts as an application with no write access of its own; a label it
+     acts as an application with no write access of its own. A label it
      places on its own work is refused and removed by the gate that checks
      who labelled (#201, measured live). A program may CARRY a grant forward
-     or CONSUME one; it may never MINT one — and running this command on the
+     or CONSUME one. It may never MINT one — and running this command on the
      owner's behalf, even when asked, is minting it.
    - **On the owner's explicit word, TELL THE OWNER THE COMMAND — do not run
      it.** Only the owner's own `gh` session, under their own credentials,

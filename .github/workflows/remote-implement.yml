@@ -151,11 +151,15 @@ jobs:
           # resolve the pull request from the run's head sha, same fallback
           # review-dispatch.yml's `who` step already uses, then read its body
           # through the API instead of the event.
+          head_sha="${{ github.event.workflow_run.head_sha }}"
           pr=$(gh api --method GET \
-            "repos/$GITHUB_REPOSITORY/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
+            "repos/$GITHUB_REPOSITORY/commits/$head_sha/pulls" \
             --jq '.[] | select(.state == "open") | .number' | head -1 || true)
           if [ -z "$pr" ]; then
-            echo "no open pull request for ${GITHUB_SHA:0:7}; nothing to carry"
+            # NOT $GITHUB_SHA -- on a workflow_run event that names the
+            # TRUSTED CHECKOUT'S commit (the default branch), never the run
+            # this job is reacting to.
+            echo "no open pull request for ${head_sha:0:7}; nothing to carry"
             exit 0
           fi
           head_repo=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json headRepositoryOwner,headRefName \

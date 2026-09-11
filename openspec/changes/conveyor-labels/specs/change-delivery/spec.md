@@ -31,8 +31,9 @@ re-decided per thread.
 
 - **WHEN** the owner asks an interactive session running under their own `gh`
   login whether the change is approved for fixing, and confirms it is
-- **THEN** the assistant tells the owner the command rather than running it,
-  and only the owner's own `gh` session — never the assistant — executes it
+- **THEN** the session tells the owner the command rather than running it,
+  and only the owner's own `gh` session — never the interactive session —
+  executes it
 
 #### Scenario: The owner approves the pull request
 

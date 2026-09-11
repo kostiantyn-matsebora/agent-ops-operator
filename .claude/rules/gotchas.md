@@ -533,16 +533,20 @@ were a separate unit.
 **A REMOTE SESSION CANNOT APPROVE ITS OWN WORK, AND IT COST A PULL REQUEST
 ITS AUTOMATIC FIXING — MEASURED LIVE ON #201.**
 `.github/routines/implement-issue.md` told a session to open its pull request
-with `gh pr create --label autofix` (RETIRED — `conveyor-labels` renamed it
-`conveyor:fix`; how that label now REACHES the pull request without the
-session placing it is the second bullet below), exactly as `change-delivery`'s
-spec then said to. `review-dispatch.yml`'s gate asked the collaborators API
-whether the
-labeller may push here; the labeller was `claude[bot]`, an application with
-no write access; the answer was `none`; the gate removed the label and posted
-a refusal. Everything behaved as designed except the design: the pull request
-sat green, reviewed and unlabelled, with no session left to do anything
-about it.
+with `gh pr create --label autofix`. This was exactly what `change-delivery`'s
+spec said to do at the time.
+
+RETIRED: `conveyor-labels` renamed that label `conveyor:fix`. How it now
+reaches the pull request without the session placing it is the second bullet
+below.
+
+`review-dispatch.yml`'s gate asked the collaborators API whether the labeller
+may push here. The labeller was `claude[bot]`, an application with no write
+access, and the answer was `none`.
+
+The gate removed the label and posted a refusal. Everything behaved as
+designed except the design: the pull request sat green, reviewed and
+unlabelled, with no session left to do anything about it.
 
 - **THE GATE WAS RIGHT AND DID NOT MOVE.** A label that decides code gets
   written to a branch counts only from someone the platform says may push,

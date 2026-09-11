@@ -198,4 +198,29 @@ assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label conveyor:fix"
 assert_contains "$(cat "$GH_CALLS")" "@maintainer"
 
+# THE SIDECAR IS PARSED AS A WHOLE NUMBER, NOT AS ITS DIGIT CHARACTERS. A real
+# `.github-issue` file carries a trailing newline, and a bare
+# `int("".join(c for c in text if c.isdigit()))` would have happened to still
+# work for that one shape -- the failure mode is a NEIGHBOURING sidecar whose
+# own number sits nowhere near this issue's, which a concatenating parser
+# cannot tell from the real one.
+it "a sidecar with a trailing newline (the real file shape) still matches"
+setup
+mkdir -p "$CWD/openspec/changes/thing"
+printf '1\n' > "$CWD/openspec/changes/thing/.github-issue"
+with_run_label maintainer 2026-09-01T10:00:00Z
+out=$(run_it --issue 1 --station archive); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 1 --repo o/r --add-label conveyor:archive"
+
+it "a NEIGHBOURING sidecar naming a DIFFERENT issue does not falsely match this one"
+setup
+mkdir -p "$CWD/openspec/changes/other"
+printf '99\n' > "$CWD/openspec/changes/other/.github-issue"
+with_run_label maintainer 2026-09-01T10:00:00Z
+out=$(run_it --issue 1 --station archive); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "plain lane"
+assert_not_contains "$(cat "$GH_CALLS")" "add-label conveyor:archive"
+
 summary

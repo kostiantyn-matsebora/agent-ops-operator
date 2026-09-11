@@ -44,13 +44,3 @@ inventory for no isolation it did not already have.
 - **WHEN** a change is implemented in a remote session
 - **THEN** the session checks out `change/<name>` in its clone and works there,
   and no worktree exists for that change anywhere
-
-<!-- The "A change is approved for automatic fixing by its owner, once"
-requirement WAS modified here too, and is REMOVED from this delta:
-`conveyor-labels` modifies the same requirement, with different wording (the
-`conveyor:` vocabulary, the carry/mint distinction) and a fuller scenario set
-— two pending deltas rewriting one requirement is an unreviewable conflict,
-not two independent changes. The one scenario unique to this delta (the
-interactive-workstation case) was folded into conveyor-labels' own delta
-instead of being lost, and this change no longer touches that requirement at
-all. -->

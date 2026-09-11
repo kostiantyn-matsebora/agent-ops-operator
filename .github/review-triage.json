@@ -69,7 +69,7 @@
     "whoever placed its label.",
     "",
     "`keep_going_label` (`conveyor:keep-going`) grants another `max_rounds` set",
-    "of unattended fixing rounds to a loop that stopped on the cap -- placing",
+    "of unattended fixing rounds to a loop that stopped on the cap — placing",
     "it also RE-TRIGGERS the workflow (the same `pull_request: labeled` event",
     "`approve_label` uses), because a labelling event is what starts a round",
     "at all. It is CONSUMED, and ONLY when it takes effect: the landing job",

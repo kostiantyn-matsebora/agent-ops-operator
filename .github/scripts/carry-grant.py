@@ -129,7 +129,7 @@ def is_opsx_lane(repo: str, issue: int) -> bool:
     a judgement about how the issue is worded."""
     for sidecar in pathlib.Path(".").glob("openspec/changes/*/.github-issue"):
         try:
-            number = int("".join(c for c in sidecar.read_text() if c.isdigit()))
+            number = int(sidecar.read_text().strip())
         except (OSError, ValueError):
             continue
         if number == issue:

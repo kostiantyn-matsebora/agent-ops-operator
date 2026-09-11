@@ -193,10 +193,21 @@ class Round:
         # rounds", not one extra round.
         self.grants = self.count_grants()
         self.cap = self.args.max_rounds * (1 + self.grants)
-        self.consume_keep_going()
+        # NOT CALLED HERE. Consuming the grant is deferred to the caller,
+        # once a commit has actually landed -- see consume_keep_going's own
+        # docstring for why a round that turns out to be a no-op (no report,
+        # a stale patch, everything disputed) must never spend it.
 
     def consume_keep_going(self) -> None:
-        """CONSUMED ONLY WHEN IT TAKES EFFECT, never on an ordinary round.
+        """CONSUMED ONLY WHEN A COMMIT ACTUALLY LANDS, never on an ordinary
+        round and never on a round that turns out to do nothing. A no-op
+        round -- no report at all, a stale patch, every item disputed -- is
+        called AT `__init__` TIME, before ANY of those outcomes is known;
+        spending the grant there would consume it on a round that pushed
+        nothing, leaving the loop stuck at the old cap with the standing
+        instruction already spent. The caller invokes this only after the
+        push succeeds.
+
         `self.cap` already reflects every grant COUNTED SO FAR (comments
         posted by earlier calls to this method, on earlier rounds), so a
         round landing at or under it needed no new extension -- this round
@@ -542,6 +553,10 @@ def main() -> int:
                    f"```\n{push.stderr.strip()}\n```")
         return 1
     print(f"pushed {sha[:7]} to {args.branch}")
+    # ONLY NOW: a commit genuinely landed, so a round past the cap has
+    # actually earned the extension it consumes.
+    if rnd:
+        rnd.consume_keep_going()
 
     for t in fixed:
         if work[t]["source"] == "review":

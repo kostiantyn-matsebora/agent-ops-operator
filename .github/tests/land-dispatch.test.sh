@@ -345,6 +345,42 @@ printf '[]' > "$GH_COMMENTS"
 # AN ORDINARY ROUND (below the cap) MUST NOT CONSUME THE LABEL, even when it
 # is present -- the bug this whole rewrite exists to fix: consuming it on
 # round 1 would spend the grant on a round that needed no extension.
+# A NO-OP ROUND MUST NOT SPEND THE GRANT. `Round.__init__` runs before ANY
+# outcome is known -- consuming keep-going there would spend it on a round
+# that pushed nothing, leaving the loop stuck at the old cap with the
+# standing instruction already gone. The grant is consumed only after a
+# commit actually lands.
+it "labelled: past the cap, a round that lands NOTHING (stale patch) does not consume conveyor:keep-going"
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- conveyor:round 3 -->\\nround three","created_at":"2026-08-29T13:00:00Z"}]' > "$GH_COMMENTS"
+mkdir -p "$tmp/bin5"
+cat > "$tmp/bin5/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "issue comments"*|"api repos/"*"/issues/"*"/comments --paginate")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
+esac
+case "\$*" in
+  "api graphql"*) cat "\$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin5/gh"
+# a stale patch: the branch moved so the fixture patch no longer applies.
+printf 'package a\n\n// moved\nfunc A() string { return "" }\n' > "$tmp/work/a.go"
+git -C "$tmp/work" commit -qam "moved" && git -C "$tmp/work" push -q origin "$BRANCH"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(PATH="$tmp/bin5:$PATH" land_all); rc=$?
+assert_status 1 "$rc"
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_not_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+printf '[]' > "$GH_COMMENTS"
+
 it "labelled: conveyor:keep-going present but NOT past the cap is left untouched"
 fresh_repo
 mkdir -p "$tmp/bin3"

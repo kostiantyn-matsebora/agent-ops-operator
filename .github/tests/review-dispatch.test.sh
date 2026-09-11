@@ -265,8 +265,13 @@ assert_not_contains "$open_if" "github.event.pull_request"
 
 it "the open job resolves the pull request from the workflow_run's head sha, not from a pull_request event payload"
 open_run=$(rpy 'print(d["jobs"]["open"]["steps"][-1]["run"])')
-assert_contains "$open_run" "commits/\${{ github.event.workflow_run.head_sha }}/pulls"
+assert_contains "$open_run" 'head_sha="${{ github.event.workflow_run.head_sha }}"'
+assert_contains "$open_run" "commits/\$head_sha/pulls"
 assert_contains "$open_run" "select(.state == \"open\")"
+
+it "the open job's own no-pull-request message names the workflow_run's head sha, never \$GITHUB_SHA (that names the trusted checkout's commit, not this run's)"
+assert_contains "$open_run" '${head_sha:0:7}'
+assert_not_contains "$open_run" '${GITHUB_SHA:0:7}'
 
 it "the open job still refuses anything that is not a same-repo change/* branch"
 assert_contains "$open_run" "change/*"
