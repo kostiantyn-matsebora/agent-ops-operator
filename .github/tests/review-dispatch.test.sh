@@ -273,15 +273,13 @@ it "the open job's own no-pull-request message names the workflow_run's head sha
 assert_contains "$open_run" '${head_sha:0:7}'
 assert_not_contains "$open_run" '${GITHUB_SHA:0:7}'
 
-it "the open job still refuses anything that is not a same-repo change/* branch"
-assert_contains "$open_run" "change/*"
-assert_contains "$open_run" "headRepositoryOwner"
-
-it "the open job calls carry-grant.py --station fix with the resolved pull request's own number"
-assert_contains "$open_run" "carry-grant.py"
-assert_contains "$open_run" "--station fix"
-assert_contains "$open_run" '--pr "$pr"'
-assert_contains "$open_run" "Refs #"
+# THE change/* GUARD AND Refs #<n> EXTRACTION LIVE IN ONE SHARED SCRIPT,
+# carry-from-pr.sh, called by BOTH open and archive with the resolved pull
+# request number and the station -- not duplicated in the workflow YAML.
+it "the open job hands the resolved pull request off to carry-from-pr.sh, station fix"
+assert_contains "$open_run" ".github/scripts/carry-from-pr.sh \"\$pr\" fix"
+assert_not_contains "$open_run" "headRepositoryOwner"
+assert_not_contains "$open_run" "carry-grant.py"
 
 it "the open job is granted issues: write for the marker comment, plus pull-requests: write since carry-grant.py labels a PULL REQUEST here and issues: write alone 403s on that mutation"
 assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'write'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
@@ -314,18 +312,26 @@ assert_contains "$archive_run" "search/issues"
 assert_contains "$archive_run" "is:pr is:merged"
 assert_contains "$archive_run" "github.event.workflow_run.head_sha"
 
-# A merge queue can land a fork's pull request too, so this job must never
-# carry a grant forward for one just because its body happens to contain
-# 'Refs #<n>' -- the SAME same-repo change/* guard the open job applies.
-it "the archive job also refuses a resolved pull request that is not a same-repo change/* branch"
-assert_contains "$archive_run" "headRepositoryOwner"
-assert_contains "$archive_run" "change/*"
+# THE SAME SHARED SCRIPT, station archive -- see the open job's test above
+# for why this is not duplicated in the workflow YAML.
+it "the archive job hands the resolved pull request off to carry-from-pr.sh, station archive"
+assert_contains "$archive_run" ".github/scripts/carry-from-pr.sh \"\$pr\" archive"
+assert_not_contains "$archive_run" "headRepositoryOwner"
+assert_not_contains "$archive_run" "carry-grant.py"
 
-it "the archive job calls carry-grant.py --station archive with no --pr, on the issue"
-assert_contains "$archive_run" "carry-grant.py"
-assert_contains "$archive_run" "--station archive"
-assert_not_contains "$archive_run" "--pr "
-assert_contains "$archive_run" "Refs #"
+# carry-from-pr.sh ITSELF: the change/* guard, the Refs #<n> extraction, and
+# routing to carry-grant.py by station -- pinned once, for whichever job
+# calls it.
+it "carry-from-pr.sh refuses anything that is not a same-repo change/* branch"
+carry_from_pr=$(cat "$ROOT/.github/scripts/carry-from-pr.sh")
+assert_contains "$carry_from_pr" "headRepositoryOwner"
+assert_contains "$carry_from_pr" "change/*"
+
+it "carry-from-pr.sh extracts Refs #<n> and calls carry-grant.py with --pr only for station fix"
+assert_contains "$carry_from_pr" "Refs #"
+assert_contains "$carry_from_pr" "carry-grant.py"
+assert_contains "$carry_from_pr" '--station fix --pr "$pr"'
+assert_contains "$carry_from_pr" "--station archive"
 
 it "the archive job is granted issues: write to carry the grant, plus pull-requests: read to find the merged pull request"
 assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'read'}" "$(rpy 'print(d["jobs"]["archive"]["permissions"])')"

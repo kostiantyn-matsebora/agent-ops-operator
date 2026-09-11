@@ -207,16 +207,22 @@ it and fails the component's job, which reports through the required check.
 `review-dispatch.yml` fixes review findings and SonarCloud issues on a pull
 request its owner has labelled `conveyor:fix` (the renamed `autofix`). The step
 that writes a fix runs a model under a read-only token and holds no other
-secret; the model-free step after it pushes the commit through a WRITE DEPLOY
-KEY (`AUTOFIX_DEPLOY_KEY`), repository-scoped and `contents` only, because a
-push made with the workflow token starts no workflow and a `workflow_dispatch`
-run's checks never reach the merge box. What that key can do is push to a
-branch of this repository; it cannot approve, merge, resolve a review thread,
-or change anything in SonarCloud. It is read by that one job, the label is the
-only thing that makes the job run, and only a person with write access can
-place it — directly, or have it carried forward by a workflow that RE-CHECKS
-their standing instruction still stands and still has write access, on the
-issue it opened from, every time (`.claude/rules/worktree-delivery.md`).
+secret.
+
+The model-free step after it pushes the commit through a WRITE DEPLOY KEY
+(`AUTOFIX_DEPLOY_KEY`), repository-scoped and `contents` only, because a push
+made with the workflow token starts no workflow and a `workflow_dispatch`
+run's checks never reach the merge box. It is read by that one job alone.
+
+What that key can do is push to a branch of this repository. It cannot
+approve, merge, resolve a review thread, or change anything in SonarCloud.
+
+The label is the only thing that makes the job run. Only a person with write
+access can place it directly.
+
+A workflow may also carry it forward on their behalf. It RE-CHECKS their
+standing instruction still stands and still has write access, on the issue it
+opened from, every time (`.claude/rules/worktree-delivery.md`).
 
 ### Context isolation
 

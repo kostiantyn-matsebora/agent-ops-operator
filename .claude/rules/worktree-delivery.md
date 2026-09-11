@@ -305,9 +305,9 @@ workflow placed it.
   comment for you, and the service's state is yours to change in its UI.
 - **`/opsx:archive` IS REFUSED WHILE THE LOOP IS OPEN** — a round running, or
   a dispute no person has answered. `autofix-guard.py` (the script keeps its
-  original filename; it reads `approve_label` — `conveyor:fix` — from the
+  original filename. It reads `approve_label` — `conveyor:fix` — from the
   vocabulary file rather than a hardcoded name), in the same hook as
-  the documentation gate and the same CI job; it fails open on anything it
+  the documentation gate and the same CI job. It fails open on anything it
   cannot read.
 
 ### WHAT THE MAIN CHECKOUT IS STILL FOR

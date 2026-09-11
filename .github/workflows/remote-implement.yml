@@ -149,8 +149,9 @@ jobs:
           set -euo pipefail
           # A workflow_run payload carries no pull_request.body directly --
           # resolve the pull request from the run's head sha, same fallback
-          # review-dispatch.yml's `who` step already uses, then read its body
-          # through the API instead of the event.
+          # review-dispatch.yml's `who` step already uses. carry-from-pr.sh
+          # takes it from there: the change/* guard and Refs #<n> extraction
+          # are shared with the archive job below.
           head_sha="${{ github.event.workflow_run.head_sha }}"
           pr=$(gh api --method GET \
             "repos/$GITHUB_REPOSITORY/commits/$head_sha/pulls" \
@@ -162,23 +163,7 @@ jobs:
             echo "no open pull request for ${head_sha:0:7}; nothing to carry"
             exit 0
           fi
-          head_repo=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json headRepositoryOwner,headRefName \
-            --jq '.headRepositoryOwner.login + "/" + .headRefName')
-          case "$head_repo" in
-            "${GITHUB_REPOSITORY%%/*}"/change/*) ;;
-            *)
-              echo "pull request #$pr is not a same-repo change/* branch; nothing to carry"
-              exit 0
-              ;;
-          esac
-          body=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
-          issue=$(printf '%s' "$body" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
-          if [ -z "$issue" ]; then
-            echo "pull request #$pr's body carries no 'Refs #<n>'; nothing to carry"
-            exit 0
-          fi
-          python3 .github/scripts/carry-grant.py --repo "$GITHUB_REPOSITORY" \
-            --issue "$issue" --station fix --pr "$pr"
+          .github/scripts/carry-from-pr.sh "$pr" fix
 
   # THE ARCHIVE TRANSITION: a merge just landed on the default branch. Find
   # the pull request that merge came from, read its `Refs #<n>` and carry
@@ -227,26 +212,8 @@ jobs:
             echo "no merged pull request found for ${{ github.event.workflow_run.head_sha }}; nothing to carry"
             exit 0
           fi
-          # SAME GUARD THE open JOB APPLIES -- a merge queue can land a fork's
-          # pull request too, and this job must never carry a grant forward
-          # for one just because its body happens to contain 'Refs #<n>'.
-          head_repo=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json headRepositoryOwner,headRefName \
-            --jq '.headRepositoryOwner.login + "/" + .headRefName')
-          case "$head_repo" in
-            "${GITHUB_REPOSITORY%%/*}"/change/*) ;;
-            *)
-              echo "pull request #$pr is not a same-repo change/* branch; nothing to carry"
-              exit 0
-              ;;
-          esac
-          body=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
-          issue=$(printf '%s' "$body" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
-          if [ -z "$issue" ]; then
-            # AN ARCHIVE PULL REQUEST CARRIES Closes, NEVER Refs -- this is how
-            # this job tells the last station of a lane from every other merge,
-            # and does nothing on it.
-            echo "pull request #$pr's body carries no 'Refs #<n>'; nothing to carry"
-            exit 0
-          fi
-          python3 .github/scripts/carry-grant.py --repo "$GITHUB_REPOSITORY" \
-            --issue "$issue" --station archive
+          # carry-from-pr.sh applies the SAME change/* guard the open job
+          # does -- a merge queue can land a fork's pull request too, and
+          # this job must never carry a grant forward for one just because
+          # its body happens to contain 'Refs #<n>'.
+          .github/scripts/carry-from-pr.sh "$pr" archive
