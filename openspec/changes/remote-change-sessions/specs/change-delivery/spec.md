@@ -45,50 +45,12 @@ inventory for no isolation it did not already have.
 - **THEN** the session checks out `change/<name>` in its clone and works there,
   and no worktree exists for that change anywhere
 
-### Requirement: A change is approved for automatic fixing by its owner, once
-
-The owner of a change SHALL approve its pull request for automatic fixing
-ONCE, by a stated label on the pull request, placed by someone with write
-access to this repository — directly, or by a program relaying that person's
-standing instruction. The owner's word MAY be given as the implement label
-placed on the issue the change was started from, before the pull request
-exists.
-
-The approval is the change's, not the finding's: the owner has read the
-proposal — or, having labelled the issue, has said the issue is to be built
-and its reviewers satisfied — and is saying "make the reviewers happy", which
-is a decision about the change. What the reviewers then say is not
-re-decided per thread.
-
-#### Scenario: The owner approves the change
-
-- **WHEN** the owner tells a remote session the change is approved for
-  fixing, and no standing instruction on the issue exists for a program to
-  relay
-- **THEN** the session places no label — it acts as an application with no
-  write access, and there is no interactive `gh` session of the owner's to
-  hand the command to mid-run — and instead names the exact command in its
-  own pull request description, for the owner to run afterward under their
-  own credentials
-
-#### Scenario: The owner approves interactively, on a workstation
-
-- **WHEN** the owner asks an interactive session running under their own `gh`
-  login whether the change is approved for fixing, and confirms it is
-- **THEN** the assistant tells the owner the command rather than running it,
-  and only the owner's own `gh` session — never the assistant — executes it
-
-#### Scenario: The owner labelled the issue
-
-- **WHEN** a change was started by the implement label on its issue, placed
-  by a person with write access
-- **THEN** a WORKFLOW — never the session — places the approve label on the
-  pull request that opens for it, recording whose instruction authorised it,
-  before it needs to be asked for again, and the pull request's description
-  says the approval came from the issue
-
-#### Scenario: The label is placed with nobody's word
-
-- **WHEN** no explicit approval from the owner exists in either form
-- **THEN** no label is placed, and a pull request without one is triaged per
-  thread
+<!-- The "A change is approved for automatic fixing by its owner, once"
+requirement WAS modified here too, and is REMOVED from this delta:
+`conveyor-labels` modifies the same requirement, with different wording (the
+`conveyor:` vocabulary, the carry/mint distinction) and a fuller scenario set
+— two pending deltas rewriting one requirement is an unreviewable conflict,
+not two independent changes. The one scenario unique to this delta (the
+interactive-workstation case) was folded into conveyor-labels' own delta
+instead of being lost, and this change no longer touches that requirement at
+all. -->

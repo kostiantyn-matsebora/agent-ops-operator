@@ -306,10 +306,17 @@ assert_contains "$archive_run" "search/issues"
 assert_contains "$archive_run" "is:pr is:merged"
 assert_contains "$archive_run" "github.event.workflow_run.head_sha"
 
+# A merge queue can land a fork's pull request too, so this job must never
+# carry a grant forward for one just because its body happens to contain
+# 'Refs #<n>' -- the SAME same-repo change/* guard the open job applies.
+it "the archive job also refuses a resolved pull request that is not a same-repo change/* branch"
+assert_contains "$archive_run" "headRepositoryOwner"
+assert_contains "$archive_run" "change/*"
+
 it "the archive job calls carry-grant.py --station archive with no --pr, on the issue"
 assert_contains "$archive_run" "carry-grant.py"
 assert_contains "$archive_run" "--station archive"
-assert_not_contains "$archive_run" "--pr \"\${{"
+assert_not_contains "$archive_run" "--pr "
 assert_contains "$archive_run" "Refs #"
 
 it "the archive job is granted issues: write to carry the grant, plus pull-requests: read to find the merged pull request"

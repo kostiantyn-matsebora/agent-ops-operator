@@ -27,6 +27,13 @@ re-decided per thread.
 - **THEN** the owner places the label themselves, or places the standing
   instruction on the issue; the session places nothing and says so
 
+#### Scenario: The owner approves interactively, on a workstation
+
+- **WHEN** the owner asks an interactive session running under their own `gh`
+  login whether the change is approved for fixing, and confirms it is
+- **THEN** the assistant tells the owner the command rather than running it,
+  and only the owner's own `gh` session — never the assistant — executes it
+
 #### Scenario: The owner approves the pull request
 
 - **WHEN** the owner places the approve label on a change's pull request

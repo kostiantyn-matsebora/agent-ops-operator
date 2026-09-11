@@ -217,6 +217,18 @@ jobs:
             echo "no merged pull request found for ${{ github.event.workflow_run.head_sha }}; nothing to carry"
             exit 0
           fi
+          # SAME GUARD THE open JOB APPLIES -- a merge queue can land a fork's
+          # pull request too, and this job must never carry a grant forward
+          # for one just because its body happens to contain 'Refs #<n>'.
+          head_repo=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json headRepositoryOwner,headRefName \
+            --jq '.headRepositoryOwner.login + "/" + .headRefName')
+          case "$head_repo" in
+            "${GITHUB_REPOSITORY%%/*}"/change/*) ;;
+            *)
+              echo "pull request #$pr is not a same-repo change/* branch; nothing to carry"
+              exit 0
+              ;;
+          esac
           body=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
           issue=$(printf '%s' "$body" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
           if [ -z "$issue" ]; then

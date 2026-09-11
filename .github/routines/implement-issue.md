@@ -32,8 +32,7 @@ change's `.github-issue` already names it (the grep above), OR the issue
 carries an `opsx:` phase label. Every other issue is on the PLAIN lane. Both
 are FACTS a program can read; neither is a reading of how the issue sounds,
 its size, or whether it "deserves" a proposal — what decides that code is
-written to a branch is not a judgement call anywhere else in this project, and
-it is not one here: the lane is read, never judged from the issue's wording.
+written to a branch is not a judgement call anywhere else in this project.
 
 | Lane | Selected when | Stations | Owes |
 |---|---|---|---|

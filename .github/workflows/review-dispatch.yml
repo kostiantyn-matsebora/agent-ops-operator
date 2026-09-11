@@ -137,10 +137,15 @@ jobs:
     # label that is neither the approval label NOR the extending label, a
     # review that did not complete — none starts anything beyond this
     # expression; the run appears skipped in the list. The exact match
-    # against the vocabulary file happens one step down (both labels, read
-    # from .github/review-triage.json); this expression must AGREE with it,
-    # and is the one place either label's literal name is repeated, because
-    # a job's `if:` is evaluated before any checkout and cannot read a file.
+    # against the vocabulary file happens one step down, for `conveyor:fix`
+    # (read as `approve_label` from .github/review-triage.json, in the `who`
+    # step below) — `conveyor:keep-going` is never looked up by name past
+    # this point, since the step below reads the EVENT's own label
+    # (`THIS_LABEL`) and only ever compares it against `approve_label`,
+    # falling through to an ordinary write-access check otherwise. This
+    # expression must still AGREE with both literal names, and is the one
+    # place either is repeated, because a job's `if:` is evaluated before any
+    # checkout and cannot read a file.
     # `conveyor:keep-going` is here because placing it must RE-TRIGGER a
     # round on a pull request whose loop already ended on the cap — the same
     # structural constraint as `conveyor:fix` right beside it.
@@ -261,14 +266,16 @@ jobs:
               # field here that could name the caller more precisely — every
               # workflow using the default token labels as this same actor.
               # WHAT ACTUALLY GATES THE DECISION is the block below: it
-              # re-reads the pull request's OWN `Refs #<n>`, the NAMED
-              # issue's CURRENT `conveyor:run`, and that label's placer's
-              # CURRENT write access — all three, fresh, regardless of who or
-              # what placed the label being checked. A label placed by any
+              # re-reads the pull request's OWN `Refs #<n>` and the NAMED
+              # issue's CURRENT `conveyor:run` — both fresh, regardless of who
+              # or what placed the label being checked. Re-checking the run
+              # label placer's OWN write access is carry-grant.py's job, not
+              # this step's: that already happened once, when the label this
+              # step is now re-verifying was placed. A label placed by any
               # other `github-actions[bot]` caller is refused unless a real
-              # standing instruction from a writer genuinely exists on the
-              # issue the pull request names right now, which is the same
-              # substantive grant a legitimate carry would also require.
+              # standing instruction genuinely exists on the issue the pull
+              # request names right now, which is the same substantive grant
+              # a legitimate carry would also require.
               if can_push "$SENDER"; then
                 mode=all
               elif [ "$SENDER" = "github-actions[bot]" ] && [ "$THIS_LABEL" = "$LABEL" ]; then
