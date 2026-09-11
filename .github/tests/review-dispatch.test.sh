@@ -305,6 +305,9 @@ assert_contains "$archive_if" "github.event_name == 'workflow_run'"
 assert_contains "$archive_if" "github.event.workflow_run.event == 'push'"
 assert_contains "$archive_if" "github.event.workflow_run.conclusion == 'success'"
 
+it "the archive job also checks the push landed on the default branch, not just any push-triggered ci run"
+assert_contains "$archive_if" "github.event.workflow_run.head_branch == github.event.repository.default_branch"
+
 it "the archive job resolves the merged pull request via a merged-pull-request search on the pushed commit"
 archive_run=$(rpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
 assert_contains "$archive_run" "search/issues"

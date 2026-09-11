@@ -185,10 +185,16 @@ jobs:
   # `conveyor:run` forward as the archive-station label ON THE ISSUE -- the
   # pull request is closed by now, and a label there drives nothing.
   archive:
+    # `ci`'s own `push:` trigger is already scoped to `branches: [master]`,
+    # so a `push`-event workflow_run for it is a push to the default branch
+    # BY CONSTRUCTION today -- this check is what keeps that true if the
+    # default branch is ever renamed without ci.yml's trigger following it,
+    # rather than the archive job silently going quiet on a mismatch.
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.conclusion == 'success'
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch
     runs-on: ubuntu-latest
     # ISSUES: write TO CARRY -- carry-grant.py --station archive labels and
     # comments the ISSUE alone through gh issue edit / gh issue comment.

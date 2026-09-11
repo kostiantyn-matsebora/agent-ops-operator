@@ -29,11 +29,12 @@ re-decided per thread.
 
 #### Scenario: The owner approves interactively, on a workstation
 
-- **WHEN** the owner asks an interactive session running under their own `gh`
-  login whether the change is approved for fixing, and confirms it is
+- **WHEN** the owner asks an interactive session, running on their workstation
+  where `gh` is already authenticated as them, whether the change is approved
+  for fixing, and confirms it is
 - **THEN** the session tells the owner the command rather than running it,
-  and only the owner's own `gh` session — never the interactive session —
-  executes it
+  and only the owner themselves — typing it in their own terminal, never the
+  session — executes it
 
 #### Scenario: The owner approves the pull request
 

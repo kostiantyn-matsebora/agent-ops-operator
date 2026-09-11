@@ -257,12 +257,14 @@ def main() -> int:
             f"`{vocab['approve_label']}`, so the review's findings are fixed without a reply in each thread"
             if carries else
             "a person places a label to start the fixing loop")
-    # NOTHING MERGES WITHOUT A PERSON, EVER -- but archiving is a workflow's
-    # own unattended step once conveyor:run stands, on whichever issue this
-    # session's change is bound to (see remote-session.md). Overstating "a
-    # person" for BOTH would misdescribe the one step this label itself
-    # exists to hand off.
-    ends = (f"a workflow carries `{label}` forward again to archive, once the pull request merges"
+    # NOTHING MERGES WITHOUT A PERSON, EVER -- but archiving CAN be a
+    # workflow's own unattended step once conveyor:run stands, on whichever
+    # issue this session's change is bound to (see remote-session.md). This
+    # job runs before the session has read the issue, so it does not yet
+    # know which lane the session will choose -- the plain lane has no
+    # archive station at all, and "always" here would misdescribe that case.
+    ends = (f"a workflow carries `{label}` forward again to archive, once the "
+            f"pull request merges — if this change is bound to an openspec change"
             if carries else
             "archiving is a person's own step too, same as merging")
     comment(args.repo, number,

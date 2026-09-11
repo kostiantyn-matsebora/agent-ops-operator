@@ -621,8 +621,9 @@ fails, up to a bound of 5 (`.github/review-triage.json`, `max_rounds`).
 A round that changes nothing ends the loop early, and every ending is one
 summary comment. At the cap, `conveyor:keep-going` grants another set of
 rounds and is consumed the moment one runs under it.
+
 The loop never marks anything in SonarCloud, and it cannot merge. Removing the
-label stops it at the next round; an unanswered dispute holds both the merge
+label stops it at the next round. An unanswered dispute holds both the merge
 and `/opsx:archive`.
 
 **One label runs the whole line.** `conveyor:run` on an issue is the standing
