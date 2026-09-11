@@ -215,7 +215,7 @@ branch of this repository; it cannot approve, merge, resolve a review thread,
 or change anything in SonarCloud. It is read by that one job, the label is the
 only thing that makes the job run, and only a person with write access can
 place it — directly, or have it carried forward by a workflow relaying their
-standing instruction on the tracking issue (`.claude/rules/worktree-delivery.md`).
+standing instruction on the issue it opened from (`.claude/rules/worktree-delivery.md`).
 
 ### Context isolation
 

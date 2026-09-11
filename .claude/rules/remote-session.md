@@ -83,7 +83,7 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
 | it POSTs the issue's NUMBER to the routine's fire endpoint | the URL is a repository variable, the token a repository secret |
 | it comments the session's link on the issue, once | that comment is the start's transition record, and says whether a later carry is coming |
 | the session reads `.github/routines/implement-issue.md` | the process is committed; the routine's saved prompt is a POINTER to it |
-| it reads the LANE — bound to an openspec change, or plain | opsx: propose, implement, archive; plain: implement straight from the issue, archiving nothing |
+| it reads the LANE — bound to an openspec change, or plain | opsx: propose, implement, archive. Plain: implement straight from the issue, archiving nothing |
 | it implements on `change/<name>`, opens the pull request WITH NO LABEL | `Refs #<n>` (NOT `Closes` — see below) is what a later carry reads |
 
 - **A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.**

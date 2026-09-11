@@ -594,22 +594,31 @@ including what the landed commit still needs from you, is
 `.claude/rules/worktree-delivery.md`.
 
 **Or approve the whole pull request for fixing, once.** The `conveyor:fix`
-label (placed by someone with write access, directly or CARRIED forward by a
-workflow relaying a `conveyor:run` instruction still standing on the tracking
-issue — never by a session; anyone else's is removed with a comment) is
-change-level consent: every open review finding, every open SonarCloud issue
-AND every failed required check on the head is on the work list, and each is
-FIXED or DISPUTED — a dispute is a reply that stays open and mentions you. An
-item the fixing step's report never names is UNADDRESSED rather than disputed,
-because silence is not a decision; a round whose fixing step wrote no report
-at all ends as its own outcome, disputing nothing. A failed check is
-reproduced with the job's own command before it is fixed, and a failure the
-tree does not explain is disputed rather than guessed at; a fixed check gets
-no reply, because its next run is the verdict.
+label is change-level consent. Every open review finding, every open
+SonarCloud issue AND every failed required check on the head is on the work
+list.
+
+Each one is FIXED or DISPUTED. A dispute is a reply that stays open and
+mentions you.
+
+The label is placed by someone with write access, directly or CARRIED forward
+by a workflow relaying a `conveyor:run` instruction still standing on the
+issue it opened from — never by a session. Anyone else's is removed with a
+comment.
+
+An item the fixing step's report never names is UNADDRESSED rather than
+disputed, because silence is not a decision. A round whose fixing step wrote
+no report at all ends as its own outcome, disputing nothing.
+
+A failed check is reproduced with the job's own command before it is fixed,
+and a failure the tree does not explain is disputed rather than guessed at.
+A fixed check gets no reply, because its next run is the verdict.
+
 The landed commit is pushed through a write deploy key, so CI and the review
-run on it, and the next round starts either when the review completes or when
-CI fails, up to a bound of 5 (`.github/review-triage.json`, `max_rounds`) — a
-round that changes nothing ends the loop early, and every ending is one
+run on it. The next round starts either when the review completes or when CI
+fails, up to a bound of 5 (`.github/review-triage.json`, `max_rounds`).
+
+A round that changes nothing ends the loop early, and every ending is one
 summary comment. At the cap, `conveyor:keep-going` grants another set of
 rounds and is consumed the moment one runs under it.
 The loop never marks anything in SonarCloud, and it cannot merge. Removing the
