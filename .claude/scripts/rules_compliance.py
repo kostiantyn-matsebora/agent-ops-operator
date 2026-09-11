@@ -16,9 +16,10 @@ Rules:
   semicolon          a `;` in prose — fenced code, inline code, HTML entities
                      and comments do not count
   long-paragraph     a paragraph over --max-words words (default 45)
-  rules-heading      a file under `.claude/rules/` whose first content line is
-                     not a `## ` heading
-  rules-second-h2    a rules file with a second `## ` heading — one topic per file
+  rules-heading      a file under `.claude/rules/` or `docs/.claude/` whose
+                     first content line is not a `## ` heading
+  rules-second-h2    a rules file (same scope) with a second `## ` heading —
+                     one topic per file
 
     rules_compliance.py <file.md>...   file:line rule, exit 1 when anything is found
 """
@@ -48,13 +49,17 @@ class Finding(NamedTuple):
 
 
 def is_rules_file(path: pathlib.Path) -> bool:
-    """`.claude/rules/*.md`, or `docs/.claude/*.md` -- authoring.md governs
-    both, since a site's own shell context follows the same one-`## `-heading,
-    one-topic convention every other rules file does."""
+    """`.claude/rules/*.md`, or the repo-root `docs/.claude/*.md` -- authoring.md
+    governs both, since a site's own shell context follows the same
+    one-`## `-heading, one-topic convention every other rules file does.
+    ANCHORED AT THE TRAILING SHAPE, not "docs anywhere in the path" -- a
+    resolved absolute path carries the whole filesystem prefix, and a repo
+    checked out under a directory that happens to be named docs (or holding
+    a deeper, unrelated docs/ of its own) must not match on that account."""
     parts = path.resolve().parts
     if len(parts) >= 3 and parts[-3] == ".claude" and parts[-2] == "rules" and path.suffix == ".md":
         return True
-    return len(parts) >= 2 and parts[-2] == ".claude" and path.suffix == ".md" and "docs" in parts[:-2]
+    return len(parts) >= 3 and parts[-3] == "docs" and parts[-2] == ".claude" and path.suffix == ".md"
 
 
 def prose_lines(text: str) -> list[tuple[int, str, bool]]:
