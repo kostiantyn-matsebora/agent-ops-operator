@@ -257,13 +257,21 @@ def main() -> int:
             f"`{vocab['approve_label']}`, so the review's findings are fixed without a reply in each thread"
             if carries else
             "a person places a label to start the fixing loop")
+    # NOTHING MERGES WITHOUT A PERSON, EVER -- but archiving is a workflow's
+    # own unattended step once conveyor:run stands, on whichever issue this
+    # session's change is bound to (see remote-session.md). Overstating "a
+    # person" for BOTH would misdescribe the one step this label itself
+    # exists to hand off.
+    ends = (f"a workflow carries `{label}` forward again to archive, once the pull request merges"
+            if carries else
+            "archiving is a person's own step too, same as merging")
     comment(args.repo, number,
             f"{MARKER}\n"
             f"Implementing this issue: {where} started, approved by @{sender}.\n\n"
             f"It proposes a change, implements it on its own branch and opens a pull request "
             f"referencing this issue, unlabelled — the session places no label on its own work. "
             f"When the pull request opens, {what}. "
-            f"Nothing merges or archives without a person.")
+            f"Nothing merges without a person, and {ends}.")
     print(f"fired for #{number}" + (f": {url}" if url else ""))
     return 0
 
