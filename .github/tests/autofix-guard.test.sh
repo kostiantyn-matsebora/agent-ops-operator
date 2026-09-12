@@ -27,7 +27,7 @@ esac
 STUB
 chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
 
-labelled() { printf '{"number":7,"headRefName":"change/thing","state":"OPEN","labels":[{"name":"autofix"}]}' > "$FX/pr.json"; }
+labelled() { printf '{"number":7,"headRefName":"change/thing","state":"OPEN","labels":[{"name":"conveyor:fix"}]}' > "$FX/pr.json"; }
 unlabelled() { printf '{"number":7,"headRefName":"change/thing","state":"OPEN","labels":[]}' > "$FX/pr.json"; }
 threads() { cat > "$FX/threads.json"; }
 none_running() { rm -f "$FX"/runs-*.json; }
@@ -49,7 +49,7 @@ unlabelled
 out=$(run); rc=$?
 it "allows, without asking further, a pull request that does not carry the label"
 assert_status 0 "$rc"
-assert_contains "$out" "does not carry \`autofix\`"
+assert_contains "$out" "does not carry \`conveyor:fix\`"
 assert_not_contains "$(cat "$GH_CALLS")" "run list"
 
 # REFUSAL ONE: a round is running — by branch, or by the number in the run's name.
@@ -80,18 +80,18 @@ threads <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
   {"id":"PRRT_disputed","isResolved":false,"path":"a.go","line":12,"comments":{"nodes":[
     {"body":"A finding.","author":{"login":"claude","__typename":"Bot"}},
-    {"body":"<!-- autofix:disputed -->\nDisputed by the fixing step: the slice is half-open.","author":{"login":"github-actions","__typename":"Bot"}}]}},
+    {"body":"<!-- conveyor:disputed -->\nDisputed by the fixing step: the slice is half-open.","author":{"login":"github-actions","__typename":"Bot"}}]}},
   {"id":"PRRT_answered","isResolved":false,"path":"b.go","line":3,"comments":{"nodes":[
     {"body":"A finding.","author":{"login":"claude","__typename":"Bot"}},
-    {"body":"<!-- autofix:disputed -->\nDisputed by the fixing step: not a bug.","author":{"login":"github-actions","__typename":"Bot"}},
+    {"body":"<!-- conveyor:disputed -->\nDisputed by the fixing step: not a bug.","author":{"login":"github-actions","__typename":"Bot"}},
     {"body":"Agreed, dismissing.","author":{"login":"a-maintainer","__typename":"User"}}]}},
   {"id":"PRRT_botreply","isResolved":false,"path":"c.go","line":3,"comments":{"nodes":[
     {"body":"A finding.","author":{"login":"claude","__typename":"Bot"}},
-    {"body":"<!-- autofix:disputed -->\nDisputed.","author":{"login":"github-actions","__typename":"Bot"}},
+    {"body":"<!-- conveyor:disputed -->\nDisputed.","author":{"login":"github-actions","__typename":"Bot"}},
     {"body":"Fixed in abc1234.","author":{"login":"github-actions","__typename":"Bot"}}]}},
   {"id":"PRRT_resolved","isResolved":true,"path":"d.go","line":3,"comments":{"nodes":[
     {"body":"A finding.","author":{"login":"claude","__typename":"Bot"}},
-    {"body":"<!-- autofix:disputed -->\nDisputed.","author":{"login":"github-actions","__typename":"Bot"}}]}}
+    {"body":"<!-- conveyor:disputed -->\nDisputed.","author":{"login":"github-actions","__typename":"Bot"}}]}}
 ]}}}}}
 JSON
 out=$(run); rc=$?
@@ -108,13 +108,13 @@ it "ignores a disputed thread a person resolved"
 assert_not_contains "$out" "PRRT_resolved"
 
 quiet_threads
-printf '[{"body":"<!-- autofix:disputed -->\\nThe fixing step disputes 1 analysis issue","user":{"login":"github-actions[bot]","type":"Bot"}}]' > "$FX/comments.json"
+printf '[{"body":"<!-- conveyor:disputed -->\\nThe fixing step disputes 1 analysis issue","user":{"login":"github-actions[bot]","type":"Bot"}}]' > "$FX/comments.json"
 out=$(run); rc=$?
 it "REFUSES over an unanswered dispute of analysis issues, which lives in a pull request comment"
 assert_status 1 "$rc"
 assert_contains "$out" "a pull request comment disputing analysis issues"
 
-printf '[{"body":"<!-- autofix:disputed -->\\nThe fixing step disputes 1 analysis issue","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"Marked as false positive.","user":{"login":"a-maintainer","type":"User"}}]' > "$FX/comments.json"
+printf '[{"body":"<!-- conveyor:disputed -->\\nThe fixing step disputes 1 analysis issue","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"Marked as false positive.","user":{"login":"a-maintainer","type":"User"}}]' > "$FX/comments.json"
 out=$(run); rc=$?
 it "allows once a person has answered the analysis dispute"
 assert_status 0 "$rc"
@@ -133,7 +133,7 @@ assert_status 0 "$rc"
 assert_contains "$out" "no pull request to read"
 
 it "allows a closed pull request"
-printf '{"number":7,"headRefName":"change/thing","state":"MERGED","labels":[{"name":"autofix"}]}' > "$FX/pr.json"
+printf '{"number":7,"headRefName":"change/thing","state":"MERGED","labels":[{"name":"conveyor:fix"}]}' > "$FX/pr.json"
 out=$(run); rc=$?
 assert_status 0 "$rc"
 

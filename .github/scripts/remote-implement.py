@@ -148,10 +148,16 @@ def main() -> int:
     event = json.loads(args.event.read_text())
 
     label = (event.get("label") or {}).get("name") or ""
-    want = vocabulary(args.vocabulary)["implement_label"]
-    if label != want:
+    vocab = vocabulary(args.vocabulary)
+    # EITHER LABEL FIRES THE SAME SESSION. `conveyor:implement` drives one
+    # station by hand; `conveyor:run` is the standing instruction that carries
+    # the change through every later station too — but starting the session is
+    # the same act either way, and which one is on the issue is what the later
+    # stations read to decide whether to carry themselves forward.
+    want = {vocab["implement_label"], vocab["run_label"]}
+    if label not in want:
         # ANOTHER LABEL. Not an error: this workflow sees every label event.
-        print(f"label {label!r} is not {want!r}; nothing to do")
+        print(f"label {label!r} is not in {sorted(want)!r}; nothing to do")
         return 0
 
     issue = event.get("issue") or {}
@@ -171,9 +177,9 @@ def main() -> int:
     if perm not in MAY_PUSH:
         # REFUSED, VISIBLY, AND THE LABEL COMES OFF.
         subprocess.run(["gh", "issue", "edit", str(number), "--repo", args.repo,
-                        "--remove-label", want], check=False)
+                        "--remove-label", label], check=False)
         comment(args.repo, number,
-                f"@{sender} placed `{want}`, which starts a session that writes to this "
+                f"@{sender} placed `{label}`, which starts a session that writes to this "
                 f"repository — that needs write access, and `{sender}` has `{perm}`. "
                 f"The label was removed.")
         print(f"::error::{sender} has {perm}; the label was removed")
@@ -198,7 +204,7 @@ def main() -> int:
     if fire_url and (any(c in fire_url for c in "\r\n\t ")
                      or not fire_url.lower().startswith(("http://", "https://"))):
         comment(args.repo, number,
-                f"`{want}` was placed by @{sender}, but this repository's `ROUTINE_FIRE_URL` "
+                f"`{label}` was placed by @{sender}, but this repository's `ROUTINE_FIRE_URL` "
                 "is not a URL. Nothing started; check the variable and place the label again.")
         print(f"::error::ROUTINE_FIRE_URL is not a URL: {fire_url[:60]!r}")
         return 1
@@ -209,7 +215,7 @@ def main() -> int:
     # or comment the value; the name is enough to fix it by.
     if any(c in token for c in "\r\n\t "):
         comment(args.repo, number,
-                f"`{want}` was placed by @{sender}, but this repository's "
+                f"`{label}` was placed by @{sender}, but this repository's "
                 "`ROUTINE_FIRE_TOKEN` contains a line break or space — it was probably "
                 "copied out of a wrapped display. Nothing started; set it again and "
                 "place the label back.")
@@ -217,7 +223,7 @@ def main() -> int:
         return 1
     if not fire_url or not token:
         comment(args.repo, number,
-                f"`{want}` was placed by @{sender}, but this repository has no routine "
+                f"`{label}` was placed by @{sender}, but this repository has no routine "
                 "configured (`ROUTINE_FIRE_URL` / `ROUTINE_FIRE_TOKEN`). Nothing started.")
         print("::error::ROUTINE_FIRE_URL or ROUTINE_FIRE_TOKEN is not set")
         return 1
@@ -240,13 +246,48 @@ def main() -> int:
 
     url = session_url(payload)
     where = f"[session]({url})" if url else "the session"
+    # THE SESSION OPENS ITS PULL REQUEST WITH NO LABEL. It acts as an
+    # application with no write access, so a label it placed on its own work
+    # would be removed by the gate that checks who labelled (#201). Where
+    # `run_label` authorised this, a workflow reads the issue again once the
+    # pull request opens and carries that instruction forward as
+    # `approve_label` — recording whose it was — never the session itself.
+    #
+    # READ FROM THE ISSUE'S LABELS, NOT FROM WHICH LABEL FIRED THIS EVENT.
+    # The later carry (`carry-grant.py`, at the `open` job) reads the issue's
+    # CURRENT labels too, never which one triggered this session — so an
+    # issue that already carries `run_label` when `implement_label` is the
+    # one placed (the standing instruction pre-dating this particular
+    # session) still gets it carried forward, and this comment must say so
+    # rather than the "a person places a label" text that fits only when no
+    # standing instruction exists at all.
+    carries = vocab["run_label"] in {l.get("name") for l in issue.get("labels") or [] if l.get("name")}
+    # NAME run_label HERE, NEVER THE FIRING label. What actually gets carried
+    # is always `run_label` (carry-grant.py reads exactly that, off the
+    # issue's live labels, regardless of which label fired this session) --
+    # so when `implement_label` is what fired this while `run_label` already
+    # stood on the issue, the text must still name the one that carries.
+    what = (f"a workflow reads `{vocab['run_label']}` again and carries it forward as "
+            f"`{vocab['approve_label']}`, so the review's findings are fixed without a reply in each thread"
+            if carries else
+            "a person places a label to start the fixing loop")
+    # NOTHING MERGES WITHOUT A PERSON, EVER -- but archiving CAN be a
+    # workflow's own unattended step once conveyor:run stands, on whichever
+    # issue this session's change is bound to (see remote-session.md). This
+    # job runs before the session has read the issue, so it does not yet
+    # know which lane the session will choose -- the plain lane has no
+    # archive station at all, and "always" here would misdescribe that case.
+    ends = (f"a workflow carries `{vocab['run_label']}` forward again to archive, once the "
+            f"pull request merges — if this change is bound to an openspec change"
+            if carries else
+            "archiving is a person's own step too, same as merging")
     comment(args.repo, number,
             f"{MARKER}\n"
             f"Implementing this issue: {where} started, approved by @{sender}.\n\n"
             f"It proposes a change, implements it on its own branch and opens a pull request "
-            f"referencing this issue, carrying `{vocabulary(args.vocabulary)['approve_label']}` "
-            f"so the review's findings are fixed without a reply in each thread. "
-            f"Nothing merges or archives without a person.")
+            f"referencing this issue, unlabelled — the session places no label on its own work. "
+            f"When the pull request opens, {what}. "
+            f"Nothing merges without a person, and {ends}.")
     print(f"fired for #{number}" + (f": {url}" if url else ""))
     return 0
 

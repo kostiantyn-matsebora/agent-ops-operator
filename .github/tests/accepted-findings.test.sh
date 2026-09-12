@@ -151,7 +151,7 @@ cat > "$GH_FIXTURE.all" <<'JSON'
     {"id":"PRRT_disputed","isResolved":false,"isOutdated":false,"path":"d.go","line":7,
      "comments":{"nodes":[
        {"databaseId":401,"body":"Missing nil check.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}},
-       {"databaseId":402,"body":"<!-- autofix:disputed -->\nDisputed by the fixing step: the pointer cannot be nil here.","authorAssociation":"NONE","author":{"login":"github-actions","__typename":"Bot"}}]}},
+       {"databaseId":402,"body":"<!-- conveyor:disputed -->\nDisputed by the fixing step: the pointer cannot be nil here.","authorAssociation":"NONE","author":{"login":"github-actions","__typename":"Bot"}}]}},
     {"id":"PRRT_human","isResolved":false,"isOutdated":false,"path":"e.go","line":9,
      "comments":{"nodes":[
        {"databaseId":501,"body":"I would rename this.","authorAssociation":"OWNER","author":{"login":"a-maintainer","__typename":"User"}}]}},

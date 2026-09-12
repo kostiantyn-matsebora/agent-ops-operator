@@ -19,15 +19,26 @@ and a security problem goes to [SECURITY.md](SECURITY.md), never to an issue.
   answer to the first.
 
 **A maintainer may hand an issue straight to a session.** An issue labelled
-`autoimplement` by somebody with write access starts one cloud session that
-proposes a change from what you wrote, implements it on its own branch and
-opens a pull request. The issue gains exactly two automated comments: one
-linking that session, and the pointer the promotion leaves as it does for any
-promoted issue. The label is refused from anyone without write access. That
-pull request opens carrying `autofix` already — labelling the issue is the same
-word, given once, so the review's findings are fixed without a reply in each
-thread. What it does not change is who decides: the proposal, the pull request
-and the review are read by a person, a dispute waits for one, and a person
+`conveyor:implement` (one station) or `conveyor:run` (the standing instruction
+that carries the change through every later station), by somebody with write
+access, starts one cloud session. The label is refused from anyone without
+write access.
+
+That session proposes a change from what you wrote, implements it on its own
+branch and opens a pull request.
+
+The issue gains exactly two automated comments: one linking that session, and
+the pointer the promotion leaves as it does for any promoted issue.
+
+That pull request opens UNLABELLED — the session holds no write access of its
+own, so it places nothing.
+
+Where `conveyor:run` authorised it, a workflow reads the issue again once the
+pull request opens and carries that instruction forward as `conveyor:fix`, so
+the review's findings are fixed without a reply in each thread.
+
+What it does not change is who decides. The proposal, the pull request and
+the review are read by a person, a dispute waits for one, and a person
 merges. Nobody has to use it: an issue nobody labels is picked up the ordinary
 way.
 
@@ -110,8 +121,9 @@ directory and the pull request; the rationale, design, specs and tasks live in
 
 **If you filed an issue that becomes a change, your issue becomes the tracking
 issue.** It is not closed in favour of one we wrote — your thread is where the
-conversation already is. An issue handed to a session by the `autoimplement`
-label is promoted in exactly the same way, by the same script.
+conversation already is. An issue handed to a session by the `conveyor:implement`
+or `conveyor:run` label is promoted in exactly the same way, by the same
+script.
 
 ## Documentation is part of the change, not a follow-up
 
@@ -588,21 +600,48 @@ the fix cannot push, only the model-free step after it can. The full rule,
 including what the landed commit still needs from you, is
 `.claude/rules/worktree-delivery.md`.
 
-**Or approve the whole pull request for fixing, once.** The `autofix` label
-(placed by someone with write access — anyone else's is removed with a
-comment) is change-level consent: every open review finding, every open
+**Or approve the whole pull request for fixing, once.** The `conveyor:fix`
+label is change-level consent. Every open review finding, every open
 SonarCloud issue AND every failed required check on the head is on the work
-list, and each is FIXED or DISPUTED — a dispute is a reply that stays open and
-mentions you. A failed check is reproduced with the job's own command before it
-is fixed, and a failure the tree does not explain is disputed rather than
-guessed at; a fixed check gets no reply, because its next run is the verdict.
+list.
+
+Each one is FIXED or DISPUTED. A dispute is a reply that stays open and
+mentions you.
+
+The label is placed by someone with write access, directly or CARRIED forward
+by a workflow relaying a `conveyor:run` instruction still standing on the
+issue it opened from — never by a session. Anyone else's is removed with a
+comment.
+
+An item the fixing step's report never names is UNADDRESSED rather than
+disputed, because silence is not a decision. A round whose fixing step wrote
+no report at all ends as its own outcome, disputing nothing.
+
+A failed check is reproduced with the job's own command before it is fixed,
+and a failure the tree does not explain is disputed rather than guessed at.
+A fixed check gets no reply, because its next run is the verdict.
+
 The landed commit is pushed through a write deploy key, so CI and the review
-run on it, and the next round starts either when the review completes or when
-CI fails, up to three; a round that changes nothing ends the loop early, and
-every ending is one summary comment.
+run on it. The next round starts either when the review completes or when CI
+fails, up to a bound of 5 (`.github/review-triage.json`, `max_rounds`).
+
+A round that changes nothing ends the loop early, and every ending is one
+summary comment. At the cap, `conveyor:keep-going` grants another set of
+rounds and is consumed the moment one runs under it.
+
 The loop never marks anything in SonarCloud, and it cannot merge. Removing the
-label stops it at the next round; an unanswered dispute holds both the merge
+label stops it at the next round. An unanswered dispute holds both the merge
 and `/opsx:archive`.
+
+**One label runs the whole line.** `conveyor:run` on an issue is the standing
+instruction: implement, drive the pull request to `conveyor:fix`-mergeable,
+and — on an issue already bound to an openspec change — archive it once
+merged.
+
+An issue with no such binding runs the PLAIN lane instead. It is implemented
+straight from what you wrote, ending at the merge with nothing archived.
+Which lane applies is read from the binding, never judged from how the issue
+is worded.
 
 **Releases are the maintainer's, and they are chart-shaped.** A component tag
 (`<component>-v<semver>`) publishes one image and creates no GitHub Release; a

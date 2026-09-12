@@ -36,23 +36,33 @@ TWO MODES, ONE PROGRAM.
             CI and no review until somebody pushes again -- a push made with
             the workflow token starts no workflow.
   all       the pull request carries the approval label (`.github/
-            review-triage.json`, `approve_label`). Every item is FIXED or
-            DISPUTED, never dropped: a disputed thread gets a reply under the
-            dispute marker and stays open, disputed analysis issues get ONE
-            pull request comment under the same marker, and the person who
-            placed the label is mentioned. The landed commit is pushed with a
-            credential that is NOT the workflow token -- a write deploy key
-            the workflow configures on the remote before calling this -- so
-            the push is an ordinary push, CI and the review run on it, and
-            the review's completion starts the next round. (A check run from
-            a `workflow_dispatch` never reaches the merge box: measured on
-            #131, the gotchas rule file.) `--push-starts-workflows` is
-            how the workflow says that credential was in place; without it a
-            landed round ends the loop, saying so.
+            review-triage.json`, `approve_label`, `conveyor:fix`). Every item
+            the fixing step NAMED is FIXED or DISPUTED, never dropped: a
+            disputed thread gets a reply under the dispute marker and stays
+            open, disputed analysis issues get ONE pull request comment under
+            the same marker, and the person who placed the label is
+            mentioned. An item the report never mentions -- and every item, if
+            the fixing step wrote NO report at all (`--report-missing`) -- is
+            UNADDRESSED instead: silence is not a decision, so it is worded as
+            such and stays eligible for a later round rather than being
+            reported as a refusal nobody made. The landed commit is pushed
+            with a credential that is NOT the workflow token -- a write
+            deploy key the workflow configures on the remote before calling
+            this -- so the push is an ordinary push, CI and the review run on
+            it, and the review's completion starts the next round. (A check
+            run from a `workflow_dispatch` never reaches the merge box:
+            measured on #131, the gotchas rule file.)
+            `--push-starts-workflows` is how the workflow says that
+            credential was in place; without it a landed round ends the loop,
+            saying so.
             Rounds are counted from this program's own round-marked comments
             since the label was placed (state on the pull request, derivable,
-            no store), capped at `--max-rounds`, and every ending posts ONE
-            summary.
+            no store), capped at `--max-rounds` -- read from the vocabulary
+            file's `max_rounds` by the caller -- and every ending posts ONE
+            summary. Reaching the cap is not the end: `keep_going_label`
+            (`conveyor:keep-going`) grants another set and is REMOVED the
+            moment a round runs under it, because a permanent extension is
+            not a decision.
 
 Resolution itself is DELEGATED to `resolve-review-threads.py`, which re-reads
 every thread and refuses any the review did not author. Two programs that
@@ -67,7 +77,7 @@ import subprocess
 import sys
 
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
-SUMMARY_MARKER = "<!-- autofix:summary -->"
+SUMMARY_MARKER = "<!-- conveyor:summary -->"
 
 
 def sh(*cmd: str, check: bool = True, **kw) -> subprocess.CompletedProcess:
@@ -107,8 +117,10 @@ def load_markers(path: pathlib.Path) -> dict:
         doc = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         doc = {}
-    return {"dispute": doc.get("dispute_marker", "<!-- autofix:disputed -->"),
-            "round": doc.get("round_marker", "<!-- autofix:round")}
+    return {"dispute": doc.get("dispute_marker", "<!-- conveyor:disputed -->"),
+            "round": doc.get("round_marker", "<!-- conveyor:round"),
+            "grant": doc.get("grant_marker", "<!-- conveyor:grant -->"),
+            "keep_going": doc.get("keep_going_label", "conveyor:keep-going")}
 
 
 def read_report(report: dict, work: dict) -> tuple[list[str], dict[str, str]]:
@@ -172,9 +184,77 @@ class Round:
         self.args = args
         self.markers = markers
         self.work = work
+        self._comments_cache: list[dict] | None = None
         self.number = self.count_rounds() + 1
         self.sonar = self.read_json(self.args.sonar)
         self.checks = self.read_json(getattr(self.args, "checks", None))
+        # THE EFFECTIVE CAP, not the bare constant. Each grant ADDS a full set
+        # of `max_rounds`, so a loop that has been extended once stops at
+        # 2 * max_rounds, extended twice at 3 * max_rounds -- "another SET of
+        # rounds", not one extra round.
+        self.grants = self.count_grants()
+        self.cap = self.args.max_rounds * (1 + self.grants)
+        # NOT CALLED HERE. Consuming the grant is deferred to the caller,
+        # once a commit has actually landed -- see consume_keep_going's own
+        # docstring for why a round that turns out to be a no-op (no report,
+        # a stale patch, everything disputed) must never spend it.
+
+    def consume_keep_going(self) -> None:
+        """CONSUMED ONLY WHEN A COMMIT ACTUALLY LANDS, never on an ordinary
+        round and never on a round that turns out to do nothing. A no-op
+        round -- no report at all, a stale patch, every item disputed -- is
+        called AT `__init__` TIME, before ANY of those outcomes is known;
+        spending the grant there would consume it on a round that pushed
+        nothing, leaving the loop stuck at the old cap with the standing
+        instruction already spent. The caller invokes this only after the
+        push succeeds.
+
+        `self.cap` already reflects every grant COUNTED SO FAR (comments
+        posted by earlier calls to this method, on earlier rounds), so a
+        round landing at or under it needed no new extension -- this round
+        is the one a fresh `conveyor:keep-going` exists to unblock exactly
+        when it lands PAST that cap. Consuming it on an ordinary round below
+        the cap would spend the grant on a round that needed no extension at
+        all."""
+        if self.number <= self.cap:
+            return
+        label = self.markers["keep_going"]
+        try:
+            current = gh("pr", "view", str(self.args.pr), "--repo", self.args.repo,
+                         "--json", "labels", "--jq", ".labels[].name")
+        except subprocess.CalledProcessError:
+            return
+        if label not in current.splitlines():
+            return
+        old_cap = self.cap
+        try:
+            gh("pr", "edit", str(self.args.pr), "--repo", self.args.repo, "--remove-label", label)
+        except subprocess.CalledProcessError:
+            # A FAILED REMOVAL MUST NOT ABORT A ROUND THAT OTHERWISE LANDS.
+            # The fix this round produces is real work; losing it because the
+            # label-removal call hit a transient error would be worse than
+            # leaving the label in place for a re-check next round.
+            return
+        try:
+            pr_comment(self.args.repo, self.args.pr,
+                       f"{self.markers['grant']}\nround {self.number} is running past the previous cap of "
+                       f"{old_cap} under `{label}`, which is now consumed.")
+        except subprocess.CalledProcessError:
+            # SAME ARGUMENT AS THE REMOVAL ABOVE, ONE STEP LATER: the label is
+            # already gone, so this round already spent the grant whether or
+            # not the record of it posts. An uncaught exception here would
+            # propagate past the thread replies and the landing summary this
+            # method is called in the middle of -- losing the whole round's
+            # report over a transient comment failure, after the fix already
+            # pushed. The cap still advances below for THIS process; a
+            # missing marker comment would only under-count on a LATER
+            # invocation's count_grants(), which is the label-removal's own
+            # transient-failure trade-off one step later.
+            print(f"::warning::grant marker comment failed to post for round {self.number}; "
+                  f"`{label}` was already removed and the cap is extended anyway", file=sys.stderr)
+        self.grants += 1
+        self.cap = self.args.max_rounds * (1 + self.grants)
+        print(f"consumed `{label}`: round {self.number} extends the cap to {self.cap}")
 
     @staticmethod
     def read_json(path) -> dict:
@@ -186,41 +266,57 @@ class Round:
         return {}
 
 
+    def _comments_since(self) -> list[dict]:
+        # CACHED ON THE INSTANCE -- count_rounds() and count_grants() both
+        # call this from __init__, and the pull request's comments do not
+        # change between those two calls. Fetching them twice was a real,
+        # avoidable network round trip on every landing-step run.
+        if self._comments_cache is None:
+            try:
+                raw = gh("api", f"repos/{self.args.repo}/issues/{self.args.pr}/comments", "--paginate")
+            except subprocess.CalledProcessError:
+                raw = "[]"
+            self._comments_cache = [c for c in parse_comments(raw)
+                                     if not self.args.since or (c.get("created_at") or "") >= self.args.since]
+        return self._comments_cache
+
     def count_rounds(self) -> int:
         """Landing comments carrying the round marker, since the label was
         placed. The label's timestamp is what makes re-labelling a fresh count."""
-        try:
-            raw = gh("api", f"repos/{self.args.repo}/issues/{self.args.pr}/comments", "--paginate")
-        except subprocess.CalledProcessError:
-            return 0
-        n = 0
-        for c in parse_comments(raw):
-            if self.markers["round"] not in (c.get("body") or ""):
-                continue
-            if self.args.since and (c.get("created_at") or "") < self.args.since:
-                continue
-            n += 1
-        return n
+        return sum(1 for c in self._comments_since() if self.markers["round"] in (c.get("body") or ""))
+
+    def count_grants(self) -> int:
+        """Comments carrying the grant marker, since the label was placed --
+        one per `conveyor:keep-going` this program has already consumed, so
+        the effective cap grows by a full `max_rounds` for each."""
+        return sum(1 for c in self._comments_since() if self.markers["grant"] in (c.get("body") or ""))
 
     def marker(self) -> str:
         return f"{self.markers['round']} {self.number} -->"
 
     def summary(self, ending: str, fixed: list[str], disputed: dict[str, str], sha: str | None = None,
-                note: str = "") -> None:
-        """ONE comment per ending: what was fixed, what was disputed, rounds
-        used, what remains, and the approver mentioned."""
+                note: str = "", unaddressed: dict[str, str] | None = None) -> None:
+        """ONE comment per ending: what was fixed, what was disputed, what was
+        unaddressed, rounds used, what remains, and the approver mentioned."""
         a = self.args
+        unaddressed = unaddressed or {}
         used = self.number if sha else self.number - 1
-        lines = [SUMMARY_MARKER, f"**Autofix on #{a.pr}: {ending}** — @{a.approver}"]
+        lines = [SUMMARY_MARKER, f"**Conveyor fix on #{a.pr}: {ending}** — @{a.approver}"]
         if note:
             lines.append(note)
-        lines.append(f"Rounds used: {used} of {a.max_rounds}.")
+        lines.append(f"Rounds used: {used} of {self.cap}.")
         if fixed:
             lines.append(f"\nFixed{f' in {sha[:7]}' if sha else ''} ({len(fixed)}):")
             lines += [f"- {describe(self.work[t])}" for t in fixed]
         if disputed:
             lines.append(f"\nDisputed ({len(disputed)}) — each stays open until you answer it:")
             lines += [f"- {describe(self.work[t])}: {why}" for t, why in disputed.items()]
+        if unaddressed:
+            # NEVER WORDED AS A DISPUTE. Nobody looked at these; they are
+            # eligible for the next round rather than settled.
+            lines.append(f"\nUnaddressed ({len(unaddressed)}) — the fixing step did not report on these; "
+                         "eligible for a later round:")
+            lines += [f"- {describe(self.work[t])}" for t in unaddressed]
         remaining = [t for t in self.work if t not in fixed]
         if remaining:
             lines.append(f"\nStill open: {plural(len(remaining), 'item')} from this round.")
@@ -270,13 +366,17 @@ def main() -> int:
     ap.add_argument("--mode", choices=["threads", "all"], default="threads")
     ap.add_argument("--approver", default="", help="--mode all: who placed the label; mentioned in every summary")
     ap.add_argument("--since", default="", help="--mode all: when the label was placed (ISO 8601); rounds are counted from then")
-    ap.add_argument("--max-rounds", type=int, default=3)
+    ap.add_argument("--max-rounds", type=int, default=5)
     ap.add_argument("--sonar", type=pathlib.Path, help="--mode all: sonar-issues.py output, for the summary")
     ap.add_argument("--checks", type=pathlib.Path, help="--mode all: failed-checks.py output, for the summary")
     ap.add_argument("--vocabulary", type=pathlib.Path, default=DEFAULT_VOCABULARY)
     ap.add_argument("--push-starts-workflows", action="store_true",
                     help="--mode all: the push goes through a credential that starts CI and the review "
                          "(a deploy key on the remote), so a landed round is followed by the next")
+    ap.add_argument("--report-missing", action="store_true",
+                    help="the fixing step wrote NO report at all (the workflow substituted an empty one "
+                         "so there is always a file to read); the round ends as its own outcome and no "
+                         "item is reported as disputed, rather than reading the substitution as refusal")
     args = ap.parse_args()
     if args.mode == "all" and not args.approver:
         args.approver = args.dispatched_by
@@ -309,6 +409,25 @@ def main() -> int:
                    f"written. Reply `fix it` under a finding to accept it.{run}")
         return 0
 
+    # SILENCE IS NOT A DECISION. The fixing step wrote no report at all -- the
+    # workflow substituted an empty one so there is always a file to read, but
+    # reading that substitution as "every item disputed" tells a reader the
+    # machine considered each finding and declined it, when nobody looked. The
+    # round ends as its OWN outcome instead, disputing nothing; every item stays
+    # eligible for a later round.
+    if args.report_missing:
+        print("no report: the fixing step wrote nothing at all, so nothing was landed and nothing "
+              "is disputed")
+        if rnd:
+            rnd.summary("no report", [], {},
+                        note="The fixing step produced no report this round -- nothing was fixed and "
+                             "nothing is disputed. Every item is still open for the next round.")
+            return 0
+        pr_comment(args.repo, args.pr,
+                   f"Dispatch by @{args.dispatched_by}: the fixing step produced no report, so nothing "
+                   f"was landed. Every accepted finding is still open; dispatch again.{run}")
+        return 0
+
     claimed_fixed, claimed_disputed = read_report(report, work)
 
     patch_empty = args.patch.stat().st_size == 0
@@ -326,8 +445,15 @@ def main() -> int:
             return (not patch_empty), "reported fixed, but the patch is empty"
         return item["path"] in touched, f"reported fixed, but the patch does not touch `{item['path']}`"
 
+    # THREE OUTCOMES, NOT TWO. An item the report NAMES as disputed (or claims
+    # fixed without evidence) is a DECISION -- the fixing step looked at it and
+    # said something. An item the report never mentions at all is UNADDRESSED:
+    # nobody looked, so it is worded as such rather than folded into the same
+    # "disputed" bucket a real refusal lands in, and it stays eligible for a
+    # later round rather than being treated as settled.
     fixed: list[str] = []
     disputed: dict[str, str] = {}
+    unaddressed: dict[str, str] = {}
     for item_id, item in work.items():
         if item_id in claimed_fixed:
             ok, why = evidence(item)
@@ -335,13 +461,17 @@ def main() -> int:
                 fixed.append(item_id)
             else:
                 disputed[item_id] = why
+        elif item_id in claimed_disputed:
+            disputed[item_id] = claimed_disputed[item_id]
         else:
-            disputed[item_id] = claimed_disputed.get(item_id, "not addressed by the fixing step")
+            unaddressed[item_id] = "not named in the fixing step's report"
 
     for t in fixed:
-        print(f"  fixed    {t} ({work[t]['path']})")
+        print(f"  fixed      {t} ({work[t]['path']})")
     for t, why in disputed.items():
         print(f"  {'disputed' if rnd else 'unfixed '} {t} ({work[t]['path']}): {why}")
+    for t, why in unaddressed.items():
+        print(f"  unaddressed {t} ({work[t]['path']}): {why}")
 
     def post_disputes() -> None:
         """--mode all: a marked reply per disputed thread, one comment for
@@ -377,10 +507,25 @@ def main() -> int:
         print("no finding was fixed, so nothing is committed and nothing is resolved")
         if rnd:
             post_disputes()
-            rnd.summary("disputes only", [], disputed,
-                        note="Every item this round was disputed and none was fixed, so the loop ends here.")
+            # THREE DISTINCT ENDINGS, NOT TWO. "nothing addressed" is true
+            # only when NEITHER a dispute nor an unaddressed item exists --
+            # a round with some of each is a genuinely MIXED outcome, and
+            # calling it "nothing addressed" would contradict the very
+            # Disputed and Unaddressed sections the same comment lists.
+            if disputed and unaddressed:
+                ending = "disputed and unaddressed"
+                note = "Every item this round was either disputed or left unaddressed, so none was fixed."
+            elif disputed:
+                ending = "disputes only"
+                note = "Every item this round was disputed and none was fixed, so the loop ends here."
+            else:
+                ending = "nothing addressed"
+                note = "Nothing was fixed this round; every item is still open for the next."
+            rnd.summary(ending, [], disputed, unaddressed=unaddressed, note=note)
             return 0
         lines = "\n".join(f"- `{work[t]['path']}`: {why}" for t, why in disputed.items())
+        lines += ("\n" if lines and unaddressed else "") + \
+            "\n".join(f"- `{work[t]['path']}`: not addressed by the fixing step" for t in unaddressed)
         pr_comment(args.repo, args.pr,
                    f"Dispatch by @{args.dispatched_by}: nothing landed. Every accepted finding "
                    f"is still open:\n\n{lines}{run}")
@@ -412,7 +557,7 @@ def main() -> int:
         parts = [plural(n_review, "review finding")] if n_review else []
         parts += [plural(n_sonar, "analysis issue")] if n_sonar else []
         parts += [plural(n_check, "failed check")] if n_check else []
-        subject = f"fix(review): address {' and '.join(parts)} (autofix round {rnd.number})"
+        subject = f"fix(review): address {' and '.join(parts)} (conveyor round {rnd.number})"
     else:
         subject = f"fix(review): address {len(fixed)} accepted review finding{'s' if len(fixed) != 1 else ''}"
     # A CHECK IS NAMED BY ITS JOB. Its `path` is the workflow file and it
@@ -439,6 +584,10 @@ def main() -> int:
                    f"```\n{push.stderr.strip()}\n```")
         return 1
     print(f"pushed {sha[:7]} to {args.branch}")
+    # ONLY NOW: a commit genuinely landed, so a round past the cap has
+    # actually earned the extension it consumes.
+    if rnd:
+        rnd.consume_keep_going()
 
     for t in fixed:
         if work[t]["source"] == "review":
@@ -450,6 +599,9 @@ def main() -> int:
         for t, why in disputed.items():
             thread_reply(args.repo, args.pr, work[t]["commentId"],
                          f"Not addressed by the dispatch ({why}). Left open.{run}")
+        for t in unaddressed:
+            thread_reply(args.repo, args.pr, work[t]["commentId"],
+                         f"Not addressed by the dispatch. Left open.{run}")
 
     # THEN resolve, through the program that already refuses anything the
     # review did not author. Analysis issues have no thread; the service
@@ -463,23 +615,23 @@ def main() -> int:
         print(resolver.stderr, file=sys.stderr)
         return resolver.returncode
 
-    left = f", {len(disputed)} left open" if disputed else ""
+    left = f", {plural(len(disputed) + len(unaddressed), 'item')} left open" if (disputed or unaddressed) else ""
     if rnd:
         # THE ROUND IS RECORDED ON THE PULL REQUEST, in the comment that
         # announces the landing. Then either the cap ends the loop, or the
         # next round is started by `workflow_dispatch`.
         pr_comment(args.repo, args.pr,
-                   f"{rnd.marker()}\nAutofix round {rnd.number} of {args.max_rounds}: {sha[:7]} addresses "
+                   f"{rnd.marker()}\nConveyor round {rnd.number} of {rnd.cap}: {sha[:7]} addresses "
                    f"{plural(len(fixed), 'item')}{left}.{run}")
-        if rnd.number >= args.max_rounds:
-            rnd.summary("round cap reached", fixed, disputed, sha=sha,
-                        note=f"{args.max_rounds} rounds have run; no further round starts. "
-                             "Remove and re-add the label to run more.")
+        if rnd.number >= rnd.cap:
+            rnd.summary("round cap reached", fixed, disputed, sha=sha, unaddressed=unaddressed,
+                        note=f"{rnd.cap} rounds have run; no further round starts. "
+                             f"Place `{markers['keep_going']}` to grant another {args.max_rounds}.")
         elif not args.push_starts_workflows:
             # THE TOKEN PUSHED IT, so nothing runs on it. The loop cannot
             # continue by itself; say so rather than wait for a round that
             # will never be triggered.
-            rnd.summary("could not start the next round", fixed, disputed, sha=sha,
+            rnd.summary("could not start the next round", fixed, disputed, sha=sha, unaddressed=unaddressed,
                         note="The commit was pushed with the workflow token, which starts no workflow: "
                              "no push credential (`AUTOFIX_DEPLOY_KEY`) is configured. Push again (an "
                              "empty commit will do) to get CI and the review — and, with the label still "

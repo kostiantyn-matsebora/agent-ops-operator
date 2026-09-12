@@ -529,3 +529,44 @@ were a separate unit.
   the first flagged function in a file often produces a helper (`findDocByKindAndName`,
   `countDocsContaining`, …) that the NEXT flagged function in the same file
   can call directly, without writing its own extraction.
+
+**A REMOTE SESSION CANNOT APPROVE ITS OWN WORK, AND IT COST A PULL REQUEST
+ITS AUTOMATIC FIXING — MEASURED LIVE ON #201.**
+`.github/routines/implement-issue.md` told a session to open its pull request
+with `gh pr create --label autofix`. This was exactly what `change-delivery`'s
+spec said to do at the time.
+
+RETIRED: `conveyor-labels` renamed that label `conveyor:fix`. How it now
+reaches the pull request without the session placing it is the second bullet
+below.
+
+`review-dispatch.yml`'s gate asked the collaborators API whether the labeller
+may push here. The labeller was `claude[bot]`, an application with no write
+access, and the answer was `none`.
+
+The gate removed the label and posted a refusal. Everything behaved as
+designed except the design: the pull request sat green, reviewed and
+unlabelled, with no session left to do anything about it.
+
+- **THE GATE WAS RIGHT AND DID NOT MOVE.** A label that decides code gets
+  written to a branch counts only from someone the platform says may push,
+  and a bot exempted from that check is the hole the whole mechanism exists
+  to close.
+- **THE FIX: A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER
+  MINT ONE.** `conveyor-labels` retired `autofix`/`autoimplement` into the
+  `conveyor:` vocabulary and made the session place NO label on its own work,
+  ever.
+  - Where a person's standing instruction (`conveyor:run`, placed on the
+    tracking issue) authorises the next station, a WORKFLOW —
+    `.github/scripts/carry-grant.py` — reads that instruction again at the
+    moment it matters.
+  - It re-checks the placer still has write access, then places the
+    station's label itself, recording whose grant it carried.
+  - The gate then passes because the label was placed by
+    `github-actions[bot]` acting on a CHECKED grant, not asserted by the
+    thing being decided about.
+- **A CARRIED LABEL IS RE-CHECKED, NEVER TRUSTED.** `review-dispatch.yml`'s
+  gate accepts a label placed by `github-actions[bot]` only after re-reading
+  the originating issue's `conveyor:run` and confirming it is still there and
+  still a writer's — the same live-read property the gate already had for a
+  person's own label.

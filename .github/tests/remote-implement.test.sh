@@ -65,12 +65,18 @@ PY
 stop_endpoint() { [ -n "${ENDPOINT_PID:-}" ] && kill "$ENDPOINT_PID" 2>/dev/null; wait "$ENDPOINT_PID" 2>/dev/null; ENDPOINT_PID=""; }
 trap stop_endpoint EXIT
 
-event() {  # event <file> <label> <number> <sender> [pull_request]
+event() {  # event <file> <label> <number> <sender> [pull_request] [extra_label]
   local pr=""; [ -n "${5:-}" ] && pr=', "pull_request": {"url": "u"}'
+  # THE ISSUE'S OWN labels[] CARRIES AT LEAST THE FIRED LABEL, as GitHub's
+  # real payload does -- an OPTIONAL sixth arg adds a second, for the case
+  # where a standing instruction already sits on the issue beside whichever
+  # label just fired this event.
+  local labels="{\"name\": \"$2\"}"
+  [ -n "${6:-}" ] && labels="$labels, {\"name\": \"$6\"}"
   cat > "$1" <<JSON
 {"action": "labeled",
  "label": {"name": "$2"},
- "issue": {"number": $3, "title": "A thing that is broken"$pr},
+ "issue": {"number": $3, "title": "A thing that is broken", "labels": [$labels]$pr},
  "sender": {"login": "$4"}}
 JSON
 }
@@ -98,19 +104,21 @@ assert_equals "" "$(cat "$GH_CALLS")"
 # --- the gate ----------------------------------------------------------------
 
 for perm in read triage none; do
-  it "a $perm labeller starts nothing: the label comes off and one comment says who may place it"
-  setup; stub_gh_perm "$BIN" "$perm"
-  event "$EVENT" autoimplement 7 stranger
-  out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
-  assert_status 1 "$status"
-  assert_contains "$(cat "$GH_CALLS")" "issue edit 7 --repo o/r --remove-label autoimplement"
-  assert_contains "$(cat "$GH_CALLS")" "issue comment 7"
-  assert_not_contains "$out" "fired"
+  for label in conveyor:implement conveyor:run; do
+    it "a $perm labeller placing $label starts nothing: the label comes off and one comment says who may place it"
+    setup; stub_gh_perm "$BIN" "$perm"
+    event "$EVENT" "$label" 7 stranger
+    out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+    assert_status 1 "$status"
+    assert_contains "$(cat "$GH_CALLS")" "issue edit 7 --repo o/r --remove-label $label"
+    assert_contains "$(cat "$GH_CALLS")" "issue comment 7"
+    assert_not_contains "$out" "fired"
+  done
 done
 
 it "a pull request carrying the label fires nothing: it is an issue to that API, not a request to implement"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 7 owner pr
+event "$EVENT" conveyor:implement 7 owner pr
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 0 "$status"
 assert_not_contains "$(cat "$GH_CALLS")" "issue comment"
@@ -119,7 +127,7 @@ assert_not_contains "$(cat "$GH_CALLS")" "issue comment"
 
 it "a writer's label fires once, carrying the NUMBER and the beta header, and comments the session link"
 setup; stub_gh_perm "$BIN" write
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 start_endpoint 200 "$BODY" "$RECORD"
 out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
 stop_endpoint
@@ -128,10 +136,63 @@ assert_equals '{"text": "42"}' "$(python3 -c 'import json,sys;print(json.load(op
 assert_contains "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["headers"])' "$RECORD")" "experimental-cc-routine"
 assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
 assert_contains "$(cat "$GH_CALLS")" "https://claude.ai/code/session_abc"
+# THE SESSION PLACES NO LABEL ON ITS OWN WORK -- #201's fix. conveyor:implement
+# is a single-station label, so the comment says a PERSON places the next
+# one, never that a workflow carries the grant forward (that only happens
+# when the fire itself was conveyor:run -- see the next test).
+assert_contains "$(cat "$GH_CALLS")" "unlabelled"
+assert_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixing loop"
+assert_not_contains "$(cat "$GH_CALLS")" "a workflow reads"
+
+# conveyor:implement CAN FIRE WHILE conveyor:run ALREADY STANDS -- the later
+# carry (carry-grant.py, at the `open` job) reads the ISSUE'S CURRENT labels,
+# never which one fired this session, so the standing instruction still gets
+# carried forward even though conveyor:implement, not conveyor:run, is what
+# triggered this particular run. The comment must say so.
+it "conveyor:implement fires while conveyor:run already stands on the issue, and the comment says the grant WILL be carried"
+setup; stub_gh_perm "$BIN" write
+event "$EVENT" conveyor:implement 44 maintainer "" conveyor:run
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 44"
+assert_contains "$(cat "$GH_CALLS")" "carries it forward as"
+assert_not_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixing loop"
+# THE TEXT MUST NAME conveyor:run, THE LABEL THAT ACTUALLY GETS CARRIED --
+# never conveyor:implement, the one that happened to fire this session.
+# carry-grant.py reads run_label off the issue's live labels regardless of
+# which label fired remote-implement.py, so naming the firing label here
+# would describe a carry that is not the one that actually happens.
+assert_contains "$(cat "$GH_CALLS")" "reads \`conveyor:run\` again and carries it forward as \`conveyor:fix\`"
+assert_contains "$(cat "$GH_CALLS")" "a workflow carries \`conveyor:run\` forward again to archive"
+assert_not_contains "$(cat "$GH_CALLS")" "reads \`conveyor:implement\` again"
+assert_not_contains "$(cat "$GH_CALLS")" "carries \`conveyor:implement\` forward again to archive"
+
+# conveyor:run FIRES THE SAME SESSION, and its comment says the standing
+# instruction is what a workflow reads again later to carry the grant forward.
+it "a writer's conveyor:run fires the same session, and says the grant will be CARRIED forward, not placed now"
+setup; stub_gh_perm "$BIN" write
+event "$EVENT" conveyor:run 43 maintainer
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_equals '{"text": "43"}' "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["body"])' "$RECORD")"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 43"
+assert_contains "$(cat "$GH_CALLS")" "carries it forward as"
+assert_contains "$(cat "$GH_CALLS")" "conveyor:fix"
+
+it "another conveyor: label (conveyor:fix, which belongs to the fixing loop, not this program) does nothing"
+setup; stub_gh_perm "$BIN" admin
+event "$EVENT" "conveyor:fix" 7 someone
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_equals "" "$(cat "$GH_CALLS")"
 
 it "the comment carries the marker, so a second run does not post a second one"
 setup; stub_gh_perm "$BIN" write
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 echo '<!-- remote-implement:fired -->' > "$DIR/comments"
 GH_COMMENTS="$DIR/comments"; export GH_COMMENTS
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
@@ -155,7 +216,7 @@ esac
 exit 0
 STUB
 chmod +x "$BIN/gh"
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 0 "$status"
 assert_not_contains "$out" "fired for"
@@ -165,7 +226,7 @@ assert_contains "$out" "already fired"
 
 it "a 5xx from the endpoint comments the status and fails the job, rather than failing silently"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 9 owner
+event "$EVENT" conveyor:implement 9 owner
 start_endpoint 503 "$BODY" "$RECORD"
 out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
 stop_endpoint
@@ -175,7 +236,7 @@ assert_contains "$(cat "$GH_CALLS")" "503"
 
 it "no endpoint configured says so on the issue instead of starting nothing quietly"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 9 owner
+event "$EVENT" conveyor:implement 9 owner
 out=$(PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r python3 "$S" --event "$EVENT" --repo o/r --fire-url "" 2>&1); status=$?
 assert_status 1 "$status"
 assert_contains "$(cat "$GH_CALLS")" "no routine"
@@ -185,7 +246,7 @@ assert_contains "$(cat "$GH_CALLS")" "no routine"
 # trace on the runner and nothing on the issue, where a person would look.
 it "a fire url carrying an EMBEDDED newline is refused with one line, not a stack trace"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 # THE SHAPE THAT ACTUALLY HAPPENED: `gh variable set` stored a value copied out
 # of a wrapped display, so the break sits INSIDE the id rather than at the end.
 # `.strip()` cannot help there — http.client raises InvalidURL from four frames
@@ -198,7 +259,7 @@ assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
 
 it "a fire url that is not a url at all is REFUSED on the issue, never a stack trace"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 out=$(run_it --fire-url "trig_01ABC/fire"); status=$?
 assert_status 1 "$status"
 assert_contains "$(cat "$GH_CALLS")" "issue comment 42"
@@ -210,7 +271,7 @@ assert_not_contains "$out" "Traceback"
 # indistinguishable from a revoked credential.
 it "a token carrying a line break is refused before it is sent, and never printed"
 setup; stub_gh_perm "$BIN" admin
-event "$EVENT" autoimplement 42 maintainer
+event "$EVENT" conveyor:implement 42 maintainer
 out=$(PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r ROUTINE_FIRE_TOKEN="$(printf 'sk-ant-oat01-AAA\nBBB')" \
   python3 "$S" --event "$EVENT" --repo o/r --fire-url "http://127.0.0.1:1/fire" 2>&1); status=$?
 assert_status 1 "$status"
@@ -225,7 +286,7 @@ assert_not_contains "$(cat "$GH_CALLS")" "sk-ant-oat01-AAA"
 it "an event whose issue number is not a number never reaches the fire"
 setup; stub_gh_perm "$BIN" admin
 cat > "$EVENT" <<'JSON'
-{"action":"labeled","label":{"name":"autoimplement"},
+{"action":"labeled","label":{"name":"conveyor:implement"},
  "issue":{"number":"7; rm -rf /","title":"t"},"sender":{"login":"owner"}}
 JSON
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?

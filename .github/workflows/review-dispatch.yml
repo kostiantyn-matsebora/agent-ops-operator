@@ -8,15 +8,21 @@
 # stays open — and, since branch protection requires conversation resolution,
 # keeps the merge blocked until a person deals with it. That is the feature.
 #
-# OR THE WHOLE PULL REQUEST IS APPROVED AT ONCE. The `autofix` label
-# (`.github/review-triage.json`, `approve_label`) is change-level consent,
-# placed by a person with write access: every open finding of the review's and
-# every open issue the analysis service reports are on the work list, each is
-# FIXED or DISPUTED (a dispute is a reply that stays open and names the
-# approver), the landed commit is pushed so that CI and the review run on it,
-# and the review's completion starts the next round —
-# bounded by MAX_ROUNDS, every ending summarised in ONE comment. Without the
-# label, nothing here changes.
+# OR THE WHOLE PULL REQUEST IS APPROVED AT ONCE. The `conveyor:fix` label
+# (`.github/review-triage.json`, `approve_label`, renamed from `autofix`) is
+# change-level consent, placed by a person with write access — directly, or
+# CARRIED forward by `.github/scripts/carry-grant.py` relaying a person's
+# standing instruction on the tracking issue (`conveyor:run`); a program may
+# only carry or consume a grant, never mint one, and a carried label is
+# re-checked against the grant it claims rather than trusted: every open
+# finding of the review's and every open issue the analysis service reports
+# are on the work list, each is FIXED or DISPUTED (a dispute is a reply that
+# stays open and names the approver), the landed commit is pushed so that CI
+# and the review run on it, and the review's completion starts the next round
+# — bounded by `max_rounds` (`.github/review-triage.json`),
+# every ending summarised in ONE comment, and
+# `conveyor:keep-going` grants another set, consumed as it is taken. Without
+# the label, nothing here changes.
 #
 # FOUR JOBS, AND THE SPLITS ARE THE POINT:
 #
@@ -47,7 +53,7 @@
 # job name, its run and a bounded tail of the failed steps' log, and a `ci` run
 # completing with `failure` starts a round beside the review's completion. The
 # `concurrency` group serialises the two, so one head can produce two rounds in
-# sequence, each collecting the live state; `MAX_ROUNDS` bounds both. A check is
+# sequence, each collecting the live state; `max_rounds` bounds both. A check is
 # FIXED only after the fixer reproduced it with the job's own command, or
 # DISPUTED with the log's reason — a runner outage and a rate limit are not
 # things the tree can fix.
@@ -118,26 +124,36 @@ concurrency:
 
 permissions: {}
 
-env:
-  # THE BOUND. The reviewer's verdicts vary between runs and it reviews the
-  # fixer's own commits, so an unbounded loop could argue with itself at a
-  # cost nobody approved. Three rounds; a third round still disagreeing is a
-  # reviewer-prompt problem, not a reason to raise this.
-  MAX_ROUNDS: 3
+# THE BOUND IS READ, NOT DECLARED HERE. This used to be a static `env:` entry
+# (`MAX_ROUNDS: 3`); a workflow's `env:` block cannot read a file, so the
+# number is now read once, in the gate job, from `.github/review-triage.json`'s
+# `max_rounds` — the same file that names the label — and passed down as
+# `needs.gate.outputs.max_rounds`. Stated once,
+# where the rest of this vocabulary already lives.
 
 jobs:
   gate:
     # THE PREFILTER. A comment that does not start with the dispatch form, a
-    # label that is not the approval label, a review that did not complete —
-    # none starts anything beyond this expression; the run appears skipped in
-    # the list. The exact match against the vocabulary file happens one step
-    # down; this must AGREE with it, and is the one place the form and the
-    # label are repeated, because an expression cannot read a file.
+    # label that is neither the approval label NOR the extending label, a
+    # review that did not complete — none starts anything beyond this
+    # expression; the run appears skipped in the list. The exact match
+    # against the vocabulary file happens one step down, for `conveyor:fix`
+    # (read as `approve_label` from .github/review-triage.json, in the `who`
+    # step below) — `conveyor:keep-going` is never looked up by name past
+    # this point, since the step below reads the EVENT's own label
+    # (`THIS_LABEL`) and only ever compares it against `approve_label`,
+    # falling through to an ordinary write-access check otherwise. This
+    # expression must still AGREE with both literal names, and is the one
+    # place either is repeated, because a job's `if:` is evaluated before any
+    # checkout and cannot read a file.
+    # `conveyor:keep-going` is here because placing it must RE-TRIGGER a
+    # round on a pull request whose loop already ended on the cap — the same
+    # structural constraint as `conveyor:fix` right beside it.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/fix-accepted')) ||
       (github.event_name == 'pull_request_review_comment' && startsWith(github.event.comment.body, '/fix-accepted')) ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'autofix') ||
+      (github.event_name == 'pull_request' && (github.event.label.name == 'conveyor:fix' || github.event.label.name == 'conveyor:keep-going')) ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'claude-review' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'ci' && github.event.workflow_run.conclusion == 'failure')
     runs-on: ubuntu-latest
@@ -155,6 +171,7 @@ jobs:
       approver: ${{ steps.who.outputs.approver }}
       since: ${{ steps.who.outputs.since }}
       head: ${{ steps.who.outputs.head }}
+      max_rounds: ${{ steps.who.outputs.max_rounds }}
     steps:
       # THE TRUSTED COPY, NOT THE PULL REQUEST'S. On `pull_request_review_comment`
       # and on `pull_request: labeled` `github.ref` is the pull request's MERGE
@@ -178,9 +195,14 @@ jobs:
           REVIEW_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
           INPUT_MODE: ${{ inputs.mode }}
+          EVENT_LABEL: ${{ github.event.label.name }}
         run: |
           set -euo pipefail
           LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["approve_label"])')
+          # THE BOUND, STATED ONCE — read here rather than declared in this
+          # workflow's own env:, so the vocabulary file is the one place a
+          # person changes it.
+          echo "max_rounds=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["max_rounds"])')" >> "$GITHUB_OUTPUT"
           echo "dispatcher=$SENDER" >> "$GITHUB_OUTPUT"
 
           refuse() {
@@ -192,9 +214,43 @@ jobs:
           # state on the pull request rather than a memory of an event. The
           # latest placement counts, so removing and re-adding the label
           # starts the round count afresh.
+          #
+          # A CARRIED LABEL'S TIMELINE ACTOR IS THE BOT, NEVER THE APPROVER —
+          # measured live: `carry-grant.py` places the label under this
+          # workflow's own token, so the timeline event's actor is
+          # `github-actions[bot]`, not the person whose `conveyor:run`
+          # instruction it carried. That person's login is exactly what
+          # `carry-grant.py`'s own marker comment already names, so a
+          # bot-placed label falls back to reading it from there instead of
+          # reporting the bot as the approver.
+          #
+          # THIS FUNCTION ALWAYS RESOLVES `conveyor:fix`'s PLACEMENT, NEVER
+          # `conveyor:keep-going`'s — deliberately, not an oversight. Both
+          # labels fire this job and both reach `mode=all`, but keep-going
+          # only EXTENDS a fixing effort someone already authorised with
+          # `conveyor:fix`; it grants more rounds under that same approval; it
+          # does not authorise a new one. So the approver attributed on every
+          # landing comment — placing `conveyor:keep-going` rounds included —
+          # is always who placed `conveyor:fix`, which is why `$LABEL` here
+          # (read once, at the top of this step) and the marker this function
+          # greps for are both hardcoded to the fix station and never take
+          # `$THIS_LABEL` or `$EVENT_LABEL`.
           label_placement() {
-            gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
-              --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$LABEL\")] | last | \"\(.actor.login) \(.created_at)\""
+            read -r actor since < <(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
+              --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$LABEL\")] | last | \"\(.actor.login) \(.created_at)\"")
+            if [ "$actor" = "github-actions[bot]" ]; then
+              # ANCHORED TO THE SENTENCE SHAPE, NOT "the first @ anywhere" --
+              # carry-grant.py's comment carries exactly one mention today
+              # ("carrying @<placer>'s standing instruction"), but a bare
+              # `grep -oE '@\w+' | head -1` would silently pick a DIFFERENT
+              # login if this template ever grew a second one.
+              carried=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+                --jq '[.[] | select(.body | startswith("<!-- carry-grant:fix -->"))] | last | .body' \
+                | grep -oE "carrying @[A-Za-z0-9_.-]+'s standing instruction" | head -1 \
+                | sed -E "s/^carrying @//; s/'s standing instruction\$//" || true)
+              [ -n "$carried" ] && actor="$carried"
+            fi
+            printf '%s %s\n' "$actor" "$since"
           }
           # MAY THIS PERSON PUSH HERE — the collaborators API, because a label
           # event carries no `author_association`.
@@ -227,14 +283,56 @@ jobs:
               esac
               ;;
             pull_request)
-              # THE LABEL IS CONSENT ONLY FROM SOMEONE WHO MAY PUSH. Placed by
-              # anyone else it is REMOVED, with a comment: a refusal that left
-              # it in place would look like a loop that broke.
-              if ! can_push "$SENDER"; then
-                gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL"
-                refuse "write access is required to approve a pull request for automatic fixing, and \`$SENDER\` cannot push here. The \`$LABEL\` label was removed."
+              # TWO LABELS REACH THIS CASE, AND EACH IS CHECKED AGAINST ITSELF
+              # — never against the other's name, or a `conveyor:keep-going`
+              # event would be refused for not being `conveyor:fix`.
+              THIS_LABEL="$EVENT_LABEL"
+              # THE LABEL IS CONSENT ONLY FROM SOMEONE WHO MAY PUSH — DIRECTLY,
+              # OR CARRIED BY A WORKFLOW RELAYING A STANDING INSTRUCTION THAT
+              # IS STILL THERE. A program may carry a grant forward; it may
+              # never mint one, so a carried label is RE-CHECKED against the
+              # grant it claims to carry rather than trusted because a
+              # workflow placed it.
+              #
+              # `SENDER == github-actions[bot]` NAMES AN IDENTITY, NOT
+              # carry-grant.py SPECIFICALLY. The GitHub timeline API attaches
+              # no workflow-run provenance to a labeled event, so there is no
+              # field here that could name the caller more precisely — every
+              # workflow using the default token labels as this same actor.
+              # WHAT ACTUALLY GATES THE DECISION is the block below: it
+              # re-reads the pull request's OWN `Refs #<n>` and the NAMED
+              # issue's CURRENT `conveyor:run` — both fresh, regardless of who
+              # or what placed the label being checked. Re-checking the run
+              # label placer's OWN write access is carry-grant.py's job, not
+              # this step's: that already happened once, when the label this
+              # step is now re-verifying was placed. A label placed by any
+              # other `github-actions[bot]` caller is refused unless a real
+              # standing instruction genuinely exists on the issue the pull
+              # request names right now, which is the same substantive grant
+              # a legitimate carry would also require.
+              if can_push "$SENDER"; then
+                mode=all
+              elif [ "$SENDER" = "github-actions[bot]" ] && [ "$THIS_LABEL" = "$LABEL" ]; then
+                # THE ORIGINATING ISSUE, from `Refs #<n>` in the pull
+                # request's own body — the same field remote-implement.yml
+                # parsed and passed to carry-grant.py as `--issue <n>` to
+                # place this label; carry-grant.py itself never reads the
+                # body. Only `conveyor:fix` is ever CARRIED this way;
+                # `conveyor:keep-going` is placed by a person only, so a bot
+                # placing it falls through to refusal.
+                BODY_TEXT=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+                ISSUE=$(printf '%s' "$BODY_TEXT" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+                RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
+                STANDING=$([ -n "$ISSUE" ] && gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx "$RUN_LABEL" && echo yes || echo no)
+                if [ -z "$ISSUE" ] || [ "$STANDING" != "yes" ]; then
+                  gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$THIS_LABEL"
+                  refuse "\`$THIS_LABEL\` was carried from an issue's \`$RUN_LABEL\`, but that instruction is no longer there (or no issue was named). The \`$THIS_LABEL\` label was removed."
+                fi
+                mode=all
+              else
+                gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$THIS_LABEL"
+                refuse "write access is required to place \`$THIS_LABEL\`, and \`$SENDER\` cannot push here. The \`$THIS_LABEL\` label was removed."
               fi
-              mode=all
               ;;
             workflow_run)
               # WHICH PULL REQUEST THIS RUN CONCERNS, and the two runs answer
@@ -495,22 +593,37 @@ jobs:
 
       # THE PATCH IS THE WHOLE OF WHAT CROSSES. `--binary` so a changed image
       # survives; `add -N` so a NEW file is in the diff at all. A missing report
-      # becomes "nothing fixed" rather than a missing input — the lander then
-      # leaves every thread open and says so, which is the honest reading of a
-      # run that produced changes it did not account for.
+      # is substituted with an empty one so the lander always has a file to
+      # read -- but SILENCE AND REFUSAL ARE DIFFERENT FACTS: a `no-report`
+      # sentinel rides beside it, so land-dispatch.py can tell "the fixing step
+      # ran and disputed nothing" from "the fixing step wrote nothing at all"
+      # rather than reading the second as three phantom disputes (measured
+      # while this very change was under review: three findings on a
+      # proposal-only pull request came back "disputed... not addressed",
+      # and no model had spoken).
       - name: The patch, and the report
         run: |
           set -euo pipefail
           git add -N .
           git diff --binary > "$RUNNER_TEMP/dispatch/fix.patch"
-          [ -f "$RUNNER_TEMP/dispatch/report.json" ] || echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
+          if [ -f "$RUNNER_TEMP/dispatch/report.json" ]; then
+            rm -f "$RUNNER_TEMP/dispatch/report.no-report"
+          else
+            echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
+            : > "$RUNNER_TEMP/dispatch/report.no-report"
+          fi
           echo "patch: $(wc -c < "$RUNNER_TEMP/dispatch/fix.patch") bytes"; cat "$RUNNER_TEMP/dispatch/report.json"
       - uses: actions/upload-artifact@v4
         with:
           name: dispatch-fix
+          # `report.no-report` is OPTIONAL -- present only when the report was
+          # missing and substituted above. `fix.patch` and `report.json` are
+          # written unconditionally, so the overall match is never empty and
+          # `if-no-files-found: error` still catches a genuinely broken step.
           path: |
             ${{ runner.temp }}/dispatch/fix.patch
             ${{ runner.temp }}/dispatch/report.json
+            ${{ runner.temp }}/dispatch/report.no-report
           retention-days: 1
           # The dotfile trap that made `.resolve-threads` a no-op for a day:
           # upload-artifact v4 excludes hidden files by default. Nothing here
@@ -605,8 +718,14 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # shellcheck disable=SC2086 -- STARTS is one flag or nothing
-          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS \
+          # A MISSING REPORT AND AN EMPTY ONE ARE DIFFERENT FACTS. The sentinel
+          # rides beside report.json only when the fixing step wrote nothing at
+          # all; its presence is what tells the lander to end the round as
+          # `no report` rather than inventing a dispute for every work item.
+          REPORT_MISSING=""
+          [ -f "$RUNNER_TEMP/dispatch/report.no-report" ] && REPORT_MISSING="--report-missing"
+          # shellcheck disable=SC2086 -- STARTS and REPORT_MISSING are each one flag or nothing
+          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS $REPORT_MISSING \
             --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" \
             --branch "${{ needs.gate.outputs.branch }}" \
             --work-list "$RUNNER_TEMP/dispatch/work-list.json" \
@@ -616,6 +735,6 @@ jobs:
             --vocabulary "$RUNNER_TEMP/review-triage.json" \
             --dispatched-by "${{ needs.gate.outputs.dispatcher }}" \
             --mode "$MODE" --approver "$APPROVER" --since "$SINCE" \
-            --max-rounds "$MAX_ROUNDS" --sonar "$RUNNER_TEMP/dispatch/sonar.json" \
+            --max-rounds "${{ needs.gate.outputs.max_rounds }}" --sonar "$RUNNER_TEMP/dispatch/sonar.json" \
             --checks "$RUNNER_TEMP/dispatch/checks.json" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

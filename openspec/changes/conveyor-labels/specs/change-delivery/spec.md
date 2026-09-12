@@ -7,12 +7,23 @@ label THEY place — on the change's pull request, or on the tracking issue as t
 standing instruction that carries to every station. The label SHALL be honoured
 only from a person whose write access is read from the platform.
 
-**A SESSION SHALL NOT PLACE IT.** An automated session acts as an application
-with no write access, so a label it places is refused and removed by the gate
-that checks who labelled — measured live, on a pull request that then sat green
-and unlabelled with no session left to act. Where the owner's grant must reach a
-pull request the session opened, a WORKFLOW carries the owner's existing label
-forward and records whose it was; the session opens its pull request carrying no
+**NO SESSION SHALL PLACE IT, WHATEVER CREDENTIALS IT RUNS UNDER.** A remote
+session acts as an application with no write access. A label it places is
+refused and removed by the gate that checks who labelled.
+
+That was measured live, on a pull request that then sat green and unlabelled
+with no session left to act.
+
+An INTERACTIVE session, on the owner's own workstation under their own
+authenticated `gh`, genuinely COULD place the label and have it honoured. It
+still SHALL NOT.
+
+Telling the owner the command is not running it. Only the owner typing it
+themselves is their own word.
+
+Where the owner's grant must reach a pull request the session opened, a
+WORKFLOW carries the owner's existing label forward and records whose it was.
+The session opens its pull request carrying no
 label at all.
 
 The approval is the change's, not the finding's: the owner has read the proposal
@@ -25,7 +36,16 @@ re-decided per thread.
 
 - **WHEN** the owner tells the session the change is approved for fixing
 - **THEN** the owner places the label themselves, or places the standing
-  instruction on the issue; the session places nothing and says so
+  instruction on the issue. The session places nothing and says so
+
+#### Scenario: The owner approves interactively, on a workstation
+
+- **WHEN** the owner asks an interactive session, running on their workstation
+  where `gh` is already authenticated as them, whether the change is approved
+  for fixing, and confirms it is
+- **THEN** the session tells the owner the command rather than running it,
+  and only the owner themselves — typing it in their own terminal, never the
+  session — executes it
 
 #### Scenario: The owner approves the pull request
 

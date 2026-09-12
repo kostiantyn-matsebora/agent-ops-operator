@@ -776,6 +776,28 @@
         "is now",
         "hosted endpoint"
       ]
+    },
+    {
+      "id": "autofix",
+      "pattern": "(?<![\\w-])(autofix|autoimplement)(?![\\w-])",
+      "says": "conveyor:fix replaces autofix (the approve label), and conveyor:implement replaces autoimplement",
+      "allow": [
+        "removed",
+        "retired",
+        "renamed",
+        "former",
+        "no longer",
+        "deleted",
+        "replaced",
+        "is now",
+        "becomes",
+        "was named",
+        "used to",
+        "before the rename",
+        "predating",
+        "flag day",
+        "gone"
+      ]
     }
   ]
 }

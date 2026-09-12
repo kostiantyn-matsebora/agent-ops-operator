@@ -104,7 +104,7 @@ def load_vocabulary(path: pathlib.Path) -> dict:
         "accept": {p.strip().lower() for p in doc["accept"]},
         "dispatch": {p.strip().lower() for p in doc["dispatch"]},
         "punctuation": doc.get("trailing_punctuation", ".!,"),
-        "dispute_marker": doc.get("dispute_marker", "<!-- autofix:disputed -->"),
+        "dispute_marker": doc.get("dispute_marker", "<!-- conveyor:disputed -->"),
     }
 
 
