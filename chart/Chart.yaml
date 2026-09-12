@@ -37,7 +37,7 @@ dependencies:
   # embedded subchart (chart/charts/home-assistant); templates are additionally
   # self-gated on home-assistant.enabled
   - name: home-assistant
-    version: 0.1.1
+    version: 0.2.0
     repository: ""
     condition: home-assistant.enabled
   # embedded subchart (chart/charts/claude) — the REFERENCE RUNTIME, and the one

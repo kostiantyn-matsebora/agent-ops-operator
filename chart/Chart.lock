@@ -10,7 +10,7 @@ dependencies:
   version: 0.4.0
 - name: home-assistant
   repository: ""
-  version: 0.1.1
+  version: 0.2.0
 - name: claude
   repository: ""
   version: 0.1.0
@@ -20,5 +20,5 @@ dependencies:
 - name: copilot
   repository: ""
   version: 0.1.0
-digest: sha256:e60c18d92d0e67c4c00d168cce02476b72c19cef71d53138a090934c30c8b354
-generated: "2026-09-09T23:07:48.646760729+03:00"
+digest: sha256:2a053527aa98f9e7937ee30e959a6f5c484aa5a0af2a6f2af2e6b5df78962bea
+generated: "2026-09-12T18:12:38.072266304+03:00"
