@@ -74,6 +74,16 @@ assert_contains "$gate" "--remove-label"
 it "the label is read at every round, so removing it stops the loop at the next boundary"
 assert_contains "$gate" "grep -qx \"\$LABEL\""
 
+# label_placement() ALWAYS RESOLVES conveyor:fix'S PLACEMENT, DELIBERATELY --
+# never conveyor:keep-going's, even on a round a keep-going event triggered.
+# keep-going only EXTENDS an already-authorised fixing effort, so the
+# approver every landing comment names is always who placed conveyor:fix.
+it "label_placement is hardcoded to the fix station, never the firing event's own label"
+assert_contains "$gate" 'label.name == \"$LABEL\"'
+assert_contains "$gate" "carry-grant:fix"
+assert_not_contains "$gate" 'label.name == \"$THIS_LABEL\"'
+assert_not_contains "$gate" 'label.name == \"$EVENT_LABEL\"'
+
 # A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.
 # A label placed by github-actions[bot] (carry-grant.py's own actor) is
 # RE-CHECKED against the issue it claims to carry from — never trusted

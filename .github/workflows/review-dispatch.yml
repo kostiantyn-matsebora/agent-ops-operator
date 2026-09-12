@@ -223,6 +223,18 @@ jobs:
           # `carry-grant.py`'s own marker comment already names, so a
           # bot-placed label falls back to reading it from there instead of
           # reporting the bot as the approver.
+          #
+          # THIS FUNCTION ALWAYS RESOLVES `conveyor:fix`'s PLACEMENT, NEVER
+          # `conveyor:keep-going`'s — deliberately, not an oversight. Both
+          # labels fire this job and both reach `mode=all`, but keep-going
+          # only EXTENDS a fixing effort someone already authorised with
+          # `conveyor:fix`; it grants more rounds under that same approval; it
+          # does not authorise a new one. So the approver attributed on every
+          # landing comment — placing `conveyor:keep-going` rounds included —
+          # is always who placed `conveyor:fix`, which is why `$LABEL` here
+          # (read once, at the top of this step) and the marker this function
+          # greps for are both hardcoded to the fix station and never take
+          # `$THIS_LABEL` or `$EVENT_LABEL`.
           label_placement() {
             read -r actor since < <(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
               --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$LABEL\")] | last | \"\(.actor.login) \(.created_at)\"")

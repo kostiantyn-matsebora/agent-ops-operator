@@ -38,7 +38,7 @@
 
 ## 6. E2E tests
 
-- [x] 6.1 Not applicable: nothing here is decided by a cluster — the change is two workflows, three programs and a vocabulary file, and every program's behaviour is pinned by section 5. The live proof this change owes is the platform's, not a cluster's, and it is task 4.2. Verify: this task claims nothing a cluster decides.
+- [x] 6.1 Not applicable: nothing here is decided by a cluster — the change is two workflows, three programs and a vocabulary file, and every program's behaviour is pinned by section 5. Task 4.2 names a further live proof on the real platform, but it is DEFERRED past this change's own merge (see 4.2) and is not what this task claims — this task claims only that no tier above section 5's unit tests applies here. Verify: this task claims nothing a cluster decides.
 
 ## 7. Documentation
 

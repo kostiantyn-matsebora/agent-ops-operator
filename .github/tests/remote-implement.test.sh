@@ -159,6 +159,15 @@ assert_status 0 "$status"
 assert_contains "$(cat "$GH_CALLS")" "issue comment 44"
 assert_contains "$(cat "$GH_CALLS")" "carries it forward as"
 assert_not_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixing loop"
+# THE TEXT MUST NAME conveyor:run, THE LABEL THAT ACTUALLY GETS CARRIED --
+# never conveyor:implement, the one that happened to fire this session.
+# carry-grant.py reads run_label off the issue's live labels regardless of
+# which label fired remote-implement.py, so naming the firing label here
+# would describe a carry that is not the one that actually happens.
+assert_contains "$(cat "$GH_CALLS")" "reads \`conveyor:run\` again and carries it forward as \`conveyor:fix\`"
+assert_contains "$(cat "$GH_CALLS")" "a workflow carries \`conveyor:run\` forward again to archive"
+assert_not_contains "$(cat "$GH_CALLS")" "reads \`conveyor:implement\` again"
+assert_not_contains "$(cat "$GH_CALLS")" "carries \`conveyor:implement\` forward again to archive"
 
 # conveyor:run FIRES THE SAME SESSION, and its comment says the standing
 # instruction is what a workflow reads again later to carry the grant forward.

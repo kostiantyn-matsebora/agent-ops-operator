@@ -555,13 +555,16 @@ unlabelled, with no session left to do anything about it.
 - **THE FIX: A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER
   MINT ONE.** `conveyor-labels` retired `autofix`/`autoimplement` into the
   `conveyor:` vocabulary and made the session place NO label on its own work,
-  ever. Where a person's standing instruction (`conveyor:run`, placed on the
-  tracking issue) authorises the next station, a WORKFLOW —
-  `.github/scripts/carry-grant.py` — reads that instruction again at the
-  moment it matters, re-checks the placer still has write access, and places
-  the station's label itself, recording whose grant it carried. The gate then
-  passes because the label was placed by `github-actions[bot]` acting on a
-  CHECKED grant, not asserted by the thing being decided about.
+  ever.
+  - Where a person's standing instruction (`conveyor:run`, placed on the
+    tracking issue) authorises the next station, a WORKFLOW —
+    `.github/scripts/carry-grant.py` — reads that instruction again at the
+    moment it matters.
+  - It re-checks the placer still has write access, then places the
+    station's label itself, recording whose grant it carried.
+  - The gate then passes because the label was placed by
+    `github-actions[bot]` acting on a CHECKED grant, not asserted by the
+    thing being decided about.
 - **A CARRIED LABEL IS RE-CHECKED, NEVER TRUSTED.** `review-dispatch.yml`'s
   gate accepts a label placed by `github-actions[bot]` only after re-reading
   the originating issue's `conveyor:run` and confirming it is still there and

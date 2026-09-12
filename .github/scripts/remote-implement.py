@@ -262,7 +262,12 @@ def main() -> int:
     # rather than the "a person places a label" text that fits only when no
     # standing instruction exists at all.
     carries = vocab["run_label"] in {l.get("name") for l in issue.get("labels") or [] if l.get("name")}
-    what = (f"a workflow reads `{label}` again and carries it forward as "
+    # NAME run_label HERE, NEVER THE FIRING label. What actually gets carried
+    # is always `run_label` (carry-grant.py reads exactly that, off the
+    # issue's live labels, regardless of which label fired this session) --
+    # so when `implement_label` is what fired this while `run_label` already
+    # stood on the issue, the text must still name the one that carries.
+    what = (f"a workflow reads `{vocab['run_label']}` again and carries it forward as "
             f"`{vocab['approve_label']}`, so the review's findings are fixed without a reply in each thread"
             if carries else
             "a person places a label to start the fixing loop")
@@ -272,7 +277,7 @@ def main() -> int:
     # job runs before the session has read the issue, so it does not yet
     # know which lane the session will choose -- the plain lane has no
     # archive station at all, and "always" here would misdescribe that case.
-    ends = (f"a workflow carries `{label}` forward again to archive, once the "
+    ends = (f"a workflow carries `{vocab['run_label']}` forward again to archive, once the "
             f"pull request merges — if this change is bound to an openspec change"
             if carries else
             "archiving is a person's own step too, same as merging")
