@@ -43,7 +43,7 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/agentops-${{ inputs.component }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # BEFORE THE BUILD, deliberately. A mistaken re-tag costs seconds rather
       # than a full build, and the recovery this enforces — cut a new patch
