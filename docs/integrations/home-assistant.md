@@ -197,7 +197,8 @@ Sixteen stay withheld, in three classes:
 
 - restart and backups
 - software and preferences
-- deletes of what a person WROTE — automations, scripts, scenes, dashboards
+- deletes of what a person WROTE — automations, scripts, scenes, dashboards,
+  dashboard resources
 
 Add any of them back by restating `adminMcp.toolset.tools` — Helm replaces lists
 rather than merging them.
