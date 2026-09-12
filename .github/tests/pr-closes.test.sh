@@ -94,5 +94,15 @@ assert_contains "$job" '--range "origin/$BASE_REF...$HEAD_SHA"'
 assert_contains "$job" 'HEAD_SHA: ${{ github.event.pull_request.head.sha }}'
 assert_not_contains "$job" 'GITHUB_SHA'
 
+# THE GUARD'S OWN REFUSAL MUST REACH A PERSON, NOT ONLY A JOB LOG. #211 sat
+# refused for hours because nobody opened the check: `conveyor-labels`
+# archived on its branch, #204 stayed open, and the only trace was a red X.
+it "ci.yml posts the guard's own failure text as a marker-deduped pull request comment, and still fails the check"
+assert_contains "$job" 'pull-requests: write'
+assert_contains "$job" 'marker="<!-- pr-closes-guard -->"'
+assert_contains "$job" 'gh pr comment "$PR_NUMBER"'
+assert_contains "$job" 'grep -qF "$marker"'
+assert_contains "$job" 'exit 1'
+
 rm -rf "$repo" "$tmp"
 summary

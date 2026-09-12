@@ -939,9 +939,16 @@ jobs:
     # `contents: read` alone. Stated here rather than inherited, so the fetch
     # cannot silently fall back to the frozen payload the moment somebody
     # tightens the top-level block.
+    #
+    # WRITE, NOT READ — A FAILURE HERE MUST BE SEEN, NOT ONLY LOGGED. The
+    # guard's own message already names the issue, the change and the exact
+    # line to add, but it printed to a job's stderr, which nobody reads
+    # unless they click into a red check. #211 sat refused for hours this
+    # way: `conveyor-labels` archived on its branch, its tracking issue
+    # (#204) left open, and the only trace was a check nobody had opened.
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -995,10 +1002,37 @@ jobs:
             printf '%s' "$FALLBACK_BODY" > "$body"
             echo "::notice::could not read the live body; judging the event payload, which a re-run freezes"
           fi
+          out="$RUNNER_TEMP/pr-closes-guard.out"
+          rc=0
           python3 .github/scripts/pr-closes-guard.py \
             --body-file "$body" \
             --range "origin/$BASE_REF...$HEAD_SHA" \
-            --root .
+            --root . > "$out" 2>&1 || rc=$?
+          cat "$out"
+          if [ "$rc" -eq 0 ]; then
+            exit 0
+          fi
+          # EXIT 1 IS THE GUARD'S OWN, DELIBERATE REFUSAL. Any other code is a
+          # SCRIPT ERROR — a crash, a bad invocation — wearing the same shape,
+          # and posting its traceback to the pull request as though it were
+          # the guard's verdict would tell a reader their `Closes #` line is
+          # wrong when the truth is the guard itself broke.
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::pr-closes-guard.py exited $rc, not a refusal — see the log above for the script error"
+            exit "$rc"
+          fi
+          # POST WHAT THE GUARD ALREADY SAID, WHERE A PERSON WILL SEE IT — a
+          # comment on the pull request, never only the job log. MARKER-DEDUPED
+          # the same way carry-grant.py's own comments are: a re-run after an
+          # unrelated push must not repeat the same paragraph every time.
+          [ -n "${PR_NUMBER:-}" ] || { echo "::error::no pull request to comment on"; exit 1; }
+          marker="<!-- pr-closes-guard -->"
+          body_comment="$marker"$'\n'"$(cat "$out")"
+          if ! gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json comments \
+            --jq '.comments[].body' 2>/dev/null | grep -qF "$marker"; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body_comment" || true
+          fi
+          exit 1
 
   # CONTRACT CONFORMANCE: every adapter's built binary, black-box, against a
   # fake manager — a minute, no cluster, no secret. It is the one thing from
