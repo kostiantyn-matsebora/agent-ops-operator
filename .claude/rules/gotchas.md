@@ -163,6 +163,25 @@ split across two lines exactly where a terminal had wrapped it.
   looks right in `gh variable list` may be wrapped for display rather than
   actually one line.
 
+**THE SONARQUBE MCP SERVER'S AUTH HEADER (settled 2026-09 as far as a
+workstation can show it).** `.mcp.json` sends `Authorization: Bearer
+${SONAR_TOKEN}` unconditionally, on the stated assumption that whether the
+remote credential proxy overrides or requires it absent was unmeasured.
+
+- **A workstation session's own connection fails with a 401
+  (`AUTH_HEADER_REJECTED`)** — "SonarQube token required. Provide via
+  Authorization: Bearer token header" — whenever `SONAR_TOKEN` is unset or
+  stale. The server answers a missing or wrong bearer value, not the mere
+  presence of the header.
+- **This is the WORKSTATION path, not the remote-proxy one.** No remote
+  session has yet reported whether the proxy attaches its own header and, if
+  so, whether a client-sent one collides with it. `.mcp.json`'s comment stays
+  correct: that half of the question is still open, and the fix is one line
+  once a remote session measures it.
+- **The header itself is not the wrong shape.** A workstation with a valid
+  `SONAR_TOKEN` connects fine, so a 401 here is a credential problem to fix
+  locally (rotate or set the token), not a sign the header needs removing.
+
 **A CLOUD ROUTINE'S PUSH RULES AND ITS ENVIRONMENT'S VARIABLES, MEASURED
 2026-09-06 SO NOBODY RE-DERIVES THEM.** A routine clones the DEFAULT branch and
 may push any branch that is NOT protected, has no open pull request by somebody
