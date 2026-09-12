@@ -284,6 +284,15 @@ it "the open job's own no-pull-request message names the workflow_run's head sha
 assert_contains "$open_run" '${head_sha:0:7}'
 assert_not_contains "$open_run" '${GITHUB_SHA:0:7}'
 
+# A FAILED LOOKUP AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS -- a bare
+# `cmd | jq ... || true` reads a transient gh api failure as the ordinary
+# "no pull request" case, silently. gh's own exit status must be checked
+# before its output is, so a real failure is reported as one.
+it "the open job's pull-request lookup checks gh's own exit status, never swallowing a real failure into the ordinary empty case"
+assert_contains "$open_run" 'if ! api_out=$(gh api'
+assert_contains "$open_run" "could not look up pull requests"
+assert_not_contains "$open_run" '.number.*| head -1 || true'
+
 # THE change/* GUARD AND Refs #<n> EXTRACTION LIVE IN ONE SHARED SCRIPT,
 # carry-from-pr.sh, called by BOTH open and archive with the resolved pull
 # request number and the station -- not duplicated in the workflow YAML.
@@ -322,6 +331,10 @@ archive_run=$(rpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
 assert_contains "$archive_run" "search/issues"
 assert_contains "$archive_run" "is:pr is:merged"
 assert_contains "$archive_run" "github.event.workflow_run.head_sha"
+
+it "the archive job's merged-pull-request search also checks gh's own exit status, same reason as the open job"
+assert_contains "$archive_run" 'if ! pr=$(gh api'
+assert_contains "$archive_run" "could not search for a merged pull request"
 
 # THE SAME SHARED SCRIPT, station archive -- see the open job's test above
 # for why this is not duplicated in the workflow YAML.

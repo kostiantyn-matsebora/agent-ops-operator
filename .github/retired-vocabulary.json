@@ -780,7 +780,7 @@
     {
       "id": "autofix",
       "pattern": "(?<![\\w-])(autofix|autoimplement)(?![\\w-])",
-      "says": "conveyor:fix — the approve label, renamed; conveyor:implement replaces autoimplement, and conveyor:run, conveyor:archive and conveyor:keep-going are the rest of the five conveyor: labels",
+      "says": "conveyor:fix replaces autofix (the approve label), and conveyor:implement replaces autoimplement",
       "allow": [
         "removed",
         "retired",

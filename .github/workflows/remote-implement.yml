@@ -153,9 +153,17 @@ jobs:
           # takes it from there: the change/* guard and Refs #<n> extraction
           # are shared with the archive job below.
           head_sha="${{ github.event.workflow_run.head_sha }}"
-          pr=$(gh api --method GET \
+          # A FAILED LOOKUP AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS --
+          # `gh api`'s own exit status is checked BEFORE `| head -1` can turn
+          # either shape into the same empty string, so a transient API
+          # failure is never read as the ordinary "no pull request" case.
+          if ! api_out=$(gh api --method GET \
             "repos/$GITHUB_REPOSITORY/commits/$head_sha/pulls" \
-            --jq '.[] | select(.state == "open") | .number' | head -1 || true)
+            --jq '.[] | select(.state == "open") | .number'); then
+            echo "::error::could not look up pull requests for ${head_sha:0:7}; not the ordinary no-pull-request case"
+            exit 1
+          fi
+          pr=$(printf '%s\n' "$api_out" | head -1)
           if [ -z "$pr" ]; then
             # NOT $GITHUB_SHA -- on a workflow_run event that names the
             # TRUSTED CHECKOUT'S commit (the default branch), never the run
@@ -205,9 +213,17 @@ jobs:
           # merge commit it ran on is the head of exactly one now-closed pull
           # request. `search` is the only API that finds a MERGED (closed,
           # non-open) pull request by commit.
-          pr=$(gh api --method GET search/issues \
+          #
+          # A FAILED SEARCH AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS --
+          # `gh api`'s own exit status is checked before its output is read,
+          # so a transient API failure is never read as the ordinary
+          # "no merged pull request" case.
+          if ! pr=$(gh api --method GET search/issues \
             -f "q=repo:$GITHUB_REPOSITORY is:pr is:merged ${{ github.event.workflow_run.head_sha }}" \
-            --jq '.items[0].number' || true)
+            --jq '.items[0].number'); then
+            echo "::error::could not search for a merged pull request on ${{ github.event.workflow_run.head_sha }}; not the ordinary no-pull-request case"
+            exit 1
+          fi
           if [ -z "$pr" ] || [ "$pr" = "null" ]; then
             echo "no merged pull request found for ${{ github.event.workflow_run.head_sha }}; nothing to carry"
             exit 0
