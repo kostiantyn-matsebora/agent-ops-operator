@@ -122,11 +122,32 @@ and every reply attached to them, and answers a person who asked a question by
 pointing them at a different page. A promoted issue keeps the conversation and
 gains the phase label; nothing is duplicated and nothing is lost.
 
+A remote session started by a label on an issue SHALL promote that issue, in the
+same way and with the same script. The start of such a session adds exactly two
+automated comments: the one recording the start, and the pointer the promotion
+leaves as it does for any promoted issue.
+
+**THE TRACKING ISSUE CARRIES THE STANDING INSTRUCTION**, and its labels SHALL be
+read at every transition of the change rather than at the first. A workflow
+deciding whether to advance the change to its next station SHALL consult the
+issue's labels as they stand at that moment.
+
 #### Scenario: A filed issue becomes a change
 
 - **WHEN** an issue reported by somebody else is turned into an openspec change
 - **THEN** that same issue tracks the change, keeps its original text and
   comments, and gains the change's link and phase label
+
+#### Scenario: The change reaches its next station
+
+- **WHEN** a workflow must decide whether to advance the change unattended
+- **THEN** it reads the tracking issue's labels at that moment, and advances
+  only while the standing instruction is there
+
+#### Scenario: The standing instruction is removed
+
+- **WHEN** the standing instruction is taken off the tracking issue
+- **THEN** the change advances no further, and work already running finishes
 
 #### Scenario: The change advances
 
