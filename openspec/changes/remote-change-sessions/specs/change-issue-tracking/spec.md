@@ -13,12 +13,15 @@ and every reply attached to them, and answers a person who asked a question by
 pointing them at a different page. A promoted issue keeps the conversation and
 gains the phase label; nothing is duplicated and nothing is lost.
 
-A remote session started by the implement label on an issue SHALL promote that
-issue, in the same way and with the same script. The start of such a session
-adds exactly two automated comments to the issue: the one recording the fire,
-which is the transition record for the start, and the pointer the promotion
-leaves as it does for any promoted issue — the phase label then advances as it
-does for any change.
+A remote session started by a label on an issue SHALL promote that issue, in
+the same way and with the same script. The start of such a session adds
+exactly two automated comments: the one recording the start, and the pointer
+the promotion leaves as it does for any promoted issue.
+
+**THE TRACKING ISSUE CARRIES THE STANDING INSTRUCTION**, and its labels SHALL be
+read at every transition of the change rather than at the first. A workflow
+deciding whether to advance the change to its next station SHALL consult the
+issue's labels as they stand at that moment.
 
 #### Scenario: A filed issue becomes a change
 
@@ -28,10 +31,21 @@ does for any change.
 
 #### Scenario: A remote session is started from a filed issue
 
-- **WHEN** the implement label starts a remote session for an issue
+- **WHEN** a label starts a remote session for an issue
 - **THEN** that session promotes the same issue as the change's tracking issue,
-  the fire's comment and the promotion's pointer are the only automated
+  the start's comment and the promotion's pointer are the only automated
   comments the start adds, and the reporter's body is untouched
+
+#### Scenario: The change reaches its next station
+
+- **WHEN** a workflow must decide whether to advance the change unattended
+- **THEN** it reads the tracking issue's labels at that moment, and advances
+  only while the standing instruction is there
+
+#### Scenario: The standing instruction is removed
+
+- **WHEN** the standing instruction is taken off the tracking issue
+- **THEN** the change advances no further, and work already running finishes
 
 #### Scenario: The change advances
 
