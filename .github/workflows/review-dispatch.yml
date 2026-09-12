@@ -262,6 +262,29 @@ jobs:
           mode=threads
           case "$EVENT" in
             workflow_dispatch)
+              # A HAND RUN NEEDS NO FURTHER CHECK — triggering `workflow_dispatch`
+              # at all already required push access on this repository, so
+              # `mode=all` here is the same consent the `pull_request: labeled`
+              # case reads off a label placed by a person.
+              #
+              # A BOT-TRIGGERED RUN IS NOT THAT. `open` (remote-implement.yml)
+              # dispatches this workflow itself, under `actions: write`, right
+              # after carrying `conveyor:fix` — labelling an API call fires no
+              # `pull_request: labeled` webhook, so without this branch the
+              # carry would sit unactioned. `github-actions[bot]` triggering a
+              # dispatch is therefore re-checked exactly as a bot-PLACED label
+              # already is: re-read the pull request's OWN `Refs #<n>` and the
+              # named issue's CURRENT `conveyor:run`, never trusted because a
+              # workflow asked for `mode=all`.
+              if [ "$SENDER" = "github-actions[bot]" ]; then
+                BODY_TEXT=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+                ISSUE=$(printf '%s' "$BODY_TEXT" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+                RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
+                STANDING=$([ -n "$ISSUE" ] && gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx "$RUN_LABEL" && echo yes || echo no)
+                if [ -z "$ISSUE" ] || [ "$STANDING" != "yes" ]; then
+                  refuse "this dispatch was triggered by \`github-actions[bot]\`, and re-checking the pull request's \`Refs #<n>\` found no standing \`$RUN_LABEL\` to carry. A bot may only trigger this workflow while relaying a still-valid grant."
+                fi
+              fi
               mode="${INPUT_MODE:-threads}"
               ;;
             issue_comment|pull_request_review_comment)

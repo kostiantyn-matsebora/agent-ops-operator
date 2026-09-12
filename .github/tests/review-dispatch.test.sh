@@ -330,8 +330,8 @@ assert_contains "$open_run" ".github/scripts/carry-from-pr.sh \"\$pr\" fix"
 assert_not_contains "$open_run" "headRepositoryOwner"
 assert_not_contains "$open_run" "carry-grant.py"
 
-it "the open job is granted issues: write for the marker comment, plus pull-requests: write since carry-grant.py labels a PULL REQUEST here and issues: write alone 403s on that mutation"
-assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'write'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
+it "the open job is granted issues: write for the marker comment, pull-requests: write since carry-grant.py labels a PULL REQUEST here and issues: write alone 403s on that mutation, and actions: write to re-dispatch review-dispatch.yml after a real carry"
+assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'write', 'actions': 'write'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
 
 # THE TRUSTED COPY, NOT THE PULL REQUEST'S OR THE MERGE COMMIT'S. A
 # workflow_run job's default checkout already resolves the TRIGGERING

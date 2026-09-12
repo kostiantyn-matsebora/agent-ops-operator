@@ -907,6 +907,30 @@ jobs:
   #
   # The template now writes `Refs #` — but a template is a suggestion at the
   # moment somebody is typing quickly, and this failure is silent and days late.
+  # `needs:` CANNOT CROSS WORKFLOW FILES, and `claude-review.yml` is its own
+  # top-level workflow -- so this is the bridge: ask the platform directly
+  # whether it finished and how, the same shape `smoke-evidence.py` already
+  # uses for a different question on the same commit. NEVER on `push`: there
+  # is no pull request on the default branch, so no review ever runs there.
+  review-clean:
+    needs: discover
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: The review finished clean for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          out=$(python3 .github/scripts/review-is-green.py --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA")
+          echo "$out"
+          [ "$out" = "green=true" ]
+
   pr-closes:
     needs: discover
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
@@ -1000,7 +1024,7 @@ jobs:
     # Never reports on a draft: a green required check on a pull request that
     # ran nothing would be a claim.
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, scripts, pr-title, pr-closes, conformance]
+    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, scripts, pr-title, pr-closes, conformance, review-clean]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

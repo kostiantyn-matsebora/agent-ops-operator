@@ -664,3 +664,19 @@ jobs:
             --repo "${{ github.repository }}" \
             --pr "$PR" \
             --file .resolve-threads
+
+      # THE PULL REQUEST IS NOT READY WHILE THE REVIEW HAS AN OPEN THREAD OF
+      # ITS OWN — new this run, or carried over from an earlier one. An open
+      # thread already blocks the merge button through
+      # `required_conversation_resolution`, but that is a pull-request
+      # property GitHub evaluates at merge time, not a status check, so it
+      # cannot join `ci-green`'s `needs:`. This step is what lets the review
+      # report the same verdict AS a check: read live, after this job's own
+      # resolve step, so a finding this run just closed does not fail it.
+      - name: The review leaves nothing open
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .github/scripts/review-not-clean.py \
+            --repo "${{ github.repository }}" \
+            --pr "$PR"

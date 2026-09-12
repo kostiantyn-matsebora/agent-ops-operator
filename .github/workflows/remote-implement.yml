@@ -115,6 +115,15 @@ jobs:
   # `opened` AND every `synchronize`, so this job runs more than once per pull
   # request. Harmless: carry-grant.py's marker comment dedupes every carry
   # after the first, and re-adding an already-present label is a no-op.
+  #
+  # CONCLUSION == 'success' ALREADY WAITS ON THE REVIEW, NOT JUST CI'S OWN
+  # JOBS -- `ci-green`'s `needs:` now includes `review-clean` (a job in this
+  # same `ci.yml` run that polls `claude-review.yml`'s own conclusion for the
+  # sha), so `ci-green` failing makes the WHOLE `ci` run's conclusion
+  # `failure`, whatever `review-clean`'s reason. This is what closes the gap
+  # a carried label used to fall into: `conveyor:fix` no longer lands before
+  # the review has had its chance to post findings, because the run this job
+  # reacts to cannot conclude `success` until the review has.
   open:
     if: >-
       github.event_name == 'workflow_run' &&
@@ -129,10 +138,23 @@ jobs:
     # pull request a workflow_run concerns needs (`commits/<sha>/pulls`);
     # write is what LABELLING it needs. ISSUES: write stays for the marker
     # comment carry-grant.py posts, through `gh issue comment`.
+    #
+    # ACTIONS: write IS FOR THE RE-DISPATCH BELOW, AND NOTHING ELSE. Adding a
+    # label through the API, under a workflow token, fires no `pull_request:
+    # labeled` webhook -- the platform suppresses events from actions it
+    # triggered itself, the same suppression already documented for a
+    # workflow-token push never starting a new `pull_request` run. So a
+    # carried `conveyor:fix` would sit on the pull request unactioned until
+    # SOME later event (a push, a comment) happened to re-enter
+    # `review-dispatch.yml`'s gate -- silently, with no round starting, which
+    # reads as the automation simply not working. `workflow_dispatch` is
+    # already one of that gate's valid triggers, so firing it explicitly here
+    # closes the gap at the moment the grant is actually carried.
     permissions:
       contents: read
       issues: write
       pull-requests: write
+      actions: write
     steps:
       # THE TRUSTED COPY, NOT THE PULL REQUEST'S. See the header comment --
       # this ALSO buys the trusted checkout, exactly as review-dispatch.yml's
@@ -171,7 +193,16 @@ jobs:
             echo "no open pull request for ${head_sha:0:7}; nothing to carry"
             exit 0
           fi
-          .github/scripts/carry-from-pr.sh "$pr" fix
+          out=$(.github/scripts/carry-from-pr.sh "$pr" fix | tee /dev/stderr)
+          # ONLY A REAL CARRY RE-DISPATCHES. The one success line this
+          # produces starts "carried " (every refusal and every "nothing to
+          # carry" case reads differently) -- re-dispatching unconditionally
+          # would fire review-dispatch.yml's gate on a pull request that
+          # never got the label at all, which the gate's own re-check would
+          # then correctly refuse, but loudly and for no reason.
+          if printf '%s\n' "$out" | grep -q '^carried '; then
+            gh workflow run review-dispatch.yml --repo "$GITHUB_REPOSITORY" -f "pr=$pr" -f mode=all
+          fi
 
   # THE ARCHIVE TRANSITION: a merge just landed on the default branch. Find
   # the pull request that merge came from, read its `Refs #<n>` and carry
