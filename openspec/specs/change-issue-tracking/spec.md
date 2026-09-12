@@ -122,10 +122,10 @@ and every reply attached to them, and answers a person who asked a question by
 pointing them at a different page. A promoted issue keeps the conversation and
 gains the phase label; nothing is duplicated and nothing is lost.
 
-A remote session started by a label on an issue SHALL promote that issue, in the
-same way and with the same script. The start of such a session adds exactly two
-automated comments: the one recording the start, and the pointer the promotion
-leaves as it does for any promoted issue.
+A remote session started by a label on an issue SHALL promote that issue, in
+the same way and with the same script. The start of such a session adds
+exactly two automated comments: the one recording the start, and the pointer
+the promotion leaves as it does for any promoted issue.
 
 **THE TRACKING ISSUE CARRIES THE STANDING INSTRUCTION**, and its labels SHALL be
 read at every transition of the change rather than at the first. A workflow
@@ -137,6 +137,13 @@ issue's labels as they stand at that moment.
 - **WHEN** an issue reported by somebody else is turned into an openspec change
 - **THEN** that same issue tracks the change, keeps its original text and
   comments, and gains the change's link and phase label
+
+#### Scenario: A remote session is started from a filed issue
+
+- **WHEN** a label starts a remote session for an issue
+- **THEN** that session promotes the same issue as the change's tracking issue,
+  the start's comment and the promotion's pointer are the only automated
+  comments the start adds, and the reporter's body is untouched
 
 #### Scenario: The change reaches its next station
 
