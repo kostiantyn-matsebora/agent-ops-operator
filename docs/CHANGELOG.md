@@ -32,6 +32,19 @@ for the source and the reference material beside this file.
   `kubernetes.profile.systemPrompt` gains the paragraph on upgrade, appended
   after its own text; `kubernetes.profile.podExecutionWithheldPrompt: ""`
   declines it. Bundle `kubernetes` 0.3.2.
+- The home-assistant bundle's `ha-admin` toolset now ships ten registry-removal
+  tools by default — entities, devices, areas/floors, zones, helpers and
+  integrations, categories, labels, groups, to-do items and calendar events. 62
+  of 78 registered tools ship, up from 52. Sixteen stay withheld, restated in
+  three classes: restart and backups, software and preferences, and deletes of
+  what a person WROTE (automations, scripts, scenes, dashboards). The
+  `ha-operator` profile's describe-and-stop rule now states it is a
+  confirmation gate: a person's reply in the thread authorizes the described
+  action, and the agent neither asks again nor tells them to run it
+  themselves. Not breaking: the admin toolset renders only under
+  `adminMcp.enabled`, off by default, and an install restating
+  `adminMcp.toolset.tools` keeps its own list. An install on the default list
+  gains the ten tools on `helm upgrade`. Bundle `home-assistant` 0.2.0.
 - The release workflow's cluster smoke is now keyed to the tagged COMMIT, not
   the tag. A release publishing many artifacts from one commit smokes it
   once. A passed smoke from any earlier run on the commit is reused. One
