@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The chart-shipped `MCPToolset` CRs covering the runtime's built-in tools, split by risk — observation, execution, workspace mutation — so a Pipeline can bind them to widen or narrow a route's tool access with no AgentProfile involved at all — profiles carry no capabilities.
+The chart-shipped `MCPToolset` CRs covering the runtime's built-in tools, split by risk — observation, execution, workspace mutation, outbound web search — so a Pipeline can bind them to widen or narrow a route's tool access with no AgentProfile involved at all — profiles carry no capabilities.
 
 ## Requirements
 
@@ -10,13 +10,13 @@ The chart-shipped `MCPToolset` CRs covering the runtime's built-in tools, split 
 
 The chart SHALL render `MCPToolset` CRs covering the runtime's built-in tools,
 split by risk rather than as one list: observation (`Read`, `Grep`, `Glob`),
-execution (`Bash`), and workspace mutation (`Edit`, `Write`). Default names SHALL
-be values-overridable and each tool list values-extendable, so adding a built-in
-the runtime gains needs no new CR kind and no chart change. Rendering SHALL be
-gated on a values flag defaulting to on; the toolsets carry no status and no
-controller, so shipping them costs nothing beyond the objects themselves. They
-are referencable from `Pipeline.spec.toolsets` only — AgentProfiles declare no
-capabilities.
+execution (`Bash`), workspace mutation (`Edit`, `Write`), and outbound web
+search (`WebSearch`). Default names SHALL be values-overridable and each
+tool list values-extendable, so adding a built-in the runtime gains needs no
+new CR kind and no chart change. Rendering SHALL be gated on a values flag
+defaulting to on; the toolsets carry no status and no controller, so shipping
+them costs nothing beyond the objects themselves. They are referencable from
+`Pipeline.spec.toolsets` only — AgentProfiles declare no capabilities.
 
 These names are RUNTIME-INTERPRETED. The manager passes tool patterns through
 opaquely and holds no definition of what `Read` or `Bash` does; each runtime
@@ -30,11 +30,16 @@ A binding is therefore never rejected for naming a tool some runtime lacks:
 which tools exist is a property of the runtime executing the conversation, and
 it is knowable only there.
 
+Web search is outbound network egress rather than local filesystem or shell
+access, which is why it is its own category rather than folded into
+observation: a route trusted to read the workspace is not thereby trusted to
+reach the open internet, and the two SHALL remain independently bindable.
+
 #### Scenario: A fresh install exposes the vocabulary
 
 - **WHEN** the chart is installed with defaults
-- **THEN** the observation, execution, and mutation toolsets exist and are
-  referencable from any Pipeline's `toolsets` binding
+- **THEN** the observation, execution, mutation and web-search toolsets exist
+  and are referencable from any Pipeline's `toolsets` binding
 
 #### Scenario: The catalog is extendable without a chart change
 
