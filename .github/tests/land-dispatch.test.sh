@@ -342,6 +342,44 @@ assert_not_contains "$(cat "$GH_CALLS")" "conveyor:grant"
 assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
 printf '[]' > "$GH_COMMENTS"
 
+# THE SAME ARGUMENT, ONE STEP LATER: the label removal SUCCEEDS but posting
+# the grant marker comment fails. An uncaught exception here used to
+# propagate past the thread replies and the landing summary this method
+# runs in the middle of, losing the whole round's report even though the
+# fix was already pushed.
+it "labelled: past the cap, a FAILED grant-marker comment does not crash the round or lose the summary"
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- conveyor:round 3 -->\\nround three","created_at":"2026-08-29T13:00:00Z"}]' > "$GH_COMMENTS"
+mkdir -p "$tmp/bin4b"
+cat > "$tmp/bin4b/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "pr comment "*"conveyor:grant"*)
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "transient failure" >&2; exit 1 ;;
+  "issue comments"*|"api repos/"*"/issues/"*"/comments --paginate")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
+esac
+case "\$*" in
+  "api graphql"*) cat "\$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin4b/gh"
+out=$(PATH="$tmp/bin4b:$PATH" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
+assert_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+# THE ROUND ITSELF STILL LANDS AND STILL REPORTS -- the label was removed,
+# the cap still advanced for this process, and the round-landing comment
+# still posts despite the grant marker's own comment call failing.
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 4 -->"
+printf '[]' > "$GH_COMMENTS"
+
 # AN ORDINARY ROUND (below the cap) MUST NOT CONSUME THE LABEL, even when it
 # is present -- the bug this whole rewrite exists to fix: consuming it on
 # round 1 would spend the grant on a round that needed no extension.

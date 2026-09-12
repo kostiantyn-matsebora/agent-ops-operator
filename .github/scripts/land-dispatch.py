@@ -235,9 +235,23 @@ class Round:
             # label-removal call hit a transient error would be worse than
             # leaving the label in place for a re-check next round.
             return
-        pr_comment(self.args.repo, self.args.pr,
-                   f"{self.markers['grant']}\nround {self.number} is running past the previous cap of "
-                   f"{old_cap} under `{label}`, which is now consumed.")
+        try:
+            pr_comment(self.args.repo, self.args.pr,
+                       f"{self.markers['grant']}\nround {self.number} is running past the previous cap of "
+                       f"{old_cap} under `{label}`, which is now consumed.")
+        except subprocess.CalledProcessError:
+            # SAME ARGUMENT AS THE REMOVAL ABOVE, ONE STEP LATER: the label is
+            # already gone, so this round already spent the grant whether or
+            # not the record of it posts. An uncaught exception here would
+            # propagate past the thread replies and the landing summary this
+            # method is called in the middle of -- losing the whole round's
+            # report over a transient comment failure, after the fix already
+            # pushed. The cap still advances below for THIS process; a
+            # missing marker comment would only under-count on a LATER
+            # invocation's count_grants(), which is the label-removal's own
+            # transient-failure trade-off one step later.
+            print(f"::warning::grant marker comment failed to post for round {self.number}; "
+                  f"`{label}` was already removed and the cap is extended anyway", file=sys.stderr)
         self.grants += 1
         self.cap = self.args.max_rounds * (1 + self.grants)
         print(f"consumed `{label}`: round {self.number} extends the cap to {self.cap}")

@@ -222,8 +222,7 @@ access can place it directly.
 
 A workflow may also carry it forward on their behalf. It RE-CHECKS their
 standing instruction still stands and still has write access, on the issue it
-opened from, every time
-([`worktree-delivery.md`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/.claude/rules/worktree-delivery.md)).
+opened from, every time.
 
 ### Context isolation
 

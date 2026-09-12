@@ -252,7 +252,16 @@ def main() -> int:
     # `run_label` authorised this, a workflow reads the issue again once the
     # pull request opens and carries that instruction forward as
     # `approve_label` — recording whose it was — never the session itself.
-    carries = label == vocab["run_label"]
+    #
+    # READ FROM THE ISSUE'S LABELS, NOT FROM WHICH LABEL FIRED THIS EVENT.
+    # The later carry (`carry-grant.py`, at the `open` job) reads the issue's
+    # CURRENT labels too, never which one triggered this session — so an
+    # issue that already carries `run_label` when `implement_label` is the
+    # one placed (the standing instruction pre-dating this particular
+    # session) still gets it carried forward, and this comment must say so
+    # rather than the "a person places a label" text that fits only when no
+    # standing instruction exists at all.
+    carries = vocab["run_label"] in {l.get("name") for l in issue.get("labels") or [] if l.get("name")}
     what = (f"a workflow reads `{label}` again and carries it forward as "
             f"`{vocab['approve_label']}`, so the review's findings are fixed without a reply in each thread"
             if carries else

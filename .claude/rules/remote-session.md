@@ -66,7 +66,7 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
   `allowed_push_branches` is set to `change/*` where the API takes it, which
   states the same bound from the other side.
 
-### AN ISSUE LABEL STARTS ONE, AND THE SESSION PLACES NONE
+### A LABEL STARTS OR DRIVES ONE, AND THE SESSION PLACES NONE
 
 | Label | Placed on | Starts |
 |---|---|---|

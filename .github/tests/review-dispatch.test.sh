@@ -277,13 +277,14 @@ job=$(rpy 'print(d["jobs"]["fire"])')
 assert_contains "$job" "vars.ROUTINE_FIRE_URL"
 assert_contains "$job" "secrets.ROUTINE_FIRE_TOKEN"
 
-# THE OPEN TRANSITION: a session's own pull request appears, unlabelled; if
-# its originating issue still carries the standing instruction, carry it
-# forward as the fix-station label ON THIS PULL REQUEST. Anchored on `ci`
-# completing FOR a pull_request event, never on `pull_request` directly — a
-# GITHUB_TOKEN issued to a pull_request-triggered run carries no write
-# access in this repository at all, measured live (see the workflow's own
-# header comment).
+# THE OPEN TRANSITION: a session's own pull request appears, unlabelled.
+# If its originating issue still carries the standing instruction, carry
+# it forward as the fix-station label ON THIS PULL REQUEST.
+#
+# Anchored on `ci` completing FOR a pull_request event, never on
+# `pull_request` directly. A GITHUB_TOKEN issued to a pull_request-triggered
+# run carries no write access in this repository at all, measured live (see
+# the workflow's own header comment).
 it "the open job fires on ci completing for a pull_request event, never pull_request directly"
 open_if=$(rpy 'print(d["jobs"]["open"]["if"])')
 assert_contains "$open_if" "github.event_name == 'workflow_run'"
@@ -301,10 +302,11 @@ it "the open job's own no-pull-request message names the workflow_run's head sha
 assert_contains "$open_run" '${head_sha:0:7}'
 assert_not_contains "$open_run" '${GITHUB_SHA:0:7}'
 
-# A FAILED LOOKUP AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS -- a bare
-# `cmd | jq ... || true` reads a transient gh api failure as the ordinary
-# "no pull request" case, silently. gh's own exit status must be checked
-# before its output is, so a real failure is reported as one.
+# A FAILED LOOKUP AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS.
+#
+# A bare `cmd | jq ... || true` reads a transient gh api failure as the
+# ordinary "no pull request" case, silently. gh's own exit status must be
+# checked before its output is, so a real failure is reported as one.
 it "the open job's pull-request lookup checks gh's own exit status, never swallowing a real failure into the ordinary empty case"
 assert_contains "$open_run" 'if ! api_out=$(gh api'
 assert_contains "$open_run" "could not look up pull requests"

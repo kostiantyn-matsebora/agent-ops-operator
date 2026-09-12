@@ -65,12 +65,18 @@ PY
 stop_endpoint() { [ -n "${ENDPOINT_PID:-}" ] && kill "$ENDPOINT_PID" 2>/dev/null; wait "$ENDPOINT_PID" 2>/dev/null; ENDPOINT_PID=""; }
 trap stop_endpoint EXIT
 
-event() {  # event <file> <label> <number> <sender> [pull_request]
+event() {  # event <file> <label> <number> <sender> [pull_request] [extra_label]
   local pr=""; [ -n "${5:-}" ] && pr=', "pull_request": {"url": "u"}'
+  # THE ISSUE'S OWN labels[] CARRIES AT LEAST THE FIRED LABEL, as GitHub's
+  # real payload does -- an OPTIONAL sixth arg adds a second, for the case
+  # where a standing instruction already sits on the issue beside whichever
+  # label just fired this event.
+  local labels="{\"name\": \"$2\"}"
+  [ -n "${6:-}" ] && labels="$labels, {\"name\": \"$6\"}"
   cat > "$1" <<JSON
 {"action": "labeled",
  "label": {"name": "$2"},
- "issue": {"number": $3, "title": "A thing that is broken"$pr},
+ "issue": {"number": $3, "title": "A thing that is broken", "labels": [$labels]$pr},
  "sender": {"login": "$4"}}
 JSON
 }
@@ -137,6 +143,22 @@ assert_contains "$(cat "$GH_CALLS")" "https://claude.ai/code/session_abc"
 assert_contains "$(cat "$GH_CALLS")" "unlabelled"
 assert_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixing loop"
 assert_not_contains "$(cat "$GH_CALLS")" "a workflow reads"
+
+# conveyor:implement CAN FIRE WHILE conveyor:run ALREADY STANDS -- the later
+# carry (carry-grant.py, at the `open` job) reads the ISSUE'S CURRENT labels,
+# never which one fired this session, so the standing instruction still gets
+# carried forward even though conveyor:implement, not conveyor:run, is what
+# triggered this particular run. The comment must say so.
+it "conveyor:implement fires while conveyor:run already stands on the issue, and the comment says the grant WILL be carried"
+setup; stub_gh_perm "$BIN" write
+event "$EVENT" conveyor:implement 44 maintainer "" conveyor:run
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 44"
+assert_contains "$(cat "$GH_CALLS")" "carries it forward as"
+assert_not_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixing loop"
 
 # conveyor:run FIRES THE SAME SESSION, and its comment says the standing
 # instruction is what a workflow reads again later to carry the grant forward.
