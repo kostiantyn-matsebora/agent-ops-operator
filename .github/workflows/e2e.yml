@@ -55,7 +55,7 @@ jobs:
       E2E_TIER: ${{ inputs.tier }}
       E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version-file: ${{ env.MANAGER_MODULE }}/go.mod

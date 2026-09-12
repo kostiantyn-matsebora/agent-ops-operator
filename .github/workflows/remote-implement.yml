@@ -99,7 +99,7 @@ jobs:
       # not push. Nothing beyond these two.
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Who labelled this, and start the session
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -161,7 +161,7 @@ jobs:
       # own workflow_run jobs already rely on it for. Even on a same-repo,
       # non-fork pull request, `carry-grant.py` deciding what a grant means
       # must run the version this repository's own default branch ships.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
       - name: Carry conveyor:run forward as the fix-station label
@@ -232,7 +232,7 @@ jobs:
     steps:
       # THE TRUSTED COPY, NOT THE MERGED COMMIT'S -- same reasoning as the
       # open job above.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
       - name: Carry conveyor:run forward as the archive-station label
