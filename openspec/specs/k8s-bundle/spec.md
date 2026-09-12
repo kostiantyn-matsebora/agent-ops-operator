@@ -126,6 +126,10 @@ When active, the `profile` component SHALL render exactly one object: the `k8s-e
 
 Because the profile has NO repository, no agent definition file can be resolved for it. The component SHALL therefore support an inline role (`systemPrompt`) and ship a sensible default, so the shipped agent is not personality-free: a conversation started by a cluster event would otherwise arrive with no instructions at all.
 
+**The inline role SHALL state the install's pod-execution posture, rendered from the same value the RBAC reads.** `global.agentops.runtimeDefaults.allowPodExecution` gates every write that produces or enters a pod on the route account and on the MCP server's role; the profile is the third wall on the same value. When the gate is off, the rendered role SHALL carry a paragraph telling the agent that this install withholds pod execution — creating or entering a pod, and editing the pod template of a Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob — and that such a request is to be declined with that reason, naming what remains possible and suggesting the operator makes the edit, rather than attempted. When the gate is on, the paragraph SHALL be absent. The paragraph's text SHALL be a bundle value, appended after `systemPrompt` whether that prompt is the shipped one or the operator's own, because the posture is the chart's fact and not the prompt author's. There SHALL be one profile, never a second one per posture: a hand-kept copy drifts from the gate the first time it is flipped.
+
+The toolset wall is a different wall, and the role already covers it: a tool absent from the allowlist is reported as unavailable. The posture paragraph exists because the pod-execution gate is invisible from the tool list — the MCP server advertises the workload-patch tool whatever the gate says, and the refusal arrives from the API server one hop later.
+
 `profile.runtimeRef` SHALL remain, naming a runtime other than `default` — a different-vendor runtime the install declared. Left empty, the profile emits no `runtimeRef` and falls back to `default`, whose existence the render-time default-runtime guard is what guarantees.
 
 #### Scenario: Profile executes under the release's runtime SA
@@ -159,6 +163,22 @@ Because the profile has NO repository, no agent definition file can be resolved 
 #### Scenario: The repo-less agent still has a role
 - **WHEN** the bundle renders with defaults
 - **THEN** the AgentProfile carries an inline role describing the agent's job and how to act on a cluster, which the runtime appends to its system prompt
+
+#### Scenario: The withheld posture is stated to the agent
+- **WHEN** the bundle renders with `allowPodExecution` false (the default)
+- **THEN** the AgentProfile's inline role ends with the posture paragraph: pod execution is withheld, a pod-template edit is declined with that reason, what remains possible is named, and the operator is pointed at making the edit
+
+#### Scenario: The agent declines instead of failing
+- **WHEN** `allowPodExecution` is false and a person asks the acting route to add a `nodeSelector` to a Deployment
+- **THEN** the agent does not call a workload-patch tool, and its answer says the install withholds pod-template edits, what it could still do, and that the operator can make the change — never an RBAC refusal read back from the API server
+
+#### Scenario: The paragraph follows the gate
+- **WHEN** the bundle renders with `allowPodExecution` true
+- **THEN** the inline role carries no posture paragraph, and the RBAC it describes is granted on the same render
+
+#### Scenario: An operator's own prompt keeps the posture
+- **WHEN** `profile.systemPrompt` is overridden and `allowPodExecution` is false
+- **THEN** the posture paragraph is appended after the operator's text, unchanged
 
 ### Requirement: Demo values migrate to bundle paths
 The pre-bundle demo values SHALL move: `demo.enabled` → `global.demo.enabled`, `demo.readOnlyRbac` → `global.agentops.runtime.rbacMode` (true ≙ `readonly`). The runtime-shaped demo values SHALL land in the parent's `runtime:` block rather than in this bundle: `demo.runtimeImage` → `runtime.image`, `demo.credentialsSecret.*` → `runtime.credentialsSecret.*`, inherited `persistence` → automatic, inherited `runtimeIdleTtlMinutes` → the manager default with `runtime.idleTtlMinutes` as an override.
