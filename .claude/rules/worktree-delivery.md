@@ -213,11 +213,11 @@ comment acts on everything accepted:
 
 **A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.**
 Every label above that authorises unattended work is placed by a person whose
-write access the platform confirms, directly.
+write access the platform confirms.
 
-Or CARRIED forward by `.github/scripts/carry-grant.py`, which records whose
-instruction it relayed and is RE-CHECKED at the point it is acted on, never
-trusted because a workflow placed it.
+It is placed directly, or CARRIED forward by `.github/scripts/carry-grant.py`.
+That program records whose instruction it relayed and RE-CHECKS it at the
+point it is acted on, never trusting that a workflow placed it before.
 
 - **THIS IS THE WHOLE FIX FOR #201.** A remote session opened its pull request
   carrying `autofix` because its own instructions said to. It acts as an

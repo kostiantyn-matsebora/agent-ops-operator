@@ -32,14 +32,25 @@ assert_equals "['labeled']" "$(py 'print(d[True]["pull_request"]["types"])')"
 it "the workflow_run trigger names the review AND ci, and completes only"
 assert_equals "['claude-review', 'ci'] ['completed']" "$(py 'print(d[True]["workflow_run"]["workflows"], d[True]["workflow_run"]["types"])')"
 
-it "the label the gate prefilters on is the one the vocabulary file states"
+# BOTH LABEL CHECKS MUST SIT INSIDE THE SAME `pull_request &&` CLAUSE, not
+# merely appear somewhere in the gate's `if` -- a bare top-level check would
+# still contain the label name and still pass a plain assert_contains, while
+# firing the gate on every event that carries that label, not only a
+# `pull_request: labeled` one.
+pr_clause() { py '
+import re
+m = re.search(r"\(github\.event_name == '"'"'pull_request'"'"' && \([^)]*\)\)", d["jobs"]["gate"]["if"])
+print(m.group(0) if m else "NOT FOUND")
+'; }
+
+it "the label the gate prefilters on is the one the vocabulary file states, tied to the pull_request event"
 label=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["approve_label"])')
-assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.label.name == '$label'"
+assert_contains "$(pr_clause)" "github.event.label.name == '$label'"
 assert_equals "conveyor:fix" "$label"
 
-it "the keep-going label ALSO prefilters the pull_request trigger, so placing it re-triggers a round"
+it "the keep-going label ALSO prefilters the pull_request trigger, tied to the SAME clause, so placing it re-triggers a round"
 keep_going=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["keep_going_label"])')
-assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.label.name == '$keep_going'"
+assert_contains "$(pr_clause)" "github.event.label.name == '$keep_going'"
 assert_equals "conveyor:keep-going" "$keep_going"
 
 it "a review that did not complete successfully starts no round"
@@ -89,7 +100,13 @@ assert_contains "$gate" 'THIS_LABEL="$EVENT_LABEL"'
 it "label_placement falls back to the carry-grant marker comment's named approver when the timeline actor is the bot"
 assert_contains "$gate" 'actor" = "github-actions[bot]"'
 assert_contains "$gate" "carry-grant:fix"
-assert_contains "$gate" "grep -oE '@[A-Za-z0-9_.-]+'"
+
+# ANCHORED TO THE SENTENCE, NOT "the first @ anywhere in the comment" -- a
+# bare @-mention grep would silently pick a DIFFERENT login if the comment
+# template carry-grant.py posts ever grew a second mention.
+it "the fallback is anchored to the 'carrying @<login>'s standing instruction' phrase, not a bare first @-mention"
+assert_contains "$gate" "carrying @[A-Za-z0-9_.-]+'s standing instruction"
+assert_not_contains "$gate" "grep -oE '@[A-Za-z0-9_.-]+' | head -1"
 
 it "the collect job holds the analysis token and the model job holds none — no secret reaches the fixing step but its own credential"
 assert_contains "$(py 'print(d["jobs"]["collect"]["steps"][1]["env"])')" "SONAR_TOKEN"

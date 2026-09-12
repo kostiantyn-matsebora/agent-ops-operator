@@ -98,14 +98,16 @@ assert_equals "" "$(cat "$GH_CALLS")"
 # --- the gate ----------------------------------------------------------------
 
 for perm in read triage none; do
-  it "a $perm labeller starts nothing: the label comes off and one comment says who may place it"
-  setup; stub_gh_perm "$BIN" "$perm"
-  event "$EVENT" conveyor:implement 7 stranger
-  out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
-  assert_status 1 "$status"
-  assert_contains "$(cat "$GH_CALLS")" "issue edit 7 --repo o/r --remove-label conveyor:implement"
-  assert_contains "$(cat "$GH_CALLS")" "issue comment 7"
-  assert_not_contains "$out" "fired"
+  for label in conveyor:implement conveyor:run; do
+    it "a $perm labeller placing $label starts nothing: the label comes off and one comment says who may place it"
+    setup; stub_gh_perm "$BIN" "$perm"
+    event "$EVENT" "$label" 7 stranger
+    out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+    assert_status 1 "$status"
+    assert_contains "$(cat "$GH_CALLS")" "issue edit 7 --repo o/r --remove-label $label"
+    assert_contains "$(cat "$GH_CALLS")" "issue comment 7"
+    assert_not_contains "$out" "fired"
+  done
 done
 
 it "a pull request carrying the label fires nothing: it is an issue to that API, not a request to implement"

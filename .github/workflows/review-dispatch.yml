@@ -227,9 +227,15 @@ jobs:
             read -r actor since < <(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
               --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$LABEL\")] | last | \"\(.actor.login) \(.created_at)\"")
             if [ "$actor" = "github-actions[bot]" ]; then
+              # ANCHORED TO THE SENTENCE SHAPE, NOT "the first @ anywhere" --
+              # carry-grant.py's comment carries exactly one mention today
+              # ("carrying @<placer>'s standing instruction"), but a bare
+              # `grep -oE '@\w+' | head -1` would silently pick a DIFFERENT
+              # login if this template ever grew a second one.
               carried=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
                 --jq '[.[] | select(.body | startswith("<!-- carry-grant:fix -->"))] | last | .body' \
-                | grep -oE '@[A-Za-z0-9_.-]+' | head -1 | tr -d '@' || true)
+                | grep -oE "carrying @[A-Za-z0-9_.-]+'s standing instruction" | head -1 \
+                | sed -E "s/^carrying @//; s/'s standing instruction\$//" || true)
               [ -n "$carried" ] && actor="$carried"
             fi
             printf '%s %s\n' "$actor" "$since"
