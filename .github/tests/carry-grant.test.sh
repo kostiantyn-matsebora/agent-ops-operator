@@ -124,6 +124,13 @@ assert_contains "$out" "who now has \`read\`"
 
 # --- already carried: no second comment --------------------------------------
 
+# THE LABEL IS RE-ASSERTED EVEN THOUGH THE MARKER SAYS ALREADY CARRIED.
+# THE BUG THIS FIXES: a person hand-removes the station label (to pause the
+# loop) while the marker comment stays. `gh issue edit --add-label` on a
+# label already present is a no-op, so re-asserting it unconditionally costs
+# nothing on an ordinary already-carried call and is what puts the label
+# back on a hand-removed one -- carry-grant.py has no way to tell those two
+# starting states apart (nor does this stub), so one assertion covers both.
 it "already carried (marker present on the target): no second comment, but the label IS re-asserted"
 setup
 mark_opsx 1
@@ -134,20 +141,6 @@ assert_status 0 "$rc"
 assert_not_contains "$(cat "$GH_CALLS")" "issue comment 5"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label conveyor:fix"
 assert_contains "$out" "already carries"
-
-# THE BUG THIS RE-ASSERTION FIXES: a person hand-removes the station label
-# (to pause the loop) while the marker comment stays. Without re-asserting
-# the label every time, the NEXT carry would see the marker, print "already
-# carried", and leave the label off forever -- the grant is real but never
-# reaches the object the gate reads.
-it "a HAND-REMOVED label with the marker still present is put back, not left off forever"
-setup
-mark_opsx 1
-with_run_label maintainer 2026-09-01T10:00:00Z
-printf 'earlier text\n<!-- carry-grant:fix -->\nalready carried' > "$COMMENTS_FILE"
-out=$(run_it --issue 1 --station fix --pr 5); rc=$?
-assert_status 0 "$rc"
-assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label conveyor:fix"
 
 # --- the plain lane has no archive station -----------------------------------
 
