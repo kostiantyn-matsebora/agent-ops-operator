@@ -88,12 +88,13 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
 
 - **A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.**
   This is the whole fix for #201: a session opened its pull request carrying
-  `autofix` because its own instructions said to, the fixing loop's gate asked
-  whether the labeller may push here, the labeller was `claude[bot]`, the
-  answer was no, and the label was stripped with a refusal comment. The gate
-  was right. The instruction was wrong. **THE SESSION NOW LABELS NOTHING**, on
-  the issue or the pull request, ever — see `worktree-delivery.md`'s label
-  table.
+  `autofix` because its own instructions said to.
+  - The fixing loop's gate asked whether the labeller may push here. The
+    labeller was `claude[bot]`, the answer was no, and the label was stripped
+    with a refusal comment.
+  - The gate was right. The instruction was wrong.
+  - **THE SESSION NOW LABELS NOTHING**, on the issue or the pull request,
+    ever — see `worktree-delivery.md`'s label table.
 - **A WORKFLOW CARRIES THE GRANT INSTEAD, RE-CHECKED EVERY TIME.**
   `.github/workflows/remote-implement.yml` gains two jobs beside `fire`, both
   on `workflow_run` after `ci` completes — NEVER `pull_request` directly. A
