@@ -14,11 +14,20 @@ set -euo pipefail
 [ $# -eq 2 ] || { echo "usage: carry-from-pr.sh <pr-number> <fix|archive>" >&2; exit 64; }
 pr="$1"
 station="$2"
+case "$station" in
+  fix|archive) ;;
+  *) echo "usage: carry-from-pr.sh <pr-number> <fix|archive> -- got '$station'" >&2; exit 64 ;;
+esac
 
-head_repo=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json headRepositoryOwner,headRefName \
-  --jq '.headRepositoryOwner.login + "/" + .headRefName')
-case "$head_repo" in
-  "${GITHUB_REPOSITORY%%/*}"/change/*) ;;
+# isCrossRepository IS THE REAL CHECK -- review-dispatch.yml's own `who` step
+# uses the same field for the same reason. A same-OWNER, different-REPO pull
+# request (someone's own fork under this account, say) would still match a
+# same-owner string comparison; isCrossRepository is what GitHub itself
+# computes from the actual head repository, not an approximation of it.
+read -r cross head_ref < <(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" \
+  --json isCrossRepository,headRefName --jq '"\(.isCrossRepository) \(.headRefName)"')
+case "$cross/$head_ref" in
+  false/change/*) ;;
   *)
     echo "pull request #$pr is not a same-repo change/* branch; nothing to carry"
     exit 0

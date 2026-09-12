@@ -636,10 +636,12 @@ and `/opsx:archive`.
 **One label runs the whole line.** `conveyor:run` on an issue is the standing
 instruction: implement, drive the pull request to `conveyor:fix`-mergeable,
 and — on an issue already bound to an openspec change — archive it once
-merged. An issue with no such binding runs the PLAIN lane instead: implemented
-straight from what you wrote, ending at the merge with nothing archived. Which
-lane applies is read from the binding, never judged from how the issue is
-worded.
+merged.
+
+An issue with no such binding runs the PLAIN lane instead. It is implemented
+straight from what you wrote, ending at the merge with nothing archived.
+Which lane applies is read from the binding, never judged from how the issue
+is worded.
 
 **Releases are the maintainer's, and they are chart-shaped.** A component tag
 (`<component>-v<semver>`) publishes one image and creates no GitHub Release; a

@@ -105,10 +105,9 @@ fi
 # posted that no person has answered.
 # `.github/scripts/autofix-guard.py` (script filename unchanged; it reads
 # `approve_label` from `.github/review-triage.json` rather than a hardcoded
-# name) reads
-# that off the pull request of the worktree's branch, fails open on everything
-# it cannot read (no gh, no pull request, no label), and CI's docs-task job
-# asks the same script.
+# name) reads that off the pull request of the worktree's branch, fails open
+# on everything it cannot read (no gh, no pull request, no label), and CI's
+# docs-task job asks the same script.
 autofix="$root/.github/scripts/autofix-guard.py"
 [ -r "$autofix" ] || exit 0
 if message=$(cd "$root" && python3 "$autofix" 2>&1); then

@@ -184,6 +184,7 @@ class Round:
         self.args = args
         self.markers = markers
         self.work = work
+        self._comments_cache: list[dict] | None = None
         self.number = self.count_rounds() + 1
         self.sonar = self.read_json(self.args.sonar)
         self.checks = self.read_json(getattr(self.args, "checks", None))
@@ -252,12 +253,18 @@ class Round:
 
 
     def _comments_since(self) -> list[dict]:
-        try:
-            raw = gh("api", f"repos/{self.args.repo}/issues/{self.args.pr}/comments", "--paginate")
-        except subprocess.CalledProcessError:
-            return []
-        return [c for c in parse_comments(raw)
-                if not self.args.since or (c.get("created_at") or "") >= self.args.since]
+        # CACHED ON THE INSTANCE -- count_rounds() and count_grants() both
+        # call this from __init__, and the pull request's comments do not
+        # change between those two calls. Fetching them twice was a real,
+        # avoidable network round trip on every landing-step run.
+        if self._comments_cache is None:
+            try:
+                raw = gh("api", f"repos/{self.args.repo}/issues/{self.args.pr}/comments", "--paginate")
+            except subprocess.CalledProcessError:
+                raw = "[]"
+            self._comments_cache = [c for c in parse_comments(raw)
+                                     if not self.args.since or (c.get("created_at") or "") >= self.args.since]
+        return self._comments_cache
 
     def count_rounds(self) -> int:
         """Landing comments carrying the round marker, since the label was

@@ -80,6 +80,17 @@ assert_contains "$gate" "--remove-label \"\$THIS_LABEL\""
 it "the pull_request trigger's label event is checked against ITSELF, not hardcoded to the fix label — a keep-going event is never refused for not being conveyor:fix"
 assert_contains "$gate" 'THIS_LABEL="$EVENT_LABEL"'
 
+# A CARRIED LABEL'S TIMELINE ACTOR IS THE BOT, NEVER THE APPROVER -- measured
+# live: carry-grant.py places the label under this workflow's own token, so
+# the timeline records github-actions[bot] as the actor. label_placement()
+# must fall back to the real approver carry-grant.py's own marker comment
+# already names, or every carried round reports "approved by
+# github-actions[bot]" instead of the person whose grant it actually was.
+it "label_placement falls back to the carry-grant marker comment's named approver when the timeline actor is the bot"
+assert_contains "$gate" 'actor" = "github-actions[bot]"'
+assert_contains "$gate" "carry-grant:fix"
+assert_contains "$gate" "grep -oE '@[A-Za-z0-9_.-]+'"
+
 it "the collect job holds the analysis token and the model job holds none — no secret reaches the fixing step but its own credential"
 assert_contains "$(py 'print(d["jobs"]["collect"]["steps"][1]["env"])')" "SONAR_TOKEN"
 fixjob=$(py 'print(d["jobs"]["fix"])')
@@ -322,10 +333,14 @@ assert_not_contains "$archive_run" "carry-grant.py"
 # carry-from-pr.sh ITSELF: the change/* guard, the Refs #<n> extraction, and
 # routing to carry-grant.py by station -- pinned once, for whichever job
 # calls it.
-it "carry-from-pr.sh refuses anything that is not a same-repo change/* branch"
+it "carry-from-pr.sh refuses anything that is not a same-repo change/* branch, using isCrossRepository -- never an owner-string approximation"
 carry_from_pr=$(cat "$ROOT/.github/scripts/carry-from-pr.sh")
-assert_contains "$carry_from_pr" "headRepositoryOwner"
+assert_contains "$carry_from_pr" "isCrossRepository"
 assert_contains "$carry_from_pr" "change/*"
+assert_not_contains "$carry_from_pr" "headRepositoryOwner"
+
+it "carry-from-pr.sh refuses any station other than fix or archive, rather than defaulting to archive"
+assert_contains "$carry_from_pr" 'fix|archive'
 
 it "carry-from-pr.sh extracts Refs #<n> and calls carry-grant.py with --pr only for station fix"
 assert_contains "$carry_from_pr" "Refs #"

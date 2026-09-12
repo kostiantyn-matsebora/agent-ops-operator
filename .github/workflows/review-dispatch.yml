@@ -214,9 +214,25 @@ jobs:
           # state on the pull request rather than a memory of an event. The
           # latest placement counts, so removing and re-adding the label
           # starts the round count afresh.
+          #
+          # A CARRIED LABEL'S TIMELINE ACTOR IS THE BOT, NEVER THE APPROVER —
+          # measured live: `carry-grant.py` places the label under this
+          # workflow's own token, so the timeline event's actor is
+          # `github-actions[bot]`, not the person whose `conveyor:run`
+          # instruction it carried. That person's login is exactly what
+          # `carry-grant.py`'s own marker comment already names, so a
+          # bot-placed label falls back to reading it from there instead of
+          # reporting the bot as the approver.
           label_placement() {
-            gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
-              --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$LABEL\")] | last | \"\(.actor.login) \(.created_at)\""
+            read -r actor since < <(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
+              --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$LABEL\")] | last | \"\(.actor.login) \(.created_at)\"")
+            if [ "$actor" = "github-actions[bot]" ]; then
+              carried=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+                --jq '[.[] | select(.body | startswith("<!-- carry-grant:fix -->"))] | last | .body' \
+                | grep -oE '@[A-Za-z0-9_.-]+' | head -1 | tr -d '@' || true)
+              [ -n "$carried" ] && actor="$carried"
+            fi
+            printf '%s %s\n' "$actor" "$since"
           }
           # MAY THIS PERSON PUSH HERE — the collaborators API, because a label
           # event carries no `author_association`.
