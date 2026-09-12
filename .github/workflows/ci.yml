@@ -1003,11 +1003,23 @@ jobs:
             echo "::notice::could not read the live body; judging the event payload, which a re-run freezes"
           fi
           out="$RUNNER_TEMP/pr-closes-guard.out"
-          if python3 .github/scripts/pr-closes-guard.py \
+          rc=0
+          python3 .github/scripts/pr-closes-guard.py \
             --body-file "$body" \
             --range "origin/$BASE_REF...$HEAD_SHA" \
-            --root . 2>&1 | tee "$out"; then
+            --root . > "$out" 2>&1 || rc=$?
+          cat "$out"
+          if [ "$rc" -eq 0 ]; then
             exit 0
+          fi
+          # EXIT 1 IS THE GUARD'S OWN, DELIBERATE REFUSAL. Any other code is a
+          # SCRIPT ERROR — a crash, a bad invocation — wearing the same shape,
+          # and posting its traceback to the pull request as though it were
+          # the guard's verdict would tell a reader their `Closes #` line is
+          # wrong when the truth is the guard itself broke.
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::pr-closes-guard.py exited $rc, not a refusal — see the log above for the script error"
+            exit "$rc"
           fi
           # POST WHAT THE GUARD ALREADY SAID, WHERE A PERSON WILL SEE IT — a
           # comment on the pull request, never only the job log. MARKER-DEDUPED

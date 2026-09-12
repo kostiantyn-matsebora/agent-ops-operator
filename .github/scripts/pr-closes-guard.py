@@ -37,6 +37,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import traceback
 
 # GitHub's own closing keywords, as documented. `Refs #12` is deliberately absent
 # -- that is the form this guard exists to steer people towards.
@@ -157,4 +158,13 @@ See .claude/rules/worktree-delivery.md.""", file=sys.stderr)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:
+        # A CRASH IS NOT A REFUSAL. main() returns only 0 or 1, both
+        # deliberate, so an uncaught exception here would otherwise also
+        # exit 1 -- and ci.yml posts exit-1 output to the pull request as
+        # the guard's own verdict. Exit 3 keeps a bug in this script from
+        # reading, on the pull request, as a bad `Closes #` line.
+        traceback.print_exc()
+        sys.exit(3)
