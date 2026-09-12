@@ -189,8 +189,15 @@ server's workload is gated on the config:
 --set home-assistant.adminMcpServer.enabled=true
 ```
 
-**Of the 78 tools that server registers, 52 ship.** The 26 withheld ones restart
-Home Assistant, manage backups, delete registry objects or install software.
+**Of the 78 tools that server registers, 62 ship** — registry removals
+included, since a stale entity or device is cheap to recreate and the
+operator's prompt gates the action.
+
+Sixteen stay withheld, in three classes:
+
+- restart and backups
+- software and preferences
+- deletes of what a person WROTE — automations, scripts, scenes, dashboards
 
 Add any of them back by restating `adminMcp.toolset.tools` — Helm replaces lists
 rather than merging them.

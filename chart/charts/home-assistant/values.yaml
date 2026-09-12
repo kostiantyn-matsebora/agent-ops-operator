@@ -400,7 +400,7 @@ adminMcp:
   # Assistant, deleting registry objects and installing HACS packages in one
   # line, which is the whole thing the enumeration prevents.
   #
-  # Verified against ha-mcp 8.3.0: 78 tools, of which these 52 ship.
+  # Verified against ha-mcp 8.3.0: 78 tools, of which these 62 ship.
   toolset:
     name: ha-admin
     tools:
@@ -417,6 +417,10 @@ adminMcp:
       - "mcp__homeassistant_admin__ha_config_list_dashboard_resources"
       - "mcp__homeassistant_admin__ha_config_list_groups"
       - "mcp__homeassistant_admin__ha_config_list_helpers"
+      - "mcp__homeassistant_admin__ha_config_remove_calendar_event"
+      - "mcp__homeassistant_admin__ha_config_remove_category"
+      - "mcp__homeassistant_admin__ha_config_remove_group"
+      - "mcp__homeassistant_admin__ha_config_remove_label"
       - "mcp__homeassistant_admin__ha_config_set_automation"
       - "mcp__homeassistant_admin__ha_config_set_calendar_event"
       - "mcp__homeassistant_admin__ha_config_set_category"
@@ -449,6 +453,12 @@ adminMcp:
       - "mcp__homeassistant_admin__ha_list_floors_areas"
       - "mcp__homeassistant_admin__ha_list_services"
       - "mcp__homeassistant_admin__ha_reload_core"
+      - "mcp__homeassistant_admin__ha_remove_area_or_floor"
+      - "mcp__homeassistant_admin__ha_remove_device"
+      - "mcp__homeassistant_admin__ha_remove_entity"
+      - "mcp__homeassistant_admin__ha_remove_helpers_integrations"
+      - "mcp__homeassistant_admin__ha_remove_todo_item"
+      - "mcp__homeassistant_admin__ha_remove_zone"
       - "mcp__homeassistant_admin__ha_search"
       - "mcp__homeassistant_admin__ha_set_area_or_floor"
       - "mcp__homeassistant_admin__ha_set_device"
@@ -456,37 +466,33 @@ adminMcp:
       - "mcp__homeassistant_admin__ha_set_integration"
       - "mcp__homeassistant_admin__ha_set_todo_item"
       - "mcp__homeassistant_admin__ha_set_zone"
-  # NOT SHIPPED, and each for a reason: they restart Home Assistant, delete
-  # registry objects, manage backups, or install software. Add the ones you want
-  # by appending to `toolset.tools` above — Helm replaces lists rather than
-  # merging them, so restate the whole list.
+  # NOT SHIPPED, and each for a reason, stated by the class it belongs to.
+  # Registry removals (entities, devices, areas/floors, zones, helpers and
+  # integrations, categories, labels, groups, to-do items, calendar events)
+  # ship above — they are cheap to recreate, and the operator's prompt gates
+  # them. These sixteen stay withheld. Add the ones you want by appending to
+  # `toolset.tools` above — Helm replaces lists rather than merging them, so
+  # restate the whole list.
   #
-  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard"
-  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard_resource"
-  #   - "mcp__homeassistant_admin__ha_config_remove_automation"
-  #   - "mcp__homeassistant_admin__ha_config_remove_calendar_event"
-  #   - "mcp__homeassistant_admin__ha_config_remove_category"
-  #   - "mcp__homeassistant_admin__ha_config_remove_group"
-  #   - "mcp__homeassistant_admin__ha_config_remove_label"
-  #   - "mcp__homeassistant_admin__ha_config_remove_scene"
-  #   - "mcp__homeassistant_admin__ha_config_remove_script"
+  # restart and backups:
+  #   - "mcp__homeassistant_admin__ha_manage_backup"
+  #   - "mcp__homeassistant_admin__ha_restart"
+  # software and preferences:
   #   - "mcp__homeassistant_admin__ha_import_blueprint"
   #   - "mcp__homeassistant_admin__ha_manage_app"
-  #   - "mcp__homeassistant_admin__ha_manage_backup"
   #   - "mcp__homeassistant_admin__ha_manage_energy_prefs"
   #   - "mcp__homeassistant_admin__ha_manage_hacs"
   #   - "mcp__homeassistant_admin__ha_manage_pipeline"
   #   - "mcp__homeassistant_admin__ha_manage_radio"
   #   - "mcp__homeassistant_admin__ha_manage_theme"
   #   - "mcp__homeassistant_admin__ha_manage_updates"
-  #   - "mcp__homeassistant_admin__ha_remove_area_or_floor"
-  #   - "mcp__homeassistant_admin__ha_remove_device"
-  #   - "mcp__homeassistant_admin__ha_remove_entity"
-  #   - "mcp__homeassistant_admin__ha_remove_helpers_integrations"
-  #   - "mcp__homeassistant_admin__ha_remove_todo_item"
-  #   - "mcp__homeassistant_admin__ha_remove_zone"
   #   - "mcp__homeassistant_admin__ha_report_issue"
-  #   - "mcp__homeassistant_admin__ha_restart"
+  # authored configuration — deletes of what a person WROTE:
+  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard"
+  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard_resource"
+  #   - "mcp__homeassistant_admin__ha_config_remove_automation"
+  #   - "mcp__homeassistant_admin__ha_config_remove_scene"
+  #   - "mcp__homeassistant_admin__ha_config_remove_script"
 
 # The admin MCP server WORKLOAD — a sibling of `adminMcp`, which renders only
 # the CRs. Runs ha-mcp in-cluster when you do not already have a server.
@@ -688,6 +694,10 @@ profiles:
         * it edits automations or scripts someone else wrote;
         * you are not confident which entity or integration was meant.
       In those cases, write exactly what you would do and wait to be told.
+
+      A reply in the thread confirming it — "yes", "do it", "go ahead" — is
+      the authorization. Do exactly what you described, once. Never ask
+      again, and never tell the person to run it themselves.
 
       Never touch an entity you were not asked about and did not diagnose.
 

@@ -2105,18 +2105,35 @@ func TestHaAdminToolsetIsEnumeratedAndWithholdsTheDestructive(t *testing.T) {
 	if strings.Contains(doc, "*") {
 		t.Fatalf("the admin toolset must enumerate:\n%s", doc)
 	}
-	// The tools that answer the failures this component exists for.
-	for _, want := range []string{"ha_set_entity", "ha_set_integration", "ha_get_logs", "ha_reload_core"} {
+	// The tools that answer the failures this component exists for, including
+	// registry removal — a stale entity or device is cheap to recreate, and
+	// the operator's prompt is the gate on it.
+	for _, want := range []string{"ha_set_entity", "ha_set_integration", "ha_get_logs", "ha_reload_core", "ha_remove_entity", "ha_remove_device"} {
 		if !strings.Contains(doc, "mcp__homeassistant_admin__"+want) {
 			t.Errorf("the admin toolset must grant %s — it is why this component exists", want)
 		}
 	}
-	// Withheld by default: these restart Home Assistant, delete registry
-	// objects, or install software. Adding one is a values decision.
-	for _, absent := range []string{"ha_restart", "ha_manage_backup", "ha_remove_entity", "ha_manage_hacs"} {
+	// Withheld by default, one per class: restart and backups, software and
+	// preferences, and deletes of what a person WROTE. Adding one is a values
+	// decision.
+	for _, absent := range []string{"ha_restart", "ha_manage_backup", "ha_manage_hacs", "ha_config_remove_automation"} {
 		if strings.Contains(doc, "mcp__homeassistant_admin__"+absent) {
 			t.Errorf("%s must not ship in the default allowlist", absent)
 		}
+	}
+}
+
+// The operator's describe-and-stop rule states a CONFIRMATION GATE, not a
+// permanent refusal: a person's reply in the thread authorizes the described
+// action.
+func TestHaOperatorPromptStatesAConfirmationGate(t *testing.T) {
+	out := helmTemplate(t, haArgs()...)
+	doc := haDoc(t, out, "AgentProfile", "ha-operator")
+	if !strings.Contains(doc, "confirming it") || !strings.Contains(doc, "the authorization") {
+		t.Fatalf("the operator prompt must state that a reply in the thread is the authorization:\n%s", doc)
+	}
+	if !strings.Contains(doc, "Never ask") || !strings.Contains(doc, "never tell the person to run it themselves") {
+		t.Fatalf("the operator prompt must forbid asking again and deferring the action to the person:\n%s", doc)
 	}
 }
 
