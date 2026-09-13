@@ -85,11 +85,12 @@ runtimes:
     image: registry.example.com/my-agentops-runtime:1.0.0
 ```
 
-**`default` is what a route naming no `runtimeRef` resolves to**, and the chart
+**`default` is what a route naming no `runtimeRef` resolves to.** The chart
 renders it as a copy of one declared runtime — the one flagged `default: true`,
-or the first configured. Declare yours alone and it is the default. Declare no
-runtime at all and the render FAILS, naming the routes that needed one — which
-is the honest alternative to conversations queueing forever.
+or the first configured. Declare yours alone and it is the default.
+
+Declare no runtime at all and the render FAILS, naming the routes that needed
+one. That is the honest alternative to conversations queueing forever.
 
 A bundle may ship a runtime of its own the same way.
 
@@ -274,6 +275,12 @@ kubectl -n agent-ops logs -f agentops-conv-<conversation>
 **Conversations already open keep the runtime they were created with.** The
 choice is recorded when a conversation starts, so patch the Pipeline and then
 ask something new.
+
+**A typo in `runtimeRef` is reported on the Pipeline, not discovered later.**
+Naming an `AgentRuntime` that does not exist turns the Pipeline's `Ready`
+condition `False`, naming the missing runtime.
+
+Apply the missing `AgentRuntime` and `Ready` converges with no further edit.
 
 Ask your agent something. The pod log should show the unit arriving, then the
 allowlist you composed, then the answer.

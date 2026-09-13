@@ -50,6 +50,19 @@ for the source and the reference material beside this file.
   once. A passed smoke from any earlier run on the commit is reused. One
   already in flight is waited for rather than raced. Contributor-facing only.
   No published artifact changes.
+- **Breaking.** A Pipeline's `spec.runtimeRef` naming an `AgentRuntime` that
+  does not exist now turns `Ready` `False`, naming the missing runtime. It
+  used to report `Ready=True` and fail only later, when a pod was built.
+  `spec.serviceAccountName` is unaffected — that field stays unchecked, since
+  confirming it exists needs RBAC the manager does not hold. Manager 0.57.4.
+
+### Upgrade
+
+1. `helm upgrade`. Nothing to restate — the check arrives with the manager
+   image.
+2. A Pipeline already carrying a dangling `runtimeRef` turns `Ready=False`.
+   Apply the missing `AgentRuntime`, or correct the name, and `Ready`
+   converges with no further edit.
 
 ## [13.4.0] — 2026-09-06
 
