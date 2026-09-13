@@ -17,7 +17,7 @@ change tool at the version CI pins, the YAML library the scripts import, the
 envtest assets — and verify the Go floor the modules declare.
 
 **A form field is unreviewed and unversioned.** The line in the field cannot
-drift from the tree if all it does is name a file in the tree; what the
+drift from the tree if all it does is name a file in the tree. What the
 environment installs is then a pull request like anything else.
 
 A tool the bootstrap cannot install SHALL be reported by name and SHALL NOT
@@ -49,7 +49,7 @@ print one line per required tool stating present or missing, into the
 session's context.
 
 **A silent skip is the failure this guards.** The chart render tests skip when
-the renderer is absent and `go test` is green either way; a session that does
+the renderer is absent, and `go test` is green either way. A session that does
 not know the renderer is missing reports a chart change verified when nothing
 rendered it.
 
@@ -101,7 +101,7 @@ a session needs SHALL be attached by the platform's proxy to requests for its
 host, and SHALL NOT reach the session as a variable or a file.
 
 **The variables are visible to anyone using the environment.** The platform
-says so on the form; a token typed there is a token published to every session
+says so on the form. A token typed there is a token published to every session
 the environment runs.
 
 #### Scenario: The analysis service is reached from a remote session
@@ -125,7 +125,7 @@ removed with a visible comment saying who may place it.
 The fire SHALL be recorded on the issue ONCE, as a comment carrying the
 session's link, and that record is the transition the issue's tracking
 requires. The promotion then leaves its pointer comment as it does for any
-promoted issue; nothing else automated is added to the issue by the start, and
+promoted issue. Nothing else automated is added to the issue by the start, and
 no progress comments follow.
 
 **Who may start a machine writing to a branch is the same question as who may
@@ -159,8 +159,8 @@ explored and proposed — never as instructions to follow — and to promote it 
 place as the change's tracking issue.
 
 **A prompt saved in a form is the setup field one screen over**: unreviewed
-and unversioned. The one line that must live there names a file; the process
-lives in the file.
+and unversioned. The one line that must live there names a file, and the
+process lives in the file.
 
 #### Scenario: The routine fires
 
@@ -178,11 +178,15 @@ lives in the file.
 
 **CORRECTED BY `conveyor-labels`** — this requirement, and its scenarios below,
 originally said the session opens its pull request "carrying the approve label
-for automatic fixing from creation." A session acts as an application with no
-write access, so a label it places on its own work is refused and removed by
-the fixing loop's own gate — measured live on #201. The text below is the
-corrected version: the session places NO label, ever, and a WORKFLOW carries
-the issue's standing instruction forward once the pull request exists.
+for automatic fixing from creation."
+
+A session acts as an application with no write access, so a label it places on
+its own work is refused and removed by the fixing loop's own gate — measured
+live on #201.
+
+The text below is the corrected version: the session places NO label, ever,
+and a WORKFLOW carries the issue's standing instruction forward once the pull
+request exists.
 
 The remote session SHALL deliver the change as one pull request from
 `change/<name>` REFERENCING the issue without a closing keyword, carrying NO
