@@ -116,19 +116,26 @@ jobs:
   # request. Harmless: carry-grant.py's marker comment dedupes every carry
   # after the first, and re-adding an already-present label is a no-op.
   #
-  # CONCLUSION == 'success' ALREADY WAITS ON THE REVIEW, NOT JUST CI'S OWN
-  # JOBS -- `ci-green`'s `needs:` now includes `review-clean` (a job in this
-  # same `ci.yml` run that polls `claude-review.yml`'s own conclusion for the
-  # sha), so `ci-green` failing makes the WHOLE `ci` run's conclusion
-  # `failure`, whatever `review-clean`'s reason. This is what closes the gap
-  # a carried label used to fall into: `conveyor:fix` no longer lands before
-  # the review has had its chance to post findings, because the run this job
-  # reacts to cannot conclude `success` until the review has.
+  # CONCLUSION IS 'success' OR 'failure', NEVER 'success' ALONE -- THAT WAS THE
+  # BUG. `ci-green`'s `needs:` includes `review-clean` (a job in this same
+  # `ci.yml` run that polls `claude-review.yml`'s own conclusion for the sha),
+  # so `ci-green` failing makes the WHOLE `ci` run's conclusion `failure`
+  # whenever the review posted findings -- exactly the pull request that most
+  # needs `conveyor:fix` carried onto it. Gating this job on `success` alone
+  # meant it never ran for that case: the carry that starts the fixing loop
+  # waited on the very green state the fixing loop exists to produce (#51).
+  # `review-dispatch.yml`'s own header already treats a red `ci-green` as a
+  # work item ("a `ci` run completing with `failure` starts a round"), so
+  # accepting `failure` here only lets the carry happen -- carry-grant.py
+  # still re-checks the writer's `conveyor:run` and the `change/*` branch
+  # guard before anything lands, and the loop itself still reproduces or
+  # disputes each failing check rather than blindly patching.
   open:
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.conclusion == 'failure')
     runs-on: ubuntu-latest
     # PULL-REQUESTS: write -- MEASURED, NOT ASSUMED. `gh issue edit <pr>
     # --add-label` accepts a pull request's number (the REST shape is

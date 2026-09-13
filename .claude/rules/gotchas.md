@@ -570,3 +570,36 @@ unlabelled, with no session left to do anything about it.
   the originating issue's `conveyor:run` and confirming it is still there and
   still a writer's — the same live-read property the gate already had for a
   person's own label.
+
+**THE `open` JOB GATED ITS OWN CARRY ON THE GREEN STATE THE CARRY EXISTS TO
+PRODUCE — MEASURED LIVE ON #51.** `conveyor:run` on issue #51 fired the
+session, which opened pull request #220 correctly, unlabelled.
+
+The review posted findings, and `ci-green` went `failure` — it `needs:
+review-clean`, which fails the whole `ci` run whenever the review found
+something. `conveyor:fix` never landed, because `remote-implement.yml`'s
+`open` job only fired when the triggering `ci` run's conclusion was
+`success`.
+
+- **A CHICKEN-AND-EGG GATE, NOT A MISSING ONE.** `open` exists to carry
+  `conveyor:fix` onto a pull request so the fixing loop can act on the
+  review's findings. Requiring `ci` to already be green before that carry
+  happens means it can never fire on exactly the pull requests that have
+  findings to fix — the one case the whole mechanism is for.
+- **THE FIX IS ONE BOOLEAN, NOT A REDESIGN.** `open`'s `if:` now accepts
+  `conclusion == 'success' || conclusion == 'failure'`.
+  `carry-from-pr.sh` and `carry-grant.py` read no CI status at all. They
+  already re-check the writer's `conveyor:run`, the `change/*` branch shape
+  and `Refs #<n>`, independent of why `ci` concluded — so widening the
+  trigger costs nothing the re-check does not already guard.
+- **`archive` KEEPS `success`-ONLY, DELIBERATELY.** It fires on a `push` to
+  the default branch, which only happens on an actual merge. A `push`-event
+  `ci` run concluding `failure` on `master` is a different incident — a
+  broken main branch — with nothing to do with this bug.
+- **THE MISLEADING COMMENT WAS THE FIRST THING TO FIX.** The `open` job's own
+  header argued at length that `success`-only was CORRECT: "this is what
+  closes the gap a carried label used to fall into." That reasoning was
+  backwards — it described the gate as protecting against a premature carry,
+  when it was instead preventing the only carry that mattered. A comment
+  defending the wrong behavior at length reads as considered, which makes it
+  a bigger risk than no comment at all.
