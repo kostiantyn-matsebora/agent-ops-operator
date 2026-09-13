@@ -71,6 +71,16 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: p.Spec.ProfileRef.Name}, &profile); err != nil {
 		missing = append(missing, "agentprofile/"+p.Spec.ProfileRef.Name)
 	}
+	// RuntimeRef is checked only when NAMED. Absent, it resolves to the
+	// AgentRuntime called "default" through runtimepod's own precedence chain
+	// — that is not a miss, and probing for "default" here would validate a
+	// name this Pipeline never wrote.
+	if p.Spec.RuntimeRef != nil {
+		var rt agentopsv1alpha1.AgentRuntime
+		if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: p.Spec.RuntimeRef.Name}, &rt); err != nil {
+			missing = append(missing, "agentruntime/"+p.Spec.RuntimeRef.Name)
+		}
+	}
 	// tooling bindings: refs only — the CRs' content is resolved at use time,
 	// so Ready checks existence, nothing else.
 	if p.Spec.Toolsets != nil {
@@ -247,6 +257,7 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&agentopsv1alpha1.SignalSource{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.Channel{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.AgentProfile{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
+		Watches(&agentopsv1alpha1.AgentRuntime{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.MCPToolset{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.MCPConfig{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Complete(r)
