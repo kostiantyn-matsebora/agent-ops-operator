@@ -299,8 +299,16 @@ it "the open job fires on ci completing for a pull_request event, never pull_req
 open_if=$(rpy 'print(d["jobs"]["open"]["if"])')
 assert_contains "$open_if" "github.event_name == 'workflow_run'"
 assert_contains "$open_if" "github.event.workflow_run.event == 'pull_request'"
-assert_contains "$open_if" "github.event.workflow_run.conclusion == 'success'"
 assert_not_contains "$open_if" "github.event.pull_request"
+
+# 'success' ALONE WAS THE BUG (#51): `ci-green` needs `review-clean`, so `ci`
+# concludes `failure` whenever the review posted findings -- exactly the pull
+# request that most needs `conveyor:fix` carried onto it. The carry that
+# starts the fixing loop must not wait on the green state the fixing loop
+# exists to produce.
+it "the open job's conclusion check accepts BOTH success and failure, never success alone"
+assert_contains "$open_if" "github.event.workflow_run.conclusion == 'success'"
+assert_contains "$open_if" "github.event.workflow_run.conclusion == 'failure'"
 
 it "the open job resolves the pull request from the workflow_run's head sha, not from a pull_request event payload"
 open_run=$(rpy 'print(d["jobs"]["open"]["steps"][-1]["run"])')

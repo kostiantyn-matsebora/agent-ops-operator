@@ -13,16 +13,23 @@ uncommitted work when one session cleaned the tree under another.
 
 ### Requirement: A change is implemented in its own working copy
 
-Every openspec change SHALL be implemented in a git worktree dedicated to it,
-created when implementation begins and removed when the change is archived.
+Every openspec change SHALL be implemented in a working copy dedicated to it:
+on a workstation a git worktree, created when implementation begins and removed
+when the change is archived; in a remote session the session's own clone, which
+is that copy by construction and SHALL NOT have a worktree added beside it.
 
-**One session, one change, one worktree.** Sessions already carry the name
+**One session, one change, one working copy.** Sessions already carry the name
 `<phase> <change>`, and two of them sharing a working copy share both a HEAD and
 a set of files. That is not a hypothetical in either direction: a branch created
 by one session moved another's HEAD and the branches diverged, and separately a
 session cleaning the tree deleted a second session's entire unstaged change
 directory. Isolation is what makes a branch per change safe at all, so it is a
 requirement of this capability rather than a convenience within it.
+
+**A remote session is the isolation, not a place to re-create it.** Its clone
+is fresh, its HEAD is its own, and its push reaches the branch it works on; a
+worktree added there is a second copy of the tree that doubles the derived
+inventory for no isolation it did not already have.
 
 #### Scenario: Two changes are worked at once
 
@@ -42,6 +49,12 @@ requirement of this capability rather than a convenience within it.
 - **WHEN** a change completes and is archived
 - **THEN** its worktree is removed, leaving no working copy that would be
   mistaken for live work
+
+#### Scenario: A remote session implements a change
+
+- **WHEN** a change is implemented in a remote session
+- **THEN** the session checks out `change/<name>` in its clone and works there,
+  and no worktree exists for that change anywhere
 
 ### Requirement: Worktrees live outside the repository tree
 
