@@ -37,6 +37,18 @@ assert_contains "$job" '["approve_label"]'
 assert_not_contains "$job" "claude"
 assert_not_contains "$job" "workflow run"
 
+it "checks the commenter's write access from the collaborators API before re-running anything"
+step=$(py 'print(d["jobs"]["rerun"]["steps"][1]["run"])')
+assert_contains "$step" "collaborators/\$SENDER/permission"
+assert_contains "$step" "admin|maintain|write"
+assert_contains "$(py 'print(d["jobs"]["rerun"]["steps"][1]["env"]["SENDER"])')" "github.event.comment.user.login"
+
+it "a non-writer's comment is refused before docs-task is even looked up"
+step=$(py 'print(d["jobs"]["rerun"]["steps"][1]["run"])')
+perm_line=$(printf '%s' "$step" | grep -n 'PERM=' | head -1 | cut -d: -f1)
+label_line=$(printf '%s' "$step" | grep -n 'LABEL=' | head -1 | cut -d: -f1)
+[ -n "$perm_line" ] && [ -n "$label_line" ] && [ "$perm_line" -lt "$label_line" ] && pass || fail "the permission check must run before the label is even read"
+
 it "serialises per pull request without cancelling"
 assert_contains "$(py 'print(d["concurrency"]["group"])')" "github.event.issue.number || github.event.pull_request.number"
 assert_equals "False" "$(py 'print(d["concurrency"]["cancel-in-progress"])')"

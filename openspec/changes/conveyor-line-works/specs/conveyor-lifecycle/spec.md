@@ -128,7 +128,7 @@ person can change to move or stop the line.
 The check that gates on the code review SHALL report whether the review ran
 for the head, and nothing about what it found.
 
-This requirement is about that ONE check -- a DIFFERENT required check MAY
+This requirement is about that ONE check — a DIFFERENT required check MAY
 still read a pull request's own comments for a different question, which is
 the next requirement.
 
@@ -168,7 +168,7 @@ could be re-run.
 ### Requirement: A required check that reads a person's answer is re-run on that answer
 
 A required check whose verdict depends on whether a person has answered
-something the loop posted -- a dispute, never the review's own threads --
+something the loop posted — a dispute, never the review's own threads —
 SHALL be re-run when that person comments, so its verdict never depends on a
 push or a hand re-run.
 

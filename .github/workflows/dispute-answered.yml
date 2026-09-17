@@ -11,9 +11,14 @@
 # `open` job then marks the head mergeable; red, the loop's own `ci failure`
 # trigger starts the next round. Nothing here decides anything.
 #
-# WHO COUNTS: anybody who is not a bot. The fixing loop's own comments are
-# bot-authored and never re-run anything; `/fix-accepted` is a DISPATCH and
-# belongs to review-dispatch.yml, which already listens on the same events.
+# WHO COUNTS: a PERSON WITH WRITE ACCESS. Re-running a job is a small action,
+# but it is still an action a comment triggers on a branch of this
+# repository -- the same bound `review-dispatch.yml`'s own dispatch reads
+# (the collaborators API, never `author_association`, which a label event
+# and a comment event both carry unreliably). The fixing loop's own comments
+# are bot-authored and never re-run anything; `/fix-accepted` is a DISPATCH
+# and belongs to review-dispatch.yml, which already listens on the same
+# events.
 #
 # `actions: write` IS THE RE-RUN AND NOTHING ELSE. `contents: read` is for
 # the checkout of the TRUSTED (default-branch) copy below, never the pull
@@ -52,12 +57,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
-      - name: Re-run docs-task on the head's own ci run, if it failed and the loop is on
+      - name: Re-run docs-task on the head's own ci run, if it failed, the loop is on, and the commenter may push here
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.issue.number || github.event.pull_request.number }}
+          SENDER: ${{ github.event.comment.user.login }}
         run: |
           set -euo pipefail
+          # WRITE ACCESS, READ FROM THE PLATFORM AT THE MOMENT IT MATTERS --
+          # never assumed because the comment landed, never read off
+          # `author_association`. Unreadable is `none`, the same fail-closed
+          # shape every other gate in this repository uses for the same
+          # question.
+          PERM=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$SENDER/permission" --jq .permission 2>/dev/null || echo none)
+          case "$PERM" in
+            admin|maintain|write) ;;
+            *) echo "::notice::@$SENDER commented on #$PR with \`$PERM\` access; nothing re-run"; exit 0 ;;
+          esac
           LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["approve_label"])')
           read -r sha labelled < <(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefOid,labels \
             --jq "\"\(.headRefOid) \([.labels[].name] | index(\"$LABEL\") != null)\"")
