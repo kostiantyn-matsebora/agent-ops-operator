@@ -11,9 +11,14 @@ own, through `required_conversation_resolution`, which is a property of the
 pull request GitHub evaluates at merge time and cannot join `ci-green`'s
 `needs:` list.
 
-Read AFTER `reconcile` resolves whatever this run's list named -- carried-over
-findings, already-open before this run, count exactly the same as one posted
-moments ago. A finding folded into a carried thread rather than re-posted
+RUN BY `ci.yml`'s `review-clean` JOB, LIVE -- never by the review's own
+`reconcile` job any more. There it failed the review RUN, and a run's
+conclusion is frozen: once a person resolved the thread nothing re-read it,
+and #220 stayed red until two workflows were re-run by hand. In `review-clean`
+it reads the threads at that moment, and `review-thread.yml` re-runs that job
+when a thread is resolved or unresolved. Carried-over findings, already-open
+before the latest review run, count exactly the same as one posted moments
+ago. A finding folded into a carried thread rather than re-posted
 (`review-coordinator.md`: "fold it in, do not post it") is invisible to
 `review-post.py`'s own counts for that reason, so the live thread state is the
 only correct source, not the run's own tally of what it posted.

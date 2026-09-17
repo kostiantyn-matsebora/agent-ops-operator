@@ -1,0 +1,51 @@
+# A REVIEW THREAD WAS RESOLVED OR UNRESOLVED. `ci.yml`'s `review-clean` job
+# reads the review's threads LIVE, so the answer just changed -- and nothing
+# re-asks it, because a thread event starts no `ci`. This workflow re-runs
+# that job of the head's own `pull_request` ci run, through the jobs API, so
+# `ci-green` re-evaluates in the SAME run and the merge box sees it. A job
+# started under THIS event would never reach the merge box (#131,
+# `gotchas.md`), which is why this is a re-run and not a check of its own.
+#
+# MEASURED ON #220: the fixing loop disputed the red `review-clean` check
+# (correctly -- no tree edit could fix a frozen review verdict), the owner
+# resolved the thread, and the pull request stayed red for days because no
+# event re-ran anything. This is the event.
+#
+# `actions: write` IS THE RE-RUN AND NOTHING ELSE. No checkout of the pull
+# request's tree, no model, no contents, no pull-requests write. A fork's pull
+# request gets a read-only token here; the program then says so and exits 0.
+name: review-thread
+
+run-name: "review-thread #${{ github.event.pull_request.number }} (${{ github.event.action }})"
+
+on:
+  pull_request_review_thread:
+    types: [resolved, unresolved]
+
+permissions: {}
+
+concurrency:
+  group: review-thread-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      # THE TRUSTED COPY. The program runs from the default branch, never from
+      # the pull request's tree -- a pull request may not rewrite what
+      # re-evaluates its own check.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Re-run review-clean on the head's own ci run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          python3 .github/scripts/rerun-review-clean.py \
+            --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --pr "$PR"

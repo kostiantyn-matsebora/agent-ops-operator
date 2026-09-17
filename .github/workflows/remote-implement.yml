@@ -89,7 +89,7 @@ jobs:
     # `implement_label` / `run_label` in .github/review-triage.json.
     if: >-
       github.event_name == 'issues' &&
-      (github.event.label.name == 'conveyor:implement' || github.event.label.name == 'conveyor:run')
+      (github.event.label.name == 'conveyor:implement' || github.event.label.name == 'conveyor:run' || github.event.label.name == 'conveyor:archive')
     runs-on: ubuntu-latest
     permissions:
       # To read the vocabulary file and the program: the checkout below needs

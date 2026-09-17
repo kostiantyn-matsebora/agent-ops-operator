@@ -101,6 +101,9 @@ assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label convey
 assert_contains "$(cat "$GH_CALLS")" "issue comment 5"
 assert_contains "$(cat "$GH_CALLS")" "@maintainer"
 
+it "instruction present, writer placed it: the fix carry sets NO station label -- the loop's gate does"
+assert_not_contains "$(cat "$GH_CALLS")" "station:"
+
 it "instruction present, writer placed it, opsx lane: places conveyor:archive on the ISSUE"
 setup
 mark_opsx 1
@@ -109,6 +112,10 @@ out=$(run_it --issue 1 --station archive); rc=$?
 assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 1 --repo o/r --add-label conveyor:archive"
 assert_contains "$(cat "$GH_CALLS")" "issue comment 1"
+
+it "the archive carry marks the issue's station archive (state, not a grant), in the same run"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 1 --repo o/r --add-label station:archive"
+assert_contains "$(cat "$GH_CALLS")" "--remove-label station:fix"
 
 # --- the placer has since LOST write access ----------------------------------
 

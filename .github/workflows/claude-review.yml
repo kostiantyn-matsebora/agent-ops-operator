@@ -665,18 +665,15 @@ jobs:
             --pr "$PR" \
             --file .resolve-threads
 
-      # THE PULL REQUEST IS NOT READY WHILE THE REVIEW HAS AN OPEN THREAD OF
-      # ITS OWN — new this run, or carried over from an earlier one. An open
-      # thread already blocks the merge button through
-      # `required_conversation_resolution`, but that is a pull-request
-      # property GitHub evaluates at merge time, not a status check, so it
-      # cannot join `ci-green`'s `needs:`. This step is what lets the review
-      # report the same verdict AS a check: read live, after this job's own
-      # resolve step, so a finding this run just closed does not fail it.
-      - name: The review leaves nothing open
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python3 .github/scripts/review-not-clean.py \
-            --repo "${{ github.repository }}" \
-            --pr "$PR"
+      # THIS JOB NO LONGER FAILS THE RUN ON AN OPEN THREAD OF THE REVIEW'S
+      # OWN. It did, so that `ci.yml`'s `review-clean` could report the
+      # review's verdict AS a check through this run's conclusion -- and that
+      # froze the verdict: a person resolving the thread afterwards changed
+      # nothing, because the run's conclusion was already `failure` and no
+      # event re-ran anything. Measured on #220, where the loop disputed the
+      # red check (correctly: no tree edit could fix it) and the only way to
+      # green was a hand re-run of two workflows. The open-thread gate now
+      # lives in `review-clean` itself (`review-not-clean.py`, read LIVE), and
+      # `review-thread.yml` re-runs that job when a thread is resolved or
+      # unresolved. This run's conclusion means one thing: the review ran and
+      # posted.

@@ -293,4 +293,110 @@ out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 1 "$status"
 assert_equals "" "$(cat "$GH_CALLS")"
 
+# --- the archive station, and a label the WORKFLOW carried ---------------------
+#
+# `conveyor:archive` reaches the tracking issue from carry-grant.py, so its
+# sender is `github-actions[bot]` -- unknown to the collaborators API. It is
+# accepted exactly when the standing instruction it relays still stands on
+# the issue and was placed by a writer, re-read here; otherwise removed with
+# a comment, like anybody else's label. Nothing fired on it before this.
+stub_gh_carried() {  # stub_gh_carried <bindir> <labels-json> <timeline-json> <placer-permission>
+  local bin="$1"; mkdir -p "$bin"
+  cat > "$bin/gh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\$GH_CALLS"
+case "\$*" in
+  "issue view "*"--json labels")          printf '%s' '$2' ;;
+  "api repos/"*"/timeline --paginate")    printf '%s' '$3' ;;
+  *"collaborators/"*"/permission"*)       echo "$4" ;;
+  *"issues/"*"/comments"*)                cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || true ;;
+  *) : ;;
+esac
+exit 0
+STUB
+  chmod +x "$bin/gh"
+}
+STANDING='{"labels":[{"name":"conveyor:run"},{"name":"conveyor:archive"},{"name":"opsx:review"}]}'
+PLACED='[{"event":"labeled","label":{"name":"conveyor:run"},"actor":{"login":"maintainer"},"created_at":"2026-09-13T09:25:16Z"}]'
+
+it "the archive label, carried by the workflow bot while a writer's conveyor:run stands, fires the archive station and records it under its OWN marker"
+setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write
+event "$EVENT" conveyor:archive 51 "github-actions[bot]"
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_equals '{"text": "51"}' "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["body"])' "$RECORD")"
+assert_contains "$(cat "$GH_CALLS")" "<!-- remote-implement:fired:archive -->"
+assert_contains "$(cat "$GH_CALLS")" "Archiving this change"
+assert_contains "$(cat "$GH_CALLS")" "@maintainer's standing instruction, carried by the workflow"
+assert_not_contains "$(cat "$GH_CALLS")" "--remove-label conveyor:archive"
+assert_contains "$out" "fired the archive station for #51"
+
+it "the archive fire marks the issue's station archive, state not grant"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --add-label station:archive"
+
+it "the implement station's own marker already on the issue does NOT stop the archive station firing"
+setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write
+printf '<!-- remote-implement:fired -->\nImplementing this issue: started.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
+event "$EVENT" conveyor:archive 51 "github-actions[bot]"
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$out" "fired the archive station for #51"
+unset GH_COMMENTS
+
+it "the archive station's own marker stops a second archive fire"
+setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write
+printf '<!-- remote-implement:fired:archive -->\nArchiving this change.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
+event "$EVENT" conveyor:archive 51 "github-actions[bot]"
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_contains "$out" "already carries a fire record for the archive station"
+unset GH_COMMENTS
+
+it "the bot's label with conveyor:run GONE from the issue: refused, label removed, comment says what was missing"
+setup; stub_gh_carried "$BIN" '{"labels":[{"name":"conveyor:archive"}]}' "$PLACED" write
+event "$EVENT" conveyor:archive 51 "github-actions[bot]"
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 1 "$status"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --remove-label conveyor:archive"
+assert_contains "$(cat "$GH_CALLS")" "no longer stands on #51"
+assert_not_contains "$out" "fired"
+
+it "the bot's label whose conveyor:run placer lost write access: refused the same way"
+setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" read
+event "$EVENT" conveyor:archive 51 "github-actions[bot]"
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 1 "$status"
+assert_contains "$(cat "$GH_CALLS")" "--remove-label conveyor:archive"
+assert_contains "$(cat "$GH_CALLS")" "who now has \`read\` here"
+
+it "a person with write access placing conveyor:archive by hand fires the archive station too"
+setup; stub_gh_perm "$BIN" write
+event "$EVENT" conveyor:archive 51 maintainer
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$out" "fired the archive station for #51"
+assert_contains "$(cat "$GH_CALLS")" "approved by @maintainer."
+
+it "the implement fire marks the issue's station implement"
+setup; stub_gh_perm "$BIN" write
+event "$EVENT" conveyor:run 42 maintainer
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 42 --repo o/r --add-label station:implement"
+
+it "ANOTHER bot placing a station label is refused like a stranger: only the workflow's own relay is re-checked"
+setup; stub_gh_perm "$BIN" none
+event "$EVENT" conveyor:archive 51 "dependabot[bot]"
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 1 "$status"
+assert_contains "$(cat "$GH_CALLS")" "--remove-label conveyor:archive"
+
 summary
