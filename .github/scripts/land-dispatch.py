@@ -305,18 +305,33 @@ class Round:
         sh(sys.executable, str(script), "--repo", self.args.repo, "--target", str(self.args.pr),
            "--loop", state, check=False)
 
-    def threads_still_open(self) -> bool:
+    def threads_still_open(self) -> tuple[bool, str]:
         """LIVE, NOT THE COLLECTED SNAPSHOT. `collect` read the threads once
         at the start of this round; a `clean` ending is decided minutes
         later, and a thread could have opened in between (a human reviewer's
         own comment, a re-triggered review). `review-not-clean.py`, exit 1,
         is the same live read `carry-from-pr.sh` trusts before ever calling a
-        pull request mergeable -- this round must not claim less carefully."""
+        pull request mergeable -- this round must not claim less carefully.
+
+        THREE OUTCOMES, NOT TWO. Exit 0 is clean, exit 1 is an open thread --
+        `review-not-clean.py`'s own verdicts. Anything else is that script
+        crashing before reaching one (an unhandled `gh` failure also exits
+        1), which is UNKNOWN, not a thread being open; claiming mergeable on
+        UNKNOWN would be worse than the caller's fallback of leaving the
+        round `running`, so this still withholds `mergeable`, but says why
+        accurately rather than naming a thread that was never seen.
+
+        Returns (withhold mergeable?, the reason to print, or "")."""
         check = self.args.thread_check_script
         if not check or not pathlib.Path(check).is_file():
-            return False
-        return sh(sys.executable, str(check), "--repo", self.args.repo, "--pr", str(self.args.pr),
-                  check=False).returncode != 0
+            return False, ""
+        rc = sh(sys.executable, str(check), "--repo", self.args.repo, "--pr", str(self.args.pr),
+               check=False).returncode
+        if rc == 0:
+            return False, ""
+        if rc == 1:
+            return True, "a review thread opened since collect ran"
+        return True, f"review-not-clean.py could not be read (exit {rc})"
 
     def summary(self, ending: str, fixed: list[str], disputed: dict[str, str], sha: str | None = None,
                 note: str = "", unaddressed: dict[str, str] | None = None) -> None:
@@ -337,16 +352,18 @@ class Round:
         # can change it.
         if ending == "round cap reached":
             self.set_loop("capped")
-        elif ending == "clean" and not self.threads_still_open():
-            self.set_loop("mergeable")
         elif ending == "clean":
-            # A THREAD OPENED SINCE `collect` READ THEM. Not stalled either --
-            # nothing was disputed and nothing failed, so a fresh round would
-            # find the same empty work list. Left as running is honest: the
-            # round is over, but the pull request is not yet mergeable, and
-            # the review's own next completion (or a person resolving the
-            # thread) is what moves it from here.
-            print(f"clean ending, but a review thread opened since collect ran; loop label left as it is")
+            withhold, why = self.threads_still_open()
+            if not withhold:
+                self.set_loop("mergeable")
+            else:
+                # NOT STALLED EITHER -- nothing was disputed and nothing
+                # failed, so a fresh round would find the same empty work
+                # list. Left as running is honest: the round is over, but
+                # the pull request is not confirmed mergeable, and the
+                # review's own next completion (or the thread being
+                # answered) is what moves it from here.
+                print(f"clean ending, but {why}; loop label left as it is")
         else:
             self.set_loop("stalled")
         used = self.number if sha else self.number - 1

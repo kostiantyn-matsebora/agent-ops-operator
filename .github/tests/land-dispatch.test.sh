@@ -488,6 +488,14 @@ assert_status 0 "$rc"
 assert_contains "$out" "a review thread opened since collect ran"
 assert_not_contains "$(loop_label)" "mergeable"
 
+it "labelled: a clean ending, but the thread check CRASHES (not exit 1), withholds mergeable with an accurate reason -- never claims a thread opened it never saw"
+fresh_repo
+out=$(THREAD_CHECK_EXIT=2 WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "review-not-clean.py could not be read (exit 2)"
+assert_not_contains "$out" "a review thread opened since collect ran"
+assert_not_contains "$(loop_label)" "mergeable"
+
 it "labelled: says when the analysis was not consulted"
 printf '{"consulted":false,"stale":["manager"],"projects":[],"issues":[]}' > "$tmp/sonar.json"
 out=$(WORK="$tmp/none.json" land_all)

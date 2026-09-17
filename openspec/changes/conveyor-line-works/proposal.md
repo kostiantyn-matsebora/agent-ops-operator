@@ -76,7 +76,7 @@ _None._
 | `workflows/review-dispatch.yml` | the fix job's bot allowlist, land on fix failure, loop state labels |
 | `workflows/claude-review.yml` | reconcile no longer fails on open threads |
 | `workflows/ci.yml` | `review-clean` asks only whether the review ran |
-| `workflows/dispute-answered.yml` | NEW: a person's comment re-runs the failed `docs-task` job of the head's `ci` run -- the one required check that re-reads the pull request's own comments, through `autofix-guard.py`'s dispute answer |
+| `workflows/dispute-answered.yml` | NEW: a person's comment re-runs the failed `docs-task` job of the head's `ci` run — the one required check that re-reads the pull request's own comments, through `autofix-guard.py`'s dispute answer |
 | `workflows/remote-implement.yml` | fires on `conveyor:archive`, moves station labels |
 | `scripts/remote-implement.py`, `carry-grant.py`, `carry-from-pr.sh`, `land-dispatch.py` | the stations and states above |
 | `scripts/conveyor-state.py`, `scripts/rerun-ci-job.py` | NEW |

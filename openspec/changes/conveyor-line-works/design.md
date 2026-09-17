@@ -90,18 +90,23 @@ unblocks the merge with no re-run.
   asks it on a green `ci` before marking the pull request `loop:mergeable`,
   so the label is honest at that moment. A thread resolved later shows in the
   merge box, and the label follows at the next transition.
-- **The check that reads the CONVERSATION is re-run on the answer.**
-  `docs-task` -- the same `ci.yml` job that also gates a change's own test
-  and documentation tasks -- fails ADDITIONALLY while a dispute has no reply
-  from a person, through its `autofix-guard.py` step. A comment IS an
-  Actions event, so
-  `dispute-answered.yml` (`issue_comment`, `pull_request_review_comment`)
-  re-runs the failed `docs-task` job of the head's own `ci` run through the
-  jobs API (`rerun-ci-job.py`) when a non-bot comments on a pull request
-  carrying `conveyor:fix`. `ci-green` re-evaluates in the same run. On
-  green, `open` marks the head mergeable, and on red the loop's `ci failure`
-  trigger starts the next round. Only that one job, because a reply changes
-  nothing else's answer, and only when it failed.
+- **The check that reads the CONVERSATION is re-run on the answer.** This is
+  the spec's "A required check that reads a person's answer is re-run on
+  that answer" made concrete: `docs-task` is that ONE check, and no other
+  required check reads a reply. `docs-task` -- the same `ci.yml` job that
+  also gates a change's own test and documentation tasks -- fails
+  ADDITIONALLY while a dispute has no reply from a person, through its
+  `autofix-guard.py` step.
+  - A comment IS an Actions event, so `dispute-answered.yml`
+    (`issue_comment`, `pull_request_review_comment`) re-runs the failed
+    `docs-task` job of the head's own `ci` run through the jobs API
+    (`rerun-ci-job.py`) when a non-bot comments on a pull request carrying
+    `conveyor:fix`.
+  - `ci-green` re-evaluates in the same run: green marks the head mergeable
+    (through `open`), red starts the loop's next round (through its `ci
+    failure` trigger).
+  - Only that one job, because a reply changes nothing else's answer, and
+    only when it failed.
 
 ### 4. The archive station is a remote session, started by the carried label
 

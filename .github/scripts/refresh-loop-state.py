@@ -46,14 +46,27 @@ def main() -> int:
         print(f"::notice::#{args.pr}: could not refresh the loop label, a helper script is missing")
         return 0
 
-    clean = subprocess.run([sys.executable, str(CHECK_SCRIPT), "--repo", args.repo, "--pr", str(args.pr)],
-                            capture_output=True, text=True).returncode == 0
-    if clean:
+    checked = subprocess.run([sys.executable, str(CHECK_SCRIPT), "--repo", args.repo, "--pr", str(args.pr)],
+                              capture_output=True, text=True)
+    # THREE OUTCOMES, NOT TWO -- the same distinction `carry-from-pr.sh`
+    # already makes reading this same script. Exit 0 is "no thread open".
+    # Exit 1 is "a thread is open", `review-not-clean.py`'s OWN verdict.
+    # ANYTHING ELSE is that script crashing before it ever reached a verdict
+    # -- an unhandled `gh` failure raises a Python traceback and also exits
+    # 1, so a bare `== 0` check would read that identically to "clean", but
+    # collapsing every NONZERO code into "a thread is open" is just as wrong
+    # the other way: a transient API failure would then stall a label that
+    # was never shown to be stale.
+    if checked.returncode == 0:
         # LEAVE IT. A clean pull request's label may already be `mergeable`
         # from an earlier ci success, or may be something else entirely (a
         # round never ran here at all) -- either is a fact this program has
         # no new information about.
         print(f"#{args.pr}: no review thread open; leaving the loop label as it is")
+        return 0
+    if checked.returncode != 1:
+        print(f"::notice::#{args.pr}: could not read the review threads (review-not-clean.py exited "
+              f"{checked.returncode}); leaving the loop label as it is")
         return 0
 
     result = subprocess.run([sys.executable, str(STATE_SCRIPT), "--repo", args.repo, "--target", str(args.pr),

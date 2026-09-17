@@ -39,6 +39,23 @@ assert_status 0 "$rc"
 assert_not_contains "$(cat "$GH_CALLS")" "issue edit"
 assert_contains "$out" "leaving the loop label as it is"
 
+it "a check-script crash (not exit 1) is UNKNOWN, never treated as an open thread"
+cat > "$tmp/repo/.github/scripts/review-not-clean.py" <<'PY'
+import sys
+sys.exit(2)
+PY
+out=$(run); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "::notice::"
+assert_contains "$out" "could not read"
+assert_not_contains "$out" "corrected the loop label to stalled"
+assert_not_contains "$(cat "$GH_CALLS")" "issue edit"
+cat > "$tmp/repo/.github/scripts/review-not-clean.py" <<'PY'
+import os, sys
+open(os.environ["GH_CALLS"], "a").write("review-not-clean.py " + " ".join(sys.argv[1:]) + "\n")
+sys.exit(1 if os.environ.get("CLEAN_EXIT") == "1" else 0)
+PY
+
 it "a missing helper script is a notice, never a failure"
 mv "$tmp/repo/.github/scripts/review-not-clean.py" "$tmp/repo/.github/scripts/review-not-clean.py.bak"
 out=$(run); rc=$?
