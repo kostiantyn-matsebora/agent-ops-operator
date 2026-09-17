@@ -23,9 +23,9 @@ flowchart TD
   RUN -->|issues: labeled| FIRE
 
   subgraph S2["Station 2 — fix, round after round"]
-    CI["ci.yml + claude-review.yml run on the PR<br/>review-clean reads the review's threads LIVE"]:::workflow
-    THREAD["review-thread.yml<br/>a thread resolved or unresolved<br/>re-runs review-clean of the same ci run"]:::workflow
-    CARRY["remote-implement.yml · open (ci succeeded)<br/>read Refs #n or Closes #n, re-read conveyor:run,<br/>placer still a writer?<br/>carry-grant.py labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml"]:::workflow
+    CI["ci.yml + claude-review.yml run on the PR<br/>review-clean asks only: did the review run"]:::workflow
+    THREAD["an open review thread blocks the merge<br/>through branch protection, live —<br/>no check carries it"]:::workflow
+    CARRY["remote-implement.yml · open (ci succeeded)<br/>read Refs #n or Closes #n, re-read conveyor:run,<br/>placer still a writer?<br/>carry-grant.py labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no review thread open → mergeable"]:::workflow
     FIX["PR grant: conveyor:fix<br/>placed by the bot, records whose grant"]:::label
     GREEN["PR state: loop:mergeable<br/>ISSUE state: station:merge"]:::state
     GATE["review-dispatch.yml · gate<br/>who started this, is the grant still standing<br/>(a bot start is re-checked against the issue)"]:::workflow
@@ -41,14 +41,13 @@ flowchart TD
     CARRY --> GREEN
     CI -->|workflow_run: ci failure, review success| GATE
     LAND -->|push starts ci + review again| CI
-    THREAD --> CI
     LAND --> MERGEABLE
     LAND --> STALLED
     LAND --> CAP
   end
   OPEN -->|pull_request| CI
   ANSWER(["person answers a dispute or resolves the thread"]):::person
-  STALLED --> ANSWER --> THREAD
+  STALLED --> ANSWER --> THREAD --> P2
 
   P2(["person merges the PR (squash)"]):::person
   MERGEABLE --> P2

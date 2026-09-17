@@ -21,10 +21,15 @@
 # the issue's station is set to done.
 #
 # STATE, NOT A GRANT, AT THE MOMENTS THIS PROGRAM KNOWS THEM. `open` runs
-# only when `ci` COMPLETED WITH SUCCESS on the pull request -- and `ci` waits
-# for the review and reads its threads live -- so a `fix` carry here means the
-# head is mergeable: the pull request's loop label says so and the issue's
-# station says `merge`. A person merges; nothing here does.
+# when `ci` COMPLETED on the pull request -- with SUCCESS or FAILURE, since
+# #221 made a red ci start a carried round too -- and hands the conclusion in
+# as CI_CONCLUSION. Only a SUCCESS is the moment to ask whether the head is
+# mergeable: ci green AND no review-authored thread open
+# (`review-not-clean.py`, read live, since a check cannot carry that question
+# -- see its docstring). Then the pull request's loop label says `mergeable`
+# and the issue's station `merge`. Measured on #220: the first version read
+# every `open` run as green and marked a red head mergeable. A person merges;
+# nothing here does.
 set -euo pipefail
 
 [ $# -eq 2 ] || { echo "usage: carry-from-pr.sh <pr-number> <fix|archive>" >&2; exit 64; }
@@ -86,8 +91,19 @@ if [ -z "$issue" ]; then
 fi
 python3 .github/scripts/carry-grant.py --repo "$GITHUB_REPOSITORY" \
   --issue "$issue" --station fix --pr "$pr"
-# ci SUCCEEDED on this head (the caller's precondition), so the pull request
-# is mergeable and the issue is at the merge station -- whether or not a grant
-# was carried, since state grants nothing.
-state --target "$pr" --loop mergeable
-state --target "$issue" --station merge
+# ONLY A GREEN ci IS A MERGEABLE HEAD. With no review thread open the pull
+# request is mergeable and the issue is at the merge station -- whether or not
+# a grant was carried, since state grants nothing. A red ci, or an open
+# thread, leaves the state to the loop's own ending (`stalled`) and to the
+# merge box.
+case "${CI_CONCLUSION:-}" in
+  success)
+    if python3 .github/scripts/review-not-clean.py --repo "$GITHUB_REPOSITORY" --pr "$pr"; then
+      state --target "$pr" --loop mergeable
+      state --target "$issue" --station merge
+    else
+      echo "pull request #$pr has a review thread open; not mergeable yet, state unchanged"
+    fi ;;
+  *)
+    echo "ci concluded '${CI_CONCLUSION:-unknown}' on #$pr; not mergeable, state unchanged" ;;
+esac

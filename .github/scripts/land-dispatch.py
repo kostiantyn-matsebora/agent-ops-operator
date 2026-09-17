@@ -312,12 +312,17 @@ class Round:
         a = self.args
         unaddressed = unaddressed or {}
         # EVERY ENDING MOVES THE LOOP LABEL. The cap is `capped`; a clean
-        # pull request needs no round and the label follows CI's own verdict
-        # (`loop:mergeable` is set from `ci` succeeding, never from here); every
-        # other ending stopped for a person and is `stalled`.
+        # ending -- no open finding, no analysis issue, no failed check -- is
+        # `mergeable`, and it must be set HERE because the gate set `running`
+        # when this round started, AFTER the carry had already said mergeable
+        # (measured on #225: the label stuck at `running` on a clean, green
+        # pull request); every other ending stopped for a person and is
+        # `stalled`.
         if ending == "round cap reached":
             self.set_loop("capped")
-        elif ending != "clean":
+        elif ending == "clean":
+            self.set_loop("mergeable")
+        else:
             self.set_loop("stalled")
         used = self.number if sha else self.number - 1
         lines = [SUMMARY_MARKER, f"**Conveyor fix on #{a.pr}: {ending}** — @{a.approver}"]

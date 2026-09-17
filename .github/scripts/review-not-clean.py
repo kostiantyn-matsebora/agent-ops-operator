@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
-"""Fail when the review leaves an open thread of its own on the pull request.
+"""Exit 1 when the review has an open thread of its own on the pull request.
 
-THIS IS THE ONE PLACE "the review ran" AND "the review found nothing to
-block" become the same fact a status check can report. `consolidate` already
-refuses to report green when the review never posted its summary -- that
-guards against the machinery failing silently. It says nothing about the
-CONTENT of a review that ran cleanly and posted five open findings, because
-until now nothing needed it to: an open thread already blocks merge on its
-own, through `required_conversation_resolution`, which is a property of the
-pull request GitHub evaluates at merge time and cannot join `ci-green`'s
-`needs:` list.
+NOT A CHECK, AND NOT A STEP OF THE REVIEW. It was the review's `reconcile`
+job's last step, failing the review RUN on an open thread so that `ci-green`
+could report the review's content -- and that froze the verdict: a run's
+conclusion never changes, so once a person resolved the thread nothing
+re-read it, and #220 stayed red with a dispute nobody could answer. Nor can
+`ci.yml` ask it: `pull_request_review_thread` is a webhook event and not an
+Actions trigger (measured: the workflow file is refused), so no check could
+follow a resolution. An open thread blocks the merge through branch
+protection's required conversation resolution, evaluated LIVE at merge time,
+and that is the one place the content question belongs.
 
-RUN BY `ci.yml`'s `review-clean` JOB, LIVE -- never by the review's own
-`reconcile` job any more. There it failed the review RUN, and a run's
-conclusion is frozen: once a person resolved the thread nothing re-read it,
-and #220 stayed red until two workflows were re-run by hand. In `review-clean`
-it reads the threads at that moment, and `review-thread.yml` re-runs that job
-when a thread is resolved or unresolved. Carried-over findings, already-open
-before the latest review run, count exactly the same as one posted moments
-ago. A finding folded into a carried thread rather than re-posted
+WHAT THIS PROGRAM IS FOR NOW: the conveyor's STATE. `carry-from-pr.sh` asks
+it before marking a pull request `loop:mergeable` on a green ci, so the label
+is honest at that moment. Carried-over findings, already-open before the
+latest review run, count exactly the same as one posted moments ago. A finding folded into a carried thread rather than re-posted
 (`review-coordinator.md`: "fold it in, do not post it") is invisible to
 `review-post.py`'s own counts for that reason, so the live thread state is the
 only correct source, not the run's own tally of what it posted.

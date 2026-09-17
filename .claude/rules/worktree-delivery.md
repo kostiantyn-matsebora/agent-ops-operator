@@ -177,15 +177,19 @@ what it read and how many consecutive reads found nothing new. The model and
 its effort are the workflow's (`--model`, `--effort` — `gotchas.md` has why);
 `reconcile` RESOLVES the recorded threads with no model and the one
 `contents: write` — and FAILS THE RUN ON NOTHING ELSE: the review run's
-conclusion means "the review ran and posted". WHETHER A REVIEW-AUTHORED
-THREAD IS STILL OPEN IS `ci.yml`'s `review-clean` JOB'S QUESTION, READ LIVE
-(`review-is-green.py` for "it ran", `review-not-clean.py` for "nothing of its
-own is open"), and `review-thread.yml` RE-RUNS THAT JOB of the head's own
-`ci` run when a thread is resolved or unresolved — so a person dismissing a
-finding turns `ci-green` green in the merge box with no push and no hand
-re-run. It lived in `reconcile` and FROZE THE VERDICT on #220: the loop
-disputed the red check (correctly, no tree edit could fix it), the owner
-resolved the thread, and nothing re-ran anything for days. It runs by hand too: `gh workflow run claude-review.yml -f
+conclusion means "the review ran and posted", which is the one question
+`ci.yml`'s `review-clean` job asks of it (`review-is-green.py`). WHETHER A
+REVIEW-AUTHORED THREAD IS STILL OPEN IS NOT A CHECK'S QUESTION, ANYWHERE.
+Branch protection's required conversation resolution blocks the merge on an
+open thread and is evaluated LIVE at merge time, so a person dismissing a
+finding unblocks the merge at once. A check carrying that question FREEZES
+IT — `reconcile` did, on #220: the loop disputed the red check (correctly, no
+tree edit could fix it), the owner resolved the thread, and nothing re-ran
+anything for days. The repair of re-running the check on the thread event
+DOES NOT EXIST: `pull_request_review_thread` is a webhook event and not an
+Actions trigger, and a workflow naming it is refused (`gotchas.md`).
+`review-not-clean.py` survives for the conveyor's STATE: `carry-from-pr.sh`
+asks it before marking a green pull request `loop:mergeable`. It runs by hand too: `gh workflow run claude-review.yml -f
 number=<pr>` (`-f dry_run=true` posts nothing; `-f full=true` ignores the
 coverage record and reads every changed path from the base — the same
 override `REVIEW_QUIET_READS`, a workflow variable, tunes: how many

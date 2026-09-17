@@ -622,11 +622,24 @@ Workflow initiated by non-human actor: github-actions (type: Bot). Add bot to al
   step failed`.
 - **The review's `reconcile` job failed the review RUN on an open thread**, so
   `review-clean` — reading that run's conclusion — stayed red after the owner
-  resolved the thread, since no event re-ran anything. The open-thread gate is
-  `review-clean`'s own now, read live, and `review-thread.yml` re-runs that
-  job of the head's `ci` run on a thread resolution. **A check's verdict must
-  be re-computable by the event that changes it**, or a dispute on it is a
-  dead end.
+  resolved the thread, since no event re-ran anything. **A CHECK MUST NEVER
+  CARRY THE THREAD QUESTION**: branch protection's required conversation
+  resolution already blocks the merge on an open thread, live at merge time.
+  `reconcile` fails on nothing but its own work now, and `review-clean` asks
+  only whether the review ran.
+- **`pull_request_review_thread` IS A WEBHOOK EVENT, NOT AN ACTIONS TRIGGER.**
+  The first repair — re-run `review-clean` on a thread resolution — shipped
+  as `review-thread.yml` and was REFUSED by the platform: `Unexpected value
+  'pull_request_review_thread'`. The tell is a failed run with ZERO JOBS,
+  named by the file's path, on EVERY push to EVERY branch, with nothing in
+  `gh run view --log`; the message is on the run's web page alone. The
+  script suite parses each workflow's `on:` keys against that name now.
+  Local YAML parsing proves nothing about which events exist.
+- **A failed job of a review run cannot be re-run after a day.** Its
+  `resolve-threads` artifact has expired (`retention-days: 1`), so `gh run
+  rerun --failed` dies in "The review's list actually arrived". Re-running
+  the review means a fresh run: a push, or `gh workflow run claude-review.yml
+  --ref <branch> -f number=<pr>` on the branch so the head sha matches.
 - **Nothing fired on `conveyor:archive`.** The carry placed it and
   `remote-implement.py` accepted the implement and run labels only, so the
   opsx lane's last station had no actor. It fires the same routine now,

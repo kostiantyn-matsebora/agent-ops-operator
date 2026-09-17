@@ -20,26 +20,56 @@ esac
 exit 0
 STUB
 chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
-# carry-grant.py is REPLACED by a recorder that prints what the test says.
+# carry-grant.py is REPLACED by a recorder that prints what the test says, and
+# review-not-clean.py by one that answers CLEAN (exit 0) or not, as the test says.
 cat > "$tmp/repo/.github/scripts/carry-grant.py" <<'PY'
 import os, sys
 open(os.environ["GH_CALLS"], "a").write("carry-grant.py " + " ".join(sys.argv[1:]) + "\n")
 print(open(os.environ["CARRY_OUT"]).read())
 PY
+export THREADS_OPEN=""
+cat > "$tmp/repo/.github/scripts/review-not-clean.py" <<'PY'
+import os, sys
+open(os.environ["GH_CALLS"], "a").write("review-not-clean.py " + " ".join(sys.argv[1:]) + "\n")
+sys.exit(1 if os.environ.get("THREADS_OPEN") else 0)
+PY
 cp "$ROOT/.github/scripts/conveyor-state.py" "$tmp/repo/.github/scripts/"
 cp "$ROOT/.github/review-triage.json" "$tmp/repo/.github/"
 
-run() { : > "$GH_CALLS"; (cd "$tmp/repo" && GITHUB_REPOSITORY=o/r bash "$S" "$@" 2>&1); }
+run() { : > "$GH_CALLS"; (cd "$tmp/repo" && GITHUB_REPOSITORY=o/r CI_CONCLUSION="${CI_CONCLUSION-success}" bash "$S" "$@" 2>&1); }
 same_repo() { printf 'false change/thing\n' > "$PR_FILE"; }
 
-it "fix from a Refs pull request: carries fix onto the pull request, then marks it mergeable and the issue at merge"
+it "fix from a Refs pull request: carries fix onto the pull request, then -- no review thread open -- marks it mergeable and the issue at merge"
 same_repo; printf 'Summary.\n\nRefs #51\n' > "$BODY_FILE"; printf 'carried conveyor:run (from maintainer) to conveyor:fix on pr #220\n' > "$CARRY_OUT"
 out=$(run 220 fix); rc=$?
 assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "carry-grant.py --repo o/r --issue 51 --station fix --pr 220"
+assert_contains "$(cat "$GH_CALLS")" "review-not-clean.py --repo o/r --pr 220"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 220 --repo o/r --add-label loop:mergeable"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --add-label station:merge"
 assert_contains "$out" "carried conveyor:run"
+
+it "fix after a RED ci (the open job runs on failure too, since #221): the carry happens, and NO mergeable or merge state is set"
+out=$(CI_CONCLUSION=failure run 220 fix); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "carry-grant.py --repo o/r --issue 51 --station fix --pr 220"
+assert_not_contains "$(cat "$GH_CALLS")" "review-not-clean.py"
+assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"
+assert_not_contains "$(cat "$GH_CALLS")" "station:merge"
+assert_contains "$out" "ci concluded 'failure'"
+
+it "fix with no conclusion handed in at all marks nothing"
+out=$(CI_CONCLUSION= run 220 fix); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"
+
+it "fix with a review thread still open: the carry happens, and NO mergeable or merge state is set"
+out=$(THREADS_OPEN=1 run 220 fix); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "carry-grant.py --repo o/r --issue 51 --station fix --pr 220"
+assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"
+assert_not_contains "$(cat "$GH_CALLS")" "station:merge"
+assert_contains "$out" "has a review thread open"
 
 it "fix from a Closes pull request (the archive one): carries fix onto it too, from the same issue"
 same_repo; printf 'Archives the change.\n\nCloses #51\n' > "$BODY_FILE"

@@ -286,6 +286,9 @@ assert_equals "conveyor:archive" "$archive_label"
 assert_equals "conveyor:implement" "$implement_label"
 assert_equals "conveyor:run" "$run_label"
 
+it "the open job hands ci's conclusion to carry-from-pr.sh: only a green ci may mark a head mergeable"
+assert_contains "$(rpy 'print(d["jobs"]["open"])')" 'CI_CONCLUSION="${{ github.event.workflow_run.conclusion }}"'
+
 it "the fire endpoint and its token are not in the tree"
 job=$(rpy 'print(d["jobs"]["fire"])')
 assert_contains "$job" "vars.ROUTINE_FIRE_URL"

@@ -916,21 +916,22 @@ jobs:
     needs: discover
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # TWO QUESTIONS, BOTH LIVE. First: did the review RUN for this head and
-    # finish (`review-is-green.py` -- its conclusion now means "ran and
-    # posted", nothing about content). Second: is any review-authored thread
-    # still OPEN on the pull request (`review-not-clean.py`, read from the
-    # threads at this moment). The second used to be a step of the review's
-    # own `reconcile` job, failing that run -- which froze the verdict: once
-    # a person resolved the thread nothing re-evaluated it, and #220 sat red
-    # until two workflows were re-run by hand. Here it is read live, and
-    # `review-thread.yml` re-runs THIS job of THIS run when a thread is
-    # resolved or unresolved, so `ci-green` follows the person's answer in
-    # the merge box without a push.
+    # ONE QUESTION: DID THE REVIEW RUN FOR THIS HEAD, AND FINISH. Its
+    # conclusion means "it ran and posted", nothing about content. WHETHER A
+    # REVIEW THREAD IS STILL OPEN IS DELIBERATELY NOT A CHECK: branch
+    # protection's required conversation resolution already blocks the merge
+    # on an open thread, and it is evaluated LIVE at merge time -- a resolved
+    # thread unblocks the merge at once. A check reporting thread state
+    # freezes it instead: the review's own `reconcile` job did that, #220 sat
+    # red after its thread was resolved, and the loop's dispute on it could
+    # not be answered. The obvious repair -- re-run this job when a thread is
+    # resolved -- does not exist: `pull_request_review_thread` is a webhook
+    # event and NOT an Actions trigger, measured (the workflow file is
+    # refused). So the content question belongs to the platform, and this
+    # job asks only the one a check can answer.
     permissions:
       contents: read
       actions: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
       - name: The review ran for this commit
@@ -942,13 +943,6 @@ jobs:
           out=$(python3 .github/scripts/review-is-green.py --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA")
           echo "$out"
           [ "$out" = "green=true" ]
-      - name: The review leaves nothing open, read live
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python3 .github/scripts/review-not-clean.py \
-            --repo "$GITHUB_REPOSITORY" \
-            --pr "${{ github.event.pull_request.number }}"
 
   pr-closes:
     needs: discover

@@ -123,27 +123,36 @@ person can change to move or stop the line.
 
 ## ADDED Requirements
 
-### Requirement: A dispute only a person can settle is settled by that person's ordinary action
+### Requirement: No required check reports the state of the review's threads
 
-Some items no edit to the tree can fix: a required check whose verdict is the
-state of the review's own threads. Where the loop disputes one, the line SHALL
-treat the person's ordinary answer as the settlement.
+A required check SHALL report whether the review ran for the head, and
+nothing about what it found.
 
-Resolving or unresolving a review thread SHALL re-evaluate the check that
-reads those threads, on the same head, with no hand re-run.
+Whether a review thread is still open SHALL be the platform's own merge-time
+question, evaluated live. A person's ordinary answer — resolving the thread,
+or replying — then settles it with no re-run and no push.
 
-**A dispute that cannot be answered is a dead end, not a decision owed.** On
-#220 the loop disputed `review-clean` correctly. The only way to green was a
-person re-running two workflows from a terminal.
+**A check that carries the thread question freezes it.** On #220 the review's
+run failed on an open thread and the loop disputed the red check correctly.
+
+The owner resolved the thread, and the head stayed red because a run's
+conclusion never changes. The platform offers no event on which such a check
+could be re-run.
 
 #### Scenario: A person dismisses a finding
 
 - **WHEN** a person resolves a review-authored thread on a pull request whose
-  head's checks reported the review as not clean
-- **THEN** the check re-evaluates against the live threads and the head's
-  required checks report green, with no push and no hand re-run
+  required checks are green
+- **THEN** the merge is unblocked at once, and no check changes
 
 #### Scenario: A person reopens a finding
 
-- **WHEN** a person unresolves a review-authored thread on a green head
-- **THEN** the check re-evaluates and the head's required checks report red
+- **WHEN** a person unresolves a review-authored thread
+- **THEN** the merge is blocked at once, and no check changes
+
+#### Scenario: The review's run ends
+
+- **WHEN** the review has posted its findings and resolved what its own list
+  named
+- **THEN** its run concludes success whatever it found, and the required
+  check reads that as "the review ran"

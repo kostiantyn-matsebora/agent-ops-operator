@@ -470,6 +470,9 @@ assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "clean** — @an-approver"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
 
+it "labelled: a clean ending marks the loop mergeable -- the gate said running when the round started"
+assert_equals "mergeable" "$(loop_label)"
+
 it "labelled: says when the analysis was not consulted"
 printf '{"consulted":false,"stale":["manager"],"projects":[],"issues":[]}' > "$tmp/sonar.json"
 out=$(WORK="$tmp/none.json" land_all)

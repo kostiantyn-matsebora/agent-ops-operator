@@ -637,9 +637,9 @@ failed`. At the cap, `conveyor:keep-going` grants another set of rounds and is
 consumed the moment one runs under it.
 
 A stalled loop (`loop:stalled`) is waiting for you. Answer a dispute in its
-thread, or resolve the thread to dismiss it: `review-clean` reads the review's
-threads live and re-runs on the resolution, so the merge box follows your
-answer without a push.
+thread, or resolve the thread to dismiss it: an open thread blocks the merge
+through branch protection alone, evaluated live, so resolving it unblocks the
+merge box at once. No check reports the threads, and none needs re-running.
 
 The loop never marks anything in SonarCloud, and it cannot merge. Removing the
 label stops it at the next round. An unanswered dispute holds both the merge
