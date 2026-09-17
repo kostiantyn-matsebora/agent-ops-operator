@@ -145,13 +145,16 @@ Three workflows share one definition, `.github/workflows/e2e.yml`, and `ci.yml` 
 | `e2e-smoke.yml` | the smoke tier | on demand, on any branch |
 | `e2e-full.yml` | the full tier, real-runtime lane included | nightly at 03:17 UTC when master moved since its last successful run, and on demand |
 
-One job in `ci.yml`, `review-clean`, reports through `ci-green` whether the
-code review ran for the head and finished. What the review found is not a
-check: an open review thread blocks the merge through branch protection's
-required conversation resolution, evaluated live, so resolving a thread
-unblocks the merge at once and nothing needs re-running. The one job that
-reads the conversation, `docs-task`, is re-run by `dispute-answered.yml` when
-a person comments on a pull request the fixing loop drives.
+The code review reaches the merge box three ways, and only the first is a
+check:
+
+| Question | Answered by |
+|---|---|
+| did the review run for the head, and finish | `review-clean`, a job in `ci.yml`, through `ci-green` |
+| is a review thread still open | branch protection's required conversation resolution, live at merge time |
+| has a person answered a dispute the loop posted | `docs-task`, re-run by `dispute-answered.yml` on the person's comment |
+
+Resolving a thread unblocks the merge at once, and nothing needs re-running.
 
 ```sh
 gh workflow run e2e-smoke.yml --ref my-branch
