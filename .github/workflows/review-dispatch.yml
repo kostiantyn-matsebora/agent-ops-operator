@@ -278,7 +278,11 @@ jobs:
               # workflow asked for `mode=all`.
               if [ "$SENDER" = "github-actions[bot]" ]; then
                 BODY_TEXT=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
-                ISSUE=$(printf '%s' "$BODY_TEXT" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+                # `Refs #<n>` on every pull request of a change but its last,
+                # `Closes #<n>` on the ARCHIVE pull request -- which the same loop
+                # drives to mergeable, so a bot start on it is checked against the
+                # same standing instruction.
+                ISSUE=$(printf '%s' "$BODY_TEXT" | grep -oE '(Refs|Closes) #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
                 RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
                 STANDING=$([ -n "$ISSUE" ] && gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx "$RUN_LABEL" && echo yes || echo no)
                 if [ -z "$ISSUE" ] || [ "$STANDING" != "yes" ]; then
@@ -344,7 +348,11 @@ jobs:
                 # `conveyor:keep-going` is placed by a person only, so a bot
                 # placing it falls through to refusal.
                 BODY_TEXT=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
-                ISSUE=$(printf '%s' "$BODY_TEXT" | grep -oE 'Refs #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+                # `Refs #<n>` on every pull request of a change but its last,
+                # `Closes #<n>` on the ARCHIVE pull request -- which the same loop
+                # drives to mergeable, so a bot start on it is checked against the
+                # same standing instruction.
+                ISSUE=$(printf '%s' "$BODY_TEXT" | grep -oE '(Refs|Closes) #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
                 RUN_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["run_label"])')
                 STANDING=$([ -n "$ISSUE" ] && gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx "$RUN_LABEL" && echo yes || echo no)
                 if [ -z "$ISSUE" ] || [ "$STANDING" != "yes" ]; then
@@ -415,6 +423,15 @@ jobs:
             echo "approver=$approver" >> "$GITHUB_OUTPUT"
             echo "since=$since" >> "$GITHUB_OUTPUT"
             echo "round on #$PR ($branch @ ${head:0:7}), approved by $approver at $since, triggered by $EVENT"
+            # STATE, NOT A GRANT: the pull request's loop label says a round is
+            # running; `land` moves it to where the round ended. Never fails
+            # the gate -- conveyor-state.py exits 0 on anything it cannot do.
+            python3 .github/scripts/conveyor-state.py --repo "$GITHUB_REPOSITORY" --target "$PR" --loop running
+            # AND THE ISSUE'S STATION IS `fix`, read from the pull request's
+            # own `Refs #<n>` (or the archive pull request's `Closes #<n>`).
+            STATION_ISSUE=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
+              | grep -oE '(Refs|Closes) #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+            [ -z "$STATION_ISSUE" ] || python3 .github/scripts/conveyor-state.py --repo "$GITHUB_REPOSITORY" --target "$STATION_ISSUE" --station fix
           else
             echo "dispatch on #$PR ($branch) by $SENDER"
           fi
@@ -523,6 +540,20 @@ jobs:
           REPORT: ${{ runner.temp }}/dispatch/report.json
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # THE ONE BOT THAT MAY START THIS STEP, AND WHY IT IS NOT `*`. Every
+          # CARRIED `conveyor:fix` round is started by `remote-implement.yml`'s
+          # `open` job through `gh workflow run`, so the run's actor is
+          # `github-actions[bot]` -- and the action's default (no bot at all)
+          # refused every such round before a model ran: "Workflow initiated
+          # by non-human actor: github-actions (type: Bot)", measured on #220,
+          # where the carried label then sat for three days with nothing
+          # posted. The gate above has already re-read the pull request's
+          # `Refs #<n>` issue and refused a bot dispatch that carries no
+          # standing `conveyor:run`, so this names the platform's own bot and
+          # nothing wider: on a public repository `*` would let an external
+          # App start this step with a prompt it controls (the action's own
+          # warning).
+          allowed_bots: github-actions
           prompt: |
             You are fixing findings on a pull request of this repository that
             a maintainer ACCEPTED — per thread, or by approving the whole pull
@@ -661,10 +692,17 @@ jobs:
   # credential that makes the next round start.
   land:
     needs: [gate, collect, fix]
+    # AND ON A FAILED `fix` -- a round whose fixer never ran, or died, is a
+    # round too. Measured on #220: the fixing step was refused before any
+    # model ran, this job was skipped, and nothing at all reached the pull
+    # request -- the label sat there for three days reading as ignored. The
+    # failure is landed as its own ending (`fixing step failed`), distinct
+    # from `no report` (the model ran and wrote nothing), with the run linked
+    # and the loop state set to stalled.
     if: >-
       always() && needs.gate.result == 'success' && needs.gate.outputs.mode != 'none' &&
       needs.collect.result == 'success' &&
-      (needs.fix.result == 'success' || needs.fix.result == 'skipped')
+      (needs.fix.result == 'success' || needs.fix.result == 'skipped' || needs.fix.result == 'failure')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -686,7 +724,7 @@ jobs:
       # Nothing accepted means `fix` never ran; the lander is handed an empty
       # patch and an empty report, and reports "nothing accepted" itself — or,
       # labelled, that the pull request is clean.
-      - if: needs.fix.result == 'skipped'
+      - if: needs.fix.result == 'skipped' || needs.fix.result == 'failure'
         run: |
           : > "$RUNNER_TEMP/dispatch/fix.patch"
           echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
@@ -703,7 +741,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch -q origin "$SOURCE"
-          for s in land-dispatch.py resolve-review-threads.py; do
+          for s in land-dispatch.py resolve-review-threads.py conveyor-state.py; do
             git show "origin/$SOURCE:.github/scripts/$s" > "$RUNNER_TEMP/$s"
           done
           git show "origin/$SOURCE:.github/review-triage.json" > "$RUNNER_TEMP/review-triage.json"
@@ -737,6 +775,7 @@ jobs:
           APPROVER: ${{ needs.gate.outputs.approver }}
           SINCE: ${{ needs.gate.outputs.since }}
           STARTS: ${{ steps.cred.outputs.starts == 'true' && '--push-starts-workflows' || '' }}
+          FIX_FAILED: ${{ needs.fix.result == 'failure' && '--fix-failed' || '' }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -748,13 +787,14 @@ jobs:
           REPORT_MISSING=""
           [ -f "$RUNNER_TEMP/dispatch/report.no-report" ] && REPORT_MISSING="--report-missing"
           # shellcheck disable=SC2086 -- STARTS and REPORT_MISSING are each one flag or nothing
-          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS $REPORT_MISSING \
+          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS $REPORT_MISSING $FIX_FAILED \
             --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" \
             --branch "${{ needs.gate.outputs.branch }}" \
             --work-list "$RUNNER_TEMP/dispatch/work-list.json" \
             --patch "$RUNNER_TEMP/dispatch/fix.patch" \
             --report "$RUNNER_TEMP/dispatch/report.json" \
             --resolver "$RUNNER_TEMP/resolve-review-threads.py" \
+            --state-script "$RUNNER_TEMP/conveyor-state.py" \
             --vocabulary "$RUNNER_TEMP/review-triage.json" \
             --dispatched-by "${{ needs.gate.outputs.dispatcher }}" \
             --mode "$MODE" --approver "$APPROVER" --since "$SINCE" \

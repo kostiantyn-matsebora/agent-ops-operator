@@ -916,12 +916,24 @@ jobs:
     needs: discover
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # TWO QUESTIONS, BOTH LIVE. First: did the review RUN for this head and
+    # finish (`review-is-green.py` -- its conclusion now means "ran and
+    # posted", nothing about content). Second: is any review-authored thread
+    # still OPEN on the pull request (`review-not-clean.py`, read from the
+    # threads at this moment). The second used to be a step of the review's
+    # own `reconcile` job, failing that run -- which froze the verdict: once
+    # a person resolved the thread nothing re-evaluated it, and #220 sat red
+    # until two workflows were re-run by hand. Here it is read live, and
+    # `review-thread.yml` re-runs THIS job of THIS run when a thread is
+    # resolved or unresolved, so `ci-green` follows the person's answer in
+    # the merge box without a push.
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
-      - name: The review finished clean for this commit
+      - name: The review ran for this commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -930,6 +942,13 @@ jobs:
           out=$(python3 .github/scripts/review-is-green.py --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA")
           echo "$out"
           [ "$out" = "green=true" ]
+      - name: The review leaves nothing open, read live
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .github/scripts/review-not-clean.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "${{ github.event.pull_request.number }}"
 
   pr-closes:
     needs: discover

@@ -1,0 +1,68 @@
+%% The conveyor line as implemented: which workflow, label and script carries
+%% each station of docs/diagrams/conveyor-lifecycle.mmd, and the state labels
+%% a person reads. Render with any mermaid viewer.
+flowchart TD
+  classDef person fill:#fff3cd,stroke:#b8860b,color:#000
+  classDef label fill:#e7f0ff,stroke:#3b6fd6,color:#000
+  classDef state fill:#efe7ff,stroke:#6e5494,color:#000
+  classDef workflow fill:#f3f3f3,stroke:#666,color:#000
+  classDef session fill:#e8f5e9,stroke:#2e7d32,color:#000
+  classDef stop fill:#eeeeee,stroke:#333,color:#000,stroke-dasharray:4 3
+
+  P1(["person places conveyor:run on the issue"]):::person
+  RUN["ISSUE grant: conveyor:run<br/>the standing instruction,<br/>re-read at every station"]:::label
+  P1 --> RUN
+
+  subgraph S1["Station 1 — implement"]
+    FIRE["remote-implement.yml · fire<br/>labeller has write access?<br/>POST the issue number to the routine"]:::workflow
+    ST1["ISSUE state: station:implement"]:::state
+    SESS["cloud session · implement-issue.md<br/>lane from recorded state:<br/>opsx = propose + implement + tasks + delta specs<br/>plain = implement from the issue text"]:::session
+    OPEN["push change/name<br/>open PR with Refs #n and NO label"]:::session
+    FIRE --> ST1 --> SESS --> OPEN
+  end
+  RUN -->|issues: labeled| FIRE
+
+  subgraph S2["Station 2 — fix, round after round"]
+    CI["ci.yml + claude-review.yml run on the PR<br/>review-clean reads the review's threads LIVE"]:::workflow
+    THREAD["review-thread.yml<br/>a thread resolved or unresolved<br/>re-runs review-clean of the same ci run"]:::workflow
+    CARRY["remote-implement.yml · open (ci succeeded)<br/>read Refs #n or Closes #n, re-read conveyor:run,<br/>placer still a writer?<br/>carry-grant.py labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml"]:::workflow
+    FIX["PR grant: conveyor:fix<br/>placed by the bot, records whose grant"]:::label
+    GREEN["PR state: loop:mergeable<br/>ISSUE state: station:merge"]:::state
+    GATE["review-dispatch.yml · gate<br/>who started this, is the grant still standing<br/>(a bot start is re-checked against the issue)"]:::workflow
+    ST2["PR state: loop:running<br/>ISSUE state: station:fix"]:::state
+    COLLECT["collect<br/>open findings + Sonar issues + failed required checks"]:::workflow
+    MODEL["fix<br/>Claude fixes or disputes every item<br/>allowed_bots: github-actions"]:::workflow
+    LAND["land (also when fix FAILED)<br/>apply, push via deploy key, reply Fixed in sha,<br/>resolve threads, post summary + round marker"]:::workflow
+    MERGEABLE(["nothing left — ci green"]):::stop
+    STALLED(["stopped for a person:<br/>disputes only · no report · fixing step failed<br/>PR state: loop:stalled"]):::stop
+    CAP(["round cap 5 — stop<br/>PR state: loop:capped<br/>conveyor:keep-going grants 5 more, consumed on use"]):::stop
+
+    CI -->|workflow_run: ci success| CARRY --> FIX --> GATE --> ST2 --> COLLECT --> MODEL --> LAND
+    CARRY --> GREEN
+    CI -->|workflow_run: ci failure, review success| GATE
+    LAND -->|push starts ci + review again| CI
+    THREAD --> CI
+    LAND --> MERGEABLE
+    LAND --> STALLED
+    LAND --> CAP
+  end
+  OPEN -->|pull_request| CI
+  ANSWER(["person answers a dispute or resolves the thread"]):::person
+  STALLED --> ANSWER --> THREAD
+
+  P2(["person merges the PR (squash)"]):::person
+  MERGEABLE --> P2
+
+  subgraph S3["Station 3 — archive (opsx lane only)"]
+    ARCH["remote-implement.yml · archive<br/>find the merged PR, its Refs #n,<br/>conveyor:run still on the issue?<br/>carry-grant.py labels the ISSUE conveyor:archive"]:::workflow
+    ALBL["ISSUE grant: conveyor:archive"]:::label
+    ST3["ISSUE state: station:archive"]:::state
+    AFIRE["remote-implement.yml · fire<br/>a bot-placed label is re-checked<br/>against the standing instruction"]:::workflow
+    ASESS["cloud session · archive-change.md<br/>openspec archive on the branch,<br/>open the archive PR with Closes #n, NO label"]:::session
+    ALOOP["the same fix loop drives the archive PR<br/>(carry reads Closes #n)"]:::workflow
+    ARCH --> ALBL --> AFIRE --> ST3 --> ASESS --> ALOOP
+  end
+  P2 -->|push to master, ci, workflow_run| ARCH
+  P3(["person merges the archive PR"]):::person
+  DONE["ISSUE state: station:done<br/>issue closed by Closes #n"]:::state
+  ALOOP --> P3 -->|remote-implement.yml · archive, Closes #n| DONE

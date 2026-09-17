@@ -92,10 +92,14 @@ needing the name reads the branch.
 
 ### ARCHIVE INSIDE THE PULL REQUEST
 
-**UNCHANGED BY EVERY LOOP ABOVE, AND STATED SO.** Neither the fixing loop nor a
-remote session archives anything: a machine may write to the branch, and a
-person merges and archives. `/opsx:archive` is refused while a round is running
-or a dispute is unanswered.
+**THE FIXING LOOP ARCHIVES NOTHING, AND A PERSON MERGES.**
+
+- Under a standing `conveyor:run`, the ARCHIVE STATION's session archives on
+  the branch once the pull request merged (`remote-session.md`), and opens the
+  archive pull request for a person to merge.
+- Where no instruction stands, a person archives by hand.
+- `/opsx:archive` is refused while a round is running or a dispute is
+  unanswered.
 
 `openspec archive` folds the delta specs into `openspec/specs/`, so doing it on
 the branch means **the diff shows the contract changing** — which is what a
@@ -172,7 +176,16 @@ summary, `{"sha", "paths": {path: {"quiet": N}}}` — so the NEXT run knows
 what it read and how many consecutive reads found nothing new. The model and
 its effort are the workflow's (`--model`, `--effort` — `gotchas.md` has why);
 `reconcile` RESOLVES the recorded threads with no model and the one
-`contents: write`. It runs by hand too: `gh workflow run claude-review.yml -f
+`contents: write` — and FAILS THE RUN ON NOTHING ELSE: the review run's
+conclusion means "the review ran and posted". WHETHER A REVIEW-AUTHORED
+THREAD IS STILL OPEN IS `ci.yml`'s `review-clean` JOB'S QUESTION, READ LIVE
+(`review-is-green.py` for "it ran", `review-not-clean.py` for "nothing of its
+own is open"), and `review-thread.yml` RE-RUNS THAT JOB of the head's own
+`ci` run when a thread is resolved or unresolved — so a person dismissing a
+finding turns `ci-green` green in the merge box with no push and no hand
+re-run. It lived in `reconcile` and FROZE THE VERDICT on #220: the loop
+disputed the red check (correctly, no tree edit could fix it), the owner
+resolved the thread, and nothing re-ran anything for days. It runs by hand too: `gh workflow run claude-review.yml -f
 number=<pr>` (`-f dry_run=true` posts nothing; `-f full=true` ignores the
 coverage record and reads every changed path from the base — the same
 override `REVIEW_QUIET_READS`, a workflow variable, tunes: how many
@@ -207,7 +220,9 @@ comment acts on everything accepted:
 | the `conveyor:fix` LABEL | a pull request | APPROVED AS A WHOLE — every open finding, every open SonarCloud issue AND every FAILED REQUIRED CHECK on the head is fixed or DISPUTED by CI, round after round, no reply and no dispatch needed. Placed by a person with WRITE access, or CARRIED forward by a workflow relaying a `conveyor:run` instruction still standing on the issue it opened from (the tracking issue on the opsx lane, the plain issue itself on the plain lane) — never by a session |
 | the `conveyor:implement` LABEL | an ISSUE | APPROVED TO BE BUILT, ONE STATION — a remote session proposes, implements and opens the pull request, UNLABELLED. Placed by a person with WRITE access. Anyone else's is removed with a comment |
 | the `conveyor:run` LABEL | an ISSUE | THE STANDING INSTRUCTION — implement, drive the pull request to mergeable, archive once merged: the whole line for that issue's LANE, read at every transition rather than recorded at the first. Removing it halts the line at the next station |
-| the `conveyor:archive` LABEL | the tracking ISSUE of a MERGED pull request | ARCHIVE, ONE STATION — placed by a person with write access, or carried forward the same way `conveyor:fix` is. Only the OPSX LANE has this station, bound to an openspec change (`remote-session.md`) — the PLAIN LANE, implemented straight from the issue, ends its line at the merge |
+| the `conveyor:archive` LABEL | the tracking ISSUE of a MERGED pull request | ARCHIVE, ONE STATION — placed by a person with write access, or carried forward the same way `conveyor:fix` is. It STARTS A SESSION (`remote-implement.yml`, the same fire as implement, `archive-change.md`) that archives on the branch and opens the archive pull request with `Closes #<n>`, unlabelled; the loop drives that pull request to mergeable and a person merges it. Only the OPSX LANE has this station, bound to an openspec change (`remote-session.md`) — the PLAIN LANE, implemented straight from the issue, ends its line at the merge |
+| a `station:<x>` LABEL | the ISSUE | STATE, NOT A GRANT — which station the line is at: `implement`, `fix`, `merge`, `archive`, `done`. Moved by the workflow performing the transition (`conveyor-state.py`), one value at a time, read by nobody but people. Removing one changes nothing |
+| a `loop:<x>` LABEL | a pull request | STATE, NOT A GRANT — what the fixing loop is doing: `running` (a round started), `stalled` (it stopped for you: a dispute, no report, or a fixer that could not run), `capped`, `mergeable` (`ci` green on the head). Same rules |
 | the `conveyor:keep-going` LABEL | a pull request whose loop stopped on the round cap | GRANTS ANOTHER SET of rounds, and is REMOVED the moment a round runs under it — one placement, one grant |
 | a reply under `<!-- conveyor:disputed -->` | a thread (or a pull request comment, for a Sonar issue) | THE LOOP DISAGREES — the code is untouched, the thread stays open, you are mentioned. Answer it (a reply, or resolve to dismiss); nothing re-disputes it |
 
@@ -291,6 +306,19 @@ point it is acted on, never trusting that a workflow placed it before.
   never named — worded as such, never as a dispute nobody made), the rounds
   used and the approver — and, at the cap, that `conveyor:keep-going` grants
   another set, consumed the moment a round runs under it.
+- **A CARRIED ROUND IS STARTED BY A BOT, AND THE FIXING STEP NAMES THAT ONE
+  BOT.** `remote-implement.yml`'s `open` job dispatches `review-dispatch.yml`
+  after carrying `conveyor:fix`, so the run's actor is `github-actions[bot]`
+  — and `claude-code-action` refuses any bot by default. Every carried round
+  died there before a model ran, measured on #220 (three days, nothing
+  posted). The step now sets `allowed_bots: github-actions`, and nothing
+  wider: the gate has already re-read the standing instruction the bot
+  relayed, and `*` would let an external App start the step on a public
+  repository.
+- **A DEAD FIXING JOB IS A ROUND TOO.** `land` runs when `fix` FAILED, and
+  posts the ending `fixing step failed` with the run linked, counting no
+  round and disputing nothing; the loop label says `stalled`. It was skipped,
+  and the pull request showed nothing at all.
 - **SILENCE IS NOT A DECISION.** A round whose fixing step wrote NO report at
   all ends as its own outcome, `no report`, disputing nothing — distinct from
   a report that named every item disputed. Reading a missing report as "every
