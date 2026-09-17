@@ -98,12 +98,17 @@ python3 .github/scripts/carry-grant.py --repo "$GITHUB_REPOSITORY" \
 # merge box.
 case "${CI_CONCLUSION:-}" in
   success)
-    if python3 .github/scripts/review-not-clean.py --repo "$GITHUB_REPOSITORY" --pr "$pr"; then
-      state --target "$pr" --loop mergeable
-      state --target "$issue" --station merge
-    else
-      echo "pull request #$pr has a review thread open; not mergeable yet, state unchanged"
-    fi ;;
+    # EXIT 1 IS "A THREAD IS OPEN"; ANYTHING ELSE IS "COULD NOT READ THEM".
+    # Both leave the state unchanged, and only the first is a fact about the
+    # pull request -- the other is a notice, so a transient API failure is
+    # never reported as an open finding.
+    threads=0; python3 .github/scripts/review-not-clean.py --repo "$GITHUB_REPOSITORY" --pr "$pr" || threads=$?
+    case "$threads" in
+      0) state --target "$pr" --loop mergeable
+         state --target "$issue" --station merge ;;
+      1) echo "pull request #$pr has a review thread open; not mergeable yet, state unchanged" ;;
+      *) echo "::notice::could not read #$pr's review threads (exit $threads); state unchanged" ;;
+    esac ;;
   *)
     echo "ci concluded '${CI_CONCLUSION:-unknown}' on #$pr; not mergeable, state unchanged" ;;
 esac

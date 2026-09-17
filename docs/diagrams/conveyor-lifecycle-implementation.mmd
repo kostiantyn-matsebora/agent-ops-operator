@@ -8,6 +8,7 @@ flowchart TD
   classDef workflow fill:#f3f3f3,stroke:#666,color:#000
   classDef session fill:#e8f5e9,stroke:#2e7d32,color:#000
   classDef stop fill:#eeeeee,stroke:#333,color:#000,stroke-dasharray:4 3
+  classDef platform fill:#fdf2e9,stroke:#b35c00,color:#000
 
   P1(["person places conveyor:run on the issue"]):::person
   RUN["ISSUE grant: conveyor:run<br/>the standing instruction,<br/>re-read at every station"]:::label
@@ -24,7 +25,7 @@ flowchart TD
 
   subgraph S2["Station 2 — fix, round after round"]
     CI["ci.yml + claude-review.yml run on the PR<br/>review-clean asks only: did the review run"]:::workflow
-    THREAD["an open review thread blocks the merge<br/>through branch protection, live —<br/>no check carries it"]:::workflow
+    THREAD["GitHub branch protection<br/>an open review thread blocks the merge, live —<br/>no workflow and no check carries it"]:::platform
     CARRY["remote-implement.yml · open (ci succeeded)<br/>read Refs #n or Closes #n, re-read conveyor:run,<br/>placer still a writer?<br/>carry-grant.py labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no review thread open → mergeable"]:::workflow
     FIX["PR grant: conveyor:fix<br/>placed by the bot, records whose grant"]:::label
     GREEN["PR state: loop:mergeable<br/>ISSUE state: station:merge"]:::state

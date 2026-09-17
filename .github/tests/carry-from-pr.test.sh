@@ -62,6 +62,22 @@ it "fix with no conclusion handed in at all marks nothing"
 out=$(CI_CONCLUSION= run 220 fix); rc=$?
 assert_status 0 "$rc"
 assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"
+assert_not_contains "$(cat "$GH_CALLS")" "station:merge"
+
+it "fix when the threads cannot be read (review-not-clean.py crashes) is a notice, not an open finding, and marks nothing"
+cat > "$tmp/repo/.github/scripts/review-not-clean.py" <<'PY'
+import sys; sys.exit(2)
+PY
+out=$(run 220 fix); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "::notice::could not read #220's review threads (exit 2)"
+assert_not_contains "$out" "has a review thread open"
+assert_not_contains "$(cat "$GH_CALLS")" "loop:mergeable"
+cat > "$tmp/repo/.github/scripts/review-not-clean.py" <<'PY'
+import os, sys
+open(os.environ["GH_CALLS"], "a").write("review-not-clean.py " + " ".join(sys.argv[1:]) + "\n")
+sys.exit(1 if os.environ.get("THREADS_OPEN") else 0)
+PY
 
 it "fix with a review thread still open: the carry happens, and NO mergeable or merge state is set"
 out=$(THREADS_OPEN=1 run 220 fix); rc=$?

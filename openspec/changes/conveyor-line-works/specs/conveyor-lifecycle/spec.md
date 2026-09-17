@@ -132,6 +132,10 @@ Whether a review thread is still open SHALL be the platform's own merge-time
 question, evaluated live. A person's ordinary answer — resolving the thread,
 or replying — then settles it with no re-run and no push.
 
+A STATE label MAY read the threads at the moment it is set, since it blocks
+nothing and is re-asserted at the next transition. A required check MAY NOT,
+because its verdict is frozen until something re-runs it.
+
 **A check that carries the thread question freezes it.** On #220 the review's
 run failed on an open thread and the loop disputed the red check correctly.
 

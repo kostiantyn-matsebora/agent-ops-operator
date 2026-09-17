@@ -49,18 +49,32 @@ def latest_run(repo: str, sha: str) -> dict | None:
     return max(runs, key=lambda r: r.get("run_started_at") or r.get("created_at") or "")
 
 
+def parse_paginated(raw: str) -> list[dict]:
+    """`gh api --paginate` without `--jq` concatenates each page's JSON object
+    back to back; split them the way carry-grant.py splits arrays."""
+    try:
+        return [json.loads(raw or "{}")]
+    except json.JSONDecodeError:
+        pages: list[dict] = []
+        for chunk in raw.replace("}{", "}\n{").splitlines():
+            if chunk.strip():
+                pages.append(json.loads(chunk))
+        return pages
+
+
 def failed_job(repo: str, run_id: int, name: str) -> tuple[int | None, str]:
-    """(job id, its conclusion) for the LATEST attempt of the named job."""
+    """(job id, its conclusion) for the LATEST attempt of the named job. The
+    name is matched HERE, in Python, never interpolated into a jq program: a
+    quote in it would break the filter, and `gh api` has no `--arg`."""
     rc, out, err = gh("api", "--method", "GET", f"repos/{repo}/actions/runs/{run_id}/jobs",
-                      "-f", "per_page=100", "--paginate",
-                      "--jq", f'.jobs[] | select(.name == "{name}") | "\\(.id) \\(.conclusion)"')
+                      "-f", "per_page=100", "--paginate")
     if rc != 0:
         raise RuntimeError(err.strip() or "listing the jobs failed")
-    rows = [line.split() for line in out.splitlines() if line.strip()]
-    if not rows:
+    jobs = [j for page in parse_paginated(out) for j in (page.get("jobs") or []) if j.get("name") == name]
+    if not jobs:
         return None, "absent"
-    jid, conclusion = rows[-1][0], (rows[-1][1] if len(rows[-1]) > 1 else "")
-    return int(jid), conclusion
+    last = jobs[-1]
+    return int(last["id"]), (last.get("conclusion") or "")
 
 
 def main() -> int:
