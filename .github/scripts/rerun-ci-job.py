@@ -95,7 +95,7 @@ def main() -> int:
         print(f"::notice::#{args.pr}: no pull_request ci run exists for {args.sha[:7]} yet; nothing to re-evaluate")
         return 0
     if run.get("status") != "completed":
-        print(f"#{args.pr}: ci run {run.get('id')} for {args.sha[:7]} is {run.get('status')}; "
+        print(f"::notice::#{args.pr}: ci run {run.get('id')} for {args.sha[:7]} is {run.get('status')}; "
               f"`{job}` reads the conversation when it runs, so nothing to do")
         return 0
     try:
@@ -107,7 +107,8 @@ def main() -> int:
         print(f"::notice::#{args.pr}: run {run['id']} has no `{job}` job; nothing re-run")
         return 0
     if conclusion != "failure":
-        print(f"#{args.pr}: `{job}` concluded {conclusion or 'nothing'} on run {run['id']}; nothing to re-evaluate")
+        print(f"::notice::#{args.pr}: `{job}` concluded {conclusion or 'nothing'} on run {run['id']}; "
+              "nothing to re-evaluate")
         return 0
     rc, _, err = gh("api", "--method", "POST", f"repos/{args.repo}/actions/jobs/{jid}/rerun")
     if rc != 0:

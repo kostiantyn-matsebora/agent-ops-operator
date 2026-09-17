@@ -125,8 +125,12 @@ person can change to move or stop the line.
 
 ### Requirement: No required check reports the state of the review's threads
 
-A required check SHALL report whether the review ran for the head, and
-nothing about what it found.
+The check that gates on the code review SHALL report whether the review ran
+for the head, and nothing about what it found.
+
+This requirement is about that ONE check -- a DIFFERENT required check MAY
+still read a pull request's own comments for a different question, which is
+the next requirement.
 
 Whether a review thread is still open SHALL be the platform's own merge-time
 question, evaluated live. A person's ordinary answer — resolving the thread,
@@ -154,16 +158,23 @@ could be re-run.
 - **WHEN** a person unresolves a review-authored thread
 - **THEN** the merge is blocked at once, and no check changes
 
-#### Scenario: A person answers a dispute
-
-- **WHEN** a person comments on a pull request the loop drives, while a
-  required check that reads the conversation is red on its head
-- **THEN** that check re-runs on the same head without a push or a hand
-  re-run, and the line continues from its verdict
-
 #### Scenario: The review's run ends
 
 - **WHEN** the review has posted its findings and resolved what its own list
   named
 - **THEN** its run concludes success whatever it found, and the required
   check reads that as "the review ran"
+
+### Requirement: A required check that reads a person's answer is re-run on that answer
+
+A required check whose verdict depends on whether a person has answered
+something the loop posted -- a dispute, never the review's own threads --
+SHALL be re-run when that person comments, so its verdict never depends on a
+push or a hand re-run.
+
+#### Scenario: A person answers a dispute
+
+- **WHEN** a person comments on a pull request the loop drives, while such a
+  check is red on its head
+- **THEN** that check re-runs on the same head without a push or a hand
+  re-run, and the line continues from its verdict

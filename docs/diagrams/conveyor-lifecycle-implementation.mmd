@@ -39,7 +39,7 @@ flowchart TD
     CAP(["round cap 5 — stop<br/>PR state: loop:capped<br/>conveyor:keep-going grants 5 more, consumed on use"]):::stop
 
     CI -->|workflow_run: ci success| CARRY --> FIX --> GATE --> ST2 --> COLLECT --> MODEL --> LAND
-    CARRY --> GREEN
+    CARRY -->|no review thread open| GREEN
     CI -->|workflow_run: ci failure, review success| GATE
     LAND -->|push starts ci + review again| CI
     LAND --> MERGEABLE

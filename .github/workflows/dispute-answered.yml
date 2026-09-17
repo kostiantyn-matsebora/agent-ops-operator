@@ -15,8 +15,9 @@
 # bot-authored and never re-run anything; `/fix-accepted` is a DISPATCH and
 # belongs to review-dispatch.yml, which already listens on the same events.
 #
-# `actions: write` IS THE RE-RUN AND NOTHING ELSE. No checkout of the pull
-# request's tree, no model, no contents, no pull-requests write.
+# `actions: write` IS THE RE-RUN AND NOTHING ELSE. `contents: read` is for
+# the checkout of the TRUSTED (default-branch) copy below, never the pull
+# request's tree; there is no model and no `pull-requests: write`.
 name: dispute-answered
 
 run-name: "dispute-answered #${{ github.event.issue.number || github.event.pull_request.number }}"

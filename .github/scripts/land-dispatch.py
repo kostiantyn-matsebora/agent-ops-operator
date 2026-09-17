@@ -311,13 +311,17 @@ class Round:
         unaddressed, rounds used, what remains, and the approver mentioned."""
         a = self.args
         unaddressed = unaddressed or {}
-        # EVERY ENDING MOVES THE LOOP LABEL. The cap is `capped`; a clean
-        # ending -- no open finding, no analysis issue, no failed check -- is
-        # `mergeable`, and it must be set HERE because the gate set `running`
-        # when this round started, AFTER the carry had already said mergeable
-        # (measured on #225: the label stuck at `running` on a clean, green
-        # pull request); every other ending stopped for a person and is
-        # `stalled`.
+        # EVERY ENDING MOVES THE LOOP LABEL. The cap is `capped`; every other
+        # ending that stopped for a person is `stalled`. A CLEAN ending is
+        # `mergeable` -- a SECOND setter of that same value, not a duplicate
+        # of `carry-from-pr.sh`'s: that one marks mergeable when `open` reacts
+        # to `ci` succeeding, BEFORE this round ever started, and this round's
+        # own gate then set `running` on top of it (measured on #225: the
+        # label stuck at `running` on a clean, green pull request, because
+        # nothing moved it off `running` again). Two setters writing the same
+        # value from two different TRANSITIONS is not the state living in two
+        # places -- there is still one label, moved at every transition that
+        # can change it.
         if ending == "round cap reached":
             self.set_loop("capped")
         elif ending == "clean":

@@ -802,7 +802,7 @@
     {
       "id": "review-thread-rerun",
       "pattern": "review-thread\\.yml|rerun-review-clean\\.py|pull_request_review_thread",
-      "says": "no workflow listens on a thread resolution: `pull_request_review_thread` is a webhook event, not an Actions trigger, and the platform refuses a workflow naming it. An open review thread blocks the merge through branch protection alone; a person's COMMENT re-runs `docs-task` through `dispute-answered.yml` -- see .claude/rules/worktree-delivery.md",
+      "says": "no workflow listens on a thread resolution: `pull_request_review_thread` is a webhook event, not an Actions trigger, and the platform refuses a workflow naming it. An open review thread blocks the merge through branch protection alone \u2014 a person's COMMENT re-runs `docs-task` through `dispute-answered.yml` \u2014 see .claude/rules/worktree-delivery.md",
       "allow": [
         "removed",
         "retired",
