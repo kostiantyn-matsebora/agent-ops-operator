@@ -219,6 +219,15 @@ def main() -> int:
     # staying off because this program once announced it. Only the COMMENT,
     # never the label, is deduplicated by the marker.
     gh("issue", "edit", str(target), "--repo", args.repo, "--add-label", station_label)
+    if args.station == "archive":
+        # STATE, NOT A GRANT: the issue's station label says the line is
+        # archiving. The fix station's label is set by the loop's own gate
+        # when a round starts, and `merge` by the `open` job on a green ci,
+        # so this program sets nothing for `fix`. Never fails the carry.
+        state = pathlib.Path(__file__).with_name("conveyor-state.py")
+        if state.is_file():
+            subprocess.run([sys.executable, str(state), "--repo", args.repo, "--target", str(args.issue),
+                            "--station", "archive"], check=False)
 
     if already_carried(args.repo, target, marker):
         print(f"#{target} already carries the `{args.station}` grant; label re-asserted, not commenting again")

@@ -221,7 +221,9 @@ land_all() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
                 --work-list "${WORK:-$tmp/work-all.json}" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report-all.json}" \
                 --dispatched-by github-actions --mode all --approver an-approver --since 2026-08-29T10:00:00Z \
                 --max-rounds "${MAX_ROUNDS:-3}" --sonar "$tmp/sonar.json" --checks "${CHECKS:-$tmp/checks-none.json}" \
-                ${STARTS---push-starts-workflows} ${REPORT_MISSING:+--report-missing} 2>&1); }
+                --state-script "$ROOT/.github/scripts/conveyor-state.py" \
+                ${STARTS---push-starts-workflows} ${REPORT_MISSING:+--report-missing} ${FIX_FAILED:+--fix-failed} 2>&1); }
+loop_label() { grep -oE 'issue edit 7 --repo o/r --add-label loop:[a-z]+' "$GH_CALLS" | sed 's/.*loop://' | tr '\n' ' ' | sed 's/ $//'; }
 printf '{"consulted":true,"checks":[],"items":[]}' > "$tmp/checks-none.json"
 
 fresh_repo
@@ -268,6 +270,7 @@ assert_contains "$summary_line" "round cap reached** — @an-approver"
 assert_contains "$summary_line" "Rounds used: 3 of 3"
 assert_contains "$summary_line" "Disputed (2)"
 assert_contains "$summary_line" "conveyor:keep-going"
+assert_equals "capped" "$(loop_label)"
 printf '[]' > "$GH_COMMENTS"
 
 # CONSUMED, THE MOMENT A ROUND RUNS UNDER IT. `conveyor:keep-going` is on the
@@ -532,6 +535,52 @@ assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
 assert_not_contains "$(cat "$GH_CALLS")" "/replies"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no report** — @an-approver"
 assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
+assert_equals "stalled" "$(loop_label)"
+
+# ENDING: the fixing JOB failed -- no model ran. Measured on #220: the action
+# refused a bot-dispatched run, `land` was skipped, and the pull request showed
+# nothing for three days. Its own ending, distinct from `no report`.
+it "labelled: a failed fixing job ends the round as 'fixing step failed', disputing nothing, counting no round, and stalls the loop label"
+fresh_repo
+: > "$tmp/empty.patch"
+printf '{"items":[]}' > "$tmp/empty-report.json"
+out=$(FIX_FAILED=1 PATCH="$tmp/empty.patch" REPORT="$tmp/empty-report.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "fixing step failed** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no model looked at any item"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:round"
+assert_equals "stalled" "$(loop_label)"
+
+it "labelled: the fixing job failing is not 'no report' -- the two endings are told apart"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no report**"
+
+# THE LOOP LABEL FOLLOWS THE ENDING: disputes -> stalled, the cap -> capped, a
+# round that goes on sets nothing here (the gate set `running` when it started).
+it "labelled: every ending moves the loop label -- disputes only stalls it"
+fresh_repo
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-disp.json" land_all); rc=$?
+assert_equals "stalled" "$(loop_label)"
+
+it "labelled: a round that lands and goes on leaves the loop label to the gate"
+fresh_repo
+out=$(land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "" "$(loop_label)"
+
+it "labelled: a missing state script is a notice, never a failed round"
+fresh_repo
+out=$(cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" --work-list "$tmp/work-all.json" \
+        --patch "$tmp/empty.patch" --report "$tmp/report-disp.json" --dispatched-by github-actions --mode all \
+        --approver an-approver --since 2026-08-29T10:00:00Z --max-rounds 3 --sonar "$tmp/sonar.json" \
+        --checks "$tmp/checks-none.json" --state-script "$tmp/not-there.py" --push-starts-workflows 2>&1); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "::notice::loop state \`stalled\` not recorded"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 
 # THE TOKEN PUSHED IT. Without the push credential the workflow does not pass
 # --push-starts-workflows, and a landed round cannot be followed by another.

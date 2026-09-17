@@ -145,6 +145,12 @@ Three workflows share one definition, `.github/workflows/e2e.yml`, and `ci.yml` 
 | `e2e-smoke.yml` | the smoke tier | on demand, on any branch |
 | `e2e-full.yml` | the full tier, real-runtime lane included | nightly at 03:17 UTC when master moved since its last successful run, and on demand |
 
+One job in `ci.yml`, `review-clean`, reports the code review's verdict
+through `ci-green`: it asks whether the review ran for the head and whether
+any thread the review opened is still unresolved, both read at that moment.
+Resolving or unresolving a review thread re-runs that job of the same run
+(`review-thread.yml`), so the merge box follows the answer without a push.
+
 ```sh
 gh workflow run e2e-smoke.yml --ref my-branch
 gh workflow run e2e-full.yml

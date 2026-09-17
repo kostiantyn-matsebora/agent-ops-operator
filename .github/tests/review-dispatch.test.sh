@@ -279,6 +279,10 @@ run_label=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/revi
 fire_if=$(rpy 'print(d["jobs"]["fire"]["if"])')
 assert_contains "$fire_if" "github.event.label.name == '$implement_label'"
 assert_contains "$fire_if" "github.event.label.name == '$run_label'"
+archive_label=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["archive_label"])')
+it "remote-implement fires on the ARCHIVE label too: the last station of the opsx lane has an actor"
+assert_contains "$fire_if" "github.event.label.name == '$archive_label'"
+assert_equals "conveyor:archive" "$archive_label"
 assert_equals "conveyor:implement" "$implement_label"
 assert_equals "conveyor:run" "$run_label"
 
@@ -403,5 +407,26 @@ assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'read'}"
 
 it "the archive job's checkout is ALSO pinned to the default branch, same reason as open"
 assert_equals "\${{ github.event.repository.default_branch }}" "$(rpy 'print(d["jobs"]["archive"]["steps"][0]["with"]["ref"])')"
+
+# THE CARRIED ROUND RUNS, AND A DEAD ROUND IS REPORTED (#220). A carried
+# `conveyor:fix` round is dispatched by `github-actions[bot]`, which the
+# action refused by default before any model ran; and with `fix` failed,
+# `land` was skipped and nothing reached the pull request for three days.
+it "the fixing step names github-actions as the ONE bot that may start it -- never '*', never empty"
+model=$(py 'print([s for s in d["jobs"]["fix"]["steps"] if s.get("id")=="model"][0]["with"]["allowed_bots"])')
+assert_equals "github-actions" "$model"
+
+it "land runs on a FAILED fix too, substitutes the empty patch and report, and passes --fix-failed"
+assert_contains "$(py 'print(d["jobs"]["land"]["if"])')" "needs.fix.result == 'failure'"
+assert_contains "$(py 'print([s.get("if","") for s in d["jobs"]["land"]["steps"]])')" "needs.fix.result == 'skipped' || needs.fix.result == 'failure'"
+assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["env"]["FIX_FAILED"])')" "needs.fix.result == 'failure' && '--fix-failed'"
+assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '$FIX_FAILED'
+
+it "land restores conveyor-state.py beside the landing programs and hands it to land-dispatch.py"
+assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py; do"
+assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--state-script "$RUNNER_TEMP/conveyor-state.py"'
+
+it "the gate marks the pull request's loop label running when a round starts, and grants nothing by it"
+assert_contains "$gate" 'conveyor-state.py --repo "$GITHUB_REPOSITORY" --target "$PR" --loop running'
 
 summary

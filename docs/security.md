@@ -209,6 +209,12 @@ request its owner has labelled `conveyor:fix` (the renamed `autofix`). The step
 that writes a fix runs a model under a read-only token and holds no other
 secret.
 
+That step accepts a run started by one bot, `github-actions`, and no other,
+because a carried `conveyor:fix` round is dispatched by this repository's own
+workflow. The gate before it has already re-read the standing instruction the
+bot relayed, and refused the run without one. The archive station is a session
+started the same way, and a person still merges what it opens.
+
 The model-free step after it pushes the commit through a WRITE DEPLOY KEY
 (`AUTOFIX_DEPLOY_KEY`), repository-scoped and `contents` only, because a push
 made with the workflow token starts no workflow and a `workflow_dispatch`

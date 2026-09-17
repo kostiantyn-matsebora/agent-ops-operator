@@ -73,16 +73,17 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
 | `conveyor:implement` | an ISSUE | one session, one station: implement, open the pull request, stop |
 | `conveyor:run` | an ISSUE | the STANDING INSTRUCTION — the same session starts, and its grant is CARRIED forward at every later station too |
 | `conveyor:fix` | a pull request | the fixing loop, placed by a person or CARRIED from `conveyor:run` |
-| `conveyor:archive` | the tracking ISSUE of a merged pull request | the archive pull request, placed by a person or CARRIED from `conveyor:run` |
+| `conveyor:archive` | the tracking ISSUE of a merged pull request | ONE SESSION for the archive station (`archive-change.md`): archive on the branch, open the archive pull request with `Closes #<n>`, stop. Placed by a person or CARRIED from `conveyor:run` |
+| `station:<x>` / `loop:<x>` | the issue / the pull request | NOTHING — state labels a person reads, moved by the workflows (`worktree-delivery.md`) |
 | `conveyor:keep-going` | a pull request whose loop stopped on the round cap | another set of rounds, consumed the moment one runs under it |
 
 | Step | What happens |
 |---|---|
-| a person with write access places `conveyor:implement` OR `conveyor:run` on an ISSUE | `remote-implement.yml`'s `fire` job runs |
-| the workflow reads the labeller's permission from the collaborators API | anyone else: the label is REMOVED and a comment says who may place it |
+| a person with write access places `conveyor:implement` OR `conveyor:run` on an ISSUE — or `conveyor:archive` is placed, by a person or CARRIED | `remote-implement.yml`'s `fire` job runs |
+| the workflow reads the labeller's permission from the collaborators API | anyone else: the label is REMOVED and a comment says who may place it. A label placed by `github-actions[bot]` is a CARRIED grant: accepted only after re-reading that `conveyor:run` still stands on the issue and its placer can push, refused and removed otherwise |
 | it POSTs the issue's NUMBER to the routine's fire endpoint | the URL is a repository variable, the token a repository secret |
-| it comments the session's link on the issue, once | that comment is the start's transition record, and says whether a later carry is coming |
-| the session reads `.github/routines/implement-issue.md` | the process is committed; the routine's saved prompt is a POINTER to it |
+| it comments the session's link on the issue, once PER STATION | that comment is the start's transition record, and says whether a later carry is coming. The implement marker is unchanged; the archive station records its own, or it would never fire on an issue the implement did |
+| the session reads `.github/routines/implement-issue.md` | the process is committed; the routine's saved prompt is a POINTER to it. Its first section reads the issue's labels and hands `conveyor:archive` to `archive-change.md` |
 | it reads the LANE — bound to an openspec change, or plain | opsx: propose, implement, archive. Plain: implement straight from the issue, archiving nothing |
 | it implements on `change/<name>`, opens the pull request WITH NO LABEL | `Refs #<n>` (NOT `Closes` — see below) is what a later carry reads |
 

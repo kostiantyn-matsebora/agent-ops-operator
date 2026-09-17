@@ -35,7 +35,13 @@ own, so it places nothing.
 
 Where `conveyor:run` authorised it, a workflow reads the issue again once the
 pull request opens and carries that instruction forward as `conveyor:fix`, so
-the review's findings are fixed without a reply in each thread.
+the review's findings are fixed without a reply in each thread. After a person
+merges, the same instruction is carried forward as `conveyor:archive`, and a
+second session archives the change and opens the archive pull request.
+
+**Where the line is** is on the issue and the pull request, as labels that
+grant nothing: `station:<implement|fix|merge|archive|done>` on the issue, and
+`loop:<running|stalled|capped|mergeable>` on the pull request.
 
 What it does not change is who decides. The proposal, the pull request and
 the review are read by a person, a dispute waits for one, and a person
@@ -626,8 +632,14 @@ run on it. The next round starts either when the review completes or when CI
 fails, up to a bound of 5 (`.github/review-triage.json`, `max_rounds`).
 
 A round that changes nothing ends the loop early, and every ending is one
-summary comment. At the cap, `conveyor:keep-going` grants another set of
-rounds and is consumed the moment one runs under it.
+summary comment — a fixing step that could not run included, as `fixing step
+failed`. At the cap, `conveyor:keep-going` grants another set of rounds and is
+consumed the moment one runs under it.
+
+A stalled loop (`loop:stalled`) is waiting for you. Answer a dispute in its
+thread, or resolve the thread to dismiss it: `review-clean` reads the review's
+threads live and re-runs on the resolution, so the merge box follows your
+answer without a push.
 
 The loop never marks anything in SonarCloud, and it cannot merge. Removing the
 label stops it at the next round. An unanswered dispute holds both the merge
@@ -636,7 +648,8 @@ and `/opsx:archive`.
 **One label runs the whole line.** `conveyor:run` on an issue is the standing
 instruction: implement, drive the pull request to `conveyor:fix`-mergeable,
 and — on an issue already bound to an openspec change — archive it once
-merged.
+merged. The archive is a session too, started by the carried
+`conveyor:archive`; its pull request closes the issue, and you merge it.
 
 An issue with no such binding runs the PLAIN lane instead. It is implemented
 straight from what you wrote, ending at the merge with nothing archived.

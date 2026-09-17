@@ -294,12 +294,31 @@ class Round:
     def marker(self) -> str:
         return f"{self.markers['round']} {self.number} -->"
 
+    def set_loop(self, state: str) -> None:
+        """STATE, NOT A GRANT. The pull request's loop label is what a person
+        reads; nothing reads it back. So this never fails a round: the script
+        exits 0 on anything it cannot do, and a missing script is a notice."""
+        script = self.args.state_script
+        if not script or not pathlib.Path(script).is_file():
+            print(f"::notice::loop state `{state}` not recorded: {script} is not there", file=sys.stderr)
+            return
+        sh(sys.executable, str(script), "--repo", self.args.repo, "--target", str(self.args.pr),
+           "--loop", state, check=False)
+
     def summary(self, ending: str, fixed: list[str], disputed: dict[str, str], sha: str | None = None,
                 note: str = "", unaddressed: dict[str, str] | None = None) -> None:
         """ONE comment per ending: what was fixed, what was disputed, what was
         unaddressed, rounds used, what remains, and the approver mentioned."""
         a = self.args
         unaddressed = unaddressed or {}
+        # EVERY ENDING MOVES THE LOOP LABEL. The cap is `capped`; a clean
+        # pull request needs no round and the label follows CI's own verdict
+        # (`loop:mergeable` is set from `ci` succeeding, never from here); every
+        # other ending stopped for a person and is `stalled`.
+        if ending == "round cap reached":
+            self.set_loop("capped")
+        elif ending != "clean":
+            self.set_loop("stalled")
         used = self.number if sha else self.number - 1
         lines = [SUMMARY_MARKER, f"**Conveyor fix on #{a.pr}: {ending}** — @{a.approver}"]
         if note:
@@ -377,6 +396,16 @@ def main() -> int:
                     help="the fixing step wrote NO report at all (the workflow substituted an empty one "
                          "so there is always a file to read); the round ends as its own outcome and no "
                          "item is reported as disputed, rather than reading the substitution as refusal")
+    ap.add_argument("--fix-failed", action="store_true",
+                    help="the fixing JOB failed, so no model ran at all (the workflow substituted an "
+                         "empty patch and report); the round ends as its own outcome, `fixing step "
+                         "failed`, naming the run -- distinct from --report-missing, where a model ran "
+                         "and wrote nothing. Measured on #220, where a refused fixer left nothing on the "
+                         "pull request for three days")
+    ap.add_argument("--state-script", type=pathlib.Path,
+                    default=pathlib.Path(__file__).with_name("conveyor-state.py"),
+                    help="conveyor-state.py, restored beside this program by the workflow; moves the "
+                         "pull request's loop label at every ending, and never fails the round")
     args = ap.parse_args()
     if args.mode == "all" and not args.approver:
         args.approver = args.dispatched_by
@@ -426,6 +455,26 @@ def main() -> int:
         pr_comment(args.repo, args.pr,
                    f"Dispatch by @{args.dispatched_by}: the fixing step produced no report, so nothing "
                    f"was landed. Every accepted finding is still open; dispatch again.{run}")
+        return 0
+
+    if args.fix_failed:
+        # SILENCE IS NOT A DECISION, AND NEITHER IS A DEAD JOB. No model ran,
+        # so nothing was fixed, nothing is disputed and no round is counted;
+        # the ending says exactly that, links the run, and names what starts
+        # another round. Without this the pull request shows nothing at all.
+        print("fixing step failed: no model ran, so nothing was landed and nothing is disputed")
+        if rnd:
+            rnd.summary("fixing step failed", [], {},
+                        note="The fixing job failed before or while doing its work, so no model looked at "
+                             "any item: nothing was fixed and nothing is disputed. The run linked below "
+                             "says why. Every item stays open. A push, or removing and re-adding the "
+                             f"label, starts another round; `{markers['keep_going']}` is not needed, since "
+                             "no round was counted.")
+            return 0
+        pr_comment(args.repo, args.pr,
+                   f"Dispatch by @{args.dispatched_by}: the fixing job failed before doing its work, so "
+                   f"nothing was landed. Every accepted finding is still open; dispatch again once the "
+                   f"run's failure is understood.{run}")
         return 0
 
     claimed_fixed, claimed_disputed = read_report(report, work)
