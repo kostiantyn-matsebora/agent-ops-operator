@@ -656,6 +656,9 @@ straight from what you wrote, ending at the merge with nothing archived.
 Which lane applies is read from the binding, never judged from how the issue
 is worded.
 
+`docs/diagrams/conveyor-lifecycle.mmd` draws this line end to end, with the
+implementation view beside it in `conveyor-lifecycle-implementation.mmd`.
+
 **Releases are the maintainer's, and they are chart-shaped.** A component tag
 (`<component>-v<semver>`) publishes one image and creates no GitHub Release; a
 `chart-v<semver>` tag publishes the chart and announces it, notes composed from
