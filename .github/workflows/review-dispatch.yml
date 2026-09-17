@@ -413,6 +413,19 @@ jobs:
             # running round completes and this is where the next one stops.
             if [ "$state" != "OPEN" ] || ! gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' | grep -qx "$LABEL"; then
               echo "::notice::#$PR is $state and does not carry \`$LABEL\`; no round starts"
+              # A REVIEW JUST COMPLETED, EVEN THOUGH NO ROUND WILL RUN HERE.
+              # `loop:mergeable` may have been set by an EARLIER green ci with
+              # no thread open, and this review may have just posted new
+              # findings -- a pull request with no active grant still deserves
+              # a label that is not a LIE. Measured live on #226 (manually
+              # driven, no `conveyor:fix`, since it edits this very workflow):
+              # the label said mergeable for over an hour after three new
+              # findings landed, because nothing without the label ever
+              # re-checked it. `refresh-loop-state.py` reads the threads --
+              # STATE, never a check's verdict, see its own docstring -- and
+              # corrects the label. Never fails the gate.
+              [ "$state" = "OPEN" ] && [ "$EVENT" = "workflow_run" ] && \
+                python3 .github/scripts/refresh-loop-state.py --repo "$GITHUB_REPOSITORY" --pr "$PR"
               echo "mode=none" >> "$GITHUB_OUTPUT"; exit 0
             fi
             read -r approver since < <(label_placement)

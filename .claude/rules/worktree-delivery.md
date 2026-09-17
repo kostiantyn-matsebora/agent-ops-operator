@@ -319,6 +319,16 @@ point it is acted on, never trusting that a workflow placed it before.
   wider: the gate has already re-read the standing instruction the bot
   relayed, and `*` would let an external App start the step on a public
   repository.
+- **A LABEL SET BY ONE PATH IS CORRECTED BY ANOTHER.** `loop:mergeable`, set
+  when `ci` succeeds with no thread open, can go stale on a pull request the
+  loop is not driving: a LATER review completion may post new findings, and
+  nothing without the `conveyor:fix` grant ever re-checked the label.
+  Measured live on #226 (manually driven, since it edits this very
+  workflow): the label said mergeable for over an hour after three findings
+  landed. The gate's `mode=none` path now calls `refresh-loop-state.py` on
+  every review completion, which re-reads `review-not-clean.py` and corrects
+  the label to `stalled` if it lied -- as STATE, never a check's verdict, the
+  same distinction that keeps `review-not-clean.py` out of `ci-green`.
 - **A PERSON'S REPLY RE-RUNS THE CHECK THAT READS IT.** `docs-task` fails
   while a dispute the loop posted has no answer from a person
   (`autofix-guard.py`), and a reply is that answer — but a comment starts no

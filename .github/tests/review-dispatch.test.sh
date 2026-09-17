@@ -432,4 +432,8 @@ assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--state-
 it "the gate marks the pull request's loop label running when a round starts, and grants nothing by it"
 assert_contains "$gate" 'conveyor-state.py --repo "$GITHUB_REPOSITORY" --target "$PR" --loop running'
 
+it "on mode=none from a review completion, the gate corrects a stale loop label via refresh-loop-state.py"
+assert_contains "$gate" "refresh-loop-state.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$PR\""
+assert_not_contains "$gate" "review-not-clean.py"
+
 summary

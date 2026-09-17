@@ -146,6 +146,7 @@ adds one and removes its siblings, idempotently, and never fails a job.
 | `ci` succeeds on a labelled pull request with no review thread open | the `open` job, through `carry-from-pr.sh` (which also runs on a red `ci` and marks nothing then) | pull request `loop:mergeable`, issue `station:merge` |
 | a round ends clean | `land` | pull request `loop:mergeable` |
 | a merge carries `conveyor:archive` | `carry-grant.py` | issue `station:archive` |
+| a review completes with findings open, on a pull request the loop is NOT driving | the `gate`'s `mode=none` path, through `refresh-loop-state.py` | pull request `loop:stalled`, correcting a stale `mergeable` |
 | the archive pull request merges, or a plain-lane pull request merges | the `archive` job | issue `station:done` |
 
 - **Distinct prefixes from the grants**, so nobody reads `station:fix` as
