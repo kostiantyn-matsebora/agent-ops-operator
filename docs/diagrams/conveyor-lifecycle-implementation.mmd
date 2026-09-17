@@ -47,7 +47,9 @@ flowchart TD
   end
   OPEN -->|pull_request| CI
   ANSWER(["person answers a dispute or resolves the thread"]):::person
+  ANSWERED["dispute-answered.yml<br/>a person's comment re-runs the failed<br/>docs-task job of the head's own ci run"]:::workflow
   STALLED --> ANSWER --> THREAD --> P2
+  ANSWER --> ANSWERED --> CI
 
   P2(["person merges the PR (squash)"]):::person
   MERGEABLE --> P2

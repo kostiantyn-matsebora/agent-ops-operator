@@ -90,6 +90,16 @@ unblocks the merge with no re-run.
   asks it on a green `ci` before marking the pull request `loop:mergeable`,
   so the label is honest at that moment. A thread resolved later shows in the
   merge box, and the label follows at the next transition.
+- **The check that reads the CONVERSATION is re-run on the answer.**
+  `docs-task` fails while a dispute has no reply from a person
+  (`autofix-guard.py`). A comment IS an Actions event, so
+  `dispute-answered.yml` (`issue_comment`, `pull_request_review_comment`)
+  re-runs the failed `docs-task` job of the head's own `ci` run through the
+  jobs API (`rerun-ci-job.py`) when a non-bot comments on a pull request
+  carrying `conveyor:fix`. `ci-green` re-evaluates in the same run. On
+  green, `open` marks the head mergeable, and on red the loop's `ci failure`
+  trigger starts the next round. Only that one job, because a reply changes
+  nothing else's answer, and only when it failed.
 
 ### 4. The archive station is a remote session, started by the carried label
 

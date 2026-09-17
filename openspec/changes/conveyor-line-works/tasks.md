@@ -17,6 +17,7 @@
 - [x] 3.2 `ci.yml`'s `review-clean` job asks only whether the review ran (`review-is-green.py`), and no check reports the review's thread state. Verify: `review-clean.test.sh` pins the job's steps and that no workflow runs `review-not-clean.py`
 - [x] 3.3 RETIRED in the follow-up: `rerun-review-clean.py` was written and removed, because the event it served does not exist. Verify: the file is gone
 - [x] 3.4 RETIRED in the follow-up: `review-thread.yml` on `pull_request_review_thread` was refused by the platform (`Unexpected value 'pull_request_review_thread'`, a failed no-job run on every push). Removed, and `review-clean.test.sh` pins that no workflow names that event. Verify: `gh run list --workflow=review-thread.yml` shows nothing after the merge
+- [x] 3.6 Add `.github/workflows/dispute-answered.yml` on `issue_comment` and `pull_request_review_comment` (created, non-bot, not a dispatch) with `actions: write`, re-running through `.github/scripts/rerun-ci-job.py` the FAILED `docs-task` job of the head's own `ci` run on a pull request carrying `conveyor:fix`. A run in progress, a missing run, a job that did not fail and a 403 each exit 0 with a notice. Verify: `rerun-ci-job.test.sh` and `dispute-answered.test.sh`
 - [x] 3.5 Set `loop:mergeable` and `station:merge` from `carry-from-pr.sh` (called by `remote-implement.yml`'s `open` job on a green `ci`) only when `review-not-clean.py` finds no review thread open. Verify: `carry-from-pr.test.sh`, both the clean and the open-thread case
 
 ## 4. The archive station has an actor

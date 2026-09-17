@@ -635,6 +635,12 @@ Workflow initiated by non-human actor: github-actions (type: Bot). Add bot to al
   `gh run view --log`; the message is on the run's web page alone. The
   script suite parses each workflow's `on:` keys against that name now.
   Local YAML parsing proves nothing about which events exist.
+- **A COMMENT IS AN EVENT, A THREAD RESOLUTION IS NOT.** `issue_comment` and
+  `pull_request_review_comment` are Actions triggers, so the check that reads
+  the conversation (`docs-task`, through `autofix-guard.py`) IS re-runnable
+  on the answer it waits for — `dispute-answered.yml` does exactly that, and
+  it is the last manual re-run #220 needed. The thread question stays with
+  the platform's merge box.
 - **A failed job of a review run cannot be re-run after a day.** Its
   `resolve-threads` artifact has expired (`retention-days: 1`), so `gh run
   rerun --failed` dies in "The review's list actually arrived". Re-running

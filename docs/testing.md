@@ -149,7 +149,9 @@ One job in `ci.yml`, `review-clean`, reports through `ci-green` whether the
 code review ran for the head and finished. What the review found is not a
 check: an open review thread blocks the merge through branch protection's
 required conversation resolution, evaluated live, so resolving a thread
-unblocks the merge at once and nothing needs re-running.
+unblocks the merge at once and nothing needs re-running. The one job that
+reads the conversation, `docs-task`, is re-run by `dispute-answered.yml` when
+a person comments on a pull request the fixing loop drives.
 
 ```sh
 gh workflow run e2e-smoke.yml --ref my-branch

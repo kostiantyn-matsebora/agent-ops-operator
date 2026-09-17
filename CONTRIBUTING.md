@@ -639,7 +639,9 @@ consumed the moment one runs under it.
 A stalled loop (`loop:stalled`) is waiting for you. Answer a dispute in its
 thread, or resolve the thread to dismiss it: an open thread blocks the merge
 through branch protection alone, evaluated live, so resolving it unblocks the
-merge box at once. No check reports the threads, and none needs re-running.
+merge box at once. No check reports the threads. The one check that reads
+your reply, `docs-task`, is re-run for you the moment you post it, so nothing
+is re-run by hand.
 
 The loop never marks anything in SonarCloud, and it cannot merge. Removing the
 label stops it at the next round. An unanswered dispute holds both the merge

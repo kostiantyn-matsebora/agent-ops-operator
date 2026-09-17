@@ -319,6 +319,17 @@ point it is acted on, never trusting that a workflow placed it before.
   wider: the gate has already re-read the standing instruction the bot
   relayed, and `*` would let an external App start the step on a public
   repository.
+- **A PERSON'S REPLY RE-RUNS THE CHECK THAT READS IT.** `docs-task` fails
+  while a dispute the loop posted has no answer from a person
+  (`autofix-guard.py`), and a reply is that answer — but a comment starts no
+  `ci`. `dispute-answered.yml` listens on `issue_comment` and
+  `pull_request_review_comment`, and on a non-bot comment on a pull request
+  carrying `conveyor:fix` re-runs the FAILED `docs-task` job of the head's
+  own `ci` run (`rerun-ci-job.py`), so `ci-green` re-evaluates in the merge
+  box with no push and no hand re-run. On green, `open` marks the head
+  mergeable, and on red the loop's `ci failure` trigger starts the next
+  round. This is the manual step #220 still needed after everything else
+  was fixed.
 - **A DEAD FIXING JOB IS A ROUND TOO.** `land` runs when `fix` FAILED, and
   posts the ending `fixing step failed` with the run linked, counting no
   round and disputing nothing; the loop label says `stalled`. It was skipped,

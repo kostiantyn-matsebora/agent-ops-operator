@@ -150,6 +150,13 @@ could be re-run.
 - **WHEN** a person unresolves a review-authored thread
 - **THEN** the merge is blocked at once, and no check changes
 
+#### Scenario: A person answers a dispute
+
+- **WHEN** a person comments on a pull request the loop drives, while a
+  required check that reads the conversation is red on its head
+- **THEN** that check re-runs on the same head without a push or a hand
+  re-run, and the line continues from its verdict
+
 #### Scenario: The review's run ends
 
 - **WHEN** the review has posted its findings and resolved what its own list

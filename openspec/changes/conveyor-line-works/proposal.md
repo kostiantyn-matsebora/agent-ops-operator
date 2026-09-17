@@ -25,7 +25,10 @@ opening run logs.
   the review's thread state any more: the review run concludes on its own
   work alone, `review-clean` asks only whether it ran, and an open thread
   blocks the merge through branch protection, evaluated live. A person
-  dismissing a finding unblocks the merge at once.
+  dismissing a finding unblocks the merge at once. The one check that reads
+  the conversation, `docs-task`, is re-run by a workflow when a person
+  comments on a loop-driven pull request, so an answered dispute needs no
+  hand re-run either.
 - **The archive station has an actor.** A carried `conveyor:archive` on the
   tracking issue fires a remote session for the archive station, which
   archives the change on its branch and opens the archive pull request with
@@ -72,9 +75,10 @@ _None._
 | `workflows/review-dispatch.yml` | the fix job's bot allowlist, land on fix failure, loop state labels |
 | `workflows/claude-review.yml` | reconcile no longer fails on open threads |
 | `workflows/ci.yml` | `review-clean` asks only whether the review ran |
+| `workflows/dispute-answered.yml` | NEW: a person's comment re-runs the failed `docs-task` job of the head's `ci` run |
 | `workflows/remote-implement.yml` | fires on `conveyor:archive`, moves station labels |
 | `scripts/remote-implement.py`, `carry-grant.py`, `carry-from-pr.sh`, `land-dispatch.py` | the stations and states above |
-| `scripts/conveyor-state.py` | NEW |
+| `scripts/conveyor-state.py`, `scripts/rerun-ci-job.py` | NEW |
 | `review-triage.json` | the state vocabularies |
 | `routines/archive-change.md` | NEW: the archive station's instructions |
 | `routines/implement-issue.md` | the station switch at the top |
