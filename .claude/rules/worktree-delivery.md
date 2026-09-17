@@ -330,7 +330,7 @@ point it is acted on, never trusting that a workflow placed it before.
   - The gate's `mode=none` path now calls `refresh-loop-state.py` on every
     review completion, which re-reads `review-not-clean.py` and corrects the
     label to `stalled` if it lied.
-  - This is STATE, never a check's verdict -- the same distinction that
+  - This is STATE, never a check's verdict — the same distinction that
     keeps `review-not-clean.py` out of `ci-green`.
 - **A PERSON'S REPLY RE-RUNS THE CHECK THAT READS IT.** `docs-task` fails
   while a dispute the loop posted has no answer from a person

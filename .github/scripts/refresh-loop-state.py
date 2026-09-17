@@ -12,10 +12,13 @@ three findings landed.
 
 Called from `review-dispatch.yml`'s `gate` job on every `claude-review`
 completion that does NOT start a round (`mode=none`) -- a round that DOES
-start already owns the label through its own ending. Reading the threads
-here to correct a label is not the frozen-check problem `review-not-clean.py`
-exists to keep out of `ci-green`: nothing required reads this value, and it
-is re-asserted at the next transition regardless.
+start already owns the label through its own ending. It also skips the
+correction while `loop:running` is set: a round from an EARLIER trigger may
+still be in flight (its `land` has not posted yet), and this review
+completing must not downgrade an active round to `stalled`. Reading the
+threads here to correct a label is not the frozen-check problem
+`review-not-clean.py` exists to keep out of `ci-green`: nothing required
+reads this value, and it is re-asserted at the next transition regardless.
 
 EXITS 0 ALWAYS. A transient failure to read the threads leaves the label as
 it is rather than guessing.
@@ -44,6 +47,20 @@ def main() -> int:
 
     if not CHECK_SCRIPT.is_file() or not STATE_SCRIPT.is_file():
         print(f"::notice::#{args.pr}: could not refresh the loop label, a helper script is missing")
+        return 0
+
+    # A ROUND MAY BE RUNNING RIGHT NOW. `gate` sets `loop:running` the moment
+    # a round starts, and that round owns the label through its OWN ending --
+    # this program's whole reason to exist is a pull request the loop is NOT
+    # currently driving. A review can complete WHILE a round from an earlier
+    # trigger is still in flight (its own `land` has not posted yet), and
+    # stamping `stalled` over `running` in that race would misreport an
+    # active round as one that stopped for a person.
+    current = subprocess.run(["gh", "pr", "view", str(args.pr), "--repo", args.repo,
+                              "--json", "labels", "--jq", ".labels[].name"],
+                             capture_output=True, text=True)
+    if current.returncode == 0 and "loop:running" in current.stdout.splitlines():
+        print(f"#{args.pr}: a round is currently running (loop:running); leaving it to that round's own ending")
         return 0
 
     checked = subprocess.run([sys.executable, str(CHECK_SCRIPT), "--repo", args.repo, "--pr", str(args.pr)],

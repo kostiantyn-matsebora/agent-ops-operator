@@ -430,8 +430,15 @@ jobs:
               # `workflow_run` trigger beside it), and refresh-loop-state.py
               # answers a question about REVIEW THREADS, which a failed `ci`
               # run says nothing about.
-              [ "$state" = "OPEN" ] && [ "$EVENT" = "workflow_run" ] && [ "$WORKFLOW_RUN_NAME" = "claude-review" ] && \
-                python3 .github/scripts/refresh-loop-state.py --repo "$GITHUB_REPOSITORY" --pr "$PR"
+              # `|| true` MATTERS UNDER `set -euo pipefail`: this whole step
+              # runs with it on, and this command sits at the end of an `&&`
+              # chain, so a nonzero exit here -- a genuine crash in the
+              # script, not its own documented "never fails" contract, which
+              # covers what IT does once it runs -- would abort the gate
+              # itself, contradicting "Never fails the gate" above.
+              if [ "$state" = "OPEN" ] && [ "$EVENT" = "workflow_run" ] && [ "$WORKFLOW_RUN_NAME" = "claude-review" ]; then
+                python3 .github/scripts/refresh-loop-state.py --repo "$GITHUB_REPOSITORY" --pr "$PR" || true
+              fi
               echo "mode=none" >> "$GITHUB_OUTPUT"; exit 0
             fi
             read -r approver since < <(label_placement)

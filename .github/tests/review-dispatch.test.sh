@@ -435,6 +435,9 @@ assert_contains "$gate" 'conveyor-state.py --repo "$GITHUB_REPOSITORY" --target 
 
 it "on mode=none from a review completion, the gate corrects a stale loop label via refresh-loop-state.py"
 assert_contains "$gate" "refresh-loop-state.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$PR\""
+
+it "the refresh-loop-state.py call cannot abort the gate under set -e: it ends in || true"
+assert_contains "$gate" "refresh-loop-state.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$PR\" || true"
 assert_not_contains "$gate" "review-not-clean.py"
 
 summary

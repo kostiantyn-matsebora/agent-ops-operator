@@ -52,7 +52,9 @@ assert_contains "$out" "concluded success"
 
 it "the LATEST attempt of the job decides, not an earlier one -- across concatenated pages"
 completed; printf '{"jobs":[{"id":554,"name":"docs-task","conclusion":"failure"}]}{"jobs":[{"id":555,"name":"docs-task","conclusion":"success"}]}' > "$JOBS_FILE"
-out=$(run); assert_not_contains "$(cat "$GH_CALLS")" "/rerun"
+out=$(run); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "/rerun"
 
 it "a run still in progress is left alone, as a notice"
 cat > "$RUNS_FILE" <<'JSON'

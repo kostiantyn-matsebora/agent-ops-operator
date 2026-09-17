@@ -49,11 +49,18 @@ flowchart TD
   OPEN -->|pull_request| CI
   ANSWER(["person answers a dispute or resolves the thread"]):::person
   ANSWERED["dispute-answered.yml<br/>a person's comment re-runs the failed<br/>docs-task job of the head's own ci run"]:::workflow
-  STALLED --> ANSWER --> THREAD --> P2
+  STALLED --> ANSWER
   ANSWER --> ANSWERED --> CI
+  ANSWER -->|resolving a thread is answered live,<br/>no re-run needed| THREAD
 
+  %% THREAD GATES EVERY MERGE, NOT ONLY THE STALLED->ANSWER PATH. Branch
+  %% protection re-checks it live at merge time regardless of what the loop
+  %% label says, so both a loop-confirmed mergeable state AND a person's own
+  %% answer to a dispute pass through it before P2.
   P2(["person merges the PR (squash)"]):::person
-  MERGEABLE --> P2
+  MERGEABLE --> THREAD
+  GREEN --> THREAD
+  THREAD --> P2
 
   subgraph S3["Station 3 — archive (opsx lane only)"]
     ARCH["remote-implement.yml · archive<br/>find the merged PR, its Refs #n,<br/>conveyor:run still on the issue?<br/>carry-grant.py labels the ISSUE conveyor:archive"]:::workflow

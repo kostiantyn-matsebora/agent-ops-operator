@@ -12,6 +12,9 @@ mkdir -p "$tmp/bin" "$tmp/repo/.github/scripts"
 cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$GH_CALLS"
+case "$*" in
+  "pr view "*"--json labels"*) printf '%s' "${CURRENT_LABELS:-}" ;;
+esac
 exit 0
 STUB
 chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
@@ -32,6 +35,18 @@ out=$(CLEAN_EXIT=1 run); rc=$?
 assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:stalled"
 assert_contains "$out" "corrected the loop label to stalled"
+
+it "a round is already running (loop:running): the label is left to that round's own ending, no thread check made"
+out=$(CURRENT_LABELS="loop:running" CLEAN_EXIT=1 run); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "review-not-clean.py"
+assert_not_contains "$(cat "$GH_CALLS")" "issue edit"
+assert_contains "$out" "a round is currently running"
+
+it "loop:running alongside other labels is still detected, not just as the sole label"
+out=$(CURRENT_LABELS=$'conveyor:fix\nloop:running\nopsx:review' CLEAN_EXIT=1 run); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "issue edit"
 
 it "no thread open (exit 0) leaves the label untouched"
 out=$(CLEAN_EXIT=0 run); rc=$?

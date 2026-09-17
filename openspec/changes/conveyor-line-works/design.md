@@ -90,6 +90,22 @@ unblocks the merge with no re-run.
   asks it on a green `ci` before marking the pull request `loop:mergeable`,
   so the label is honest at that moment. A thread resolved later shows in the
   merge box, and the label follows at the next transition.
+- **A LATER review completion can post findings after that moment passes,
+  and go uncorrected.** Measured live while fixing #226 itself, the pull
+  request this change is delivered on: `loop:mergeable`, set once, said so
+  for over an hour after three new findings landed, because #226 carries no
+  `conveyor:fix` grant (it edits `review-dispatch.yml`, so the loop cannot
+  run on it) and nothing else ever re-checked the label.
+  - `review-dispatch.yml`'s `gate` job calls `refresh-loop-state.py` on
+    every `claude-review` completion that does NOT itself start a round
+    (`mode=none`), narrowed to that ONE trigger -- the sibling `ci failure`
+    trigger reaching the same branch says nothing about review threads.
+  - It skips the correction entirely while `loop:running` is set. An
+    in-flight round from an earlier trigger owns the label through its own
+    ending, so a review completing mid-round must not downgrade it.
+  - Otherwise it re-reads `review-not-clean.py` live and sets `stalled` when
+    a thread is open, `mergeable` never claimed here for a case this program
+    has no positive evidence for.
 - **The check that reads the CONVERSATION is re-run on the answer.** This is
   the spec's "A required check that reads a person's answer is re-run on
   that answer" made concrete: `docs-task` is that ONE check, and no other
