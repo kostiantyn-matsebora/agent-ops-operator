@@ -22,13 +22,14 @@ opening run logs.
   still runs and posts one summary naming the failure and the run, and the
   pull request's loop state says it stalled.
 - **A disputed review verdict can be answered.** No required check reports
-  the review's thread state any more: the review run concludes on its own
-  work alone, `review-clean` asks only whether it ran, and an open thread
-  blocks the merge through branch protection, evaluated live. A person
-  dismissing a finding unblocks the merge at once. The one check that reads
-  the conversation, `docs-task`, is re-run by a workflow when a person
-  comments on a loop-driven pull request, so an answered dispute needs no
-  hand re-run either.
+  the review's thread state any more.
+  - The review run concludes on its own work alone, and `review-clean` asks
+    only whether it ran.
+  - An open thread blocks the merge through branch protection, evaluated
+    live, so a person dismissing a finding unblocks the merge at once.
+  - `docs-task`, the one check that also reads the conversation, is re-run
+    by a workflow when a person comments on a loop-driven pull request, so
+    an answered dispute needs no hand re-run either.
 - **The archive station has an actor.** A carried `conveyor:archive` on the
   tracking issue fires a remote session for the archive station, which
   archives the change on its branch and opens the archive pull request with

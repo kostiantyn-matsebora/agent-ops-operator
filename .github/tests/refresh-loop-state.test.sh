@@ -46,4 +46,17 @@ assert_status 0 "$rc"
 assert_contains "$out" "::notice::"
 mv "$tmp/repo/.github/scripts/review-not-clean.py.bak" "$tmp/repo/.github/scripts/review-not-clean.py"
 
+it "a thread open, but conveyor-state.py itself fails to run: reports it was NOT corrected, never claims success"
+mv "$tmp/repo/.github/scripts/conveyor-state.py" "$tmp/repo/.github/scripts/conveyor-state.py.bak"
+cat > "$tmp/repo/.github/scripts/conveyor-state.py" <<'PY'
+import sys
+sys.exit(1)
+PY
+out=$(CLEAN_EXIT=1 run); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "::notice::"
+assert_contains "$out" "was NOT corrected"
+assert_not_contains "$out" "corrected the loop label to stalled"
+mv "$tmp/repo/.github/scripts/conveyor-state.py.bak" "$tmp/repo/.github/scripts/conveyor-state.py"
+
 summary

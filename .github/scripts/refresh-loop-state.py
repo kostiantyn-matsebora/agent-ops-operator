@@ -56,9 +56,17 @@ def main() -> int:
         print(f"#{args.pr}: no review thread open; leaving the loop label as it is")
         return 0
 
-    subprocess.run([sys.executable, str(STATE_SCRIPT), "--repo", args.repo, "--target", str(args.pr),
-                    "--loop", "stalled"], check=False)
-    print(f"#{args.pr}: a review thread is open; corrected the loop label to stalled")
+    result = subprocess.run([sys.executable, str(STATE_SCRIPT), "--repo", args.repo, "--target", str(args.pr),
+                             "--loop", "stalled"], check=False)
+    # `conveyor-state.py` ITSELF ALWAYS EXITS 0 (state, never a grant, never a
+    # failed round) -- but that only covers what it does once it runs.
+    # NONZERO HERE means the interpreter or the script itself could not run
+    # at all, and "corrected" would be a claim this program cannot back.
+    if result.returncode == 0:
+        print(f"#{args.pr}: a review thread is open; corrected the loop label to stalled")
+    else:
+        print(f"::notice::#{args.pr}: a review thread is open, but conveyor-state.py could not run "
+              f"(exit {result.returncode}); the label was NOT corrected")
     return 0
 
 
