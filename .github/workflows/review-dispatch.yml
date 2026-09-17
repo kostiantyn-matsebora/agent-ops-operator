@@ -192,6 +192,7 @@ jobs:
           SENDER: ${{ github.event.comment.user.login || github.event.sender.login || github.actor }}
           PR: ${{ github.event.issue.number || github.event.pull_request.number || inputs.pr }}
           REVIEW_TITLE: ${{ github.event.workflow_run.display_title }}
+          WORKFLOW_RUN_NAME: ${{ github.event.workflow_run.name }}
           REVIEW_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
           INPUT_MODE: ${{ inputs.mode }}
@@ -424,7 +425,12 @@ jobs:
               # re-checked it. `refresh-loop-state.py` reads the threads --
               # STATE, never a check's verdict, see its own docstring -- and
               # corrects the label. Never fails the gate.
-              [ "$state" = "OPEN" ] && [ "$EVENT" = "workflow_run" ] && \
+              # NARROWED TO THE REVIEW'S OWN COMPLETION -- this branch is
+              # also reached by a `ci` FAILURE completion (the other
+              # `workflow_run` trigger beside it), and refresh-loop-state.py
+              # answers a question about REVIEW THREADS, which a failed `ci`
+              # run says nothing about.
+              [ "$state" = "OPEN" ] && [ "$EVENT" = "workflow_run" ] && [ "$WORKFLOW_RUN_NAME" = "claude-review" ] && \
                 python3 .github/scripts/refresh-loop-state.py --repo "$GITHUB_REPOSITORY" --pr "$PR"
               echo "mode=none" >> "$GITHUB_OUTPUT"; exit 0
             fi
@@ -754,7 +760,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch -q origin "$SOURCE"
-          for s in land-dispatch.py resolve-review-threads.py conveyor-state.py; do
+          for s in land-dispatch.py resolve-review-threads.py conveyor-state.py review-not-clean.py; do
             git show "origin/$SOURCE:.github/scripts/$s" > "$RUNNER_TEMP/$s"
           done
           git show "origin/$SOURCE:.github/review-triage.json" > "$RUNNER_TEMP/review-triage.json"
@@ -808,6 +814,7 @@ jobs:
             --report "$RUNNER_TEMP/dispatch/report.json" \
             --resolver "$RUNNER_TEMP/resolve-review-threads.py" \
             --state-script "$RUNNER_TEMP/conveyor-state.py" \
+            --thread-check-script "$RUNNER_TEMP/review-not-clean.py" \
             --vocabulary "$RUNNER_TEMP/review-triage.json" \
             --dispatched-by "${{ needs.gate.outputs.dispatcher }}" \
             --mode "$MODE" --approver "$APPROVER" --since "$SINCE" \

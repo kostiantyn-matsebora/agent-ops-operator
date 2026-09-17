@@ -30,13 +30,26 @@ assert_contains "$(py "$CI" 'print(d["jobs"]["ci-green"]["needs"])')" "review-cl
 it "the review's reconcile job no longer fails its run on an open thread"
 assert_not_contains "$(py "$REVIEW" 'print([s.get("run","") for s in d["jobs"]["reconcile"]["steps"]])')" "review-not-clean.py"
 
-it "review-not-clean.py is RUN by NO workflow job: a check must never carry the thread question"
-runs=$(python3 - "$ROOT"/.github/workflows/*.yml <<'PY'
+it "review-not-clean.py is RUN by NO REQUIRED CHECK: a check must never carry the thread question"
+# EVERY job `ci-green` needs, in EVERY workflow -- not only ci.yml's own
+# jobs, since `ci-green` is the one status that gates the merge. A job
+# outside that set (review-dispatch.yml's `land`, say) may still call this
+# script for STATE, exactly as `carry-from-pr.sh` already does: nothing
+# required reads that value, and it is re-asserted at the next transition.
+required=$(python3 -c "
+import yaml
+d = yaml.safe_load(open('$CI'))
+print(' '.join(d['jobs']['ci-green']['needs']))
+")
+runs=$(python3 - "$ROOT"/.github/workflows/*.yml <<PY
 import sys, yaml
+required = set("""$required""".split())
 hits = []
 for path in sys.argv[1:]:
     d = yaml.safe_load(open(path))
     for job, spec in (d.get("jobs") or {}).items():
+        if job not in required:
+            continue
         for step in spec.get("steps") or []:
             if "review-not-clean.py" in (step.get("run") or ""):
                 hits.append(f"{path.rsplit('/',1)[-1]}:{job}")

@@ -305,6 +305,19 @@ class Round:
         sh(sys.executable, str(script), "--repo", self.args.repo, "--target", str(self.args.pr),
            "--loop", state, check=False)
 
+    def threads_still_open(self) -> bool:
+        """LIVE, NOT THE COLLECTED SNAPSHOT. `collect` read the threads once
+        at the start of this round; a `clean` ending is decided minutes
+        later, and a thread could have opened in between (a human reviewer's
+        own comment, a re-triggered review). `review-not-clean.py`, exit 1,
+        is the same live read `carry-from-pr.sh` trusts before ever calling a
+        pull request mergeable -- this round must not claim less carefully."""
+        check = self.args.thread_check_script
+        if not check or not pathlib.Path(check).is_file():
+            return False
+        return sh(sys.executable, str(check), "--repo", self.args.repo, "--pr", str(self.args.pr),
+                  check=False).returncode != 0
+
     def summary(self, ending: str, fixed: list[str], disputed: dict[str, str], sha: str | None = None,
                 note: str = "", unaddressed: dict[str, str] | None = None) -> None:
         """ONE comment per ending: what was fixed, what was disputed, what was
@@ -324,8 +337,16 @@ class Round:
         # can change it.
         if ending == "round cap reached":
             self.set_loop("capped")
-        elif ending == "clean":
+        elif ending == "clean" and not self.threads_still_open():
             self.set_loop("mergeable")
+        elif ending == "clean":
+            # A THREAD OPENED SINCE `collect` READ THEM. Not stalled either --
+            # nothing was disputed and nothing failed, so a fresh round would
+            # find the same empty work list. Left as running is honest: the
+            # round is over, but the pull request is not yet mergeable, and
+            # the review's own next completion (or a person resolving the
+            # thread) is what moves it from here.
+            print(f"clean ending, but a review thread opened since collect ran; loop label left as it is")
         else:
             self.set_loop("stalled")
         used = self.number if sha else self.number - 1
@@ -415,6 +436,11 @@ def main() -> int:
                     default=pathlib.Path(__file__).with_name("conveyor-state.py"),
                     help="conveyor-state.py, restored beside this program by the workflow; moves the "
                          "pull request's loop label at every ending, and never fails the round")
+    ap.add_argument("--thread-check-script", type=pathlib.Path,
+                    default=pathlib.Path(__file__).with_name("review-not-clean.py"),
+                    help="review-not-clean.py, restored beside this program by the workflow; read LIVE "
+                         "before a clean ending claims mergeable, since collect's own read of the "
+                         "threads is a snapshot from the start of the round")
     args = ap.parse_args()
     if args.mode == "all" and not args.approver:
         args.approver = args.dispatched_by

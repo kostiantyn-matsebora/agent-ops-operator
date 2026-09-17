@@ -91,8 +91,10 @@ unblocks the merge with no re-run.
   so the label is honest at that moment. A thread resolved later shows in the
   merge box, and the label follows at the next transition.
 - **The check that reads the CONVERSATION is re-run on the answer.**
-  `docs-task` fails while a dispute has no reply from a person
-  (`autofix-guard.py`). A comment IS an Actions event, so
+  `docs-task` -- the same `ci.yml` job that also gates a change's own test
+  and documentation tasks -- fails ADDITIONALLY while a dispute has no reply
+  from a person, through its `autofix-guard.py` step. A comment IS an
+  Actions event, so
   `dispute-answered.yml` (`issue_comment`, `pull_request_review_comment`)
   re-runs the failed `docs-task` job of the head's own `ci` run through the
   jobs API (`rerun-ci-job.py`) when a non-bot comments on a pull request

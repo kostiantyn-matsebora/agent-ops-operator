@@ -216,12 +216,20 @@ cat > "$tmp/work-all.json" <<'JSON'
 JSON
 printf '{"items":[{"id":"PRRT_a","action":"fixed","reason":""},{"id":"PRRT_b","action":"disputed","reason":"B is exported and used by the tests"},{"id":"sonar:AZ1","action":"disputed","reason":"the function is the package API"}]}' > "$tmp/report-all.json"
 
+# THREAD_CHECK_EXIT: 0 = no thread open (the ordinary case in this file's
+# fixtures), 1 = a thread opened since collect ran (live-checked at the
+# clean ending, never trusted from the snapshot).
+cat > "$tmp/thread-check.py" <<'PY'
+import os, sys
+sys.exit(int(os.environ.get("THREAD_CHECK_EXIT", "0")))
+PY
 land_all() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
              (cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
                 --work-list "${WORK:-$tmp/work-all.json}" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report-all.json}" \
                 --dispatched-by github-actions --mode all --approver an-approver --since 2026-08-29T10:00:00Z \
                 --max-rounds "${MAX_ROUNDS:-3}" --sonar "$tmp/sonar.json" --checks "${CHECKS:-$tmp/checks-none.json}" \
                 --state-script "$ROOT/.github/scripts/conveyor-state.py" \
+                --thread-check-script "$tmp/thread-check.py" \
                 ${STARTS---push-starts-workflows} ${REPORT_MISSING:+--report-missing} ${FIX_FAILED:+--fix-failed} 2>&1); }
 loop_label() { grep -oE 'issue edit 7 --repo o/r --add-label loop:[a-z]+' "$GH_CALLS" | sed 's/.*loop://' | tr '\n' ' ' | sed 's/ $//'; }
 printf '{"consulted":true,"checks":[],"items":[]}' > "$tmp/checks-none.json"
@@ -472,6 +480,13 @@ assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
 
 it "labelled: a clean ending marks the loop mergeable -- the gate said running when the round started"
 assert_equals "mergeable" "$(loop_label)"
+
+it "labelled: a clean ending, but a thread opened since collect ran, does NOT mark mergeable"
+fresh_repo
+out=$(THREAD_CHECK_EXIT=1 WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "a review thread opened since collect ran"
+assert_not_contains "$(loop_label)" "mergeable"
 
 it "labelled: says when the analysis was not consulted"
 printf '{"consulted":false,"stale":["manager"],"projects":[],"issues":[]}' > "$tmp/sonar.json"

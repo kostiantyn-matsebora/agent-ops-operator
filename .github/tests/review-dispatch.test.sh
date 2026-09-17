@@ -425,9 +425,10 @@ assert_contains "$(py 'print([s.get("if","") for s in d["jobs"]["land"]["steps"]
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["env"]["FIX_FAILED"])')" "needs.fix.result == 'failure' && '--fix-failed'"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '$FIX_FAILED'
 
-it "land restores conveyor-state.py beside the landing programs and hands it to land-dispatch.py"
-assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py; do"
+it "land restores conveyor-state.py AND review-not-clean.py beside the landing programs, and hands both to land-dispatch.py"
+assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py review-not-clean.py; do"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--state-script "$RUNNER_TEMP/conveyor-state.py"'
+assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--thread-check-script "$RUNNER_TEMP/review-not-clean.py"'
 
 it "the gate marks the pull request's loop label running when a round starts, and grants nothing by it"
 assert_contains "$gate" 'conveyor-state.py --repo "$GITHUB_REPOSITORY" --target "$PR" --loop running'
