@@ -84,6 +84,9 @@ assert_contains "$out" "::notice::#220: re-running \`docs-task\` (job 777 of run
 assert_contains "$out" "403"
 
 it "uses --method GET on the runs route, so the params never become a request body"
+completed; printf '{"jobs":[{"id":555,"name":"docs-task","conclusion":"failure"}]}' > "$JOBS_FILE"
+out=$(run); rc=$?
+assert_status 0 "$rc"
 assert_contains "$(grep 'workflows/ci.yml/runs' "$GH_CALLS")" "api --method GET"
 
 summary

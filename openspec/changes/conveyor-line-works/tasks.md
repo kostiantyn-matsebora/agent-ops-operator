@@ -11,7 +11,7 @@
 - [x] 2.3 Add `--fix-failed` to `land-dispatch.py`: one summary ending `fixing step failed` naming the run and the approver, no round counted, no item disputed, and the loop label set to `stalled`. Verify: with the script suite's stubbed `gh` that the summary is posted and no thread is touched
 - [x] 2.4 Set the loop label at the transitions: `running` from `gate` when a round starts, `stalled` from `land` on disputes-only, no-report and fixer-failed endings, `capped` at the cap. Verify: each path in `land-dispatch.test.sh` records the expected `conveyor-state.py` call
 
-## 3. The review verdict is live, and a thread event re-evaluates it
+## 3. The review verdict is read live, and a person's answer is what re-evaluates it
 
 - [x] 3.1 Remove the "The review leaves nothing open" step from `claude-review.yml`'s `reconcile` job, and update `review-not-clean.py`'s docstring to say where it now runs. Verify: `claude-review.test.sh` still passes and pins the step's absence
 - [x] 3.2 `ci.yml`'s `review-clean` job asks only whether the review ran (`review-is-green.py`), and no check reports the review's thread state. Verify: `review-clean.test.sh` pins the job's steps and that no workflow STEP runs `review-not-clean.py` as a check (its one caller is `carry-from-pr.sh`, for state, see 3.5)
