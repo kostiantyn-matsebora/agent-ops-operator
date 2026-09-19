@@ -192,6 +192,7 @@ jobs:
           SENDER: ${{ github.event.comment.user.login || github.event.sender.login || github.actor }}
           PR: ${{ github.event.issue.number || github.event.pull_request.number || inputs.pr }}
           REVIEW_TITLE: ${{ github.event.workflow_run.display_title }}
+          WORKFLOW_RUN_NAME: ${{ github.event.workflow_run.name }}
           REVIEW_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
           INPUT_MODE: ${{ inputs.mode }}
@@ -413,6 +414,31 @@ jobs:
             # running round completes and this is where the next one stops.
             if [ "$state" != "OPEN" ] || ! gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' | grep -qx "$LABEL"; then
               echo "::notice::#$PR is $state and does not carry \`$LABEL\`; no round starts"
+              # A REVIEW JUST COMPLETED, EVEN THOUGH NO ROUND WILL RUN HERE.
+              # `loop:mergeable` may have been set by an EARLIER green ci with
+              # no thread open, and this review may have just posted new
+              # findings -- a pull request with no active grant still deserves
+              # a label that is not a LIE. Measured live on #226 (manually
+              # driven, no `conveyor:fix`, since it edits this very workflow):
+              # the label said mergeable for over an hour after three new
+              # findings landed, because nothing without the label ever
+              # re-checked it. `refresh-loop-state.py` reads the threads --
+              # STATE, never a check's verdict, see its own docstring -- and
+              # corrects the label. Never fails the gate.
+              # NARROWED TO THE REVIEW'S OWN COMPLETION -- this branch is
+              # also reached by a `ci` FAILURE completion (the other
+              # `workflow_run` trigger beside it), and refresh-loop-state.py
+              # answers a question about REVIEW THREADS, which a failed `ci`
+              # run says nothing about.
+              # `|| true` MATTERS UNDER `set -euo pipefail`: this whole step
+              # runs with it on, and this command sits at the end of an `&&`
+              # chain, so a nonzero exit here -- a genuine crash in the
+              # script, not its own documented "never fails" contract, which
+              # covers what IT does once it runs -- would abort the gate
+              # itself, contradicting "Never fails the gate" above.
+              if [ "$state" = "OPEN" ] && [ "$EVENT" = "workflow_run" ] && [ "$WORKFLOW_RUN_NAME" = "claude-review" ]; then
+                python3 .github/scripts/refresh-loop-state.py --repo "$GITHUB_REPOSITORY" --pr "$PR" || true
+              fi
               echo "mode=none" >> "$GITHUB_OUTPUT"; exit 0
             fi
             read -r approver since < <(label_placement)
@@ -741,7 +767,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch -q origin "$SOURCE"
-          for s in land-dispatch.py resolve-review-threads.py conveyor-state.py; do
+          for s in land-dispatch.py resolve-review-threads.py conveyor-state.py review-not-clean.py; do
             git show "origin/$SOURCE:.github/scripts/$s" > "$RUNNER_TEMP/$s"
           done
           git show "origin/$SOURCE:.github/review-triage.json" > "$RUNNER_TEMP/review-triage.json"
@@ -795,6 +821,7 @@ jobs:
             --report "$RUNNER_TEMP/dispatch/report.json" \
             --resolver "$RUNNER_TEMP/resolve-review-threads.py" \
             --state-script "$RUNNER_TEMP/conveyor-state.py" \
+            --thread-check-script "$RUNNER_TEMP/review-not-clean.py" \
             --vocabulary "$RUNNER_TEMP/review-triage.json" \
             --dispatched-by "${{ needs.gate.outputs.dispatcher }}" \
             --mode "$MODE" --approver "$APPROVER" --since "$SINCE" \

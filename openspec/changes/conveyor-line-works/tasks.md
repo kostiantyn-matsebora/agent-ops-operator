@@ -11,13 +11,16 @@
 - [x] 2.3 Add `--fix-failed` to `land-dispatch.py`: one summary ending `fixing step failed` naming the run and the approver, no round counted, no item disputed, and the loop label set to `stalled`. Verify: with the script suite's stubbed `gh` that the summary is posted and no thread is touched
 - [x] 2.4 Set the loop label at the transitions: `running` from `gate` when a round starts, `stalled` from `land` on disputes-only, no-report and fixer-failed endings, `capped` at the cap. Verify: each path in `land-dispatch.test.sh` records the expected `conveyor-state.py` call
 
-## 3. The review verdict is live, and a thread event re-evaluates it
+## 3. The review verdict is read live, and a person's answer is what re-evaluates it
 
 - [x] 3.1 Remove the "The review leaves nothing open" step from `claude-review.yml`'s `reconcile` job, and update `review-not-clean.py`'s docstring to say where it now runs. Verify: `claude-review.test.sh` still passes and pins the step's absence
-- [x] 3.2 Make `ci.yml`'s `review-clean` job run `review-is-green.py` then `review-not-clean.py` against the pull request, with `pull-requests: read`. Verify: the job's steps by reading the rendered YAML
-- [x] 3.3 Write `.github/scripts/rerun-review-clean.py`: find the head sha's latest `pull_request`-event `ci` run, and when it is completed re-run its `review-clean` job through `POST /repos/{repo}/actions/jobs/{id}/rerun`. A run in progress, a missing run and a 403 each exit 0 with a notice. Verify: each branch with a stubbed `gh`
-- [x] 3.4 Add `.github/workflows/review-thread.yml` on `pull_request_review_thread` (`resolved`, `unresolved`) with `actions: read` and `actions: write` only, concurrency keyed by the pull request, calling 3.3. Verify: it parses and `review-thread.test.sh` pins its triggers and permissions
-- [x] 3.5 Set `loop:mergeable` and `station:merge` from `remote-implement.yml`'s `open` job when `ci` completes with success on a pull request carrying `conveyor:fix`. Verify: the job's steps by reading the rendered YAML
+- [x] 3.2 `ci.yml`'s `review-clean` job asks only whether the review ran (`review-is-green.py`), and no check reports the review's thread state. Verify: `review-clean.test.sh` pins the job's steps and that no REQUIRED check runs `review-not-clean.py` (its callers are `carry-from-pr.sh`, `refresh-loop-state.py` and `land-dispatch.py`, all for state, see 3.5, 3.7 and 3.8)
+- [x] 3.3 RETIRED in the follow-up: `rerun-review-clean.py` was written and removed, because the event it served does not exist. Verify: the file is gone
+- [x] 3.4 RETIRED in the follow-up: `review-thread.yml` on `pull_request_review_thread` was refused by the platform (`Unexpected value 'pull_request_review_thread'`, a failed no-job run on every push). Removed, and `review-clean.test.sh` pins that no workflow names that event. Verify: `gh run list --workflow=review-thread.yml` shows nothing after the merge
+- [x] 3.5 Set `loop:mergeable` and `station:merge` from `carry-from-pr.sh` (called by `remote-implement.yml`'s `open` job on a green `ci`) only when `review-not-clean.py` finds no review thread open. Verify: `carry-from-pr.test.sh`, both the clean and the open-thread case
+- [x] 3.6 Add `.github/workflows/dispute-answered.yml` on `issue_comment` and `pull_request_review_comment` (created, non-bot, not a dispatch) with `actions: write`, re-running through `.github/scripts/rerun-ci-job.py` the FAILED `docs-task` job of the head's own `ci` run on a pull request carrying `conveyor:fix`. A run in progress, a missing run, a job that did not fail and a 403 each exit 0 with a notice. Verify: `rerun-ci-job.test.sh` and `dispute-answered.test.sh`
+- [x] 3.7 Correct a stale `loop:mergeable` when a later review completes with findings open, on a pull request the loop is not driving (measured on #226): `.github/scripts/refresh-loop-state.py`, called from the gate's `mode=none` path. Verify: `refresh-loop-state.test.sh`
+- [x] 3.8 A `clean` round ending re-checks the threads LIVE (`review-not-clean.py`) before claiming `loop:mergeable`, instead of trusting `collect`'s snapshot from the start of the round -- a thread could open between collection and landing (measured while fixing #226 itself): `.github/scripts/land-dispatch.py`'s `threads_still_open`. Verify: `land-dispatch.test.sh`'s clean-ending cases, including the thread-check-crashes-vs-thread-open distinction
 
 ## 4. The archive station has an actor
 
@@ -32,11 +35,11 @@
 ## 5. Live proof, after the merge
 
 - [ ] 5.1 After this change merges, open a throwaway plain-lane issue asking for a one-line change, place `conveyor:run`, and verify the station label moves implement → fix → merge → done with no further label placed by a person, and the loop label reads running then mergeable
-- [ ] 5.2 On #220, re-run the review's `reconcile` job and CI's failed jobs once by hand, and verify `ci-green` turns green from the resolved thread alone, then that resolving and unresolving a thread flips `review-clean` without a push
+- [ ] 5.2 On #220, push once (master merged into its branch) so the merged workflows run on it, and verify `ci-green` turns green with the review's thread resolved, the loop label reads `mergeable` and #51's station `merge`. A re-run of the old review run is not possible: its artifact expired after a day
 
 ## 6. Unit tests
 
-- [x] 6.1 `.github/tests/run.sh` passes with the new and changed tests: `conveyor-state.test.sh`, `rerun-review-clean.test.sh`, `review-thread.test.sh`, and the extended `land-dispatch`, `remote-implement`, `carry-grant`, `review-dispatch`, `claude-review` and `ci` tests, each pinning the behaviour its section above names
+- [x] 6.1 `.github/tests/run.sh` passes with the new and changed tests: `conveyor-state.test.sh`, `carry-from-pr.test.sh`, `review-clean.test.sh`, `rerun-ci-job.test.sh`, `dispute-answered.test.sh`, `refresh-loop-state.test.sh`, and the extended `land-dispatch`, `remote-implement`, `carry-grant`, `review-dispatch` and `claude-review` tests, each pinning the behaviour its section above names
 - [x] 6.2 `python3 .github/scripts/publication-guard.py`, `python3 .github/scripts/retired-vocabulary-guard.py` and `python3 .github/scripts/docs-generate.py --check` pass on this worktree
 
 ## 7. E2E tests
@@ -47,11 +50,11 @@
 
 ### 8.1 Reference docs
 
-- [x] 8.1.1 `.claude/rules/worktree-delivery.md`: the review section says `review-clean` reads the threads live and a thread event re-runs it, and the label table gains the two state vocabularies and the archive station's actor
+- [x] 8.1.1 `.claude/rules/worktree-delivery.md`: the review section says no check carries the thread question and why, and the label table gains the two state vocabularies and the archive station's actor
 - [x] 8.1.2 `.claude/rules/remote-session.md`: the label table gains `conveyor:archive` starting a session, the archive routine, and the per-station fire record
 - [x] 8.1.3 `.claude/rules/gotchas.md`: the #201 entry gains the second measurement, the action's bot allowlist refusing every carried round on #220
 - [x] 8.1.4 `CONTRIBUTING.md`: the conveyor section describes the archive station, the state labels and what a person does on a stalled loop
-- [x] 8.1.5 `docs/testing.md`: what `review-clean` decides, and that a thread event re-evaluates it
+- [x] 8.1.5 `docs/testing.md`: what `review-clean` decides, and that the threads are the merge box's live question
 - [x] 8.1.6 `docs/diagrams/conveyor-lifecycle.mmd` and `conveyor-lifecycle-implementation.mmd`: committed, the implementation diagram redrawn without the defect nodes and with the state labels
 - [x] 8.1.7 `.github/review-triage.json`'s comment block describes the state vocabularies
 

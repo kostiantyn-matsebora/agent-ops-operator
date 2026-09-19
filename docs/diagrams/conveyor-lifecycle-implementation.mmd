@@ -8,6 +8,7 @@ flowchart TD
   classDef workflow fill:#f3f3f3,stroke:#666,color:#000
   classDef session fill:#e8f5e9,stroke:#2e7d32,color:#000
   classDef stop fill:#eeeeee,stroke:#333,color:#000,stroke-dasharray:4 3
+  classDef platform fill:#fdf2e9,stroke:#b35c00,color:#000
 
   P1(["person places conveyor:run on the issue"]):::person
   RUN["ISSUE grant: conveyor:run<br/>the standing instruction,<br/>re-read at every station"]:::label
@@ -23,9 +24,9 @@ flowchart TD
   RUN -->|issues: labeled| FIRE
 
   subgraph S2["Station 2 — fix, round after round"]
-    CI["ci.yml + claude-review.yml run on the PR<br/>review-clean reads the review's threads LIVE"]:::workflow
-    THREAD["review-thread.yml<br/>a thread resolved or unresolved<br/>re-runs review-clean of the same ci run"]:::workflow
-    CARRY["remote-implement.yml · open (ci succeeded)<br/>read Refs #n or Closes #n, re-read conveyor:run,<br/>placer still a writer?<br/>carry-grant.py labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml"]:::workflow
+    CI["ci.yml + claude-review.yml run on the PR<br/>review-clean asks only: did the review run"]:::workflow
+    THREAD["GitHub branch protection<br/>an open review thread blocks the merge, live —<br/>no workflow and no check carries it"]:::platform
+    CARRY["remote-implement.yml · open (ci succeeded)<br/>read Refs #n or Closes #n, re-read conveyor:run,<br/>placer still a writer?<br/>carry-grant.py labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no review thread open → mergeable"]:::workflow
     FIX["PR grant: conveyor:fix<br/>placed by the bot, records whose grant"]:::label
     GREEN["PR state: loop:mergeable<br/>ISSUE state: station:merge"]:::state
     GATE["review-dispatch.yml · gate<br/>who started this, is the grant still standing<br/>(a bot start is re-checked against the issue)"]:::workflow
@@ -38,20 +39,28 @@ flowchart TD
     CAP(["round cap 5 — stop<br/>PR state: loop:capped<br/>conveyor:keep-going grants 5 more, consumed on use"]):::stop
 
     CI -->|workflow_run: ci success| CARRY --> FIX --> GATE --> ST2 --> COLLECT --> MODEL --> LAND
-    CARRY --> GREEN
+    CARRY -->|no review thread open| GREEN
     CI -->|workflow_run: ci failure, review success| GATE
     LAND -->|push starts ci + review again| CI
-    THREAD --> CI
     LAND --> MERGEABLE
     LAND --> STALLED
     LAND --> CAP
   end
   OPEN -->|pull_request| CI
   ANSWER(["person answers a dispute or resolves the thread"]):::person
-  STALLED --> ANSWER --> THREAD
+  ANSWERED["dispute-answered.yml<br/>a person's comment re-runs the failed<br/>docs-task job of the head's own ci run"]:::workflow
+  STALLED --> ANSWER
+  ANSWER --> ANSWERED --> CI
+  ANSWER -->|resolving a thread is answered live,<br/>no re-run needed| THREAD
 
+  %% THREAD GATES EVERY MERGE, NOT ONLY THE STALLED->ANSWER PATH. Branch
+  %% protection re-checks it live at merge time regardless of what the loop
+  %% label says, so both a loop-confirmed mergeable state AND a person's own
+  %% answer to a dispute pass through it before P2.
   P2(["person merges the PR (squash)"]):::person
-  MERGEABLE --> P2
+  MERGEABLE --> THREAD
+  GREEN --> THREAD
+  THREAD --> P2
 
   subgraph S3["Station 3 — archive (opsx lane only)"]
     ARCH["remote-implement.yml · archive<br/>find the merged PR, its Refs #n,<br/>conveyor:run still on the issue?<br/>carry-grant.py labels the ISSUE conveyor:archive"]:::workflow

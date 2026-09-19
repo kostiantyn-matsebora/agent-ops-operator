@@ -286,6 +286,9 @@ assert_equals "conveyor:archive" "$archive_label"
 assert_equals "conveyor:implement" "$implement_label"
 assert_equals "conveyor:run" "$run_label"
 
+it "the open job hands ci's conclusion to carry-from-pr.sh: only a green ci may mark a head mergeable"
+assert_contains "$(rpy 'print(d["jobs"]["open"])')" 'CI_CONCLUSION="${{ github.event.workflow_run.conclusion }}"'
+
 it "the fire endpoint and its token are not in the tree"
 job=$(rpy 'print(d["jobs"]["fire"])')
 assert_contains "$job" "vars.ROUTINE_FIRE_URL"
@@ -422,11 +425,19 @@ assert_contains "$(py 'print([s.get("if","") for s in d["jobs"]["land"]["steps"]
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["env"]["FIX_FAILED"])')" "needs.fix.result == 'failure' && '--fix-failed'"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '$FIX_FAILED'
 
-it "land restores conveyor-state.py beside the landing programs and hands it to land-dispatch.py"
-assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py; do"
+it "land restores conveyor-state.py AND review-not-clean.py beside the landing programs, and hands both to land-dispatch.py"
+assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py review-not-clean.py; do"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--state-script "$RUNNER_TEMP/conveyor-state.py"'
+assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--thread-check-script "$RUNNER_TEMP/review-not-clean.py"'
 
 it "the gate marks the pull request's loop label running when a round starts, and grants nothing by it"
 assert_contains "$gate" 'conveyor-state.py --repo "$GITHUB_REPOSITORY" --target "$PR" --loop running'
+
+it "on mode=none from a review completion, the gate corrects a stale loop label via refresh-loop-state.py"
+assert_contains "$gate" "refresh-loop-state.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$PR\""
+
+it "the refresh-loop-state.py call cannot abort the gate under set -e: it ends in || true"
+assert_contains "$gate" "refresh-loop-state.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$PR\" || true"
+assert_not_contains "$gate" "review-not-clean.py"
 
 summary

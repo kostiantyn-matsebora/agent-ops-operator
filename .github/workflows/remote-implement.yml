@@ -200,7 +200,11 @@ jobs:
             echo "no open pull request for ${head_sha:0:7}; nothing to carry"
             exit 0
           fi
-          out=$(.github/scripts/carry-from-pr.sh "$pr" fix | tee /dev/stderr)
+          # THE CONCLUSION GOES WITH IT: this job runs on a red ci too
+          # (a carried round must start on one), and only a green one may
+          # mark the head mergeable.
+          out=$(CI_CONCLUSION="${{ github.event.workflow_run.conclusion }}" \
+                .github/scripts/carry-from-pr.sh "$pr" fix | tee /dev/stderr)
           # ONLY A REAL CARRY RE-DISPATCHES. The one success line this
           # produces starts "carried " (every refusal and every "nothing to
           # carry" case reads differently) -- re-dispatching unconditionally

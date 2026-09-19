@@ -21,11 +21,15 @@ opening run logs.
 - **A dead round is reported.** When the fixing step fails, the landing job
   still runs and posts one summary naming the failure and the run, and the
   pull request's loop state says it stalled.
-- **A disputed review verdict can be answered.** The review's open-thread gate
-  moves from the review workflow into CI's `review-clean` job and is read
-  live, and resolving or unresolving a review thread re-runs that job of the
-  head's CI run. A person dismissing a finding turns `ci-green` green without
-  a hand re-run.
+- **A disputed review verdict can be answered.** No required check reports
+  the review's thread state any more.
+  - The review run concludes on its own work alone, and `review-clean` asks
+    only whether it ran.
+  - An open thread blocks the merge through branch protection, evaluated
+    live, so a person dismissing a finding unblocks the merge at once.
+  - `docs-task`, the one check that also reads the conversation, is re-run
+    by a workflow when a person comments on a loop-driven pull request, so
+    an answered dispute needs no hand re-run either.
 - **The archive station has an actor.** A carried `conveyor:archive` on the
   tracking issue fires a remote session for the archive station, which
   archives the change on its branch and opens the archive pull request with
@@ -54,7 +58,8 @@ _None._
   - The fixing loop reports a round that could not run, and acts on a run its
     own workflow dispatched.
   - The archive station runs unattended under the standing instruction.
-  - A dispute the loop cannot settle is answerable by resolving the thread.
+  - No required check reports the review's thread state, so a dispute on
+    one cannot become a dead end.
 - `remote-change-sessions`: two requirements move.
   - A label on the issue starts a session for the station the label names,
     `conveyor:archive` included, and a carried label is accepted after
@@ -70,11 +75,11 @@ _None._
 |---|---|
 | `workflows/review-dispatch.yml` | the fix job's bot allowlist, land on fix failure, loop state labels |
 | `workflows/claude-review.yml` | reconcile no longer fails on open threads |
-| `workflows/ci.yml` | `review-clean` reads the threads live |
-| `workflows/review-thread.yml` | NEW: re-runs `review-clean` on thread resolution |
+| `workflows/ci.yml` | `review-clean` asks only whether the review ran |
+| `workflows/dispute-answered.yml` | NEW: a person's comment re-runs the failed `docs-task` job of the head's `ci` run — the one required check that re-reads the pull request's own comments, through `autofix-guard.py`'s dispute answer |
 | `workflows/remote-implement.yml` | fires on `conveyor:archive`, moves station labels |
 | `scripts/remote-implement.py`, `carry-grant.py`, `carry-from-pr.sh`, `land-dispatch.py` | the stations and states above |
-| `scripts/conveyor-state.py`, `scripts/rerun-review-clean.py` | NEW |
+| `scripts/conveyor-state.py`, `scripts/rerun-ci-job.py` | NEW |
 | `review-triage.json` | the state vocabularies |
 | `routines/archive-change.md` | NEW: the archive station's instructions |
 | `routines/implement-issue.md` | the station switch at the top |

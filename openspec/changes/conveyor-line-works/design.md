@@ -67,32 +67,62 @@ ending `fixing step failed`, and sets the loop label to `stalled`.
 - **No round is counted**, because nothing landed. The label stays, and the
   summary names what restarts a round: a push, or `conveyor:keep-going`.
 
-### 3. `review-clean` reads the threads live, and a thread event re-runs it
+### 3. No check carries the thread question
 
-Two halves:
+`claude-review.yml`'s `reconcile` job drops the "leaves nothing open" step,
+so the review run's conclusion means "the review ran and posted".
+`review-clean` asks exactly that (`review-is-green.py`) and nothing about
+content.
 
-1. **Where the gate lives.** `claude-review.yml`'s `reconcile` job drops the
-   "leaves nothing open" step. The review run's conclusion then means "the
-   review ran and posted". `ci.yml`'s `review-clean` job runs
-   `review-is-green.py` (the review ran) and then `review-not-clean.py` (no
-   review-authored thread is open), both against the live state.
-2. **When it re-runs.** A new workflow `review-thread.yml` on
-   `pull_request_review_thread` (`resolved`, `unresolved`) runs
-   `rerun-review-clean.py`, which finds the head's latest `pull_request` run
-   of `ci` and re-runs its `review-clean` job through the jobs API. Re-running
-   a job re-runs its dependents, so `ci-green` re-evaluates in the SAME run,
-   and the merge box sees it.
+An open review thread blocks the merge through branch protection's required
+conversation resolution, evaluated live at merge time. A person resolving it
+unblocks the merge with no re-run.
 
-- **Why not re-run all of `ci`:** cost, and nothing else changed.
-- **Why not a job on the thread event itself:** its check runs never reach the
-  merge box (#131).
-- **A `ci` still in progress needs nothing**, since `review-clean` reads live
-  when it runs. A missing run, or a fork's read-only token, is a notice.
-- **The carry job fires again on the re-run's completion** and is idempotent:
-  the label is re-asserted and the marker comment stops a second dispatch.
-- **The dispute marker for checks stays as it is.** A head still red after a
-  resolution starts a round that disputes the same check again, at the cost
-  of one model run and no round counted. Bounded by events, not by rounds.
+- **The first design re-ran `review-clean` on the thread event, and it does
+  not exist.** `pull_request_review_thread` is a webhook event and NOT an
+  Actions trigger. The workflow file shipped in #223 was refused by the
+  platform (`Unexpected value 'pull_request_review_thread'`), showing as a
+  failed no-job run on every push to every branch. Removed in the follow-up.
+- **Why not poll:** a scheduled re-run every N minutes would work and would
+  cost a runner and API calls per open pull request for a question the
+  platform already answers live in the merge box.
+- **`review-not-clean.py` survives as a STATE reader.** `carry-from-pr.sh`
+  asks it on a green `ci` before marking the pull request `loop:mergeable`,
+  so the label is honest at that moment. A thread resolved later shows in the
+  merge box, and the label follows at the next transition.
+- **A LATER review completion can post findings after that moment passes,
+  and go uncorrected.** Measured live while fixing #226 itself, the pull
+  request this change is delivered on: `loop:mergeable`, set once, said so
+  for over an hour after three new findings landed, because #226 carries no
+  `conveyor:fix` grant (it edits `review-dispatch.yml`, so the loop cannot
+  run on it) and nothing else ever re-checked the label.
+  - `review-dispatch.yml`'s `gate` job calls `refresh-loop-state.py` on
+    every `claude-review` completion that does NOT itself start a round
+    (`mode=none`), narrowed to that ONE trigger -- the sibling `ci failure`
+    trigger reaching the same branch says nothing about review threads.
+  - It skips the correction entirely while `loop:running` is set. An
+    in-flight round from an earlier trigger owns the label through its own
+    ending, so a review completing mid-round must not downgrade it.
+  - Otherwise it re-reads `review-not-clean.py` live and sets `stalled` when
+    a thread is open, `mergeable` never claimed here for a case this program
+    has no positive evidence for.
+- **The check that reads the CONVERSATION is re-run on the answer.** This is
+  the spec's "A required check that reads a person's answer is re-run on
+  that answer" made concrete: `docs-task` is that ONE check, and no other
+  required check reads a reply. `docs-task` -- the same `ci.yml` job that
+  also gates a change's own test and documentation tasks -- fails
+  ADDITIONALLY while a dispute has no reply from a person, through its
+  `autofix-guard.py` step.
+  - A comment IS an Actions event, so `dispute-answered.yml`
+    (`issue_comment`, `pull_request_review_comment`) re-runs the failed
+    `docs-task` job of the head's own `ci` run through the jobs API
+    (`rerun-ci-job.py`) when a non-bot comments on a pull request carrying
+    `conveyor:fix`.
+  - `ci-green` re-evaluates in the same run: green marks the head mergeable
+    (through `open`), red starts the loop's next round (through its `ci
+    failure` trigger).
+  - Only that one job, because a reply changes nothing else's answer, and
+    only when it failed.
 
 ### 4. The archive station is a remote session, started by the carried label
 
@@ -136,8 +166,10 @@ adds one and removes its siblings, idempotently, and never fails a job.
 | a round starts | `gate` | pull request `loop:running` |
 | a round ends with disputes only, no report, or a failed fixer | `land` | pull request `loop:stalled` |
 | the round cap is reached | `land` | pull request `loop:capped` |
-| `ci` succeeds on a labelled pull request | the `open` job | pull request `loop:mergeable`, issue `station:merge` |
+| `ci` succeeds on a labelled pull request with no review thread open | the `open` job, through `carry-from-pr.sh` (which also runs on a red `ci` and marks nothing then) | pull request `loop:mergeable`, issue `station:merge` |
+| a round ends clean | `land` | pull request `loop:mergeable` |
 | a merge carries `conveyor:archive` | `carry-grant.py` | issue `station:archive` |
+| a review completes with findings open, on a pull request the loop is NOT driving | the `gate`'s `mode=none` path, through `refresh-loop-state.py` | pull request `loop:stalled`, correcting a stale `mergeable` |
 | the archive pull request merges, or a plain-lane pull request merges | the `archive` job | issue `station:done` |
 
 - **Distinct prefixes from the grants**, so nobody reads `station:fix` as
@@ -164,9 +196,8 @@ The first is the one to build next if labels prove too little.
 
 - [The bot allowlist widens who may start the model] → bounded to the
   platform's own bot, behind a gate that re-reads the grant first.
-- [A thread event storm re-runs `review-clean` many times] → one job per
-  event, concurrency keyed by the pull request, and a run in progress is left
-  alone.
+- [`loop:mergeable` lags a thread resolved after the last `ci`] → the merge
+  box is live and the label is state, and the next transition re-asserts it.
 - [The archive session's branch was deleted by the merge] → the routine
   recreates it from master. The archive commit needs nothing from the old
   branch.
@@ -180,5 +211,6 @@ The first is the one to build next if labels prove too little.
 
 1. Merge. Every workflow takes effect from master at once.
 2. Create the nine state labels by hand, once.
-3. #220: re-run its review's `reconcile` job and CI's failed jobs once by
-   hand. From then on the merged line drives it.
+3. #220: a push (master merged into its branch) so the merged workflows run
+   on it. A re-run of the old review run is not possible: its artifact
+   expired after a day.

@@ -177,15 +177,19 @@ what it read and how many consecutive reads found nothing new. The model and
 its effort are the workflow's (`--model`, `--effort` — `gotchas.md` has why);
 `reconcile` RESOLVES the recorded threads with no model and the one
 `contents: write` — and FAILS THE RUN ON NOTHING ELSE: the review run's
-conclusion means "the review ran and posted". WHETHER A REVIEW-AUTHORED
-THREAD IS STILL OPEN IS `ci.yml`'s `review-clean` JOB'S QUESTION, READ LIVE
-(`review-is-green.py` for "it ran", `review-not-clean.py` for "nothing of its
-own is open"), and `review-thread.yml` RE-RUNS THAT JOB of the head's own
-`ci` run when a thread is resolved or unresolved — so a person dismissing a
-finding turns `ci-green` green in the merge box with no push and no hand
-re-run. It lived in `reconcile` and FROZE THE VERDICT on #220: the loop
-disputed the red check (correctly, no tree edit could fix it), the owner
-resolved the thread, and nothing re-ran anything for days. It runs by hand too: `gh workflow run claude-review.yml -f
+conclusion means "the review ran and posted", which is the one question
+`ci.yml`'s `review-clean` job asks of it (`review-is-green.py`). WHETHER A
+REVIEW-AUTHORED THREAD IS STILL OPEN IS NOT A CHECK'S QUESTION, ANYWHERE.
+Branch protection's required conversation resolution blocks the merge on an
+open thread and is evaluated LIVE at merge time, so a person dismissing a
+finding unblocks the merge at once. A check carrying that question FREEZES
+IT — `reconcile` did, on #220: the loop disputed the red check (correctly, no
+tree edit could fix it), the owner resolved the thread, and nothing re-ran
+anything for days. The repair of re-running the check on the thread event
+DOES NOT EXIST: `pull_request_review_thread` is a webhook event and not an
+Actions trigger, and a workflow naming it is refused (`gotchas.md`).
+`review-not-clean.py` survives for the conveyor's STATE: `carry-from-pr.sh`
+asks it before marking a green pull request `loop:mergeable`. It runs by hand too: `gh workflow run claude-review.yml -f
 number=<pr>` (`-f dry_run=true` posts nothing; `-f full=true` ignores the
 coverage record and reads every changed path from the base — the same
 override `REVIEW_QUIET_READS`, a workflow variable, tunes: how many
@@ -315,6 +319,30 @@ point it is acted on, never trusting that a workflow placed it before.
   wider: the gate has already re-read the standing instruction the bot
   relayed, and `*` would let an external App start the step on a public
   repository.
+- **A LABEL SET BY ONE PATH IS CORRECTED BY ANOTHER.** `loop:mergeable`, set
+  when `ci` succeeds with no thread open, can go stale on a pull request the
+  loop is not driving.
+  - A LATER review completion may post new findings, and nothing without the
+    `conveyor:fix` grant ever re-checked the label.
+  - Measured live on #226 (manually driven, since it edits this very
+    workflow): the label said mergeable for over an hour after three
+    findings landed.
+  - The gate's `mode=none` path now calls `refresh-loop-state.py` on every
+    review completion, which re-reads `review-not-clean.py` and corrects the
+    label to `stalled` if it lied.
+  - This is STATE, never a check's verdict — the same distinction that
+    keeps `review-not-clean.py` out of `ci-green`.
+- **A PERSON'S REPLY RE-RUNS THE CHECK THAT READS IT.** `docs-task` fails
+  while a dispute the loop posted has no answer from a person
+  (`autofix-guard.py`), and a reply is that answer — but a comment starts no
+  `ci`. `dispute-answered.yml` listens on `issue_comment` and
+  `pull_request_review_comment`, and on a non-bot comment on a pull request
+  carrying `conveyor:fix` re-runs the FAILED `docs-task` job of the head's
+  own `ci` run (`rerun-ci-job.py`), so `ci-green` re-evaluates in the merge
+  box with no push and no hand re-run. On green, `open` marks the head
+  mergeable, and on red the loop's `ci failure` trigger starts the next
+  round. This is the manual step #220 still needed after everything else
+  was fixed.
 - **A DEAD FIXING JOB IS A ROUND TOO.** `land` runs when `fix` FAILED, and
   posts the ending `fixing step failed` with the run linked, counting no
   round and disputing nothing; the loop label says `stalled`. It was skipped,

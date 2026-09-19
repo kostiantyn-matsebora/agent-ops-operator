@@ -622,11 +622,35 @@ Workflow initiated by non-human actor: github-actions (type: Bot). Add bot to al
   step failed`.
 - **The review's `reconcile` job failed the review RUN on an open thread**, so
   `review-clean` — reading that run's conclusion — stayed red after the owner
-  resolved the thread, since no event re-ran anything. The open-thread gate is
-  `review-clean`'s own now, read live, and `review-thread.yml` re-runs that
-  job of the head's `ci` run on a thread resolution. **A check's verdict must
-  be re-computable by the event that changes it**, or a dispute on it is a
-  dead end.
+  resolved the thread, since no event re-ran anything. **A CHECK MUST NEVER
+  CARRY THE THREAD QUESTION**: branch protection's required conversation
+  resolution already blocks the merge on an open thread, live at merge time.
+  `reconcile` fails on nothing but its own work now, and `review-clean` asks
+  only whether the review ran.
+- **`pull_request_review_thread` IS A WEBHOOK EVENT, NOT AN ACTIONS TRIGGER.**
+  The first repair — re-run `review-clean` on a thread resolution — shipped
+  as `review-thread.yml` and was REFUSED by the platform: `Unexpected value
+  'pull_request_review_thread'`. The tell is a failed run with ZERO JOBS,
+  named by the file's path, on EVERY push to EVERY branch, with nothing in
+  `gh run view --log`. The message is on the run's web page alone. The
+  script suite parses each workflow's `on:` keys against that name now.
+  Local YAML parsing proves nothing about which events exist.
+- **A COMMENT IS AN EVENT, A THREAD RESOLUTION IS NOT.** `issue_comment` and
+  `pull_request_review_comment` are Actions triggers, so the check that reads
+  the conversation (`docs-task`, through `autofix-guard.py`) IS re-runnable
+  on the answer it waits for — `dispute-answered.yml` does exactly that, and
+  it is the last manual re-run #220 needed. The thread question stays with
+  the platform's merge box.
+- **A failed job of a review run cannot be re-run after a day.** Its
+  `resolve-threads` artifact has expired (`retention-days: 1`), so a re-run
+  of the failed job fails again, this time in the step named "The review's
+  list actually arrived", with `Artifact not found for name: resolve-threads`.
+  Re-running the review means a FRESH run: a push, or a hand dispatch on the
+  branch so the head sha matches:
+
+  ```sh
+  gh workflow run claude-review.yml --ref <branch> -f number=<pr>
+  ```
 - **Nothing fired on `conveyor:archive`.** The carry placed it and
   `remote-implement.py` accepted the implement and run labels only, so the
   opsx lane's last station had no actor. It fires the same routine now,
@@ -634,4 +658,4 @@ Workflow initiated by non-human actor: github-actions (type: Bot). Add bot to al
 - **A `workflow_run` job that reads labels RACES the job that places them.**
   The dispatch's own `workflow_run` gate on the same `ci` completion read the
   labels one second before the carry landed. Harmless only because the carry
-  dispatches explicitly; never rely on two `workflow_run` jobs ordering.
+  dispatches explicitly. Never rely on two `workflow_run` jobs ordering.
