@@ -56,6 +56,13 @@ out=$(run); rc=$?
 assert_status 0 "$rc"
 assert_not_contains "$(cat "$GH_CALLS")" "/rerun"
 
+it "a job whose OWN NAME contains the literal '}{' is parsed correctly -- never split on content"
+completed; printf '{"jobs":[{"id":9,"name":"weird}{name","conclusion":"failure"}]}{"jobs":[{"id":555,"name":"docs-task","conclusion":"failure"}]}' > "$JOBS_FILE"
+out=$(run); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "api --method POST repos/o/r/actions/jobs/555/rerun"
+assert_not_contains "$(cat "$GH_CALLS")" "actions/jobs/9/rerun"
+
 it "a run still in progress is left alone, as a notice"
 cat > "$RUNS_FILE" <<'JSON'
 {"workflow_runs":[{"id":101,"status":"in_progress","conclusion":null,"run_started_at":"2026-09-17T18:00:00Z"}]}

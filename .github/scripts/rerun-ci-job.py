@@ -51,15 +51,25 @@ def latest_run(repo: str, sha: str) -> dict | None:
 
 def parse_paginated(raw: str) -> list[dict]:
     """`gh api --paginate` without `--jq` concatenates each page's JSON object
-    back to back; split them the way carry-grant.py splits arrays."""
-    try:
-        return [json.loads(raw or "{}")]
-    except json.JSONDecodeError:
-        pages: list[dict] = []
-        for chunk in raw.replace("}{", "}\n{").splitlines():
-            if chunk.strip():
-                pages.append(json.loads(chunk))
-        return pages
+    back to back, with no separator between them at all -- not even a
+    newline. A STRING-SPLIT ON THE LITERAL `"}{"` (what `carry-grant.py`'s
+    sibling does for arrays, `"]["`) BREAKS ON ANY VALUE CONTAINING THAT
+    SUBSTRING: a job's own name, a log URL, a commit message a job carries
+    in its payload. `json.JSONDecoder.raw_decode` is a REAL streaming
+    decoder -- it parses one object from the front of the buffer and reports
+    exactly where that object ended, so splitting never happens on content,
+    only on the decoder's own verified object boundaries."""
+    decoder = json.JSONDecoder()
+    pages: list[dict] = []
+    buf = (raw or "{}").strip()
+    idx = 0
+    while idx < len(buf):
+        obj, end = decoder.raw_decode(buf, idx)
+        pages.append(obj)
+        idx = end
+        while idx < len(buf) and buf[idx].isspace():
+            idx += 1
+    return pages
 
 
 def failed_job(repo: str, run_id: int, name: str) -> tuple[int | None, str]:
