@@ -169,6 +169,42 @@ func TestPipelineValidationAndSharing(t *testing.T) {
 	}
 }
 
+// TestPipelineRuntimeRefValidation covers `spec.runtimeRef`'s Ready check and
+// the deliberate asymmetry beside it: `spec.serviceAccountName` names an
+// identity the manager holds no RBAC to confirm, so it stays unchecked.
+func TestPipelineRuntimeRefValidation(t *testing.T) {
+	mkProfile(t, "prof-rtref")
+	mkRuntime(t, "rtref-runtime", "example.com/runtime:v1", "")
+
+	// no runtimeRef → resolves to "default" elsewhere in the chain, not a miss
+	mkPipeline(t, "rtref-unset", nil, nil, "prof-rtref")
+	if p := reconcilePipeline(t, "rtref-unset"); !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
+		t.Fatalf("unset runtimeRef must stay Ready: %+v", p.Status.Conditions)
+	}
+
+	// runtimeRef naming an AgentRuntime that exists → Ready
+	mkWiredPipeline(t, "rtref-ok", nil, "prof-rtref", "rtref-runtime", "")
+	if p := reconcilePipeline(t, "rtref-ok"); !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
+		t.Fatalf("existing runtimeRef must stay Ready: %+v", p.Status.Conditions)
+	}
+
+	// runtimeRef naming an AgentRuntime that does not exist → Ready=False naming it
+	mkWiredPipeline(t, "rtref-dangling", nil, "prof-rtref", "no-such-runtime", "")
+	p := reconcilePipeline(t, "rtref-dangling")
+	ready := apimeta.FindStatusCondition(p.Status.Conditions, "Ready")
+	if ready == nil || ready.Status != "False" || !strings.Contains(ready.Message, "agentruntime/no-such-runtime") {
+		t.Fatalf("dangling runtimeRef not surfaced: %+v", p.Status.Conditions)
+	}
+
+	// serviceAccountName naming nothing is NOT checked — the manager holds no
+	// `serviceaccounts` RBAC, and a missing one already fails loudly at pod
+	// admission. An untested deliberate asymmetry reads as an oversight.
+	mkWiredPipeline(t, "rtref-sa-unchecked", nil, "prof-rtref", "", "no-such-serviceaccount")
+	if p := reconcilePipeline(t, "rtref-sa-unchecked"); !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
+		t.Fatalf("an unresolvable serviceAccountName must not affect Ready: %+v", p.Status.Conditions)
+	}
+}
+
 func TestMultiChannelConversationMirroring(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-mc")
