@@ -278,6 +278,14 @@ point it is acted on, never trusting that a workflow placed it before.
     command, and re-runs it before the patch is cut. A failure the tree does
     not explain — an outage, a rate limit, a flake — is DISPUTED with the log's
     reason, because a false fix for a flake is worse than the flake.
+  - **A DISPUTE'S REASON IS BOUND BY THIS REPOSITORY'S OWN ANSWERING AND
+    WRITING RULES**, since it is posted verbatim to a thread or a pull
+    request comment: at most 40 words, no timeline, no log excerpt. The
+    fixing step's prompt asks for it. `land-dispatch.py`'s `shorten_reason`
+    is the second wall, replacing an over-length reason with a short notice
+    rather than posting or truncating it. Measured live: an early reason ran
+    to several paragraphs, reproducing an investigation nobody asked to read
+    to decide `fix it` or leave it.
   - **A fixed check gets no reply.** There is no thread to reply in, and the
     check's next run on the landed commit is its verdict; the round's summary
     is where it is accounted for.

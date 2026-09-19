@@ -628,6 +628,17 @@ jobs:
             is the honest answer. An item you neither fixed nor disputed is a
             defect in your report.
 
+            A DISPUTE'S "reason" IS POSTED VERBATIM TO GITHUB, so it follows
+            this repository's own `.claude/rules/answering.md` and
+            `writing.md`: AT MOST 40 WORDS, ONE OR TWO SENTENCES, NO
+            SEMICOLON, NO TIMELINE, NO LOG EXCERPT, NO QUOTED FILE CONTENT.
+            State the conclusion a maintainer needs to answer `fix it` or
+            leave it — not the investigation that reached it. Name the file
+            or command where one is needed; do not narrate reading it. If
+            the reasoning genuinely needs more than that, the excess belongs
+            in a code comment beside the fix, or is left out — never appended
+            to "reason".
+
             When done, write the report to $REPORT as JSON:
               {"items": [{"id": "<id>", "action": "fixed", "reason": ""},
                          {"id": "<id>", "action": "disputed", "reason": "<why>"}]}

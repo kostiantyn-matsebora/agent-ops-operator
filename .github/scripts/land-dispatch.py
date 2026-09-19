@@ -123,12 +123,37 @@ def load_markers(path: pathlib.Path) -> dict:
             "keep_going": doc.get("keep_going_label", "conveyor:keep-going")}
 
 
+# THE FIXING STEP'S OWN PROMPT ASKS FOR AT MOST 40 WORDS (this repository's
+# rules on answering and writing) -- this is the SECOND wall, because a
+# prompt is followed
+# until the model is tired, and a dispute's "reason" is posted VERBATIM to a
+# thread or a pull request comment. A wall of prose -- a timeline, a log
+# excerpt, quoted file content -- is exactly what those rules exist to keep
+# out of anything a maintainer reads. Measured live: a dispute reason ran to
+# several paragraphs, reproducing an investigation nobody asked to read to
+# decide `fix it` or leave it. This never truncates mid-sentence -- see
+# invariants.md, "NOTHING SHORTENS AN AGENT'S OUTPUT" -- it REPLACES an
+# over-length reason with a short, honest notice instead, so the thread
+# still gets an answer and the maintainer is told where the real one is.
+REASON_WORD_LIMIT = 40
+
+
+def shorten_reason(reason: str) -> str:
+    words = reason.split()
+    if len(words) <= REASON_WORD_LIMIT:
+        return reason
+    return (f"disputed, but the fixing step's own reason ran to {len(words)} words -- "
+            "over this repository's limit for anything posted to a thread. "
+            "See the run's own log for the actual reasoning.")
+
+
 def read_report(report: dict, work: dict) -> tuple[list[str], dict[str, str]]:
     """The model's claims, in either shape it may have written:
     {"items":[{"id","action","reason"}]} or the older {"fixed":[...],
     "unfixed":[{"threadId","reason"}]}. Returns (claimed fixed ids,
     {disputed id: reason}); ids the work list does not carry are dropped and
-    named."""
+    named. Every reason is passed through `shorten_reason` before it can
+    reach a comment."""
     claimed_fixed: list[str] = []
     claimed_disputed: dict[str, str] = {}
     for entry in report.get("items", []) or []:
@@ -138,11 +163,11 @@ def read_report(report: dict, work: dict) -> tuple[list[str], dict[str, str]]:
         if entry.get("action") == "fixed":
             claimed_fixed.append(item_id)
         else:
-            claimed_disputed[item_id] = entry.get("reason") or "no reason given"
+            claimed_disputed[item_id] = shorten_reason(entry.get("reason") or "no reason given")
     claimed_fixed += [t for t in report.get("fixed", []) or [] if isinstance(t, str)]
     for u in report.get("unfixed", []) or []:
         if isinstance(u, dict):
-            claimed_disputed[u.get("id") or u.get("threadId")] = u.get("reason", "no reason given")
+            claimed_disputed[u.get("id") or u.get("threadId")] = shorten_reason(u.get("reason") or "no reason given")
     for stray in [t for t in claimed_fixed if t not in work] + [t for t in claimed_disputed if t not in work]:
         print(f"  DROPPED  {stray}: the report names an item the work list does not carry")
     return [t for t in claimed_fixed if t in work], {t: r for t, r in claimed_disputed.items() if t in work}
