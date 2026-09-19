@@ -39,7 +39,7 @@ jobs:
       VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       - name: Assert Chart.yaml agrees with the tag
         run: |
