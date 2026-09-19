@@ -84,12 +84,26 @@ def is_person(author: dict | None) -> bool:
     return bool(author) and author.get("__typename") != "Bot"
 
 
+def carries_marker(body: str, marker: str) -> bool:
+    """True when `marker` appears as its OWN LINE, never merely somewhere in
+    the text. Every dispute comment this program's own callers post writes
+    the marker as the first line (`land-dispatch.py`'s `thread_reply`:
+    marker, then a newline) -- a bare substring test also matches a comment
+    that only MENTIONS the marker in prose, in a code span, explaining what
+    it is. Measured live on #220, 2026-09-19: a maintainer's own reply
+    QUOTED an earlier comment that named the marker inside backticks while
+    describing the mechanism, and the substring test read that quoted
+    mention as a fresh, unanswered dispute the reply had itself just filed."""
+    return any(line.strip() == marker for line in (body or "").splitlines())
+
+
 def unanswered_after_marker(comments: list[dict], marker: str) -> bool:
-    """True when a comment carries the marker and no PERSON commented after it.
-    Pure, so the suite exercises it without a network."""
+    """True when a comment carries the marker (as its own line) and no
+    PERSON commented after it. Pure, so the suite exercises it without a
+    network."""
     disputed_at = None
     for i, c in enumerate(comments):
-        if marker in (c.get("body") or ""):
+        if carries_marker(c.get("body") or "", marker):
             disputed_at = i
     if disputed_at is None:
         return False
