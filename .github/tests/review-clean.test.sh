@@ -31,15 +31,28 @@ it "the review's reconcile job no longer fails its run on an open thread"
 assert_not_contains "$(py "$REVIEW" 'print([s.get("run","") for s in d["jobs"]["reconcile"]["steps"]])')" "review-not-clean.py"
 
 it "review-not-clean.py is RUN by NO REQUIRED CHECK: a check must never carry the thread question"
-# EVERY job `ci-green` needs, in EVERY workflow -- not only ci.yml's own
-# jobs, since `ci-green` is the one status that gates the merge. A job
-# outside that set (review-dispatch.yml's `land`, say) may still call this
-# script for STATE, exactly as `carry-from-pr.sh` already does: nothing
-# required reads that value, and it is re-asserted at the next transition.
+# THE TRANSITIVE CLOSURE OF `ci-green`'s `needs:`, not only its direct list.
+# `discover` and `trivy-db` are required through `operator`/`images`/etc.
+# without `ci-green` naming them itself, and a job outside this closure
+# (review-dispatch.yml's `land`, say) may still call this script for STATE,
+# exactly as `carry-from-pr.sh` already does: nothing required reads that
+# value, and it is re-asserted at the next transition. Only ci.yml's own
+# jobs can be in the closure at all -- `needs:` cannot cross workflow files
+# -- but the closure is still computed rather than assumed flat, since a
+# future job could add its own `needs:` chain inside ci.yml.
 required=$(python3 -c "
 import yaml
-d = yaml.safe_load(open('$CI'))
-print(' '.join(d['jobs']['ci-green']['needs']))
+d = yaml.safe_load(open('$CI'))['jobs']
+seen = set()
+frontier = set(d['ci-green']['needs'])
+while frontier:
+    seen |= frontier
+    nxt = set()
+    for job in frontier:
+        n = d.get(job, {}).get('needs') or []
+        nxt |= set([n] if isinstance(n, str) else n) - seen
+    frontier = nxt
+print(' '.join(sorted(seen)))
 ")
 runs=$(python3 - "$ROOT"/.github/workflows/*.yml <<PY
 import sys, yaml

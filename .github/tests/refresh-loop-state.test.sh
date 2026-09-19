@@ -43,6 +43,30 @@ assert_not_contains "$(cat "$GH_CALLS")" "review-not-clean.py"
 assert_not_contains "$(cat "$GH_CALLS")" "issue edit"
 assert_contains "$out" "a round is currently running"
 
+it "gh pr view fails to read the current labels: STOPS here, never falls through to the thread check"
+cat > "$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+case "$*" in
+  "pr view "*"--json labels"*) exit 7 ;;
+esac
+exit 0
+STUB
+out=$(CLEAN_EXIT=1 run); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "review-not-clean.py"
+assert_not_contains "$(cat "$GH_CALLS")" "issue edit"
+assert_contains "$out" "::notice::"
+assert_contains "$out" "could not read the current labels"
+cat > "$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+case "$*" in
+  "pr view "*"--json labels"*) printf '%s' "${CURRENT_LABELS:-}" ;;
+esac
+exit 0
+STUB
+
 it "loop:running alongside other labels is still detected, not just as the sole label"
 out=$(CURRENT_LABELS=$'conveyor:fix\nloop:running\nopsx:review' CLEAN_EXIT=1 run); rc=$?
 assert_status 0 "$rc"

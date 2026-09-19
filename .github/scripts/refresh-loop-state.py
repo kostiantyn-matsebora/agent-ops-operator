@@ -59,7 +59,17 @@ def main() -> int:
     current = subprocess.run(["gh", "pr", "view", str(args.pr), "--repo", args.repo,
                               "--json", "labels", "--jq", ".labels[].name"],
                              capture_output=True, text=True)
-    if current.returncode == 0 and "loop:running" in current.stdout.splitlines():
+    if current.returncode != 0:
+        # UNKNOWN IS NOT "NO ROUND RUNNING". A failed read here must not fall
+        # through to the thread check below: this program would then risk
+        # stamping `stalled` over an ACTIVE round's `loop:running` on the
+        # strength of a label list it never actually saw. Stop, without
+        # correcting anything -- the same conservative default the rest of
+        # this program already uses for an unreadable check or state script.
+        print(f"::notice::#{args.pr}: could not read the current labels (gh exited "
+              f"{current.returncode}); leaving the loop label as it is")
+        return 0
+    if "loop:running" in current.stdout.splitlines():
         print(f"#{args.pr}: a round is currently running (loop:running); leaving it to that round's own ending")
         return 0
 
