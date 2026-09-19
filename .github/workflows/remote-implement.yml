@@ -249,6 +249,15 @@ jobs:
       - name: Carry conveyor:run forward as the archive-station label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # BOTH REQUIRED BY `remote-implement.py` ITSELF, THE MOMENT IT
+          # ACTUALLY FIRES BELOW -- `fire`'s own step sets the same two for
+          # the same reason. Missing here, the script would run all the way
+          # to the fire attempt and fail there with "ROUTINE_FIRE_URL or
+          # ROUTINE_FIRE_TOKEN is not set", which the tests never caught
+          # because they stub the fire endpoint rather than exercising a
+          # missing one.
+          ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
         run: |
           set -euo pipefail
           # A push-triggered `ci` run has no pull request of its own -- the
@@ -274,4 +283,37 @@ jobs:
           # does -- a merge queue can land a fork's pull request too, and
           # this job must never carry a grant forward for one just because
           # its body happens to contain 'Refs #<n>'.
-          .github/scripts/carry-from-pr.sh "$pr" archive
+          #
+          # A LABEL PLACED THROUGH THE API, UNDER THIS WORKFLOW'S OWN TOKEN,
+          # FIRES NO `issues: labeled` WEBHOOK -- the platform suppresses
+          # events from actions it triggered itself, the same suppression
+          # `open`'s own comment documents for `pull_request: labeled`. So
+          # placing `conveyor:archive` here was never enough to start the
+          # archive station's session: `fire`'s trigger never fires. Measured
+          # live: the label landed on #51 and #222, and no session ever
+          # started for either.
+          #
+          # `open` closes the same gap by DISPATCHING `review-dispatch.yml`
+          # again, because that workflow accepts `workflow_dispatch`.
+          # `remote-implement.yml` has none, and `fire` reads its input from
+          # a labeling EVENT PAYLOAD, not from workflow inputs -- so the fix
+          # here is to hand `remote-implement.py` the SAME PAYLOAD SHAPE a
+          # real `issues: labeled` event would carry, once `carry-from-pr.sh`
+          # confirms a real carry happened (its one success line starts
+          # "carried "). `remote-implement.py` re-checks the grant itself
+          # from `sender`, exactly as it does for a bot-carried `conveyor:fix`
+          # label event -- this is not a second, weaker path, it is the same
+          # program reading the same facts it would read from a live event.
+          out=$(.github/scripts/carry-from-pr.sh "$pr" archive | tee /dev/stderr)
+          # The shared script's own success line: "carried `<label>` (from
+          # <placer>) to `<station_label>` on issue #<n>" -- the issue number
+          # IS the number this carry landed on, read from the same line that
+          # proves the carry actually happened, never assumed from context.
+          carried_issue=$(printf '%s\n' "$out" | grep -oE '^carried .* on issue #[0-9]+' | grep -oE '[0-9]+$')
+          if [ -n "$carried_issue" ]; then
+            LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["archive_label"])')
+            payload=$(mktemp)
+            printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"}}' \
+              "$LABEL" "$carried_issue" > "$payload"
+            python3 .github/scripts/remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"
+          fi

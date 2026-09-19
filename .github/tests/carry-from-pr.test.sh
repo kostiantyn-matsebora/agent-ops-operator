@@ -109,6 +109,25 @@ assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "carry-grant.py --repo o/r --issue 51 --station archive"
 assert_not_contains "$(cat "$GH_CALLS")" "station:done"
 
+# MEASURED LIVE ON #229's OWN REVIEW: the archive branch READ carry-grant.py's
+# output to decide the plain-lane case, but never RE-PRINTED it -- so a
+# caller capturing carry-from-pr.sh's OWN stdout (the archive job, deciding
+# whether a real carry happened) got nothing, and carried_issue was always
+# empty. The `fix` station's unpiped call never had this gap; only archive's
+# `out=$(... | tee /dev/stderr)` swallowed it.
+#
+# STDOUT ALONE, NEVER MERGED WITH STDERR -- this is the whole point of the
+# regression. `run()`'s own `2>&1` would let a line that only reaches
+# STDERR (via an inner `tee /dev/stderr`) masquerade as having reached
+# stdout, which is exactly how the original bug passed every existing
+# assertion here: they all read `$out` from a merged stream. The workflow's
+# own capture (`out=$(carry-from-pr.sh ... | tee /dev/stderr)`) only ever
+# sees this script's REAL stdout -- a pipe carries stdout only, never
+# stderr -- so the test must check the same thing, in isolation.
+it "the carried line reaches carry-from-pr.sh's OWN STDOUT, not only stderr via an inner tee"
+stdout_only=$(cd "$tmp/repo" && GITHUB_REPOSITORY=o/r bash "$S" 220 archive 2>/dev/null)
+assert_contains "$stdout_only" "carried conveyor:run (from maintainer) to conveyor:archive on issue #51"
+
 it "archive from a Closes pull request: the line ENDED at this merge -- station done, nothing carried"
 same_repo; printf 'Closes #51\n' > "$BODY_FILE"
 out=$(run 230 archive); rc=$?
