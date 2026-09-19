@@ -106,6 +106,17 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
   |---|---|---|
   | `open` | a `pull_request` event, from `change/*` | resolves the pull request from the run's head sha, reads its `Refs #<n>`, and — if that issue still carries `conveyor:run` from a writer — `.github/scripts/carry-grant.py` places `conveyor:fix` on the pull request, naming whose instruction it carried |
   | `archive` | a `push` to the default branch | resolves the just-merged pull request from the pushed commit and does the same for `conveyor:archive`, ON THE ISSUE — the pull request is closed by then, and a label there drives nothing — only on the opsx lane, since the plain lane has no archive station |
+
+  **`archive` ALSO STARTS THE SESSION ITSELF, IN THE SAME STEP.** Placing a
+  label through this job's own token fires no `issues: labeled` webhook — the
+  same suppression named above for `pull_request: labeled` — so `fire` never
+  runs on it. Measured live: `conveyor:archive` landed on two issues and no
+  session started for either. On an ACTUAL carry (read from the shared
+  script's own success line, never assumed), `archive` hands
+  `remote-implement.py` the same payload shape a real `issues: labeled`
+  event would carry. That script re-checks the grant from `sender` exactly
+  as it does for a bot-carried `conveyor:fix` event, so this is the same
+  program reading the same facts, not a second, weaker path.
 - **THE PAYLOAD IS A NUMBER AND NOTHING ELSE.** The platform wraps fire text as
   untrusted; a number is something the prompt can validate before it is used,
   and the session then reads the issue itself.
