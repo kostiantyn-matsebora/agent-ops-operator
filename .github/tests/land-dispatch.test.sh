@@ -264,6 +264,19 @@ it "labelled: a round that goes on posts NO summary — the summary is the endin
 assert_not_contains "$(cat "$GH_CALLS")" "<!-- conveyor:summary -->"
 assert_not_contains "$(cat "$GH_CALLS")" "Push again"
 
+# THE SECOND WALL. answering.md and writing.md bind everything posted to a
+# person, and a prompt is followed until the model is tired -- so an
+# over-length "reason" is replaced, never trusted or truncated mid-sentence.
+it "labelled: an over-length dispute reason (over 40 words) is REPLACED with a short notice, never posted verbatim"
+fresh_repo
+long_reason=$(python3 -c "print(' '.join(['word'] * 60))")
+printf '{"items":[{"id":"PRRT_a","action":"disputed","reason":"%s"},{"id":"PRRT_b","action":"disputed","reason":"short and fine"},{"id":"sonar:AZ1","action":"disputed","reason":"also fine"}]}' "$long_reason" > "$tmp/report-long.json"
+out=$(REPORT="$tmp/report-long.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "$long_reason"
+assert_contains "$(cat "$GH_CALLS")" "own reason ran to 60 words"
+assert_contains "$(cat "$GH_CALLS")" "short and fine"
+
 # ENDING: the cap. Two rounds already on the pull request since the label.
 it "labelled: counts rounds from its own marked comments since the label, and at the cap posts ONE summary mentioning the approver instead of re-triggering"
 fresh_repo
