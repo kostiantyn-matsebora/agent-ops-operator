@@ -422,4 +422,9 @@ it "the synthesized payload names the archive label from the vocabulary file, ne
 step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
 assert_contains "$step" '["archive_label"]'
 
+it "the archive job's own step sets ROUTINE_FIRE_URL and ROUTINE_FIRE_TOKEN, the same two fire's own step needs"
+env=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["env"])')
+assert_contains "$env" "vars.ROUTINE_FIRE_URL"
+assert_contains "$env" "secrets.ROUTINE_FIRE_TOKEN"
+
 summary

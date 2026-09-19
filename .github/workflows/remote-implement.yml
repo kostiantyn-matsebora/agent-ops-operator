@@ -249,6 +249,15 @@ jobs:
       - name: Carry conveyor:run forward as the archive-station label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # BOTH REQUIRED BY `remote-implement.py` ITSELF, THE MOMENT IT
+          # ACTUALLY FIRES BELOW -- `fire`'s own step sets the same two for
+          # the same reason. Missing here, the script would run all the way
+          # to the fire attempt and fail there with "ROUTINE_FIRE_URL or
+          # ROUTINE_FIRE_TOKEN is not set", which the tests never caught
+          # because they stub the fire endpoint rather than exercising a
+          # missing one.
+          ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
         run: |
           set -euo pipefail
           # A push-triggered `ci` run has no pull request of its own -- the
