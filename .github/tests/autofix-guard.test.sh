@@ -120,6 +120,19 @@ it "allows once a person has answered the analysis dispute"
 assert_status 0 "$rc"
 rm -f "$FX/comments.json"
 
+# MEASURED LIVE ON #220, 2026-09-19: a maintainer's own reply QUOTED an
+# earlier summary comment that mentioned the marker in prose (inside
+# backticks, explaining the mechanism), and the guard misread that quoted
+# mention as a FRESH, unanswered dispute -- because the marker check was a
+# bare substring test over the whole body, not a check for the marker as its
+# own line the way every dispute comment this program actually posts writes
+# it (land-dispatch.py's thread_reply: marker, then a newline).
+printf '[{"body":"<!-- conveyor:disputed -->\\nThe fixing step disputes 1 analysis issue","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"> disputed because it carries `<!-- conveyor:disputed -->` in its body\\n\\nagree","user":{"login":"a-maintainer","type":"User"}}]' > "$FX/comments.json"
+out=$(run); rc=$?
+it "a reply that merely QUOTES the marker in prose is an ANSWER, never a fresh dispute"
+assert_status 0 "$rc"
+rm -f "$FX/comments.json"
+
 # FAIL-OPEN, every way.
 it "allows when gh cannot be reached, and says why"
 out=$(GH_DOWN=1 run); rc=$?
