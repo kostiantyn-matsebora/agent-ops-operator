@@ -39,7 +39,7 @@ jobs:
     outputs:
       images: ${{ steps.list.outputs.images }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: list
@@ -72,7 +72,7 @@ jobs:
         image: ${{ fromJSON(needs.discover.outputs.images) }}
     name: scan (${{ matrix.image.component }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # ONE ARCHITECTURE. Every published manifest carries linux/amd64 and
       # linux/arm64, and a scan reads one image — the runner's, amd64. The
       # arm64 half has the same packages from the same Dockerfile, so this is
