@@ -255,11 +255,15 @@ d = yaml.safe_load(open(sys.argv[1]))
 $1
 " "$R"; }
 
-it "remote-implement triggers on a labelled issue and on ci's workflow_run completing, and nothing else"
-assert_equals "issues workflow_run" "$(rpy 'print(" ".join(sorted(d[True])))')"
+it "remote-implement triggers on a labelled issue, on ci's workflow_run completing, and on a manual dispatch, and nothing else"
+assert_equals "issues workflow_dispatch workflow_run" "$(rpy 'print(" ".join(sorted(d[True])))')"
 assert_equals "['labeled']" "$(rpy 'print(d[True]["issues"]["types"])')"
 assert_equals "['ci']" "$(rpy 'print(d[True]["workflow_run"]["workflows"])')"
 assert_equals "['completed']" "$(rpy 'print(d[True]["workflow_run"]["types"])')"
+
+it "the manual dispatch takes a required pr input, and nothing else — recovery only, never a routine trigger"
+assert_equals "['pr']" "$(rpy 'print(list(d[True]["workflow_dispatch"]["inputs"]))')"
+assert_equals "True" "$(rpy 'print(d[True]["workflow_dispatch"]["inputs"]["pr"]["required"])')"
 
 it "never triggers on pull_request or pull_request_target directly — the token those events carry has no write access here"
 assert_not_contains "$(rpy 'print(d[True])')" "pull_request_target"
