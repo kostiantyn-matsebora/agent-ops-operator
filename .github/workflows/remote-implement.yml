@@ -335,16 +335,27 @@ jobs:
           # label event -- this is not a second, weaker path, it is the same
           # program reading the same facts it would read from a live event.
           out=$(.github/scripts/carry-from-pr.sh "$pr" archive | tee /dev/stderr)
-          # The shared script's own success line: "carried `<label>` (from
-          # <placer>) to `<station_label>` on issue #<n>" -- the issue number
-          # IS the number this carry landed on, read from the same line that
-          # proves the carry actually happened, never assumed from context.
+          # TWO SUCCESS SHAPES FROM THE SHARED SCRIPT, BOTH FIRE-WORTHY.
+          # "carried ..." is a fresh label placement. "#<n> already carries
+          # the `archive` grant" is its OWN dedup on a comment marker it
+          # already posted -- which #51 hit on a #230 replay: the label and
+          # that marker were both posted the first time this ran, BEFORE this
+          # recovery path existed, so the label was never fresh again and
+          # `remote-implement.py` never fired. `remote-implement.py` carries
+          # its own SEPARATE fire-marker dedup
+          # (`<!-- remote-implement:fired:archive -->`), so calling it on the
+          # "already carries" case is safe: it does nothing if the session
+          # already started, and starts it if -- as here -- the label was
+          # placed but the fire never happened.
+          #
           # GUARDED, NOT LEFT TO set -e: the ordinary "nothing carried" case
           # has no matching line at all, and an unguarded grep in a $(...)
           # assignment exits 1 on no match -- which set -euo pipefail (above)
           # would then read as this whole step failing, for the routine case
           # of nothing to carry.
-          carried_issue=$(printf '%s\n' "$out" | grep -oE '^carried .* on issue #[0-9]+' | grep -oE '[0-9]+$' || true)
+          carried_issue=$(printf '%s\n' "$out" | \
+            grep -oE '^carried .* on issue #[0-9]+|^#[0-9]+ already carries the `archive` grant' | \
+            grep -oE '[0-9]+' || true)
           if [ -n "$carried_issue" ]; then
             LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["archive_label"])')
             payload=$(mktemp)
