@@ -323,16 +323,34 @@ mcp:
   # starting point to check against your own /mcp_server, not a contract. A name
   # that resolves to nothing is inert, and a tool you use that is missing here
   # is a values edit.
+  #
+  # EVERY TOOL IS LISTED TWICE, and that is deliberate. Home Assistant 2026.9
+  # prefixes each LLM tool with the domain of the integration offering it, and
+  # the prefix differs per tool: `GetLiveContext` became
+  # `homeassistant__GetLiveContext`, `HassTurnOn` became `intent__HassTurnOn`,
+  # `HassLightSet` became `light__HassLightSet`. The bare names serve an
+  # instance older than 2026.9, the prefixed ones a newer one, and whichever
+  # half your instance does not register is inert. With only the bare names, an
+  # agent on 2026.9 is left with no Home Assistant tool at all, and nothing
+  # reports it: the allowlist fails closed.
+  #
+  # Two reads have no prefixed twin. `HassGetCurrentDate` and
+  # `HassGetCurrentTime` are one tool on 2026.9, `llm__GetDateTime`.
   toolsets:
     observe:
       name: ha-observability
       tools:
+        # Home Assistant before 2026.9
         - "mcp__homeassistant__GetLiveContext"
         - "mcp__homeassistant__HassGetState"
         - "mcp__homeassistant__HassGetWeather"
         - "mcp__homeassistant__HassGetCurrentDate"
         - "mcp__homeassistant__HassGetCurrentTime"
         - "mcp__homeassistant__todo_get_items"
+        # Home Assistant 2026.9 and later
+        - "mcp__homeassistant__homeassistant__GetLiveContext"
+        - "mcp__homeassistant__llm__GetDateTime"
+        - "mcp__homeassistant__todo__get_items"
     actions:
       # Rendered whenever the MCP component is, and NOT gated on a credential:
       # Home Assistant registers the same Assist intents for any user, so there
@@ -345,6 +363,7 @@ mcp:
       enabled: true
       name: ha-actions
       tools:
+        # Home Assistant before 2026.9
         - "mcp__homeassistant__HassTurnOn"
         - "mcp__homeassistant__HassTurnOff"
         - "mcp__homeassistant__HassLightSet"
@@ -358,6 +377,20 @@ mcp:
         - "mcp__homeassistant__HassBroadcast"
         - "mcp__homeassistant__HassCancelAllTimers"
         - "mcp__homeassistant__HassListAddItem"
+        # Home Assistant 2026.9 and later
+        - "mcp__homeassistant__intent__HassTurnOn"
+        - "mcp__homeassistant__intent__HassTurnOff"
+        - "mcp__homeassistant__light__HassLightSet"
+        - "mcp__homeassistant__intent__HassSetPosition"
+        - "mcp__homeassistant__climate__HassClimateSetTemperature"
+        - "mcp__homeassistant__media_player__HassMediaPause"
+        - "mcp__homeassistant__media_player__HassMediaUnpause"
+        - "mcp__homeassistant__media_player__HassMediaNext"
+        - "mcp__homeassistant__vacuum__HassVacuumStart"
+        - "mcp__homeassistant__vacuum__HassVacuumReturnToBase"
+        - "mcp__homeassistant__assist_satellite__HassBroadcast"
+        - "mcp__homeassistant__intent__HassCancelAllTimers"
+        - "mcp__homeassistant__todo__HassListAddItem"
 
 # THE ADMIN MCP PATH — how `ha-ops` reaches everything Assist intents cannot.
 #

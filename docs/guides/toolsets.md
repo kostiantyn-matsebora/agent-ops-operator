@@ -187,6 +187,9 @@ spec:
     - mcp__homeassistant__HassGetCurrentDate
     - mcp__homeassistant__HassGetCurrentTime
     - mcp__homeassistant__todo_get_items
+    - mcp__homeassistant__homeassistant__GetLiveContext
+    - mcp__homeassistant__llm__GetDateTime
+    - mcp__homeassistant__todo__get_items
 ```
 <!-- /generated -->
 
@@ -217,6 +220,19 @@ spec:
     - mcp__homeassistant__HassBroadcast
     - mcp__homeassistant__HassCancelAllTimers
     - mcp__homeassistant__HassListAddItem
+    - mcp__homeassistant__intent__HassTurnOn
+    - mcp__homeassistant__intent__HassTurnOff
+    - mcp__homeassistant__light__HassLightSet
+    - mcp__homeassistant__intent__HassSetPosition
+    - mcp__homeassistant__climate__HassClimateSetTemperature
+    - mcp__homeassistant__media_player__HassMediaPause
+    - mcp__homeassistant__media_player__HassMediaUnpause
+    - mcp__homeassistant__media_player__HassMediaNext
+    - mcp__homeassistant__vacuum__HassVacuumStart
+    - mcp__homeassistant__vacuum__HassVacuumReturnToBase
+    - mcp__homeassistant__assist_satellite__HassBroadcast
+    - mcp__homeassistant__intent__HassCancelAllTimers
+    - mcp__homeassistant__todo__HassListAddItem
 ```
 <!-- /generated -->
 

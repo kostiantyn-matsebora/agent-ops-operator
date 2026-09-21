@@ -56,6 +56,20 @@ for the source and the reference material beside this file.
   `spec.serviceAccountName` is unaffected — that field stays unchecked, since
   confirming it exists needs RBAC the manager does not hold. Manager 0.57.4.
 
+### Fixed
+
+- The home-assistant bundle's `ha-observability` and `ha-actions` toolsets
+  matched no tool on Home Assistant 2026.9 or later. That release prefixes every
+  LLM tool with the domain of the integration offering it, and the prefix
+  differs per tool: `GetLiveContext` became `homeassistant__GetLiveContext`,
+  `HassTurnOn` became `intent__HassTurnOn`, `HassLightSet` became
+  `light__HassLightSet`. The allowlists fail closed, so an agent on the
+  `ha-control` route simply had no Home Assistant tool, and nothing reported
+  it. Both toolsets now list each tool under its bare name and its prefixed
+  name, and the half an instance does not register is inert. Not breaking: an
+  install overriding `home-assistant.mcp.toolsets.*.tools` keeps its own list
+  and must add the prefixed names itself.
+
 ### Upgrade
 
 1. `helm upgrade`. Nothing to restate — the check arrives with the manager
