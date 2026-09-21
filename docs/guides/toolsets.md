@@ -188,6 +188,7 @@ spec:
     - mcp__homeassistant__HassGetCurrentTime
     - mcp__homeassistant__todo_get_items
     - mcp__homeassistant__homeassistant__GetLiveContext
+    - mcp__homeassistant__weather__HassGetWeather
     - mcp__homeassistant__llm__GetDateTime
     - mcp__homeassistant__todo__get_items
 ```
