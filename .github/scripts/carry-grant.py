@@ -31,6 +31,18 @@ EXITS 0 DOING NOTHING WHEN THE STANDING INSTRUCTION IS ABSENT -- that is the
 ordinary case (a single-station label drove this pull request or issue by
 hand, or nobody granted the standing instruction at all), never an error.
 
+STATION archive IS THE ONE EXCEPTION, AND IT SETS station:stalled RATHER
+THAN NOTHING. By the time this program is called for --station archive, a
+merge has already happened -- that is the archive job's own trigger -- so an
+opsx-lane issue with no `run_label` to carry is not "nobody ever wanted this
+automated", it is a line that reached the merge station and has nothing to
+carry it onward. Left alone the issue keeps `station:merge`, whose own label
+description ("the pull request is mergeable and waits for a person") is now
+FALSE: the pull request is merged, and nothing is waiting on a decision to
+merge it. #222 sat exactly here for two days, indistinguishable from a
+line still working. `station:stalled` names that gap the same way
+`loop:stalled` already does on the pull request side.
+
 RE-CHECKED, NEVER TRUSTED. `run_label`'s placer is read from the issue's
 timeline at the moment this program runs, exactly as `review-dispatch.yml`'s
 own gate re-checks a label it did not itself place -- a carried label is only
@@ -149,6 +161,17 @@ def comment(repo: str, target: int, body: str) -> None:
     subprocess.run(["gh", "issue", "comment", str(target), "--repo", repo, "--body", body], check=False)
 
 
+def mark_stalled(repo: str, issue: int) -> None:
+    """STATE, NOT A GRANT, same as the `archive` branch below sets
+    station:archive. Never fails the carry -- a transition that could not be
+    recorded is a notice, and the next real transition re-asserts its own
+    value."""
+    state = pathlib.Path(__file__).with_name("conveyor-state.py")
+    if state.is_file():
+        subprocess.run([sys.executable, str(state), "--repo", repo, "--target", str(issue),
+                        "--station", "stalled"], check=False)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo", required=True, help="owner/name")
@@ -172,7 +195,18 @@ def main() -> int:
 
     labels = issue_labels(args.repo, args.issue)
     if run_label not in labels:
-        print(f"#{args.issue} does not carry `{run_label}`; nothing to carry, and that is the ordinary case")
+        if args.station == "archive" and is_opsx_lane(args.repo, args.issue):
+            # A MERGE JUST HAPPENED -- that is this program's own caller's
+            # trigger -- so an opsx-lane issue with nothing to carry is a
+            # line stalled at the merge station, not an issue nobody wanted
+            # automated. Left as station:merge, that label's own description
+            # ("the pull request is mergeable and waits for a person") reads
+            # false: the pull request is already merged.
+            mark_stalled(args.repo, args.issue)
+            print(f"#{args.issue} does not carry `{run_label}`; the merge station has nothing to "
+                  "carry it onward, marked station:stalled")
+        else:
+            print(f"#{args.issue} does not carry `{run_label}`; nothing to carry, and that is the ordinary case")
         return 0
 
     if args.station == "archive" and not is_opsx_lane(args.repo, args.issue):

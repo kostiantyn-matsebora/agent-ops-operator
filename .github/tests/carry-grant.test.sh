@@ -89,6 +89,38 @@ assert_status 0 "$rc"
 assert_not_contains "$(cat "$GH_CALLS")" "--add-label"
 assert_contains "$out" "nothing to carry"
 
+# --- MEASURED LIVE ON #222: a merge happened (the archive job's own trigger),
+# but the issue never carried conveyor:run at all, so it sat as station:merge
+# -- whose own label description says the pull request is mergeable and
+# waits for a person -- for two days after that pull request had already
+# merged. --station archive with no standing instruction, opsx lane, is the
+# ONE case that sets a station label anyway: station:stalled, never silently
+# "nothing to carry".
+
+it "no standing instruction, opsx lane, --station archive: marks station:stalled instead of doing nothing"
+setup
+mark_opsx 1
+out=$(run_it --issue 1 --station archive); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "--add-label conveyor:archive"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 1 --repo o/r --add-label station:stalled"
+assert_contains "$out" "station:stalled"
+
+it "no standing instruction, PLAIN lane, --station archive: still nothing -- that lane has no archive station"
+setup
+out=$(run_it --issue 1 --station archive); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "--add-label"
+assert_contains "$out" "nothing to carry"
+
+it "no standing instruction, --station fix: unaffected, still the ordinary case"
+setup
+mark_opsx 1
+out=$(run_it --issue 1 --station fix --pr 5); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "--add-label"
+assert_contains "$out" "nothing to carry"
+
 # --- instruction present, placer has write access: places on the RIGHT target
 
 it "instruction present, writer placed it: places conveyor:fix on the PULL REQUEST, once"

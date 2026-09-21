@@ -19,13 +19,13 @@ chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
 
 run() { : > "$GH_CALLS"; python3 "$S" --repo o/r "$@" 2>&1; }
 
-it "sets one station label and removes its four siblings in one edit"
+it "sets one station label and removes its five siblings in one edit"
 out=$(run --target 51 --station fix); rc=$?
 assert_status 0 "$rc"
 assert_equals "1" "$(wc -l < "$GH_CALLS")"
 call=$(cat "$GH_CALLS")
 assert_contains "$call" "issue edit 51 --repo o/r --add-label station:fix"
-for other in implement merge archive done; do assert_contains "$call" "--remove-label station:$other"; done
+for other in implement merge stalled archive done; do assert_contains "$call" "--remove-label station:$other"; done
 assert_not_contains "$call" "--remove-label station:fix"
 assert_not_contains "$call" "loop:"
 
@@ -37,7 +37,7 @@ assert_not_contains "$call" "station:"
 
 it "reads the names from the vocabulary, never from its own text"
 names=$(python3 -c 'import json;v=json.load(open("'"$ROOT"'/.github/review-triage.json"));print(" ".join(sorted(v["station_labels"].values())+sorted(v["loop_labels"].values())))')
-assert_equals "station:archive station:done station:fix station:implement station:merge loop:capped loop:mergeable loop:running loop:stalled" "$names"
+assert_equals "station:archive station:done station:fix station:implement station:merge station:stalled loop:capped loop:mergeable loop:running loop:stalled" "$names"
 
 it "an unknown value is a notice and exit 0, and nothing is edited"
 out=$(run --target 51 --station shipped); rc=$?

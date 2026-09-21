@@ -98,11 +98,20 @@
     "person reads to see where the line is; nothing reads them to decide anything,",
     "so removing one changes nothing about what runs next. `station_labels` go on",
     "the ISSUE and name the station the line is at (implement, fix, merge,",
-    "archive, done); `loop_labels` go on the PULL REQUEST and name what the",
-    "fixing loop is doing (running, stalled, capped, mergeable). Each family holds",
-    "at most one value at a time, moved by `.github/scripts/conveyor-state.py`",
-    "from the workflow performing the transition. Distinct prefixes from the",
-    "`conveyor:` grants, deliberately: `station:fix` must never read as consent."
+    "stalled, archive, done); `loop_labels` go on the PULL REQUEST and name what",
+    "the fixing loop is doing (running, stalled, capped, mergeable). Each family",
+    "holds at most one value at a time, moved by",
+    "`.github/scripts/conveyor-state.py` from the workflow performing the",
+    "transition. Distinct prefixes from the `conveyor:` grants, deliberately:",
+    "`station:fix` must never read as consent.",
+    "",
+    "`station:stalled` is set by `carry-grant.py` itself, not by",
+    "`conveyor-state.py`'s ordinary callers, and ONLY for the archive station:",
+    "a merge already happened (that is the archive job's own trigger) and the",
+    "issue carries no `run_label` to carry it onward. Left as `station:merge`,",
+    "that label's own description (\"the pull request is mergeable and waits",
+    "for a person\") is false the moment the merge lands — measured live on #222,",
+    "stuck there for two days, indistinguishable from a line still working."
   ],
   "accept": [
     "fix it",
@@ -127,6 +136,7 @@
     "implement": "station:implement",
     "fix": "station:fix",
     "merge": "station:merge",
+    "stalled": "station:stalled",
     "archive": "station:archive",
     "done": "station:done"
   },
