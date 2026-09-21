@@ -659,3 +659,26 @@ Workflow initiated by non-human actor: github-actions (type: Bot). Add bot to al
   The dispatch's own `workflow_run` gate on the same `ci` completion read the
   labels one second before the carry landed. Harmless only because the carry
   dispatches explicitly. Never rely on two `workflow_run` jobs ordering.
+
+**A `run-name:` OVERRIDES `workflow_run.name` FOR EVERY LATER LISTENER, SILENTLY.**
+`claude-review.yml` sets `run-name: "Review of #<n>"`. A receiving workflow's
+`workflow_run.name` is the RUN's own name — the `run-name`, once one exists —
+never the workflow's static `name:` field. `review-dispatch.yml`'s `gate` job
+matched the literal `'claude-review'`, and that stopped matching anything the
+moment `run-name` shipped.
+
+- **Measured live on #233.** Two fixing rounds landed, a review completed
+  clean after the second, and the condition stayed false forever — no round
+  ever started against the review's next findings, and `loop:running` sat
+  wrong on a pull request nothing was working on.
+- **The FIRING TRIGGER (`on.workflow_run.workflows: [claude-review]`) still
+  worked**, because THAT match is against the declared `name:`, a different
+  field entirely. Only the payload read INSIDE the job's own `if:` used the
+  wrong one — so the run fired, `gate` evaluated, and evaluated false, which
+  looks identical to "nothing happened" from outside.
+- **The fix is `workflow_run.path`**, the workflow FILE's path
+  (`.github/workflows/claude-review.yml`), which carries no per-run wording
+  and cannot drift when a `run-name` is added or reworded later.
+- **Any future `workflow_run.name` match anywhere in this repository owes
+  the same check**: does the fired workflow set `run-name`? If so, match on
+  `.path` instead, or the condition is dead from the day one ships.
