@@ -54,14 +54,23 @@ assert_contains "$(pr_clause)" "github.event.label.name == '$keep_going'"
 assert_equals "conveyor:keep-going" "$keep_going"
 
 it "a review that did not complete successfully starts no round"
-assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.name == 'claude-review' && github.event.workflow_run.conclusion == 'success'"
+assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.path == '.github/workflows/claude-review.yml' && github.event.workflow_run.conclusion == 'success'"
 
 # THE TWO RUNS START A ROUND FOR OPPOSITE REASONS, so the prefilter names each
 # workflow with the conclusion that matters for it. A green CI run starting a
 # round would be a round over nothing, every push.
 it "a ci run starts a round only when it FAILED"
-assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.name == 'ci' && github.event.workflow_run.conclusion == 'failure'"
-assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "workflow_run.name == 'ci' && github.event.workflow_run.conclusion == 'success'"
+assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.path == '.github/workflows/ci.yml' && github.event.workflow_run.conclusion == 'failure'"
+assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "workflow_run.path == '.github/workflows/ci.yml' && github.event.workflow_run.conclusion == 'success'"
+
+# MEASURED LIVE ON #233: `claude-review.yml` sets `run-name: "Review of #<n>"`,
+# and a workflow_run event's own `.name` field reflects THAT per-run display
+# title, never the workflow's static `name:` -- so a literal 'claude-review'
+# here matched nothing, ever, and two rounds landed on #233 with a clean
+# review completing after the second and no further round ever starting.
+it "the gate matches workflow_run events on .path, never .name -- a run-name overrides .name silently"
+assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "workflow_run.name == 'claude-review'"
+assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "workflow_run.name == 'ci'"
 
 it "the gate reads the vocabulary from the default branch on every event but a hand run"
 assert_contains "$(py 'print(d["jobs"]["gate"]["steps"][0]["with"]["ref"])')" "github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch"
@@ -443,5 +452,14 @@ assert_contains "$gate" "refresh-loop-state.py --repo \"\$GITHUB_REPOSITORY\" --
 it "the refresh-loop-state.py call cannot abort the gate under set -e: it ends in || true"
 assert_contains "$gate" "refresh-loop-state.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$PR\" || true"
 assert_not_contains "$gate" "review-not-clean.py"
+
+# MEASURED LIVE ON #233, the second occurrence of the same bug: this branch's
+# own guard also compared workflow_run.name to the literal 'claude-review',
+# so even with the job's outer if: fixed, refresh-loop-state.py would still
+# never have run.
+it "the refresh-loop-state.py guard matches on WORKFLOW_RUN_PATH, never WORKFLOW_RUN_NAME"
+assert_contains "$gate" 'WORKFLOW_RUN_PATH" = ".github/workflows/claude-review.yml"'
+assert_not_contains "$gate" "WORKFLOW_RUN_NAME"
+assert_contains "$(py 'print(d["jobs"]["gate"]["steps"][1]["env"])')" "workflow_run.path"
 
 summary

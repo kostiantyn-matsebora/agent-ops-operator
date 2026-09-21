@@ -149,13 +149,23 @@ jobs:
     # `conveyor:keep-going` is here because placing it must RE-TRIGGER a
     # round on a pull request whose loop already ended on the cap — the same
     # structural constraint as `conveyor:fix` right beside it.
+    #
+    # MATCHED ON `.path`, NEVER `.name`. `workflow_run.name` is the RUN's own
+    # display name, which `claude-review.yml`'s `run-name: "Review of #<n>"`
+    # overrides on every run -- so a literal `'claude-review'` here matched
+    # NOTHING, ever, since that field was added. Measured live on #233: two
+    # rounds landed, a clean review completed after the second, and this
+    # condition silently stayed false -- the loop label stuck at `running`
+    # with three fresh findings sitting unanswered and no further round ever
+    # starting. `.path` is the workflow FILE's path and carries no per-run
+    # wording, so a `run-name` change elsewhere can never repeat this.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/fix-accepted')) ||
       (github.event_name == 'pull_request_review_comment' && startsWith(github.event.comment.body, '/fix-accepted')) ||
       (github.event_name == 'pull_request' && (github.event.label.name == 'conveyor:fix' || github.event.label.name == 'conveyor:keep-going')) ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'claude-review' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'ci' && github.event.workflow_run.conclusion == 'failure')
+      (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-review.yml' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/ci.yml' && github.event.workflow_run.conclusion == 'failure')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -192,7 +202,7 @@ jobs:
           SENDER: ${{ github.event.comment.user.login || github.event.sender.login || github.actor }}
           PR: ${{ github.event.issue.number || github.event.pull_request.number || inputs.pr }}
           REVIEW_TITLE: ${{ github.event.workflow_run.display_title }}
-          WORKFLOW_RUN_NAME: ${{ github.event.workflow_run.name }}
+          WORKFLOW_RUN_PATH: ${{ github.event.workflow_run.path }}
           REVIEW_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
           INPUT_MODE: ${{ inputs.mode }}
@@ -436,7 +446,13 @@ jobs:
               # script, not its own documented "never fails" contract, which
               # covers what IT does once it runs -- would abort the gate
               # itself, contradicting "Never fails the gate" above.
-              if [ "$state" = "OPEN" ] && [ "$EVENT" = "workflow_run" ] && [ "$WORKFLOW_RUN_NAME" = "claude-review" ]; then
+              # MATCHED ON `.path`, NEVER `.name` -- see the job's own `if:`
+              # above. `claude-review.yml`'s `run-name` overrides `.name` for
+              # every listener, so this branch matched nothing from the day
+              # that shipped: measured live on #233, two rounds landed and a
+              # clean review completed with three fresh findings, and this
+              # never ran to correct the stale `loop:running` label.
+              if [ "$state" = "OPEN" ] && [ "$EVENT" = "workflow_run" ] && [ "$WORKFLOW_RUN_PATH" = ".github/workflows/claude-review.yml" ]; then
                 python3 .github/scripts/refresh-loop-state.py --repo "$GITHUB_REPOSITORY" --pr "$PR" || true
               fi
               echo "mode=none" >> "$GITHUB_OUTPUT"; exit 0
