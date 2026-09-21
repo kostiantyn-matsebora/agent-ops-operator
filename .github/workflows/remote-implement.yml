@@ -353,9 +353,9 @@ jobs:
           # assignment exits 1 on no match -- which set -euo pipefail (above)
           # would then read as this whole step failing, for the routine case
           # of nothing to carry.
-          carried_issue=$(printf '%s\n' "$out" | \
+          carried_issue=$( (printf '%s\n' "$out" | \
             grep -oE '^carried .* on issue #[0-9]+|^#[0-9]+ already carries the `archive` grant' | \
-            grep -oE '[0-9]+' || true)
+            grep -oE '#[0-9]+' | head -1 | tr -d '#') || true)
           if [ -n "$carried_issue" ]; then
             LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["archive_label"])')
             payload=$(mktemp)

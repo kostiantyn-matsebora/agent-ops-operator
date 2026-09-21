@@ -413,7 +413,7 @@ step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
 assert_contains "$step" "carry-from-pr.sh \"\$pr\" archive"
 assert_contains "$step" "remote-implement.py --event \"\$payload\" --repo \"\$GITHUB_REPOSITORY\""
 
-it "the archive job only re-invokes on an ACTUAL carry, read from carry-grant.py's own success line, never unconditionally"
+it "the archive job only re-invokes on an ACTUAL carry, read from the shared script's own success line, never unconditionally"
 step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
 assert_contains "$step" "grep -oE '^carried .* on issue #[0-9]+"
 assert_contains "$step" 'already carries the `archive` grant'
@@ -421,13 +421,20 @@ assert_contains "$step" 'if [ -n "$carried_issue" ]; then'
 
 # MEASURED LIVE ON A #230 REPLAY: dispatching pr=220 for #51 printed
 # "#51 already carries the `archive` grant; label re-asserted, not commenting
-# again" -- carry-grant.py's OWN dedup on its comment marker, since the label
-# was placed and that marker posted the first time this ran, before this
-# recovery path existed. The grep only matched a FRESH "carried ..." line, so
-# carried_issue came back empty and remote-implement.py never fired -- the
-# recovery path failed to recover the one case it exists for.
-it "the carry-line grep ALSO matches carry-grant.py's own already-carries dedup line, not only a fresh carry"
-extract() { printf '%s\n' "$1" | grep -oE '^carried .* on issue #[0-9]+|^#[0-9]+ already carries the `archive` grant' | grep -oE '[0-9]+' || true; }
+# again" -- the shared script's OWN dedup on its comment marker, since the
+# label was placed and that marker posted the first time this ran, before
+# this recovery path existed. The grep only matched a FRESH "carried ..."
+# line, so carried_issue came back empty and remote-implement.py never fired
+# -- the recovery path failed to recover the one case it exists for.
+#
+# THE EXTRACTION LOGIC IS RUN FROM THE STEP ITSELF, NEVER RETYPED. A second
+# copy of the pattern here would drift from the workflow silently -- the
+# assignment line is pulled out of $step with sed and eval'd against a fixed
+# $out, so this test exercises the exact bytes that ship.
+it "the carry-line grep ALSO matches the shared script's own already-carries dedup line, not only a fresh carry"
+step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
+extraction=$(printf '%s\n' "$step" | sed -n '/^carried_issue=/,/|| true)$/p')
+extract() { out="$1"; eval "$extraction"; printf '%s' "$carried_issue"; }
 assert_equals "51" "$(extract 'carried `conveyor:run` (from maintainer) to `conveyor:archive` on issue #51')"
 assert_equals "51" "$(extract '#51 already carries the `archive` grant; label re-asserted, not commenting again')"
 assert_equals "" "$(extract '#222 does not carry `conveyor:run`; nothing to carry, and that is the ordinary case')"
