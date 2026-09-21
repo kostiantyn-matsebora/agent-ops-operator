@@ -56,12 +56,15 @@ _None._
 | `review-triage.json` | new `station_labels.stalled` entry, comment updated |
 | `tests/carry-grant.test.sh` | three new cases: opsx-lane archive with nothing to carry, plain-lane archive with nothing to carry (unaffected), and `--station fix` with nothing to carry (unaffected) |
 
-**Reference docs made untrue and updated:** none beyond
-`.claude/rules/worktree-delivery.md`'s and `.claude/rules/remote-session.md`'s
-station-label tables, which gain the new value.
+**Reference docs made untrue and updated:**
+`.claude/rules/worktree-delivery.md`'s station-label table, which gains the
+new value, and `docs/diagrams/conveyor-lifecycle-implementation.mmd`, which
+shows every station label and gains the stalled branch off the archive
+station.
 
-**Adopter site:** not affected. This is repository-internal automation with
-no CRD, contract, chart or adopter-visible behaviour.
+**Adopter site:** no page under `docs/` mentions the conveyor's station
+labels. This is repository-internal automation with no CRD, contract, chart
+or adopter-visible behaviour.
 
 **Not affected:** the manager, the chart, every CRD, every image, every
 runtime. Nothing a cluster decides changes.

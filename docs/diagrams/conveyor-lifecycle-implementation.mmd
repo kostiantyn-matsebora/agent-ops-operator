@@ -69,7 +69,9 @@ flowchart TD
     AFIRE["remote-implement.yml · fire<br/>a bot-placed label is re-checked<br/>against the standing instruction"]:::workflow
     ASESS["cloud session · archive-change.md<br/>openspec archive on the branch,<br/>open the archive PR with Closes #n, NO label"]:::session
     ALOOP["the same fix loop drives the archive PR<br/>(carry reads Closes #n)"]:::workflow
+    STALLED2(["no conveyor:run to carry<br/>ISSUE state: station:stalled<br/>resumed by placing conveyor:run or conveyor:archive"]):::stop
     ARCH --> ALBL --> AFIRE --> ST3 --> ASESS --> ALOOP
+    ARCH -->|no conveyor:run on the issue| STALLED2
   end
   P2 -->|push to master, ci, workflow_run| ARCH
   P3(["person merges the archive PR"]):::person

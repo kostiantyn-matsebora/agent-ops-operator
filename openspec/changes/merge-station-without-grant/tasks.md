@@ -16,7 +16,7 @@
 
 ### 3.2 Adopter site
 
-- [x] 3.2.1 Confirm nothing on the site mentions the conveyor's station labels (`grep -rn "station:" docs/*.md docs/guides/*.md`) — none does, so no page needs a change
+- [x] 3.2.1 `docs/diagrams/conveyor-lifecycle-implementation.mmd` shows every station label including `station:merge` — it gains the stalled branch off the archive station too. Every other page under `docs/` is clean (`grep -rn "station:" docs/`)
 
 ## 4. Unit tests
 
