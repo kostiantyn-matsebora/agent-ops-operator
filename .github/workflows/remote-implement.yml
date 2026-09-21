@@ -62,10 +62,21 @@
 # THE ENDPOINT IS NOT IN THE TREE. `ROUTINE_FIRE_URL` is a repository variable
 # (its path carries the routine's id) and `ROUTINE_FIRE_TOKEN` a secret. Without
 # both the program says so on the issue rather than failing silently.
+#
+# A MANUAL `archive` DISPATCH IS THE RECOVERY PATH FOR A MERGE THE ARCHIVE JOB
+# NEVER SAW. The job only ever inspects the commit of the `push` it reacted
+# to, so a change merged BEFORE this file could carry the label (#220, #226 —
+# #51 and #222 stuck at `station:archive` and `station:merge`) has no later
+# `push` to re-trigger it: master has since moved on, and the job never looks
+# at history. `workflow_dispatch` with a `pr` input lets a person re-run the
+# same carry logic against that PR NUMBER directly, instead of resolving one
+# from a commit sha — same script, same re-checked grant, same no-op on
+# anything that is not a same-repo `change/*` `Refs #<n>` pull request.
 name: remote-implement
 
 run-name: >-
   ${{ github.event_name == 'issues' && format('remote-implement for #{0}', github.event.issue.number)
+      || github.event_name == 'workflow_dispatch' && format('remote-implement archive replay for #{0}', inputs.pr)
       || format('remote-implement carry after {0}', github.event.workflow_run.display_title) }}
 
 on:
@@ -78,6 +89,15 @@ on:
   workflow_run:
     workflows: [ci]
     types: [completed]
+  # RECOVERY ONLY -- see the header comment. Never a routine trigger: nothing
+  # here subscribes a routine to this event, and the archive job below is the
+  # only one that reads `inputs.pr`.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Merged pull request number to replay the archive carry for (e.g. a merge that predates this recovery path)"
+        required: true
+        type: string
 
 permissions: {}
 
@@ -226,10 +246,11 @@ jobs:
     # default branch is ever renamed without ci.yml's trigger following it,
     # rather than the archive job silently going quiet on a mismatch.
     if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == github.event.repository.default_branch
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # ISSUES: write TO CARRY -- carry-grant.py --station archive labels and
     # comments the ISSUE alone through gh issue edit / gh issue comment.
@@ -258,26 +279,34 @@ jobs:
           # missing one.
           ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
           ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          DISPATCH_PR: ${{ inputs.pr }}
         run: |
           set -euo pipefail
-          # A push-triggered `ci` run has no pull request of its own -- the
-          # merge commit it ran on is the head of exactly one now-closed pull
-          # request. `search` is the only API that finds a MERGED (closed,
-          # non-open) pull request by commit.
-          #
-          # A FAILED SEARCH AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS --
-          # `gh api`'s own exit status is checked before its output is read,
-          # so a transient API failure is never read as the ordinary
-          # "no merged pull request" case.
-          if ! pr=$(gh api --method GET search/issues \
-            -f "q=repo:$GITHUB_REPOSITORY is:pr is:merged ${{ github.event.workflow_run.head_sha }}" \
-            --jq '.items[0].number'); then
-            echo "::error::could not search for a merged pull request on ${{ github.event.workflow_run.head_sha }}; not the ordinary no-pull-request case"
-            exit 1
-          fi
-          if [ -z "$pr" ] || [ "$pr" = "null" ]; then
-            echo "no merged pull request found for ${{ github.event.workflow_run.head_sha }}; nothing to carry"
-            exit 0
+          # A MANUAL DISPATCH NAMES THE PULL REQUEST DIRECTLY -- the recovery
+          # case this input exists for is exactly a merge whose commit is no
+          # longer resolvable this way, because master has moved on since.
+          if [ -n "${DISPATCH_PR:-}" ]; then
+            pr="$DISPATCH_PR"
+          else
+            # A push-triggered `ci` run has no pull request of its own -- the
+            # merge commit it ran on is the head of exactly one now-closed pull
+            # request. `search` is the only API that finds a MERGED (closed,
+            # non-open) pull request by commit.
+            #
+            # A FAILED SEARCH AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS --
+            # `gh api`'s own exit status is checked before its output is read,
+            # so a transient API failure is never read as the ordinary
+            # "no merged pull request" case.
+            if ! pr=$(gh api --method GET search/issues \
+              -f "q=repo:$GITHUB_REPOSITORY is:pr is:merged ${{ github.event.workflow_run.head_sha }}" \
+              --jq '.items[0].number'); then
+              echo "::error::could not search for a merged pull request on ${{ github.event.workflow_run.head_sha }}; not the ordinary no-pull-request case"
+              exit 1
+            fi
+            if [ -z "$pr" ] || [ "$pr" = "null" ]; then
+              echo "no merged pull request found for ${{ github.event.workflow_run.head_sha }}; nothing to carry"
+              exit 0
+            fi
           fi
           # carry-from-pr.sh applies the SAME change/* guard the open job
           # does -- a merge queue can land a fork's pull request too, and
@@ -295,12 +324,13 @@ jobs:
           #
           # `open` closes the same gap by DISPATCHING `review-dispatch.yml`
           # again, because that workflow accepts `workflow_dispatch`.
-          # `remote-implement.yml` has none, and `fire` reads its input from
-          # a labeling EVENT PAYLOAD, not from workflow inputs -- so the fix
-          # here is to hand `remote-implement.py` the SAME PAYLOAD SHAPE a
-          # real `issues: labeled` event would carry, once `carry-from-pr.sh`
-          # confirms a real carry happened (its one success line starts
-          # "carried "). `remote-implement.py` re-checks the grant itself
+          # `remote-implement.yml` had none at the time, and `fire` reads its
+          # input from a labeling EVENT PAYLOAD, not from workflow inputs --
+          # so the fix here is to hand `remote-implement.py` the SAME PAYLOAD
+          # SHAPE a real `issues: labeled` event would carry, once
+          # `carry-from-pr.sh` confirms a real carry happened (its one
+          # success line starts "carried "). `remote-implement.py` re-checks
+          # the grant itself
           # from `sender`, exactly as it does for a bot-carried `conveyor:fix`
           # label event -- this is not a second, weaker path, it is the same
           # program reading the same facts it would read from a live event.

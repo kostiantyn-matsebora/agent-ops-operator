@@ -427,4 +427,27 @@ env=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["env"])')
 assert_contains "$env" "vars.ROUTINE_FIRE_URL"
 assert_contains "$env" "secrets.ROUTINE_FIRE_TOKEN"
 
+# --- MANUAL REPLAY: a merge whose commit is no longer the one master's most --
+# --- recent push carries has no later ci run to re-trigger the archive job. --
+# --- workflow_dispatch names the pull request directly, for exactly that ----
+# --- recovery -- #51 and #222 stuck at station:archive / station:merge -----
+# --- because the fix landed after their own merges had already scrolled off -
+it "workflow_dispatch declares a required pr input, for replaying a merge the archive job never saw"
+inputs=$(wpy 'print(d[True]["workflow_dispatch"]["inputs"])')
+assert_contains "$inputs" "'pr':"
+assert_contains "$inputs" "'required': True"
+
+it "the archive job also runs on a manual workflow_dispatch, beside its ordinary push-completion trigger"
+cond=$(wpy 'print(d["jobs"]["archive"]["if"])')
+assert_contains "$cond" "workflow_dispatch"
+
+it "a manual dispatch's pr input is used DIRECTLY, skipping the commit search entirely"
+step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
+assert_contains "$step" 'DISPATCH_PR:-'
+assert_contains "$step" 'pr="$DISPATCH_PR"'
+
+it "the dispatch input reaches the step as DISPATCH_PR, from inputs.pr"
+env=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["env"])')
+assert_contains "$env" "inputs.pr"
+
 summary
