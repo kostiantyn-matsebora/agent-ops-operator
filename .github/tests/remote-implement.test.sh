@@ -399,4 +399,32 @@ out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 1 "$status"
 assert_contains "$(cat "$GH_CALLS")" "--remove-label conveyor:archive"
 
+# --- the ARCHIVE JOB'S own step, which places the label AND must start the ---
+# --- session, since a label an API call places fires no webhook at all -----
+W="$ROOT/.github/workflows/remote-implement.yml"
+wpy() { python3 -c "
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+$1
+" "$W"; }
+
+it "the archive job re-invokes remote-implement.py directly after a real carry, since its own label placement fires no webhook"
+step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
+assert_contains "$step" "carry-from-pr.sh \"\$pr\" archive"
+assert_contains "$step" "remote-implement.py --event \"\$payload\" --repo \"\$GITHUB_REPOSITORY\""
+
+it "the archive job only re-invokes on an ACTUAL carry, read from carry-grant.py's own success line, never unconditionally"
+step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
+assert_contains "$step" "grep -oE '^carried .* on issue #[0-9]+'"
+assert_contains "$step" 'if [ -n "$carried_issue" ]; then'
+
+it "the synthesized payload names the archive label from the vocabulary file, never restating it"
+step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
+assert_contains "$step" '["archive_label"]'
+
+it "the archive job's own step sets ROUTINE_FIRE_URL and ROUTINE_FIRE_TOKEN, the same two fire's own step needs"
+env=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["env"])')
+assert_contains "$env" "vars.ROUTINE_FIRE_URL"
+assert_contains "$env" "secrets.ROUTINE_FIRE_TOKEN"
+
 summary

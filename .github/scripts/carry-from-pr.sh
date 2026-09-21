@@ -73,8 +73,16 @@ if [ "$station" = "archive" ]; then
     echo "pull request #$pr's body carries no 'Refs #<n>'; nothing to carry"
     exit 0
   fi
+  # PRINTED, NOT SWALLOWED. `out` is READ here to decide the plain-lane
+  # case below, but a caller capturing THIS SCRIPT's own stdout (the archive
+  # job, deciding whether a real carry happened) needs the line too -- and a
+  # `$(...)` capture with no `tee` of its own would otherwise leave nothing
+  # on carry-from-pr.sh's stdout at all. `printf` re-emits it exactly once,
+  # after the capture, the way the `fix` station's own unpiped call already
+  # reaches this script's stdout for free.
   out=$(python3 .github/scripts/carry-grant.py --repo "$GITHUB_REPOSITORY" \
-    --issue "$refs" --station archive | tee /dev/stderr)
+    --issue "$refs" --station archive)
+  printf '%s\n' "$out"
   case "$out" in
     *"is on the plain lane"*)
       # THE PLAIN LANE ENDS AT THE MERGE, and `Refs` is what its pull request
