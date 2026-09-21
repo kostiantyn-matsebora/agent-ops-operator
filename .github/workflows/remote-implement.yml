@@ -309,7 +309,12 @@ jobs:
           # <placer>) to `<station_label>` on issue #<n>" -- the issue number
           # IS the number this carry landed on, read from the same line that
           # proves the carry actually happened, never assumed from context.
-          carried_issue=$(printf '%s\n' "$out" | grep -oE '^carried .* on issue #[0-9]+' | grep -oE '[0-9]+$')
+          # GUARDED, NOT LEFT TO set -e: the ordinary "nothing carried" case
+          # has no matching line at all, and an unguarded grep in a $(...)
+          # assignment exits 1 on no match -- which set -euo pipefail (above)
+          # would then read as this whole step failing, for the routine case
+          # of nothing to carry.
+          carried_issue=$(printf '%s\n' "$out" | grep -oE '^carried .* on issue #[0-9]+' | grep -oE '[0-9]+$' || true)
           if [ -n "$carried_issue" ]; then
             LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["archive_label"])')
             payload=$(mktemp)
