@@ -131,7 +131,8 @@ assert_not_contains "$(cat "$GH_CALLS")" "station:done"
 # whatever the block above it last wrote.
 it "the carried line reaches carry-from-pr.sh's OWN STDOUT, not only stderr via an inner tee"
 same_repo; printf 'Refs #51\n' > "$BODY_FILE"; printf 'carried conveyor:run (from maintainer) to conveyor:archive on issue #51\n' > "$CARRY_OUT"
-stdout_only=$(cd "$tmp/repo" && GITHUB_REPOSITORY=o/r bash "$S" 220 archive 2>/dev/null)
+stdout_only=$(cd "$tmp/repo" && GITHUB_REPOSITORY=o/r bash "$S" 220 archive 2>/dev/null); rc=$?
+assert_status 0 "$rc"
 assert_contains "$stdout_only" "carried conveyor:run (from maintainer) to conveyor:archive on issue #51"
 
 it "archive from a Closes pull request: the line ENDED at this merge -- station done, nothing carried"
