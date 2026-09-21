@@ -124,7 +124,13 @@ assert_not_contains "$(cat "$GH_CALLS")" "station:done"
 # own capture (`out=$(carry-from-pr.sh ... | tee /dev/stderr)`) only ever
 # sees this script's REAL stdout -- a pipe carries stdout only, never
 # stderr -- so the test must check the same thing, in isolation.
+#
+# SET UP FRESH RATHER THAN REUSING THE PRIOR BLOCK'S FIXTURES. This test
+# reads $tmp/repo and $S directly instead of going through run(), so it
+# must not depend on $BODY_FILE / $CARRY_OUT / $PR_FILE still holding
+# whatever the block above it last wrote.
 it "the carried line reaches carry-from-pr.sh's OWN STDOUT, not only stderr via an inner tee"
+same_repo; printf 'Refs #51\n' > "$BODY_FILE"; printf 'carried conveyor:run (from maintainer) to conveyor:archive on issue #51\n' > "$CARRY_OUT"
 stdout_only=$(cd "$tmp/repo" && GITHUB_REPOSITORY=o/r bash "$S" 220 archive 2>/dev/null)
 assert_contains "$stdout_only" "carried conveyor:run (from maintainer) to conveyor:archive on issue #51"
 
