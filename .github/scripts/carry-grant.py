@@ -43,11 +43,19 @@ merge it. #222 sat exactly here for two days, indistinguishable from a
 line still working. `station:stalled` names that gap the same way
 `loop:stalled` already does on the pull request side.
 
-RE-CHECKED, NEVER TRUSTED. `run_label`'s placer is read from the issue's
+RE-CHECKED, NEVER TRUSTED. The grant's placer is read from the issue's
 timeline at the moment this program runs, exactly as `review-dispatch.yml`'s
 own gate re-checks a label it did not itself place -- a carried label is only
 as good as the grant it claims to carry, and that grant is re-verified here
 rather than assumed because a workflow is the one calling this program.
+
+`conveyor:archive` IS ITS OWN GRANT FOR --station fix, NOT ONLY `run_label`.
+The archive station's own promise (`worktree-delivery.md`'s label table) is
+that the loop drives its resulting pull request to mergeable, not merely that
+a session opens it -- so a person placing `conveyor:archive` directly (the
+sanctioned path when `run_label` was never on the issue, or was consumed)
+authorises exactly that pull request's own fix station. It needs no second,
+unrelated grant the archive station's own description never mentions.
 
 ONE COMMENT, ONCE, under a marker naming whose instruction was carried --
 so a reader sees whose decision it was, on the object the label reached.
@@ -191,10 +199,26 @@ def main() -> int:
 
     vocab = vocabulary(args.vocabulary)
     run_label = vocab["run_label"]
-    station_label = {"fix": vocab["approve_label"], "archive": vocab["archive_label"]}[args.station]
+    archive_label = vocab["archive_label"]
+    station_label = {"fix": vocab["approve_label"], "archive": archive_label}[args.station]
 
     labels = issue_labels(args.repo, args.issue)
-    if run_label not in labels:
+    # `conveyor:archive` IS ITS OWN GRANT FOR --station fix. The archive
+    # station's own promise -- worktree-delivery.md's label table, verbatim --
+    # is that "the loop drives that pull request to mergeable", not merely
+    # that a session opens it. A person placing `conveyor:archive` directly
+    # (the sanctioned path when the issue never carried `conveyor:run` at
+    # all, or it was consumed) authorises exactly that pull request's own fix
+    # station -- it must not need a SECOND, unrelated grant the archive
+    # station's own description never mentions. Measured live on #237: the
+    # archive session fired and opened the pull request correctly, but its
+    # own fixing loop never started, because this carry checked only
+    # `run_label` -- silently treating the archive grant as insufficient
+    # authorisation for the one pull request it exists to produce.
+    grant_label = run_label
+    if args.station == "fix" and run_label not in labels and archive_label in labels:
+        grant_label = archive_label
+    if grant_label not in labels:
         if args.station == "archive" and is_opsx_lane(args.repo, args.issue):
             # A MERGE JUST HAPPENED -- that is this program's own caller's
             # trigger -- so an opsx-lane issue with nothing to carry is a
@@ -213,16 +237,16 @@ def main() -> int:
         print(f"#{args.issue} is on the plain lane, which has no archive station; its line ended at the merge")
         return 0
 
-    placed = label_placement(args.repo, args.issue, run_label)
+    placed = label_placement(args.repo, args.issue, grant_label)
     if placed is None:
-        print(f"::notice::#{args.issue} carries `{run_label}` but the timeline shows nobody placing it; "
+        print(f"::notice::#{args.issue} carries `{grant_label}` but the timeline shows nobody placing it; "
               "nothing carried")
         return 0
     placer, since = placed
     perm = permission(args.repo, placer)
     if perm not in MAY_PUSH:
         # A GRANT THAT EXISTED AND WAS WITHDRAWN IS NOT THE ORDINARY CASE --
-        # unlike `run_label` never being placed at all, this is a standing
+        # unlike the grant never being placed at all, this is a standing
         # instruction that WAS honoured once and has now silently stopped
         # working, for a person who may still believe it is in force. A log
         # line nobody reads is the "reads as a broken bot" failure this
@@ -235,10 +259,10 @@ def main() -> int:
         if not already_carried(args.repo, gone_target, gone_marker):
             comment(args.repo, gone_target,
                     f"{gone_marker}\n"
-                    f"`{run_label}` was placed by @{placer} on #{args.issue}, but they now have "
+                    f"`{grant_label}` was placed by @{placer} on #{args.issue}, but they now have "
                     f"`{perm}` there. Nothing was carried. Someone with write access can place "
-                    f"`{station_label}` directly, or re-place `{run_label}`.")
-        print(f"::notice::#{args.issue}'s `{run_label}` was placed by {placer}, who now has `{perm}`; "
+                    f"`{station_label}` directly, or re-place `{grant_label}`.")
+        print(f"::notice::#{args.issue}'s `{grant_label}` was placed by {placer}, who now has `{perm}`; "
               "nothing carried")
         return 0
 
@@ -270,10 +294,10 @@ def main() -> int:
     where = "pull request" if args.station == "fix" else "issue"
     comment(args.repo, target,
             f"{marker}\n"
-            f"Placed `{station_label}` on this {where}, carrying @{placer}'s standing instruction "
-            f"(`{run_label}`, placed on #{args.issue} at {since}). This program relays a grant a "
+            f"Placed `{station_label}` on this {where}, carrying @{placer}'s grant "
+            f"(`{grant_label}`, placed on #{args.issue} at {since}). This program relays a grant a "
             f"person already gave; it does not decide anything on its own.")
-    print(f"carried `{run_label}` (from {placer}) to `{station_label}` on {target_kind} #{target}")
+    print(f"carried `{grant_label}` (from {placer}) to `{station_label}` on {target_kind} #{target}")
     return 0
 
 
