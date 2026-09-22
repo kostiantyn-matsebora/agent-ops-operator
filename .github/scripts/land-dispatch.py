@@ -322,13 +322,28 @@ class Round:
     def set_loop(self, state: str) -> None:
         """STATE, NOT A GRANT. The pull request's loop label is what a person
         reads; nothing reads it back. So this never fails a round: the script
-        exits 0 on anything it cannot do, and a missing script is a notice."""
+        exits 0 on anything it cannot do, and a missing script is a notice.
+
+        `--vocabulary` IS PASSED EXPLICITLY, AND THAT IS NOT OPTIONAL HERE.
+        `conveyor-state.py`'s own default resolves its vocabulary file
+        relative to ITS OWN restored path -- `$RUNNER_TEMP/conveyor-state.py`
+        -- as `$RUNNER_TEMP/../review-triage.json`, one directory ABOVE where
+        the workflow actually restores `review-triage.json`
+        (`$RUNNER_TEMP/review-triage.json` itself). That default is only
+        ever correct when the script runs from its real path in the repository
+        checkout, which `gate`'s own direct calls do and this restored-copy
+        call does not. Without this flag every `set_loop` call from `land`
+        silently failed the vocabulary lookup and did nothing -- the loop
+        label stuck wherever `gate` last left it, `running`, through every
+        ending `land` ever reported, `no report` included. Measured live on
+        #233: `land` posted "no report... every item is still open", and
+        `loop:running` never moved, with no error anywhere in the run."""
         script = self.args.state_script
         if not script or not pathlib.Path(script).is_file():
             print(f"::notice::loop state `{state}` not recorded: {script} is not there", file=sys.stderr)
             return
         sh(sys.executable, str(script), "--repo", self.args.repo, "--target", str(self.args.pr),
-           "--loop", state, check=False)
+           "--loop", state, "--vocabulary", str(self.args.vocabulary), check=False)
 
     def threads_still_open(self) -> tuple[bool, str]:
         """LIVE, NOT THE COLLECTED SNAPSHOT. `collect` read the threads once
