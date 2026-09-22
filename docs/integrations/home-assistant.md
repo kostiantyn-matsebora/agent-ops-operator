@@ -174,6 +174,26 @@ home-assistant:
                                         # that reaches it
 ```
 
+### Tool names depend on the Home Assistant version
+
+**Home Assistant 2026.9 prefixes every Assist tool with a domain**, and the
+prefix differs per tool:
+
+| Before 2026.9 | 2026.9 and later |
+|---|---|
+| `GetLiveContext` | `homeassistant__GetLiveContext` |
+| `HassTurnOn` | `intent__HassTurnOn` |
+| `HassLightSet` | `light__HassLightSet` |
+| `HassGetCurrentDate`, `HassGetCurrentTime` | `llm__GetDateTime` |
+
+- Both toolsets list each tool under both names. The half your instance does
+  not register is inert.
+- **An install that overrides `mcp.toolsets.*.tools` must add the prefixed
+  names itself.** The allowlist fails closed: a list of bare names on 2026.9
+  leaves the agent with no Home Assistant tool, and nothing reports it.
+- List what your instance registers with a `tools/list` call to its
+  `/mcp_server/sse` (SSE) or `/mcp` (streamable-HTTP) endpoint.
+
 ### Repairing the house is one switch made of two flags
 
 Neither renders alone — the config refuses without a server to reach, and the
