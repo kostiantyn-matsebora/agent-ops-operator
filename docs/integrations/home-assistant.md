@@ -192,7 +192,7 @@ prefix differs per tool:
   names itself.** The allowlist fails closed: a list of bare names on 2026.9
   leaves the agent with no Home Assistant tool, and nothing reports it.
 - List what your instance registers with a `tools/list` call to its
-  `/api/mcp` endpoint.
+  `/mcp_server/sse` (SSE) or `/mcp` (streamable-HTTP) endpoint.
 
 ### Repairing the house is one switch made of two flags
 
