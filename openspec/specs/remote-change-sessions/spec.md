@@ -117,20 +117,36 @@ the environment runs.
 
 ### Requirement: A label on an issue starts a remote session that implements it
 
-An issue carrying the stated implement label, placed by a person with write
-access, SHALL start one remote session in the repository's environment, handed
-the issue's number and nothing else. A label placed by anyone else SHALL be
-removed with a visible comment saying who may place it.
+An issue carrying a station label, placed by a person with write access, SHALL
+start one remote session in the repository's environment for that station,
+handed the issue's number and nothing else.
 
-The fire SHALL be recorded on the issue ONCE, as a comment carrying the
-session's link, and that record is the transition the issue's tracking
+| Label | Starts |
+|---|---|
+| the implement label, or the standing instruction | the implement station |
+| the archive label | the archive station |
+
+A label placed by anyone else SHALL be removed with a visible comment saying
+who may place it. The one exception is a label the repository's own workflow
+carried. That one SHALL be accepted after re-checking two facts:
+
+- the standing instruction it relayed still stands on the issue
+- that instruction was placed by a writer
+
+The fire SHALL be recorded on the issue ONCE PER STATION, as a comment carrying
+the session's link. That record is the transition the issue's tracking
 requires. The promotion then leaves its pointer comment as it does for any
-promoted issue. Nothing else automated is added to the issue by the start, and
-no progress comments follow.
+promoted issue.
+
+Nothing else automated is added to the issue by the start, and no progress
+comments follow. The station label is the progress.
 
 **Who may start a machine writing to a branch is the same question as who may
 dispatch a fix**, and it has the same answer: write access, read from the
 platform, never from a sentence.
+
+A carried label is that person's own answer, relayed, and re-read rather than
+trusted.
 
 #### Scenario: A maintainer labels an issue
 
@@ -149,6 +165,20 @@ platform, never from a sentence.
 - **WHEN** the implement label is removed from an issue and later placed again
 - **THEN** a new session starts, and the change already bound to that issue is
   continued rather than proposed a second time
+
+#### Scenario: A workflow carries the archive label
+
+- **WHEN** the repository's own workflow places the archive label on a tracking
+  issue that still carries a writer's standing instruction
+- **THEN** exactly one remote session starts for the archive station, and the
+  issue gains one comment linking it
+
+#### Scenario: A carried label whose instruction is gone
+
+- **WHEN** the archive label arrives from the workflow but the issue no longer
+  carries the standing instruction, or its placer can no longer push
+- **THEN** no session starts, the label is removed, and the comment says what
+  was missing
 
 ### Requirement: The session's instructions are committed, and the issue is a request
 
@@ -192,7 +222,8 @@ The remote session SHALL deliver the change as one pull request from
 `change/<name>` REFERENCING the issue without a closing keyword, carrying NO
 label, with the unit and chart tiers run in the session and the cluster tier
 dispatched to the smoke end-to-end workflow on its branch. Nothing the session
-does SHALL merge, archive, or place a label.
+does SHALL merge, or place a label. Nothing the IMPLEMENT station does SHALL
+archive.
 
 **The label on the issue is the owner's word, given once**, and a WORKFLOW —
 never the session — carries it to the pull request as the consent the fixing
@@ -202,6 +233,12 @@ that loop cannot settle — a dispute, an unanswered gate — waits for a person
 as it does today. The session SHALL NOT wait for the checks or the review
 before ending. The loop owns the pull request from the moment its label is
 carried to it.
+
+The ARCHIVE station's session SHALL archive the change on its branch, open the
+archive pull request CLOSING the tracking issue with no label, and stop.
+
+That pull request is carried the same consent. The loop drives it to
+mergeable, and a person merges it.
 
 #### Scenario: The session opens the pull request
 
@@ -236,5 +273,13 @@ carried to it.
 #### Scenario: The loop ends
 
 - **WHEN** the fixing loop posts its summary
-- **THEN** the pull request waits for a person to merge, and the change is
-  archived by a person on the branch as today
+- **THEN** the pull request waits for a person to merge, and after the merge
+  the archive station runs under the standing instruction, or a person
+  archives on the branch where no instruction stands
+
+#### Scenario: The archive session opens its pull request
+
+- **WHEN** the archive station's session finishes archiving the change
+- **THEN** one pull request exists from `change/<name>`, closing the tracking
+  issue, carrying no label, and a workflow carries the approve label onto it
+  as it did the first one
