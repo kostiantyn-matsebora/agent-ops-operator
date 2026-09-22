@@ -621,6 +621,30 @@ assert_status 0 "$rc"
 assert_contains "$out" "::notice::loop state \`stalled\` not recorded"
 assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 
+# MEASURED LIVE ON #233. `land`'s job restores conveyor-state.py to a FLAT
+# temp directory ($RUNNER_TEMP), never beside review-triage.json the way it
+# sits in the real checkout -- so conveyor-state.py's own default vocabulary
+# path (one directory above ITS OWN location) resolved to nowhere, every
+# time set_loop() called it without --vocabulary. The failure is silent by
+# that script's own design ("never fails the round"), so `land`'s summary,
+# its exit code and every other assertion in this file read as correct
+# while the loop label simply never moved. This test reproduces the REAL
+# runtime shape -- a copied script with NO review-triage.json anywhere
+# near it -- rather than the real repository checkout every other test
+# here uses, which is exactly why the bug shipped invisibly.
+it "labelled: the state script is called with --vocabulary explicitly, so a COPIED script (the real runtime shape) still finds the label names"
+fresh_repo
+mkdir -p "$tmp/restored"
+cp "$ROOT/.github/scripts/conveyor-state.py" "$tmp/restored/conveyor-state.py"
+out=$(cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" --work-list "$tmp/work-all.json" \
+        --patch "$tmp/empty.patch" --report "$tmp/report-disp.json" --dispatched-by github-actions --mode all \
+        --approver an-approver --since 2026-08-29T10:00:00Z --max-rounds 3 --sonar "$tmp/sonar.json" \
+        --checks "$tmp/checks-none.json" --state-script "$tmp/restored/conveyor-state.py" \
+        --vocabulary "$ROOT/.github/review-triage.json" --push-starts-workflows 2>&1); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$out" "not recorded"
+assert_equals "stalled" "$(loop_label)"
+
 # THE TOKEN PUSHED IT. Without the push credential the workflow does not pass
 # --push-starts-workflows, and a landed round cannot be followed by another.
 it "labelled: without the push credential, lands the round and ends the loop with ONE summary naming the missing secret"
