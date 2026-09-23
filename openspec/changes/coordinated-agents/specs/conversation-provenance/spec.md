@@ -14,8 +14,9 @@ was invoked as. It SHALL be written once at creation and never changed.
 Nothing SHALL resolve a profile, a channel set, a capability or a delivery
 decision through it.
 
-A conversation's `causedBy` MAY itself carry `causedBy`. A member may be a
-Coordinator's own root for a further level of members, with no depth limit.
+The conversation `causedBy` names MAY itself carry a `causedBy`. A member may
+be a Coordinator's own root for a further level of members, with no depth
+limit.
 
 #### Scenario: Written once
 - **WHEN** a conversation with `causedBy` is reopened, re-wired or reconciled

@@ -45,7 +45,8 @@ The MANAGER validates the token and enforces two bounds, per verb:
 | Verb | Bound |
 |---|---|
 | `invoke` | the Coordinator's `agents[]` list |
-| `escalate`, `read` | the calling conversation's own subtree, at any depth — never the tree's ultimate root when the caller is nested |
+| `escalate` | the caller itself — it takes no conversation argument and acts only on the calling conversation, never a member reached through it |
+| `read` | the calling conversation's own subtree, at any depth — never the tree's ultimate root when the caller is nested |
 | `close` | the caller itself, or a conversation it directly caused, per `conversation-close`'s rule — never a deeper descendant reached through an intermediate member |
 
 An allowlist inside the runtime pod SHALL NOT be relied on for any bound.

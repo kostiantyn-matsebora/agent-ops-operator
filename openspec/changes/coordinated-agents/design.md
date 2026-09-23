@@ -61,8 +61,9 @@ refers to the ADR's decisions as D1–D6.
 - `internal/chat/pipelines.go` `PipelinesForSource` returns a `[]Claimant`
   interface — name, kind, resolved `AgentCapabilitySpec`, channel refs, `Ready`. Pipeline
   and Coordinator implement it. Every call site iterates claimants.
-- `Coordinator.Ready` = own capability resolves ∧ every `agents[].capabilityRef`
-  resolves ∧ each AgentCapability `Ready`. Message lists the failing entry names.
+- `Coordinator.Ready` = own capability resolves ∧ every `agents[]` entry's
+  `capabilityRef` or `coordinatorRef` resolves ∧ each resolved AgentCapability
+  or Coordinator is itself `Ready`. Message lists the failing entry names.
 - A conversation created from a Coordinator: `spec.pipelineRef` empty,
   `spec.coordinatorRef` set, `spec.channelRefs` EMPTY (D3/D4), limits
   snapshotted into `status.budget{maxAgents,maxTurns,deadline}`. NESTING: this
@@ -172,9 +173,11 @@ merely deep, it never terminates.
 - It authenticates CALLERS by a per-conversation token the manager injects into
   the runtime pod as `AOPS_MCP_TOKEN`, derived with context
   `coordinator:<name>:<conversation>`. The server forwards it; the MANAGER
-  validates and enforces the `agents[]` list and the calling conversation's
-  own subtree scope on a new `/coordinate/*` surface. The server never
-  decides reach.
+  validates and enforces the per-verb bound on a new `/coordinate/*` surface —
+  the `agents[]` list for `invoke`, the calling conversation's own subtree for
+  `escalate` and `read`, and for `close` the caller itself or a conversation
+  it directly caused, never a deeper descendant. The server never decides
+  reach.
 - Tools: `list_agents`, `list_conversations`, `get_conversation`, `get_tree`,
   `invoke`, `close`, `escalate`, `read`. All complete within the request.
   `list_conversations` returns each conversation's `brief` (D-I) beside name,

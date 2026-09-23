@@ -1045,9 +1045,10 @@ ATTACHED to, never duplicated. Refused when the target is outside
 `agents[]`, when the caller's own `maxAgents` is exhausted, or when it would
 cycle the Coordinator graph (below).
 
-**`close(conversation, reason)`.** Ends a conversation the caller caused,
-stamping `reason` as `closeReason`. Required from a coordinator — refused
-with none. Refused outright for a conversation the caller did not cause.
+**`close(conversation, reason)`.** Ends the caller itself, or a conversation
+it directly caused, stamping `reason` as `closeReason`. Required from a
+coordinator — refused with none. Refused outright for anything else,
+including a deeper descendant reached through an intermediate member.
 
 **`escalate(message)`, on the tree's UNCAUSED conversation** (no
 `causedBy`): binds the Coordinator's escalation channels, snapshotted at

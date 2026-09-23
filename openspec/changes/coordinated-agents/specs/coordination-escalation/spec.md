@@ -18,7 +18,7 @@ agent supplied. Prior inputs and results SHALL NOT be replayed into it.
 
 #### Scenario: Escalate opens a thread with the digest
 - **WHEN** an uncaused conversation escalates with a message
-- **THEN** each of the Coordinator's channels gets a thread whose first post is that message
+- **THEN** each of the snapshotted channels gets a thread whose first post is that message
 - **AND** no earlier member result is posted to it
 
 #### Scenario: After escalation the root is an ordinary multi-channel conversation
