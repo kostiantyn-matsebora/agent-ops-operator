@@ -160,8 +160,23 @@ export function useReopenConversation() {
   })
 }
 
-export function useConversation(name: string) {
-  return useQuery({ queryKey: ['conversation', name], queryFn: () => api.conversation(name) })
+export function useConversation(name: string, enabled = true) {
+  return useQuery({ queryKey: ['conversation', name], queryFn: () => api.conversation(name), enabled })
+}
+
+/**
+ * Everything the console's activity window holds, oldest first — FIRST LOAD.
+ * The stream appends to it from then on, so it is never re-read to observe a
+ * change; a replay reaching further back than it is told so rather than shown
+ * quiet.
+ */
+export function useActivityBuffer() {
+  return useQuery({
+    queryKey: ['activity'],
+    queryFn: () => api.activity(),
+    staleTime: Infinity,
+    retry: false,
+  })
 }
 
 export function useConversationGraph(name: string) {

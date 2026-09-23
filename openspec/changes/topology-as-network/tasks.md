@@ -20,27 +20,27 @@
 
 ## 4. Port the mockup: views and mapping
 
-- [ ] 4.1 PORT from `openspec/changes/topology-as-network/mockup/topology-network.html` the three views and the hop mapping into `platform/console/ui/src/graph/`: Model, Components and Infrastructure as functions from the base graph and a hop to that view's nodes, with per-view classes and the spine that cannot be hidden. Verify: `model.test.ts` maps one dispatch hop onto each view as the spec's first scenario states
-- [ ] 4.2 PORT the detail control as a fold of the Model view only, routes only through full model. Verify: a unit test folds a pipeline's profile, runtime and capabilities into it
-- [ ] 4.3 PORT the route walk with its two refusals: no passage through a channel adapter's served-by edge into a source, and a shared runtime image's calls credited along the route's MCP config. Verify: `model.test.ts` reproduces the console-adapter case and the shared-harness case
-- [ ] 4.4 PORT the expandable conversation pod on the Infrastructure view, with the hops re-routed through the sidecars when open. Verify: a unit test expands a pod and maps a model call through egress-proxy
+- [x] 4.1 PORT from `openspec/changes/topology-as-network/mockup/topology-network.html` the three views and the hop mapping into `platform/console/ui/src/graph/`: Model, Components and Infrastructure as functions from the base graph and a hop to that view's nodes, with per-view classes and the spine that cannot be hidden. Verify: `model.test.ts` maps one dispatch hop onto each view as the spec's first scenario states
+- [x] 4.2 PORT the detail control as a fold of the Model view only, routes only through full model. Verify: a unit test folds a pipeline's profile, runtime and capabilities into it
+- [x] 4.3 PORT the route walk with its two refusals: no passage through a channel adapter's served-by edge into a source, and a shared runtime image's calls credited along the route's MCP config. Verify: `model.test.ts` reproduces the console-adapter case and the shared-harness case
+- [x] 4.4 PORT the expandable conversation pod on the Infrastructure view, with the hops re-routed through the sidecars when open. Verify: a unit test expands a pod and maps a model call through egress-proxy
 
 ## 5. Port the mockup: layout and boxes
 
 - [x] 5.1 Add `dagre` and `webcola` to `platform/console/ui/package.json`, remove `@patternfly/react-topology`. Verify: `npm ci` and `npm run build` succeed in this worktree
-- [ ] 5.2 PORT the three layouts, concentric with wanted-angle placement, cola with groups, dagre with integer-weighted cycle breaking, each remembered per view. Verify: `layout.test.ts` lays each view out without a thrown error and with the hub at the centre for concentric
-- [ ] 5.3 PORT the compaction: members settled in groups, rectangles packed under canvas-shaped gravity, final direct separation, non-members evicted from boxes. Verify: a unit test asserts no two boxes and no two marks intersect after compaction on the fixture graph
-- [ ] 5.4 PORT ownership boxes: bundle from labels, route computed, cluster node from the pod, none on Components, nested pod boxes. Verify: a unit test boxes the fixture by each owner and finds every external outside every node box
-- [ ] 5.5 PORT the canvas sizing to the picture's aspect and the fit over marks and boxes, keeping the existing fit-on-first-display and stop-after-pan rules. Verify: `Viewport.test.tsx` covers the aspect and the fit
+- [x] 5.2 PORT the three layouts, concentric with wanted-angle placement, cola with groups, dagre with integer-weighted cycle breaking, each remembered per view. Verify: `layout.test.ts` lays each view out without a thrown error and with the hub at the centre for concentric
+- [x] 5.3 PORT the compaction: members settled in groups, rectangles packed under canvas-shaped gravity, final direct separation, non-members evicted from boxes. Verify: a unit test asserts no two boxes and no two marks intersect after compaction on the fixture graph
+- [x] 5.4 PORT ownership boxes: bundle from labels, route computed, cluster node from the pod, none on Components, nested pod boxes. Verify: a unit test boxes the fixture by each owner and finds every external outside every node box
+- [x] 5.5 PORT the canvas sizing to the picture's aspect and the fit over marks and boxes, keeping the existing fit-on-first-display and stop-after-pan rules. Verify: `Viewport.test.tsx` covers the aspect and the fit
 
 ## 6. Port the mockup: traffic, feed, replay
 
-- [ ] 6.1 PORT the continuous rate-driven stream with error proportion and the recorded-hop pulses along the drawn path, pulses clickable. Verify: `Graph.test.tsx` renders a stream on an edge with events and a pulse for an arriving hop
-- [ ] 6.2 PORT the hop feed, the per-edge hop history and the hop content panel, joining content from the conversation's status by id. Verify: a unit test opens a completion hop and shows the run's recorded result
-- [ ] 6.3 PORT the pipeline selector, the scope chip with depth, and find and hide over the view's facts, all counting what they hide. Verify: unit tests for each expression form and for the hidden count
-- [ ] 6.4 PORT the window replay: intervals, ten second frames, slider, three speeds, buffer's edge admitted. Verify: unit tests for frame selection, speed and the buffer report
-- [ ] 6.5 PORT the conversation replay: hop list with offsets, step and play with compressed gaps, route dimming, entry from node, pod, hop and list. Verify: unit tests for stepping and dimming on each view
-- [ ] 6.6 Rebuild the Topology page and the conversation page's graph tab on the ported graph, with PatternFly controls in place of the mockup's toolbar. Verify: `npm run typecheck` and `vitest run` pass in this worktree
+- [x] 6.1 PORT the continuous rate-driven stream with error proportion and the recorded-hop pulses along the drawn path, pulses clickable. Verify: `Graph.test.tsx` renders a stream on an edge with events and a pulse for an arriving hop
+- [x] 6.2 PORT the hop feed, the per-edge hop history and the hop content panel, joining content from the conversation's status by id. Verify: a unit test opens a completion hop and shows the run's recorded result
+- [x] 6.3 PORT the pipeline selector, the scope chip with depth, and find and hide over the view's facts, all counting what they hide. Verify: unit tests for each expression form and for the hidden count
+- [x] 6.4 PORT the window replay: intervals, ten second frames, slider, three speeds, buffer's edge admitted. Verify: unit tests for frame selection, speed and the buffer report
+- [x] 6.5 PORT the conversation replay: hop list with offsets, step and play with compressed gaps, route dimming, entry from node, pod, hop and list. Verify: unit tests for stepping and dimming on each view
+- [x] 6.6 Rebuild the Topology page and the conversation page's graph tab on the ported graph, with PatternFly controls in place of the mockup's toolbar. Verify: `npm run typecheck` and `vitest run` pass in this worktree
 
 ## 7. Unit tests
 

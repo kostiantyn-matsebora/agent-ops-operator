@@ -65,12 +65,12 @@ export function ConfigPage() {
 function KindGlyph({ kind, size = 18 }: { kind: string; size?: number }) {
   const s = styleFor(kind)
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flex: '0 0 auto' }}>
+    <svg width={size} height={size} viewBox="-12 -12 24 24" aria-hidden="true" style={{ flex: '0 0 auto' }}>
       <path
         d={s.glyph}
         fill="none"
         stroke="var(--pf-t--global--icon--color--subtle, #6a6e73)"
-        strokeWidth={1.8}
+        strokeWidth={1.4}
         strokeLinecap="round"
         strokeLinejoin="round"
       />

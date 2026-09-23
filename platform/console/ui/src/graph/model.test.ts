@@ -1,272 +1,209 @@
 import { describe, expect, it } from 'vitest'
-import type { GraphEdge, GraphNode, Topology } from '../api/types'
-import { animationDuration, edgeId, edgeLabel, edgeTone, liveEdgeIds, scopedGraph, visibleGraph } from './model'
+import { CLAUDE_IMAGE, fixtureTopology, hop } from '../test-fixtures/topology'
+import { crossing, hopIndex } from './hops'
+import { reach, routeMembers, routeOwners } from './route'
+import { isSpine, type ViewGraph } from './types'
+import { buildView, componentsView, foldToRoutes, infrastructureView, modelView } from './views'
+import { SPINE_CLASS, VIEW_CLASSES } from './views/classes'
 
-const topo: Topology = {
-  eventNodeKinds: {
-    'signal-source': 'signalsources',
-    pipeline: 'pipelines',
-    channel: 'channels',
-    toolset: 'mcptoolsets',
-  },
-  nodes: [
-    { id: 'signalsources/events', kind: 'signalsources', name: 'events', health: 'ok', active: 0, recent: 0 },
-    { id: 'pipelines/ops', kind: 'pipelines', name: 'ops', health: 'ok', active: 1, recent: 3 },
-    { id: 'channels/console', kind: 'channels', name: 'console', health: 'ok', active: 0, recent: 0 },
-    { id: 'mcptoolsets/admin', kind: 'mcptoolsets', name: 'admin', health: 'bad', active: 0, recent: 0 },
-  ],
-  edges: [
-    {
-      from: 'signalsources/events', to: 'pipelines/ops', kind: 'feeds',
-      traffic: { events: 12, errors: 0, ratePerMin: 4, p50LatencyMs: 250 },
-    },
-    { from: 'pipelines/ops', to: 'channels/console', kind: 'posts' },
-    { from: 'pipelines/ops', to: 'mcptoolsets/admin', kind: 'uses' },
-  ],
+const IMG = `runtime-image/${CLAUDE_IMAGE}`
+const A1 = 'agentops-conv-prometheus-alerts-a1'
+const MGR_POD = 'pods/agentops-manager-7c9d'
+
+/** The drawn path a hop takes on a view, as `from>to` in travel order. */
+function path(g: ViewGraph, ev: Parameters<ViewGraph['legs']>[0]): string[] {
+  const x = crossing(g, hopIndex(g), ev)
+  if (!x) return []
+  if (x.pop) return [`@${x.pop}`]
+  return x.edges.map(({ edge, dir }) => (dir === 1 ? `${edge.from}>${edge.to}` : `${edge.to}>${edge.from}`))
 }
 
-describe('visibleGraph', () => {
-  it('hides a class without removing it from the health summary', () => {
-    const view = visibleGraph(topo, { mcptoolsets: true }, true)
-    expect(view.nodes.map((n) => n.kind)).not.toContain('mcptoolsets')
-    // The failing toolset is hidden but STILL counted — a filter that could
-    // conceal a broken component silently is the one way this view could mislead.
-    expect(view.health.bad).toBe(1)
-    expect(view.hiddenSummary.failing).toBe(1)
-    expect(view.hiddenSummary.classes).toEqual(['mcptoolsets'])
+const dispatch = hop('run.dispatched', 'pipeline/alert-triage', 'runtime/default', {
+  conversation: 'prometheus-alerts-a1', pipeline: 'alert-triage', runId: 'r1',
+})
+
+describe('one hop, three pictures', () => {
+  it('moves the pipeline runtime edge, manager to context-sync to image, and manager pod to conversation pod', () => {
+    const topo = fixtureTopology()
+    expect(path(modelView(topo), dispatch)).toEqual(['pipelines/alert-triage>agentruntimes/default'])
+    expect(path(componentsView(topo), dispatch)).toEqual([
+      'manager/manager>context-sync/context-sync',
+      `context-sync/context-sync>${IMG}`,
+    ])
+    expect(path(infrastructureView(topo), dispatch)).toEqual([`${MGR_POD}>pods/${A1}`])
   })
 
-  it('drops edges whose endpoints are hidden', () => {
-    const view = visibleGraph(topo, { mcptoolsets: true }, true)
-    expect(view.edges.some((e) => e.to === 'mcptoolsets/admin')).toBe(false)
-    expect(view.edges).toHaveLength(2)
+  it('maps a signal, an op and a model call onto every view', () => {
+    const topo = fixtureTopology()
+    const signal = hop('signal.received', 'signal-adapter/alertmanager', 'signal-source/prometheus-alerts')
+    expect(path(modelView(topo), signal)).toEqual(['signaladapters/alertmanager>signalsources/prometheus-alerts'])
+    expect(path(componentsView(topo), signal)).toEqual(['signal-adapter/alertmanager>manager/manager'])
+    expect(path(infrastructureView(topo), signal)).toEqual([`pods/agentops-signal-alertmanager-6b7d>${MGR_POD}`])
+
+    const op = hop('channel.op.enqueued', 'conversation/prometheus-alerts-a1', 'channel/ops-chat', {
+      conversation: 'prometheus-alerts-a1',
+    })
+    // The conversation has no edge to a channel: its pipeline's wiring is what moved.
+    expect(path(modelView(topo), op)).toEqual(['pipelines/alert-triage>channels/ops-chat'])
+
+    const call = hop('model.call', IMG, 'model/claude-sonnet-5', {
+      conversation: 'prometheus-alerts-a1', pipeline: 'alert-triage', data: { tokensIn: '1200' },
+    })
+    expect(path(modelView(topo), call)).toEqual(['@agentruntimes/default'])
+    expect(path(componentsView(topo), call)).toEqual([
+      `${IMG}>egress-proxy/egress-proxy`, 'egress-proxy/egress-proxy>model/claude-sonnet-5',
+    ])
+    expect(path(infrastructureView(topo), call)).toEqual([`pods/${A1}>model/claude-sonnet-5`])
   })
 
-  it('keeps broken edges when idle elements are hidden', () => {
-    const withDangling: Topology = {
-      ...topo,
-      edges: [...topo.edges, { from: 'pipelines/ops', to: 'agentprofiles/ghost', kind: 'answers', dangling: true }],
-      nodes: [
-        ...topo.nodes,
-        { id: 'agentprofiles/ghost', kind: 'agentprofiles', name: 'ghost', health: 'bad', active: 0, recent: 0 },
-      ],
+  it('pulses a dropped signal on its source', () => {
+    const topo = fixtureTopology()
+    const drop = hop('signal.dropped', 'signal-source/bench-sensors', null, { status: 'error' })
+    expect(path(modelView(topo), drop)).toEqual(['@signalsources/bench-sensors'])
+  })
+})
+
+describe('the views', () => {
+  it('wires the runtime from the pipeline, never from the profile', () => {
+    const g = modelView(fixtureTopology())
+    expect(g.edges.some((e) => e.from === 'pipelines/alert-triage' && e.to === 'agentruntimes/default')).toBe(true)
+    expect(g.edges.some((e) => e.from.startsWith('agentprofiles/') && e.to.startsWith('agentruntimes/'))).toBe(false)
+    // image, harness and vendor are panel facts, not nodes
+    const rt = g.nodes.find((n) => n.id === 'agentruntimes/default')!
+    expect(rt.facts).toContainEqual(['Harness', 'Claude Code'])
+    expect(g.nodes.some((n) => n.cls === 'runtime-image')).toBe(false)
+  })
+
+  it('draws a runtime image in several pods once, with the count', () => {
+    const g = componentsView(fixtureTopology())
+    const images = g.nodes.filter((n) => n.cls === 'runtime-image')
+    expect(images.map((n) => n.id)).toContain(IMG)
+    expect(images.find((n) => n.id === IMG)!.count).toBe(2)
+    expect(images.find((n) => n.id === IMG)!.label).toBe('agentops-runtime-claude:0.9.3')
+  })
+
+  it('draws the MCP servers the configs point at on Components', () => {
+    const g = componentsView(fixtureTopology())
+    expect(g.edges.map((e) => e.id)).toContain('egress-proxy/egress-proxy->mcp-server/kubernetes')
+  })
+
+  it('draws no Model object on Infrastructure, and keeps pod attributes in the panel', () => {
+    const g = infrastructureView(fixtureTopology())
+    expect(g.nodes.some((n) => n.id.startsWith('pipelines/') || n.id.startsWith('conversations/'))).toBe(false)
+    const p = g.nodes.find((n) => n.id === `pods/${A1}`)!
+    expect(p.collapsed).toBe(true)
+    expect(p.facts).toContainEqual(['Pipeline', 'alert-triage'])
+    expect(p.facts).toContainEqual(['Cluster node', 'node-b'])
+  })
+
+  it('declares each view its own classes and one spine', () => {
+    const topo = fixtureTopology()
+    for (const v of ['model', 'components', 'infrastructure'] as const) {
+      const g = buildView(v, topo)
+      expect(VIEW_CLASSES[v]).toContain(SPINE_CLASS[v])
+      for (const n of g.nodes) expect(VIEW_CLASSES[v]).toContain(n.cls)
     }
-    const view = visibleGraph(withDangling, {}, false)
-    // A dangling ref is never "idle" — it is wrong, and hiding it under a
-    // traffic filter would be the same mistake as hiding a failing node.
-    expect(view.edges.some((e) => e.dangling)).toBe(true)
-    // ...while a wired-but-quiet edge is filtered out
-    expect(view.edges.some((e) => e.to === 'channels/console')).toBe(false)
+    const infra = infrastructureView(topo)
+    expect(infra.spineId).toBe(MGR_POD)
+    // on Infrastructure only the manager's pod is the spine, never every pod
+    expect(infra.nodes.filter((n) => isSpine(infra, n)).map((n) => n.id)).toEqual([MGR_POD])
+    const comps = componentsView(topo)
+    expect(comps.nodes.filter((n) => isSpine(comps, n)).map((n) => n.id)).toEqual(['manager/manager'])
   })
 })
 
-describe('edgeTone', () => {
-  it('separates unconfirmed delivery from success', () => {
-    const unconfirmed: GraphEdge = {
-      from: 'a', to: 'b', kind: 'posts',
-      traffic: { events: 1, errors: 0, ratePerMin: 1, unconfirmed: true },
+describe('routes only', () => {
+  it('folds a pipeline profile, runtime and capabilities into it', () => {
+    const g = foldToRoutes(modelView(fixtureTopology()))
+    const classes = new Set(g.nodes.map((n) => n.cls))
+    expect([...classes].sort()).toEqual(['channeladapters', 'channels', 'pipelines', 'signaladapters', 'signalsources'])
+    const p = g.nodes.find((n) => n.id === 'pipelines/k8s-observe')!
+    const folds = p.facts.find(([k]) => k === 'Folds in')![1]
+    for (const x of ['k8s-engineer', 'default', 'agentops-observe', 'agentops-shell', 'kubernetes', 'cluster-events-b7']) {
+      expect(folds).toContain(x)
     }
-    // Adapter reporting is OPTIONAL, so an adapter that reports nothing must not
-    // look like one that delivered.
-    expect(edgeTone(unconfirmed)).toBe('unconfirmed')
-    expect(edgeTone({ from: 'a', to: 'b', kind: 'posts' })).toBe('idle')
-    expect(edgeTone({ from: 'a', to: 'b', kind: 'posts', dangling: true })).toBe('error')
-    expect(
-      edgeTone({ from: 'a', to: 'b', kind: 'posts', traffic: { events: 2, errors: 1, ratePerMin: 1 } }),
-    ).toBe('error')
+    // a model call inside the route pulses on the pipeline that holds its runtime
+    const call = hop('model.call', IMG, 'model/claude-sonnet-5', { pipeline: 'k8s-observe', conversation: 'cluster-events-b7' })
+    expect(path(g, call)).toEqual(['@pipelines/k8s-observe'])
+    // and the route's own edges survive the fold
+    expect(g.edges.map((e) => e.id)).toContain('pipelines/k8s-observe->channels/console')
   })
 })
 
-describe('animationDuration', () => {
-  it('is faster for busier edges and clamped at both ends', () => {
-    expect(animationDuration(0)).toBe(0)
-    expect(animationDuration(60)).toBeLessThan(animationDuration(1))
-    expect(animationDuration(10_000)).toBeGreaterThanOrEqual(0.4)
-    expect(animationDuration(0.001)).toBeLessThanOrEqual(6)
-  })
-})
-
-describe('edgeLabel', () => {
-  it('renders rate and latency, and nothing for an idle edge', () => {
-    const e = topo.edges[0]
-    expect(edgeLabel(e, 'rate')).toBe('4.0/min')
-    expect(edgeLabel(e, 'latency')).toBe('250ms')
-    expect(edgeLabel(e, 'none')).toBe('')
-    expect(edgeLabel(topo.edges[1], 'rate')).toBe('')
-  })
-})
-
-describe('liveEdgeIds', () => {
-  it('maps activity events onto graph edges', () => {
-    const ids = liveEdgeIds(
-      [
-        {
-          cursor: '1', ts: '', kind: 'signal.claimed', status: 'ok',
-          from: { kind: 'signal-source', name: 'events' },
-          to: { kind: 'pipeline', name: 'ops' },
-        },
-      ],
-      topo.eventNodeKinds,
-      topo.edges,
-    )
-    expect(ids.has('signalsources/events->pipelines/ops')).toBe(true)
+describe('the route walk', () => {
+  it('does not use a shared adapter as a shortcut', () => {
+    const topo = fixtureTopology()
+    const g = modelView(topo)
+    // alert-triage posts to the console channel; the console adapter also
+    // serves the chat source chat-helper reads. Scoping one reaches no other.
+    const route = reach('pipelines/alert-triage', g.edges)
+    expect(route.has('channeladapters/console')).toBe(true)
+    expect(route.has('signaladapters/console')).toBe(false)
+    expect(route.has('signalsources/console')).toBe(false)
+    expect(route.has('pipelines/chat-helper')).toBe(false)
   })
 
-  it('matches an edge regardless of which way the graph drew it', () => {
-    // A signal travels adapter → source; the graph draws that relationship as
-    // source → adapter. Traffic means "these two exchanged something".
-    const withAdapter: Topology = {
-      ...topo,
-      eventNodeKinds: { ...topo.eventNodeKinds, 'signal-adapter': 'signaladapters' },
-      edges: [
-        ...topo.edges,
-        { from: 'signalsources/events', to: 'signaladapters/k8s', kind: 'served-by' },
-      ],
+  it('refuses the mockup form of the same shortcut', () => {
+    const edges = [
+      { from: 'pipelines/a', to: 'channels/console', kind: 'posts' },
+      { from: 'channels/console', to: 'channeladapters/console', kind: 'served-by' },
+      { from: 'channeladapters/console', to: 'signalsources/console', kind: 'served-by' },
+      { from: 'signalsources/console', to: 'pipelines/b', kind: 'feeds' },
+    ]
+    expect(reach('pipelines/a', edges).has('pipelines/b')).toBe(false)
+  })
+
+  it('never turns around through a shared channel', () => {
+    const route = reach('pipelines/nightly-report', modelView(fixtureTopology()).edges)
+    expect(route.has('channels/console')).toBe(true)
+    expect(route.has('pipelines/alert-triage')).toBe(false)
+    expect(route.has('mcpconfigs/prometheus')).toBe(false)
+  })
+
+  it('credits a shared image along the route, not along the image', () => {
+    const topo = fixtureTopology()
+    const calls = [
+      hop('tool.call', IMG, 'mcp-server/kubernetes', { pipeline: 'k8s-observe', conversation: 'cluster-events-b7' }),
+      hop('tool.call', IMG, 'mcp-server/prometheus', { pipeline: 'alert-triage', conversation: 'prometheus-alerts-a1' }),
+    ]
+    for (const v of ['components', 'infrastructure'] as const) {
+      const members = routeMembers(topo, buildView(v, topo), 'alert-triage', calls)
+      expect(members.has('mcp-server/prometheus')).toBe(true)
+      expect([...members].some((id) => id.includes('kubernetes-mcp') || id === 'mcp-server/kubernetes')).toBe(false)
     }
-    const ids = liveEdgeIds(
-      [
-        {
-          cursor: '1', ts: '', kind: 'signal.received', status: 'ok',
-          from: { kind: 'signal-adapter', name: 'k8s' },
-          to: { kind: 'signal-source', name: 'events' },
-        },
-      ],
-      withAdapter.eventNodeKinds,
-      withAdapter.edges,
-    )
-    expect(ids.has('signalsources/events->signaladapters/k8s')).toBe(true)
+    // and on the Model a tool call lands on the route's own MCP config
+    expect(path(modelView(topo), calls[1])).toEqual(['pipelines/alert-triage>mcpconfigs/prometheus'])
   })
 
-  it('credits a conversation hop to its pipeline edge', () => {
-    // An op names a conversation, which the wiring graph has no node for; the
-    // movement still crossed the pipeline's edge to that channel.
-    const ids = liveEdgeIds(
-      [
-        {
-          cursor: '1', ts: '', kind: 'channel.op.enqueued', status: 'ok',
-          from: { kind: 'conversation', name: 'chat-1' },
-          to: { kind: 'channel', name: 'console' },
-          pipeline: 'ops',
-        },
-      ],
-      topo.eventNodeKinds,
-      topo.edges,
-    )
-    expect(ids.has('pipelines/ops->channels/console')).toBe(true)
-  })
-
-  it('lights nothing for a hop that resolves to no drawn edge', () => {
-    const ids = liveEdgeIds(
-      [
-        {
-          cursor: '1', ts: '', kind: 'signal.received', status: 'ok',
-          from: { kind: 'signal-adapter', name: 'k8s' },
-          to: { kind: 'manager', name: 'manager' },
-        },
-      ],
-      topo.eventNodeKinds,
-      topo.edges,
-    )
-    expect(ids.size).toBe(0)
+  it('owns a node to a route only when one pipeline reaches it', () => {
+    const owners = routeOwners(fixtureTopology())
+    expect(owners.get('mcpconfigs/prometheus')).toBe('alert-triage')
+    expect(owners.get('agentruntimes/sandbox')).toBe('nightly-report')
+    expect(owners.has('agentruntimes/default')).toBe(false)
+    expect(owners.has('channels/console')).toBe(false)
   })
 })
 
-// A scope is another filter, so it answers to the same rule the display panel
-// does: it may simplify the picture, never conceal a broken component.
-describe('scopedGraph', () => {
-  // adapter — source — pipeline — channel, plus a toolset off the pipeline and
-  // a second pipeline sharing the channel. Two components: the strand above,
-  // and an unclaimed source that nothing joins.
-  const nodes: GraphNode[] = [
-    { id: 'signaladapters/k8s', kind: 'signaladapters', name: 'k8s', health: 'ok', active: 0, recent: 0 },
-    { id: 'signalsources/events', kind: 'signalsources', name: 'events', health: 'ok', active: 0, recent: 0 },
-    { id: 'pipelines/ops', kind: 'pipelines', name: 'ops', health: 'ok', active: 0, recent: 0 },
-    { id: 'pipelines/alerts', kind: 'pipelines', name: 'alerts', health: 'ok', active: 0, recent: 0 },
-    { id: 'channels/console', kind: 'channels', name: 'console', health: 'ok', active: 0, recent: 0 },
-    { id: 'mcptoolsets/admin', kind: 'mcptoolsets', name: 'admin', health: 'bad', active: 0, recent: 0 },
-    { id: 'signalsources/orphan', kind: 'signalsources', name: 'orphan', health: 'bad', active: 0, recent: 0 },
-  ]
-  const edges: GraphEdge[] = [
-    // AS THE BFF EMITS IT: the served CR points at its adapter. Writing this the
-    // intuitive way round is what let the adapter defect through — the fixture
-    // agreed with the code instead of with the cluster.
-    { from: 'signalsources/events', to: 'signaladapters/k8s', kind: 'served-by' },
-    { from: 'signalsources/events', to: 'pipelines/ops', kind: 'feeds' },
-    { from: 'pipelines/ops', to: 'channels/console', kind: 'posts' },
-    { from: 'pipelines/ops', to: 'mcptoolsets/admin', kind: 'uses' },
-    { from: 'pipelines/alerts', to: 'channels/console', kind: 'posts' },
-  ]
-  const ids = (r: { nodes: GraphNode[] }) => r.nodes.map((n) => n.id).sort()
+describe('an expanded conversation pod', () => {
+  it('opens into its containers and routes the hops through the sidecars', () => {
+    const topo = fixtureTopology()
+    const open = infrastructureView(topo, new Set([`pods/${A1}`]))
+    const ids = open.nodes.map((n) => n.id)
+    expect(ids).not.toContain(`pods/${A1}`)
+    for (const k of ['agent', 'context-sync', 'egress-proxy']) expect(ids).toContain(`containers/${A1}/${k}`)
 
-  it('scopes to the whole ROUTE through the element, not to whatever it can be walked to', () => {
-    const r = scopedGraph(nodes, edges, { id: 'pipelines/ops', depth: 'all' })
-    expect(ids(r)).toEqual([
-      'channels/console', 'mcptoolsets/admin',
-      'pipelines/ops', 'signaladapters/k8s', 'signalsources/events',
+    const call = hop('model.call', IMG, 'model/claude-sonnet-5', { conversation: 'prometheus-alerts-a1', pipeline: 'alert-triage' })
+    expect(path(open, call)).toEqual([
+      `containers/${A1}/agent>containers/${A1}/egress-proxy`,
+      `containers/${A1}/egress-proxy>model/claude-sonnet-5`,
     ])
-    // pipelines/alerts posts to the SAME channel, and that is the whole point:
-    // a shared object must not become a shortcut between two routes that have
-    // nothing to do with each other. Undirected traversal pulled it in.
-    expect(ids(r)).not.toContain('pipelines/alerts')
-  })
-
-  it('runs UPSTREAM as well as downstream', () => {
-    // A channel reaches nothing downstream. Scoping it must still answer which
-    // pipelines post to it, or the scope is useless on half the graph — and
-    // both of them are ancestors, so both belong.
-    const r = scopedGraph(nodes, edges, { id: 'channels/console', depth: 1 })
-    expect(ids(r)).toEqual(['channels/console', 'pipelines/alerts', 'pipelines/ops'])
-  })
-
-  it('cuts by hop distance, not by discovery order', () => {
-    const r = scopedGraph(nodes, edges, { id: 'pipelines/ops', depth: 1 })
-    expect(ids(r)).toEqual([
-      'channels/console', 'mcptoolsets/admin', 'pipelines/ops', 'signalsources/events',
+    expect(path(open, dispatch)).toEqual([
+      `${MGR_POD}>containers/${A1}/context-sync`,
+      `containers/${A1}/context-sync>containers/${A1}/agent`,
     ])
-    // the adapter is 2 hops upstream: on the route, but beyond this depth, and
-    // reported as such rather than simply absent
-    expect(r.beyondDepth).toBe(1)
-  })
 
-  it('keeps every edge whose ends both survive, and drops the rest', () => {
-    const r = scopedGraph(nodes, edges, { id: 'signalsources/events', depth: 1 })
-    expect(r.edges.map(edgeId).sort()).toEqual([
-      'signalsources/events->pipelines/ops',
-      'signalsources/events->signaladapters/k8s',
-    ])
-  })
-
-  it('names the class of a failing element it put out of view', () => {
-    const r = scopedGraph(nodes, edges, { id: 'channels/console', depth: 1 })
-    expect(r.outOfScope.failing).toBe(2)
-    expect(r.outOfScope.classes).toEqual(['mcptoolsets', 'signalsources'])
-  })
-
-  it('puts a signal adapter at the HEAD of its route, not at a dead end', () => {
-    // The adapter feeds the source, so everything the source feeds is
-    // downstream of the adapter — even though the edge is drawn the other way.
-    const r = scopedGraph(nodes, edges, { id: 'signaladapters/k8s', depth: 'all' })
-    expect(ids(r)).toEqual([
-      'channels/console', 'mcptoolsets/admin', 'pipelines/ops',
-      'signaladapters/k8s', 'signalsources/events',
-    ])
-  })
-
-  it('keeps a channel adapter at the TAIL, where the flow already points', () => {
-    const r = scopedGraph(nodes, edges, { id: 'channels/console', depth: 1 })
-    expect(ids(r)).toEqual(['channels/console', 'pipelines/alerts', 'pipelines/ops'])
-  })
-
-  it('leaves the whole graph alone when there is no scope', () => {
-    const r = scopedGraph(nodes, edges, undefined)
-    expect(r.nodes).toHaveLength(nodes.length)
-    expect(r.outOfScope.count).toBe(0)
-  })
-
-  it('falls back to the whole graph when the focused id is not on it', () => {
-    // A node can vanish under the operator — hide its class while it is
-    // focused — and an empty canvas would present that as the answer.
-    const r = scopedGraph(nodes, edges, { id: 'pipelines/gone', depth: 'all' })
-    expect(r.nodes).toHaveLength(nodes.length)
+    const closed = infrastructureView(topo, new Set())
+    expect(closed.nodes.map((n) => n.id)).toContain(`pods/${A1}`)
+    expect(path(closed, call)).toEqual([`pods/${A1}>model/claude-sonnet-5`])
   })
 })

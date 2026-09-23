@@ -44,6 +44,13 @@ export interface EdgeTraffic {
   unconfirmed?: boolean
 }
 
+/** A system outside the install an adapter CR declares it faces, verbatim. */
+export interface ExternalRef {
+  name: string
+  /** sender (pushes to the adapter), api (called by it) or kubernetes. */
+  kind: string
+}
+
 export interface GraphNode {
   id: string
   kind: string
@@ -54,9 +61,20 @@ export interface GraphNode {
   detached?: boolean
   active: number
   recent: number
+  /** The chart bundle that installs the object, from its Helm label. */
+  bundle?: string
+  image?: string
+  harness?: string
+  vendor?: string
+  externals?: ExternalRef[]
+  servedBy?: string
+  phase?: string
+  runtimePod?: string
 }
 
-export type EdgeKind = 'feeds' | 'answers' | 'posts' | 'served-by' | 'uses'
+export type EdgeKind =
+  | 'feeds' | 'answers' | 'posts' | 'served-by' | 'uses' | 'runs-on' | 'opened'
+  | 'sends' | 'calls'
 
 export interface GraphEdge {
   from: string
@@ -66,11 +84,74 @@ export interface GraphEdge {
   traffic?: EdgeTraffic
 }
 
+/** One node of the Components view: a component the repository builds, or a system outside. */
+export interface Component {
+  /** `<role>/<name>`, which is `<activity node kind>/<name>` wherever a hop names one. */
+  id: string
+  role: string
+  name: string
+  image?: string
+  /** Pods running it now. */
+  count: number
+  health: Health
+  reason?: string
+  message?: string
+  bundle?: string
+  /** The Model node ids this component carries. */
+  implements?: string[]
+  workload?: string
+  servedBy?: string
+  externalKind?: string
+  harness?: string
+  vendor?: string
+  url?: string
+}
+
+export interface Container {
+  name: string
+  image?: string
+  /** On a runtime pod: runtime-image, context-sync or egress-proxy. */
+  role?: string
+  ready: boolean
+  restarts: number
+}
+
+/** One node of the Infrastructure view. */
+export interface Pod {
+  id: string
+  name: string
+  component?: string
+  clusterNode?: string
+  phase?: string
+  health: Health
+  reason?: string
+  conversation?: string
+  pipeline?: string
+  containers: Container[]
+}
+
+/** One windowed hop aggregate, in the activity vocabulary. */
+export interface EdgeStat {
+  from: NodeRef
+  to: NodeRef
+  events: number
+  errors: number
+  ratePerMin: number
+  p50LatencyMs?: number
+  maxLatencyMs?: number
+  lastTs?: string
+  unconfirmed: boolean
+}
+
 export interface Topology {
   nodes: GraphNode[]
   edges: GraphEdge[]
   windowSeconds?: number
   eventNodeKinds: Record<string, string>
+  components?: Component[]
+  componentEdges?: GraphEdge[]
+  pods?: Pod[]
+  hops?: EdgeStat[]
 }
 
 export interface TopologyResponse {
@@ -106,6 +187,14 @@ export interface ActivityEvent {
   code?: string
   detail?: string
   adapter?: string
+  /** Bounded facts with no durable home: tokens, a tool, a stop reason. Never content. */
+  data?: Record<string, string>
+}
+
+export interface ActivityResponse {
+  events: ActivityEvent[]
+  cursor: string
+  stream: StreamHealth
 }
 
 export interface StreamHealth {

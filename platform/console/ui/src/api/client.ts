@@ -2,7 +2,7 @@ import type {
   VocabularyResponse, ChartResponse, CloseRequest, CloseResponse,
   DeleteResponse, ConversationDetail, ConversationGraph,
   ConversationPage, Detail, Finding, KindInfo, InventoryRow, MarkReadRequest,
-  MarkReadResponse, Overview, Queues, Session, SourcesResponse, TopologyResponse,
+  MarkReadResponse, Overview, ActivityResponse, Queues, Session, SourcesResponse, TopologyResponse,
 } from './types'
 
 /** Raised for a non-2xx response, carrying the server's own explanation. */
@@ -50,6 +50,9 @@ export const api = {
 
   topology: (windowSeconds: number) =>
     request<TopologyResponse>(`/api/topology?windowSeconds=${windowSeconds}`),
+
+  // Everything the console holds, oldest first: what a replay can reach.
+  activity: (limit = 5000) => request<ActivityResponse>(`/api/activity?limit=${limit}`),
 
   conversations: (params: URLSearchParams) =>
     request<ConversationPage>(`/api/conversations?${params.toString()}`),
