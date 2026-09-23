@@ -920,6 +920,199 @@ the limit to `0` to disable the breaker without disabling the counting.
   for chat transports, against the channel adapter contract above.
 - [`platform/context-sync/`](../platform/context-sync/) — the sidecar.
 
+## The aops MCP server contract
+
+The interface through which a coordinating agent sees and acts on agent-ops
+itself. `platform/mcp-aops/` is a thin client of the manager — MCP over
+streamable HTTP, no state of its own, deciding nothing about reach.
+
+```
+runtime pod  --MCP, token forwarded verbatim-->  mcp-aops
+mcp-aops     --HTTP, same token as Bearer------->  manager /coordinate/*
+```
+
+**The server forwards a forged request exactly as it forwards a legitimate
+one.** It holds no allowlist and makes no decision either way. The manager
+validates the token, resolves the calling conversation and enforces every
+bound.
+
+This is deliberate. A server holding the manager's own adapter token and
+enforcing reach itself was considered and rejected — that puts a credential
+stronger than any caller's inside a component every coordinator can reach.
+
+**One credential of its own** — a derived token, context `mcp-aops`, used
+only to authenticate the server to the manager. Never a caller's.
+
+### Authentication and reach
+
+| Token context | Injected into | Reaches |
+|---|---|---|
+| `coordinator:<name>:<conversation>` | a Coordinator's own conversation, as `AOPS_MCP_TOKEN` | every tool and verb, scoped to that ONE CONVERSATION'S OWN SUBTREE |
+| `channel-reader:<channel>` | a reader with no coordination role | `list_conversations` / `get_conversation` only, projected, no verb |
+
+**The token is per conversation, never per Coordinator.** One Coordinator may
+hold several open conversations at once, nested or not, and a token naming
+only the Coordinator could not scope to one of them.
+
+**A nested caller's reach is its own subtree, never the tree's ultimate
+root.** A Coordinator's conversation three levels deep sees its own members
+and their descendants, and nothing above it — not its parent, and not a
+sibling branch.
+
+| Refused | By |
+|---|---|
+| Invoking an AgentCapability outside the caller's `agents[]` list | manager |
+| Acting on a conversation outside the caller's own subtree | manager |
+| Any verb, from a `channel-reader` token | manager |
+| An `invoke` that would repeat a Coordinator already in the caller's ancestor chain | manager (cycle guard, below) |
+
+An allowlist inside the runtime pod is never relied on for any of these.
+
+### The tool list
+
+| Tool | Kind | Returns |
+|---|---|---|
+| `list_agents()` | read | the caller's Coordinator's `agents[]` entries — name and description only |
+| `list_conversations()` | read | conversations in the caller's scope, each with `brief` |
+| `get_conversation(name)` | read | one conversation's detail, in scope |
+| `get_tree(name?)` | read | the caller's own subtree, walked from itself downward |
+| `invoke(agent, task)` | verb | the member's name at once — `created` or `attached` |
+| `close(conversation, reason)` | verb | acknowledgement |
+| `escalate(message)` | verb | acknowledgement |
+| `read(conversation)` | verb | a conversation's own record, in scope |
+
+**All eight complete within the request.** None waits on another agent's
+work — a `list_conversations` call never blocks on a member still running.
+
+### Read tools
+
+The four read tools cover Conversations, Pipelines, AgentCapabilities,
+Coordinators, SignalSources and Channels, filtered to what the calling
+Coordinator lists and what it caused.
+
+`list_conversations` carries `brief` beside name, title, phase and pipeline,
+so a caller deciding WHICH conversation it means never has to `read` one
+first:
+
+```json
+{
+  "conversations": [
+    {
+      "name": "agentops-conv-a1b2c3",
+      "title": "ingress 502s in web",
+      "brief": "Checking the web namespace ingress and its Service after 502s were reported.",
+      "phase": "Active",
+      "pipeline": "incident-coordinator"
+    }
+  ]
+}
+```
+
+`get_tree` walks from the CALLING conversation downward, one hop at a time —
+never toward the tree's ultimate root when the caller is itself nested:
+
+```json
+{
+  "name": "agentops-conv-sub-1",
+  "brief": "Diagnosing the Service side of the ingress incident.",
+  "members": [
+    {"name": "agentops-conv-sub-1-a", "entry": "endpoint-check", "phase": "Closed", "members": []}
+  ]
+}
+```
+
+The parent that invoked this Coordinator, and any sibling branch, sit outside
+this response — refused if named directly, not merely omitted.
+
+### The four verbs, all asynchronous
+
+Every verb returns without waiting on any agent's work. A result, when there
+is one, arrives later as an ordinary input.
+
+**`invoke(agent, task)`.** Starts, or attaches to, a member conversation
+running the named `agents[]` entry with `task` as its first input.
+
+Reports which happened — a live member carrying the same signature is
+ATTACHED to, never duplicated. Refused when the target is outside
+`agents[]`, when the caller's own `maxAgents` is exhausted, or when it would
+cycle the Coordinator graph (below).
+
+**`close(conversation, reason)`.** Ends a conversation the caller caused,
+stamping `reason` as `closeReason`. Required from a coordinator — refused
+with none. Refused outright for a conversation the caller did not cause.
+
+**`escalate(message)`, on the tree's UNCAUSED conversation** (no
+`causedBy`): binds the Coordinator's escalation channels, snapshotted at
+creation, and opens a thread on each with `message` as the first post.
+
+**`escalate(message)`, on a NESTED conversation** (one carrying `causedBy`):
+opens no thread. Closes that conversation with `message` as its
+`closeReason` and its result, landing on its own parent as an ordinary
+member-result input.
+
+The parent's agent then decides whether to handle it or call `escalate`
+again — bubbling one hop at a time until a call reaches the uncaused root.
+
+**`read(conversation)`.** Scoped exactly as the read tools are.
+
+### The cycle guard
+
+Nesting carries no depth limit — a tree runs as deep as each level's own
+budget allows. A CYCLE is a different failure from depth: Coordinator A
+invoking B invoking A never terminates, however small each step.
+
+On every `invoke`, the manager walks the calling conversation's `causedBy`
+chain to the uncaused root, collecting each ancestor's `coordinatorRef`. A
+target that resolves to (or is wired as) a Coordinator already in that list
+is refused, naming the repeated Coordinator:
+
+```json
+{"error": "cycle: coordinator \"A\" already appears in this conversation's ancestor chain"}
+```
+
+**A `maxDepth` field was considered and rejected.** It bounds a symptom — a
+long chain — rather than the actual failure, a chain that repeats, and would
+refuse a legitimately deep but acyclic tree an operator asked for.
+
+### The channel-reader projection
+
+A second reach class exists for a caller that is not a coordinator at all —
+first user: the voice lane's analyzer, which must pick the conversation a
+spoken reply belongs to without reading any conversation's transcript.
+
+```jsonc
+// token context: channel-reader:voice-desk
+{
+  "conversations": [
+    {
+      "name": "agentops-conv-x9",
+      "title": "kitchen light schedule",
+      "brief": "Adjusting the evening lighting automation.",
+      "phase": "Active",
+      "pipeline": "home-assistant"
+    }
+  ]
+}
+// no run, no input, no tree -- only conversations with a thread on "voice-desk"
+```
+
+Every verb is refused for this token. The bound is the CHANNEL, because "a
+conversation you could mean" is one that has a thread where you are
+speaking — the same bound the channel-close remote verb uses for who may
+end a conversation.
+
+The server learns nothing about channels. It forwards this token exactly as
+it forwards a coordinator's, and the manager alone decides the projection.
+
+### Placement
+
+| | |
+|---|---|
+| Reachable from | runtime pods and the manager only, under the ADR 0001 network wall |
+| Holds | one derived token (`mcp-aops`) and no Secret reads |
+| Bound to a Coordinator via | `MCPConfig`, rendered by the chart, exposed through `global.builtinToolsets.agentops-coordinate` |
+| Component path | `platform/mcp-aops/` — standard-library Go, the shared Dockerfile recipe |
+
 ## The activity contract
 
 **Per-hop telemetry: one structured event for every movement the manager
@@ -1118,6 +1311,7 @@ scrape time from the same in-memory state `/status` reports.
 | `GET/POST /channel/*` | adapter-facing channel contract (bearer token, see adapter contract) |
 | `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token, see signal adapter contract) |
 | `GET/POST /activity*` | per-hop telemetry (bearer token, see activity contract) |
+| `POST /coordinate/*` | the aops MCP server's four verbs and read tools (bearer token, see aops MCP server contract) |
 | `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |
