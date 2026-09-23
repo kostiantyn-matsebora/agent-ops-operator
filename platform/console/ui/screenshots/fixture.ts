@@ -14,9 +14,9 @@
 // byte-identical images.
 
 import type {
-  VocabularyResponse, ConversationDetail, ConversationGraph, ConversationPage, Detail,
-  Finding, InventoryRow, KindInfo, Overview, Queues, Session, SourcesResponse,
-  TopologyResponse,
+  ActivityEvent, ActivityResponse, VocabularyResponse, ConversationDetail, ConversationGraph,
+  ConversationPage, Detail, Finding, InventoryRow, KindInfo, Overview, Queues, Session,
+  SourcesResponse, TopologyResponse,
 } from '../src/api/types'
 
 /** The clock the capture pins the browser to. */
@@ -448,15 +448,19 @@ const conversationDetail: ConversationDetail = {
     },
   ],
   events: [
-    { cursor: '18240', ts: ago(96), kind: 'signal', from: { kind: 'signal-source', name: 'cluster-events' }, to: { kind: 'pipeline', name: 'k8s-observe' }, status: 'ok', conversation: 'cluster-events-7c1d4e', pipeline: 'k8s-observe' },
-    { cursor: '18241', ts: ago(94), kind: 'dispatch', from: { kind: 'pipeline', name: 'k8s-observe' }, to: { kind: 'runtime', name: 'default' }, status: 'ok', conversation: 'cluster-events-7c1d4e', runId: 'run-3', latencyMs: 340 },
-    { cursor: '18242', ts: ago(58), kind: 'answer', from: { kind: 'runtime', name: 'default' }, to: { kind: 'channel', name: 'console' }, status: 'ok', conversation: 'cluster-events-7c1d4e', runId: 'run-3', latencyMs: 36120 },
-    { cursor: '18243', ts: ago(44), kind: 'inbound', from: { kind: 'channel', name: 'ops-chat' }, to: { kind: 'pipeline', name: 'k8s-observe' }, status: 'ok', conversation: 'cluster-events-7c1d4e' },
+    { cursor: '18240', ts: ago(96), kind: 'signal.claimed', from: { kind: 'signal-source', name: 'cluster-events' }, to: { kind: 'pipeline', name: 'k8s-observe' }, status: 'ok', conversation: 'cluster-events-7c1d4e', pipeline: 'k8s-observe' },
+    { cursor: '18241', ts: ago(94), kind: 'run.dispatched', from: { kind: 'pipeline', name: 'k8s-observe' }, to: { kind: 'runtime', name: 'default' }, status: 'ok', conversation: 'cluster-events-7c1d4e', pipeline: 'k8s-observe', runId: 'run-3', latencyMs: 340 },
+    { cursor: '18242', ts: ago(58), kind: 'run.completed', from: { kind: 'runtime', name: 'default' }, to: { kind: 'pipeline', name: 'k8s-observe' }, status: 'ok', conversation: 'cluster-events-7c1d4e', pipeline: 'k8s-observe', runId: 'run-3', latencyMs: 36120 },
+    { cursor: '18243', ts: ago(44), kind: 'channel.inbound', from: { kind: 'channel-adapter', name: 'telegram' }, to: { kind: 'conversation', name: 'cluster-events-7c1d4e' }, status: 'ok', conversation: 'cluster-events-7c1d4e', pipeline: 'k8s-observe' },
   ],
   runtimePodStatus: { phase: 'Running', problem: '', node: 'node-2' },
 }
 
 // ---- topology ----------------------------------------------------------------
+//
+// The BFF's real shape: the Model's objects and references, the COMPONENTS and
+// PODS the other two views are drawn from, and the windowed hops. Every name is
+// invented, and every image is the short form the overview above already uses.
 
 const eventNodeKinds: Record<string, string> = {
   'signal-adapter': 'signaladapters',
@@ -468,6 +472,88 @@ const eventNodeKinds: Record<string, string> = {
   'channel-adapter': 'channeladapters',
   toolset: 'mcptoolsets',
   'mcp-config': 'mcpconfigs',
+  conversation: 'conversations',
+}
+
+const CLAUDE_IMAGE = 'agentops-runtime-claude:0.5.1'
+const SANDBOX_IMAGE = 'agentops-runtime-claude:0.5.1-sandbox'
+const MODEL = 'claude-sonnet-5'
+const REPO = 'https://git.example.com/ops/agents.git'
+
+type NodeExtra = Partial<TopologyResponse['topology']['nodes'][number]>
+const node = (kind: string, name: string, extra: NodeExtra = {}) => ({
+  id: `${kind}/${name}`, kind, name, health: 'ok' as const, active: 0, recent: 0, ...extra,
+})
+type Comp = NonNullable<TopologyResponse['topology']['components']>[number]
+const comp = (role: string, name: string, extra: Partial<Comp> = {}): Comp => ({
+  id: `${role}/${name}`, role, name, count: 0, health: 'none', ...extra,
+})
+type PodT = NonNullable<TopologyResponse['topology']['pods']>[number]
+const pod = (name: string, clusterNode: string, component: string, extra: Partial<PodT> = {}): PodT => ({
+  id: `pods/${name}`, name, clusterNode, component, phase: 'Running', health: 'ok',
+  containers: [{ name: 'main', ready: true, restarts: 0 }], ...extra,
+})
+const convPod = (conversation: string, clusterNode: string, pipeline: string, image: string): PodT =>
+  pod(`agentops-conv-${conversation}`, clusterNode, `runtime-image/${image}`, {
+    conversation, pipeline,
+    containers: [
+      { name: 'agent', image, role: 'runtime-image', ready: true, restarts: 0 },
+      { name: 'context-sync', image: 'agentops-context-sync:0.3.0', role: 'context-sync', ready: true, restarts: 0 },
+      { name: 'egress-proxy', image: 'agentops-egress-proxy:0.2.1', role: 'egress-proxy', ready: true, restarts: 0 },
+    ],
+  })
+const stat = (from: [string, string], to: [string, string], events: number, ratePerMin: number, p50LatencyMs?: number) => ({
+  from: { kind: from[0], name: from[1] }, to: { kind: to[0], name: to[1] },
+  events, errors: 0, ratePerMin, p50LatencyMs, unconfirmed: false,
+})
+
+// The activity buffer: one conversation's whole run in the current vocabulary,
+// a second one mid-run, an alert claimed, and one drop. Each view maps these
+// same hops onto its own nodes.
+let seq = 18180
+type Hop = ActivityEvent
+const hop = (s: number, kind: string, from: [string, string] | null, to: [string, string] | null, extra: Partial<Hop> = {}): Hop => ({
+  cursor: String(++seq), ts: ago(s), kind, status: 'ok',
+  from: from ? { kind: from[0], name: from[1] } : undefined,
+  to: to ? { kind: to[0], name: to[1] } : undefined,
+  ...extra,
+})
+const C1 = { conversation: 'cluster-events-7c1d4e', pipeline: 'k8s-observe' }
+const C2 = { conversation: 'console-3f9a2b', pipeline: 'k8s-observe' }
+const A1 = { conversation: 'prometheus-alerts-91b7fd', pipeline: 'alert-triage' }
+const activityEvents: Hop[] = [
+  hop(100, 'signal.received', ['signal-adapter', 'k8s-events'], ['signal-source', 'cluster-events'], { conversation: C1.conversation }),
+  hop(99, 'signal.claimed', ['signal-source', 'cluster-events'], ['pipeline', 'k8s-observe'], C1),
+  hop(99, 'conversation.created', ['pipeline', 'k8s-observe'], ['conversation', C1.conversation], C1),
+  hop(98, 'runtime.starting', ['conversation', C1.conversation], ['runtime', 'default'], { ...C1, latencyMs: 3400 }),
+  hop(95, 'context.restored', ['runtime', 'default'], ['conversation', C1.conversation], { ...C1, code: 'start' }),
+  hop(94, 'run.dispatched', ['pipeline', 'k8s-observe'], ['runtime', 'default'], { ...C1, runId: 'run-3', latencyMs: 340 }),
+  hop(90, 'model.call', ['runtime-image', CLAUDE_IMAGE], ['model', MODEL], { ...C1, runId: 'run-3', detail: MODEL, data: { model: MODEL, tokensIn: '18422', tokensOut: '412', stopReason: 'tool_use' } }),
+  hop(86, 'tool.call', ['runtime-image', CLAUDE_IMAGE], ['mcp-server', 'kubernetes'], { ...C1, runId: 'run-3', latencyMs: 820, detail: 'mcp__kubernetes__pods_log', data: { tool: 'mcp__kubernetes__pods_log', server: 'kubernetes', resultBytes: '6120' } }),
+  hop(80, 'model.call', ['runtime-image', CLAUDE_IMAGE], ['model', MODEL], { ...C1, runId: 'run-3', detail: MODEL, data: { model: MODEL, tokensIn: '24906', tokensOut: '380', cacheReadTokens: '18000', stopReason: 'tool_use' } }),
+  hop(76, 'tool.call', ['runtime-image', CLAUDE_IMAGE], ['mcp-server', 'kubernetes'], { ...C1, runId: 'run-3', latencyMs: 540, detail: 'mcp__kubernetes__resources_get', data: { tool: 'mcp__kubernetes__resources_get', server: 'kubernetes', resultBytes: '2210' } }),
+  hop(62, 'model.call', ['runtime-image', CLAUDE_IMAGE], ['model', MODEL], { ...C1, runId: 'run-3', detail: MODEL, data: { model: MODEL, tokensIn: '27730', tokensOut: '1104', cacheReadTokens: '24500', stopReason: 'end_turn' } }),
+  hop(58, 'run.completed', ['runtime', 'default'], ['pipeline', 'k8s-observe'], { ...C1, runId: 'run-3', latencyMs: 36120, code: 'succeeded', detail: 'succeeded (exit 0)' }),
+  hop(58, 'context.checkpoint', ['conversation', C1.conversation], ['runtime', 'default'], { ...C1, code: 'work-done', data: { bytes: '48213', files: '3', quiesced: 'true' } }),
+  hop(57, 'channel.op.enqueued', ['conversation', C1.conversation], ['channel', 'console'], { ...C1, opId: 'send:cluster-events-7c1d4e:console:run-3', code: 'send' }),
+  hop(57, 'channel.op.enqueued', ['conversation', C1.conversation], ['channel', 'ops-chat'], { ...C1, opId: 'send:cluster-events-7c1d4e:ops-chat:run-3', code: 'send' }),
+  hop(56, 'channel.op.completed', ['channel-adapter', 'console'], ['manager', 'manager'], { ...C1, opId: 'send:cluster-events-7c1d4e:console:run-3', latencyMs: 90, adapter: 'console' }),
+  hop(61, 'signal.received', ['signal-adapter', 'console'], ['signal-source', 'console'], { conversation: C2.conversation }),
+  hop(61, 'signal.claimed', ['signal-source', 'console'], ['pipeline', 'k8s-observe'], C2),
+  hop(44, 'channel.inbound', ['channel-adapter', 'telegram'], ['conversation', C1.conversation], C1),
+  hop(35, 'signal.dropped', ['signal-source', 'bench-sensors'], null, { status: 'error', code: 'unclaimed', detail: 'no Ready Pipeline lists this source' }),
+  hop(27, 'signal.received', ['signal-adapter', 'alertmanager'], ['signal-source', 'prometheus-alerts'], { conversation: A1.conversation }),
+  hop(27, 'signal.claimed', ['signal-source', 'prometheus-alerts'], ['pipeline', 'alert-triage'], A1),
+  hop(18, 'run.dispatched', ['pipeline', 'k8s-observe'], ['runtime', 'default'], { ...C2, runId: 'run-2', latencyMs: 210 }),
+  hop(12, 'model.call', ['runtime-image', CLAUDE_IMAGE], ['model', MODEL], { ...C2, runId: 'run-2', detail: MODEL, data: { model: MODEL, tokensIn: '15840', tokensOut: '296', stopReason: 'tool_use' } }),
+  hop(8, 'tool.call', ['runtime-image', CLAUDE_IMAGE], ['mcp-server', 'kubernetes'], { ...C2, runId: 'run-2', latencyMs: 610, detail: 'mcp__kubernetes__resources_list', data: { tool: 'mcp__kubernetes__resources_list', server: 'kubernetes', resultBytes: '9034' } }),
+  hop(4, 'tool.call', ['runtime-image', CLAUDE_IMAGE], null, { ...C2, runId: 'run-2', latencyMs: 40, detail: 'Read', data: { tool: 'Read', resultBytes: '1880' } }),
+].sort((a, b) => a.ts.localeCompare(b.ts) || a.cursor.localeCompare(b.cursor))
+
+const activity: ActivityResponse = {
+  events: activityEvents,
+  cursor: activityEvents[activityEvents.length - 1].cursor,
+  stream: overview.stream,
 }
 
 const topology: TopologyResponse = {
@@ -478,57 +564,113 @@ const topology: TopologyResponse = {
   oldestEvent: ago(900),
   metricsAvailable: false,
   topology: {
-    windowSeconds: 900,
+    windowSeconds: 300,
     eventNodeKinds,
     nodes: [
-      { id: 'signaladapters/k8s-events', kind: 'signaladapters', name: 'k8s-events', health: 'ok', active: 0, recent: 6 },
-      { id: 'signaladapters/alertmanager', kind: 'signaladapters', name: 'alertmanager', health: 'ok', active: 0, recent: 2 },
-      { id: 'signaladapters/cron', kind: 'signaladapters', name: 'cron', health: 'ok', active: 0, recent: 1 },
-      { id: 'signalsources/cluster-events', kind: 'signalsources', name: 'cluster-events', health: 'ok', active: 1, recent: 6 },
-      { id: 'signalsources/console', kind: 'signalsources', name: 'console', health: 'ok', active: 1, recent: 3 },
-      { id: 'signalsources/prometheus-alerts', kind: 'signalsources', name: 'prometheus-alerts', health: 'ok', active: 0, recent: 2 },
-      { id: 'signalsources/nightly', kind: 'signalsources', name: 'nightly', health: 'ok', active: 0, recent: 1 },
-      { id: 'signalsources/bench-sensors', kind: 'signalsources', name: 'bench-sensors', health: 'bad', reason: 'NoPipeline', message: 'no Ready Pipeline lists this source', active: 0, recent: 0 },
-      { id: 'pipelines/k8s-observe', kind: 'pipelines', name: 'k8s-observe', health: 'ok', active: 2, recent: 9 },
-      { id: 'pipelines/alert-triage', kind: 'pipelines', name: 'alert-triage', health: 'ok', active: 1, recent: 2 },
-      { id: 'pipelines/nightly-report', kind: 'pipelines', name: 'nightly-report', health: 'ok', active: 0, recent: 1 },
-      { id: 'agentprofiles/k8s-engineer', kind: 'agentprofiles', name: 'k8s-engineer', health: 'none', active: 2, recent: 9 },
-      { id: 'agentprofiles/alert-investigator', kind: 'agentprofiles', name: 'alert-investigator', health: 'none', active: 1, recent: 2 },
-      { id: 'agentprofiles/release-scribe', kind: 'agentprofiles', name: 'release-scribe', health: 'none', active: 0, recent: 1 },
-      { id: 'agentruntimes/default', kind: 'agentruntimes', name: 'default', health: 'ok', active: 2, recent: 11 },
-      { id: 'agentruntimes/sandbox', kind: 'agentruntimes', name: 'sandbox', health: 'ok', active: 0, recent: 0 },
-      { id: 'channels/console', kind: 'channels', name: 'console', health: 'ok', active: 1, recent: 7 },
-      { id: 'channels/ops-chat', kind: 'channels', name: 'ops-chat', health: 'ok', active: 0, recent: 5 },
-      { id: 'channeladapters/console', kind: 'channeladapters', name: 'console', health: 'ok', active: 1, recent: 7 },
-      { id: 'channeladapters/telegram', kind: 'channeladapters', name: 'telegram', health: 'ok', active: 0, recent: 5 },
-      { id: 'mcptoolsets/agentops-observe', kind: 'mcptoolsets', name: 'agentops-observe', health: 'none', active: 0, recent: 0 },
-      { id: 'mcptoolsets/k8s-observability', kind: 'mcptoolsets', name: 'k8s-observability', health: 'none', active: 0, recent: 0 },
-      { id: 'mcpconfigs/k8s-api', kind: 'mcpconfigs', name: 'k8s-api', health: 'none', active: 0, recent: 0 },
+      node('signaladapters', 'k8s-events', { bundle: 'kubernetes', recent: 6, externals: [{ name: 'Kubernetes API', kind: 'kubernetes' }] }),
+      node('signaladapters', 'alertmanager', { bundle: 'prometheus', recent: 2, externals: [{ name: 'Alertmanager', kind: 'sender' }] }),
+      node('signaladapters', 'cron', { recent: 1 }),
+      node('signaladapters', 'console', { servedBy: 'channeladapters/console', recent: 3 }),
+      node('signalsources', 'cluster-events', { bundle: 'kubernetes', active: 1, recent: 6 }),
+      node('signalsources', 'console', { active: 1, recent: 3 }),
+      node('signalsources', 'prometheus-alerts', { bundle: 'prometheus', recent: 2 }),
+      node('signalsources', 'nightly', { recent: 1 }),
+      node('signalsources', 'bench-sensors', { health: 'bad', reason: 'NoPipeline', message: 'no Ready Pipeline lists this source', detached: true }),
+      node('pipelines', 'k8s-observe', { bundle: 'kubernetes', active: 2, recent: 9 }),
+      node('pipelines', 'alert-triage', { bundle: 'prometheus', active: 1, recent: 2 }),
+      node('pipelines', 'nightly-report', { recent: 1 }),
+      node('agentprofiles', 'k8s-engineer', { health: 'none', bundle: 'kubernetes' }),
+      node('agentprofiles', 'alert-investigator', { health: 'none', bundle: 'prometheus' }),
+      node('agentprofiles', 'release-scribe', { health: 'none' }),
+      node('agentruntimes', 'default', { bundle: 'claude', image: CLAUDE_IMAGE, harness: 'Claude Code', vendor: 'Anthropic' }),
+      node('agentruntimes', 'sandbox', { image: SANDBOX_IMAGE, harness: 'Claude Code', vendor: 'Anthropic' }),
+      node('mcptoolsets', 'agentops-observe', { health: 'none' }),
+      node('mcptoolsets', 'k8s-observability', { health: 'none', bundle: 'kubernetes' }),
+      node('mcpconfigs', 'k8s-api', { health: 'none', bundle: 'kubernetes' }),
+      node('channels', 'console', { active: 1, recent: 7 }),
+      node('channels', 'ops-chat', { bundle: 'telegram', recent: 5 }),
+      node('channeladapters', 'console', { recent: 7, externals: [{ name: 'Browser', kind: 'sender' }, { name: 'Kubernetes API', kind: 'kubernetes' }] }),
+      node('channeladapters', 'telegram', { bundle: 'telegram', recent: 5, externals: [{ name: 'Telegram Bot API', kind: 'api' }] }),
+      node('conversations', 'cluster-events-7c1d4e', { health: 'none', phase: 'Working', runtimePod: 'pods/agentops-conv-cluster-events-7c1d4e' }),
+      node('conversations', 'console-3f9a2b', { health: 'none', phase: 'Working', runtimePod: 'pods/agentops-conv-console-3f9a2b' }),
+      node('conversations', 'prometheus-alerts-91b7fd', { health: 'none', phase: 'Pending' }),
     ],
     edges: [
-      { from: 'signaladapters/k8s-events', to: 'signalsources/cluster-events', kind: 'served-by' },
-      { from: 'signaladapters/alertmanager', to: 'signalsources/prometheus-alerts', kind: 'served-by' },
-      { from: 'signaladapters/cron', to: 'signalsources/nightly', kind: 'served-by' },
-      { from: 'signaladapters/cron', to: 'signalsources/bench-sensors', kind: 'served-by' },
-      { from: 'channeladapters/console', to: 'channels/console', kind: 'served-by' },
-      { from: 'channeladapters/telegram', to: 'channels/ops-chat', kind: 'served-by' },
-      { from: 'signalsources/cluster-events', to: 'pipelines/k8s-observe', kind: 'feeds', traffic: { events: 6, errors: 0, ratePerMin: 0.4, p50LatencyMs: 210, maxLatencyMs: 480, lastTs: ago(96) } },
-      { from: 'signalsources/console', to: 'pipelines/k8s-observe', kind: 'feeds', traffic: { events: 3, errors: 0, ratePerMin: 0.2, p50LatencyMs: 180, maxLatencyMs: 260, lastTs: ago(61) } },
-      { from: 'signalsources/prometheus-alerts', to: 'pipelines/alert-triage', kind: 'feeds', traffic: { events: 2, errors: 0, ratePerMin: 0.1, p50LatencyMs: 240, maxLatencyMs: 300, lastTs: ago(27) } },
-      { from: 'signalsources/nightly', to: 'pipelines/nightly-report', kind: 'feeds', traffic: { events: 1, errors: 0, ratePerMin: 0.1, lastTs: ago(35700) } },
-      { from: 'pipelines/k8s-observe', to: 'agentprofiles/k8s-engineer', kind: 'answers', traffic: { events: 9, errors: 0, ratePerMin: 0.6, p50LatencyMs: 12400, maxLatencyMs: 41000, lastTs: ago(58) } },
-      { from: 'pipelines/alert-triage', to: 'agentprofiles/alert-investigator', kind: 'answers', traffic: { events: 2, errors: 0, ratePerMin: 0.1, lastTs: ago(27) } },
+      { from: 'signalsources/cluster-events', to: 'signaladapters/k8s-events', kind: 'served-by' },
+      { from: 'signalsources/prometheus-alerts', to: 'signaladapters/alertmanager', kind: 'served-by' },
+      { from: 'signalsources/nightly', to: 'signaladapters/cron', kind: 'served-by' },
+      { from: 'signalsources/bench-sensors', to: 'signaladapters/cron', kind: 'served-by' },
+      { from: 'signalsources/console', to: 'signaladapters/console', kind: 'served-by' },
+      { from: 'channels/console', to: 'channeladapters/console', kind: 'served-by' },
+      { from: 'channels/ops-chat', to: 'channeladapters/telegram', kind: 'served-by' },
+      { from: 'signalsources/cluster-events', to: 'pipelines/k8s-observe', kind: 'feeds', traffic: { events: 6, errors: 0, ratePerMin: 1.2, p50LatencyMs: 210, maxLatencyMs: 480, lastTs: ago(99) } },
+      { from: 'signalsources/console', to: 'pipelines/k8s-observe', kind: 'feeds', traffic: { events: 3, errors: 0, ratePerMin: 0.6, p50LatencyMs: 180, maxLatencyMs: 260, lastTs: ago(61) } },
+      { from: 'signalsources/prometheus-alerts', to: 'pipelines/alert-triage', kind: 'feeds', traffic: { events: 2, errors: 0, ratePerMin: 0.4, p50LatencyMs: 240, maxLatencyMs: 300, lastTs: ago(27) } },
+      { from: 'signalsources/nightly', to: 'pipelines/nightly-report', kind: 'feeds' },
+      { from: 'pipelines/k8s-observe', to: 'agentprofiles/k8s-engineer', kind: 'answers' },
+      { from: 'pipelines/alert-triage', to: 'agentprofiles/alert-investigator', kind: 'answers' },
       { from: 'pipelines/nightly-report', to: 'agentprofiles/release-scribe', kind: 'answers' },
-      { from: 'agentprofiles/k8s-engineer', to: 'agentruntimes/default', kind: 'uses', traffic: { events: 9, errors: 0, ratePerMin: 0.6, p50LatencyMs: 340, maxLatencyMs: 900, lastTs: ago(58) } },
-      { from: 'agentprofiles/alert-investigator', to: 'agentruntimes/default', kind: 'uses', traffic: { events: 2, errors: 0, ratePerMin: 0.1, lastTs: ago(27) } },
-      { from: 'agentprofiles/release-scribe', to: 'agentruntimes/sandbox', kind: 'uses' },
-      { from: 'pipelines/k8s-observe', to: 'channels/console', kind: 'posts', traffic: { events: 7, errors: 0, ratePerMin: 0.5, p50LatencyMs: 90, maxLatencyMs: 210, lastTs: ago(58) } },
-      { from: 'pipelines/k8s-observe', to: 'channels/ops-chat', kind: 'posts', traffic: { events: 3, errors: 0, ratePerMin: 0.2, lastTs: ago(58), unconfirmed: true } },
-      { from: 'pipelines/alert-triage', to: 'channels/ops-chat', kind: 'posts', traffic: { events: 2, errors: 0, ratePerMin: 0.1, lastTs: ago(27) } },
+      { from: 'pipelines/k8s-observe', to: 'agentruntimes/default', kind: 'runs-on', traffic: { events: 4, errors: 0, ratePerMin: 0.8, p50LatencyMs: 340, maxLatencyMs: 36120, lastTs: ago(18) } },
+      { from: 'pipelines/alert-triage', to: 'agentruntimes/default', kind: 'runs-on' },
+      { from: 'pipelines/nightly-report', to: 'agentruntimes/sandbox', kind: 'runs-on' },
+      { from: 'pipelines/k8s-observe', to: 'channels/console', kind: 'posts', traffic: { events: 2, errors: 0, ratePerMin: 0.4, p50LatencyMs: 90, maxLatencyMs: 210, lastTs: ago(56) } },
+      { from: 'pipelines/k8s-observe', to: 'channels/ops-chat', kind: 'posts', traffic: { events: 2, errors: 0, ratePerMin: 0.4, lastTs: ago(44), unconfirmed: true } },
+      { from: 'pipelines/alert-triage', to: 'channels/ops-chat', kind: 'posts' },
       { from: 'pipelines/nightly-report', to: 'channels/ops-chat', kind: 'posts' },
       { from: 'pipelines/k8s-observe', to: 'mcptoolsets/agentops-observe', kind: 'uses' },
       { from: 'pipelines/k8s-observe', to: 'mcptoolsets/k8s-observability', kind: 'uses' },
+      { from: 'pipelines/alert-triage', to: 'mcptoolsets/agentops-observe', kind: 'uses' },
       { from: 'pipelines/k8s-observe', to: 'mcpconfigs/k8s-api', kind: 'uses' },
+      { from: 'pipelines/k8s-observe', to: 'conversations/cluster-events-7c1d4e', kind: 'opened' },
+      { from: 'pipelines/k8s-observe', to: 'conversations/console-3f9a2b', kind: 'opened' },
+      { from: 'pipelines/alert-triage', to: 'conversations/prometheus-alerts-91b7fd', kind: 'opened' },
+    ],
+    components: [
+      comp('manager', 'manager', { count: 1, health: 'ok', image: 'agentops-manager:0.14.0', workload: 'deployments/agentops-manager' }),
+      comp('signal-adapter', 'k8s-events', { count: 1, health: 'ok', bundle: 'kubernetes', image: 'agentops-signal-k8s-events:0.4.2', implements: ['signaladapters/k8s-events'] }),
+      comp('signal-adapter', 'alertmanager', { count: 1, health: 'ok', bundle: 'prometheus', image: 'agentops-signal-alertmanager:0.5.0', implements: ['signaladapters/alertmanager'] }),
+      comp('signal-adapter', 'cron', { count: 1, health: 'ok', image: 'agentops-signal-cron:0.4.0', implements: ['signaladapters/cron'] }),
+      comp('signal-adapter', 'console', { health: 'ok', implements: ['signaladapters/console'], servedBy: 'channel-adapter/console' }),
+      comp('channel-adapter', 'console', { count: 1, health: 'ok', image: 'agentops-console:0.14.0', implements: ['channeladapters/console'] }),
+      comp('channel-adapter', 'telegram', { count: 1, health: 'ok', bundle: 'telegram', image: 'agentops-channel-telegram:0.6.1', implements: ['channeladapters/telegram'] }),
+      comp('gateway', 'telegram', { count: 1, health: 'ok', bundle: 'telegram', image: 'agentops-gateway-telegram:0.6.0', workload: 'deployments/agentops-gateway-telegram' }),
+      comp('runtime-image', CLAUDE_IMAGE, { count: 2, image: CLAUDE_IMAGE, implements: ['agentruntimes/default'], harness: 'Claude Code', vendor: 'Anthropic' }),
+      comp('runtime-image', SANDBOX_IMAGE, { image: SANDBOX_IMAGE, implements: ['agentruntimes/sandbox'], harness: 'Claude Code', vendor: 'Anthropic' }),
+      comp('context-sync', 'context-sync', { count: 2, image: 'agentops-context-sync:0.3.0' }),
+      comp('egress-proxy', 'egress-proxy', { count: 2, image: 'agentops-egress-proxy:0.2.1' }),
+      comp('housekeeping', 'housekeeping', { image: 'agentops-housekeeping:0.2.0', workload: 'cronjobs/agentops-housekeeping' }),
+      comp('model', MODEL),
+      comp('mcp-server', 'kubernetes', { count: 1, health: 'ok', bundle: 'kubernetes', implements: ['mcpconfigs/k8s-api'], workload: 'deployments/kubernetes-mcp' }),
+      comp('repository', REPO, { url: REPO, implements: ['agentprofiles/alert-investigator', 'agentprofiles/k8s-engineer', 'agentprofiles/release-scribe'] }),
+      comp('external', 'Alertmanager', { externalKind: 'sender' }),
+      comp('external', 'Browser', { externalKind: 'sender' }),
+      comp('external', 'Kubernetes API', { externalKind: 'kubernetes' }),
+      comp('external', 'Telegram Bot API', { externalKind: 'api' }),
+    ],
+    componentEdges: [
+      { from: 'external/Alertmanager', to: 'signal-adapter/alertmanager', kind: 'sends' },
+      { from: 'external/Browser', to: 'channel-adapter/console', kind: 'sends' },
+      { from: 'signal-adapter/k8s-events', to: 'external/Kubernetes API', kind: 'calls' },
+      { from: 'channel-adapter/console', to: 'external/Kubernetes API', kind: 'calls' },
+      { from: 'channel-adapter/telegram', to: 'external/Telegram Bot API', kind: 'calls' },
+    ],
+    pods: [
+      pod('agentops-manager-6d4b8c9f7-w2xkq', 'node-1', 'manager/manager'),
+      pod('agentops-adapter-console-5c8d7b6f9-h4mzt', 'node-1', 'channel-adapter/console'),
+      pod('agentops-adapter-telegram-7f9c6d5b8-q2wxr', 'node-3', 'channel-adapter/telegram'),
+      pod('agentops-gateway-telegram-6b5d4c8f7-k9plm', 'node-3', 'gateway/telegram'),
+      pod('agentops-signal-k8s-events-8d7c6b5f4-t3vbn', 'node-1', 'signal-adapter/k8s-events'),
+      pod('agentops-signal-alertmanager-5f4d3c2b1-r8xzq', 'node-3', 'signal-adapter/alertmanager'),
+      pod('agentops-signal-cron-4c3b2a1f9-m7nkw', 'node-1', 'signal-adapter/cron'),
+      pod('kubernetes-mcp-9a8b7c6d5-p5jhs', 'node-3', 'mcp-server/kubernetes'),
+      convPod('cluster-events-7c1d4e', 'node-2', 'k8s-observe', CLAUDE_IMAGE),
+      convPod('console-3f9a2b', 'node-2', 'k8s-observe', CLAUDE_IMAGE),
+    ],
+    hops: [
+      stat(['runtime-image', CLAUDE_IMAGE], ['model', MODEL], 4, 0.8),
+      stat(['runtime-image', CLAUDE_IMAGE], ['mcp-server', 'kubernetes'], 3, 0.6, 610),
+      stat(['signal-adapter', 'k8s-events'], ['signal-source', 'cluster-events'], 1, 0.2),
+      stat(['pipeline', 'k8s-observe'], ['runtime', 'default'], 2, 0.4, 340),
     ],
   },
 }
@@ -590,13 +732,14 @@ export interface Install {
   conversationDetail: ConversationDetail
   conversationGraph: ConversationGraph
   topology: TopologyResponse
+  activity: ActivityResponse
   sources: SourcesResponse
   vocabulary: VocabularyResponse
 }
 
 export const install: Install = {
   session, overview, queues, kinds, findings, inventory, pipelineDetail,
-  conversations, conversationDetail, conversationGraph, topology, sources,
+  conversations, conversationDetail, conversationGraph, topology, activity, sources,
   vocabulary,
 }
 
@@ -620,6 +763,7 @@ export function responder(state: Install) {
       case '/api/config': return state.kinds
       case '/api/findings': return state.findings
       case '/api/topology': return state.topology
+      case '/api/activity': return state.activity
       case '/api/sources': return state.sources
       case '/api/vocabulary': return state.vocabulary
       case '/api/charts': return { available: false, charts: [] }

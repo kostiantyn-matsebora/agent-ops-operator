@@ -187,7 +187,7 @@ export const beats: Beat[] = [
       })
       const inbound = event(3)
       inbound.ts = at(78)
-      inbound.from = { kind: 'channel', name: 'console' }
+      inbound.from = { kind: 'channel-adapter', name: 'console' }
       state.conversationDetail.events?.push(inbound)
 
       const item = state.conversationDetail.conversation
