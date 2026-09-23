@@ -1,22 +1,22 @@
 ## 1. The runtime reports its turns
 
-- [ ] 1.1 Extend the work result in `platform/manager/internal/httpapi/` with a bounded `turns[]` and `toolCalls[]`, sizes capped by count and by field length, documented in `docs/contracts.md`. Verify: the httpapi unit tests accept a result with and without them and reject an oversized one
-- [ ] 1.2 Add `model.call` and `tool.call` kinds and the `runtime-image`, `model`, `mcp-server` and `external` node kinds to `platform/manager/internal/activity/`, plus the bounded `data` map on the event. Verify: the activity unit tests emit both kinds from a work report and refuse a `data` map over the bound
-- [ ] 1.3 `runtimes/claude/` reports each turn and tool call from the stream-json it already reads. Verify: `node --test` with a captured stream fixture produces the expected report
-- [ ] 1.4 `runtimes/ollama/` reports each turn and tool call from its own loop. Verify: `go test ./...` in the module
-- [ ] 1.5 `runtimes/copilot/` reports each turn and tool call from the SDK's events. Verify: `node --test` with a captured fixture
-- [ ] 1.6 The metrics registry gains counters and histograms for model and tool hops from the same emission. Verify: the manager's metrics test sees them observed
+- [x] 1.1 Extend the work result in `platform/manager/internal/httpapi/` with a bounded `turns[]` and `toolCalls[]`, sizes capped by count and by field length, documented in `docs/contracts.md`. Verify: the httpapi unit tests accept a result with and without them and reject an oversized one
+- [x] 1.2 Add `model.call` and `tool.call` kinds and the `runtime-image`, `model`, `mcp-server` and `external` node kinds to `platform/manager/internal/activity/`, plus the bounded `data` map on the event. Verify: the activity unit tests emit both kinds from a work report and refuse a `data` map over the bound
+- [x] 1.3 `runtimes/claude/` reports each turn and tool call from the stream-json it already reads. Verify: `node --test` with a captured stream fixture produces the expected report
+- [x] 1.4 `runtimes/ollama/` reports each turn and tool call from its own loop. Verify: `go test ./...` in the module
+- [x] 1.5 `runtimes/copilot/` reports each turn and tool call from the SDK's events. Verify: `node --test` with a captured fixture
+- [x] 1.6 The metrics registry gains counters and histograms for model and tool hops from the same emission. Verify: the manager's metrics test sees them observed
 
 ## 2. Adapters declare their externals
 
-- [ ] 2.1 Add `spec.externals[]` (name, kind) to `SignalAdapter` and `ChannelAdapter` in `platform/manager/api/v1alpha1/`, regenerate deepcopy and CRDs. Verify: `controller-gen` runs clean and `kubectl apply --dry-run=client -f chart/crds/` accepts the CRDs
-- [ ] 2.2 The chart's adapter bundles declare their externals: alertmanager, cron, k8s-events, ha, telegram, console. Verify: the chart render tests find each declaration
+- [x] 2.1 Add `spec.externals[]` (name, kind) to `SignalAdapter` and `ChannelAdapter` in `platform/manager/api/v1alpha1/`, regenerate deepcopy and CRDs. Verify: `controller-gen` runs clean and `kubectl apply --dry-run=client -f chart/crds/` accepts the CRDs
+- [x] 2.2 The chart's adapter bundles declare their externals: alertmanager, cron, k8s-events, ha, telegram, console. Verify: the chart render tests find each declaration
 
 ## 3. The console reads what the views need
 
-- [ ] 3.1 The chart grants the console read-only list/watch of pods, deployments and cronjobs in its namespace, in the same file as its existing grant. Verify: `serviceaccount-guard.py` and the chart render tests pass
-- [ ] 3.2 The console's cache watches pods, deployments and cronjobs beside the agentops kinds, resuming by resourceVersion and relisting on 410. Verify: the console's kube tests cover the new kinds
-- [ ] 3.3 The topology BFF serves the base graph with the bundle of each object from its Helm labels, the cluster node of each pod, each adapter's externals, each runtime's image and vendor facts, and the components derived from the deployments. Verify: `topology_test.go` covers each fact
+- [x] 3.1 The chart grants the console read-only list/watch of pods, deployments and cronjobs in its namespace, in the same file as its existing grant. Verify: `serviceaccount-guard.py` and the chart render tests pass
+- [x] 3.2 The console's cache watches pods, deployments and cronjobs beside the agentops kinds, resuming by resourceVersion and relisting on 410. Verify: the console's kube tests cover the new kinds
+- [x] 3.3 The topology BFF serves the base graph with the bundle of each object from its Helm labels, the cluster node of each pod, each adapter's externals, each runtime's image and vendor facts, and the components derived from the deployments. Verify: `topology_test.go` covers each fact
 
 ## 4. Port the mockup: views and mapping
 
@@ -52,7 +52,7 @@
 
 ## 8. E2E tests
 
-- [ ] 8.1 A lane in `platform/manager/test/e2e/` runs a stub runtime that reports two turns and one tool call, and asserts the manager's activity endpoint holds the `model.call` and `tool.call` hops with the run's id. A cluster decides this: the report crosses the work contract into a real manager
+- [x] 8.1 A lane in `platform/manager/test/e2e/` runs a stub runtime that reports two turns and one tool call, and asserts the manager's activity endpoint holds the `model.call` and `tool.call` hops with the run's id. A cluster decides this: the report crosses the work contract into a real manager
 - [ ] 8.2 The pack runs against this worktree's tree, built in the container and run on the host, and the new lane passes
 
 ## 9. Documentation
