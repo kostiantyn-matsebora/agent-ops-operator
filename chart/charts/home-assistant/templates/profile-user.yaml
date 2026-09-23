@@ -19,6 +19,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   maxTurns: {{ $p.maxTurns }}
   {{- with $p.systemPrompt }}

@@ -17,6 +17,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-kubernetes
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: {{ printf "%s:%s" $ea.image.repository (toString $ea.image.tag) | quote }}
   # This adapter's DATA SOURCE is the Kubernetes API, so it mounts its own SA
@@ -314,6 +315,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-kubernetes
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   # a REFERENCE to the SignalAdapter CR above — its implementation defines the
   # schema of the config below

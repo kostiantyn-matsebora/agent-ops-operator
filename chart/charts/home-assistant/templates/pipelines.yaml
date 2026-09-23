@@ -104,6 +104,7 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   {{- with .icon }}
   # Display only: how this route is recognised in a chat command menu or the

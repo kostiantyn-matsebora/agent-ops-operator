@@ -22,6 +22,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-signal-alertmanager
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: "{{ .Values.alertmanager.image.repository }}:{{ .Values.alertmanager.image.tag }}"
   port: 8080

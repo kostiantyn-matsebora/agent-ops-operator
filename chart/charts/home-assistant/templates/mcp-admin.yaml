@@ -17,6 +17,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   servers:
     homeassistant_admin:
@@ -34,6 +35,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   # ENUMERATED from the server's real tool list. A wildcard here would grant
   # restarting Home Assistant, deleting registry objects and installing HACS

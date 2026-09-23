@@ -55,13 +55,15 @@ var Kinds = []string{
 
 // InstallKinds are the workload resources that carry INSTALL FACTS — image
 // references and digests, readiness, restart counts, pod phase and failure
-// reasons. None of it exists in any CR, so an operations console that cannot
-// read them cannot see a CrashLoopBackOff.
+// reasons, and the cluster node a pod runs on. None of it exists in any CR, so
+// an operations console that cannot read them cannot see a CrashLoopBackOff,
+// and its topology cannot draw a component the repository builds.
 //
 // This is a deliberate widening past agentops.dev, and it stays read-only and
-// namespaced: `get/list/watch` on these two, granted by the chart against the
-// console's own ServiceAccount.
+// namespaced: `get/list/watch` on these three, granted by the chart against
+// the console's own ServiceAccount.
 var InstallKinds = []string{
+	"cronjobs",
 	"deployments",
 	"pods",
 }
@@ -70,6 +72,7 @@ var InstallKinds = []string{
 // an agentops.dev custom resource — the console's own group is the default
 // precisely because it is nearly everything the console reads.
 var groupVersion = map[string]struct{ Group, Version string }{
+	"cronjobs":    {"batch", "v1"},
 	"deployments": {"apps", "v1"},
 	"pods":        {"", "v1"}, // core group: /api/v1, no /apis prefix
 }
@@ -86,6 +89,7 @@ var Singular = map[string]string{
 	"pipelines":       "Pipeline",
 	"signaladapters":  "SignalAdapter",
 	"signalsources":   "SignalSource",
+	"cronjobs":        "CronJob",
 	"deployments":     "Deployment",
 	"pods":            "Pod",
 }

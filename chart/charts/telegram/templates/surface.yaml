@@ -47,6 +47,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   # names the ChannelAdapter serving this surface; that adapter's
   # implementation is what defines and validates `config` below
@@ -78,6 +79,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   adapter: {{ .Values.signalAdapter.name }}
   # No credentialsSecretRef: signal-telegram never contacts Telegram.

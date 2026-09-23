@@ -16,6 +16,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: {{ printf "%s:%s" $la.image.repository (toString $la.image.tag) | quote }}
   # This adapter's DATA SOURCE is Home Assistant, not the cluster. It holds no
@@ -209,6 +210,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   # a REFERENCE to the SignalAdapter above — its implementation defines the
   # schema of the config below

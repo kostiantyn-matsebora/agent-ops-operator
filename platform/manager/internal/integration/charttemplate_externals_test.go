@@ -87,3 +87,39 @@ func TestAdaptersFacingNothingDeclareNothing(t *testing.T) {
 		}
 	}
 }
+
+// A bundle's objects carry Helm's chart label, which is what the console boxes
+// them by. Only in metadata: a versioned label in a selector would make every
+// chart upgrade refuse to patch an immutable field.
+func TestBundleObjectsCarryTheChartLabel(t *testing.T) {
+	out := helmTemplate(t, allBundles("--set", "kubernetes.pipelines.enabled=true")...)
+	for _, tc := range []struct{ kind, name, bundle string }{
+		{"SignalAdapter", "k8s-events", "kubernetes"},
+		{"SignalSource", "cluster-events", "kubernetes"},
+		{"SignalAdapter", "alertmanager", "prometheus"},
+		{"SignalAdapter", "home-assistant", "home-assistant"},
+		{"ChannelAdapter", "telegram", "telegram"},
+		{"Pipeline", "k8s-observe", "kubernetes"},
+	} {
+		doc := findDocByKindAndName(t, out, tc.kind, tc.name)
+		if !strings.Contains(doc, `helm.sh/chart: "`+tc.bundle+`-`) {
+			t.Errorf("%s %s must carry the %s bundle's chart label:\n%s", tc.kind, tc.name, tc.bundle, doc)
+		}
+	}
+	for _, tc := range []struct{ kind, name string }{
+		{"ChannelAdapter", "console"}, {"AgentRuntime", "default"},
+	} {
+		if doc := findDocByKindAndName(t, out, tc.kind, tc.name); strings.Contains(doc, "helm.sh/chart") {
+			t.Errorf("the parent chart's substrate is no bundle's: %s %s", tc.kind, tc.name)
+		}
+	}
+	for _, doc := range splitDocs(out) {
+		_, selector, found := strings.Cut(doc, "selector:")
+		if found && strings.Contains(selector, "helm.sh/chart") && strings.Contains(doc, "kind: Deployment") {
+			sel, _, _ := strings.Cut(selector, "template:")
+			if strings.Contains(sel, "helm.sh/chart") {
+				t.Fatalf("a versioned label must never select pods:\n%s", doc)
+			}
+		}
+	}
+}
