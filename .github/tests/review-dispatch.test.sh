@@ -438,6 +438,23 @@ assert_contains "$(py 'print([s.get("if","") for s in d["jobs"]["land"]["steps"]
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["env"]["FIX_FAILED"])')" "needs.fix.result == 'failure' && '--fix-failed'"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '$FIX_FAILED'
 
+# `fix` HAS A BOUND, AND `cancelled` (what a bound produces) IS NOT `failure`.
+# Measured on #243: the model step sat in_progress for 15+ hours with no job
+# timeout at all, `land` never ran (none of its three matched fix.result
+# values fire on a job with no result), and loop:running stayed posted over
+# nothing. GitHub reports a `timeout-minutes` job as `cancelled`, never
+# `failure` -- its own distinction, not this workflow's -- so `land` and the
+# flag it passes both need the extra value, or the bound alone trades one
+# silent hang for a different silent stop.
+it "the fix job is bounded, so a hang becomes a terminal result land can act on"
+assert_equals "30" "$(py 'print(d["jobs"]["fix"]["timeout-minutes"])')"
+
+it "land also runs on a CANCELLED fix (a timeout, never a crash), and passes the distinct --fix-timed-out flag"
+assert_contains "$(py 'print(d["jobs"]["land"]["if"])')" "needs.fix.result == 'cancelled'"
+assert_contains "$(py 'print([s.get("if","") for s in d["jobs"]["land"]["steps"]])')" "needs.fix.result == 'failure' || needs.fix.result == 'cancelled'"
+assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["env"]["FIX_TIMED_OUT"])')" "needs.fix.result == 'cancelled' && '--fix-timed-out'"
+assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '$FIX_TIMED_OUT'
+
 it "land restores conveyor-state.py AND review-not-clean.py beside the landing programs, and hands both to land-dispatch.py"
 assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py review-not-clean.py; do"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--state-script "$RUNNER_TEMP/conveyor-state.py"'

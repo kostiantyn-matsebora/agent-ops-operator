@@ -230,7 +230,7 @@ land_all() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
                 --max-rounds "${MAX_ROUNDS:-3}" --sonar "$tmp/sonar.json" --checks "${CHECKS:-$tmp/checks-none.json}" \
                 --state-script "$ROOT/.github/scripts/conveyor-state.py" \
                 --thread-check-script "$tmp/thread-check.py" \
-                ${STARTS---push-starts-workflows} ${REPORT_MISSING:+--report-missing} ${FIX_FAILED:+--fix-failed} 2>&1); }
+                ${STARTS---push-starts-workflows} ${REPORT_MISSING:+--report-missing} ${FIX_FAILED:+--fix-failed} ${FIX_TIMED_OUT:+--fix-timed-out} 2>&1); }
 loop_label() { grep -oE 'issue edit 7 --repo o/r --add-label loop:[a-z]+' "$GH_CALLS" | sed 's/.*loop://' | tr '\n' ' ' | sed 's/ $//'; }
 printf '{"consulted":true,"checks":[],"items":[]}' > "$tmp/checks-none.json"
 
@@ -590,6 +590,26 @@ assert_not_contains "$(cat "$GH_CALLS")" "/replies"
 assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "fixing step failed** — @an-approver"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no model looked at any item"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:round"
+assert_equals "stalled" "$(loop_label)"
+
+# ENDING: the fixing JOB hit its `timeout-minutes` bound -- GitHub reports
+# this as `cancelled`, never `failure`, so it needs its own flag rather than
+# reusing --fix-failed and mislabelling a hang as a crash. Measured on #243:
+# the model step sat in_progress for 15+ hours with no bound at all.
+it "labelled: a timed-out fixing job ends the round as 'fixing step timed out', disputing nothing, counting no round, and stalls the loop label"
+fresh_repo
+: > "$tmp/empty.patch"
+printf '{"items":[]}' > "$tmp/empty-report.json"
+out=$(FIX_TIMED_OUT=1 PATCH="$tmp/empty.patch" REPORT="$tmp/empty-report.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "fixing step timed out** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "ran past its time limit"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
 assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
 assert_not_contains "$(cat "$GH_CALLS")" "conveyor:round"

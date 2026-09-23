@@ -561,6 +561,21 @@ jobs:
     needs: [gate, collect]
     if: needs.collect.outputs.accepted != '0'
     runs-on: ubuntu-latest
+    # BOUNDED, SO A DEAD FIXER BECOMES `failure` RATHER THAN NEVER FINISHING.
+    # `land`'s `if:` already accepts `needs.fix.result == 'failure'` and posts
+    # "fixing job failed" through `--fix-failed` -- that path was ADDED for
+    # exactly this case (see the comment on `land`, below) but never fires
+    # without a bound, because GitHub's un-timed default is 360 minutes and
+    # `claude-code-action` can also simply hang inside that window with no
+    # step-level timeout of its own. Measured live on #243: the `fix` job's
+    # model step sat `in_progress` for 15+ hours, `land` never ran (it
+    # `needs: [... , fix]`, and a job with no result is not one of the three
+    # `fix.result` values `land` matches on), and `loop:running` stayed
+    # posted with nothing behind it. 30 minutes is generous for one round's
+    # worth of fixes -- multi-file, may run a build or reproduce a check --
+    # while being far short of "indefinite". Revise the number if a
+    # legitimate round is ever cut short by it; do not remove the bound.
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: read
@@ -752,10 +767,19 @@ jobs:
     # failure is landed as its own ending (`fixing step failed`), distinct
     # from `no report` (the model ran and wrote nothing), with the run linked
     # and the loop state set to stalled.
+    #
+    # `cancelled` IS A THIRD SHAPE OF DEAD, NOT A VARIANT OF `failure`. A job
+    # that hits `timeout-minutes` reports `cancelled`, never `failure` --
+    # GitHub's own distinction, not this workflow's. `fix` gained a timeout
+    # after #243 sat with its model step `in_progress` for 15+ hours: no
+    # bound meant no terminal result, `land` never ran (none of its three
+    # matched values fire on a job with no result at all), and `loop:running`
+    # stayed posted over nothing. Without this line the bound alone would
+    # have swapped one silent hang for a different silent stop.
     if: >-
       always() && needs.gate.result == 'success' && needs.gate.outputs.mode != 'none' &&
       needs.collect.result == 'success' &&
-      (needs.fix.result == 'success' || needs.fix.result == 'skipped' || needs.fix.result == 'failure')
+      (needs.fix.result == 'success' || needs.fix.result == 'skipped' || needs.fix.result == 'failure' || needs.fix.result == 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -777,7 +801,7 @@ jobs:
       # Nothing accepted means `fix` never ran; the lander is handed an empty
       # patch and an empty report, and reports "nothing accepted" itself — or,
       # labelled, that the pull request is clean.
-      - if: needs.fix.result == 'skipped' || needs.fix.result == 'failure'
+      - if: needs.fix.result == 'skipped' || needs.fix.result == 'failure' || needs.fix.result == 'cancelled'
         run: |
           : > "$RUNNER_TEMP/dispatch/fix.patch"
           echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
@@ -829,6 +853,10 @@ jobs:
           SINCE: ${{ needs.gate.outputs.since }}
           STARTS: ${{ steps.cred.outputs.starts == 'true' && '--push-starts-workflows' || '' }}
           FIX_FAILED: ${{ needs.fix.result == 'failure' && '--fix-failed' || '' }}
+          # `cancelled` IS `timeout-minutes` FIRING, NEVER A CRASH. GitHub
+          # reports the two differently, and the posted ending says which one
+          # happened -- see the note on `fix`'s own `timeout-minutes`, above.
+          FIX_TIMED_OUT: ${{ needs.fix.result == 'cancelled' && '--fix-timed-out' || '' }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -839,8 +867,8 @@ jobs:
           # `no report` rather than inventing a dispute for every work item.
           REPORT_MISSING=""
           [ -f "$RUNNER_TEMP/dispatch/report.no-report" ] && REPORT_MISSING="--report-missing"
-          # shellcheck disable=SC2086 -- STARTS and REPORT_MISSING are each one flag or nothing
-          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS $REPORT_MISSING $FIX_FAILED \
+          # shellcheck disable=SC2086 -- each of these is one flag or nothing
+          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS $REPORT_MISSING $FIX_FAILED $FIX_TIMED_OUT \
             --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" \
             --branch "${{ needs.gate.outputs.branch }}" \
             --work-list "$RUNNER_TEMP/dispatch/work-list.json" \
