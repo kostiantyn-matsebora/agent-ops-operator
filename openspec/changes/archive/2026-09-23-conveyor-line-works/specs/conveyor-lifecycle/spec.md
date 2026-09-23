@@ -77,6 +77,22 @@ moments they actually decide something are the merges.
   instruction
 - **THEN** that station runs and the line stops there
 
+#### Scenario: A merge with no standing instruction to carry
+
+- **WHEN** an opsx-lane pull request merges and its issue carries no standing
+  instruction
+- **THEN** the issue's station moves from merge to stalled, and no archive
+  session starts
+
+#### Scenario: The archive station drives its own pull request
+
+- **WHEN** a person places the archive label directly, with no standing
+  instruction on the issue
+- **THEN** the session it starts opens a pull request, and that pull request
+  is driven to mergeable by the fixing loop the same as any other — the
+  archive label is itself sufficient authorisation for its own pull
+  request's fix station
+
 ### Requirement: The line's state is its labels, and nothing else
 
 Which station a change has reached SHALL be readable from the labels on its
@@ -105,6 +121,12 @@ person can change to move or stop the line.
 - **WHEN** somebody reads the tracking issue and its pull request
 - **THEN** the standing instruction, the station reached, and whether the loop
   stalled are all visible there
+
+#### Scenario: A merge station label outlives its own condition
+
+- **WHEN** a pull request merges and nothing carries the issue's line onward
+- **THEN** the issue's label no longer reads `station:merge`, since that
+  label's own meaning is now false
 
 #### Scenario: The station label follows the line
 
