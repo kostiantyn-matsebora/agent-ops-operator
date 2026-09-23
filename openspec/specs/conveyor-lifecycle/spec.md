@@ -59,10 +59,6 @@ Asking again when the pull request opens, and again when it merges, asks the
 same person the same question about work they already approved — while the
 moments they actually decide something are the merges.
 
-**A merge with nothing to carry it onward SHALL mark the line stalled.** The
-merge station's job ends the moment the pull request merges, so an opsx-lane
-issue with no standing instruction SHALL move off that label at once.
-
 #### Scenario: The line runs end to end
 
 - **WHEN** a person places the standing instruction on an issue
@@ -80,7 +76,9 @@ issue with no standing instruction SHALL move off that label at once.
 
 - **WHEN** a person places one station's label instead of the standing
   instruction
-- **THEN** that station runs and the line stops there
+- **THEN** that station runs and the line stops there — EXCEPT the archive
+  station, whose own label already promises to drive its resulting pull
+  request to mergeable
 
 #### Scenario: A merge with no standing instruction to carry
 
@@ -88,6 +86,15 @@ issue with no standing instruction SHALL move off that label at once.
   instruction
 - **THEN** the issue's station moves from merge to stalled, and no archive
   session starts
+
+#### Scenario: The archive station drives its own pull request
+
+- **WHEN** a person places the archive label directly, with no standing
+  instruction on the issue
+- **THEN** the session it starts opens a pull request, and that pull request
+  is driven to mergeable by the fixing loop the same as any other — the
+  archive label is itself sufficient authorisation for its own pull
+  request's fix station
 
 ### Requirement: The issue selects the lane, and nothing infers it
 
