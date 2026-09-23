@@ -45,17 +45,40 @@ is not Ready SHALL claim nothing.
 - **THEN** the Coordinator's `Ready` is False with the entry's name in its message
 - **AND** signals on its sources are not routed to it
 
-### Requirement: Limits and escalation channels are snapshotted onto the root
+### Requirement: Limits and escalation channels are snapshotted onto the conversation opened
 
 `spec.limits` SHALL carry `maxAgents`, `maxTurns` and `deadline`, each optional
 with a chart-documented default. The values, and the Coordinator's
-`channelRefs`, SHALL be snapshotted onto the root conversation at creation, so
-editing the Coordinator does not change the budget or the escalation surfaces
-of an incident already in flight.
+`channelRefs`, SHALL be snapshotted onto the conversation it opens at
+creation, so editing the Coordinator does not change the budget of an incident
+already in flight.
+
+This holds whether that conversation is an uncaused root or itself a member.
+A nested Coordinator's budget and escalation snapshot are its own, independent
+of any ancestor's.
 
 #### Scenario: A limit edit does not reach a running incident
 - **WHEN** a Coordinator's `maxAgents` is lowered while one of its incidents is open
 - **THEN** that incident keeps the value it was created with
+
+#### Scenario: A nested Coordinator's budget is independent
+- **WHEN** a member conversation is itself a Coordinator's root and its own `maxAgents` is reached
+- **THEN** only that member and its own members close `budget-exceeded`, and its ancestors are unaffected
+
+### Requirement: An invoke is refused when it would cycle the Coordinator graph
+
+The manager SHALL walk the calling conversation's `causedBy` chain to the
+uncaused root, collecting each ancestor's `coordinatorRef`. An `invoke` whose
+target resolves to a Coordinator already in that list SHALL be refused as a
+cycle, whether the repeat is immediate or reached through other Coordinators.
+
+#### Scenario: Direct self-invoke refused
+- **WHEN** a Coordinator's own conversation asks to invoke an AgentCapability wired to itself
+- **THEN** the invoke is refused naming the cycle, and no conversation is created
+
+#### Scenario: Indirect cycle refused
+- **WHEN** Coordinator A invokes B, B invokes C, and C asks to invoke A
+- **THEN** the invoke is refused naming A as the repeated ancestor
 
 ### Requirement: Deleting a Coordinator cascades nothing
 

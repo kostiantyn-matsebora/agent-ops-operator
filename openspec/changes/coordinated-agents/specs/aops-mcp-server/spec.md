@@ -3,16 +3,23 @@ The aops MCP server is the component through which a coordinating agent sees and
 
 ## ADDED Requirements
 
-### Requirement: Read tools over the agentops kinds
+### Requirement: Read tools scoped to the caller's own subtree
 
 The server SHALL expose read tools listing and getting Conversations,
-Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels, including a
-conversation's tree by root. Reads SHALL be filtered to what the calling
-Coordinator lists and what it caused.
+Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels.
+
+The tree read walks from the CALLING conversation downward — its own
+descendants, at any depth, never its ancestors or their other branches.
+Reads SHALL be filtered to what the calling Coordinator lists and what it
+caused.
 
 #### Scenario: A coordinator sees only its members
 - **WHEN** a coordinating agent lists agents
 - **THEN** it receives its Coordinator's `agents[]` entries — name and description — and nothing else
+
+#### Scenario: A nested coordinator's tree excludes its ancestors
+- **WHEN** a nested Coordinator's conversation calls `get_tree`
+- **THEN** it receives its own members and their descendants, and nothing from its parent or siblings
 
 ### Requirement: Four verbs, all asynchronous
 
@@ -29,11 +36,16 @@ waiting on any agent's work. `invoke` SHALL report created or attached.
 Every verb SHALL carry the calling conversation's token, derived by the
 manager with context `coordinator:<name>:<conversation>` and injected into
 that conversation's runtime pod. The server SHALL forward it and decide
-nothing: the MANAGER validates the token and enforces the Coordinator's
-`agents[]` list and the root scope on every verb. An allowlist inside the
-runtime pod SHALL NOT be relied on for any bound. The token is per
-conversation because one Coordinator may hold several roots at once, and a
-token naming only the Coordinator could not scope to one of them.
+nothing.
+
+The MANAGER validates the token and enforces the Coordinator's `agents[]`
+list and the CALLING CONVERSATION'S OWN SUBTREE scope on every verb — never
+the tree's ultimate root when the caller is nested. An allowlist inside the
+runtime pod SHALL NOT be relied on for any bound.
+
+The token is per conversation because one Coordinator may hold several open
+conversations at once, nested or not, and a token naming only the Coordinator
+could not scope to one of them.
 
 #### Scenario: A forged name is refused by the manager
 - **WHEN** a caller holding root A's token invokes an AgentCapability listed only by another Coordinator
