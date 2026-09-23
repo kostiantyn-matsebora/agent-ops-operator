@@ -209,7 +209,10 @@
       "sonarcloud.io",
       "*.sonarcloud.io",
       "contributor-covenant.org",
-      "*.contributor-covenant.org"
+      "*.contributor-covenant.org",
+      "_comment: PUBLIC CDNs a committed mockup loads a library from. A library host is not a private deployment.",
+      "cdnjs.cloudflare.com",
+      "cdn.jsdelivr.net"
     ]
   },
   "addressLiteral": {

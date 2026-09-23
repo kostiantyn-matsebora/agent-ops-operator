@@ -426,7 +426,7 @@ const nodes = [
   N('pods', 'agentops-conv-prometheus-alerts-a1', 'ok', { conversation: 'prometheus-alerts-a1', node: 'node-b' }),
   N('pods', 'agentops-conv-console-c3', 'ok', { conversation: 'console-c3', node: 'node-a' }),
   N('pods', 'agentops-conv-nightly-d2', 'unknown', { conversation: 'nightly-d2', node: 'node-b', reason: 'Pending', message: 'ContainerCreating' }),
-  N('repos', 'agents.git', 'none', { url: 'git@git.example.com:ops/agents.git', ref: 'main' }),
+  N('repos', 'agents.git', 'none', { url: 'https://git.example.com/ops/agents.git', ref: 'main' }),
   ...['prometheus-alerts-a1', 'cluster-events-b7', 'console-c3', 'nightly-d2'].flatMap(c => [
     N('containers', 'agent', 'ok', { pod: `agentops-conv-${c}`, role: 'agent', image: c === 'nightly-d2' ? 'agentops-runtime-ollama:0.4.1' : 'agentops-runtime-claude:0.9.3', id: `containers/agentops-conv-${c}/agent` }),
     N('containers', 'context-sync', 'ok', { pod: `agentops-conv-${c}`, role: 'context-sync', image: 'agentops-context-sync:0.3.0', id: `containers/agentops-conv-${c}/context-sync` }),
