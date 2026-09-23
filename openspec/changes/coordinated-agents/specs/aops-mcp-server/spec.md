@@ -40,10 +40,15 @@ manager with context `coordinator:<name>:<conversation>` and injected into
 that conversation's runtime pod. The server SHALL forward it and decide
 nothing.
 
-The MANAGER validates the token and enforces the Coordinator's `agents[]`
-list and the CALLING CONVERSATION'S OWN SUBTREE scope on every verb — never
-the tree's ultimate root when the caller is nested. An allowlist inside the
-runtime pod SHALL NOT be relied on for any bound.
+The MANAGER validates the token and enforces two bounds, per verb:
+
+| Verb | Bound |
+|---|---|
+| `invoke` | the Coordinator's `agents[]` list |
+| `escalate`, `read` | the calling conversation's own subtree, at any depth — never the tree's ultimate root when the caller is nested |
+| `close` | the caller itself, or a conversation it directly caused, per `conversation-close`'s rule — never a deeper descendant reached through an intermediate member |
+
+An allowlist inside the runtime pod SHALL NOT be relied on for any bound.
 
 The token is per conversation because one Coordinator may hold several open
 conversations at once, nested or not, and a token naming only the Coordinator
@@ -57,14 +62,19 @@ could not scope to one of them.
 - **WHEN** roots A and B of one Coordinator are open and A's token asks to close a member of B
 - **THEN** the manager refuses it as out of scope
 
+#### Scenario: Close cannot reach past a direct member
+- **WHEN** a caller asks to close its own member's member — a conversation it did not directly cause
+- **THEN** the manager refuses it, even though the target is within the caller's own subtree
+
 ### Requirement: A channel-reader token reaches a projection and no verb
 
 A token derived with context `channel-reader:<channel>` SHALL reach, through
 `list_conversations` and `get_conversation`, only the projection `{name,
 title, brief, phase, pipeline}` of conversations bound to that Channel. Every
-verb SHALL be refused for it, and no run, input or tree SHALL be returned. The
-MANAGER SHALL decide this from the token context; the server SHALL forward the
-token and decide nothing, exactly as for a coordinator's.
+verb SHALL be refused for it, and no run, input or tree SHALL be returned.
+
+The MANAGER SHALL decide this from the token context. The server SHALL
+forward the token and decide nothing, exactly as for a coordinator's.
 
 #### Scenario: A reader picks a conversation without reading one
 - **WHEN** a caller holding `channel-reader:voice-desk` lists conversations
