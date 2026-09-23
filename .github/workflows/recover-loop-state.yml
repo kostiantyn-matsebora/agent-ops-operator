@@ -77,8 +77,11 @@ jobs:
           # `--paginate` alone re-runs `--jq` once PER PAGE, so `last` picked
           # each page's own last match rather than the timeline's, and a
           # multi-page timeline could print one line per page.
+          # `// empty` is load-bearing: `last` on no match is `null`, and
+          # `.created_at` on `null` is the literal string "null", not empty --
+          # which would reach the next step's `!= ''` check as truthy.
           since=$(gh api "repos/${{ github.repository }}/issues/$PR/timeline" --paginate --slurp \
-            --jq '[.[][] | select(.event == "labeled" and .label.name == "loop:running")] | last | .created_at')
+            --jq '[.[][] | select(.event == "labeled" and .label.name == "loop:running")] | last | .created_at // empty')
           case "$since" in
             *$'\n'*)
               echo "::notice::timeline lookup for #$PR returned more than one line; skipping this recovery pass"

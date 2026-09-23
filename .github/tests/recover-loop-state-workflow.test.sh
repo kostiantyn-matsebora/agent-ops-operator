@@ -39,7 +39,7 @@ assert_contains "$last" "--run-conclusion"
 assert_contains "$last" "--run-job-count"
 
 it "holds only the permissions it needs: no write beyond labels, no model"
-assert_equals "{'contents': 'write', 'pull-requests': 'write', 'actions': 'read'}" \
+assert_equals "{'contents': 'read', 'pull-requests': 'write', 'actions': 'read'}" \
   "$(py 'print(d["jobs"]["recover"]["permissions"])')"
 
 summary

@@ -134,13 +134,19 @@ def main() -> int:
             return 0
 
     result = subprocess.run([sys.executable, str(STATE_SCRIPT), "--repo", args.repo, "--target", str(args.pr),
-                             "--loop", state, "--vocabulary", str(args.vocabulary)], check=False)
-    if result.returncode == 0:
+                             "--loop", state, "--vocabulary", str(args.vocabulary)],
+                             capture_output=True, text=True, check=False)
+    print(result.stdout, end="")
+    # conveyor-state.py EXITS 0 ALWAYS (see its own docstring), printing
+    # `::notice::` instead of failing when the label edit did not land -- so the
+    # returncode alone cannot tell a recorded transition from a silent miss.
+    recorded = result.returncode == 0 and result.stdout.startswith(f"#{args.pr}: loop = ")
+    if recorded:
         print(f"#{args.pr}: the round that held `running` was superseded before it could report ({why}); "
               f"corrected the loop label to {state}")
     else:
-        print(f"::notice::#{args.pr}: {why}, but conveyor-state.py could not run (exit {result.returncode}); "
-              "the label was NOT corrected")
+        print(f"::notice::#{args.pr}: {why}, but the loop label was NOT corrected "
+              f"(conveyor-state.py did not report the transition)")
     return 0
 
 
