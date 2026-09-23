@@ -189,6 +189,7 @@ person can change to move or stop the line.
 | Label | Its own stated meaning | What makes it false |
 |---|---|---|
 | `station:merge` | the pull request is mergeable and waits for a person | the pull request merges |
+| `station:stalled` | a merge landed but nothing carries the line onward | a person places the standing instruction, or the archive label, to resume it |
 
 Measured live: an issue whose pull request merged two days earlier still read
 `station:merge`, indistinguishable from one still waiting on a person.
