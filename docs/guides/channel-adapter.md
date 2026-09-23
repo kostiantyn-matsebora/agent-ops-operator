@@ -168,7 +168,7 @@ A reply you push comes back to you **only** if your adapter declares
 
 ## Declare the ChannelAdapter
 
-<!-- generated: template kind=ChannelAdapter name=my-adapter fields=image,port,echoesOwnMessages,singleton,configSchema,credentialKeys comments=off -->
+<!-- generated: template kind=ChannelAdapter name=my-adapter fields=image,port,echoesOwnMessages,singleton,configSchema,credentialKeys,externals comments=off -->
 ```yaml
 apiVersion: agentops.dev/v1alpha1
 kind: ChannelAdapter
@@ -182,6 +182,9 @@ spec:
   configSchema: {}
   credentialKeys:
   - key: <key>
+  externals:
+  - kind: sender   # sender | api | kubernetes
+    name: <name>
 ```
 <!-- /generated -->
 
@@ -192,6 +195,10 @@ they typed. Set it `false` on a viewer that renders only what it is sent, as the
 console does.
 
 An unreadable channel answers `true`, which is the conservative half.
+
+**`externals` names the systems your implementation talks to**, each with a
+`kind` of `sender`, `api` or `kubernetes`. The console's topology draws them
+beside your adapter. It is metadata only and grants nothing.
 
 This is what the chart renders for Telegram. Note how much of it is interface
 metadata, so an operator learns what `config` needs without reading the source:
@@ -208,12 +215,19 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: "telegram-0.4.0"
 spec:
   image: "ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.25.0"
   # Receives forwarded topic updates: the reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
   singleton: true
+  # Metadata only: what this implementation faces outside the install. The
+  # manager verifies none of it and grants nothing from it.
+  # The router polls the same API, but it is no adapter and declares nothing.
+  externals:
+    - name: Telegram Bot API
+      kind: api
   # Interface metadata: makes `kubectl get channeladapter` answer "what goes in
   # spec.config?" without reading adapter source. Advisory — the manager
   # reports ConfigValid, the adapter stays the authority.
@@ -284,6 +298,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: "telegram-0.4.0"
 spec:
   # names the ChannelAdapter serving this surface; that adapter's
   # implementation is what defines and validates `config` below
