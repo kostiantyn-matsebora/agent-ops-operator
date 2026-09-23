@@ -143,7 +143,7 @@ func TestConsoleRoleIsReadOnly(t *testing.T) {
 	assertOnlyReadVerbs(t, rules, "console Role")
 	assertRuleGrantsNone(t, rules, "console Role", "create", "update", "patch", "delete", "secrets")
 	assertExactlyAPIGroups(t, rules, "console Role",
-		`apiGroups: ["agentops.dev"]`, `apiGroups: ["apps"]`, `apiGroups: [""]`)
+		`apiGroups: ["agentops.dev"]`, `apiGroups: ["apps"]`, `apiGroups: [""]`, `apiGroups: ["batch"]`)
 }
 
 // assertOnlyReadVerbs fails unless every verbs: line in rules is exactly

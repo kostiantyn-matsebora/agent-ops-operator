@@ -205,6 +205,18 @@ spec:
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
+  # Metadata only: what this implementation faces outside the install. The
+  # manager verifies none of it and grants nothing from it.
+  externals:
+    - name: Browser
+      kind: sender
+    # read-only list/watch, through the Role this file renders
+    - name: Kubernetes API
+      kind: kubernetes
+    {{- with $metricsURL }}
+    - name: Metrics endpoint
+      kind: api
+    {{- end }}
   configSchema:
     type: object
     properties:
@@ -322,10 +334,10 @@ spec:
     # and each message gets its own conversation.
     cooldownHours: 0
 ---
-# READ-ONLY. Two API groups: agentops.dev for configuration, plus deployments
-# and pods for INSTALL FACTS — image digests, restart counts and pod failure
-# reasons exist in no CR, and an operations console that cannot see a
-# CrashLoopBackOff is not one.
+# READ-ONLY. agentops.dev for configuration, plus deployments, pods and
+# cronjobs for INSTALL FACTS — image digests, restart counts, pod failure
+# reasons and which node a pod runs on exist in no CR, and an operations
+# console that cannot see a CrashLoopBackOff is not one.
 #
 # NO WRITE VERBS ANYWHERE. The console has no write path to the Kubernetes API
 # at all; its only writes are POST /channel/inbound and POST /signal/inbound,
@@ -357,6 +369,10 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # the housekeeping CronJob is a component too, and the topology draws it
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

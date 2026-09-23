@@ -31,6 +31,11 @@ spec:
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
+  # Metadata only: what this implementation faces outside the install. The
+  # manager verifies none of it and grants nothing from it.
+  externals:
+    - name: Kubernetes API
+      kind: kubernetes
   # Interface metadata: makes `kubectl get signaladapter` answer "what goes in
   # spec.config?" without reading adapter source.
   configSchema:
