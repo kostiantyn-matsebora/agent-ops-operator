@@ -55,10 +55,22 @@ other object of any kind.
 `coordinatorRef` does not resolve, or resolves to an object whose own `Ready`
 is False. A Coordinator that is not Ready SHALL claim nothing.
 
+Resolution SHALL track the Coordinators already visited on the current path
+and detect a STATIC `coordinatorRef` cycle — one reachable with no
+conversation involved. A Coordinator whose own name reappears on that path
+SHALL be `Ready=False` naming the cycle, rather than recursing.
+
+This is a separate guard from the `invoke`-time one below, which walks a
+live conversation's `causedBy` chain instead of the static ref graph.
+
 #### Scenario: A dangling member
 - **WHEN** an `agents[]` entry names an AgentCapability or Coordinator that does not exist
 - **THEN** the Coordinator's `Ready` is False with the entry's name in its message
 - **AND** signals on its sources are not routed to it
+
+#### Scenario: Two Coordinators list each other
+- **WHEN** Coordinator A's `agents[]` names a `coordinatorRef` to B, and B's own `agents[]` names one back to A
+- **THEN** both A and B are `Ready=False` naming the cycle, and neither claims anything
 
 ### Requirement: Limits and escalation channels are snapshotted onto the conversation opened
 
