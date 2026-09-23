@@ -118,8 +118,9 @@ identity, mediated egress and at-least-once delivery are already in it.
 
 **Console — all in one place.** The [console](docs/console.md) ships enabled and
 [read-only on your cluster](docs/console.md) — every conversation as it happens,
-what is queued, what is stuck and why, and the whole wiring as a graph. It is a
-channel too, so you answer the agent right there.
+what is queued, what is stuck and why, and the whole install as a live network,
+down to each model and tool call. It is a channel too, so you answer the agent
+right there.
 **[Watch one signal, start to finish](https://kostiantyn-matsebora.github.io/agent-ops-operator/#tour)** — a minute, no sound.
 
 ## The kinds you declare

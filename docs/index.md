@@ -161,8 +161,8 @@ identity, mediated egress and at-least-once delivery are already in it.
 > **Console — all in one place**
 >
 > Every conversation as it happens, what is queued, what is stuck and why — and
-> the whole wiring as a graph. It is a channel too, so you answer the agent
-> right there.
+> the whole install as a live network, down to each model and tool call. It is
+> a channel too, so you answer the agent right there.
 >
 > - ships enabled
 > - six views
