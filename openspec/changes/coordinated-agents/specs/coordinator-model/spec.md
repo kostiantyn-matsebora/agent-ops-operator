@@ -41,6 +41,10 @@ other object of any kind.
 - **WHEN** an `agents[]` entry carries both `capabilityRef` and `coordinatorRef`
 - **THEN** the API server rejects the manifest
 
+#### Scenario: An entry naming neither ref is refused
+- **WHEN** an `agents[]` entry carries neither `capabilityRef` nor `coordinatorRef`
+- **THEN** the API server rejects the manifest
+
 #### Scenario: Invoking outside the list fails
 - **WHEN** the coordinating agent asks to invoke an AgentCapability or Coordinator its own Coordinator does not list
 - **THEN** the request is refused naming the Coordinator, and no conversation is created

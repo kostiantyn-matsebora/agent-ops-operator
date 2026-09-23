@@ -137,10 +137,12 @@ budget across levels (ADR D5).
 - Closing a conversation closes every member with `causedBy` naming it, the
   same `closeReason` kept verbatim — recursively, since a closed member may
   itself have members.
-- `budget-exceeded` runs `escalate` FIRST (D-D) with a manager-written digest
-  (limit, counts, member list), then closes. On a nested conversation this
-  bubbles one hop, exactly as an agent-initiated `escalate` does — only the
-  uncaused root's `budget-exceeded` opens a human thread.
+- `budget-exceeded` closes THIS conversation and every live member first
+  (`closeReason: budget-exceeded`), then runs `escalate` (D-D) with a
+  manager-written digest (limit, counts, member list). On a nested
+  conversation this bubbles one hop, exactly as an agent-initiated
+  `escalate` does — only the uncaused root's `budget-exceeded` opens a human
+  thread.
 - `agentsInvoked` is incremented on the conversation's OWN status by the
   manager under optimistic concurrency; a conflict retries. Ten members is the
   design point, per level.
