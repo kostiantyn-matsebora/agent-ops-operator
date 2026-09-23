@@ -12,8 +12,8 @@ SignalSources and Channels have no reader here.
 
 The tree read walks from the CALLING conversation downward — its own
 descendants, at any depth, never its ancestors or their other branches.
-Reads SHALL be filtered to what the calling Coordinator lists and what it
-caused.
+Reads SHALL be filtered to what the calling Coordinator lists and to the
+calling conversation's own subtree, at any depth.
 
 #### Scenario: A coordinator sees only its members
 - **WHEN** a coordinating agent lists agents

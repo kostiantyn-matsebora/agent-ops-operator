@@ -126,7 +126,7 @@ refers to the ADR's decisions as D1–D6.
 
 Each conversation that is itself a Coordinator's root enforces its OWN
 snapshotted `limits`, independent of any ancestor's. Nesting does not pool a
-budget across levels (ADR D5/D7).
+budget across levels (ADR D5).
 
 | Edge | Where | Action |
 |---|---|---|

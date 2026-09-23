@@ -48,16 +48,19 @@ is not Ready SHALL claim nothing.
 ### Requirement: Limits and escalation channels are snapshotted onto the conversation opened
 
 `spec.limits` SHALL carry `maxAgents`, `maxTurns` and `deadline`, each optional
-with a chart-documented default. The values, and the Coordinator's
-`channelRefs`, SHALL be snapshotted onto the conversation it opens at
-creation.
+with a chart-documented default. The values SHALL be snapshotted onto the
+conversation it opens at creation, whether that conversation is an uncaused
+root or itself a member.
+
+A nested Coordinator's budget snapshot is its own, independent of any
+ancestor's.
+
+The Coordinator's `channelRefs` SHALL be snapshotted as
+`spec.escalationChannelRefs` onto an UNCAUSED root only. A member never binds
+it (coordination-escalation).
 
 Editing the Coordinator changes neither the budget of an incident already in
-flight nor where it would escalate.
-
-This holds whether that conversation is an uncaused root or itself a member.
-A nested Coordinator's budget and escalation snapshot are its own, independent
-of any ancestor's.
+flight nor where the uncaused root would escalate.
 
 #### Scenario: A limit edit does not reach a running incident
 - **WHEN** a Coordinator's `maxAgents` is lowered while one of its incidents is open

@@ -105,9 +105,10 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       one hop, exactly as an agent-initiated close does.
 - [ ] 3.2 `DeliverInputs` fences on `escalatedAt`: nothing earlier is
       delivered to the escalated channels.
-- [ ] 3.3 `budget-exceeded` calls `escalate` first with a manager-written
-      digest (limit, counts, member list), then closes — bubbling per 3.1b on
-      a nested conversation, opening a thread only on the uncaused root.
+- [ ] 3.3 `budget-exceeded` closes the conversation, then calls `escalate`
+      with a manager-written digest (limit, counts, member list) — bubbling
+      per 3.1b on a nested conversation, opening a thread only on the
+      uncaused root.
 - [ ] 3.4 Fake-chat integration test: escalate on the uncaused root opens
       threads with the digest only; a later member result reaches the
       thread; a person's reply is a root input; escalate on a nested member

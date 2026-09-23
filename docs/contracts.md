@@ -975,7 +975,7 @@ An allowlist inside the runtime pod is never relied on for any of these.
 | `list_agents()` | read | the caller's Coordinator's `agents[]` entries — name and description only |
 | `list_conversations()` | read | conversations in the caller's scope, each with `brief` |
 | `get_conversation(name)` | read | one conversation's detail, in scope |
-| `get_tree(name?)` | read | the caller's own subtree, walked from itself downward |
+| `get_tree()` | read | the caller's own subtree, walked from itself downward |
 | `invoke(agent, task)` | verb | the member's name at once — `created` or `attached` |
 | `close(conversation, reason)` | verb | acknowledgement |
 | `escalate(message)` | verb | acknowledgement |

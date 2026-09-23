@@ -114,8 +114,8 @@ on an omission rather than a field.
 
 - `platform/manager/api/v1alpha1/`: `agentcapability_types.go`, `coordinator_types.go`,
   `Pipeline.spec.capabilityRef` + CEL, `Conversation.spec.causedBy`,
-  `Conversation.spec.coordinatorRef`, `status.closeReason`, `status.brief`;
-  deepcopy and CRDs regenerated.
+  `Conversation.spec.coordinatorRef`, `Conversation.spec.escalationChannelRefs`,
+  `status.closeReason`, `status.brief`; deepcopy and CRDs regenerated.
 - `platform/manager/internal/`: `controller/` (AgentCapability, Coordinator reconcilers;
   budget enforcement; late binding), `httpapi/` (root routing on `/work/done`,
   `causedBy` reuse scope, self-input refusal, `PipelinesForSource` gains
