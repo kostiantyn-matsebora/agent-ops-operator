@@ -100,13 +100,6 @@ issue with no standing instruction SHALL move off that label at once.
   archive label is itself sufficient authorisation for its own pull
   request's fix station
 
-#### Scenario: A merge with no standing instruction to carry
-
-- **WHEN** an opsx-lane pull request merges and its issue carries no standing
-  instruction
-- **THEN** the issue's station moves from merge to stalled, and no archive
-  session starts
-
 ### Requirement: The issue selects the lane, and nothing infers it
 
 An issue already bound to an openspec change SHALL be worked through that
