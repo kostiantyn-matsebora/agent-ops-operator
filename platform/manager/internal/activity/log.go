@@ -95,7 +95,7 @@ func parseCursor(s string) (uint64, bool) {
 // entry, and a subscriber that cannot keep up is marked lagged rather than
 // waited on.
 //
-// Cursor, TS and Status are normalized here so every emission site can stay a
+// Cursor, TS, Status and the Data bound are normalized here so every emission site can stay a
 // literal.
 func (l *Log) Emit(e Event) {
 	if l == nil {
@@ -109,6 +109,7 @@ func (l *Log) Emit(e Event) {
 	if e.Status == "" {
 		e.Status = StatusOK
 	}
+	e.Data = BoundData(e.Data)
 
 	l.mu.Lock()
 	seq := l.next

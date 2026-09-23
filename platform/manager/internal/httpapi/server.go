@@ -506,6 +506,11 @@ type workDone struct {
 	// would be confident and sometimes wrong.
 	ContinuityReason string `json:"continuityReason,omitempty"`
 	Result           string `json:"result,omitempty"`
+	// Turns and ToolCalls are what the runtime saw the run do, bounded in
+	// count and field size (workreport.go). Each becomes one activity hop and
+	// nothing else — they are telemetry, never written to the Conversation.
+	Turns     []Turn     `json:"turns,omitempty"`
+	ToolCalls []ToolCall `json:"toolCalls,omitempty"`
 }
 
 // Continuity report values. Runtime-agnostic by construction: they describe what
@@ -525,6 +530,10 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	var d workDone
 	if err := json.Unmarshal(body, &d); err != nil {
 		writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
+		return
+	}
+	if err := validateReport(&d); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 	ctx := r.Context()
@@ -643,6 +652,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pipeline := s.pipelineName(ctx, &conv)
+	s.emitRunCalls(ctx, &conv, pipeline, d.RunID, &d)
 	runEvent := activity.Event{
 		Kind:     activity.KindRunCompleted,
 		From:     activity.Node(activity.NodeRuntime, s.runtimeName(ctx, &conv)),

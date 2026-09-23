@@ -86,3 +86,14 @@ func TestFailedContextReportIsAnErrorEvent(t *testing.T) {
 		t.Fatalf("detail = %q, want the reported error", evs[0].Detail)
 	}
 }
+
+// The facts ride structured in data too, so a reader need not parse detail.
+func TestContextFactsRideInData(t *testing.T) {
+	log := activity.New(10)
+	s := &Server{Activity: log}
+	postContext(t, s, `{"kind":"context.skip","conversation":"c1","bytes":2048,"files":3,"quiesced":true}`)
+	evs, _ := log.Since("", 10)
+	if d := evs[0].Data; d["bytes"] != "2048" || d["files"] != "3" || d["quiesced"] != "true" {
+		t.Fatalf("data = %+v", d)
+	}
+}

@@ -74,6 +74,17 @@ func TestEveryEventKindMovesItsMetric(t *testing.T) {
 			Kind: activity.KindChannelOpCompleted, Code: "send", OpID: "send:1", LatencyMs: 120,
 			From: activity.Node(activity.NodeChannelAdapter, "telegram"),
 		}, "agentops_channel_ops_total"},
+		{"model call", activity.Event{
+			Kind: activity.KindModelCall, Pipeline: "k8s-ops", RunID: "r-1",
+			From: activity.Node(activity.NodeRuntimeImage, "example/runtime:1"),
+			To:   activity.Node(activity.NodeModel, "model-a"),
+			Data: map[string]string{"tokensIn": "1200", "tokensOut": "80"},
+		}, "agentops_model_calls_total"},
+		{"tool call", activity.Event{
+			Kind: activity.KindToolCall, Pipeline: "k8s-ops", RunID: "r-1", LatencyMs: 320,
+			From: activity.Node(activity.NodeRuntimeImage, "example/runtime:1"),
+			To:   activity.Node(activity.NodeMCPServer, "kubernetes"),
+		}, "agentops_tool_calls_total"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,12 +123,48 @@ func TestHistogramsObserveOnlyMeasuredLatencies(t *testing.T) {
 	}
 }
 
+// The model and tool hops move their histograms from the same emission, and
+// the model's NAME reaches no label: two models make one series per direction.
+func TestModelAndToolHopsObserveTheirHistograms(t *testing.T) {
+	log, reg := wired(t, nil)
+	for _, model := range []string{"model-a", "model-b"} {
+		log.Emit(activity.Event{Kind: activity.KindModelCall, Pipeline: "p",
+			To:   activity.Node(activity.NodeModel, model),
+			Data: map[string]string{"tokensIn": "1000", "tokensOut": "50", "cacheReadTokens": "800"}})
+	}
+	log.Emit(activity.Event{Kind: activity.KindToolCall, Pipeline: "p", LatencyMs: 1500})
+	log.Emit(activity.Event{Kind: activity.KindToolCall, Pipeline: "p",
+		To: activity.Node(activity.NodeMCPServer, "kubernetes")}) // unmeasured
+
+	families := gather(t, reg)
+	tokens := families["agentops_model_call_tokens"]
+	if tokens == nil || len(tokens.GetMetric()) != 3 {
+		t.Fatalf("want one token series per direction, got %+v", tokens)
+	}
+	for _, m := range tokens.GetMetric() {
+		if m.GetHistogram().GetSampleCount() != 2 {
+			t.Fatalf("each direction observed once per call: %+v", m)
+		}
+	}
+	calls := families["agentops_tool_calls_total"]
+	if calls == nil || len(calls.GetMetric()) != 2 || counterValue(calls) != 2 {
+		t.Fatalf("builtin and mcp calls are two series: %+v", calls)
+	}
+	dur := families["agentops_tool_call_duration_seconds"]
+	if dur == nil || dur.GetMetric()[0].GetHistogram().GetSampleCount() != 1 ||
+		dur.GetMetric()[0].GetHistogram().GetSampleSum() != 1.5 {
+		t.Fatalf("only the measured call is observed, in seconds: %+v", dur)
+	}
+}
+
 // 1b.2b, first half: no metric declares a label that CAN carry an id. The rule
 // is structural — the label names are what enforce it, so this reads them.
 func TestNoMetricDeclaresAnIdentifyingLabel(t *testing.T) {
 	allowed := map[string]bool{
 		"pipeline": true, "adapter": true, "source": true, "channel": true,
 		"kind": true, "status": true, "reason": true,
+		// closed enums: builtin|mcp, in|out|cache-read
+		"target": true, "direction": true,
 	}
 	log, reg := wired(t, func() Sample {
 		return Sample{
@@ -135,6 +182,10 @@ func TestNoMetricDeclaresAnIdentifyingLabel(t *testing.T) {
 	log.Emit(activity.Event{Kind: activity.KindRunCompleted, Pipeline: "p", LatencyMs: 1})
 	log.Emit(activity.Event{Kind: activity.KindChannelOpCompleted, Code: "send", LatencyMs: 1,
 		From: activity.Node(activity.NodeChannelAdapter, "telegram")})
+	log.Emit(activity.Event{Kind: activity.KindModelCall, Pipeline: "p",
+		To: activity.Node(activity.NodeModel, "model-a"), Data: map[string]string{"tokensIn": "5"}})
+	log.Emit(activity.Event{Kind: activity.KindToolCall, Pipeline: "p", LatencyMs: 1,
+		To: activity.Node(activity.NodeMCPServer, "kubernetes")})
 
 	for name, f := range gather(t, reg) {
 		if !strings.HasPrefix(name, "agentops_") {

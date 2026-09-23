@@ -17,7 +17,11 @@
 //     no-signal-loops invariant exists to prevent.
 package activity
 
-import "time"
+import (
+	"sort"
+	"time"
+	"unicode/utf8"
+)
 
 // Node kinds. These are the SAME vocabulary the topology graph uses, so an
 // event is renderable as motion along an edge the graph already draws — no
@@ -36,6 +40,19 @@ const (
 	// NodeManager is the manager process itself — the endpoint of every hop
 	// that arrives from outside (signal receipt, op completion reports).
 	NodeManager = "manager"
+	// NodeRuntimeImage is the image a runtime pod runs, named by its image
+	// reference. It is the `from` of every hop the runtime reports it made,
+	// because the harness inside the image made the call, not the AgentRuntime
+	// object that selected it.
+	NodeRuntimeImage = "runtime-image"
+	// NodeModel is a model a runtime called, named as the runtime reported it.
+	NodeModel = "model"
+	// NodeMCPServer is an MCP server a tool call reached, named by its key in
+	// the bound MCPConfigs.
+	NodeMCPServer = "mcp-server"
+	// NodeExternal is a system outside the install an adapter declares it
+	// faces, named as the adapter CR declares it.
+	NodeExternal = "external"
 )
 
 // Event kinds, one per real hop the manager mediates.
@@ -75,6 +92,11 @@ const (
 	// is the goal, not a symptom.
 	KindContextSkipped = "context.skipped" // conversation -> runtime
 	KindContextFailed  = "context.failed"  // conversation -> runtime
+
+	// Runtime hops. The manager never sees a model or a tool call: the runtime
+	// reports them with its work result, and the manager emits one hop each.
+	KindModelCall = "model.call" // runtime-image -> model
+	KindToolCall  = "tool.call"  // runtime-image -> mcp-server, or nothing for a built-in tool
 )
 
 // Context checkpoint codes — BOUNDED, so they are safe as metric labels.
@@ -111,6 +133,46 @@ const (
 	StatusOK    = "ok"
 	StatusError = "error"
 )
+
+// The bound on Event.Data. Truncated rather than refused: telemetry never
+// fails the request that produced it.
+const (
+	MaxDataKeys  = 16
+	MaxDataValue = 200
+)
+
+// BoundData returns data within MaxDataKeys and MaxDataValue. Keys beyond the
+// bound are dropped in sorted order, so the same map always keeps the same
+// keys. The input is never modified.
+func BoundData(data map[string]string) map[string]string {
+	if len(data) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > MaxDataKeys {
+		keys = keys[:MaxDataKeys]
+	}
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		out[Truncate(k, MaxDataValue)] = Truncate(data[k], MaxDataValue)
+	}
+	return out
+}
+
+// Truncate cuts s to at most n bytes without splitting a UTF-8 sequence.
+func Truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
 
 // NodeRef names one graph node.
 type NodeRef struct {
@@ -161,6 +223,12 @@ type Event struct {
 	// carries ids that would grow series without limit. Metrics answer "how many,
 	// how deep, how old"; the ids stay in the event and in GET /status.
 	Code string `json:"code,omitempty"`
+
+	// Data holds bounded facts that exist nowhere else — tokens, a tool's name,
+	// a stop reason, checkpoint bytes. Never content: an input's text, a run's
+	// result and an op's message have durable homes and are joined from there.
+	// Emit bounds it to MaxDataKeys keys of MaxDataValue bytes each.
+	Data map[string]string `json:"data,omitempty"`
 
 	// Adapter records which adapter reported an event that arrived over
 	// POST /activity. Manager-emitted events leave it empty. It is set from the
