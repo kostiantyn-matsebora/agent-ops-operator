@@ -39,12 +39,13 @@ const (
 type Turn struct {
 	// Model is the model the call went to, as the runtime names it.
 	Model string `json:"model,omitempty"`
-	// TokensIn is the input tokens billed for the call.
+	// TokensIn is every input token the call consumed, cache reads included,
+	// as far as the vendor reports them.
 	TokensIn *int64 `json:"tokensIn,omitempty"`
 	// TokensOut is the output tokens the call produced.
 	TokensOut *int64 `json:"tokensOut,omitempty"`
-	// CacheReadTokens is the input tokens served from the provider's prompt
-	// cache. Omitted by a vendor that reports none.
+	// CacheReadTokens is the part of TokensIn served from the provider's
+	// prompt cache. Omitted by a vendor that reports none.
 	CacheReadTokens *int64 `json:"cacheReadTokens,omitempty"`
 	// StopReason is why the model stopped: end of turn, tool use, max tokens.
 	StopReason string `json:"stopReason,omitempty"`
