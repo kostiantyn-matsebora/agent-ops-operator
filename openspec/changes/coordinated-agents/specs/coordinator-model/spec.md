@@ -21,27 +21,38 @@ with the same exclusivity a Pipeline has.
 
 ### Requirement: The agents list is the whole outbound reach
 
-`spec.agents[]` SHALL be a list of `{name, capabilityRef, description}`. The
-Coordinator SHALL be able to invoke exactly the AgentCapabilities this list names and no
-other object of any kind. `description` SHALL be required and non-empty; it
-lives on the entry, so two Coordinators may describe one AgentCapability differently.
+`spec.agents[]` SHALL be a list of entries, each `{name, description}` plus
+EITHER `capabilityRef` OR `coordinatorRef`, mutually exclusive by CEL. The
+Coordinator SHALL be able to invoke exactly the objects this list names and no
+other object of any kind.
+
+- A `capabilityRef` entry invokes an AgentCapability as a plain member.
+- A `coordinatorRef` entry NESTS. The invoked Coordinator's own root opens as
+  the member, and its `coordinatorRef` is what the member's own
+  `coordinatorRef` (`conversation-provenance`) is set from.
+- `description` SHALL be required and non-empty, on the entry rather than the
+  target, so two Coordinators may describe one differently.
 
 #### Scenario: An entry without a description is refused
 - **WHEN** an `agents[]` entry omits `description`
 - **THEN** the API server rejects the manifest
 
+#### Scenario: An entry naming both refs is refused
+- **WHEN** an `agents[]` entry carries both `capabilityRef` and `coordinatorRef`
+- **THEN** the API server rejects the manifest
+
 #### Scenario: Invoking outside the list fails
-- **WHEN** the coordinating agent asks to invoke an AgentCapability its Coordinator does not list
+- **WHEN** the coordinating agent asks to invoke an AgentCapability or Coordinator its own Coordinator does not list
 - **THEN** the request is refused naming the Coordinator, and no conversation is created
 
 ### Requirement: Readiness names every member that is not
 
-`Ready` SHALL be False, naming each of them, when any listed `capabilityRef` does not
-resolve or resolves to an AgentCapability whose own `Ready` is False. A Coordinator that
-is not Ready SHALL claim nothing.
+`Ready` SHALL be False, naming each of them, when any listed `capabilityRef` or
+`coordinatorRef` does not resolve, or resolves to an object whose own `Ready`
+is False. A Coordinator that is not Ready SHALL claim nothing.
 
 #### Scenario: A dangling member
-- **WHEN** an `agents[]` entry names an AgentCapability that does not exist
+- **WHEN** an `agents[]` entry names an AgentCapability or Coordinator that does not exist
 - **THEN** the Coordinator's `Ready` is False with the entry's name in its message
 - **AND** signals on its sources are not routed to it
 
@@ -72,10 +83,13 @@ flight nor where the uncaused root would escalate.
 
 ### Requirement: An invoke is refused when it would cycle the Coordinator graph
 
-The manager SHALL walk the calling conversation's `causedBy` chain to the
-uncaused root, collecting each ancestor's `coordinatorRef`. An `invoke` whose
-target resolves to a Coordinator already in that list SHALL be refused as a
-cycle, whether the repeat is immediate or reached through other Coordinators.
+The manager SHALL collect the calling conversation's OWN `coordinatorRef`,
+then walk its `causedBy` chain to the uncaused root collecting each
+ancestor's.
+
+An `invoke` whose target resolves to a Coordinator already in that list
+SHALL be refused as a cycle, whether the repeat is immediate or reached
+through other Coordinators.
 
 #### Scenario: Direct self-invoke refused
 - **WHEN** a Coordinator's own conversation asks to invoke a Coordinator wired to itself

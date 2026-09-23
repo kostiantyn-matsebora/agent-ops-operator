@@ -169,8 +169,9 @@ merely deep, it never terminates.
 - It authenticates CALLERS by a per-conversation token the manager injects into
   the runtime pod as `AOPS_MCP_TOKEN`, derived with context
   `coordinator:<name>:<conversation>`. The server forwards it; the MANAGER
-  validates and enforces the `agents[]` list and root scope on a new
-  `/coordinate/*` surface. The server never decides reach.
+  validates and enforces the `agents[]` list and the calling conversation's
+  own subtree scope on a new `/coordinate/*` surface. The server never
+  decides reach.
 - Tools: `list_agents`, `list_conversations`, `get_conversation`, `get_tree`,
   `invoke`, `close`, `escalate`, `read`. All complete within the request.
   `list_conversations` returns each conversation's `brief` (D-I) beside name,

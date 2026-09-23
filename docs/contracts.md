@@ -922,6 +922,12 @@ the limit to `0` to disable the breaker without disabling the counting.
 
 ## The aops MCP server contract
 
+**Proposed, not yet shipped.** `platform/mcp-aops/` and `POST /coordinate/*`
+do not exist in this repository — this section is the contract
+[ADR 0002](adr/0002-coordinated-agents.md) and the `coordinated-agents`
+openspec change design against, kept here so the two stay coherent while the
+change is implemented.
+
 The interface through which a coordinating agent sees and acts on agent-ops
 itself. `platform/mcp-aops/` is a thin client of the manager — MCP over
 streamable HTTP, no state of its own, deciding nothing about reach.
@@ -1313,7 +1319,7 @@ scrape time from the same in-memory state `/status` reports.
 | `GET/POST /channel/*` | adapter-facing channel contract (bearer token, see adapter contract) |
 | `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token, see signal adapter contract) |
 | `GET/POST /activity*` | per-hop telemetry (bearer token, see activity contract) |
-| `POST /coordinate/*` | the aops MCP server's four verbs and read tools (bearer token, see aops MCP server contract) |
+| `POST /coordinate/*` | **proposed, not yet shipped** — the aops MCP server's four verbs and read tools (bearer token, see aops MCP server contract) |
 | `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |

@@ -105,6 +105,12 @@ thing that gives a conversation a turn.
 thread when it decides to, on its `channelRefs`, with a synthesised first message.
 Close and drop are `/close` with a `closeReason` the object keeps.
 
+- **Only the uncaused root holds a `channelRefs` to open a thread on** — a
+  caused conversation binds no human channel (D3). A nested Coordinator's
+  `escalate` closes its own conversation instead, appending the message to its
+  parent's inputs, so the decision to open a thread propagates up one hop at a
+  time until it reaches the root.
+
 **D5 — Budget on the conversation a Coordinator opens. Exhaustion closes with
 a reason, and nesting does not share a budget** — a nested Coordinator
 snapshots its OWN `limits`, independent of its parent's. A wide-and-deep tree

@@ -45,8 +45,8 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       nothing.
 - [ ] 2.5 Conversation creation from a Coordinator: no `channelRefs`; its OWN
       limits snapshotted into `status.budget`; the Coordinator's `channelRefs`
-      snapshotted into `spec.escalationChannelRefs` — every time, whether the
-      conversation is uncaused or itself a member.
+      snapshotted into `spec.escalationChannelRefs` on an UNCAUSED root only —
+      a member never binds it.
 - [ ] 2.6 Manager `/coordinate/*` surface: `invoke`, `close`, `escalate`,
       `read`; caller token context `coordinator:<name>:<conversation>`;
       `agents[]` list and the CALLING CONVERSATION'S OWN SUBTREE scope
