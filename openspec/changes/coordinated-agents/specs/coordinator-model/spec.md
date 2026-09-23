@@ -107,8 +107,19 @@ An `invoke` whose target resolves to a Coordinator already in that list
 SHALL be refused as a cycle, whether the repeat is immediate or reached
 through other Coordinators.
 
+This is a live-conversation check, distinct from the static `agents[]` graph
+the Readiness requirement walks.
+
+A Coordinator naming itself directly by `coordinatorRef` is already
+`Ready=False` and never runs, so that shape never reaches this check.
+
+What this check catches instead is a `capabilityRef` entry whose target is,
+through separate wiring, also a Coordinator already on the caller's own
+ancestor list — invisible to the static graph, which follows only
+`coordinatorRef` entries.
+
 #### Scenario: Direct self-invoke refused
-- **WHEN** a Coordinator's own conversation asks to invoke a Coordinator wired to itself
+- **WHEN** a Coordinator's own conversation asks to invoke an AgentCapability that is, through separate wiring, that same Coordinator
 - **THEN** the invoke is refused naming the cycle, and no conversation is created
 
 #### Scenario: Indirect cycle refused

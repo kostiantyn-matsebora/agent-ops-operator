@@ -72,10 +72,11 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       `maxTurns` in `handleWorkDone`, `deadline` via reconciler requeue.
       Closing a conversation closes its members with the same `closeReason`,
       kept verbatim, recursively.
-- [ ] 2.10b Cycle guard (D-E2): on `invoke`, walk the caller's `causedBy`
-      chain to the uncaused root collecting each ancestor's `coordinatorRef`;
-      refuse naming the repeated Coordinator when the target matches one
-      already in that list. No depth limit.
+- [ ] 2.10b Cycle guard (D-E2): on `invoke`, collect the caller's own
+      `coordinatorRef` first, then walk its `causedBy` chain to the uncaused
+      root collecting each ancestor's `coordinatorRef`. Refuse naming the
+      repeated Coordinator when the target matches one already in that list.
+      No depth limit.
 - [ ] 2.11 `closeReason` stamped by the `close` verb (required there), absent
       from `/close`; a coordinator cannot close outside conversations it
       caused.

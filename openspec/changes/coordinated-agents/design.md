@@ -178,11 +178,17 @@ merely deep, it never terminates.
 - It authenticates CALLERS by a per-conversation token the manager injects into
   the runtime pod as `AOPS_MCP_TOKEN`, derived with context
   `coordinator:<name>:<conversation>`. The server forwards it; the MANAGER
-  validates and enforces the per-verb bound on a new `/coordinate/*` surface —
-  the `agents[]` list for `invoke`, the calling conversation's own subtree for
-  `escalate` and `read`, and for `close` the caller itself or a conversation
-  it directly caused, never a deeper descendant. The server never decides
-  reach.
+  validates and enforces the per-verb bound on a new `/coordinate/*` surface,
+  the same bound `aops-mcp-server/spec.md` states:
+
+  | Verb | Bound |
+  |---|---|
+  | `invoke` | the `agents[]` list |
+  | `escalate` | the caller itself — no conversation argument, never a member reached through it |
+  | `read` | the calling conversation's own subtree |
+  | `close` | the caller itself, or a conversation it directly caused, never a deeper descendant |
+
+  The server never decides reach.
 - Tools: `list_agents`, `list_conversations`, `get_conversation`, `get_tree`,
   `invoke`, `close`, `escalate`, `read`. All complete within the request.
   `list_conversations` returns each conversation's `brief` (D-I) beside name,
