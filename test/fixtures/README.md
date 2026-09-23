@@ -5,9 +5,9 @@ module's unit tests so one captured payload cannot drift between the two.
 
 | File | Is | Read by |
 |---|---|---|
-| `alertmanager-webhook.json` | an Alertmanager-format webhook body: two firing alerts and one resolved | `signals/alertmanager` tests; the pack POSTs it to `/webhook/{source}` |
-| `telegram-update-message.json` | a Telegram `Update` on a forum supergroup's GENERAL surface — an origination | `signals/telegram` tests; the pack feeds it to the fake Bot API |
-| `telegram-update-topic.json` | the same shape inside a forum TOPIC — a continuation | `channels/telegram` tests; the pack feeds it to the fake Bot API |
+| `alertmanager-webhook.json` | an Alertmanager-format webhook body: two firing alerts and one resolved | `signals/alertmanager` tests, and the pack POSTs it to `/webhook/{source}` |
+| `telegram-update-message.json` | a Telegram `Update` on a forum supergroup's GENERAL surface — an origination | `signals/telegram` tests, and the pack feeds it to the fake Bot API |
+| `telegram-update-topic.json` | the same shape inside a forum TOPIC — a continuation | `channels/telegram` tests, and the pack feeds it to the fake Bot API |
 | `claude-stream-json.jsonl` | claude-code's `--output-format stream-json` for a run of three turns, one MCP and one built-in tool call | `runtimes/claude` tests, for the turns and tool calls the work result reports |
 | `copilot-session-events.jsonl` | the Copilot SDK's session events for a run of two turns, one MCP and one built-in tool call | `runtimes/copilot` tests, for the same report |
 
