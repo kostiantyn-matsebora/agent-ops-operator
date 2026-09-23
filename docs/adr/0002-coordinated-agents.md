@@ -136,6 +136,11 @@ names the ONE HOP parent (D3), never the tree's top.
   human thread opens only when that decision reaches the top.
 - Budget is per-Coordinator (D5). Nesting does not pool `maxAgents`,
   `maxTurns` or `deadline` across levels.
+- `coordinatorRef` names the Coordinator a conversation's own entry point is —
+  set on a direct address and on a nested member, empty on a Pipeline-addressed
+  conversation. The cycle guard walks `causedBy` to the uncaused root
+  collecting each ancestor's `coordinatorRef`, and refuses an `invoke` whose
+  target resolves to a Coordinator already in that list.
 
 ## Consequences
 

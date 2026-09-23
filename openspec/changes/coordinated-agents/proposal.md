@@ -26,6 +26,10 @@ on an omission rather than a field.
   one hop, never the tree's ultimate root. Written once, resolves nothing.
   Conversation reuse scopes on it. A member MAY itself be a Coordinator's own
   root for further members, so the tree nests to any depth.
+- **`Conversation.spec.coordinatorRef`** — set when the conversation's own
+  entry point is a Coordinator, addressed directly or opened as a nested
+  member. Written once, resolves nothing beyond identifying that Coordinator.
+  The cycle guard walks `causedBy` to the uncaused root collecting it.
 - **The manager routes results**: `/work/done` on a caused conversation appends
   the result as an input on its PARENT. A caused conversation binds no human
   channel.
@@ -94,9 +98,10 @@ on an omission rather than a field.
   delivered as any input is.
 - `chat-signal-origination`: a Coordinator is a claimant of a source beside
   Pipelines; fan-out counts both.
-- `state-durability`: the restart-resilience matrix gains `causedBy`, the
-  root's budget counters, the pending escalation and `brief` — agent-written,
-  latest-wins, surviving every restart with the status it lives on.
+- `state-durability`: the restart-resilience matrix gains `causedBy`,
+  `coordinatorRef`, the root's budget counters, the pending escalation and
+  `brief` — agent-written, latest-wins, surviving every restart with the
+  status it lives on.
 - `console-topology`: `AgentCapability` and `Coordinator` are graph nodes; a Coordinator's
   member edges are drawn from `agents[]`.
 - `chat-addressing-discovery`: `/pipelines` and the choice list name Pipelines
@@ -109,7 +114,8 @@ on an omission rather than a field.
 
 - `platform/manager/api/v1alpha1/`: `agentcapability_types.go`, `coordinator_types.go`,
   `Pipeline.spec.capabilityRef` + CEL, `Conversation.spec.causedBy`,
-  `status.closeReason`, `status.brief`; deepcopy and CRDs regenerated.
+  `Conversation.spec.coordinatorRef`, `status.closeReason`, `status.brief`;
+  deepcopy and CRDs regenerated.
 - `platform/manager/internal/`: `controller/` (AgentCapability, Coordinator reconcilers;
   budget enforcement; late binding), `httpapi/` (root routing on `/work/done`,
   `causedBy` reuse scope, self-input refusal, `PipelinesForSource` gains

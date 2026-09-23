@@ -75,7 +75,7 @@ target resolves to a Coordinator already in that list SHALL be refused as a
 cycle, whether the repeat is immediate or reached through other Coordinators.
 
 #### Scenario: Direct self-invoke refused
-- **WHEN** a Coordinator's own conversation asks to invoke an AgentCapability wired to itself
+- **WHEN** a Coordinator's own conversation asks to invoke a Coordinator wired to itself
 - **THEN** the invoke is refused naming the cycle, and no conversation is created
 
 #### Scenario: Indirect cycle refused
