@@ -68,7 +68,7 @@
 
 ### 9.2 Adopter site
 
-- [ ] 9.2.1 `docs/console-guide.md`: the Topology tab's text and its screenshot alt text describe the network views
+- [x] 9.2.1 `docs/console-guide.md`: the Topology tab's text and its screenshot alt text describe the network views
 - [ ] 9.2.2 `docs/getting-started.md` and `docs/index.md`: every sentence that names the lanes or describes the old graph
 - [x] 9.2.3 `cd platform/console/ui && npm run screenshots && npm run demo`, so the site's screenshots and the landing recording show the new topology
 - [ ] 9.2.4 `python3 .claude/scripts/rules_compliance.py $(git ls-files '*.md')` and the docs lint in `docs/CLAUDE.md` pass
