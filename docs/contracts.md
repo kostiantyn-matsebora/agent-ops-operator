@@ -802,7 +802,7 @@ An `AgentRuntime` image must:
 3. **Report** the outcome:
 
    ```
-   POST $CONTROL_URL/work/done {convo, runId, status, sessionId, result}
+   POST $CONTROL_URL/work/done {convo, runId, status, runtimeContextId, result, turns, toolCalls}
    ```
 
 4. **Exit `0`** after `RUNTIME_IDLE_TTL_M` minutes without work
@@ -812,7 +812,8 @@ An `AgentRuntime` image must:
 The unit also carries `toolsMode` (`merge` | `overwrite`) and `agent`. A runtime
 holding the repository is expected to read the agent's definition, take its
 `tools:` frontmatter as the agent's own declaration, and compose the two.
-WHERE that definition lives is the runtime's fact, not the contract's:
+
+WHERE that definition lives is the runtime's fact, not the contract's.
 `runtime-claude` and `runtime-ollama` read `.claude/agents/<agent>.md`,
 `runtime-copilot` reads `.github/agents/<agent>.agent.md`, and another backend
 may read somewhere else.
@@ -835,16 +836,21 @@ run until its idle TTL.
 
 `runtime-ollama` is the second implementation, and the one that had to build
 everything the CLI provides for the first: the agent loop, tool dispatch, the
-transcript and the handle. It composes the same two halves, applies the gate
-ONCE before the request — only allowed tools are advertised — and logs every
-allowlist entry it cannot provide. Building it needed no change to this
-contract, which is what makes the contract vendor-neutral rather than a
-description of one CLI.
+transcript and the handle.
+
+- **It composes the same two halves.**
+- **It applies the gate ONCE, before the request.** Only allowed tools are
+  advertised.
+- **It logs every allowlist entry it cannot provide.**
+
+Building it needed no change to this contract, which is what makes the
+contract vendor-neutral rather than a description of one CLI.
 
 `runtime-copilot` is the third, and the first whose vendor owns its own tool
-vocabulary. It translates the composed allowlist at the point of use — into
-Copilot's availability filters and a per-invocation permission callback — and
-what it cannot translate it withholds and logs, never passes through. Three
+vocabulary. It translates the composed allowlist at the point of use, into
+Copilot's availability filters and a per-invocation permission callback.
+
+What it cannot translate it withholds and logs, never passes through. Three
 obligations it made visible bind every runtime:
 
 | Obligation | Because |
@@ -877,6 +883,57 @@ records the context handle from the completion report, so checkpointing
 afterwards could leave a recorded handle whose context was never persisted. The
 next run would then fail a continuation that should have worked.
 
+### What the run did: `turns[]` and `toolCalls[]`
+
+**The manager never sees a model call or a tool call. The runtime does**, so it
+may report both with its result. The manager records one activity hop each —
+`model.call` and `tool.call`, see [the activity contract](#the-activity-contract)
+— and writes neither to the Conversation.
+
+**Both lists are optional.** A runtime that reports neither stays conformant,
+and its runs draw exactly the hops they drew before.
+
+`turns[]`, one per model call:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `model` | string | the model the call went to, as the runtime names it |
+| `tokensIn` | integer | every input token the call consumed, cache reads included |
+| `tokensOut` | integer | the output tokens it produced |
+| `cacheReadTokens` | integer | the part of `tokensIn` served from the provider's prompt cache |
+| `stopReason` | string | why the model stopped: end of turn, tool use, max tokens |
+
+`toolCalls[]`, one per tool call:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `tool` | string | the tool's name in the agent-ops vocabulary: `Bash`, `Read`, `mcp__<server>__<tool>` |
+| `server` | string | the MCP server the call reached. **Empty for a built-in tool** |
+| `durationMs` | integer | wall time from the call to its result |
+| `resultBytes` | integer | the size of what the tool returned |
+
+**A fact the runtime cannot determine is OMITTED, never sent as zero.** Zero
+tokens is a real, different value. **A tool's input and output are never
+reported.** A shell command or a file's contents is content, and content has
+no place in telemetry.
+
+**The bounds, and what breaking one costs:**
+
+| Bound | Value |
+|---|---|
+| entries in `turns[]` | 200 |
+| entries in `toolCalls[]` | 200 |
+| bytes in any string field | 200 |
+| any integer field | not negative |
+
+- **A report over any bound is REFUSED with `400`**, naming the field and the
+  bound it broke. It is never trimmed, so a runtime that overflows hears it
+  rather than drawing a silently shortened picture.
+- **The refusal is of the WHOLE `/work/done`, result included.** So a
+  conformant runtime trims to these bounds before posting. `runtime-claude`,
+  `runtime-ollama` and `runtime-copilot` all do, which keeps the refusal from
+  ever costing a run its answer.
+
 ### A tool call the model cannot FORM
 
 A model writes its tool arguments as text, and that text is not always valid
@@ -901,10 +958,11 @@ The failure worth ending is the loop that cannot end, because nothing about it
 changes.
 
 **A run that recovers still says so.** Recovery usually means ABANDONING the
-tool, not fixing the call — twice out of twice observed, the model then answered
-from what the session already held and the run was reported a success. The
-notice is appended to the answer, never substituted for it, because the answer
-itself does not mention it.
+tool, not fixing the call. Twice out of twice observed, the model then answered
+from what the session already held and the run was reported a success.
+
+The notice is appended to the answer, never substituted for it, because the
+answer itself does not mention it.
 
 **Failing is the point of the breaker.** Without one, a spin ends the same way:
 a successful-looking run, answered from memory, presented as current.
@@ -958,6 +1016,7 @@ Event shape:
   "latencyMs":    4218,
   "code":         "succeeded",
   "detail":       "succeeded (exit 0)",
+  "data":         {"model": "claude-sonnet-5", "tokensIn": "18422"},
   "adapter":      "telegram"
 }
 ```
@@ -968,7 +1027,18 @@ in the consumer.
 
 Node kinds: `signal-adapter`, `signal-source`, `pipeline`, `conversation`,
 `profile`, `runtime`, `channel`, `channel-adapter`, `toolset`, `mcp-config`,
-`manager`.
+`manager`, plus four that name what the runtime reaches:
+
+| Node kind | Named by |
+|---|---|
+| `runtime-image` | the image the conversation's pod runs, resolved as the pod builder resolves it. It is the `from` of every call the runtime reports, because the harness inside the image made the call |
+| `model` | the model, as the runtime reported it |
+| `mcp-server` | the server's key in the bound MCPConfigs |
+| `external` | a system outside the install, as an adapter CR's `spec.externals[]` names it |
+
+**A runtime that no longer resolves to an image** makes its calls leave from
+its `runtime` node instead. A hop from a coarser node is honest, and one from
+an image nobody ran is not.
 
 | Kind | From → To | Emitted when |
 |---|---|---|
@@ -986,6 +1056,28 @@ Node kinds: `signal-adapter`, `signal-source`, `pipeline`, `conversation`,
 | `context.checkpoint` | conversation → runtime | live context copied to the volume |
 | `context.skipped` | conversation → runtime | a checkpoint ran and found nothing changed |
 | `context.failed` | conversation → runtime | a restore or checkpoint failed |
+| `model.call` | runtime-image → model | one per `turns[]` entry a runtime reported with its result |
+| `tool.call` | runtime-image → mcp-server, or ∅ for a built-in tool | one per `toolCalls[]` entry. `latencyMs` is the call's `durationMs` |
+
+**Both call hops carry the run's `conversation`, `pipeline` and `runId`**, and
+`detail` names the model or the tool. A turn with no `model` records no `to`.
+
+**`data` is a bounded map of facts that exist nowhere else**, keys and values
+both strings. It is never content — an input's text, a run's result and an
+op's message have durable homes and are joined from there.
+
+| Hop | `data` keys, each present only when known |
+|---|---|
+| `model.call` | `model`, `tokensIn`, `tokensOut`, `cacheReadTokens`, `stopReason` |
+| `tool.call` | `tool`, `server`, `resultBytes` |
+| `context.checkpoint`, `context.skipped`, `context.restored` | `bytes`, `files`, `quiesced` |
+
+- **At most 16 keys**, and a value or key at most 200 bytes.
+- **Over the bound it is TRUNCATED, never refused.** Telemetry never fails the
+  request that produced it. Keys past the sixteenth are dropped in sorted
+  order, so one map always keeps the same keys, and a long value is cut at a
+  UTF-8 boundary.
+- **`POST /activity` carries no `data`.** Only the manager writes it.
 
 **Three properties are load-bearing:**
 
@@ -1089,6 +1181,10 @@ scrape time from the same in-memory state `/status` reports.
 | `agentops_conversations_created_total` | counter | `pipeline` |
 | `agentops_runs_total` | counter | `pipeline`, `status` |
 | `agentops_run_duration_seconds` | histogram | `pipeline` |
+| `agentops_model_calls_total` | counter | `pipeline`, `status` |
+| `agentops_model_call_tokens` | histogram | `pipeline`, `direction` (`in`, `out`, `cache-read`) |
+| `agentops_tool_calls_total` | counter | `pipeline`, `target` (`builtin`, `mcp`), `status` |
+| `agentops_tool_call_duration_seconds` | histogram | `pipeline`, `target` |
 | `agentops_channel_ops_total` | counter | `adapter`, `kind`, `status` |
 | `agentops_channel_op_latency_seconds` | histogram | `adapter`, `kind` |
 | `agentops_channel_ops_queued` | gauge | `adapter` |
@@ -1108,6 +1204,9 @@ scrape time from the same in-memory state `/status` reports.
   never from `detail`, which may carry a fingerprint or an error message.
 - **A conversation, run or op id as a label would grow series without limit.**
   Those identify the specific stuck item and stay in `/status`.
+- **Nor is a model or a tool name a label.** Both are reported by a runtime
+  rather than declared by a CR, so neither is bounded by CR count. They stay in
+  the events, and the call metrics key on `target` instead.
 
 ## HTTP API
 

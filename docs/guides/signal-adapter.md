@@ -195,9 +195,10 @@ filling in. They let an operator learn what your `config` needs without reading
 your source.
 
 `externals` is interface metadata too. It names each system outside the install
-your implementation faces, with a `kind` of `sender`, `api` or `kubernetes`. The
-console's topology draws each one beside your adapter. **It grants nothing**:
-no RBAC, no network policy and no credential follows from it.
+your implementation faces, with a `kind` of `sender`, `api` or `kubernetes`.
+
+The console's topology draws each one beside your adapter. **It grants
+nothing**: no RBAC, no network policy and no credential follows from it.
 
 {: .ao-callout}
 > **`serviceAccountName` is a reference, and naming one mounts its token.** No

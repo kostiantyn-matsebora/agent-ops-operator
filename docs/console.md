@@ -210,8 +210,10 @@ calls are inside the window. Nothing declares a model ahead of time.
 
 **Model and tool calls are hops too.** A runtime reports its turns and tool
 calls with its result, and the manager records them as `model.call` and
-`tool.call` (see [contracts](contracts.md#the-activity-contract)). On Model a
-call pulses on the route's runtime, or along its MCP config for an MCP tool.
+`tool.call` (see [contracts](contracts.md#the-activity-contract)).
+
+On Model a call pulses on the route's runtime, or along its MCP config for an
+MCP tool.
 
 - **A runtime that reports no turns draws no model hops**, and the panel's
   hop list says nothing crossed.
