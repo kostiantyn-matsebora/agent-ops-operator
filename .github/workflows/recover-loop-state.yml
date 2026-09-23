@@ -73,8 +73,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          since=$(gh api "repos/${{ github.repository }}/issues/$PR/timeline" --paginate \
-            --jq '[.[] | select(.event == "labeled" and .label.name == "loop:running")] | last | .created_at')
+          # --slurp collects every page into ONE array before the filter runs --
+          # `--paginate` alone re-runs `--jq` once PER PAGE, so `last` picked
+          # each page's own last match rather than the timeline's, and a
+          # multi-page timeline could print one line per page.
+          since=$(gh api "repos/${{ github.repository }}/issues/$PR/timeline" --paginate --slurp \
+            --jq '[.[][] | select(.event == "labeled" and .label.name == "loop:running")] | last | .created_at')
+          case "$since" in
+            *$'\n'*)
+              echo "::notice::timeline lookup for #$PR returned more than one line; skipping this recovery pass"
+              since=""
+              ;;
+          esac
           echo "since=$since" >> "$GITHUB_OUTPUT"
       - name: Recover the label, if this run's discard is what left it stale
         if: steps.jobs.outputs.count == '0' && steps.placed.outputs.since != ''
