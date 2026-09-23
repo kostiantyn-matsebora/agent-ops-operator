@@ -19,7 +19,7 @@ on an omission rather than a field.
   CEL. The inline form is today's Pipeline unchanged. **Not breaking.**
 - **New CRD `Coordinator`** — wiring for a composition: `signalSourceRefs`
   (claimed, as a Pipeline's are), `channelRefs` (where it escalates),
-  `agents[]{name, capabilityRef, description}` (its whole outbound reach), `limits`
+  `agents[]{name, capabilityRef|coordinatorRef, description}` (its whole outbound reach), `limits`
   (`maxAgents`, `maxTurns`, `deadline`), plus the capability fields of the
   coordinator agent itself.
 - **`Conversation.spec.causedBy`** — provenance naming the PARENT conversation,

@@ -151,8 +151,9 @@ No depth limit is imposed — a tree may nest as deep as its own per-level
 budgets allow. A CYCLE is a different failure: A invoking B invoking A is not
 merely deep, it never terminates.
 
-- On `invoke`, the manager walks the calling conversation's `causedBy` chain
-  to the uncaused root, collecting each ancestor's `coordinatorRef`.
+- On `invoke`, the manager collects the calling conversation's OWN
+  `coordinatorRef` first, then walks its `causedBy` chain to the uncaused
+  root, collecting each ancestor's.
 - If the target AgentCapability resolves to (or is wired as) a Coordinator
   already in that list, the invoke is refused naming the repeated Coordinator.
 - The walk is bounded by the chain's own length, which the three ordinary

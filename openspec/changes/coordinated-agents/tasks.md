@@ -59,7 +59,8 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 2.7 Member creation: `causedBy` set to the invoking PARENT (one hop), no
       channels, capability from the listed AgentCapability, reuse scoped by
       `causedBy` in `reusableBy`. A member MAY itself carry `coordinatorRef`
-      when its own AgentCapability wires it as a Coordinator (nesting).
+      when the invoking Coordinator's `agents[]` entry names it by
+      `coordinatorRef` rather than `capabilityRef` (nesting).
 - [ ] 2.8 `handleWorkDone` on a member appends the result input on its PARENT
       (`causedBy`, one hop) in the same status write (D-C); dedup key
       `member:<conv>:<runId>`; closed parent → skip. Reconciler backstop

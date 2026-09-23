@@ -28,8 +28,8 @@ other object of any kind.
 
 - A `capabilityRef` entry invokes an AgentCapability as a plain member.
 - A `coordinatorRef` entry NESTS. The invoked Coordinator's own root opens as
-  the member, and its `coordinatorRef` is what the member's own
-  `coordinatorRef` (`conversation-provenance`) is set from.
+  the member, and the member's own `coordinatorRef` (`conversation-provenance`)
+  is set to name that invoked Coordinator.
 - `description` SHALL be required and non-empty, on the entry rather than the
   target, so two Coordinators may describe one differently.
 

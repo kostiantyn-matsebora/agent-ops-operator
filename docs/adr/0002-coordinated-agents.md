@@ -144,9 +144,10 @@ names the ONE HOP parent (D3), never the tree's top.
   `maxTurns` or `deadline` across levels.
 - `coordinatorRef` names the Coordinator a conversation's own entry point is —
   set on a direct address and on a nested member, empty on a Pipeline-addressed
-  conversation. The cycle guard walks `causedBy` to the uncaused root
-  collecting each ancestor's `coordinatorRef`, and refuses an `invoke` whose
-  target resolves to a Coordinator already in that list.
+  conversation. The cycle guard collects the calling conversation's OWN
+  `coordinatorRef` first, then walks `causedBy` to the uncaused root
+  collecting each ancestor's, and refuses an `invoke` whose target resolves to
+  a Coordinator already in that list.
 
 ## Consequences
 
