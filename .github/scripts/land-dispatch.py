@@ -489,6 +489,13 @@ def main() -> int:
                          "failed`, naming the run -- distinct from --report-missing, where a model ran "
                          "and wrote nothing. Measured on #220, where a refused fixer left nothing on the "
                          "pull request for three days")
+    ap.add_argument("--fix-timed-out", action="store_true",
+                    help="the fixing JOB hit its `timeout-minutes` bound, so GitHub marked it `cancelled` "
+                         "rather than `failure` -- a distinct fact worth telling apart from a crash, since "
+                         "it usually means the round's own work (or the model) stalled, not that it errored. "
+                         "Same handling as --fix-failed otherwise: nothing was fixed, nothing is disputed, "
+                         "no round is counted. Measured on #243, where the fixing step's model action sat "
+                         "`in_progress` for 15+ hours with no bound on the job at all")
     ap.add_argument("--state-script", type=pathlib.Path,
                     default=pathlib.Path(__file__).with_name("conveyor-state.py"),
                     help="conveyor-state.py, restored beside this program by the workflow; moves the "
@@ -549,24 +556,32 @@ def main() -> int:
                    f"was landed. Every accepted finding is still open; dispatch again.{run}")
         return 0
 
-    if args.fix_failed:
-        # SILENCE IS NOT A DECISION, AND NEITHER IS A DEAD JOB. No model ran,
-        # so nothing was fixed, nothing is disputed and no round is counted;
-        # the ending says exactly that, links the run, and names what starts
-        # another round. Without this the pull request shows nothing at all.
-        print("fixing step failed: no model ran, so nothing was landed and nothing is disputed")
+    if args.fix_failed or args.fix_timed_out:
+        # SILENCE IS NOT A DECISION, AND NEITHER IS A DEAD JOB. No model ran
+        # to completion, so nothing was fixed, nothing is disputed and no
+        # round is counted; the ending says exactly that, links the run, and
+        # names what starts another round. Without this the pull request
+        # shows nothing at all.
+        #
+        # THE TWO SHAPES OF DEAD ARE NAMED SEPARATELY, because a maintainer
+        # reading "failed" investigates a crash and one reading "timed out"
+        # investigates something else -- a hang, a stall, a fixing round that
+        # genuinely needed longer than the bound. Both stop the round exactly
+        # the same way; only the words differ.
+        ending = "fixing step timed out" if args.fix_timed_out else "fixing step failed"
+        cause = ("the fixing job ran past its time limit before finishing its work" if args.fix_timed_out
+                 else "the fixing job failed before or while doing its work")
+        print(f"{ending}: no model finished, so nothing was landed and nothing is disputed")
         if rnd:
-            rnd.summary("fixing step failed", [], {},
-                        note="The fixing job failed before or while doing its work, so no model looked at "
-                             "any item: nothing was fixed and nothing is disputed. The run linked below "
-                             "says why. Every item stays open. A push, or removing and re-adding the "
-                             f"label, starts another round; `{markers['keep_going']}` is not needed, since "
-                             "no round was counted.")
+            rnd.summary(ending, [], {},
+                        note=f"The {cause}, so no model looked at any item: nothing was fixed and nothing "
+                             "is disputed. The run linked below says why. Every item stays open. A push, "
+                             "or removing and re-adding the label, starts another round; "
+                             f"`{markers['keep_going']}` is not needed, since no round was counted.")
             return 0
         pr_comment(args.repo, args.pr,
-                   f"Dispatch by @{args.dispatched_by}: the fixing job failed before doing its work, so "
-                   f"nothing was landed. Every accepted finding is still open; dispatch again once the "
-                   f"run's failure is understood.{run}")
+                   f"Dispatch by @{args.dispatched_by}: {cause}, so nothing was landed. Every accepted "
+                   f"finding is still open; dispatch again once the run is understood.{run}")
         return 0
 
     claimed_fixed, claimed_disputed = read_report(report, work)
