@@ -79,7 +79,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       No depth limit.
 - [ ] 2.11 `closeReason` stamped by the `close` verb (required there), absent
       from `/close`; a coordinator cannot close outside conversations it
-      caused.
+      directly caused.
 - [ ] 2.12 Regenerate deepcopy and CRDs; `chart/crds/coordinators…yaml`.
 - [ ] 2.13 Tests: envtest — fan-out counts a Coordinator; member result lands
       on its parent exactly once across a simulated restart; self-input
