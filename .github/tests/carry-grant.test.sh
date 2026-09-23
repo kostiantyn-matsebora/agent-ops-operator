@@ -53,6 +53,12 @@ with_run_label() {  # with_run_label <placer> <when>
     "$1" "$2" > "$TIMELINE_FILE"
 }
 
+with_archive_label() {  # with_archive_label <placer> <when> -- NO conveyor:run
+  printf '{"labels":[{"name":"conveyor:archive"}]}' > "$LABELS_FILE"
+  printf '[{"event":"labeled","label":{"name":"conveyor:archive"},"actor":{"login":"%s"},"created_at":"%s"}]' \
+    "$1" "$2" > "$TIMELINE_FILE"
+}
+
 mark_opsx() {  # mark_opsx <issue-number>
   mkdir -p "$CWD/openspec/changes/thing"
   printf '%s' "$1" > "$CWD/openspec/changes/thing/.github-issue"
@@ -133,7 +139,51 @@ assert_contains "$(cat "$GH_CALLS")" "issue edit 5 --repo o/r --add-label convey
 assert_contains "$(cat "$GH_CALLS")" "issue comment 5"
 assert_contains "$(cat "$GH_CALLS")" "@maintainer"
 
-it "instruction present, writer placed it: the fix carry sets NO station label -- the loop's gate does"
+# MEASURED LIVE ON #237: conveyor:archive fired the archive session and its
+# pull request opened correctly, but the fix carry checked ONLY conveyor:run
+# -- absent, since #222 was never granted the standing instruction at all --
+# so the archive pull request's own fixing loop never started. conveyor:archive
+# is its own grant for --station fix: the archive station's documented
+# promise is that the loop drives its resulting pull request to mergeable,
+# not merely that a session opens it.
+it "conveyor:archive alone (no conveyor:run) is sufficient to carry conveyor:fix onto the archive pull request"
+setup
+mark_opsx 1
+with_archive_label maintainer 2026-09-01T10:00:00Z
+out=$(run_it --issue 1 --station fix --pr 9); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 9 --repo o/r --add-label conveyor:fix"
+assert_contains "$(cat "$GH_CALLS")" "issue comment 9"
+assert_contains "$(cat "$GH_CALLS")" "@maintainer"
+assert_contains "$out" "carried \`conveyor:archive\`"
+
+it "conveyor:run still wins when BOTH labels are present -- archive is a fallback, not a preference"
+setup
+mark_opsx 1
+printf '{"labels":[{"name":"conveyor:run"},{"name":"conveyor:archive"}]}' > "$LABELS_FILE"
+printf '[{"event":"labeled","label":{"name":"conveyor:run"},"actor":{"login":"maintainer"},"created_at":"2026-09-01T10:00:00Z"}]' \
+  > "$TIMELINE_FILE"
+out=$(run_it --issue 1 --station fix --pr 9); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "carried \`conveyor:run\`"
+assert_not_contains "$out" "carried \`conveyor:archive\`"
+
+it "an archive-label placer who has since lost write access is refused the same way a run-label placer is"
+setup
+mark_opsx 1
+with_archive_label ex-maintainer 2026-09-01T10:00:00Z
+printf '%s' "read" > "$PERM_FILE"
+out=$(run_it --issue 1 --station fix --pr 9); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "--add-label"
+assert_contains "$out" "who now has \`read\`"
+
+it "the fix carry sets NO station label -- the loop's gate does"
+setup
+mark_opsx 1
+with_run_label maintainer 2026-09-01T10:00:00Z
+out=$(run_it --issue 1 --station fix --pr 5); rc=$?
+assert_status 0 "$rc"
 assert_not_contains "$(cat "$GH_CALLS")" "station:"
 
 it "instruction present, writer placed it, opsx lane: places conveyor:archive on the ISSUE"
