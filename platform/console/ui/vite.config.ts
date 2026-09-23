@@ -10,13 +10,14 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     // Deterministic chunking keeps the embedded asset set small and stable:
-    // PatternFly and the topology renderer are large and change rarely, so
-    // splitting them keeps an ordinary UI edit from re-emitting everything.
+    // PatternFly and the topology's layout engines are large and change
+    // rarely, so splitting them keeps an ordinary UI edit from re-emitting
+    // everything.
     rollupOptions: {
       output: {
         manualChunks: {
           patternfly: ['@patternfly/react-core', '@patternfly/react-table', '@patternfly/react-icons'],
-          topology: ['@patternfly/react-topology'],
+          topology: ['dagre', 'webcola', 'd3-force'],
           // PF Charts v8 exports only subpaths — the bare specifier has no
           // entry point, and naming it here fails the build rather than the
           // import.

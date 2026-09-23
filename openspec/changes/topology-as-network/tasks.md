@@ -27,7 +27,7 @@
 
 ## 5. Port the mockup: layout and boxes
 
-- [ ] 5.1 Add `dagre` and `webcola` to `platform/console/ui/package.json`, remove `@patternfly/react-topology`. Verify: `npm ci` and `npm run build` succeed in this worktree
+- [x] 5.1 Add `dagre` and `webcola` to `platform/console/ui/package.json`, remove `@patternfly/react-topology`. Verify: `npm ci` and `npm run build` succeed in this worktree
 - [ ] 5.2 PORT the three layouts, concentric with wanted-angle placement, cola with groups, dagre with integer-weighted cycle breaking, each remembered per view. Verify: `layout.test.ts` lays each view out without a thrown error and with the hub at the centre for concentric
 - [ ] 5.3 PORT the compaction: members settled in groups, rectangles packed under canvas-shaped gravity, final direct separation, non-members evicted from boxes. Verify: a unit test asserts no two boxes and no two marks intersect after compaction on the fixture graph
 - [ ] 5.4 PORT ownership boxes: bundle from labels, route computed, cluster node from the pod, none on Components, nested pod boxes. Verify: a unit test boxes the fixture by each owner and finds every external outside every node box
