@@ -134,9 +134,9 @@ budget across levels (ADR D5/D7).
 | `maxTurns` | `handleWorkDone` on THIS conversation | close `budget-exceeded` after recording |
 | `deadline` | the conversation reconciler, requeue at the deadline | close `budget-exceeded` |
 
-- Closing a conversation closes every member with `causedBy` naming it,
-  reason `root-closed` — recursively, since a closed member may itself have
-  members.
+- Closing a conversation closes every member with `causedBy` naming it, the
+  same `closeReason` kept verbatim — recursively, since a closed member may
+  itself have members.
 - `budget-exceeded` runs `escalate` FIRST (D-D) with a manager-written digest
   (limit, counts, member list), then closes. On a nested conversation this
   bubbles one hop, exactly as an agent-initiated `escalate` does — only the

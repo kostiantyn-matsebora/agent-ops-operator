@@ -112,11 +112,11 @@ is bounded at every level, never as one pool.
 
 | Limit | Bounds | Why the others miss it |
 |---|---|---|
-| `maxAgents` | fan-out per root | the global cap starves other incidents |
-| `maxTurns` | the root's own inputs | a loop is height 2, infinite width — depth never fires |
-| `deadline` | root age | nothing else has a timer |
+| `maxAgents` | fan-out per Coordinator conversation | the global cap starves other incidents |
+| `maxTurns` | that conversation's own inputs | a loop is height 2, infinite width — depth never fires |
+| `deadline` | that conversation's age | nothing else has a timer |
 
-Past any: root closed `budget-exceeded`, members with it, through D4.
+Past any: that conversation closes `budget-exceeded`, its members with it, through D4.
 
 **D6 — The console shows the tree** rooted at the uncaused conversation, at
 any depth — a member's `causedBy` may itself be another member. It is the

@@ -29,6 +29,29 @@ Coordinator's own root for a further level of members, with no depth limit.
 - **WHEN** a member conversation is a Coordinator's own root and invokes further members
 - **THEN** those members' `causedBy` names that member, not the tree's uncaused root
 
+### Requirement: coordinatorRef names the Coordinator a conversation opened under
+
+`Conversation.spec.coordinatorRef` SHALL be set when the conversation's own
+entry point is a Coordinator — addressed directly, or opened as a member whose
+`agents[]` entry wires one (nesting). It SHALL be empty for a
+Pipeline-addressed conversation.
+
+It SHALL be written once at creation and never changed, exactly as `causedBy`
+is. It resolves nothing beyond identifying that Coordinator.
+
+It is ordinary Kubernetes-API state, so it survives a manager restart with
+nothing to derive or recompute. The cycle guard is its only reader: it walks a
+calling conversation's `causedBy` chain to the uncaused root, collecting each
+ancestor's `coordinatorRef`.
+
+#### Scenario: Absent on a Pipeline-addressed conversation
+- **WHEN** a conversation's entry point is a Pipeline, not a Coordinator
+- **THEN** `coordinatorRef` is empty
+
+#### Scenario: Set on a nested Coordinator's own root
+- **WHEN** an `agents[]` entry wires a Coordinator and is invoked
+- **THEN** the created member's `coordinatorRef` names that Coordinator, independent of its `causedBy`
+
 ### Requirement: Reuse is scoped by causedBy, at one hop
 
 Conversation reuse by signature SHALL match only conversations with the same
@@ -51,9 +74,11 @@ their depth and their phases SHALL be derivable by following `causedBy` links
 and creation timestamps, with no other state and no depth limit.
 
 #### Scenario: A viewer rebuilds the tree
-- **WHEN** a client lists conversations selecting on an uncaused conversation's name
-- **THEN** it receives every descendant at every depth, and nothing that belongs to another tree
+- **WHEN** a client walks an uncaused conversation's tree
+- **THEN** it lists selecting on that name, then recursively on each result's
+  name, until it has collected every descendant at every depth, and nothing
+  that belongs to another tree
 
 #### Scenario: A subtree is derivable on its own
-- **WHEN** a client lists conversations selecting on a nested member's name
-- **THEN** it receives that member's own descendants, independent of its ancestors
+- **WHEN** a client walks a nested member's tree the same way
+- **THEN** it collects that member's own descendants, independent of its ancestors

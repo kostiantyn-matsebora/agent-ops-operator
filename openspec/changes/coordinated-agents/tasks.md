@@ -69,7 +69,8 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 2.10 Budget edges per D-E, evaluated on EACH Coordinator's own
       conversation independently: `maxAgents` in the invoke handler,
       `maxTurns` in `handleWorkDone`, `deadline` via reconciler requeue.
-      Closing a conversation closes its members `root-closed`, recursively.
+      Closing a conversation closes its members with the same `closeReason`,
+      kept verbatim, recursively.
 - [ ] 2.10b Cycle guard (D-E2): on `invoke`, walk the caller's `causedBy`
       chain to the uncaused root collecting each ancestor's `coordinatorRef`;
       refuse naming the repeated Coordinator when the target matches one

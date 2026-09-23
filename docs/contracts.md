@@ -986,9 +986,11 @@ work — a `list_conversations` call never blocks on a member still running.
 
 ### Read tools
 
-The four read tools cover Conversations, Pipelines, AgentCapabilities,
-Coordinators, SignalSources and Channels, filtered to what the calling
-Coordinator lists and what it caused.
+The four read tools — `list_agents`, `list_conversations`, `get_conversation`
+and `get_tree` — cover Conversations and the caller's own Coordinator's
+`agents[]` entries, filtered to what the calling Coordinator lists and what it
+caused. Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels
+have no reader here.
 
 `list_conversations` carries `brief` beside name, title, phase and pipeline,
 so a caller deciding WHICH conversation it means never has to `read` one

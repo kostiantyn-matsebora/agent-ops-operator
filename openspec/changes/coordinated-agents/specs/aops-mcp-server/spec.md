@@ -6,7 +6,8 @@ The aops MCP server is the component through which a coordinating agent sees and
 ### Requirement: Read tools scoped to the caller's own subtree
 
 The server SHALL expose read tools listing and getting Conversations,
-Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels.
+Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels, plus
+`get_tree` for walking a conversation's own subtree.
 
 The tree read walks from the CALLING conversation downward — its own
 descendants, at any depth, never its ancestors or their other branches.

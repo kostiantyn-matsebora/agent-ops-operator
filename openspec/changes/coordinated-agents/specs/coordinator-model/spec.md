@@ -50,8 +50,10 @@ is not Ready SHALL claim nothing.
 `spec.limits` SHALL carry `maxAgents`, `maxTurns` and `deadline`, each optional
 with a chart-documented default. The values, and the Coordinator's
 `channelRefs`, SHALL be snapshotted onto the conversation it opens at
-creation, so editing the Coordinator does not change the budget of an incident
-already in flight.
+creation.
+
+Editing the Coordinator changes neither the budget of an incident already in
+flight nor where it would escalate.
 
 This holds whether that conversation is an uncaused root or itself a member.
 A nested Coordinator's budget and escalation snapshot are its own, independent
