@@ -64,6 +64,11 @@ refers to the ADR's decisions as D1–D6.
 - `Coordinator.Ready` = own capability resolves ∧ every `agents[]` entry's
   `capabilityRef` or `coordinatorRef` resolves ∧ each resolved AgentCapability
   or Coordinator is itself `Ready`. Message lists the failing entry names.
+- Resolving a `coordinatorRef` carries the set of Coordinator names already
+  visited on the current path. A name reappearing in that set is a STATIC
+  cycle: `Ready=False` naming it, rather than recursing into it again. This is
+  the static counterpart to the `invoke`-time cycle guard (D-E2), which walks
+  a live conversation's `causedBy` chain instead.
 - A conversation created from a Coordinator: `spec.pipelineRef` empty,
   `spec.coordinatorRef` set, `spec.channelRefs` EMPTY (D3/D4), limits
   snapshotted into `status.budget{maxAgents,maxTurns,deadline}`. NESTING: this

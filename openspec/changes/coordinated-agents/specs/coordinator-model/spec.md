@@ -101,7 +101,7 @@ flight nor where the uncaused root would escalate.
 
 The manager SHALL collect the calling conversation's OWN `coordinatorRef`,
 then walk its `causedBy` chain to the uncaused root collecting each
-ancestor's.
+ancestor's `coordinatorRef`.
 
 An `invoke` whose target resolves to a Coordinator already in that list
 SHALL be refused as a cycle, whether the repeat is immediate or reached

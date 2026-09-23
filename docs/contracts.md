@@ -969,6 +969,7 @@ sibling branch.
 |---|---|
 | Invoking an AgentCapability outside the caller's `agents[]` list | manager |
 | Acting on a conversation outside the caller's own subtree | manager |
+| `close` past one hop — a directly caused member only, never a deeper descendant reached through it, even within the caller's own subtree | manager |
 | Any verb, from a `channel-reader` token | manager |
 | An `invoke` that would repeat a Coordinator already in the caller's ancestor chain | manager (cycle guard, below) |
 
@@ -1070,10 +1071,10 @@ Nesting carries no depth limit — a tree runs as deep as each level's own
 budget allows. A CYCLE is a different failure from depth: Coordinator A
 invoking B invoking A never terminates, however small each step.
 
-On every `invoke`, the manager walks the calling conversation's `causedBy`
-chain to the uncaused root, collecting each ancestor's `coordinatorRef`. A
-target that resolves to (or is wired as) a Coordinator already in that list
-is refused, naming the repeated Coordinator:
+On every `invoke`, the manager collects the calling conversation's OWN
+`coordinatorRef`, then walks its `causedBy` chain to the uncaused root
+collecting each ancestor's. A target that resolves to (or is wired as) a
+Coordinator already in that list is refused, naming the repeated Coordinator:
 
 ```json
 {"error": "cycle: coordinator \"A\" already appears in this conversation's ancestor chain"}
