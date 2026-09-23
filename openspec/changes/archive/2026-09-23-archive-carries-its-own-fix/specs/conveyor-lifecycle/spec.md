@@ -33,6 +33,13 @@ moments they actually decide something are the merges.
   station, whose own label already promises to drive its resulting pull
   request to mergeable
 
+#### Scenario: A merge with no standing instruction to carry
+
+- **WHEN** an opsx-lane pull request merges and its issue carries no standing
+  instruction
+- **THEN** the issue's station moves from merge to stalled, and no archive
+  session starts
+
 #### Scenario: The archive station drives its own pull request
 
 - **WHEN** a person places the archive label directly, with no standing

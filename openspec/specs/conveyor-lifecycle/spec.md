@@ -80,7 +80,25 @@ issue with no standing instruction SHALL move off that label at once.
 
 - **WHEN** a person places one station's label instead of the standing
   instruction
-- **THEN** that station runs and the line stops there
+- **THEN** that station runs and the line stops there — EXCEPT the archive
+  station, whose own label already promises to drive its resulting pull
+  request to mergeable
+
+#### Scenario: A merge with no standing instruction to carry
+
+- **WHEN** an opsx-lane pull request merges and its issue carries no standing
+  instruction
+- **THEN** the issue's station moves from merge to stalled, and no archive
+  session starts
+
+#### Scenario: The archive station drives its own pull request
+
+- **WHEN** a person places the archive label directly, with no standing
+  instruction on the issue
+- **THEN** the session it starts opens a pull request, and that pull request
+  is driven to mergeable by the fixing loop the same as any other — the
+  archive label is itself sufficient authorisation for its own pull
+  request's fix station
 
 #### Scenario: A merge with no standing instruction to carry
 
