@@ -233,7 +233,7 @@ vocabulary file, and SHALL grant nothing:
 
 | On | Says | Values |
 |---|---|---|
-| the issue | which station the line is at | implement, fix, merge, archive, done |
+| the issue | which station the line is at | implement, fix, merge, stalled, archive, done |
 | the pull request | what the fixing loop is doing | running, stalled, capped, mergeable |
 
 Each SHALL be moved by the workflow performing the transition. At most one
@@ -262,7 +262,8 @@ person can change to move or stop the line.
 - **WHEN** a station starts, when its pull request goes green, when a person
   merges, and when the archive lands
 - **THEN** the issue's station label reads implement, fix, merge, archive and
-  done in turn, and never two at once
+  done in turn — or stalled in place of archive, when the merge left nothing
+  to carry the line onward — and never two at once
 
 #### Scenario: The loop label follows the round
 

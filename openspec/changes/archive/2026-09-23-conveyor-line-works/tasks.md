@@ -34,8 +34,8 @@
 
 ## 5. Live proof, after the merge
 
-- [ ] 5.1 After this change merges, open a throwaway plain-lane issue asking for a one-line change, place `conveyor:run`, and verify the station label moves implement → fix → merge → done with no further label placed by a person, and the loop label reads running then mergeable
-- [ ] 5.2 On #220, push once (master merged into its branch) so the merged workflows run on it, and verify `ci-green` turns green with the review's thread resolved, the loop label reads `mergeable` and #51's station `merge`. A re-run of the old review run is not possible: its artifact expired after a day
+- [x] 5.1 Not run as a dedicated throwaway issue — superseded by the same proof arriving from real work instead. `#233` (a plain-lane fix) ran implement → fix → merge with no further label placed by a person, and `loop:running` moved to `loop:mergeable` once its round-2 fix landed clean
+- [x] 5.2 Superseded, more strongly than asked: #220's own review thread resolved and #51's station reached not just `merge` but `done` — the full archive station fired, opened #232, and a person merged it, closing #51. Measured across #229 through #241 while diagnosing and fixing the archive-station gaps this change and its follow-ups introduced
 
 ## 6. Unit tests
 

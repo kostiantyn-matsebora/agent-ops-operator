@@ -115,7 +115,7 @@ the environment runs.
 - **WHEN** the environment's variables are listed
 - **THEN** none of them is a secret
 
-### Requirement: A label on an issue starts a remote session that implements it
+### Requirement: A label on an issue starts a remote session for the station it names
 
 An issue carrying a station label, placed by a person with write access, SHALL
 start one remote session in the repository's environment for that station,
@@ -123,8 +123,11 @@ handed the issue's number and nothing else.
 
 | Label | Starts |
 |---|---|
-| the implement label, or the standing instruction | the implement station |
+| the implement label | the implement station |
 | the archive label | the archive station |
+
+The standing instruction SHALL also start the implement station, the same as
+the implement label does, since it carries the whole line from there.
 
 A label placed by anyone else SHALL be removed with a visible comment saying
 who may place it. The one exception is a label the repository's own workflow
