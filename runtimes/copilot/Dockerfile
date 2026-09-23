@@ -62,7 +62,7 @@ RUN npm install -g --ignore-scripts npm@12.0.2 && \
     npm ci --omit=dev --no-audit --no-fund --ignore-scripts && \
     rm -rf /srv/node_modules/@github/copilot-linux-*/foundry-local-sdk && \
     npm cache clean --force
-COPY runtime.js tools.js vocabulary.js mcp.js continuity.js /srv/
+COPY runtime.js tools.js vocabulary.js mcp.js continuity.js report.js /srv/
 
 ENV HOME=/data/context
 USER node

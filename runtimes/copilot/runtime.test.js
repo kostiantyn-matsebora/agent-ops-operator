@@ -211,3 +211,13 @@ test('finish drops the internal openError field and attaches continuity', () => 
   assert.deepStrictEqual(out, { status: 'succeeded', result: 'ok', continuity: { resumed: true } });
   assert.ok(!('openError' in out));
 });
+
+test('onEvent feeds the run report as the transcript is written', () => {
+  const { newCallRecorder } = require('./report');
+  const s = { lastText: '', toolCalls: 0, turns: 0, errors: [], toolNames: new Map(), calls: newCallRecorder() };
+  onEvent({ type: 'assistant.usage', data: { model: 'gpt-5', inputTokens: 10 } }, s);
+  onEvent({ type: 'tool.execution_start', data: { toolName: 'bash', toolCallId: 'c1', arguments: { command: 'ls' } } }, s);
+  assert.deepStrictEqual(s.calls.report(), { turns: [{ model: 'gpt-5', tokensIn: 10 }], toolCalls: [{ tool: 'Bash' }] });
+  assert.strictEqual(s.turns, 1);
+  assert.strictEqual(s.toolCalls, 1);
+});
