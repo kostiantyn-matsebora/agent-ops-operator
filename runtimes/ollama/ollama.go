@@ -26,6 +26,18 @@ type Message struct {
 	// ToolName names the tool a role=tool message answers for. Ollama accepts
 	// it; older servers ignore it.
 	ToolName string `json:"tool_name,omitempty"`
+	// Usage is what the server said the call cost. Never sent and never
+	// stored in the transcript: it describes the call, not the conversation.
+	Usage *Usage `json:"-"`
+}
+
+// Usage is one chat call's accounting, as the vendor reported it. A count the
+// server did not send stays nil, because zero is a different answer.
+type Usage struct {
+	Model      string
+	TokensIn   *int64
+	TokensOut  *int64
+	StopReason string
 }
 
 // ToolCall is the model asking for a tool. Arguments are kept RAW: a small
@@ -86,10 +98,13 @@ type chatRequest struct {
 }
 
 type chatChunk struct {
-	Message    Message `json:"message"`
-	Done       bool    `json:"done"`
-	DoneReason string  `json:"done_reason,omitempty"`
-	Error      string  `json:"error,omitempty"`
+	Model           string  `json:"model,omitempty"`
+	Message         Message `json:"message"`
+	Done            bool    `json:"done"`
+	DoneReason      string  `json:"done_reason,omitempty"`
+	PromptEvalCount *int64  `json:"prompt_eval_count,omitempty"`
+	EvalCount       *int64  `json:"eval_count,omitempty"`
+	Error           string  `json:"error,omitempty"`
 }
 
 // Chat streams /api/chat. options.num_ctx is ALWAYS set: the server default
@@ -141,6 +156,8 @@ func (o *Ollama) Chat(ctx context.Context, messages []Message, tools []ToolDef, 
 		}
 		msg.ToolCalls = append(msg.ToolCalls, ch.Message.ToolCalls...)
 		if ch.Done {
+			msg.Usage = &Usage{Model: orDefault(ch.Model, o.Model), TokensIn: ch.PromptEvalCount,
+				TokensOut: ch.EvalCount, StopReason: ch.DoneReason}
 			break
 		}
 	}

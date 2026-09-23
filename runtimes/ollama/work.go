@@ -61,6 +61,10 @@ type RunResult struct {
 	Continuity       string `json:"continuity,omitempty"`
 	ContinuityReason string `json:"continuityReason,omitempty"`
 	Result           string `json:"result,omitempty"`
+	// Turns and ToolCalls are what the run did, for the manager's activity
+	// graph (report.go). Absent when the run made no call.
+	Turns     []TurnReport     `json:"turns,omitempty"`
+	ToolCalls []ToolCallReport `json:"toolCalls,omitempty"`
 }
 
 // doneReport is the POST /work/done body.

@@ -53,7 +53,7 @@ RUN echo "apt refresh: ${APT_REFRESH}" && \
 # the same category error as bundling an MCP server. Need one? Derive an image
 # (three lines, and its own version pin becomes yours to own against your
 # cluster, same as this one) and point AgentRuntime.spec.image at it; see README.
-COPY runtime.js tools.js spin.js /srv/
+COPY runtime.js tools.js spin.js report.js /srv/
 
 ENV HOME=/data/context
 USER node

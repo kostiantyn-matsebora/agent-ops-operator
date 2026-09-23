@@ -54,6 +54,10 @@ case "$FAKE_MODE" in
     echo 'not json at all'
     exit 0
     ;;
+  fixture)
+    cat "$FAKE_STREAM"
+    exit 0
+    ;;
   recovered)
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Foo","input":{"__unparsedToolInput":{"raw":"{bad}"}}}]}}'
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Foo","input":{"__unparsedToolInput":{"raw":"{bad}"}}}]}}'
@@ -179,4 +183,21 @@ test('an agent declaration and full wiring (system prompt, thread, max-turns) al
     systemPrompt: 'be nice', maxTurns: 5, threadId: 42,
   });
   assert.strictEqual(out.status, 'succeeded');
+});
+
+test('a run reports its turns and tool calls from the stream it printed', async () => {
+  process.env.FAKE_MODE = 'fixture';
+  process.env.FAKE_STREAM = path.join(__dirname, '..', '..', 'test', 'fixtures', 'claude-stream-json.jsonl');
+  const out = await runClaude({ promptText: 'hi', runId: 'r-fixture' });
+  assert.strictEqual(out.status, 'succeeded');
+  assert.strictEqual(out.turns.length, 3);
+  assert.deepStrictEqual(out.toolCalls.map((c) => c.tool), ['mcp__kubernetes__pods_list', 'Bash']);
+  assert.strictEqual(out.toolCalls[0].server, 'kubernetes');
+  assert.ok(!('server' in out.toolCalls[1]), 'a built-in tool names no server');
+});
+
+test('a run whose stream shows no calls reports none', async () => {
+  process.env.FAKE_MODE = 'badjson';
+  const out = await runClaude({ promptText: 'hi', runId: 'r-silent' });
+  assert.ok(!('turns' in out) && !('toolCalls' in out), 'a silent run adds nothing to the report');
 });
