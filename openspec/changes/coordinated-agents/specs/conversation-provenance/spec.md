@@ -41,9 +41,12 @@ It SHALL be written once at creation and never changed, exactly as `causedBy`
 is. It resolves nothing beyond identifying that Coordinator.
 
 It is ordinary Kubernetes-API state, so it survives a manager restart with
-nothing to derive or recompute. The cycle guard is its only reader: it walks a
-calling conversation's `causedBy` chain to the uncaused root, collecting each
-ancestor's `coordinatorRef`.
+nothing to derive or recompute.
+
+The cycle guard reads it to walk a calling conversation's `causedBy` chain to
+the uncaused root, collecting each ancestor's `coordinatorRef`. The console's
+incident view reads it too, to tell a member that is itself a Coordinator's
+root from a plain member (`console-coordination-view`).
 
 #### Scenario: Absent on a Pipeline-addressed conversation
 - **WHEN** a conversation's entry point is a Pipeline, not a Coordinator

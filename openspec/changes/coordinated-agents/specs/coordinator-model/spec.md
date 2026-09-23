@@ -7,9 +7,10 @@ The `Coordinator` CRD is the wiring for a COMPOSITION: what feeds a coordinating
 
 A `Coordinator` SHALL carry `signalSourceRefs`, claimed exactly as a Pipeline
 claims — shareable, fanned out, counted in `Wired` — and `channelRefs`, which
-are the surfaces it ESCALATES to and nothing else. It SHALL carry the six
-capability fields for the coordinating agent itself, inline or by `capabilityRef`
-with the same exclusivity a Pipeline has.
+are the surfaces it ESCALATES to and nothing else.
+
+It SHALL carry the six capability fields for the coordinating agent itself,
+inline or by `capabilityRef` with the same exclusivity a Pipeline has.
 
 #### Scenario: A Coordinator and a Pipeline share a source
 - **WHEN** a Pipeline and a Coordinator both list one source and a signal is admitted there
@@ -110,20 +111,28 @@ through other Coordinators.
 This is a live-conversation check, distinct from the static `agents[]` graph
 the Readiness requirement walks.
 
-A Coordinator naming itself directly by `coordinatorRef` is already
-`Ready=False` and never runs, so that shape never reaches this check.
+A Coordinator BUILT self-referential — its own `agents[]` already names itself
+at creation — is already `Ready=False` and never runs, so that shape never
+reaches this check.
 
-What this check catches instead is a `capabilityRef` entry whose target is,
-through separate wiring, also a Coordinator already on the caller's own
-ancestor list — invisible to the static graph, which follows only
-`coordinatorRef` entries.
+What this check catches instead is `agents[]` EDITED into a cycle after a
+chain already running through it was created.
+
+The edit turns every Coordinator on the new cycle `Ready=False` for FUTURE
+admissions, but a conversation already in flight is not re-validated against
+Readiness on each `invoke` — this check is what stops it completing the cycle
+anyway.
+
+Only a `coordinatorRef` entry can ever be the repeated target. A
+`capabilityRef` entry names an AgentCapability, a different CRD kind that
+carries no `agents[]` of its own to invoke from (`agent-capability-model`).
 
 #### Scenario: Direct self-invoke refused
-- **WHEN** a Coordinator's own conversation asks to invoke an AgentCapability that is, through separate wiring, that same Coordinator
+- **WHEN** a Coordinator's conversation is already running when its `agents[]` is edited to add a `coordinatorRef` entry naming that same Coordinator, and the conversation invokes it
 - **THEN** the invoke is refused naming the cycle, and no conversation is created
 
 #### Scenario: Indirect cycle refused
-- **WHEN** Coordinator A invokes B, B invokes C, and C asks to invoke A
+- **WHEN** Coordinator A invokes B, B invokes C, and C's `agents[]` is then edited to add a `coordinatorRef` back to A, which C invokes
 - **THEN** the invoke is refused naming A as the repeated ancestor
 
 ### Requirement: Deleting a Coordinator cascades nothing
