@@ -395,3 +395,10 @@ what lives HERE is the implementation:
   read-only Role it binds to it.
 - **Conversations carry no `pipelineRef`**, so pipeline attribution is INFERRED
   from the materialized bindings and left blank when ambiguous. Never guessed.
+- **The topology is THREE VIEWS of one activity feed** — Model, Components,
+  Infrastructure — built in `ui/src/graph/views/`, one function per view from
+  the base graph and a hop to that view's nodes. `topology.go` and
+  `components.go` serve the facts, and the browser does the mapping.
+  - **It also watches pods, deployments and cronjobs**, read-only, because
+    Components and Infrastructure are drawn from them.
+  - **`docs/console.md` owns the detail.** This is only where it lives.

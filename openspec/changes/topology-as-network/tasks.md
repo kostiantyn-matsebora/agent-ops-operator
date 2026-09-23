@@ -64,7 +64,7 @@
 - [x] 9.1.3 `docs/concepts.md`: the adapter CR's `externals` metadata beside `configSchema` and `credentialKeys`
 - [x] 9.1.4 `python3 .github/scripts/docs-generate.py`, then `--check`, so `docs/cr-reference.md` and every generated block carry the new field
 - [x] 9.1.5 `docs/CHANGELOG.md`: the chart, manager, console and runtime versions this ships, with the additive migration note
-- [ ] 9.1.6 `.claude/rules/structure.md` and `.claude/rules/terminology.md`: the topology's three views named where the console is described
+- [x] 9.1.6 `.claude/rules/structure.md` and `.claude/rules/terminology.md`: the topology's three views named where the console is described
 
 ### 9.2 Adopter site
 
