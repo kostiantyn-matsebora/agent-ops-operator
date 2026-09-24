@@ -716,3 +716,33 @@ active round to anyone checking the label.
   "fixing step timed out" goes looking for a hang or a round that genuinely
   needed longer — conflating the two into one message would have answered
   a question nobody asked and left the real one open.
+
+**THE FIXER'S SCRATCH LANDED IN ITS OWN COMMITS, AND THE PROMPT WAS THE CAUSE
+— MEASURED ON #243, SIX ROUNDS RUNNING.** Every conveyor round on that pull
+request committed a zero-byte helper at the repository root beside the real
+fix.
+
+The names say what happened: `.tmp_getenv.py`, `.tmp_hello.sh`,
+`.tmp_copy_worklist.py`, `.tmp_read_worklist.sh`, `.worklist_reader.sh`,
+`.scratch_read.sh`.
+
+- **The prompt handed the model `$WORK_LIST` and `$REPORT`** — env names on
+  the action's step, which a model holding Read, Write and a handful of
+  `Bash(go:*)`-shaped grants CANNOT EXPAND. No shell, no `cat`, no `echo`. So
+  it wrote a script into the checkout to read its own inputs, could not run
+  that either, and eventually guessed the path.
+- **`git add -N . && git diff --binary` cut the patch**, so every untracked
+  file in the working tree crossed to the landing job and was committed.
+- **THE CHAIN THAT MADE IT A RED CHECK:** the review found the scratch file,
+  the next round DISPUTED that finding (the file was not part of any
+  accepted item), and `autofix-guard.py` then failed `docs-task` until a
+  person answered a dispute about a file nobody wrote on purpose.
+- **THE FIX IS BOTH HALVES.** The prompt names real paths
+  (`${{ runner.temp }}/dispatch/...`, expanded by the workflow) and a scratch
+  directory outside the checkout. `dispatch-patch.py` then lands a new file
+  ONLY where the report's `created` list declares it, deleting the rest
+  before the cut and naming them on the pull request. Telling the model
+  alone is trust. The program is the boundary.
+- **A ROOT DOTFILE THAT IS EMPTY IS THE TELL.** `git show --stat` on a
+  conveyor commit listing a `| 0` file at the root is this bug, whatever its
+  name.

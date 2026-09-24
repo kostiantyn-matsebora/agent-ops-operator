@@ -220,6 +220,14 @@ The model-free step after it pushes the commit through a WRITE DEPLOY KEY
 made with the workflow token starts no workflow and a `workflow_dispatch`
 run's checks never reach the merge box. It is read by that one job alone.
 
+What crosses between the two is a patch cut by a program read from the base
+branch, never from the pull request.
+
+- It carries every change to a tracked file.
+- A new file crosses only where the model's report declares it.
+- Anything else the model left in the checkout is deleted before the cut and
+  named on the pull request.
+
 What that key can do is push to a branch of this repository. It cannot
 approve, merge, resolve a review thread, or change anything in SonarCloud.
 

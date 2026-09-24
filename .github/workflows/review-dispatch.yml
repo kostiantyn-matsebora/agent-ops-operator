@@ -590,11 +590,18 @@ jobs:
         with:
           name: dispatch-work-list
           path: ${{ runner.temp }}/dispatch
+      # THE MODEL'S INPUTS, OUTPUT AND SCRATCH ALL SIT OUTSIDE THE CHECKOUT, and
+      # the prompt names them by their real paths. It used to hand the model
+      # `$WORK_LIST` and `$REPORT` -- env names it cannot expand with the tools
+      # it holds (no shell, no `cat`) -- so it wrote helper scripts INTO the
+      # checkout to find its own inputs, and `git add -N .` landed them
+      # (`.tmp_getenv.py`, `.tmp_read_worklist.sh`, ... on #243, six rounds
+      # running). The scratch directory is where anything temporary goes, and
+      # dispatch-patch.py below is what makes the checkout's copy not land
+      # anyway.
+      - run: mkdir -p "$RUNNER_TEMP/dispatch/scratch"
       - id: model
         uses: anthropics/claude-code-action@v1
-        env:
-          WORK_LIST: ${{ runner.temp }}/dispatch/work-list.json
-          REPORT: ${{ runner.temp }}/dispatch/report.json
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # THE ONE BOT THAT MAY START THIS STEP, AND WHY IT IS NOT `*`. Every
@@ -617,7 +624,7 @@ jobs:
             request for automatic fixing. The branch is checked out in the
             working directory.
 
-            THE WORK LIST is the JSON file at $WORK_LIST — one item per
+            THE WORK LIST is the JSON file at ${{ runner.temp }}/dispatch/work-list.json — one item per
             accepted finding, each with an `id` and a `source`:
             - `source: review` — a review thread: `path`, `line`, `finding`
               (the review's text), `acceptedBy` and `reply` (the maintainer's
@@ -650,6 +657,15 @@ jobs:
               change nobody reviewed.
             - Do NOT commit, push, or run any `gh` command. A separate step
               lands what you produce.
+            - NOTHING TEMPORARY GOES IN THE CHECKOUT. Every untracked file you
+              leave under the working directory is either a new file of the
+              fix, DECLARED in the report's `created` list, or scratch — and
+              scratch is DELETED before the patch is cut and named on the pull
+              request as not landed. Anything temporary (a script, a note, a
+              copy of an input) goes under ${{ runner.temp }}/dispatch/scratch/
+              instead. You need no helper to read your inputs: the work list
+              and the report are the files named above and below, readable
+              and writable as they are.
 
             FIX OR DISPUTE, NEVER SKIP. An item you judge wrong — the finding
             misreads the code, the rule does not apply here, the fix would
@@ -670,11 +686,15 @@ jobs:
             in a code comment beside the fix, or is left out — never appended
             to "reason".
 
-            When done, write the report to $REPORT as JSON:
+            When done, write the report to ${{ runner.temp }}/dispatch/report.json
+            as JSON:
               {"items": [{"id": "<id>", "action": "fixed", "reason": ""},
-                         {"id": "<id>", "action": "disputed", "reason": "<why>"}]}
+                         {"id": "<id>", "action": "disputed", "reason": "<why>"}],
+               "created": ["<path of a NEW file the fix adds>", ...]}
             Every `id` from the work list appears exactly once, with `action`
-            `fixed` or `disputed`. Return nothing else.
+            `fixed` or `disputed`. `created` lists every file the fix ADDED,
+            relative to the repository root — an empty list when none. A new
+            file it does not name is not landed. Return nothing else.
           claude_args: |
             # THE REPRODUCE GRANT IS THE TEST RUNNERS, NOT A SHELL. A check
             # item is reproduced by running the job's own command, so the
@@ -682,6 +702,9 @@ jobs:
             # every command there is and would make this list decoration. The
             # suite has its own entry rather than arriving through `bash`.
             --allowedTools "Read,Edit,MultiEdit,Write,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(go:*),Bash(npm:*),Bash(node:*),Bash(helm:*),Bash(python3 .github/scripts/:*),Bash(.github/tests/run.sh:*)"
+            # THE INPUTS, THE REPORT AND THE SCRATCH DIRECTORY, reachable without
+            # a permission prompt -- which in a pod-shaped run is a hang.
+            --add-dir "${{ runner.temp }}/dispatch"
 
       # A MODEL THAT DID NOT RUN MUST NOT READ AS A MODEL THAT FIXED NOTHING.
       # The action skips itself, successfully, whenever this workflow file
@@ -713,8 +736,16 @@ jobs:
           echo "::error::The fixing step reported success without running: no execution file, and this workflow file matches the default branch."
           exit 1
 
-      # THE PATCH IS THE WHOLE OF WHAT CROSSES. `--binary` so a changed image
-      # survives; `add -N` so a NEW file is in the diff at all. A missing report
+      # THE PATCH IS THE WHOLE OF WHAT CROSSES, and dispatch-patch.py cuts it:
+      # every change to a tracked file, plus the NEW files the report DECLARES
+      # under `created` -- an undeclared new file is the fixer's scratch, and
+      # is deleted before the cut and recorded in dropped.json for the landing
+      # summary to name. `git add -N . && git diff` was the cut before, and it
+      # landed six helper scripts on one pull request (#243). The program is
+      # read from the branch the WORKFLOW came from, as the landing programs
+      # are, so a pull request cannot rewrite what decides what crosses.
+      #
+      # `--binary` so a changed image survives. A missing report
       # is substituted with an empty one so the lander always has a file to
       # read -- but SILENCE AND REFUSAL ARE DIFFERENT FACTS: a `no-report`
       # sentinel rides beside it, so land-dispatch.py can tell "the fixing step
@@ -723,29 +754,40 @@ jobs:
       # while this very change was under review: three findings on a
       # proposal-only pull request came back "disputed... not addressed",
       # and no model had spoken).
+      - name: The patch program, from the branch the workflow came from
+        env:
+          SOURCE: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch -q origin "$SOURCE"
+          git show "origin/$SOURCE:.github/scripts/dispatch-patch.py" > "$RUNNER_TEMP/dispatch-patch.py"
       - name: The patch, and the report
         run: |
           set -euo pipefail
-          git add -N .
-          git diff --binary > "$RUNNER_TEMP/dispatch/fix.patch"
           if [ -f "$RUNNER_TEMP/dispatch/report.json" ]; then
             rm -f "$RUNNER_TEMP/dispatch/report.no-report"
           else
             echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
             : > "$RUNNER_TEMP/dispatch/report.no-report"
           fi
-          echo "patch: $(wc -c < "$RUNNER_TEMP/dispatch/fix.patch") bytes"; cat "$RUNNER_TEMP/dispatch/report.json"
+          python3 "$RUNNER_TEMP/dispatch-patch.py" \
+            --report "$RUNNER_TEMP/dispatch/report.json" \
+            --out "$RUNNER_TEMP/dispatch/fix.patch" \
+            --dropped "$RUNNER_TEMP/dispatch/dropped.json"
+          cat "$RUNNER_TEMP/dispatch/report.json"
       - uses: actions/upload-artifact@v4
         with:
           name: dispatch-fix
           # `report.no-report` is OPTIONAL -- present only when the report was
-          # missing and substituted above. `fix.patch` and `report.json` are
-          # written unconditionally, so the overall match is never empty and
-          # `if-no-files-found: error` still catches a genuinely broken step.
+          # missing and substituted above. `fix.patch`, `report.json` and
+          # `dropped.json` are written unconditionally, so the overall match is
+          # never empty and `if-no-files-found: error` still catches a
+          # genuinely broken step.
           path: |
             ${{ runner.temp }}/dispatch/fix.patch
             ${{ runner.temp }}/dispatch/report.json
             ${{ runner.temp }}/dispatch/report.no-report
+            ${{ runner.temp }}/dispatch/dropped.json
           retention-days: 1
           # The dotfile trap that made `.resolve-threads` a no-op for a day:
           # upload-artifact v4 excludes hidden files by default. Nothing here
@@ -874,6 +916,7 @@ jobs:
             --work-list "$RUNNER_TEMP/dispatch/work-list.json" \
             --patch "$RUNNER_TEMP/dispatch/fix.patch" \
             --report "$RUNNER_TEMP/dispatch/report.json" \
+            --dropped "$RUNNER_TEMP/dispatch/dropped.json" \
             --resolver "$RUNNER_TEMP/resolve-review-threads.py" \
             --state-script "$RUNNER_TEMP/conveyor-state.py" \
             --thread-check-script "$RUNNER_TEMP/review-not-clean.py" \

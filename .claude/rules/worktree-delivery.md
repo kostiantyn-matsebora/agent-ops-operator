@@ -267,6 +267,20 @@ point it is acted on, never trusting that a workflow placed it before.
   `resolve-review-threads.py`. A thread is resolved only where its patch landed;
   a stale patch pushes nothing, resolves nothing, and says so — rebase and
   dispatch again.
+  - **A NEW FILE CROSSES ONLY WHERE THE REPORT DECLARES IT.** The patch is cut
+    by `dispatch-patch.py` (read from the base branch, as the landing programs
+    are): every change to a tracked file, plus the new files the report's
+    `created` list names. An undeclared new file is the fixer's SCRATCH — it is
+    deleted before the cut, recorded in `dropped.json`, and named in the
+    landing comment and the summary as not landed.
+  - **It was `git add -N .` and it landed the scratch.** Six rounds on #243
+    each committed a helper script at the repository root (`.tmp_getenv.py`,
+    `.worklist_reader.sh`, ...). The review then found the scratch, the next
+    round disputed the finding, and `docs-task` refused the head until a
+    person answered — see `gotchas.md`.
+  - **The prompt names the work list, the report and a scratch directory by
+    their REAL PATHS**, under `$RUNNER_TEMP/dispatch/`. The helpers existed
+    because it said `$WORK_LIST`, which a model with no shell cannot expand.
 - **A RED `ci-green` STARTS A ROUND TOO, AND A FAILED CHECK IS A WORK ITEM.**
   Under the label, `review-dispatch.yml` also runs on a `ci` run that COMPLETED
   WITH `failure`, and `collect` reads the head's failed required checks
