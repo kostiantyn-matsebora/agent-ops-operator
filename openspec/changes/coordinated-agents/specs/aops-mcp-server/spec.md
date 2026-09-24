@@ -40,7 +40,7 @@ manager with context `coordinator:<name>:<conversation>` and injected into
 that conversation's runtime pod. The server SHALL forward it and decide
 nothing.
 
-The MANAGER validates the token and enforces two bounds, per verb:
+The MANAGER validates the token and enforces a bound per verb:
 
 | Verb | Bound |
 |---|---|
