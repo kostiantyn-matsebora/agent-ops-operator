@@ -141,8 +141,9 @@ names the ONE HOP parent (D3), never the tree's top.
   opens no thread.
 - The parent's agent decides whether to handle it or escalate again, so a
   human thread opens only when that decision reaches the top.
-- Budget is per-Coordinator (D5). Nesting does not pool `maxAgents`,
-  `maxTurns` or `deadline` across levels.
+- Budget is per-conversation a Coordinator opens (D5), not pooled across the
+  tree. Nesting does not pool `maxAgents`, `maxTurns` or `deadline` across
+  levels.
 - `coordinatorRef` names the Coordinator a conversation's own entry point is —
   set on a direct address and on a member that is itself a Coordinator's root
   (an `agents[]` entry wiring one), empty on an ordinary member and on a
