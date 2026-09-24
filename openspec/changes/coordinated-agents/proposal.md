@@ -101,7 +101,7 @@ on an omission rather than a field.
 - `chat-signal-origination`: a Coordinator is a claimant of a source beside
   Pipelines; fan-out counts both.
 - `state-durability`: the restart-resilience matrix gains `causedBy`,
-  `coordinatorRef`, the root's budget counters, the pending escalation,
+  `coordinatorRef`, each level's budget counters, the pending escalation,
   `closeReason` and `brief` — agent-written, latest-wins, surviving every
   restart with the status it lives on.
 - `console-topology`: `AgentCapability` and `Coordinator` are graph nodes; a Coordinator's
