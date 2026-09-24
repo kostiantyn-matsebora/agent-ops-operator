@@ -35,8 +35,8 @@ on an omission rather than a field.
   channel.
 - **Escalation is a verb, and only the tree's uncaused root ever opens a human
   thread**: it binds its `channelRefs` late, with a synthesised first message.
-  A nested Coordinator's `escalate` instead closes its own conversation and
-  reports the message to its parent, bubbling until a call reaches the
+- **A nested Coordinator's `escalate` instead closes its own conversation**
+  and reports the message to its parent, bubbling until a call reaches the
   uncaused root. Close and drop are `/close` with a new `closeReason`.
 - **Budget on every level**: each Coordinator's own limits close it and its
   members `budget-exceeded`, through escalation, independent of any nesting

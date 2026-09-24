@@ -682,3 +682,67 @@ moment `run-name` shipped.
 - **Any future `workflow_run.name` match anywhere in this repository owes
   the same check**: does the fired workflow set `run-name`? If so, match on
   `.path` instead, or the condition is dead from the day one ships.
+
+**A FIXING JOB WITH NO `timeout-minutes` CAN HANG FOREVER, AND `land`'S
+FIX-FAILED PATH NEVER SEES IT — MEASURED LIVE ON #243.** The `fix` job's
+`claude-code-action` step sat `in_progress` for 15+ hours.
+
+`land` never ran. It `needs: [gate, collect, fix]`, and none of the three
+`needs.fix.result` values it matched (`success` / `skipped` / `failure`) is
+what a job with no terminal result reports — it has no result at all.
+
+`loop:running` stayed posted with nothing behind it, reading exactly like an
+active round to anyone checking the label.
+
+- **This is a DIFFERENT gap from the one #220 fixed.** That fix covered a
+  `fix` job that FAILED outright (the action refusing a bot actor). Nothing
+  there helps a job that neither fails nor finishes — GitHub's own default
+  timeout is 360 minutes, and the action can also hang inside that window on
+  its own, with no bound of its choosing either.
+- **The fix is a `timeout-minutes` on the `fix` job**, sized to what one
+  round of fixes plausibly needs (30, here — multi-file, may run a build or
+  reproduce a failing check) rather than left at the platform default.
+- **`cancelled` IS NOT `failure`, AND THAT DISTINCTION IS GITHUB'S, NOT THIS
+  WORKFLOW'S.** A job that hits `timeout-minutes` reports `conclusion:
+  cancelled`. Adding the bound alone would have swapped one silent hang for
+  a different silent stop: `land`'s `if:` still would not have matched, for
+  the same reason it did not match "no result at all". Every place that
+  reads `needs.fix.result` — `land`'s own `if:`, the step that substitutes
+  an empty patch and report, and the flag passed to `land-dispatch.py` —
+  needs `cancelled` added beside `failure`.
+- **THE POSTED ENDING NAMES WHICH ONE HAPPENED.** `--fix-timed-out` is a
+  distinct flag from `--fix-failed`, not the same flag renamed: a maintainer
+  reading "fixing step failed" goes looking for a crash, and one reading
+  "fixing step timed out" goes looking for a hang or a round that genuinely
+  needed longer — conflating the two into one message would have answered
+  a question nobody asked and left the real one open.
+
+**THE FIXER'S SCRATCH LANDED IN ITS OWN COMMITS, AND THE PROMPT WAS THE CAUSE
+— MEASURED ON #243, SIX ROUNDS RUNNING.** Every conveyor round on that pull
+request committed a zero-byte helper at the repository root beside the real
+fix.
+
+The names say what happened: `.tmp_getenv.py`, `.tmp_hello.sh`,
+`.tmp_copy_worklist.py`, `.tmp_read_worklist.sh`, `.worklist_reader.sh`,
+`.scratch_read.sh`.
+
+- **The prompt handed the model `$WORK_LIST` and `$REPORT`** — env names on
+  the action's step, which a model holding Read, Write and a handful of
+  `Bash(go:*)`-shaped grants CANNOT EXPAND. No shell, no `cat`, no `echo`. So
+  it wrote a script into the checkout to read its own inputs, could not run
+  that either, and eventually guessed the path.
+- **`git add -N . && git diff --binary` cut the patch**, so every untracked
+  file in the working tree crossed to the landing job and was committed.
+- **THE CHAIN THAT MADE IT A RED CHECK:** the review found the scratch file,
+  the next round DISPUTED that finding (the file was not part of any
+  accepted item), and `autofix-guard.py` then failed `docs-task` until a
+  person answered a dispute about a file nobody wrote on purpose.
+- **THE FIX IS BOTH HALVES.** The prompt names real paths
+  (`${{ runner.temp }}/dispatch/...`, expanded by the workflow) and a scratch
+  directory outside the checkout. `dispatch-patch.py` then lands a new file
+  ONLY where the report's `created` list declares it, deleting the rest
+  before the cut and naming them on the pull request. Telling the model
+  alone is trust. The program is the boundary.
+- **A ROOT DOTFILE THAT IS EMPTY IS THE TELL.** `git show --stat` on a
+  conveyor commit listing a `| 0` file at the root is this bug, whatever its
+  name.

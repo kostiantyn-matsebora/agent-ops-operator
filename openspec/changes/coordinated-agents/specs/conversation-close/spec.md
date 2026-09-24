@@ -9,7 +9,8 @@ SHALL be refused without one.
 
 CLOSE REACH IS ONE HOP, the same `causedBy` link result-routing and the
 cycle guard use, never the whole subtree. A conversation SHALL be unable to
-close anything it did not directly cause.
+close anything it did not directly cause, EXCEPT ITSELF: a Coordinator's
+root MAY always close its own conversation.
 
 Reaching a deeper descendant means asking the direct member to close it. That
 member's own close then cascades to ITS members, keeping the same
