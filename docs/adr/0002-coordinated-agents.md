@@ -132,8 +132,9 @@ only place a person sees incidents they were not told about.
 names the ONE HOP parent (D3), never the tree's top.
 
 - Walking to the uncaused root means following links, not one lookup.
-- Reuse scoping and self-input refusal both compare `causedBy` at one hop,
-  unaffected by depth.
+- Reuse scoping compares `causedBy` at one hop, unaffected by depth.
+- Self-input refusal compares the origin surface's identity to the target
+  conversation itself, never `causedBy`.
 - Escalation stays a decision made ONLY by the uncaused root (D4, D6). A
   nested Coordinator's `escalate(message)` closes ITS OWN conversation with
   that message as its result, an ordinary append to its parent's inputs, and

@@ -70,7 +70,9 @@ on an omission rather than a field.
   unwired, resolution to one `AgentCapabilitySpec` shared with the inline Pipeline form.
 - `coordinator-model`: the `Coordinator` CRD — claimed sources, escalation
   channels, the typed `agents[]` list with required descriptions, per-level
-  limits, `Ready` naming any member not Ready, the cycle guard on `invoke`.
+  limits, `Ready` naming any member not Ready and catching a static
+  `coordinatorRef` cycle in `agents[]`, the separate invoke-time cycle guard
+  over live conversations.
 - `conversation-provenance`: `spec.causedBy` — the PARENT, one hop, written
   once, resolves nothing, decides no delivery, scopes reuse. The nested tree
   it defines is walked one hop at a time to any depth.
