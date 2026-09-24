@@ -1118,7 +1118,7 @@ it forwards a coordinator's, and the manager alone decides the projection.
 
 | | |
 |---|---|
-| Reachable from | runtime pods and the manager only, under the ADR 0001 network wall |
+| Reachable from | runtime pods and the manager only, under the [ADR 0001](adr/0001-bound-component-reach.md) network wall |
 | Holds | one derived token (`mcp-aops`) and no Secret reads |
 | Bound to a Coordinator via | `MCPConfig`, rendered by the chart, exposed through `global.builtinToolsets.agentops-coordinate` |
 | Component path | `platform/mcp-aops/` — standard-library Go, the shared Dockerfile recipe |
