@@ -105,7 +105,7 @@ refers to the ADR's decisions as D1–D6.
 
 ### D-D — Escalation reuses reopen's late-thread path, and only the uncaused root ever opens one
 
-- The Coordinator's `channelRefs` are SNAPSHOTTED onto the conversation it
+- The Coordinator's `channelRefs` are SNAPSHOTTED onto the UNCAUSED root it
   creates as `spec.escalationChannelRefs` — they are refs, and refs are
   snapshotted; reading them at escalation time would have been the one read of
   wiring after creation, and would have nothing to read once the Coordinator
