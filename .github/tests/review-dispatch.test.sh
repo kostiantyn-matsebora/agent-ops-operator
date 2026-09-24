@@ -253,6 +253,37 @@ assert_contains "$patch_step" "report.no-report"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" "--report-missing"
 
 # ---------------------------------------------------------------------------
+# THE FIXER'S SCRATCH MUST NOT LAND (#243). The cut used to be `git add -N .`,
+# every untracked file included, and the model wrote helper scripts into the
+# checkout because the prompt handed it `$WORK_LIST` -- an env name it cannot
+# expand with no shell. Both halves are pinned: the prompt names real paths,
+# and dispatch-patch.py decides what crosses.
+
+it "the prompt names the work list and the report by their paths, never by an env var the model cannot expand"
+assert_not_contains "$prompt" '$WORK_LIST'
+assert_not_contains "$prompt" '$REPORT'
+assert_contains "$prompt" "runner.temp }}/dispatch/work-list.json"
+assert_contains "$prompt" "runner.temp }}/dispatch/report.json"
+
+it "the prompt gives the model a scratch directory outside the checkout, and states the created-file rule"
+assert_contains "$prompt" "runner.temp }}/dispatch/scratch/"
+assert_contains "$prompt" '"created": ['
+assert_contains "$prompt" "file it does not name is not landed"
+assert_contains "$(py 'print([s for s in d["jobs"]["fix"]["steps"] if "claude-code-action" in s.get("uses","")][0]["with"]["claude_args"])')" '--add-dir "${{ runner.temp }}/dispatch"'
+
+it "the patch is cut by dispatch-patch.py, restored from the branch the workflow came from, never by add -N ."
+assert_not_contains "$fixjob" "git add -N ."
+assert_contains "$patch_step" 'python3 "$RUNNER_TEMP/dispatch-patch.py"'
+assert_contains "$patch_step" '--dropped "$RUNNER_TEMP/dispatch/dropped.json"'
+restore=$(py 'print([s for s in d["jobs"]["fix"]["steps"] if s.get("name")=="The patch program, from the branch the workflow came from"][0])')
+assert_contains "$restore" 'git show "origin/$SOURCE:.github/scripts/dispatch-patch.py"'
+assert_contains "$restore" "github.event_name == 'workflow_dispatch' && github.ref_name || github.event.repository.default_branch"
+
+it "the dropped list rides in the artifact and reaches the lander"
+assert_contains "$(py 'print([s for s in d["jobs"]["fix"]["steps"] if "upload-artifact" in s.get("uses","")][0]["with"]["path"])')" "dispatch/dropped.json"
+assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--dropped "$RUNNER_TEMP/dispatch/dropped.json"'
+
+# ---------------------------------------------------------------------------
 # THE OTHER WORKFLOW A LABEL STARTS, AND THE ONE THAT CARRIES A STANDING
 # INSTRUCTION FORWARD AT THE TWO LATER TRANSITIONS. It holds a token that
 # starts a machine writing to this repository, so its shape is pinned in the

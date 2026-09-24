@@ -103,6 +103,31 @@ def patch_paths(patch: pathlib.Path) -> set[str]:
     return {line.split("\t")[2] for line in out.splitlines() if line.count("\t") >= 2}
 
 
+def read_dropped(path) -> list[str]:
+    """dispatch-patch.py's record of the new files the fixing step left in the
+    checkout WITHOUT declaring them -- deleted before the patch was cut, so
+    they are named here rather than landed. Absent (the fixing job never ran,
+    or an older artifact) is nothing dropped."""
+    if not path or not pathlib.Path(path).is_file():
+        return []
+    try:
+        data = json.loads(pathlib.Path(path).read_text() or "{}")
+    except json.JSONDecodeError:
+        return []
+    dropped = data.get("dropped") if isinstance(data, dict) else None
+    return [d for d in dropped if isinstance(d, str)] if isinstance(dropped, list) else []
+
+
+def dropped_note(dropped: list[str]) -> str:
+    """One sentence for a landing comment. A scratch file that did not land is
+    not silent: a person reading the round should see the fixer left it, in
+    case it was a fix the report forgot to declare."""
+    if not dropped:
+        return ""
+    return (f"\n\nNot landed: {', '.join(f'`{d}`' for d in dropped)} — created by the fixing step "
+            "but not declared in its report, so deleted before the patch was cut.")
+
+
 def first_line(text: str, limit: int = 72) -> str:
     line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
     return line if len(line) <= limit else line[: limit - 1] + "…"
@@ -423,6 +448,13 @@ class Round:
             lines.append(f"\nUnaddressed ({len(unaddressed)}) — the fixing step did not report on these; "
                          "eligible for a later round:")
             lines += [f"- {describe(self.work[t])}" for t in unaddressed]
+        dropped = read_dropped(getattr(a, "dropped", None))
+        if dropped:
+            # THE SCRATCH THAT DID NOT LAND IS NAMED, never silently gone: a
+            # new file the report forgot to declare looks exactly like one.
+            lines.append(f"\nNot landed ({len(dropped)}) — created by the fixing step but not declared "
+                         "in its report, so deleted before the patch was cut:")
+            lines += [f"- `{d}`" for d in dropped]
         remaining = [t for t in self.work if t not in fixed]
         if remaining:
             lines.append(f"\nStill open: {plural(len(remaining), 'item')} from this round.")
@@ -464,6 +496,11 @@ def main() -> int:
     ap.add_argument("--patch", type=pathlib.Path, required=True)
     ap.add_argument("--report", type=pathlib.Path, required=True,
                     help='the fixing step\'s {"items":[{"id","action","reason"}]}')
+    ap.add_argument("--dropped", type=pathlib.Path,
+                    help='dispatch-patch.py\'s {"dropped":[...]}: the new files the fixing step left in '
+                         "the checkout without declaring them, deleted before the patch was cut and "
+                         "named in the landing comment and the summary rather than landed. Optional: "
+                         "absent means nothing was dropped")
     ap.add_argument("--resolve-list", type=pathlib.Path, default=pathlib.Path(".resolve-threads"))
     ap.add_argument("--resolver", type=pathlib.Path,
                     default=pathlib.Path(__file__).with_name("resolve-review-threads.py"))
@@ -522,6 +559,7 @@ def main() -> int:
     for item in work.values():
         item.setdefault("source", "review")
     report = json.loads(args.report.read_text() or "{}")
+    dropped = dropped_note(read_dropped(args.dropped))
     run = f" ([run]({args.run_url}))" if args.run_url else ""
     markers = load_markers(args.vocabulary)
     rnd = Round(args, markers, work) if args.mode == "all" else None
@@ -778,7 +816,7 @@ def main() -> int:
         # next round is started by `workflow_dispatch`.
         pr_comment(args.repo, args.pr,
                    f"{rnd.marker()}\nConveyor round {rnd.number} of {rnd.cap}: {sha[:7]} addresses "
-                   f"{plural(len(fixed), 'item')}{left}.{run}")
+                   f"{plural(len(fixed), 'item')}{left}.{run}{dropped}")
         if rnd.number >= rnd.cap:
             rnd.summary("round cap reached", fixed, disputed, sha=sha, unaddressed=unaddressed,
                         note=f"{rnd.cap} rounds have run; no further round starts. "
@@ -804,7 +842,7 @@ def main() -> int:
         # silently passing.
         pr_comment(args.repo, args.pr,
                    f"Dispatch by @{args.dispatched_by}: {sha[:7]} addresses {len(fixed)} accepted "
-                   f"finding{'s' if len(fixed) != 1 else ''}{left}.{run}\n\n"
+                   f"finding{'s' if len(fixed) != 1 else ''}{left}.{run}{dropped}\n\n"
                    "A commit pushed by a workflow starts no workflow, so CI and the review have NOT "
                    "run on it. Push again (an empty commit will do) to get both.")
     print(f"\n{len(fixed)} fixed and pushed as {sha[:7]}, {len(disputed)} left open")

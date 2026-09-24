@@ -75,7 +75,7 @@ printf '{"fixed":["PRRT_a"],"unfixed":[{"threadId":"PRRT_b","reason":"B is expor
 land() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
          (cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
             --work-list "$tmp/work.json" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report.json}" \
-            --dispatched-by a-maintainer 2>&1); }
+            ${DROPPED:+--dropped "$DROPPED"} --dispatched-by a-maintainer 2>&1); }
 
 out=$(land); rc=$?
 
@@ -229,7 +229,7 @@ land_all() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
                 --dispatched-by github-actions --mode all --approver an-approver --since 2026-08-29T10:00:00Z \
                 --max-rounds "${MAX_ROUNDS:-3}" --sonar "$tmp/sonar.json" --checks "${CHECKS:-$tmp/checks-none.json}" \
                 --state-script "$ROOT/.github/scripts/conveyor-state.py" \
-                --thread-check-script "$tmp/thread-check.py" \
+                --thread-check-script "$tmp/thread-check.py" ${DROPPED:+--dropped "$DROPPED"} \
                 ${STARTS---push-starts-workflows} ${REPORT_MISSING:+--report-missing} ${FIX_FAILED:+--fix-failed} ${FIX_TIMED_OUT:+--fix-timed-out} 2>&1); }
 loop_label() { grep -oE 'issue edit 7 --repo o/r --add-label loop:[a-z]+' "$GH_CALLS" | sed 's/.*loop://' | tr '\n' ' ' | sed 's/ $//'; }
 printf '{"consulted":true,"checks":[],"items":[]}' > "$tmp/checks-none.json"
@@ -735,6 +735,37 @@ printf '{"consulted":false,"checks":[],"items":[]}' > "$tmp/checks-absent.json"
 out=$(WORK="$tmp/none.json" CHECKS="$tmp/checks-absent.json" land_all)
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The required checks were NOT consulted"
 assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The required checks reported"
+
+# ---------------------------------------------------------------------------
+# WHAT THE FIXER LEFT BEHIND AND DID NOT DECLARE IS NAMED, NEVER SILENT.
+# dispatch-patch.py deletes an undeclared new file before the cut and records
+# it; the lander says so where a person reads the round, because a fix the
+# report forgot to declare looks exactly like scratch (#243: six rounds of
+# `.tmp_*` helpers at the root, then a review finding on them, then a dispute).
+
+it "a dropped list names the files that did not land, in the landing comment and the ending's summary"
+fresh_repo
+printf '{"dropped":[".tmp_getenv.py",".worklist_reader.sh"]}' > "$tmp/dropped.json"
+out=$(DROPPED="$tmp/dropped.json" MAX_ROUNDS=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(grep 'conveyor:round' "$GH_CALLS")" "Not landed: \`.tmp_getenv.py\`, \`.worklist_reader.sh\` — created by the fixing step but not declared in its report"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Not landed (2)"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "- \`.worklist_reader.sh\`"
+assert_not_contains "$(cat "$tmp/fix.patch")" ".tmp_getenv.py"
+
+it "the unlabelled landing comment names them too"
+fresh_repo
+out=$(DROPPED="$tmp/dropped.json" land)
+assert_contains "$(cat "$GH_CALLS")" "Not landed: \`.tmp_getenv.py\`"
+
+it "an absent or empty dropped list adds nothing"
+fresh_repo
+out=$(DROPPED="$tmp/no-such-dropped.json" land)
+assert_not_contains "$(cat "$GH_CALLS")" "Not landed"
+fresh_repo
+printf '{"dropped":[]}' > "$tmp/dropped-empty.json"
+out=$(DROPPED="$tmp/dropped-empty.json" land)
+assert_not_contains "$(cat "$GH_CALLS")" "Not landed"
 
 rm -rf "$tmp"
 
