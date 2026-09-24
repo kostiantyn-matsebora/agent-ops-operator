@@ -162,8 +162,10 @@ merely deep, it never terminates.
 - On `invoke`, the manager collects the calling conversation's OWN
   `coordinatorRef` first, then walks its `causedBy` chain to the uncaused
   root, collecting each ancestor's.
-- If the target AgentCapability resolves to (or is wired as) a Coordinator
-  already in that list, the invoke is refused naming the repeated Coordinator.
+- If the invoked entry's `coordinatorRef` target is a Coordinator already in
+  that list, the invoke is refused naming the repeated Coordinator. Only a
+  `coordinatorRef` entry can ever be the repeated target — a `capabilityRef`
+  entry names an AgentCapability, which carries no `agents[]` to invoke from.
 - The walk is bounded by the chain's own length, which the three ordinary
   budgets already keep finite, so this check adds no new unbounded work.
 - Alternative rejected: a `maxDepth` limit. Bounds a symptom (a long chain)
