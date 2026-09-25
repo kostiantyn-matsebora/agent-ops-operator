@@ -29,46 +29,64 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       `capabilityRef`, `signalSourceRefs`, `channelRefs`, `agents[]{name, capabilityRef,
       description (required, MinLength=1)}`, `limits{maxAgents, maxTurns,
       deadline}`; status with `Ready`.
-- [ ] 2.2 `ConversationSpec.CausedBy *Provenance{root, entry}`,
-      `spec.coordinatorRef`; `ConversationStatus.budget{maxAgents, maxTurns,
-      deadline, agentsInvoked, turns}`, `escalatedAt`, `closeReason`,
-      `brief` (MaxLength=512, D-I).
+- [ ] 2.2 `ConversationSpec.CausedBy *Provenance{parent, entry}` — PARENT, one
+      hop, never the tree's ultimate root — `spec.coordinatorRef`;
+      `ConversationStatus.budget{maxAgents, maxTurns, deadline, agentsInvoked,
+      turns}`, `escalatedAt`, `closeReason`, `brief` (MaxLength=512, D-I).
 - [ ] 2.3 `PipelinesForSource` → claimants of both kinds (D-B); every call site
       iterates claimants; `Wired` counts both; bare-chat choice list names
       both.
 - [ ] 2.3b `internal/addressing` + `HandleCommand` resolve `/<name>` across
       Pipeline and Coordinator; `/pipelines` and the choice list carry both
-      kinds' addressed forms; an addressed root binds the origin surface only.
+      kinds' addressed forms; an addressed conversation binds the origin
+      surface only.
 - [ ] 2.4 Coordinator reconciler: `Ready` per D-B, message lists failing entry
       names, and a name a Pipeline also holds; a not-Ready Coordinator claims
       nothing.
-- [ ] 2.5 Root creation from a Coordinator: no `channelRefs`; limits
-      snapshotted into `status.budget`; the Coordinator's `channelRefs`
-      snapshotted into `spec.escalationChannelRefs`.
+- [ ] 2.5 Conversation creation from a Coordinator: no `channelRefs`; its OWN
+      limits snapshotted into `status.budget`; the Coordinator's `channelRefs`
+      snapshotted into `spec.escalationChannelRefs` on an UNCAUSED root only —
+      a member never binds it.
 - [ ] 2.6 Manager `/coordinate/*` surface: `invoke`, `close`, `escalate`,
       `read`; caller token context `coordinator:<name>:<conversation>`;
-      `agents[]` list and root scope enforced HERE (D-F). `invoke` returns
-      created|attached. A `channel-reader:<channel>` token gets the
-      `{name, title, brief, phase, pipeline}` projection of conversations
+      `agents[]` list and the CALLING CONVERSATION'S OWN SUBTREE scope
+      enforced HERE (D-F). `invoke` returns created|attached and REFUSES a
+      target whose Coordinator already appears among the caller's `causedBy`
+      ancestors (D-E2, cycle guard). A `channel-reader:<channel>` token gets
+      the `{name, title, brief, phase, pipeline}` projection of conversations
       bound to that channel and is refused every verb — decided here, from
       the context alone.
-- [ ] 2.7 Member creation: `causedBy` set, no channels, capability from the
-      listed AgentCapability, reuse scoped by `causedBy` in `reusableBy`.
-- [ ] 2.8 `handleWorkDone` on a member appends the result input on the root in
-      the same status write (D-C); dedup key `member:<conv>:<runId>`; closed
-      root → skip. Reconciler backstop re-derives a missing append.
+- [ ] 2.7 Member creation: `causedBy` set to the invoking PARENT (one hop), no
+      channels, capability from the listed AgentCapability, reuse scoped by
+      `causedBy` in `reusableBy`. A member MAY itself carry `coordinatorRef`
+      when the invoking Coordinator's `agents[]` entry names it by
+      `coordinatorRef` rather than `capabilityRef` (nesting).
+- [ ] 2.8 `handleWorkDone` on a member appends the result input on its PARENT
+      (`causedBy`, one hop) in the same status write (D-C); dedup key
+      `member:<conv>:<runId>`; closed parent → skip. Reconciler backstop
+      re-derives a missing append.
 - [ ] 2.9 `/channel/inbound` refuses an input whose origin surface is the
       target conversation.
-- [ ] 2.10 Budget edges per D-E: `maxAgents` in the invoke handler, `maxTurns`
-      in `handleWorkDone` on a root, `deadline` via reconciler requeue. Closing
-      a root closes its members `root-closed`.
+- [ ] 2.10 Budget edges per D-E, evaluated on EACH Coordinator's own
+      conversation independently: `maxAgents` in the invoke handler,
+      `maxTurns` in `handleWorkDone`, `deadline` via reconciler requeue.
+      Closing a conversation closes its members with the same `closeReason`,
+      kept verbatim, recursively.
+- [ ] 2.10b Cycle guard (D-E2): on `invoke`, collect the caller's own
+      `coordinatorRef` first, then walk its `causedBy` chain to the uncaused
+      root collecting each ancestor's `coordinatorRef`. Refuse naming the
+      repeated Coordinator when the target matches one already in that list.
+      No depth limit.
 - [ ] 2.11 `closeReason` stamped by the `close` verb (required there), absent
-      from `/close`; a coordinator cannot close outside its root.
+      from `/close`; a coordinator cannot close outside conversations it
+      directly caused, except closing itself, always allowed.
 - [ ] 2.12 Regenerate deepcopy and CRDs; `chart/crds/coordinators…yaml`.
 - [ ] 2.13 Tests: envtest — fan-out counts a Coordinator; member result lands
-      on root exactly once across a simulated restart; self-input refused;
-      each of the three limits closes with reason and members; reuse scope;
-      a channel-reader token sees only its channel's projection and no verb.
+      on its parent exactly once across a simulated restart; self-input
+      refused; each of the three limits closes with reason and members, per
+      level; reuse scope; a channel-reader token sees only its channel's
+      projection and no verb; a nested Coordinator's budget is independent of
+      its ancestor's; a direct and an indirect cycle are both refused.
 - [ ] 2.14 `brief` (D-I): `/work/done` accepts `brief`; `handleWorkDone`
       records it latest-wins in the run's status write, leaving it alone when
       absent; `dispatch/templates/format.md` asks the agent for one sentence
@@ -79,17 +97,24 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 3. Phase 2 — escalation (design D-D)
 
-- [ ] 3.1 `escalate` sets `spec.channelRefs` from the root's
-      `spec.escalationChannelRefs` snapshot — reads no Coordinator — stamps
-      `escalatedAt`, enqueues `ensure-topic` with the digest as
-      the opening message.
+- [ ] 3.1 `escalate` on an UNCAUSED conversation (no `causedBy`) sets
+      `spec.channelRefs` from its `spec.escalationChannelRefs` snapshot —
+      reads no Coordinator — stamps `escalatedAt`, enqueues `ensure-topic`
+      with the digest as the opening message.
+- [ ] 3.1b `escalate` on a conversation carrying `causedBy` opens NO thread:
+      closes it with the message as `closeReason` and result, landing on its
+      PARENT as an ordinary member-result input (task 2.8's path) — bubbling
+      one hop, exactly as an agent-initiated close does.
 - [ ] 3.2 `DeliverInputs` fences on `escalatedAt`: nothing earlier is
       delivered to the escalated channels.
-- [ ] 3.3 `budget-exceeded` escalates first with a manager-written digest
-      (limit, counts, member list), then closes.
-- [ ] 3.4 Fake-chat integration test: escalate opens threads with the digest
-      only; a later member result reaches the thread; a person's reply is a
-      root input.
+- [ ] 3.3 `budget-exceeded` closes the conversation, then calls `escalate`
+      with a manager-written digest (limit, counts, member list) — bubbling
+      per 3.1b on a nested conversation, opening a thread only on the
+      uncaused root.
+- [ ] 3.4 Fake-chat integration test: escalate on the uncaused root opens
+      threads with the digest only; a later member result reaches the
+      thread; a person's reply is a root input; escalate on a nested member
+      closes it and lands the message on its parent with no thread anywhere.
 
 ## 4. Phase 3 — `platform/mcp-aops` (design D-F)
 

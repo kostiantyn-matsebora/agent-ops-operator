@@ -91,9 +91,10 @@ the other.**
 - Description lives on the entry, not the AgentCapability.
 - An entry without a description is refused.
 
-**D3 — The manager routes results.** A conversation the coordinator started
-carries `spec.causedBy` (the root). `/work/done` on it appends the result as an
-INPUT to the root — the only thing that gives a conversation a turn.
+**D3 — The manager routes results.** A conversation a coordinator started
+carries `spec.causedBy` — its PARENT, one hop, never the tree's top.
+`/work/done` on it appends the result as an input to the parent, the only
+thing that gives a conversation a turn.
 
 - `causedBy` is provenance, as `pipelineRef` is: written once, resolves nothing,
   decides no delivery.
@@ -104,18 +105,53 @@ INPUT to the root — the only thing that gives a conversation a turn.
 thread when it decides to, on its `channelRefs`, with a synthesised first message.
 Close and drop are `/close` with a `closeReason` the object keeps.
 
-**D5 — Budget on the root; exhaustion closes with a reason.**
+- **Only the uncaused root holds a `channelRefs` to open a thread on** — a
+  caused conversation binds no human channel (D3). A nested Coordinator's
+  `escalate` closes its own conversation instead, appending the message to its
+  parent's inputs, so the decision to open a thread propagates up one hop at a
+  time until it reaches the root.
+
+**D5 — Budget on the conversation a Coordinator opens. Exhaustion closes with
+a reason, and nesting does not share a budget** — a nested Coordinator
+snapshots its OWN `limits`, independent of its parent's. A wide-and-deep tree
+is bounded at every level, never as one pool.
 
 | Limit | Bounds | Why the others miss it |
 |---|---|---|
-| `maxAgents` | fan-out per root | the global cap starves other incidents |
-| `maxTurns` | the root's own inputs | a loop is height 2, infinite width — depth never fires |
-| `deadline` | root age | nothing else has a timer |
+| `maxAgents` | fan-out per Coordinator conversation | the global cap starves other incidents |
+| `maxTurns` | that conversation's own inputs | a loop is height 2, infinite width — depth never fires |
+| `deadline` | that conversation's age | nothing else has a timer |
 
-Past any: root closed `budget-exceeded`, members with it, through D4.
+Past any: that conversation closes `budget-exceeded`, its members with it, through D4.
 
-**D6 — The console shows the tree** rooted at the uncaused conversation. It is
-the only place a person sees incidents they were not told about.
+**D6 — The console shows the tree** rooted at the uncaused conversation, at
+any depth — a member's `causedBy` may itself be another member. It is the
+only place a person sees incidents they were not told about.
+
+**D7 — A member may be a Coordinator, so the tree may nest.** `causedBy`
+names the ONE HOP parent (D3), never the tree's top.
+
+- Walking to the uncaused root means following links, not one lookup.
+- Reuse scoping compares `causedBy` at one hop, unaffected by depth.
+- Self-input refusal compares the origin surface's identity to the target
+  conversation itself, never `causedBy`.
+- Escalation stays a decision made ONLY by the uncaused root (D4, D6). A
+  nested Coordinator's `escalate(message)` closes ITS OWN conversation with
+  that message as its result, an ordinary append to its parent's inputs, and
+  opens no thread.
+- The parent's agent decides whether to handle it or escalate again, so a
+  human thread opens only when that decision reaches the top.
+- Budget is per-conversation a Coordinator opens (D5), not pooled across the
+  tree. Nesting does not pool `maxAgents`, `maxTurns` or `deadline` across
+  levels.
+- `coordinatorRef` names the Coordinator a conversation's own entry point is —
+  set on a direct address and on a member that is itself a Coordinator's root
+  (an `agents[]` entry wiring one), empty on an ordinary member and on a
+  Pipeline-addressed conversation. The cycle guard collects the calling
+  conversation's OWN
+  `coordinatorRef` first, then walks `causedBy` to the uncaused root
+  collecting each ancestor's, and refuses an `invoke` whose target resolves to
+  a Coordinator already in that list.
 
 ## Consequences
 
@@ -142,5 +178,4 @@ the only place a person sees incidents they were not told about.
 
 - Whether `AgentCapability` replaces the inline Pipeline fields later.
 - `Coordinator` status shape.
-- Whether a member may be a Coordinator.
 - Choreography (agent-to-agent with no root) — waits for the budget to exist.

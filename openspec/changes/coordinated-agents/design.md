@@ -30,7 +30,6 @@ refers to the ADR's decisions as D1–D6.
 
 **Non-Goals:**
 - Choreography (agent-to-agent with no root).
-- A member that is itself a Coordinator.
 - Replacing the inline Pipeline fields.
 - Synchronous invocation.
 - Summarising the root's context. (`brief`, D-I, is not that: it is what a
@@ -62,11 +61,22 @@ refers to the ADR's decisions as D1–D6.
 - `internal/chat/pipelines.go` `PipelinesForSource` returns a `[]Claimant`
   interface — name, kind, resolved `AgentCapabilitySpec`, channel refs, `Ready`. Pipeline
   and Coordinator implement it. Every call site iterates claimants.
-- `Coordinator.Ready` = own capability resolves ∧ every `agents[].capabilityRef`
-  resolves ∧ each AgentCapability `Ready`. Message lists the failing entry names.
-- A root conversation created from a Coordinator: `spec.pipelineRef` empty,
-  new `spec.coordinatorRef` set, `spec.channelRefs` EMPTY (D3/D4), limits
-  snapshotted into `status.budget{maxAgents,maxTurns,deadline}`.
+- `Coordinator.Ready` = own capability resolves ∧ every `agents[]` entry's
+  `capabilityRef` or `coordinatorRef` resolves ∧ each resolved AgentCapability
+  or Coordinator is itself `Ready`. Message lists the failing entry names.
+- Resolving a `coordinatorRef` carries the set of Coordinator names already
+  visited on the current path. A name reappearing in that set is a STATIC
+  cycle: `Ready=False` naming it, rather than recursing into it again. This is
+  the static counterpart to the `invoke`-time cycle guard (D-E2), which walks
+  a live conversation's `causedBy` chain instead.
+- A conversation created from a Coordinator: `spec.pipelineRef` empty,
+  `spec.coordinatorRef` set, `spec.channelRefs` EMPTY (D3/D4), limits
+  snapshotted into `status.budget{maxAgents,maxTurns,deadline}`. NESTING: this
+  conversation may itself be a MEMBER (`causedBy` set by its own parent's
+  invoke) while also being a Coordinator's root for its own members —
+  `causedBy` and `coordinatorRef` are independent fields, and a conversation
+  carries both when a Coordinator was addressed or invoked from inside another
+  coordination.
 - `internal/addressing` and `HandleCommand` resolve the addressed segment
   across BOTH kinds — one Get per kind, Pipeline first; a name held by both is
   reported by the Coordinator reconciler's `Ready`. An addressed root binds the
@@ -78,46 +88,94 @@ refers to the ADR's decisions as D1–D6.
 ### D-C — Result routing is a status-write in `handleWorkDone`, and derivable
 
 - `handleWorkDone` on a conversation with `causedBy`: after recording the run,
-  append an input on the ROOT `{origin: {kind: member, name: <conv>, entry:
-  <name>}, payload: result}` in the same request; on conflict, the reconciler
-  backstop re-derives from "member run done ∧ no root input with that run id".
+  append an input on the PARENT (`causedBy`, one hop — NOT the tree's root)
+  `{origin: {kind: member, name: <conv>, entry: <name>}, payload: result}` in
+  the same request; on conflict, the reconciler backstop re-derives from
+  "member run done ∧ no parent input with that run id".
 - Input dedup key: `member:<conversation>:<runId>` — one append per run.
-- Root closed → skip, and the member's run stays on its own record.
-- Turn counting: `status.budget.turns` increments when the ROOT's run is
-  recorded, not when an input arrives — N members finishing at once is one turn.
+- Parent closed → skip, and the member's run stays on its own record.
+- Turn counting: `status.budget.turns` increments on the CONVERSATION WHOSE
+  OWN `status.budget` IT IS when its run is recorded, not when an input
+  arrives — N members finishing at once is one turn. Nested: a sub-coordinator
+  increments its own budget on its own run. Its parent's budget increments
+  separately, when the parent's own run — the one that read the
+  sub-coordinator's result as an input — completes.
 - Alternative rejected: routing at dispatch time by reading the tree. Would make
   a turn depend on a list, which a restart could re-order.
 
-### D-D — Escalation reuses reopen's late-thread path
+### D-D — Escalation reuses reopen's late-thread path, and only the uncaused root ever opens one
 
-- The Coordinator's `channelRefs` are SNAPSHOTTED onto the root at creation
-  as `spec.escalationChannelRefs` — they are refs, and refs are snapshotted;
-  reading them at escalation time would have been the one read of wiring after
-  creation, and would have nothing to read once the Coordinator is deleted.
-- `escalate` verb → manager sets `spec.channelRefs` = the snapshot, stamps
-  `status.escalatedAt`, and enqueues `ensure-topic` with the digest as the
-  topic's opening message. Nothing reads the Coordinator.
+- The Coordinator's `channelRefs` are SNAPSHOTTED onto the UNCAUSED root it
+  creates as `spec.escalationChannelRefs` — they are refs, and refs are
+  snapshotted; reading them at escalation time would have been the one read of
+  wiring after creation, and would have nothing to read once the Coordinator
+  is deleted.
+- `escalate` verb, called on the UNCAUSED root (no `causedBy`): manager sets
+  `spec.channelRefs` = the snapshot, stamps `status.escalatedAt`, and enqueues
+  `ensure-topic` with the digest as the topic's opening message. Nothing reads
+  the Coordinator.
+- `escalate` verb, called on a MEMBER that carries `causedBy` (a nested
+  Coordinator's own conversation): opens NO thread. It closes that
+  conversation with the escalate message as its result, which lands on its
+  PARENT as an ordinary member-result input (D-C) — the parent's agent then
+  decides whether to handle it or call `escalate` itself, bubbling one hop at
+  a time until a call reaches the uncaused root.
 - `DeliverInputs` MUST NOT replay: it skips inputs with `arrivedAt <
   escalatedAt`. This is the one correction to the queue-iteration behaviour
   noted in Context, and it is scoped to escalated roots.
 - After escalation the root is an ordinary multi-channel conversation.
 - `closeReason` is a `MaxLength=256` status string; `/close` from a surface
-  stamps none; the MCP `close` verb requires one.
+  stamps none; the MCP `close` verb requires one — including the close
+  `escalate` performs on a non-root conversation.
 
-### D-E — Budget enforcement has two edges
+### D-E — Budget enforcement has two edges, evaluated PER COORDINATOR LEVEL
+
+Each conversation that is itself a Coordinator's root enforces its OWN
+snapshotted `limits`, independent of any ancestor's. Nesting does not pool a
+budget across levels (ADR D5).
 
 | Edge | Where | Action |
 |---|---|---|
-| `maxAgents` | the `invoke` verb, in the manager's handler | refuse, then close root `budget-exceeded` |
-| `maxTurns` | `handleWorkDone` on the root | close `budget-exceeded` after recording |
+| `maxAgents` | the `invoke` verb, in the manager's handler | refuse, then close THIS conversation `budget-exceeded` |
+| `maxTurns` | `handleWorkDone` on THIS conversation | close `budget-exceeded` after recording |
 | `deadline` | the conversation reconciler, requeue at the deadline | close `budget-exceeded` |
 
-- Closing a root closes every member with `causedBy` naming it, reason
-  `root-closed`.
-- `budget-exceeded` runs escalation FIRST (D5) with a manager-written digest
-  (limit, counts, member list), then closes — so the thread exists to carry it.
-- `agentsInvoked` is incremented on the root's status by the manager under
-  optimistic concurrency; a conflict retries. Ten members is the design point.
+- Closing a conversation closes every member with `causedBy` naming it, the
+  same `closeReason` kept verbatim — recursively, since a closed member may
+  itself have members.
+- `budget-exceeded` closes every live member first (`closeReason:
+  budget-exceeded`), then runs `escalate` (D-D) on THIS conversation with a
+  manager-written digest (limit, counts, member list) — never a separate
+  close on THIS conversation, since `escalate` performs one of the two
+  outcomes below.
+  - **THIS conversation is a nested member** (carries `causedBy`): `escalate`
+    IS the close (D-D) — `closeReason: budget-exceeded`, the digest as the
+    result, bubbling one hop to the parent.
+  - **THIS conversation is the uncaused root**: `escalate` opens the human
+    thread instead of closing (D-D), so the root stays open, carrying the
+    digest as its opening message.
+- `agentsInvoked` is incremented on the conversation's OWN status by the
+  manager under optimistic concurrency; a conflict retries. Ten members is the
+  design point, per level.
+
+### D-E2 — The `invoke` verb refuses a cycle in the Coordinator graph
+
+No depth limit is imposed — a tree may nest as deep as its own per-level
+budgets allow. A CYCLE is a different failure: A invoking B invoking A is not
+merely deep, it never terminates.
+
+- On `invoke`, the manager collects the calling conversation's OWN
+  `coordinatorRef` first, then walks its `causedBy` chain to the uncaused
+  root, collecting each ancestor's.
+- If the invoked entry's `coordinatorRef` target is a Coordinator already in
+  that list, the invoke is refused naming the repeated Coordinator. Only a
+  `coordinatorRef` entry can ever be the repeated target — a `capabilityRef`
+  entry names an AgentCapability, which carries no `agents[]` to invoke from.
+- The walk is bounded by the chain's own length, which the three ordinary
+  budgets already keep finite, so this check adds no new unbounded work.
+- Alternative rejected: a `maxDepth` limit. Bounds a symptom (a long chain)
+  rather than the actual failure (a chain that repeats), and would refuse a
+  legitimately deep but acyclic tree the operator asked for.
 
 ### D-F — The MCP server is a thin client of the manager
 
@@ -127,8 +185,17 @@ refers to the ADR's decisions as D1–D6.
 - It authenticates CALLERS by a per-conversation token the manager injects into
   the runtime pod as `AOPS_MCP_TOKEN`, derived with context
   `coordinator:<name>:<conversation>`. The server forwards it; the MANAGER
-  validates and enforces the `agents[]` list and root scope on a new
-  `/coordinate/*` surface. The server never decides reach.
+  validates and enforces the per-verb bound on a new `/coordinate/*` surface,
+  the same bound `aops-mcp-server/spec.md` states:
+
+  | Verb | Bound |
+  |---|---|
+  | `invoke` | the `agents[]` list |
+  | `escalate` | the caller itself — no conversation argument, never a member reached through it |
+  | `read` | the calling conversation's own subtree |
+  | `close` | the caller itself, or a conversation it directly caused, never a deeper descendant |
+
+  The server never decides reach.
 - Tools: `list_agents`, `list_conversations`, `get_conversation`, `get_tree`,
   `invoke`, `close`, `escalate`, `read`. All complete within the request.
   `list_conversations` returns each conversation's `brief` (D-I) beside name,
@@ -178,10 +245,15 @@ refers to the ADR's decisions as D1–D6.
 
 - The adapter's watch set grows by `agentcapabilities` and `coordinators` (RBAC in the
   chart).
-- The tree is derived from the conversation snapshot by `causedBy`; no new
-  endpoint. The incident view is a route on the root; member transcripts link
-  up.
-- Fixture for `npm run screenshots` gains one root with three members.
+- The tree is derived from the conversation snapshot by `causedBy`, walked one
+  hop at a time — no new endpoint, and no depth limit. A member's `causedBy`
+  may itself carry `causedBy`, so the client follows links to the uncaused
+  root rather than reading a single field.
+- The incident view is a route on the uncaused root; member transcripts link
+  up, and a member that is itself a sub-coordinator's root expands to its own
+  nested timeline in place.
+- Fixture for `npm run screenshots` gains one root with three members, one of
+  which is itself a sub-coordinator with two members of its own.
 
 ### D-H — Delivery is phased, one PR, each phase green on its own
 
@@ -201,6 +273,12 @@ refers to the ADR's decisions as D1–D6.
   finalizer, no ownerRef, no `delete` on conversations.
 - **Root context growth.** Unbounded by design here; the member descriptions
   and `maxTurns` are the controls. A later change may summarise.
+- **No depth limit on nesting.** Each level's own `maxAgents`/`maxTurns`/
+  `deadline` bounds ITS width and lifetime, but nothing bounds how many levels
+  deep a tree grows — only a repeated Coordinator (a cycle) is refused (D-E2).
+  A pathological but acyclic capability graph could still nest very deep, each
+  level individually within its own budget. Left as an accepted risk rather
+  than a `maxDepth` field this request did not ask for.
 - **`DeliverInputs` on the queue** was already timing-dependent; this change
   adds the `escalatedAt` fence and nothing else. A full move to
   `status.runs[].inputs[]` is a separate change.
