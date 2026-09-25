@@ -191,54 +191,47 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
-      - name: Carry conveyor:run forward as the fix-station label
+      - id: carry
+        name: Carry the standing instruction onto the pull request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
-          # A workflow_run payload carries no pull_request.body directly --
-          # resolve the pull request from the run's head sha, same fallback
-          # review-dispatch.yml's `who` step already uses. carry-from-pr.sh
-          # takes it from there: the change/* guard and Refs #<n> extraction
-          # are shared with the archive job below.
-          head_sha="${{ github.event.workflow_run.head_sha }}"
+          # A workflow_run payload carries no pull_request.body directly, so the pull
+          # request is resolved from the run's head sha. carry.py takes it from there:
+          # it gathers the facts, asks the state machine (`conveyor.py`) what the
+          # instruction stands for on THIS pull request, and acts on the answer.
+          #
           # A FAILED LOOKUP AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS --
-          # `gh api`'s own exit status is checked BEFORE `| head -1` can turn
-          # either shape into the same empty string, so a transient API
-          # failure is never read as the ordinary "no pull request" case.
+          # `gh api`'s own exit status is checked BEFORE `| head -1` can turn either
+          # shape into the same empty string, so a transient API failure is never
+          # read as the ordinary "no pull request" case.
           if ! api_out=$(gh api --method GET \
-            "repos/$GITHUB_REPOSITORY/commits/$head_sha/pulls" \
+            "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" \
             --jq '.[] | select(.state == "open") | .number'); then
-            echo "::error::could not look up pull requests for ${head_sha:0:7}; not the ordinary no-pull-request case"
+            echo "::error::could not look up pull requests for ${HEAD_SHA:0:7}; not the ordinary no-pull-request case"
             exit 1
           fi
           pr=$(printf '%s\n' "$api_out" | head -1)
           if [ -z "$pr" ]; then
-            # NOT $GITHUB_SHA -- on a workflow_run event that names the
-            # TRUSTED CHECKOUT'S commit (the default branch), never the run
-            # this job is reacting to.
-            echo "no open pull request for ${head_sha:0:7}; nothing to carry"
+            echo "no open pull request for ${HEAD_SHA:0:7}; nothing to carry"
             exit 0
           fi
-          # THE CONCLUSION GOES WITH IT: this job runs on a red ci too
-          # (a carried round must start on one), and only a green one may
-          # mark the head mergeable.
-          out=$(CI_CONCLUSION="${{ github.event.workflow_run.conclusion }}" \
-                .github/scripts/carry-from-pr.sh "$pr" fix | tee /dev/stderr)
-          # ONLY A REAL CARRY RE-DISPATCHES. The one success line this
-          # produces starts "carried " (every refusal and every "nothing to
-          # carry" case reads differently) -- re-dispatching unconditionally
-          # would fire review-dispatch.yml's gate on a pull request that
-          # never got the label at all, which the gate's own re-check would
-          # then correctly refuse, but loudly and for no reason.
-          if printf '%s\n' "$out" | grep -q '^carried '; then
-            gh workflow run review-dispatch.yml --repo "$GITHUB_REPOSITORY" -f "pr=$pr" -f mode=all
-          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/carry.py --repo "$GITHUB_REPOSITORY" --pr "$pr" --station fix \
+            --ci-conclusion "$CI_CONCLUSION"
+      # THE ROUND STARTS FROM THE CARRY'S OWN ANSWER, never from scraping its text: carry.py
+      # says `dispatch_round=true` only when the review had ALREADY completed for the head,
+      # because otherwise the review's own completion starts the round and dispatching here
+      # too made two rounds of one push, both spending the budget.
+      - name: Start a round
+        if: steps.carry.outputs.dispatch_round == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run review-dispatch.yml --repo "$GITHUB_REPOSITORY" -f "pr=${{ steps.carry.outputs.pr }}" -f mode=all
 
-  # THE ARCHIVE TRANSITION: a merge just landed on the default branch. Find
-  # the pull request that merge came from, read its `Refs #<n>` and carry
-  # `conveyor:run` forward as the archive-station label ON THE ISSUE -- the
-  # pull request is closed by now, and a label there drives nothing.
   archive:
     # `ci`'s own `push:` trigger is already scoped to `branches: [master]`,
     # so a `push`-event workflow_run for it is a push to the default branch
@@ -267,99 +260,47 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
-      - name: Carry conveyor:run forward as the archive-station label
+      - id: carry
+        name: Carry the standing instruction to the archive station
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # BOTH REQUIRED BY `remote-implement.py` ITSELF, THE MOMENT IT
-          # ACTUALLY FIRES BELOW -- `fire`'s own step sets the same two for
-          # the same reason. Missing here, the script would run all the way
-          # to the fire attempt and fail there with "ROUTINE_FIRE_URL or
-          # ROUTINE_FIRE_TOKEN is not set", which the tests never caught
-          # because they stub the fire endpoint rather than exercising a
-          # missing one.
-          ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
-          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
           DISPATCH_PR: ${{ inputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          # A MANUAL DISPATCH NAMES THE PULL REQUEST DIRECTLY -- the recovery
-          # case this input exists for is exactly a merge whose commit is no
-          # longer resolvable this way, because master has moved on since.
           if [ -n "${DISPATCH_PR:-}" ]; then
             pr="$DISPATCH_PR"
           else
-            # A push-triggered `ci` run has no pull request of its own -- the
-            # merge commit it ran on is the head of exactly one now-closed pull
-            # request. `search` is the only API that finds a MERGED (closed,
-            # non-open) pull request by commit.
-            #
-            # A FAILED SEARCH AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS --
-            # `gh api`'s own exit status is checked before its output is read,
-            # so a transient API failure is never read as the ordinary
-            # "no merged pull request" case.
+            # The pull request that MERGED to produce this push, found by its sha.
             if ! pr=$(gh api --method GET search/issues \
-              -f "q=repo:$GITHUB_REPOSITORY is:pr is:merged ${{ github.event.workflow_run.head_sha }}" \
+              -f "q=repo:$GITHUB_REPOSITORY is:pr is:merged $HEAD_SHA" \
               --jq '.items[0].number'); then
-              echo "::error::could not search for a merged pull request on ${{ github.event.workflow_run.head_sha }}; not the ordinary no-pull-request case"
+              echo "::error::could not search for a merged pull request on $HEAD_SHA; not the ordinary no-pull-request case"
               exit 1
             fi
             if [ -z "$pr" ] || [ "$pr" = "null" ]; then
-              echo "no merged pull request found for ${{ github.event.workflow_run.head_sha }}; nothing to carry"
+              echo "no merged pull request found for $HEAD_SHA; nothing to carry"
               exit 0
             fi
           fi
-          # carry-from-pr.sh applies the SAME change/* guard the open job
-          # does -- a merge queue can land a fork's pull request too, and
-          # this job must never carry a grant forward for one just because
-          # its body happens to contain 'Refs #<n>'.
-          #
-          # A LABEL PLACED THROUGH THE API, UNDER THIS WORKFLOW'S OWN TOKEN,
-          # FIRES NO `issues: labeled` WEBHOOK -- the platform suppresses
-          # events from actions it triggered itself, the same suppression
-          # `open`'s own comment documents for `pull_request: labeled`. So
-          # placing `conveyor:archive` here was never enough to start the
-          # archive station's session: `fire`'s trigger never fires. Measured
-          # live: the label landed on #51 and #222, and no session ever
-          # started for either.
-          #
-          # `open` closes the same gap by DISPATCHING `review-dispatch.yml`
-          # again, because that workflow accepts `workflow_dispatch`.
-          # `remote-implement.yml` had none at the time, and `fire` reads its
-          # input from a labeling EVENT PAYLOAD, not from workflow inputs --
-          # so the fix here is to hand `remote-implement.py` the SAME PAYLOAD
-          # SHAPE a real `issues: labeled` event would carry, once
-          # `carry-from-pr.sh` confirms a real carry happened (its one
-          # success line starts "carried "). `remote-implement.py` re-checks
-          # the grant itself
-          # from `sender`, exactly as it does for a bot-carried `conveyor:fix`
-          # label event -- this is not a second, weaker path, it is the same
-          # program reading the same facts it would read from a live event.
-          out=$(.github/scripts/carry-from-pr.sh "$pr" archive | tee /dev/stderr)
-          # TWO SUCCESS SHAPES FROM THE SHARED SCRIPT, BOTH FIRE-WORTHY.
-          # "carried ..." is a fresh label placement. "#<n> already carries
-          # the `archive` grant" is its OWN dedup on a comment marker it
-          # already posted -- which #51 hit on a #230 replay: the label and
-          # that marker were both posted the first time this ran, BEFORE this
-          # recovery path existed, so the label was never fresh again and
-          # `remote-implement.py` never fired. `remote-implement.py` carries
-          # its own SEPARATE fire-marker dedup
-          # (`<!-- remote-implement:fired:archive -->`), so calling it on the
-          # "already carries" case is safe: it does nothing if the session
-          # already started, and starts it if -- as here -- the label was
-          # placed but the fire never happened.
-          #
-          # GUARDED, NOT LEFT TO set -e: the ordinary "nothing carried" case
-          # has no matching line at all, and an unguarded grep in a $(...)
-          # assignment exits 1 on no match -- which set -euo pipefail (above)
-          # would then read as this whole step failing, for the routine case
-          # of nothing to carry.
-          carried_issue=$( (printf '%s\n' "$out" | \
-            grep -oE '^carried .* on issue #[0-9]+|^#[0-9]+ already carries the `archive` grant' | \
-            grep -oE '#[0-9]+' | head -1 | tr -d '#') || true)
-          if [ -n "$carried_issue" ]; then
-            LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["archive_label"])')
-            payload=$(mktemp)
-            printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"}}' \
-              "$LABEL" "$carried_issue" > "$payload"
-            python3 .github/scripts/remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"
-          fi
+          # carry.py asks the machine: only a FINISHED change reaches the archive station, so a
+          # proposal or apply merge carries nothing and moves the line to implement instead.
+          python3 .github/scripts/carry.py --repo "$GITHUB_REPOSITORY" --pr "$pr" --station archive
+      # Placing a label through this job's own token fires no `issues: labeled` webhook, so the
+      # session is started HERE, from the carry's own answer (`fire_issue`), with the same payload
+      # shape a real event carries. remote-implement.py re-checks the grant exactly as it does for
+      # any bot-carried label, so this is the same program reading the same facts.
+      - name: Start the archive session
+        if: steps.carry.outputs.fire_issue != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          ISSUE: ${{ steps.carry.outputs.fire_issue }}
+        run: |
+          set -euo pipefail
+          LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["archive_label"])')
+          payload=$(mktemp)
+          printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"}}' \
+            "$LABEL" "$ISSUE" > "$payload"
+          python3 .github/scripts/remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"

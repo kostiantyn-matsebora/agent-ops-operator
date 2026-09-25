@@ -253,7 +253,7 @@ def _carried_by_a_person_or_a_bot(placer: Placer | None) -> bool:
 
 # ---- the fire: a label on the issue ----------------------------------------------------------
 
-def fire(vocab: dict, label: str, line: Line, placer: Placer) -> Decision:
+def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Placer | None = None) -> Decision:
     """A label landed on the issue. Which station starts, if any.
 
     Actions: `ignore` (not a label this line acts on), `refuse` (strip the label
@@ -266,7 +266,8 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer) -> Decision:
     or the lane has no archive.
 
     A CARRIED PLACEMENT NEEDS `conveyor:run` STANDING, since only the standing
-    instruction can be carried, and it never fires twice.
+    instruction can be carried, placed by someone who can still push (that is
+    `grant_placer`, the person behind the bot), and it never fires twice.
 
     A PERSON'S PLACEMENT IS A FRESH INSTRUCTION. The fire record used to be
     permanent, so a session that died left an issue nobody could restart. A
@@ -282,6 +283,9 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer) -> Decision:
         if vocab["run_label"] not in line.issue_labels:
             return Decision("refuse", f"`{label}` was carried by the workflow, but no `{vocab['run_label']}` "
                             "stands on the issue to carry", remove_label=strip)
+        if not _carried_by_a_person_or_a_bot(grant_placer):
+            return Decision("refuse", f"`{label}` was carried by the workflow, but whoever placed "
+                            f"`{vocab['run_label']}` cannot push here now", remove_label=strip)
     elif not placer.may_push:
         return Decision("refuse", f"`{label}` starts a session that writes to this repository, which needs "
                         f"write access, and @{placer.login} has `{placer.permission}`", remove_label=strip)
@@ -568,7 +572,7 @@ def _placer(d):
 def _decide(vocab: dict, name: str, facts: dict) -> dict:
     from dataclasses import asdict
     if name == "fire":
-        d = fire(vocab, facts["label"], _build(Line, facts.get("line")), _placer(facts["placer"]))
+        d = fire(vocab, facts["label"], _build(Line, facts.get("line")), _placer(facts["placer"]), _placer(facts.get("grant_placer")))
     elif name == "carry_fix":
         d = carry_fix(vocab, _build(PullRequest, facts.get("pr")), _build(Line, facts.get("line")), _placer(facts.get("placer")))
     elif name == "carry_archive":

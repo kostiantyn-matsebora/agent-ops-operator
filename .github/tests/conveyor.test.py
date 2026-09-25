@@ -181,10 +181,10 @@ def pull_requests(state="OPEN", labels=frozenset({FIX})):
 
 
 class TheFire(unittest.TestCase):
-    def expected(self, label, line, placer):
+    def expected(self, label, line, placer, grant_placer=None):
         if label not in (RUN, IMPL, ARCH):
             return "ignore", None
-        if placer.bot and RUN not in line.issue_labels:
+        if placer.bot and (RUN not in line.issue_labels or grant_placer is None or not grant_placer.may_push):
             return "refuse", label
         if not placer.bot and not placer.may_push:
             return "refuse", label
@@ -196,10 +196,10 @@ class TheFire(unittest.TestCase):
         return "fire", station
 
     def test_every_combination(self):
-        for label, line, placer in itertools.product((RUN, IMPL, ARCH, "bug"), lines(), (WRITER, READER, BOT)):
-            d = c.fire(V, label, line, placer)
-            action, extra = self.expected(label, line, placer)
-            with self.subTest(label=label, line=line, placer=placer.login):
+        for label, line, placer, grant in itertools.product((RUN, IMPL, ARCH, "bug"), lines(), (WRITER, READER, BOT), (WRITER, READER, None)):
+            d = c.fire(V, label, line, placer, grant)
+            action, extra = self.expected(label, line, placer, grant)
+            with self.subTest(label=label, line=line, placer=placer.login, grant=grant and grant.login):
                 self.assertEqual(action, d.action, d.reason)
                 if action == "refuse":
                     self.assertEqual(extra, d.remove_label)
@@ -212,7 +212,7 @@ class TheFire(unittest.TestCase):
 
     def test_an_unfinished_change_never_reaches_the_archive_station(self):
         for label, line, placer in itertools.product((RUN, IMPL, ARCH), lines(), (WRITER, BOT)):
-            d = c.fire(V, label, line, placer)
+            d = c.fire(V, label, line, placer, WRITER)
             if d.action in ("fire", "skip") and d.station == "archive":
                 self.assertTrue(line.change_finished and line.lane == "opsx")
 
@@ -226,10 +226,17 @@ class TheFire(unittest.TestCase):
         d = c.fire(V, RUN, line, WRITER)
         self.assertEqual(("fire", "archive"), (d.action, d.station))
 
+    def test_a_carried_placement_needs_the_person_behind_it_to_still_push(self):
+        line = c.Line(frozenset({RUN}), "opsx", change_finished=False)
+        self.assertEqual("fire", c.fire(V, RUN, line, BOT, WRITER).action)
+        for grant in (READER, None):
+            d = c.fire(V, RUN, line, BOT, grant)
+            self.assertEqual(("refuse", RUN), (d.action, d.remove_label))
+
     def test_a_dead_session_is_restarted_by_a_person_and_never_by_a_carry(self):
         base = dict(issue_labels=frozenset({RUN}), lane="opsx", change_finished=False, fired=frozenset({"implement"}))
         self.assertEqual("fire", c.fire(V, RUN, c.Line(**base, open_pr_from_change=False), WRITER).action)
-        self.assertEqual("skip", c.fire(V, RUN, c.Line(**base, open_pr_from_change=False), BOT).action)
+        self.assertEqual("skip", c.fire(V, RUN, c.Line(**base, open_pr_from_change=False), BOT, WRITER).action)
         self.assertEqual("skip", c.fire(V, RUN, c.Line(**base, open_pr_from_change=True), WRITER).action)
 
 
@@ -280,7 +287,7 @@ class TheCarries(unittest.TestCase):
             if carried.action != "carry":
                 continue
             after = c.Line(line.issue_labels | {ARCH}, line.lane, line.change_finished, line.fired, line.open_pr_from_change)
-            fired = c.fire(V, ARCH, after, BOT)
+            fired = c.fire(V, ARCH, after, BOT, WRITER)
             self.assertIn(fired.action, ("fire", "skip"), fired.reason)
             self.assertEqual("archive", fired.station)
 
