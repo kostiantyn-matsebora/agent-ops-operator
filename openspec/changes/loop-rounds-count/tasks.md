@@ -18,7 +18,7 @@
 
 ## 5. Unit tests
 
-- [ ] 5.1 `.github/tests/run.sh` passes, the five suites above included
+- [ ] 5.1 `.github/tests/run.sh` passes, the four suites above included: land-dispatch, autofix-guard, review-dispatch and failed-checks
 
 ## 6. E2E tests
 
