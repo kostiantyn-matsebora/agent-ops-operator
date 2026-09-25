@@ -76,10 +76,11 @@ type report struct {
 }
 
 type turn struct {
-	Model      string `json:"model"`
-	TokensIn   int64  `json:"tokensIn"`
-	TokensOut  int64  `json:"tokensOut"`
-	StopReason string `json:"stopReason"`
+	Model           string `json:"model"`
+	TokensIn        int64  `json:"tokensIn"`
+	TokensOut       int64  `json:"tokensOut"`
+	CacheReadTokens int64  `json:"cacheReadTokens"`
+	StopReason      string `json:"stopReason"`
 }
 
 type toolCall struct {
@@ -96,8 +97,8 @@ var scriptedCalls = struct {
 	tools []toolCall
 }{
 	turns: []turn{
-		{Model: "stub-model", TokensIn: 120, TokensOut: 12, StopReason: "tool_use"},
-		{Model: "stub-model", TokensIn: 180, TokensOut: 30, StopReason: "end_turn"},
+		{Model: "stub-model", TokensIn: 120, TokensOut: 12, CacheReadTokens: 0, StopReason: "tool_use"},
+		{Model: "stub-model", TokensIn: 180, TokensOut: 30, CacheReadTokens: 110, StopReason: "end_turn"},
 	},
 	tools: []toolCall{{Tool: "mcp__stub__lookup", Server: "stub", DurationMs: 5, ResultBytes: 64}},
 }
