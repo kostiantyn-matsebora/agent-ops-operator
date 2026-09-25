@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Prototype of the console conversations view. Composition reference only: behaviour is in ../specs/. Exported from the design canvas, static, opens in any browser. -->
+<title>C · Pipeline rail with inline events</title>
+</head>
+<body>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Text:wght@400;500;700&amp;family=Red+Hat+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#eef1f2;font-family:"Red Hat Text",system-ui,sans-serif;color:#16191c}
+a{color:#0d7d76}a:hover{color:#0a615c}
+.ico{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#5c656d;cursor:pointer}
+.ico.on{background:#d3ece9;color:#0a615c}
+.sec{font-size:11px;letter-spacing:.08em;color:#5c656d;font-weight:500;padding:14px 14px 6px}
+.sc{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:13.5px;cursor:pointer;color:#16191c}
+.sc.on{background:#d3ece9;color:#0a615c;font-weight:500}
+.sc .n{margin-left:auto;font-size:11.5px;color:#5c656d}
+.sc .cnt{margin-left:auto}
+.sc .plus{margin-left:6px;color:#9aa4ab;font-size:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:12px;font-size:12px;font-weight:500;white-space:nowrap}
+.cnt{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#0d7d76;color:#fff;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.row{display:grid;grid-template-columns:36px 1fr;column-gap:10px;padding:10px 12px;border-bottom:1px solid #eef1f2;cursor:pointer}
+.row.sel{background:#d3ece9;box-shadow:inset 3px 0 0 #0d7d76}
+.row.new{animation:arrive 4s ease-out forwards}
+.av{width:36px;height:36px;border-radius:50%;background:#f3f5f6;border:1px solid #cfd6da;display:flex;align-items:center;justify-content:center;position:relative;color:#0a615c}
+.av.alert{color:#b32c3f}.av.report{color:#6b4bd6}
+.dot{position:absolute;right:-2px;bottom:-2px;width:11px;height:11px;border-radius:50%;border:2px solid #fff;background:#9aa4ab}
+.dot.working{background:#0d7d76;animation:pulse 1.6s ease-out infinite}.dot.pending{background:#a86400}.dot.failed{background:#b32c3f}.dot.idle{background:#1f7a4d}
+.l1,.l2{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}
+.t{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row.unread .t{font-weight:700}
+.time{font-size:11.5px;color:#5c656d;flex:none}
+.s{font-size:12.5px;color:#5c656d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.s em{color:#0a615c}
+.tag{flex:none;font-size:11px;padding:1px 7px;border-radius:9px;border:1px solid #cfd6da;color:#5c656d}
+.tag.new{border-color:#0d7d76;color:#0a615c}.tag.err{border-color:#b32c3f;color:#b32c3f}
+.msg{display:grid;grid-template-columns:36px 1fr;column-gap:12px;padding:12px 0 4px}
+.mav{width:36px;height:36px;border-radius:50%;border:1px solid #cfd6da;display:flex;align-items:center;justify-content:center;background:#fff;color:#0a615c}
+.mav.sig{color:#b32c3f}.mav.usr{color:#6b4bd6}.mav.self{color:#fff;background:#6b4bd6;border-color:#6b4bd6;font-size:13px;font-weight:700}
+.mh{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px}
+.mh b{font-size:14px;color:#0a615c}.mh.sig b{color:#b32c3f}.mh.usr b{color:#6b4bd6}
+.mh time{font-size:12px;color:#5c656d}
+.body{font-size:14px;line-height:1.5}
+.k{font-size:11px;letter-spacing:.06em;color:#5c656d;margin:8px 0 2px;font-weight:500}
+code{font-family:"Red Hat Mono",monospace;font-size:12.5px;background:#f6f8f8;padding:1px 5px;border-radius:4px}
+.ev{display:flex;align-items:center;gap:8px;padding:3px 0 3px 48px;font-size:12px;color:#5c656d}
+.ev .ln{width:14px;height:1px;background:#cfd6da}
+.ev code{background:transparent;padding:0;color:#5c656d}
+.ev.hot{color:#0a615c;animation:fade 3s ease-out forwards}
+.divider{display:flex;align-items:center;gap:12px;margin:8px 0 0;color:#0a615c;font-size:12px;font-weight:700;letter-spacing:.04em}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:#0d7d76}
+.typing{display:inline-flex;gap:4px;align-items:center;padding:8px 12px;border-radius:14px;background:#f3f5f6;border:1px solid #cfd6da}
+.typing i{width:6px;height:6px;border-radius:50%;background:#0d7d76;animation:bob 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+.btn{height:36px;padding:0 18px;border-radius:18px;border:1px solid #0d7d76;background:#0d7d76;color:#fff;font:inherit;font-size:14px;font-weight:500;cursor:pointer}
+.btn.g{background:#fff;color:#16191c;border-color:#cfd6da}
+.kbd{display:inline-block;padding:1px 6px;border:1px solid #cfd6da;border-radius:4px;font-size:11px;background:#fff}
+.qc{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:12px;border:1px solid #cfd6da;background:#fff;font-size:12px;cursor:pointer;white-space:nowrap}
+.qc.mono{font-family:"Red Hat Mono",monospace}
+.jump{position:absolute;right:28px;bottom:150px;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:16px;background:#16191c;color:#fff;font-size:12px;box-shadow:0 6px 16px rgba(0,0,0,.25)}
+.split{width:6px;flex:none;background:#eef1f2;cursor:col-resize;display:flex;align-items:center;justify-content:center;position:relative}
+.split i{width:2px;height:28px;border-radius:1px;background:#9aa4ab}
+.split:hover,.split.on{background:#d3ece9}.split.on i{background:#0d7d76}
+.split .w{position:absolute;top:50%;left:10px;transform:translateY(-50%);background:#16191c;color:#fff;font-size:11px;padding:2px 6px;border-radius:4px;white-space:nowrap}
+.badge{position:absolute;top:-4px;right:-6px;min-width:16px;height:16px;font-size:10px}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(13,125,118,.55)}100%{box-shadow:0 0 0 8px rgba(13,125,118,0)}}
+@keyframes arrive{0%{background:#d3ece9}100%{background:#f1f9f8}}
+@keyframes bob{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-4px)}}
+@keyframes fade{0%{background:#d3ece9}100%{background:transparent}}
+</style>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #eef1f2; position: relative; overflow: hidden">
+
+  <div style="height: 56px; flex: none; background: #ffffff; border-bottom: 1px solid #cfd6da; display: flex; align-items: center; gap: 16px; padding: 0 20px">
+    <div style="display: flex; align-items: center; gap: 8px; width: 240px">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0d7d76" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
+      <span style="font-weight: 700; font-size: 15px">agent-ops console</span>
+    </div>
+    <label style="display: flex; align-items: center; gap: 8px; height: 34px; width: 420px; border: 1px solid #cfd6da; border-radius: 17px; padding: 0 12px; color: #5c656d; font-size: 13px; background: #f3f5f6">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+      <input placeholder="Search conversations, or type / to address a pipeline" style="border: 0; outline: 0; font: inherit; flex: 1; background: transparent">
+      <span class="kbd">⌘K</span>
+    </label>
+    <div style="flex: 1"></div>
+    <span class="chip" style="background: #d3ece9; color: #0a615c"><span style="width: 8px; height: 8px; border-radius: 50%; background: #1f7a4d; display: inline-block"></span>live</span>
+    <span class="chip" style="background: #fff; border: 1px solid #cfd6da; color: #16191c; position: relative">🔔 <span class="cnt" style="min-width: 16px; height: 16px; font-size: 10px">1</span></span>
+    <span class="chip" style="background: #d3ece9; color: #0a615c">dana@example.com</span>
+  </div>
+
+  <div style="flex: 1; min-height: 0; display: flex">
+    <!-- icon rail -->
+    <div style="width: 56px; flex: none; background: #ffffff; border-right: 1px solid #cfd6da; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0">
+      <span class="ico" title="Overview"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"></rect><rect x="13" y="3" width="8" height="8" rx="1"></rect><rect x="3" y="13" width="8" height="8" rx="1"></rect><rect x="13" y="13" width="8" height="8" rx="1"></rect></svg></span>
+      <span class="ico" title="Queues"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"></path></svg></span>
+      <span class="ico" title="Configuration"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg></span>
+      <span class="ico" title="Topology"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"></circle><circle cx="19" cy="6" r="2"></circle><circle cx="19" cy="18" r="2"></circle><path d="M7 12l10-6M7 12l10 6"></path></svg></span>
+      <span class="ico on" title="Conversations" style="position: relative"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H8l-4 4z"></path></svg><span class="cnt" style="position: absolute; top: -4px; right: -6px; min-width: 16px; height: 16px; font-size: 10px">3</span></span>
+    </div>
+
+    <!-- scope column -->
+    <div style="width: 240px; flex: none; background: #ffffff; border-right: 1px solid #cfd6da; display: flex; flex-direction: column">
+      <div class="sec">INBOX</div>
+      <div class="sc on">All <span class="n">8</span></div>
+      <div class="sc">Unread <span class="cnt">3</span></div>
+      <div class="sc">Working <span class="n">2</span></div>
+      <div class="sc">Mine <span class="n">2</span></div>
+      <div class="sc">Errored <span class="n">1</span></div>
+      <div class="sc" style="color: #6b4bd6">⛭ Incidents <span class="cnt" style="background: #6b4bd6">1</span></div>
+      <div class="sec" style="display: flex; justify-content: space-between; align-items: center">PIPELINES <span style="font-size: 11px; color: #5c656d; letter-spacing: 0; font-weight: 400">＋ starts one</span></div>
+      <div class="sc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0a615c" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>k8s-observe <span class="cnt">2</span><span class="plus">＋</span></div>
+      <div class="sc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b32c3f" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg>alert-triage <span class="cnt">1</span><span class="plus">＋</span></div>
+      <div class="sc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b4bd6" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"></rect><path d="M3 9h18M8 2v4M16 2v4"></path></svg>nightly-report <span class="n">1</span><span class="plus">＋</span></div>
+      <div class="sc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b4bd6" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg>rollout-coordinator <span class="cnt">1</span><span class="plus">＋</span></div>
+      <div class="sec">COMMANDS</div>
+      <div class="sc" style="font-family: 'Red Hat Mono', monospace; font-size: 12.5px">/pipelines <span class="n">list</span></div>
+      <div class="sc" style="font-family: 'Red Hat Mono', monospace; font-size: 12.5px">/help <span class="n">usage</span></div>
+      <div class="sec">CLOSED</div>
+      <div class="sc" style="color: #5c656d">Archive <span class="n">1</span></div>
+      <div style="margin-top: auto; padding: 10px 14px; font-size: 12px; color: #5c656d; border-top: 1px solid #eef1f2; display: flex; justify-content: space-between; align-items: center"><span>Counts are unread messages, not rows that changed.</span><a href="#collapse" title="collapse to icons" style="font-size: 14px; text-decoration: none">«</a></div>
+    </div>
+    <div class="split" title="drag to resize · double-click to reset"><i></i></div>
+
+    <!-- list -->
+    <div style="width: 340px; flex: none; background: #ffffff; border-right: 1px solid #cfd6da; display: flex; flex-direction: column">
+      <div style="padding: 12px 12px 8px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #cfd6da"><span style="font-weight: 700; font-size: 15px">All conversations</span><span style="font-size: 12px; color: #5c656d">newest first ▾</span></div>
+      <div class="row new"><div class="av alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg><span class="dot pending"></span></div><div style="min-width: 0"><div class="l1"><span class="t">CrashLoopBackOff in storefront/cart</span><span class="time">4s</span></div><div class="l2"><span class="s">opened by alert-triage · waiting for a slot</span><span class="tag new">new</span></div></div></div>
+      <div class="row unread sel"><div class="av"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot working"></span></div><div style="min-width: 0"><div class="l1"><span class="t">checkout-api is restarting</span><span class="time">2m</span></div><div class="l2"><span class="s"><em>working</em> · oncall: Does the same setting affect…</span><span class="cnt">2</span></div></div></div>
+      <div class="row unread" style="grid-template-columns: 12px 36px 1fr"><span style="font-size: 11px; color: #5c656d; padding-top: 10px">▸</span><div class="av" style="color: #6b4bd6; border-color: #6b4bd6; background: #e9e3fb"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg><span class="dot working"></span></div><div style="min-width: 0"><div class="l1"><span class="t">payments rollout is stuck</span><span class="time">1m</span></div><div class="l2"><span class="s">rollout-coordinator · turn 2/6 · 4 members, 2 levels</span><span class="cnt">1</span></div></div></div>
+      <div class="row"><div class="av alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg><span class="dot pending"></span></div><div style="min-width: 0"><div class="l1"><span class="t">HighMemoryPressure on node-3</span><span class="time">27s</span></div><div class="l2"><span class="s">pending · behind 5 active runtimes</span><span class="tag">observed</span></div></div></div>
+      <div class="row unread"><div class="av alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg><span class="dot failed"></span></div><div style="min-width: 0"><div class="l1"><span class="t">TLS certificate for api.example.com expires in 6 days</span><span class="time">18m</span></div><div class="l2"><span class="s">signal: renewal order failed twice</span><span class="tag err">run failed</span></div></div></div>
+      <div class="row"><div class="av"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot idle"></span></div><div style="min-width: 0"><div class="l1"><span class="t">Which namespaces have no resource quota?</span><span class="time">35m</span></div><div class="l2"><span class="s">you: thanks, that is all I needed</span></div></div></div>
+      <div class="row"><div class="av report"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"></rect><path d="M3 9h18M8 2v4M16 2v4"></path></svg><span class="dot idle"></span></div><div style="min-width: 0"><div class="l1"><span class="t">Nightly capacity report</span><span class="time">9.9h</span></div><div class="l2"><span class="s">agent: 3 nodes above 80% memory</span><span class="tag">observed</span></div></div></div>
+    </div>
+    <div class="split" title="drag to resize · double-click to reset"><i></i></div>
+
+    <!-- thread -->
+    <div style="flex: 1; min-width: 0; background: #ffffff; display: flex; flex-direction: column; position: relative">
+      <div style="padding: 12px 24px 10px; border-bottom: 1px solid #cfd6da; display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <span style="font-size: 18px; font-weight: 700; flex: 1">checkout-api is restarting</span>
+          <span class="chip" style="background: #d3ece9; color: #0a615c"><span class="dot working" style="position: static; border: 0; width: 8px; height: 8px"></span>working · run 3 · 00:41</span>
+          <span class="chip" style="background: #fff; border: 1px solid #cfd6da; color: #5c656d" title="bound channels">console · ops-chat</span>
+          <button class="btn g" style="height: 28px; padding: 0 10px; font-size: 12px">Runs</button>
+          <button class="btn g" style="height: 28px; padding: 0 10px; font-size: 12px">Graph</button>
+          <button class="btn g" style="height: 28px; padding: 0 10px; font-size: 12px">YAML</button>
+          <button class="btn g" style="height: 28px; padding: 0 10px; font-size: 12px">⋯</button>
+        </div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap">
+          <span class="chip" style="background: #fbe3e3; color: #b32c3f">cluster-events</span>
+          <span class="chip" style="background: #d3ece9; color: #0a615c">k8s-observe</span>
+          <span class="chip" style="background: #e9e3fb; color: #6b4bd6">k8s-engineer</span>
+          <span class="chip" style="background: #f3f5f6; color: #5c656d">agentops-conv-cluster-events-7c1d4e</span>
+        </div>
+      </div>
+
+      <div style="flex: 1; min-height: 0; overflow: hidden; padding: 0 24px; display: flex; flex-direction: column; justify-content: flex-end">
+        <div class="ev"><span class="ln"></span>conversation opened by <b style="color: #b32c3f; font-weight: 500">cluster-events</b> · claimed by k8s-observe · 09:38:24</div>
+        <div class="msg">
+          <div class="mav sig"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg></div>
+          <div><div class="mh sig"><b>signal</b><time>09:38:24</time></div><div class="body">checkout-api in namespace storefront has restarted 5 times in 10 minutes (BackOff).</div></div>
+        </div>
+        <div class="ev"><span class="ln"></span>run 1 dispatched · runtime starting · context restored in 1.2s · completed in 38s <a href="#ev" style="font-size: 12px">3 events</a></div>
+        <div class="msg">
+          <div class="mav"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></div>
+          <div><div class="mh"><b>agent</b><time>09:39:02</time></div>
+          <div class="body"><b>storefront/checkout-api · diagnosed</b><div class="k">ROOT CAUSE</div>OOM-killed, not a bug. Working set reaches 244Mi of a 256Mi request before each restart.<div class="k">FIX</div><code>kubectl -n storefront rollout undo deploy/checkout-api</code><div style="font-size: 12px; color: #5c656d; margin-top: 6px">▸ Evidence · Details (9 lines)</div></div></div>
+        </div>
+        <div class="msg">
+          <div class="mav self">D</div>
+          <div><div class="mh" style="color: #6b4bd6"><b style="color: #6b4bd6">you</b><time>09:39:10 · seen by ops-chat</time></div><div class="body">Roll it back, then check the cache setting was the only change in that release.</div></div>
+        </div>
+        <div class="divider">New messages</div>
+        <div class="msg">
+          <div class="mav usr"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg></div>
+          <div><div class="mh usr"><b>ops-chat/oncall</b><time>09:39:16</time></div><div class="body">Does the same setting affect the other two services in that namespace?</div></div>
+        </div>
+        <div class="ev hot"><span class="ln"></span>run 3 dispatched to <code>agentops-conv-cluster-events-7c1d4e</code> · 09:39:18 — the "On it…" ack folds in here</div>
+        <div class="msg">
+          <div class="mav"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></div>
+          <div><div class="mh"><b>k8s-engineer</b><time style="color: #0a615c">working · 00:41</time></div><span class="typing"><i></i><i></i><i></i></span></div>
+        </div>
+        <div style="height: 12px"></div>
+      </div>
+      <div class="jump">↓ 1 new message</div>
+
+      <div style="padding: 10px 24px 14px; border-top: 1px solid #cfd6da; display: flex; flex-direction: column; gap: 8px">
+        <div style="display: flex; gap: 6px; align-items: center">
+          <span class="qc mono">/exit</span><span class="qc mono">/close</span><span class="qc">Apply the fix</span><span class="qc">Check the other services</span><span class="qc">Show evidence</span>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: flex-end">
+          <textarea placeholder="Reply to k8s-engineer…" style="flex: 1; height: 56px; resize: none; border: 1px solid #cfd6da; border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 14px"></textarea>
+          <button class="btn">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
