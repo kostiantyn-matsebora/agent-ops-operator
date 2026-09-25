@@ -61,7 +61,7 @@
 ## 9. E2E tests
 
 - [x] 9.1 A lane in `platform/manager/test/e2e/` runs a stub runtime that reports two turns and one tool call, and asserts the manager's activity endpoint holds the `model.call` and `tool.call` hops with the run's id. A cluster decides this: the report crosses the work contract into a real manager
-- [ ] 9.2 The pack runs against this worktree's tree, built in the container and run on the host, and the new lane passes
+- [x] 9.2 The pack runs against this worktree's tree, built in the container and run on the host, and the new lane passes
 
 ## 10. Documentation
 
