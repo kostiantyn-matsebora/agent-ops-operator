@@ -15,7 +15,7 @@ cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$GH_CALLS"
 case "$*" in
-  "pr view "*"--json labels"*) printf '%s' "${CURRENT_LABELS:-loop:running}" ;;
+  "pr view "*"--json labels"*|"issue view "*"--json labels"*) printf '%s\n' ${CURRENT_LABELS:-loop:running} ;;
   "api repos/o/r/issues/226/comments --paginate") printf '%s' "$ROUND_COMMENTS" ;;
 esac
 exit 0
@@ -28,7 +28,7 @@ import os, sys
 open(os.environ["GH_CALLS"], "a").write("review-not-clean.py " + " ".join(sys.argv[1:]) + "\n")
 sys.exit(int(os.environ.get("CLEAN_EXIT", "0")))
 PY
-cp "$ROOT/.github/scripts/conveyor-state.py" "$tmp/repo/.github/scripts/"
+cp "$ROOT/.github/scripts/conveyor-state.py" "$ROOT/.github/scripts/conveyor.py" "$tmp/repo/.github/scripts/"
 cat > "$tmp/repo/.github/review-triage.json" <<'JSON'
 {"round_marker": "<!-- conveyor:round", "grant_marker": "<!-- conveyor:grant -->", "max_rounds": 3,
  "loop_labels": {"running": "loop:running", "stalled": "loop:stalled", "capped": "loop:capped", "mergeable": "loop:mergeable"}}
@@ -62,19 +62,24 @@ assert_status 0 "$rc"
 assert_not_contains "$(cat "$GH_CALLS")" "issue edit"
 assert_contains "$out" "not \`running\`"
 
-it "rounds used exceeds the cap: corrects to capped, without even checking threads"
-ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1),$(round_comment 2026-01-02T00:01:00Z 2),$(round_comment 2026-01-02T00:02:00Z 3),$(round_comment 2026-01-02T00:03:00Z 4)]" \
+it "rounds used REACH the cap: corrects to capped, without even checking threads"
+ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1),$(round_comment 2026-01-02T00:01:00Z 2),$(round_comment 2026-01-02T00:02:00Z 3)]" \
   out=$(run); rc=$?
 assert_status 0 "$rc"
 assert_not_contains "$(cat "$GH_CALLS")" "review-not-clean.py"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:capped"
-assert_contains "$out" "corrected the loop label to capped"
+assert_contains "$out" "sent recover:capped to the loop machine"
+
+it "rounds used EXCEED the cap: corrects to capped too"
+ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1),$(round_comment 2026-01-02T00:01:00Z 2),$(round_comment 2026-01-02T00:02:00Z 3),$(round_comment 2026-01-02T00:03:00Z 4)]" \
+  out=$(run); rc=$?
+assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:capped"
 
 it "rounds within the cap, a thread is open: corrects to stalled"
 ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1)]" out=$(CLEAN_EXIT=1 run); rc=$?
 assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:stalled"
-assert_contains "$out" "corrected the loop label to stalled"
+assert_contains "$out" "sent recover:stalled to the loop machine"
 
 it "rounds within the cap, no thread open: leaves running -- a round may genuinely be in flight"
 ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1)]" out=$(CLEAN_EXIT=0 run); rc=$?
@@ -122,7 +127,7 @@ cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$GH_CALLS"
 case "$*" in
-  "pr view "*"--json labels"*) printf '%s' "${CURRENT_LABELS:-loop:running}" ;;
+  "pr view "*"--json labels"*|"issue view "*"--json labels"*) printf '%s\n' ${CURRENT_LABELS:-loop:running} ;;
   "api repos/o/r/issues/226/comments --paginate") printf '%s' "$ROUND_COMMENTS" ;;
 esac
 exit 0
@@ -141,7 +146,7 @@ cat > "$tmp/repo/.github/scripts/conveyor-state.py" <<'PY'
 import sys
 sys.exit(1)
 PY
-ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1),$(round_comment 2026-01-02T00:01:00Z 2),$(round_comment 2026-01-02T00:02:00Z 3),$(round_comment 2026-01-02T00:03:00Z 4)]" \
+ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1),$(round_comment 2026-01-02T00:01:00Z 2),$(round_comment 2026-01-02T00:02:00Z 3)]" \
   out=$(run); rc=$?
 assert_status 0 "$rc"
 assert_contains "$out" "::notice::"

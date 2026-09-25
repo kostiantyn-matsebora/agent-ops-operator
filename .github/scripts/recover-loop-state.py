@@ -46,6 +46,9 @@ import pathlib
 import subprocess
 import sys
 
+sys.path.insert(0, str(pathlib.Path(".github/scripts").resolve()))
+import conveyor  # noqa: E402
+
 STATE_SCRIPT = pathlib.Path(".github/scripts/conveyor-state.py")
 CHECK_SCRIPT = pathlib.Path(".github/scripts/review-not-clean.py")
 DEFAULT_VOCABULARY = pathlib.Path(".github/review-triage.json")
@@ -55,7 +58,7 @@ def gh(*args: str) -> str:
     return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout
 
 
-def load_markers(path: pathlib.Path) -> dict:
+def load_vocabulary(path: pathlib.Path) -> dict:
     try:
         doc = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
@@ -67,16 +70,11 @@ def load_markers(path: pathlib.Path) -> dict:
     }
 
 
-def comments_since(repo: str, pr: int, since: str) -> list[dict]:
+def comments(repo: str, pr: int) -> list[dict]:
     try:
-        raw = json.loads(gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate") or "[]")
+        return json.loads(gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate") or "[]")
     except (subprocess.CalledProcessError, json.JSONDecodeError):
         return []
-    return [c for c in raw if not since or (c.get("created_at") or "") >= since]
-
-
-def count_marked(comments: list[dict], marker: str) -> int:
-    return sum(1 for c in comments if marker in (c.get("body") or ""))
 
 
 def main() -> int:
@@ -103,38 +101,42 @@ def main() -> int:
         return 0
 
     try:
-        current = gh("pr", "view", str(args.pr), "--repo", args.repo, "--json", "labels", "--jq", ".labels[].name")
+        labels = gh("pr", "view", str(args.pr), "--repo", args.repo, "--json", "labels", "--jq", ".labels[].name")
     except subprocess.CalledProcessError as exc:
         print(f"::notice::#{args.pr}: could not read the current labels ({exc}); leaving the loop label as it is")
         return 0
-    if "loop:running" not in current.splitlines():
+    if "loop:running" not in labels.splitlines():
         print(f"#{args.pr}: loop label is not `running`; nothing for this program to recover")
         return 0
 
-    markers = load_markers(args.vocabulary)
-    seen = comments_since(args.repo, args.pr, args.since)
-    rounds_used = count_marked(seen, markers["round"])
-    grants = count_marked(seen, markers["grant"])
-    cap = markers["max_rounds"] * (1 + grants)
+    vocab = load_vocabulary(args.vocabulary)
+    seen = comments(args.repo, args.pr)
+    rounds_used = conveyor.count_marked(seen, vocab["round"], args.since)
+    grants = conveyor.count_marked(seen, vocab["grant"], args.since)
+    cap = conveyor.cap_for(vocab["max_rounds"], grants)
 
-    if rounds_used > cap:
-        state, why = "capped", f"{rounds_used} rounds used, cap is {cap}"
-    else:
+    thread_open = False
+    if rounds_used < cap:
         checked = subprocess.run([sys.executable, str(CHECK_SCRIPT), "--repo", args.repo, "--pr", str(args.pr)],
                                   capture_output=True, text=True)
-        if checked.returncode == 1:
-            state, why = "stalled", "a review thread is open"
-        elif checked.returncode == 0:
-            print(f"#{args.pr}: {rounds_used} of {cap} rounds used, no thread open; "
-                  "a round may genuinely be in flight, leaving `running` as it is")
-            return 0
-        else:
+        if checked.returncode not in (0, 1):
             print(f"::notice::#{args.pr}: could not read the review threads (review-not-clean.py exited "
                   f"{checked.returncode}); leaving the loop label as it is")
             return 0
+        thread_open = checked.returncode == 1
+
+    # THE MACHINE NAMES THE CORRECTION. `running` with the bound reached is
+    # `capped`, with a thread open is `stalled`, and with neither a round may
+    # genuinely be in flight, so the label is left alone.
+    event = conveyor.recover("running", rounds_used, cap, thread_open)
+    if not event:
+        print(f"#{args.pr}: {rounds_used} of {cap} rounds used, no thread open; "
+              "a round may genuinely be in flight, leaving `running` as it is")
+        return 0
+    why = f"{rounds_used} rounds used, cap is {cap}" if event == "recover:capped" else "a review thread is open"
 
     result = subprocess.run([sys.executable, str(STATE_SCRIPT), "--repo", args.repo, "--target", str(args.pr),
-                             "--loop", state, "--vocabulary", str(args.vocabulary)],
+                             "--loop-event", event, "--vocabulary", str(args.vocabulary)],
                              capture_output=True, text=True, check=False)
     print(result.stdout, end="")
     # conveyor-state.py EXITS 0 ALWAYS (see its own docstring), printing
@@ -143,7 +145,7 @@ def main() -> int:
     recorded = result.returncode == 0 and result.stdout.startswith(f"#{args.pr}: loop = ")
     if recorded:
         print(f"#{args.pr}: the round that held `running` was superseded before it could report ({why}); "
-              f"corrected the loop label to {state}")
+              f"sent {event} to the loop machine")
     else:
         print(f"::notice::#{args.pr}: {why}, but the loop label was NOT corrected "
               f"(conveyor-state.py did not report the transition)")

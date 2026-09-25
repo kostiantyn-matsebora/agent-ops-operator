@@ -764,16 +764,21 @@ jobs:
             exit 0
           fi
           python3 .github/scripts/docs-task-guard.py --range "$BASE_SHA..$GITHUB_SHA"
-      # THE SAME QUESTION THE ARCHIVE HOOK ASKS, where the hook can be skipped:
-      # a change archived in this pull request while its automatic fixing loop
-      # is still running, or over a dispute nobody has answered, is judged
-      # here too. Fail-open where there is nothing to ask about.
-      - name: No change is archived while its fixing loop is open
+      # THE DISPUTE HALF OF THE QUESTION THE ARCHIVE HOOK ASKS, where the hook can
+      # be skipped: a dispute the fixing loop posted and no person answered holds
+      # the merge, and a person's reply re-runs this job (dispute-answered.yml).
+      # The other half, whether a round is running, is the loop's own state and is
+      # NOT a check's question. Fail-open where there is nothing to ask about.
+      - name: No dispute the fixing loop posted waits unanswered
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 .github/scripts/autofix-guard.py --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER"
+        # `--purpose ci`: THE CHECK ASKS WHETHER A DISPUTE WAITS FOR A PERSON, AND NOTHING ELSE.
+        # Whether a round is running is the loop's own state, and a check reporting it red turns
+        # `ci-green` red, which starts the next round from that red (#248). The archive command
+        # keeps asking both, through the same program's default purpose.
+        run: python3 .github/scripts/autofix-guard.py --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --purpose ci
 
   # THE SCRIPTS THAT JUDGE PULL REQUESTS ARE TESTED AND MEASURED LIKE A
   # COMPONENT. They decide things — refusing a commit, refusing to resolve

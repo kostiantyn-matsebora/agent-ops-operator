@@ -537,7 +537,7 @@ def recover(current: str, rounds_used: int, cap: int, thread_open: bool) -> str:
     """The loop event for a `running` label whose round was never reported, or ''."""
     if current != "running":
         return ""
-    if rounds_used > cap:
+    if rounds_used >= cap:
         return "recover:capped"
     if thread_open:
         return "recover:stalled"

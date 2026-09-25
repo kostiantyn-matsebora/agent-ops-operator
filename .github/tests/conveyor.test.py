@@ -476,11 +476,11 @@ class TheChecks(unittest.TestCase):
 
 class TheCorrections(unittest.TestCase):
     def test_recover_and_refresh_only_touch_the_label_they_own(self):
-        for current, used, cap, thread in itertools.product(c.LOOP_STATES, (3, 6), (5,), (False, True)):
+        for current, used, cap, thread in itertools.product(c.LOOP_STATES, (3, 5, 6), (5,), (False, True)):
             event = c.recover(current, used, cap, thread)
             if current != "running":
                 self.assertEqual("", event)
-            elif used > cap:
+            elif used >= cap:
                 self.assertEqual("recover:capped", event)
             else:
                 self.assertEqual("recover:stalled" if thread else "", event)

@@ -45,6 +45,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conveyor  # noqa: E402  -- the state machine: which red job is work is its rule, not this program's
+
 # The aggregate, excluded by NAME because that is what a check run carries.
 # `ci-green` fails BECAUSE one of its needs did, so reporting both hands the
 # fixer the symptom beside the cause with no way to tell them apart.
@@ -52,7 +55,7 @@ import sys
 # The review's own jobs need no list: they are not in `ci-green`'s `needs:`, so
 # the required-jobs test already excludes them. A second list naming them would
 # be a copy to keep in step for nothing.
-EXCLUDED = {"ci-green"}
+EXCLUDED = {"ci-green"}   # kept for the docstring's sake: `conveyor.check_is_work` is what excludes it now
 
 
 def gh(*args: str) -> str:
@@ -127,6 +130,37 @@ def failed_log(repo: str, run: str, job: str, tail_lines: int) -> str:
     return "\n".join(lines[-tail_lines:])
 
 
+def guard_step_name(ci: pathlib.Path) -> str:
+    """The name of the `docs-task` step that runs the loop's own guard, READ from
+    ci.yml (the step whose command is `autofix-guard.py`), never restated: a
+    reworded step must not turn a waiting dispute back into work for a fixer."""
+    try:
+        import yaml  # noqa: PLC0415
+        spec = yaml.safe_load(ci.read_text())
+        for step in ((spec.get("jobs") or {}).get("docs-task") or {}).get("steps") or []:
+            if "autofix-guard.py" in str(step.get("run") or ""):
+                return str(step.get("name") or "")
+    except Exception:  # noqa: BLE001 -- no yaml, or a malformed file: no guard step is known
+        pass
+    return ""
+
+
+def failed_steps(repo: str, check: dict) -> list[str]:
+    """The names of a job's FAILED steps, from the jobs API. A check run on an
+    Actions job carries the job's id, which is what the route takes. Unreadable
+    is an empty list, which `check_is_work` reads as "cannot say it was only the
+    guard", so the job stays work rather than being waved through."""
+    job_id = check.get("id")
+    if not job_id:
+        return []
+    try:
+        raw = gh("api", "--method", "GET", f"repos/{repo}/actions/jobs/{job_id}",
+                 "--jq", '[.steps[] | select(.conclusion == "failure") | .name]')
+        return [str(x) for x in json.loads(raw or "[]")]
+    except (RuntimeError, ValueError):
+        return []
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo", required=True)
@@ -163,6 +197,8 @@ def main() -> int:
 
     items: list[dict] = []
     checks: list[dict] = []
+    waiting: list[dict] = []
+    guard_step = guard_step_name(args.ci)
     for c in runs:
         name = c.get("name") or ""
         job = job_name(name)
@@ -172,6 +208,14 @@ def main() -> int:
         entry = {"job": name, "conclusion": conclusion}
         checks.append(entry)
         if conclusion != "failure":
+            continue
+        # THE MACHINE DECIDES what a red job is: work for a fixer, or a wait on a
+        # person. A `docs-task` that failed only on the loop's own guard is the
+        # second, and handing it to a fixer started rounds that could not help.
+        steps = failed_steps(args.repo, c) if guard_step else []
+        verdict = conveyor.check_is_work(name, conclusion, steps, guard_step, required)
+        if verdict.action == "waiting":
+            waiting.append({"job": name, "reason": verdict.reason, "steps": steps})
             continue
         run = run_id(c)
         url = c.get("html_url") or c.get("details_url") or ""
@@ -186,10 +230,12 @@ def main() -> int:
             "tail": failed_log(args.repo, run, name, args.tail_lines),
         })
 
-    result = {"consulted": consulted, "checks": checks, "items": items}
+    result = {"consulted": consulted, "checks": checks, "items": items, "waiting": waiting}
     args.out.write_text(json.dumps(result, indent=2) + "\n")
     for i in items:
         print(f"  failure  {i['job']}")
+    for w in waiting:
+        print(f"  waiting  {w['job']}: {w['reason']}")
     print(f"checks {'consulted' if consulted else 'NOT consulted'}: "
           f"{len(items)} failed required check(s) written to {args.out}")
     return 0

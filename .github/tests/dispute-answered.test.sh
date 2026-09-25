@@ -57,4 +57,11 @@ it "docs-task is the ci job it names, and that job is what runs the loop's archi
 ci=$(python3 -c 'import yaml;d=yaml.safe_load(open("'"$ROOT"'/.github/workflows/ci.yml"));print([s.get("run","") for s in d["jobs"]["docs-task"]["steps"]])')
 assert_contains "$ci" "autofix-guard.py"
 
+# THE CHECK ASKS ONE QUESTION. Whether a round is running is the loop's own state, and a
+# check reporting it red turns ci-green red, which starts the next round (#248). Dropping
+# this flag brings the self-feeding cycle back with every other test still green.
+it "the docs-task guard step runs with --purpose ci, so a running round is never its verdict"
+guard=$(python3 -c 'import yaml;d=yaml.safe_load(open("'"$ROOT"'/.github/workflows/ci.yml"));print([s.get("run","") for s in d["jobs"]["docs-task"]["steps"] if "autofix-guard.py" in s.get("run","")][0])')
+assert_contains "$guard" "--purpose ci"
+
 summary
