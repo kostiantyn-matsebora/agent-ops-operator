@@ -26,6 +26,13 @@ for the source and the reference material beside this file.
   - Window replay (1, 5, 10 or 30 minutes, ten-second frames, three speeds)
     and conversation replay (one run, hop by hop).
   - The runtime edge is drawn from the Pipeline, never from the profile.
+  - The canvas fits the viewport. The navigation folds to its icons, the
+    column beside the canvas folds to a strip, and the Display, hop feed and
+    History cards each fold to their title, so the picture takes the whole
+    screen. Every mark's glyph clears its outline, and an unrouted edge bows
+    around the marks between its ends, both held by tests. A pipeline wears
+    the icon `spec.icon` declares in its mark and beside its name wherever the
+    console names it.
   - See [console.md](console.md#topology). Console 0.39.0.
 - **Model calls and tool calls are recorded as activity.** A runtime may
   report `turns[]` and `toolCalls[]` with its work result, and the manager

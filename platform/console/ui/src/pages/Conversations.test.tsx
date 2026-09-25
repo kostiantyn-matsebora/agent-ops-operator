@@ -22,6 +22,7 @@ let lastParams = ''
 let canWrite = true
 
 vi.mock('../api/hooks', () => ({
+  usePipelineIcon: () => () => undefined,
   useConversations: (params: URLSearchParams) => {
     lastParams = params.toString()
     return { data: page(), isLoading: false, error: null }

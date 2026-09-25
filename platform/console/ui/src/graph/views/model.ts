@@ -21,7 +21,7 @@ export function modelView(topo: Topology): ViewGraph {
     if (n.active || n.recent) facts.push(['Conversations', `${n.active} active, ${n.recent} recent`])
     return {
       id: n.id, cls: n.kind, name: n.name, health: n.health, reason: n.reason, message: n.message,
-      detached: n.detached, bundle: n.bundle, facts, config: `${n.kind}/${n.name}`,
+      detached: n.detached, bundle: n.bundle, icon: n.icon, facts, config: `${n.kind}/${n.name}`,
     }
   })
   const ids = new Set(nodes.map((n) => n.id))

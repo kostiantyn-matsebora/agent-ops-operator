@@ -7,9 +7,11 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link, useParams } from 'react-router-dom'
 import { useState } from 'react'
 import { Empty, ErrorState, Loading } from '../components/States'
-import { useDetail, useInventory, useKinds } from '../api/hooks'
+import { useDetail, useInventory, useKinds, usePipelineIcon } from '../api/hooks'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'
+import { Icon } from '../components/Icon'
+import { PipelineName } from '../components/PipelineName'
 import { Yaml } from '../components/Yaml'
 import { ConditionChips, HealthChip, KeyValueChips, MetadataCard, age } from '../components/Metadata'
 import { styleFor } from '../graph/shapes'
@@ -185,7 +187,7 @@ export function ConfigKindPage() {
                     <Tr key={row.name}>
                       <Td dataLabel="Name">
                         <Link to={`/config/${kind}/${row.name}`}>
-                          <PlainText>{row.name}</PlainText>
+                          {row.icon ? <PipelineName name={row.name} icon={row.icon} /> : <PlainText>{row.name}</PlainText>}
                         </Link>
                         {row.findings > 0 && (
                           <Tooltip content="the console's own cross-reference checks flagged this">
@@ -226,8 +228,12 @@ export function ConfigDetailPage() {
   const { kind = '', name = '' } = useParams()
   const { data, isLoading, error } = useDetail(kind, name)
   const [tab, setTab] = useState<string | number>(0)
+  const iconFor = usePipelineIcon()
   if (isLoading) return <Loading />
   if (error || !data) return <ErrorState title="Not found">{String(error)}</ErrorState>
+  // The object's own declaration, read off its spec: a Pipeline that is not
+  // Ready is absent from the vocabulary and still has its icon here.
+  const declaredIcon = kind === 'pipelines' ? (data.object.spec as { icon?: string } | undefined)?.icon : undefined
 
   return (
     <>
@@ -235,7 +241,7 @@ export function ConfigDetailPage() {
         items={[
           { label: 'Configuration', to: '/config' },
           { label: kind, to: `/config/${kind}` },
-          { label: name },
+          { label: name, icon: declaredIcon },
         ]}
       />
       <PageSection>
@@ -244,6 +250,7 @@ export function ConfigDetailPage() {
             <Title headingLevel="h1">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
                 <KindGlyph kind={kind} size={24} />
+                {declaredIcon && <Icon icon={declaredIcon} />}
                 <PlainText>{name}</PlainText>
                 <HealthChip health={data.health} />
               </span>
@@ -351,7 +358,7 @@ export function ConfigDetailPage() {
                             {(data.usedBy ?? []).map((r) => (
                               <Label key={`${r.kind}/${r.name}/${r.field}`} isCompact>
                                 <Link to={`/config/${r.kind}/${r.name}`}>
-                                  {r.kind}/{r.name}
+                                  {r.kind}/{r.kind === 'pipelines' ? <PipelineName name={r.name} icon={iconFor(r.name)} /> : r.name}
                                 </Link>{' '}
                                 ({r.field})
                               </Label>

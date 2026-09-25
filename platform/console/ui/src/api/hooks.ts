@@ -195,6 +195,17 @@ export function useVocabulary() {
   return useQuery({ queryKey: ['vocabulary'], queryFn: api.vocabulary })
 }
 
+/**
+ * A Pipeline's declared icon, by name, from the vocabulary — which is fetched
+ * once and shared, so every mention of a Pipeline draws the same icon at no
+ * extra cost. Undefined for a name the vocabulary does not list.
+ */
+export function usePipelineIcon(): (name?: string) => string | undefined {
+  const vocabulary = useVocabulary()
+  return (name?: string) =>
+    name ? vocabulary.data?.entries.find((e) => e.kind === 'pipeline' && e.name === name)?.icon : undefined
+}
+
 /** Which historical charts the backend can answer, and whether one exists. */
 export function useCharts() {
   return useQuery({ queryKey: ['charts'], queryFn: api.charts, staleTime: 30_000 })

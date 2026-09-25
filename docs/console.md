@@ -364,6 +364,60 @@ Find and Hide take terms joined by `and`:
 
 An unknown term matches nothing, and the view names it.
 
+#### The panels fold, so the picture can take the screen
+
+**The canvas fits the viewport.** It is sized from where it starts to the
+bottom of the window, less the folded History title under it, so the picture
+is seen whole with no scrolling.
+
+**The column beside it folds to a strip**, from the chevron at its edge, and
+unfolds from the same chevron. Inside it, the Display card and the hop feed
+each fold to their title from the chevron in their header.
+
+**The History card under the graph folds the same way**, and stays on the
+page as its title.
+
+**A selection always has somewhere to show.** With the column folded, clicking
+an element, an edge or a pulse opens its panel beside the canvas. Folding the
+column again drops the selection.
+
+**The navigation folds too**, to its icons, from the button at the foot of the
+sidebar. Every link keeps its name as a tooltip and for a screen reader, and
+the unread count stays on Conversations.
+
+**Folded, the masthead keeps the mark alone**, since its brand column is as
+narrow as the strip.
+
+**Every fold is kept across reloads**, the way the display is.
+
+**Every mark's glyph clears its outline.** Each shape states the rectangles its
+outline stays out of, in `platform/console/ui/src/graph/shapes.tsx`, and a
+test flattens every outline and glyph to hold it.
+
+The cloud shipped once with the globe crossing its bottom line. No fixture
+happened to draw an external system, so no screenshot showed it.
+
+**An unrouted edge bows around the marks between its ends.** A quadratic's bow
+is chosen per edge, and to the side that clears more of them.
+
+**A pipeline wears the icon it declares, wherever it is named.** In the
+graph, `Pipeline.spec.icon` is drawn in the mark in place of the class glyph.
+
+Everywhere else the name is drawn, the icon sits beside it:
+
+- the Configuration list and detail, the crumb and a reference chip
+- a conversation's chips and a queue row
+- the topology's panels, its routes chip and its pipeline selector
+
+One lookup serves them all, so no mention draws a different icon from the next.
+
+| Reference | Drawn as |
+|---|---|
+| the built-in `aops:` set | a path |
+| a URL, or a named set | an image |
+| an emoji | text |
+| anything unknown | nothing: the class glyph stays, as the list stays blank |
+
 #### What crossed: the hop feed and the content panel
 
 **The hop feed lists recent hops**, the same on every view, with the

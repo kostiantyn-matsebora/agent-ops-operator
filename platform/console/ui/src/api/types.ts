@@ -61,6 +61,8 @@ export interface GraphNode {
   detached?: boolean
   active: number
   recent: number
+  /** A pipeline's declared icon reference, verbatim, drawn in its mark. */
+  icon?: string
   /** The chart bundle that installs the object, from its Helm label. */
   bundle?: string
   image?: string
@@ -342,6 +344,8 @@ export interface KindInfo {
 
 export interface InventoryRow {
   name: string
+  /** A pipeline's declared icon reference, verbatim. */
+  icon?: string
   uid?: string
   created?: string
   labels?: Record<string, string>

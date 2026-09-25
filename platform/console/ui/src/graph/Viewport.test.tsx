@@ -144,6 +144,9 @@ describe('Viewport aspect', () => {
     expect(aspectHeight(1000, 400, 400)).toBe(Math.max(600, window.innerHeight - 160))
     // in between, width times the picture's aspect
     expect(aspectHeight(1000, 1000, 480)).toBe(580)
+    // never over what the viewport has left, whatever the picture wants
+    expect(aspectHeight(1000, 400, 400, 500)).toBe(500)
+    expect(aspectHeight(1000, 800, 200, 400)).toBe(400)
   })
 
   it('sizes the canvas from its width when asked', () => {

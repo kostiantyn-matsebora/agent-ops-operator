@@ -8,6 +8,7 @@ import type { ActivityEvent, Topology } from '../api/types'
 import { CLAUDE_IMAGE, detailWithRun, fixtureTopology, hop } from '../test-fixtures/topology'
 import { useDisplay } from './display'
 import { Graph, type GraphProps } from './Graph'
+import { BUILTIN_ICONS } from '../icons/builtin'
 
 // The graph's behavioural contract: edges with traffic carry a stream, a hop
 // that arrives pulses the edge it crossed and opens on a click, each view keeps
@@ -250,5 +251,64 @@ describe('what crossed', () => {
     const row = screen.getAllByTestId('hop-row').find((r) => r.textContent?.includes('run.completed'))!
     await act(async () => fireEvent.click(row))
     expect(screen.getByTestId('hop-body')).toHaveTextContent('Container `checkout` is killed at 512Mi')
+  })
+})
+
+describe('the side panels', () => {
+  it('folds the column to a strip and brings it back from the same place, and a selection still shows', async () => {
+    draw()
+    expect(screen.getByTestId('hop-feed')).toBeInTheDocument()
+    expect(screen.getByTestId('display-panel')).toBeInTheDocument()
+    await userEvent.click(screen.getByLabelText('Hide side panels'))
+    expect(screen.queryByTestId('hop-feed')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('display-panel')).not.toBeInTheDocument()
+    expect(useDisplay.getState().sideOpen).toBe(false)
+    // Selecting an element shows its panel whatever the fold says.
+    await userEvent.click(node('pipelines/alert-triage'))
+    expect(screen.getByTestId('node-panel')).toBeInTheDocument()
+    await userEvent.click(screen.getByLabelText('Hide side panels'))
+    expect(screen.queryByTestId('node-panel')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByLabelText('Show side panels'))
+    expect(screen.getByTestId('hop-feed')).toBeInTheDocument()
+  })
+
+  it('folds the feed and the display card to their titles', async () => {
+    draw()
+    expect(screen.getAllByTestId('hop-row').length).toBeGreaterThan(0)
+    await userEvent.click(screen.getByLabelText('Toggle hop feed'))
+    expect(screen.queryByTestId('hop-row')).not.toBeInTheDocument()
+    expect(screen.getByTestId('hop-feed')).toBeInTheDocument()
+    expect(useDisplay.getState().feedOpen).toBe(false)
+    expect(screen.getByLabelText('Traffic animation')).toBeInTheDocument()
+    await userEvent.click(screen.getByLabelText('Toggle display panel'))
+    expect(screen.queryByLabelText('Traffic animation')).not.toBeInTheDocument()
+    expect(useDisplay.getState().panelOpen).toBe(false)
+  })
+})
+
+describe('a declared icon', () => {
+  it('is drawn in the pipeline\'s mark in place of the class glyph, in whichever form it takes', async () => {
+    const topo = fixtureTopology()
+    const p = topo.nodes.find((n) => n.id === 'pipelines/alert-triage')!
+    p.icon = 'aops:kubernetes'
+    const { redraw } = draw({}, topo)
+    expect(within(node('pipelines/alert-triage')).getByTestId('mark-icon').querySelector('path')?.getAttribute('d')).toBe(BUILTIN_ICONS.kubernetes)
+    expect(within(node('pipelines/nightly-report')).queryByTestId('mark-icon')).toBeNull()
+    // The same icon beside the name in its panel and in the pipeline selector.
+    await userEvent.click(node('pipelines/alert-triage'))
+    expect(within(screen.getByTestId('node-panel')).getByText('alert-triage').parentElement?.querySelector('svg path')?.getAttribute('d')).toBe(BUILTIN_ICONS.kubernetes)
+    await userEvent.click(screen.getByLabelText('pipelines'))
+    const option = screen.getAllByText('alert-triage').map((e) => e.closest('li')).find(Boolean)
+    expect(option?.querySelector('svg path')?.getAttribute('d')).toBe(BUILTIN_ICONS.kubernetes)
+    await userEvent.keyboard('{Escape}')
+    const emoji = fixtureTopology()
+    emoji.nodes.find((n) => n.id === 'pipelines/alert-triage')!.icon = '🛠'
+    redraw({ topology: emoji })
+    expect(within(node('pipelines/alert-triage')).getByTestId('mark-icon')).toHaveTextContent('🛠')
+    // An unknown built-in name draws nothing rather than a broken mark: the glyph stays.
+    const unknown = fixtureTopology()
+    unknown.nodes.find((n) => n.id === 'pipelines/alert-triage')!.icon = 'aops:nothing-like-this'
+    redraw({ topology: unknown })
+    expect(within(node('pipelines/alert-triage')).queryByTestId('mark-icon')).toBeNull()
   })
 })

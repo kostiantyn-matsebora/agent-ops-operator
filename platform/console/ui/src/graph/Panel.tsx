@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
 import {
-  Button, Card, CardBody, CardTitle, DescriptionList, DescriptionListDescription, DescriptionListGroup,
+  Button, Card, CardBody, CardExpandableContent, CardHeader, CardTitle, DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, Label, Stack, StackItem,
 } from '@patternfly/react-core'
 import { Link } from 'react-router-dom'
 import { healthVariant, useConversation } from '../api/hooks'
 import type { ActivityEvent, EdgeTraffic } from '../api/types'
+import { PipelineName } from '../components/PipelineName'
 import { PlainText } from '../components/Text'
 import { hopContent, hopSummary } from './content'
 import type { EdgeTone } from './hops'
@@ -79,17 +80,23 @@ function HopList({ children }: { children: ReactNode }) {
 }
 
 export function FeedPanel({
-  title, feed, conversations, onHop, onConversation,
+  title, feed, conversations, onHop, onConversation, expanded, onToggle,
 }: {
   title: string
   feed: ActivityEvent[]
   conversations: string[]
   onHop: (ev: ActivityEvent) => void
   onConversation: (name: string) => void
+  /** Collapsed to its title, the feed stays where it is and reopens from the same chevron. */
+  expanded: boolean
+  onToggle: () => void
 }) {
   return (
-    <Card isCompact data-testid="hop-feed">
-      <CardTitle>{title}</CardTitle>
+    <Card isCompact isExpanded={expanded} data-testid="hop-feed">
+      <CardHeader onExpand={onToggle} toggleButtonProps={{ 'aria-label': 'Toggle hop feed', 'aria-expanded': expanded }}>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardExpandableContent>
       <CardBody>
         <Stack hasGutter>
           <StackItem>
@@ -117,6 +124,7 @@ export function FeedPanel({
           </StackItem>
         </Stack>
       </CardBody>
+      </CardExpandableContent>
     </Card>
   )
 }
@@ -184,7 +192,7 @@ export function NodePanel({
     <Card isCompact data-testid="node-panel">
       <CardTitle>
         <small style={{ textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ao-text-subtle)' }}>{style.label}</small>
-        <div><PlainText>{node.name}</PlainText></div>
+        <div>{node.icon ? <PipelineName name={node.name} icon={node.icon} /> : <PlainText>{node.name}</PlainText>}</div>
       </CardTitle>
       <CardBody>
         <Stack hasGutter>
@@ -271,7 +279,7 @@ export function HopPanel({
   ]
   if (ev.latencyMs) rows.push(['Latency', `${(ev.latencyMs / 1000).toFixed(2)}s`])
   if (ev.conversation) rows.push(['Conversation', <PlainText key="c">{ev.conversation}</PlainText>])
-  if (ev.pipeline) rows.push(['Pipeline', <PlainText key="pl">{ev.pipeline}</PlainText>])
+  if (ev.pipeline) rows.push(['Pipeline', <PipelineName key="pl" name={ev.pipeline} />])
   return (
     <Card isCompact data-testid="hop-panel">
       <CardTitle>

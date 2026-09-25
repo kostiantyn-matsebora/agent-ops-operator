@@ -22,6 +22,8 @@ export interface ViewNode {
   name: string
   /** What is drawn under the mark, when the name is too long to read. */
   label?: string
+  /** A declared icon reference, drawn in the mark in place of the class glyph. */
+  icon?: string
   health: Health
   reason?: string
   message?: string

@@ -139,6 +139,9 @@ type Node struct {
 	Active int `json:"active"`
 	Recent int `json:"recent"`
 
+	// Icon is a Pipeline's declared icon reference, verbatim: the graph draws
+	// it in the pipeline's mark, as the list draws it beside the name.
+	Icon string `json:"icon,omitempty"`
 	// Bundle is the chart bundle that installs the object, read from its
 	// `helm.sh/chart` label with the version dropped. Empty for the parent
 	// chart's shared substrate and for anything applied by hand.
@@ -394,6 +397,8 @@ func newNode(obj *Object) Node {
 		Health: h, Reason: reason, Message: msg, Bundle: bundleOf(obj),
 	}
 	switch obj.Kind {
+	case "pipelines":
+		n.Icon = iconOf(obj)
 	case "channeladapters", "signaladapters":
 		spec := decodeSpec[adapterSpec](obj.Spec)
 		n.Image, n.Externals = spec.Image, spec.Externals

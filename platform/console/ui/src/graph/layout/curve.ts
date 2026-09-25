@@ -70,18 +70,59 @@ export function trimmed(a: Pt, b: Pt): [Pt, Pt] {
   ]
 }
 
+/** How close to another mark's centre an edge may pass. */
+export const EDGE_CLEARANCE = MARK_RADIUS + 8
+const MAX_BOW = 150
+
 /**
- * An unrouted edge: a gentle arc bowed to the right of travel, so two opposite
- * edges between one pair never lie on one line.
+ * How far an unrouted edge bows, and to which side, so that it clears the
+ * marks between its ends. A quadratic with its control k off the chord passes
+ * 2t(1-t)k off it at parameter t, so an obstacle at (t, s) in the chord's
+ * frame is cleared when that offset and s differ by EDGE_CLEARANCE. The side
+ * is the one that clears more of them; with nothing in the way the bow is the
+ * gentle default, to the right of travel so two opposite edges never share a
+ * line.
  */
-export function arcCurve(a: Pt, b: Pt): Curve {
+function bow(L: number, obstacles: { t: number; s: number }[]): number {
+  const base = Math.min(30, L * 0.12)
+  if (!obstacles.length) return base
+  const plan = (sign: 1 | -1) => {
+    let k = base
+    let missed = 0
+    for (const o of obstacles) {
+      const bump = 2 * o.t * (1 - o.t)
+      const s = sign * o.s
+      if (s <= 0) k = Math.max(k, (EDGE_CLEARANCE + s) / bump)
+      else if (s < EDGE_CLEARANCE) missed++
+    }
+    if (k > MAX_BOW) missed++
+    return { sign, k: Math.min(k, MAX_BOW), missed }
+  }
+  const right = plan(1)
+  const left = plan(-1)
+  const best = left.missed < right.missed || (left.missed === right.missed && left.k < right.k) ? left : right
+  return best.sign * best.k
+}
+
+/**
+ * An unrouted edge: an arc bowed to clear the marks between its ends, and
+ * bowed gently to the right of travel where nothing is in the way.
+ */
+export function arcCurve(a: Pt, b: Pt, avoid: Pt[] = []): Curve {
   const [p, q] = trimmed(a, b)
   const mx = (p.x + q.x) / 2
   const my = (p.y + q.y) / 2
   const dx = q.x - p.x
   const dy = q.y - p.y
   const L = Math.hypot(dx, dy) || 1
-  const k = Math.min(30, L * 0.12)
+  const obstacles = avoid
+    .map((o) => {
+      const rx = o.x - p.x
+      const ry = o.y - p.y
+      return { t: (rx * dx + ry * dy) / (L * L), s: (rx * -dy + ry * dx) / L }
+    })
+    .filter((o) => o.t > 0.05 && o.t < 0.95 && Math.abs(o.s) < EDGE_CLEARANCE + MAX_BOW / 2)
+  const k = bow(L, obstacles)
   const c = { x: mx - (dy / L) * k, y: my + (dx / L) * k }
   // a quadratic is a cubic with both controls two thirds toward its one
   const c1 = { x: p.x + (2 / 3) * (c.x - p.x), y: p.y + (2 / 3) * (c.y - p.y) }

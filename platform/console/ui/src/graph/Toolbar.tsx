@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import {
-  Button, Card, CardBody, CardTitle, Checkbox, Divider, FormGroup, FormSelect, FormSelectOption, Label,
-  LabelGroup, MenuToggle, Select, SelectList, SelectOption, Stack, StackItem, Switch, TextInput,
+  Button, Card, CardBody, CardExpandableContent, CardHeader, CardTitle, Checkbox, Divider, FormGroup, FormSelect, FormSelectOption,
+  MenuToggle, Select, SelectList, SelectOption, Stack, StackItem, Switch, TextInput,
   ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
+import { Icon } from '../components/Icon'
 import { useDisplay } from './display'
 import type { HiddenSummary } from './filter'
 import type { EdgeLabel } from './hops'
@@ -28,7 +29,8 @@ export type Mode = 'live' | 'replay' | 'conversation'
 
 export interface ToolbarProps {
   pipelines: string[]
-  health: { ok: number; bad: number; unknown: number }
+  /** A pipeline's declared icon, by name, for the selector's rows. */
+  iconFor: (name: string) => string | undefined
   find: string
   hide: string
   onFind: (v: string) => void
@@ -37,7 +39,7 @@ export interface ToolbarProps {
   onMode: (m: 'live' | 'replay') => void
 }
 
-export function GraphToolbar({ pipelines, health, find, hide, onFind, onHide, mode, onMode }: ToolbarProps) {
+export function GraphToolbar({ pipelines, iconFor, find, hide, onFind, onHide, mode, onMode }: ToolbarProps) {
   const d = useDisplay()
   const view = d.views[d.view]
   const [open, setOpen] = useState(false)
@@ -71,7 +73,9 @@ export function GraphToolbar({ pipelines, health, find, hide, onFind, onHide, mo
           >
             <SelectList>
               {pipelines.map((p) => (
-                <SelectOption key={p} value={p} hasCheckbox isSelected={chosen.includes(p)}>{p}</SelectOption>
+                <SelectOption key={p} value={p} hasCheckbox isSelected={chosen.includes(p)} icon={iconFor(p) ? <Icon icon={iconFor(p)} /> : undefined}>
+                  {p}
+                </SelectOption>
               ))}
             </SelectList>
             <Divider />
@@ -94,17 +98,12 @@ export function GraphToolbar({ pipelines, health, find, hide, onFind, onHide, mo
           </ToolbarItem>
         )}
         <ToolbarItem>
-          <FormSelect aria-label="layout" value={view.layout} onChange={(_e, v) => d.setLayout(v as LayoutId)} style={{ width: 140 }}>
+          <FormSelect aria-label="layout" value={view.layout} onChange={(_e, v) => d.setLayout(v as LayoutId)} style={{ width: 120 }}>
             {LAYOUTS.map((l) => <FormSelectOption key={l.value} value={l.value} label={l.label} />)}
           </FormSelect>
         </ToolbarItem>
         <ToolbarItem>
-          <Button variant="secondary" onClick={() => d.setPanelOpen(!d.panelOpen)} aria-expanded={d.panelOpen}>
-            Display {d.panelOpen ? '▴' : '▾'}
-          </Button>
-        </ToolbarItem>
-        <ToolbarItem>
-          <TextInput aria-label="find expression" placeholder="Find… e.g. name~k8s" value={find} onChange={(_e, v) => onFind(v)} style={{ width: 170 }} />
+          <TextInput aria-label="find expression" placeholder="Find… e.g. name~k8s" value={find} onChange={(_e, v) => onFind(v)} style={{ width: 150 }} />
         </ToolbarItem>
         <ToolbarItem>
           <TextInput
@@ -116,11 +115,11 @@ export function GraphToolbar({ pipelines, health, find, hide, onFind, onHide, mo
             onKeyDown={(e) => {
               if (e.key === 'Enter') onHide(hideDraft)
             }}
-            style={{ width: 150 }}
+            style={{ width: 130 }}
           />
         </ToolbarItem>
         <ToolbarItem>
-          <FormSelect aria-label="window" value={String(d.windowSeconds)} onChange={(_e, v) => d.setWindow(Number(v))} style={{ width: 120 }}>
+          <FormSelect aria-label="window" value={String(d.windowSeconds)} onChange={(_e, v) => d.setWindow(Number(v))} style={{ width: 110 }}>
             {WINDOWS.map((w) => <FormSelectOption key={w.seconds} value={String(w.seconds)} label={w.label} />)}
           </FormSelect>
         </ToolbarItem>
@@ -129,13 +128,6 @@ export function GraphToolbar({ pipelines, health, find, hide, onFind, onHide, mo
             <ToggleGroupItem text="Live" isSelected={mode !== 'replay'} onChange={() => onMode('live')} />
             <ToggleGroupItem text="Replay" isSelected={mode === 'replay'} onChange={() => onMode('replay')} />
           </ToggleGroup>
-        </ToolbarItem>
-        <ToolbarItem>
-          <LabelGroup categoryName="Health">
-            <Label isCompact color="green">{health.ok} ok</Label>
-            <Label isCompact color="red">{health.bad} failing</Label>
-            <Label isCompact color="orange">{health.unknown} unknown</Label>
-          </LabelGroup>
         </ToolbarItem>
       </ToolbarContent>
     </Toolbar>
@@ -155,52 +147,59 @@ export function DisplayPanel({ hidden, viewLabel }: { hidden: HiddenSummary; vie
   const hiddenSet = new Set(d.views[view].hidden)
   const spine = SPINE_CLASS[view]
   return (
-    <Card isCompact data-testid="display-panel">
-      <CardTitle>Display</CardTitle>
-      <CardBody>
-        <Stack hasGutter>
-          <StackItem>
-            <FormGroup label={`Classes in the ${viewLabel} view`} fieldId="display-classes">
-              {VIEW_CLASSES[view].map((c) => {
-                const fixed = c === spine && view !== 'infrastructure'
-                return (
-                  <Checkbox
-                    key={c}
-                    id={`display-class-${view}-${c}`}
-                    label={`${plural(styleFor(c).label)}${c === spine && view === 'infrastructure' ? ' (the manager’s stays)' : ''}`}
-                    isChecked={fixed || !hiddenSet.has(c)}
-                    isDisabled={fixed}
-                    onChange={() => d.toggleClass(c)}
-                  />
-                )
-              })}
-            </FormGroup>
-            <small>
-              {hidden.count} hidden
-              {hidden.failing > 0 && `, including ${hidden.failing} failing (${hidden.classes.join(', ')})`}. Health counts
-              every element, hidden or not.
-            </small>
-          </StackItem>
-          <StackItem><Divider /></StackItem>
-          <StackItem>
-            <Switch id="display-animate" label="Traffic animation" isChecked={d.animate} onChange={(_e, v) => d.setAnimate(v)} />
-            <Switch id="display-idle-edges" label="Idle edges" isChecked={d.idleEdges} onChange={(_e, v) => d.setIdleEdges(v)} />
-            <Switch id="display-idle-nodes" label="Idle elements" isChecked={d.idleNodes} onChange={(_e, v) => d.setIdleNodes(v)} />
-          </StackItem>
-          <StackItem>
-            <FormGroup label="Edge labels" fieldId="display-edge-labels">
-              <FormSelect id="display-edge-labels" value={d.edgeLabels} onChange={(_e, v) => d.setEdgeLabels(v as EdgeLabel)}>
-                <FormSelectOption value="none" label="None" />
-                <FormSelectOption value="rate" label="Rate" />
-                <FormSelectOption value="latency" label="Latency (p50)" />
-              </FormSelect>
-            </FormGroup>
-          </StackItem>
-          <StackItem>
-            <Button variant="link" isInline onClick={d.reset}>Reset display</Button>
-          </StackItem>
-        </Stack>
-      </CardBody>
+    <Card isCompact isExpanded={d.panelOpen} data-testid="display-panel">
+      <CardHeader
+        onExpand={() => d.setPanelOpen(!d.panelOpen)}
+        toggleButtonProps={{ 'aria-label': 'Toggle display panel', 'aria-expanded': d.panelOpen }}
+      >
+        <CardTitle>Display</CardTitle>
+      </CardHeader>
+      <CardExpandableContent>
+        <CardBody>
+          <Stack hasGutter>
+            <StackItem>
+              <FormGroup label={`Classes in the ${viewLabel} view`} fieldId="display-classes">
+                {VIEW_CLASSES[view].map((c) => {
+                  const fixed = c === spine && view !== 'infrastructure'
+                  return (
+                    <Checkbox
+                      key={c}
+                      id={`display-class-${view}-${c}`}
+                      label={`${plural(styleFor(c).label)}${c === spine && view === 'infrastructure' ? ' (the manager’s stays)' : ''}`}
+                      isChecked={fixed || !hiddenSet.has(c)}
+                      isDisabled={fixed}
+                      onChange={() => d.toggleClass(c)}
+                    />
+                  )
+                })}
+              </FormGroup>
+              <small>
+                {hidden.count} hidden
+                {hidden.failing > 0 && `, including ${hidden.failing} failing (${hidden.classes.join(', ')})`}. Health counts
+                every element, hidden or not.
+              </small>
+            </StackItem>
+            <StackItem><Divider /></StackItem>
+            <StackItem>
+              <Switch id="display-animate" label="Traffic animation" isChecked={d.animate} onChange={(_e, v) => d.setAnimate(v)} />
+              <Switch id="display-idle-edges" label="Idle edges" isChecked={d.idleEdges} onChange={(_e, v) => d.setIdleEdges(v)} />
+              <Switch id="display-idle-nodes" label="Idle elements" isChecked={d.idleNodes} onChange={(_e, v) => d.setIdleNodes(v)} />
+            </StackItem>
+            <StackItem>
+              <FormGroup label="Edge labels" fieldId="display-edge-labels">
+                <FormSelect id="display-edge-labels" value={d.edgeLabels} onChange={(_e, v) => d.setEdgeLabels(v as EdgeLabel)}>
+                  <FormSelectOption value="none" label="None" />
+                  <FormSelectOption value="rate" label="Rate" />
+                  <FormSelectOption value="latency" label="Latency (p50)" />
+                </FormSelect>
+              </FormGroup>
+            </StackItem>
+            <StackItem>
+              <Button variant="link" isInline onClick={d.reset}>Reset display</Button>
+            </StackItem>
+          </Stack>
+        </CardBody>
+      </CardExpandableContent>
     </Card>
   )
 }

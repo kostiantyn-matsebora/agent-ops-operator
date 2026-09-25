@@ -227,3 +227,19 @@ func TestUnjoinedPipelinesListsWhatNeedsAnEdit(t *testing.T) {
 		t.Fatalf("unjoined pipelines: %v", got)
 	}
 }
+
+// A Pipeline's icon reaches the graph as it reaches the list: verbatim, and
+// only where one is declared.
+func TestTopologyPublishesThePipelineIcon(t *testing.T) {
+	c := staticCache(
+		obj("pipelines", "iconed", "1", `{"profileRef":{"name":"p"},"icon":"aops:kubernetes"}`, "{}"),
+		obj("pipelines", "plain", "1", `{"profileRef":{"name":"p"}}`, "{}"),
+	)
+	topo := BuildTopology(c)
+	if got := findNode(topo, "pipelines", "iconed").Icon; got != "aops:kubernetes" {
+		t.Fatalf("icon = %q, want aops:kubernetes", got)
+	}
+	if got := findNode(topo, "pipelines", "plain").Icon; got != "" {
+		t.Fatalf("icon = %q, want none", got)
+	}
+}

@@ -5,11 +5,15 @@ import {
   MastheadMain, Page, PageSidebar, PageSidebarBody, Label, Popover, Toolbar, ToolbarContent,
   ToolbarGroup, ToolbarItem, PageSection,
 } from '@patternfly/react-core'
+import {
+  AngleDoubleLeftIcon, AngleDoubleRightIcon, CogIcon, CommentsIcon, ListIcon, TachometerAltIcon, TopologyIcon,
+} from '@patternfly/react-icons'
 import { useLiveStream, useSession, useUnreadCount } from './api/hooks'
 import { api } from './api/client'
 import { Logo } from './components/Logo'
 import { Empty, Loading } from './components/States'
 import { ThemeSwitcher } from './components/ThemeSwitcher'
+import { useShell } from './shell'
 import { NewConversation } from './pages/NewConversation'
 import { LoginPage } from './pages/Login'
 import { OverviewPage } from './pages/Overview'
@@ -51,11 +55,11 @@ class Boundary extends Component<{ children: ReactNode }, { error?: Error }> {
 }
 
 const NAV = [
-  { to: '/overview', label: 'Overview' },
-  { to: '/queues', label: 'Queues' },
-  { to: '/config', label: 'Configuration' },
-  { to: '/topology', label: 'Topology' },
-  { to: '/conversations', label: 'Conversations' },
+  { to: '/overview', label: 'Overview', icon: <TachometerAltIcon /> },
+  { to: '/queues', label: 'Queues', icon: <ListIcon /> },
+  { to: '/config', label: 'Configuration', icon: <CogIcon /> },
+  { to: '/topology', label: 'Topology', icon: <TopologyIcon /> },
+  { to: '/conversations', label: 'Conversations', icon: <CommentsIcon /> },
 ]
 
 export function App() {
@@ -67,6 +71,11 @@ export function App() {
   const unread = useUnreadCount()
   const location = useLocation()
   const [navOpen, setNavOpen] = useState(true)
+  // Folded to its icons, and kept so across reloads: a wide view, the
+  // topology first of all, is what the width is wanted for, and a choice made
+  // for it should not need making again on every visit.
+  const navCollapsed = useShell((s) => s.navCollapsed)
+  const toggleNav = () => useShell.getState().setNavCollapsed(!navCollapsed)
 
   if (session.isLoading) return <Loading />
   // A console that authenticates nobody itself reports every request as
@@ -85,7 +94,11 @@ export function App() {
               broken-image glyph, which is exactly what the masthead was showing. */}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <Logo />
-            <span style={{ fontWeight: 600 }}>agent-ops console</span>
+            {/* Folded, the masthead's brand column is as narrow as the icon
+                strip under it, so the name would spill under the toolbar.
+                The mark alone stands for it then, as the icons stand for the
+                links. */}
+            {!navCollapsed && <span style={{ fontWeight: 600 }}>agent-ops console</span>}
           </span>
         </MastheadBrand>
       </MastheadMain>
@@ -167,29 +180,46 @@ export function App() {
 
   const sidebar = (
     <PageSidebar isSidebarOpen={navOpen}>
-      <PageSidebarBody>
-        <Nav>
-          <NavList>
-            {NAV.map((item) => (
-              <NavItem key={item.to} isActive={location.pathname.startsWith(item.to)}>
-                <NavLink to={item.to}>
-                  {item.label}
-                  {item.to === '/conversations' && (unread.data?.unreadTotal ?? 0) > 0 && (
-                    <Badge isRead={false} data-testid="unread-badge" style={{ marginLeft: 8 }}>
-                      {unread.data?.unreadTotal}
-                    </Badge>
-                  )}
-                </NavLink>
-              </NavItem>
-            ))}
-          </NavList>
-        </Nav>
+      <PageSidebarBody isFilled>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <Nav aria-label="console">
+            <NavList>
+              {NAV.map((item) => (
+                <NavItem key={item.to} isActive={location.pathname.startsWith(item.to)}>
+                  <NavLink to={item.to} aria-label={item.label} title={navCollapsed ? item.label : undefined}>
+                    <span className="pf-v6-c-nav__link-icon" aria-hidden="true">{item.icon}</span>
+                    {!navCollapsed && <span className="pf-v6-c-nav__link-text">{item.label}</span>}
+                    {item.to === '/conversations' && (unread.data?.unreadTotal ?? 0) > 0 && (
+                      <Badge isRead={false} data-testid="unread-badge" style={{ marginLeft: navCollapsed ? 4 : 8 }}>
+                        {unread.data?.unreadTotal}
+                      </Badge>
+                    )}
+                  </NavLink>
+                </NavItem>
+              ))}
+            </NavList>
+          </Nav>
+          <div style={{ marginTop: 'auto', padding: 8, textAlign: navCollapsed ? 'center' : 'right' }}>
+            <Button
+              variant="plain"
+              aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+              aria-expanded={!navCollapsed}
+              onClick={toggleNav}
+              icon={navCollapsed ? <AngleDoubleRightIcon /> : <AngleDoubleLeftIcon />}
+            />
+          </div>
+        </div>
       </PageSidebarBody>
     </PageSidebar>
   )
 
   return (
-    <Page masthead={masthead} sidebar={sidebar} onPageResize={() => setNavOpen(true)}>
+    <Page
+      masthead={masthead}
+      sidebar={sidebar}
+      className={navCollapsed ? 'ao-nav-collapsed' : undefined}
+      onPageResize={() => setNavOpen(true)}
+    >
       <Boundary>
         <Routes>
           <Route path="/" element={<Navigate to="/overview" replace />} />

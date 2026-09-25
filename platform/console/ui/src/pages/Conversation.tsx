@@ -21,6 +21,7 @@ import { useDisplay } from '../graph/display'
 import { mergeEvents } from '../graph/hops'
 import { api, ApiError } from '../api/client'
 import { Crumbs } from '../components/Crumbs'
+import { PipelineName } from '../components/PipelineName'
 import { ComposerHint } from '../components/ComposerHint'
 import { Icon, stripLeadingIcon } from '../components/Icon'
 import { matchEntries } from './NewConversation'
@@ -803,7 +804,7 @@ function ConversationGraphTab({ name }: { name: string }) {
               value of this view is precisely that it does not. */}
           <Alert variant="info" isInline title="The pipeline has been re-wired since this ran">
             This conversation materialized different bindings from{' '}
-            <PlainText>{data.pipeline}</PlainText>'s current wiring, which the graph below draws.
+            <PipelineName name={data.pipeline ?? 'the pipeline'} />'s current wiring, which the graph below draws.
             <ul>
               {(data.drift ?? []).map((d, i) => (
                 <li key={i}>

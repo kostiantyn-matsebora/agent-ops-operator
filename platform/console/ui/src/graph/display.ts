@@ -35,7 +35,14 @@ export interface DisplayState {
   windowSeconds: number
   /** The routes shown, or null for every pipeline. */
   pipelines: string[] | null
+  /** The column beside the canvas, as a whole. Folded, the canvas takes the width. */
+  sideOpen: boolean
+  /** The Display card in that column, expanded or collapsed to its title. */
   panelOpen: boolean
+  /** The hop feed card, likewise. */
+  feedOpen: boolean
+  /** The history charts under the topology, likewise. Folded by default, so the canvas fits the viewport. */
+  historyOpen: boolean
   setView: (v: ViewId) => void
   toggleClass: (cls: string) => void
   hideClass: (cls: string) => void
@@ -48,7 +55,10 @@ export interface DisplayState {
   setEdgeLabels: (v: EdgeLabel) => void
   setWindow: (v: number) => void
   setPipelines: (p: string[] | null) => void
+  setSideOpen: (v: boolean) => void
   setPanelOpen: (v: boolean) => void
+  setFeedOpen: (v: boolean) => void
+  setHistoryOpen: (v: boolean) => void
   reset: () => void
 }
 
@@ -68,7 +78,10 @@ const DEFAULTS = {
   edgeLabels: 'none' as EdgeLabel,
   windowSeconds: 300,
   pipelines: null as string[] | null,
+  sideOpen: true,
   panelOpen: false,
+  feedOpen: true,
+  historyOpen: false,
 }
 
 export const useDisplay = create<DisplayState>()(
@@ -91,9 +104,16 @@ export const useDisplay = create<DisplayState>()(
         setEdgeLabels: (edgeLabels) => set({ edgeLabels }),
         setWindow: (windowSeconds) => set({ windowSeconds }),
         setPipelines: (pipelines) => set({ pipelines }),
+        setSideOpen: (sideOpen) => set({ sideOpen }),
         setPanelOpen: (panelOpen) => set({ panelOpen }),
-        // Restores the display OPTIONS and keeps the view being looked at.
-        reset: () => set((s) => ({ ...DEFAULTS, view: s.view, panelOpen: s.panelOpen })),
+        setFeedOpen: (feedOpen) => set({ feedOpen }),
+        setHistoryOpen: (historyOpen) => set({ historyOpen }),
+        // Restores the display OPTIONS and keeps the view being looked at, and
+        // which panels are open — those are the page's layout, not the picture's.
+        reset: () =>
+          set((s) => ({
+            ...DEFAULTS, view: s.view, sideOpen: s.sideOpen, panelOpen: s.panelOpen, feedOpen: s.feedOpen, historyOpen: s.historyOpen,
+          })),
       }
     },
     { name: 'agentops-console-topology', version: 1 },

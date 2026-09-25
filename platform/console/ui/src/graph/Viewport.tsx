@@ -32,16 +32,23 @@ export interface ViewportProps {
    * dimension is air; one shaped like the picture makes the marks big.
    */
   aspect?: boolean
+  /** The tallest the canvas may be: what the viewport has left below its top edge. */
+  maxHeight?: number
   /** Drawn over the canvas, top left: what the picture is scoped to. */
   overlay?: ReactNode
   onBackgroundClick?: () => void
 }
 
-/** The canvas height for a picture of this aspect on a host this wide. */
-export function aspectHeight(hostWidth: number, contentWidth: number, contentHeight: number): number {
+/**
+ * The canvas height for a picture of this aspect on a host this wide, never
+ * over the ceiling — what the viewport has left below the canvas's top edge,
+ * so the picture is seen whole without scrolling.
+ */
+export function aspectHeight(hostWidth: number, contentWidth: number, contentHeight: number, maxHeight?: number): number {
   const viewport = typeof window === 'undefined' ? 768 : window.innerHeight
+  const ceiling = Math.max(300, maxHeight ?? Math.max(600, viewport - 160))
   const want = hostWidth * ((contentHeight + 40) / Math.max(1, contentWidth)) + 60
-  return Math.round(Math.min(Math.max(520, want), Math.max(600, viewport - 160)))
+  return Math.round(Math.min(Math.max(Math.min(520, ceiling), want), ceiling))
 }
 
 interface Transform {
@@ -55,7 +62,7 @@ function clamp(k: number): number {
 }
 
 export function Viewport({
-  contentWidth, contentHeight, contentX = 0, contentY = 0, children, ariaLabel, fitKey, aspect, overlay,
+  contentWidth, contentHeight, contentX = 0, contentY = 0, children, ariaLabel, fitKey, aspect, maxHeight, overlay,
   onBackgroundClick,
 }: ViewportProps) {
   const host = useRef<HTMLDivElement>(null)
@@ -89,14 +96,16 @@ export function Viewport({
 
     owed.current = false
     adjusted.current = false
-    if (aspect) setHeight(aspectHeight(width, contentWidth, contentHeight))
-    const k = clamp(Math.min((width - 24) / contentWidth, (height - 24) / contentHeight, 1))
+    // Fit to the height the canvas is about to have, not the one it had.
+    const h = aspect ? aspectHeight(width, contentWidth, contentHeight, maxHeight) : height
+    if (aspect) setHeight(h)
+    const k = clamp(Math.min((width - 24) / contentWidth, (h - 24) / contentHeight, 1))
     setT({
       k,
       x: (width - contentWidth * k) / 2 - contentX * k,
-      y: (height - contentHeight * k) / 2 - contentY * k,
+      y: (h - contentHeight * k) / 2 - contentY * k,
     })
-  }, [contentWidth, contentHeight, contentX, contentY, aspect])
+  }, [contentWidth, contentHeight, contentX, contentY, aspect, maxHeight])
 
   // Fit on mount and whenever the graph is rebuilt — a re-render that left the
   // viewport where it was would strand the user off-canvas after a filter change.
@@ -177,7 +186,7 @@ export function Viewport({
         }}
         style={{
           height: aspect && height ? height : '68vh',
-          minHeight: 420,
+          minHeight: Math.min(420, maxHeight ?? 420),
           overflow: 'hidden',
           cursor: drag.current ? 'grabbing' : 'grab',
           background: 'var(--ao-canvas)',

@@ -3,7 +3,8 @@ import type { ActivityEvent, EdgeTraffic } from '../api/types'
 import type { EdgeTone } from './hops'
 import type { Box } from './layout'
 import type { Curve, Pt } from './layout/curve'
-import { CAPTION_Y, LABEL_Y, MARK_SCALE, ROLE_GLYPH, shapePath, styleFor } from './shapes'
+import { resolveIcon } from '../components/Icon'
+import { CAPTION_Y, ICON_HALF, LABEL_Y, MARK_SCALE, ROLE_GLYPH, shapePath, styleFor } from './shapes'
 import { markPath, pulseAt, pulseLife, streamMarks, type Pulse } from './traffic'
 import type { ViewEdge, ViewNode } from './types'
 import { ViewportScale } from './Viewport'
@@ -113,6 +114,32 @@ export interface NodeMarkProps {
   onDrag: (p: Pt) => void
 }
 
+/**
+ * A declared icon in a mark, in place of the class glyph: the built-in set as
+ * a path, a fetched one as an image, an emoji as text — sized to the icon box
+ * every shape's clearance leaves, so it never touches the outline either.
+ */
+function MarkIcon({ icon }: { icon: string }) {
+  const r = resolveIcon(icon)
+  if (!r) return null
+  const size = ICON_HALF * 2
+  if (r.kind === 'path') {
+    return (
+      <g transform={`translate(${-ICON_HALF} ${-ICON_HALF}) scale(${size / 24})`} data-testid="mark-icon">
+        <path d={r.d} fill="var(--ao-text-subtle)" />
+      </g>
+    )
+  }
+  if (r.kind === 'image') {
+    return <image href={r.src} x={-ICON_HALF} y={-ICON_HALF} width={size} height={size} data-testid="mark-icon" />
+  }
+  return (
+    <text data-testid="mark-icon" fontSize={size * 0.8} textAnchor="middle" dominantBaseline="central">
+      {r.text}
+    </text>
+  )
+}
+
 export function NodeMark({ node, at, selected, found, working, dim, badge, role, onSelect, onOpen, onDrag }: NodeMarkProps) {
   const style = styleFor(node.cls)
   const k = useContext(ViewportScale)
@@ -179,8 +206,12 @@ export function NodeMark({ node, at, selected, found, working, dim, badge, role,
           strokeWidth={selected ? 3.2 : node.health === 'bad' ? 2.6 : 1.3}
           strokeDasharray={node.detached ? '3 2' : undefined}
         />
-        <path d={(role && ROLE_GLYPH[role]) || style.glyph} fill="none" stroke="var(--ao-text-subtle)" strokeWidth={0.9}
-          strokeLinecap="round" strokeLinejoin="round" />
+        {!role && node.icon && resolveIcon(node.icon) ? (
+          <MarkIcon icon={node.icon} />
+        ) : (
+          <path d={(role && ROLE_GLYPH[role]) || style.glyph} fill="none" stroke="var(--ao-text-subtle)" strokeWidth={0.9}
+            strokeLinecap="round" strokeLinejoin="round" />
+        )}
       </g>
       <text y={LABEL_Y} fontSize={15} textAnchor="middle" fill="var(--ao-text)" stroke="var(--ao-surface)" strokeWidth={3} paintOrder="stroke">
         {label}

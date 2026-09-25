@@ -42,33 +42,41 @@
 - [x] 6.5 PORT the conversation replay: hop list with offsets, step and play with compressed gaps, route dimming, entry from node, pod, hop and list. Verify: unit tests for stepping and dimming on each view
 - [x] 6.6 Rebuild the Topology page and the conversation page's graph tab on the ported graph, with PatternFly controls in place of the mockup's toolbar. Verify: `npm run typecheck` and `vitest run` pass in this worktree
 
-## 7. Unit tests
+## 7. The picture takes the whole screen
 
-- [ ] 7.1 `cd platform/manager && go test ./...` with envtest, in this worktree's container mount
-- [ ] 7.2 `cd runtimes/ollama && go test ./...`, `cd runtimes/claude && node --test`, `cd runtimes/copilot && node --test`
-- [ ] 7.3 `cd platform/console && go test ./...` and `cd platform/console/ui && npm run test:coverage`
-- [ ] 7.4 The chart render tests and `python3 .github/scripts/serviceaccount-guard.py`
-- [ ] 7.5 `python3 .github/scripts/publication-guard.py` and `python3 .github/scripts/retired-vocabulary-guard.py` pass on this worktree, the mockup included
+- [x] 7.1 The navigation folds to its icons from a button at the foot of the sidebar, every link keeping its name as a tooltip and for a screen reader, the fold kept across reloads in `platform/console/ui/src/shell.ts` the way the display is. Verify: `App.test.tsx` folds, checks the page class and the link names, and finds the fold again after a remount
+- [x] 7.2 The column beside the canvas folds to a strip from a chevron at its edge, the Display and hop feed cards fold to their titles, the History card under the graph folds the same way, and the canvas is sized from its own top edge to the viewport's bottom. Verify: `Graph.test.tsx` folds the column, still shows a selection's panel, folds the two cards, and `History.test.tsx` folds the History card
+- [x] 7.5 The topology endpoint and the inventory publish `Pipeline.spec.icon`, the mark draws it in place of the class glyph, and one `PipelineName` component draws it beside the name at every other mention: the Configuration list, detail, crumb and reference chips, queue rows, the topology's panels, routes chip and pipeline selector. Verify: `topology_test.go` and `api_test.go` find the icon, `Graph.test.tsx` draws each form and finds it in the panel and the selector, `PipelineName.test.tsx` covers the handed and looked-up icon
+- [x] 7.4 An unrouted edge bows around the marks between its ends, to the side that clears more of them. Verify: `curve.test.ts` clears a mark on the line and one just off it, and leaves a clear edge as it was
+- [x] 7.3 Every mark's glyph clears its outline: `shapes.tsx` states each shape's clearance rectangles, the cloud is re-centred and enlarged, the cube's front face is clear, the cylinder's rim and the MCP config's mark stay out of the glyph, and the server's glyph decorates its slabs. Verify: `shapes.test.ts` flattens every outline and glyph, the role glyphs on a pod included, and finds no point on the wrong side
 
-## 8. E2E tests
+## 8. Unit tests
 
-- [x] 8.1 A lane in `platform/manager/test/e2e/` runs a stub runtime that reports two turns and one tool call, and asserts the manager's activity endpoint holds the `model.call` and `tool.call` hops with the run's id. A cluster decides this: the report crosses the work contract into a real manager
-- [ ] 8.2 The pack runs against this worktree's tree, built in the container and run on the host, and the new lane passes
+- [ ] 8.1 `cd platform/manager && go test ./...` with envtest, in this worktree's container mount
+- [ ] 8.2 `cd runtimes/ollama && go test ./...`, `cd runtimes/claude && node --test`, `cd runtimes/copilot && node --test`
+- [x] 8.3 `cd platform/console && go test ./...` and `cd platform/console/ui && npm run test:coverage`
+- [ ] 8.4 The chart render tests and `python3 .github/scripts/serviceaccount-guard.py`
+- [x] 8.5 `python3 .github/scripts/publication-guard.py` and `python3 .github/scripts/retired-vocabulary-guard.py` pass on this worktree, the mockup included
 
-## 9. Documentation
+## 9. E2E tests
 
-### 9.1 Reference docs
+- [x] 9.1 A lane in `platform/manager/test/e2e/` runs a stub runtime that reports two turns and one tool call, and asserts the manager's activity endpoint holds the `model.call` and `tool.call` hops with the run's id. A cluster decides this: the report crosses the work contract into a real manager
+- [ ] 9.2 The pack runs against this worktree's tree, built in the container and run on the host, and the new lane passes
 
-- [x] 9.1.1 `docs/console.md`: replace the Topology section with the three views, their classes, the layouts, the boxes, the scoping, the feed, the replay
-- [x] 9.1.2 `docs/contracts.md`: the work result's turns and tool calls, and the activity vocabulary's new kinds and `data` map
-- [x] 9.1.3 `docs/concepts.md`: the adapter CR's `externals` metadata beside `configSchema` and `credentialKeys`
-- [x] 9.1.4 `python3 .github/scripts/docs-generate.py`, then `--check`, so `docs/cr-reference.md` and every generated block carry the new field
-- [x] 9.1.5 `docs/CHANGELOG.md`: the chart, manager, console and runtime versions this ships, with the additive migration note
-- [x] 9.1.6 `.claude/rules/structure.md` and `.claude/rules/terminology.md`: the topology's three views named where the console is described
+## 10. Documentation
 
-### 9.2 Adopter site
+### 10.1 Reference docs
 
-- [x] 9.2.1 `docs/console-guide.md`: the Topology tab's text and its screenshot alt text describe the network views
-- [x] 9.2.2 `docs/getting-started.md` and `docs/index.md`: every sentence that names the lanes or describes the old graph
-- [x] 9.2.3 `cd platform/console/ui && npm run screenshots && npm run demo`, so the site's screenshots and the landing recording show the new topology
-- [ ] 9.2.4 `python3 .claude/scripts/rules_compliance.py $(git ls-files '*.md')` and the docs lint in `docs/CLAUDE.md` pass
+- [x] 10.1.1 `docs/console.md`: replace the Topology section with the three views, their classes, the layouts, the boxes, the scoping, the feed, the replay
+- [x] 10.1.2 `docs/contracts.md`: the work result's turns and tool calls, and the activity vocabulary's new kinds and `data` map
+- [x] 10.1.3 `docs/concepts.md`: the adapter CR's `externals` metadata beside `configSchema` and `credentialKeys`
+- [x] 10.1.4 `python3 .github/scripts/docs-generate.py`, then `--check`, so `docs/cr-reference.md` and every generated block carry the new field
+- [x] 10.1.5 `docs/CHANGELOG.md`: the chart, manager, console and runtime versions this ships, with the additive migration note
+- [x] 10.1.6 `.claude/rules/structure.md` and `.claude/rules/terminology.md`: the topology's three views named where the console is described
+
+### 10.2 Adopter site
+
+- [x] 10.2.1 `docs/console-guide.md`: the Topology tab's text and its screenshot alt text describe the network views
+- [x] 10.2.2 `docs/getting-started.md` and `docs/index.md`: every sentence that names the lanes or describes the old graph
+- [x] 10.2.3 `cd platform/console/ui && npm run screenshots && npm run demo`, so the site's screenshots and the landing recording show the new topology
+- [ ] 10.2.4 `python3 .claude/scripts/rules_compliance.py $(git ls-files '*.md')` and the docs lint in `docs/CLAUDE.md` pass

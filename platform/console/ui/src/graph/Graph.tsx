@@ -5,6 +5,8 @@ import {
 import type { ActivityEvent, EdgeTraffic, Topology } from '../api/types'
 import { PlainText } from '../components/Text'
 import { ArrowDefs, BoxRect, EdgeLine, NodeMark, TrafficLayer } from './Canvas'
+import { AngleDoubleLeftIcon, AngleDoubleRightIcon } from '@patternfly/react-icons'
+import { PipelineName } from '../components/PipelineName'
 import { useDisplay } from './display'
 import { compile, depthLevels, visible, type Scope, type ScopeDepth } from './filter'
 import { crossing, edgeLabel, edgeTone, hopIndex, tsOf, windowStats } from './hops'
@@ -38,11 +40,13 @@ export interface GraphProps {
   /** Open on this conversation's replay. */
   conversation?: string
   emptyMessage?: string
+  /** What the page keeps under the canvas, in pixels — the section's own padding and whatever it draws there — so the canvas fits the viewport above it. */
+  reserveBelow?: number
 }
 
 const CALLS = new Set(['model.call', 'tool.call'])
 
-export function Graph({ topology, events, bufferStart, conversation, emptyMessage }: GraphProps) {
+export function Graph({ topology, events, bufferStart, conversation, emptyMessage, reserveBelow = 56 }: GraphProps) {
   const d = useDisplay()
   const view = d.view
   const vd = d.views[view]
@@ -66,13 +70,23 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
   useEffect(() => {
     const el = host.current
     if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => {
+    // The canvas fits the viewport: from where it starts to the bottom, less
+    // what the page keeps below it. Measured from the element rather than a
+    // guess at the chrome above, which the alerts and the toolbar's wrapping
+    // both change.
+    const measure = () => {
       const w = Math.round((el.clientWidth || 1400) / 100) * 100
-      const h = Math.max(600, window.innerHeight - 160)
+      const top = el.getBoundingClientRect().top + window.scrollY
+      const h = Math.max(300, window.innerHeight - top - reserveBelow)
       setCanvas((c) => (c.w === w && c.h === h ? c : { w, h }))
-    })
+    }
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
-    return () => ro.disconnect()
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
   }, [])
 
   // A scope is not carried across views: it names an element of one of them.
@@ -161,15 +175,19 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
   const boxes = dragged.size ? memberBoxes(groups, pos) : placement.boxes
   const curves = useMemo(() => {
     const out = new Map<string, Curve>()
+    // An unrouted edge bows around the marks between its ends; a routed one
+    // already goes around them, dagre having placed it.
+    const placed = vis.nodes.map((n) => [n.id, pos.get(n.id)] as const).filter((x): x is readonly [string, Pt] => Boolean(x[1]))
     for (const e of vis.edges) {
       const a = pos.get(e.from)
       const b = pos.get(e.to)
       if (!a || !b) continue
       const routed = placement.routes.get(e.id)
-      out.set(e.id, routed && !dragged.has(e.from) && !dragged.has(e.to) ? basisCurve(a, b, routed) : arcCurve(a, b))
+      const avoid = placed.filter(([id]) => id !== e.from && id !== e.to).map(([, p]) => p)
+      out.set(e.id, routed && !dragged.has(e.from) && !dragged.has(e.to) ? basisCurve(a, b, routed) : arcCurve(a, b, avoid))
     }
     return out
-  }, [vis.edges, pos, placement, dragged])
+  }, [vis.nodes, vis.edges, pos, placement, dragged])
   const bounds = pictureBounds(pos, boxes)
 
   // ---- pulses --------------------------------------------------------------------------
@@ -282,9 +300,18 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
     return out
   }, [events, tEnd, g, index])
   const activeByPipeline = useMemo(() => new Map(topology.nodes.map((n) => [n.id, n.active])), [topology])
+  // A pipeline's declared icon, from the graph's own nodes: the same source the mark draws from.
+  const pipelineIcons = useMemo(
+    () => new Map(topology.nodes.filter((n) => n.kind === 'pipelines' && n.icon).map((n) => [n.name, n.icon!])),
+    [topology],
+  )
+  const pipelineIcon = (name: string) => pipelineIcons.get(name)
 
   // ---- the panel -------------------------------------------------------------------------
   const nodeById = useMemo(() => new Map(g.nodes.map((n) => [n.id, n])), [g])
+  // A selection always has somewhere to show, whatever the column's fold says.
+  const showsSelection = Boolean(hop || (mode === 'conversation' && conv) || selectedEdge || selected)
+  const sideShown = d.sideOpen || showsSelection
   const panel = (() => {
     if (hop) {
       return (
@@ -364,6 +391,8 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
           spawn([{ ev, dur: 1100 }])
         }}
         onConversation={openConversation}
+        expanded={d.feedOpen}
+        onToggle={() => d.setFeedOpen(!d.feedOpen)}
       />
     )
   })()
@@ -373,6 +402,14 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
   const scopedName = scope ? nodeById.get(scope.id)?.name ?? scope.id : undefined
   const overlay = (
     <>
+      {/* The health summary rides on the canvas with the other status chips:
+          it is information rather than a control, and the toolbar's one row is
+          for controls. It counts every element, hidden ones included. */}
+      <span data-testid="health-summary" style={{ display: 'inline-flex', gap: 4 }}>
+        <Label isCompact color="green">{health.ok} ok</Label>
+        <Label isCompact color="red">{health.bad} failing</Label>
+        <Label isCompact color="orange">{health.unknown} unknown</Label>
+      </span>
       {scope && vis.nodes.some((n) => n.id === scope.id) && (
         <span data-testid="scope-bar" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
           <Label color="blue" isCompact>Scoped to <PlainText>{scopedName}</PlainText></Label>
@@ -393,7 +430,19 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
           <Button variant="link" isInline onClick={() => setScope(undefined)} aria-label="reset scope">Reset scope</Button>
         </span>
       )}
-      {routes && <Label isCompact color="blue">routes: {(selectedRoutes ?? []).join(', ') || 'none'}</Label>}
+      {routes && (
+        <Label isCompact color="blue">
+          routes:{' '}
+          {(selectedRoutes ?? []).length
+            ? (selectedRoutes ?? []).map((r, i) => (
+                <span key={r}>
+                  {i > 0 && ', '}
+                  <PipelineName name={r} icon={pipelineIcon(r)} />
+                </span>
+              ))
+            : 'none'}
+        </Label>
+      )}
       {vd.layout === 'dagre' && placement.orientation && (
         <Label isCompact>{placement.orientation === 'lr' ? 'left to right' : 'top down'} fits larger</Label>
       )}
@@ -425,7 +474,7 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
       <StackItem>
         <GraphToolbar
           pipelines={pipelines}
-          health={health}
+          iconFor={pipelineIcon}
           find={find}
           hide={hide}
           onFind={setFind}
@@ -496,6 +545,7 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
                   ariaLabel={`topology graph, ${viewLabel} view`}
                   fitKey={layoutKey}
                   aspect
+                  maxHeight={canvas.h}
                   overlay={overlay}
                   onBackgroundClick={() => {
                     setSelected(undefined)
@@ -576,15 +626,37 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
               )}
             </div>
           </SplitItem>
-          <SplitItem style={{ width: 360, flex: '0 0 360px' }}>
-            <Stack hasGutter>
-              {d.panelOpen && (
-                <StackItem>
-                  <DisplayPanel hidden={vis.hidden} viewLabel={viewLabel} />
-                </StackItem>
+          {/* The column beside the canvas folds to a strip holding the chevron
+              that brings it back, so the fold and the unfold are one control in
+              one place. Inside it each card folds to its title the same way. */}
+          <SplitItem style={{ width: sideShown ? 388 : 28, flex: `0 0 ${sideShown ? 388 : 28}px` }}>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+              <Button
+                variant="plain"
+                size="sm"
+                aria-label={sideShown ? 'Hide side panels' : 'Show side panels'}
+                aria-expanded={sideShown}
+                title={sideShown ? 'Hide side panels' : 'Show side panels'}
+                onClick={() => {
+                  // Hiding a column a selection was holding open drops the selection too.
+                  d.setSideOpen(!sideShown)
+                  if (sideShown) {
+                    setSelected(undefined)
+                    setSelectedEdge(undefined)
+                    setHop(undefined)
+                  }
+                }}
+                icon={sideShown ? <AngleDoubleRightIcon /> : <AngleDoubleLeftIcon />}
+              />
+              {sideShown && (
+                <Stack hasGutter style={{ flex: 1, minWidth: 0 }}>
+                  <StackItem>
+                    <DisplayPanel hidden={vis.hidden} viewLabel={viewLabel} />
+                  </StackItem>
+                  <StackItem>{panel}</StackItem>
+                </Stack>
               )}
-              <StackItem>{panel}</StackItem>
-            </Stack>
+            </div>
           </SplitItem>
         </Split>
       </StackItem>

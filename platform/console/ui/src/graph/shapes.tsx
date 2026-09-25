@@ -4,6 +4,11 @@
 // before any label is. The outlines are sized for a mark scaled by MARK_SCALE,
 // and the glyphs sit inside them on the same origin — one path each, so a node
 // is a <g> of two paths and nothing fights over sizing or fill.
+//
+// A GLYPH NEVER TOUCHES ITS OUTLINE. Every shape states the rectangles the
+// outline stays out of (CLEARANCE), every glyph stays inside one of them, and
+// shapes.test.ts flattens both paths to check it. The cloud shipped with the
+// globe crossing its bottom line once; the numbers are here so it cannot again.
 
 export type ShapeKind =
   | 'hexagon' | 'plaque' | 'rect' | 'chip' | 'cloud' | 'server' | 'hub'
@@ -20,16 +25,42 @@ const SHAPES: Record<ShapeKind, string> = {
   plaque: 'M-18 -12 h36 v24 h-36 z M-18 -6 h-3 M-18 6 h-3',
   rect: 'M-22 -13 h44 a3 3 0 0 1 3 3 v20 a3 3 0 0 1 -3 3 h-44 a3 3 0 0 1 -3 -3 v-20 a3 3 0 0 1 3 -3 z',
   chip: 'M-17 -11 h34 v22 h-34 z',
-  cloud: 'M-14 6 a7 7 0 0 1 1 -14 a10 10 0 0 1 19 -2 a8 8 0 0 1 8 16 z',
+  cloud: 'M-18 13 a9 9 0 0 1 1 -18 a13 13 0 0 1 25 -3 a10 10 0 0 1 10 21 z',
   server: 'M-17 -14 h34 v10 h-34 z M-17 4 h34 v10 h-34 z',
   hub: 'M-26 -17 h52 a4 4 0 0 1 4 4 v26 a4 4 0 0 1 -4 4 h-52 a4 4 0 0 1 -4 -4 v-26 a4 4 0 0 1 4 -4 z',
   circle: 'M-15 0 a15 15 0 1 0 30 0 a15 15 0 1 0 -30 0',
   stadium: 'M-12 -12 h24 a12 12 0 0 1 0 24 h-24 a12 12 0 0 1 0 -24 z',
   diamond: 'M0 -17 L17 0 L0 17 L-17 0 Z',
-  diamond2: 'M0 -17 L17 0 L0 17 L-17 0 Z M-8 0 h16',
+  diamond2: 'M0 -17 L17 0 L0 17 L-17 0 Z M-17 0 h-4 M17 0 h4',
   cylinder: 'M-16 -10 a16 5 0 0 0 32 0 a16 5 0 0 0 -32 0 v20 a16 5 0 0 0 32 0 v-20',
   note: 'M-13 -15 h18 l8 8 v22 h-26 z M5 -15 v8 h8',
-  box: 'M0 -15 l13 7 v16 l-13 7 -13 -7 v-16 z M0 -1 l13 -7 M0 -1 l-13 -7 M0 -1 v16',
+  box: 'M-10 -10 h20 v20 h-20 z M-10 -10 l5 -5 h20 v20 l-5 5 M10 -10 l5 -5',
+}
+
+/** Half the side of the box a declared icon is drawn in, centred on the mark: inside every shape's clearance. */
+export const ICON_HALF = 9
+
+/** [x0, y0, x1, y1] in mark units: where a shape's outline never goes, and where its glyph always is. */
+export type Clearance = [number, number, number, number]
+
+export const CLEARANCE: Record<ShapeKind, Clearance[]> = {
+  hexagon: [[-12, -8, 12, 8]],
+  plaque: [[-16, -10, 16, 10]],
+  rect: [[-22, -11, 22, 11]],
+  chip: [[-15, -9, 15, 9]],
+  cloud: [[-8, -7, 8, 7]],
+  // Two slabs: a glyph decorates each rather than crossing the gap between them.
+  server: [[-15, -12, 15, -6], [-15, 6, 15, 12]],
+  hub: [[-26, -14, 26, 14]],
+  circle: [[-10, -10, 10, 10]],
+  stadium: [[-18, -10, 18, 10]],
+  diamond: [[-8, -8, 8, 8]],
+  diamond2: [[-8, -8, 8, 8]],
+  // The rim's front edge dips to y=-5, so the clear area starts below it.
+  cylinder: [[-13, -4, 13, 12]],
+  note: [[-11, -5, 11, 13]],
+  // The cube's front face, on the origin; the two other faces sit above and to the right.
+  box: [[-9, -9, 9, 9]],
 }
 
 const GLYPHS = {
@@ -40,13 +71,16 @@ const GLYPHS = {
   runtime: 'M-5 -5 h10 v10 h-10 z M-2 -2 h4 v4 h-4 z',
   toolset: 'M5 -5 a3 3 0 0 1 -4 4 l-5 5 -1 -1 5 -5 a3 3 0 0 1 4 -4 z',
   mcpconfig: 'M-6 -5 h12 v4 h-12 z M-6 1 h12 v4 h-12 z',
-  channel: 'M-6 -5 h12 v8 h-6 l-3 3 v-3 h-3 z',
+  channel: 'M-6 -3 h12 v8 h-6 l-3 3 v-3 h-3 z',
   conversation: 'M-5 -2 h10 M-5 2 h6',
   pod: 'M-4 -4 h8 v8 h-8 z',
   manager: 'M-7 -5 h14 v10 h-14 z M-7 -1 h14 M-3 3 h.01 M0 3 h.01',
   image: 'M-6 -6 h12 v12 h-12 z M-2 -2 h4 v4 h-4 z M0 -9 v3 M0 6 v3 M-9 0 h3 M6 0 h3',
   model: 'M0 -5 l1.5 3.5 3.5 1.5 -3.5 1.5 -1.5 3.5 -1.5 -3.5 -3.5 -1.5 3.5 -1.5 z',
-  mcpserver: 'M-6 -7 h12 M-6 -3 h12 M-6 3 h12 M-6 7 h12',
+  mcpserver: 'M-7 -9 h14 M-7 9 h14',
+  // A pod running an MCP server wears a small server: the slab bars above sit
+  // in the server SHAPE's slabs, and on a cube's face they would hug its edges.
+  server: 'M-6 -6 h12 v4 h-12 z M-6 2 h12 v4 h-12 z',
   container: 'M-6 -4 h12 M-6 0 h12 M-6 4 h12',
   gateway: 'M-7 0 h14 M3 -4 l4 4 -4 4 M-3 -4 l-4 4 4 4',
   job: 'M0 -6 a6 6 0 1 0 0.01 0 M0 -3 v3 l2 2',
@@ -99,7 +133,7 @@ export const ROLE_GLYPH: Record<string, string> = {
   gateway: GLYPHS.gateway,
   'runtime-image': GLYPHS.image,
   housekeeping: GLYPHS.job,
-  'mcp-server': GLYPHS.mcpserver,
+  'mcp-server': GLYPHS.server,
 }
 
 export function styleFor(cls: string): NodeStyle {
