@@ -113,14 +113,14 @@ for the source and the reference material beside this file.
 
 ### Upgrade
 
-1. `helm upgrade`. Nothing to restate — the check arrives with the manager
+1. **Apply the CRDs first** — `kubectl apply -f chart/crds/` — before
+   `helm upgrade`. Helm never upgrades a CRD, and an old one silently prunes
+   `spec.externals` from every adapter CR.
+2. `helm upgrade`. Nothing to restate — the check arrives with the manager
    image.
-2. A Pipeline already carrying a dangling `runtimeRef` turns `Ready=False`.
+3. A Pipeline already carrying a dangling `runtimeRef` turns `Ready=False`.
    Apply the missing `AgentRuntime`, or correct the name, and `Ready`
    converges with no further edit.
-3. **Apply the CRDs** — `kubectl apply -f chart/crds/` — before `helm upgrade`.
-   Helm never upgrades a CRD, and an old one silently prunes `spec.externals`
-   from every adapter CR.
 4. **Nothing else is owed, since the topology change is additive.**
    - A runtime image older than this release reports no turns, and the graph
      simply draws no model or tool hops for it.
