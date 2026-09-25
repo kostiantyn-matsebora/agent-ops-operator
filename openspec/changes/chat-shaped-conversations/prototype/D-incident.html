@@ -94,7 +94,7 @@ code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padd
   <div style="flex: 1; min-height: 0; display: flex">
     <div class="nav" style="width: 200px; flex: none; background: #ffffff; border-right: 1px solid #cfd6da; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px">
       <a href="#nav">Overview</a><a href="#nav">Queues</a><a href="#nav">Configuration</a><a href="#nav">Topology</a>
-      <a href="#nav" class="on" style="display: flex; justify-content: space-between; align-items: center">Conversations <span class="cnt">3</span></a>
+      <a href="#nav" class="on" style="display: flex; justify-content: space-between; align-items: center">Conversations <span class="cnt">1</span></a>
     </div>
 
     <!-- list with tree -->
@@ -106,7 +106,7 @@ code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padd
         </div>
         <div style="display: flex; gap: 6px; flex-wrap: wrap">
           <span class="filt on">All <span class="n">10</span></span>
-          <span class="filt">Unread <span class="n">2</span></span>
+          <span class="filt">Unread <span class="n">1</span></span>
           <span class="filt">Working <span class="n">4</span></span>
           <span class="filt">Mine</span>
           <span class="filt" style="border-color: #6b4bd6; color: #6b4bd6">⛭ Incidents <span class="n">2</span></span>
@@ -116,18 +116,18 @@ code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padd
       <div style="flex: 1; overflow: hidden">
 
         <!-- root -->
-        <div class="row unread sel">
+        <div class="row sel">
           <span class="car">▾</span>
           <div class="av coord"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg><span class="dot working"></span></div>
           <div style="min-width: 0"><div class="l1x"><span class="t">payments rollout is stuck</span><span class="time">1m</span></div>
-          <div class="l2x"><span class="s">rollout-coordinator · turn 2 of 6 · 3 of 4 agents · 12m left</span><span class="cnt">2</span></div></div>
+          <div class="l2x"><span class="s">rollout-coordinator · turn 2 of 6 · 3 of 4 agents · 12m left</span></div></div>
         </div>
         <!-- level 1: a member that coordinates -->
         <div class="row l1">
           <span class="car">▾</span>
           <div class="av coord" style="border-style: dashed"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg><span class="dot working"></span></div>
           <div style="min-width: 0"><div class="l1x"><span class="t">k8s-diagnoser <span class="s" style="display: inline">as</span> <span class="s e" style="display: inline">diagnose</span></span><span class="time">48s</span></div>
-          <div class="l2x"><span class="s"><em>working</em> · waiting on metrics</span><span class="tag v">2 agents</span></div></div>
+          <div class="l2x"><span class="s"><em>working</em> · turn 1 of 4 · 2 of 3 agents · 9m left</span></div></div>
         </div>
         <!-- level 2 -->
         <div class="row l2">
@@ -160,10 +160,22 @@ code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padd
 
         <!-- root, autosolved -->
         <div class="row">
-          <span class="car" title="2 members collapsed">▸</span>
+          <span class="car">▾</span>
           <div class="av coord" style="opacity: .7"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg><span class="dot"></span></div>
           <div style="min-width: 0"><div class="l1x"><span class="t" style="color: #5c656d">node-3 memory pressure</span><span class="time">41m</span></div>
           <div class="l2x"><span class="s">closed · <em style="color: #1f7a4d">resolved</em>: evicted 2 pods, pressure cleared · 2 agents</span><span class="tag" title="closed without escalation">nobody notified</span></div></div>
+        </div>
+        <div class="row l1">
+          <span class="car"></span>
+          <div class="av" style="color: #9aa4ab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t" style="color: #5c656d">node-inspector <span class="s" style="display: inline">as</span> <span class="s e" style="display: inline">inspect</span></span><span class="time">43m</span></div>
+          <div class="l2x"><span class="s">brief: two pods over their request on node-3, both evictable</span><span class="tag">closed</span></div></div>
+        </div>
+        <div class="row l1">
+          <span class="car"></span>
+          <div class="av" style="color: #9aa4ab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"></path></svg><span class="dot"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t" style="color: #5c656d">pod-evictor <span class="s" style="display: inline">as</span> <span class="s e" style="display: inline">evict</span></span><span class="time">42m</span></div>
+          <div class="l2x"><span class="s">brief: evicted both, pressure cleared in 40s</span><span class="tag">closed</span></div></div>
         </div>
         <div class="row">
           <span class="car"></span>
@@ -240,7 +252,7 @@ code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padd
       <div style="padding: 10px 24px 14px; border-top: 1px solid #cfd6da; display: flex; flex-direction: column; gap: 8px">
         <div style="display: flex; gap: 6px; align-items: center">
           <span class="qc mono">/close</span><span class="qc">Roll back</span><span class="qc">Fix forward</span><span class="qc">Wait for metrics</span>
-          <span style="flex: 1"></span><span style="font-size: 12px; color: #5c656d">before escalation this pane is read-only: the root had no channel</span>
+          <span style="flex: 1"></span><span style="font-size: 12px; color: #5c656d">escalated 09:41 · replies reach ops-chat too</span>
         </div>
         <div style="display: flex; gap: 8px; align-items: flex-end">
           <textarea placeholder="Reply to rollout-coordinator…" style="flex: 1; height: 56px; resize: none; border: 1px solid #cfd6da; border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 14px"></textarea>

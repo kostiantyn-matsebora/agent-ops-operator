@@ -56,7 +56,7 @@ from `../agent-ops-worktrees/chat-shaped-conversations` for Go, `npm` under
 
 ## 8. E2E tests
 
-- [ ] 8.1 Not applicable: nothing here is decided by a cluster. The count, the rewind and the tree are computed from objects the console and the manager already hold, which `docs/testing.md` places in unit and envtest. The rewind's status write is covered by the envtest case in 2.1.
+- [x] 8.1 Not applicable: nothing here is decided by a cluster. The count, the rewind and the tree are computed from objects the console and the manager already hold, which `docs/testing.md` places in unit and envtest. The rewind's status write is covered by the envtest case in 2.1.
 
 ## 9. Documentation
 

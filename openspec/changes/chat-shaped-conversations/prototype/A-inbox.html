@@ -82,7 +82,7 @@ code{font-family:"Red Hat Mono",monospace;font-size:12.5px;background:#f6f8f8;pa
     <!-- nav -->
     <div class="nav" style="width: 200px; flex: none; background: #ffffff; border-right: 1px solid #cfd6da; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px">
       <a href="#nav">Overview</a><a href="#nav">Queues</a><a href="#nav">Configuration</a><a href="#nav">Topology</a>
-      <a href="#nav" class="on" style="display: flex; justify-content: space-between; align-items: center">Conversations <span class="cnt">3</span></a>
+      <a href="#nav" class="on" style="display: flex; justify-content: space-between; align-items: center">Conversations <span class="cnt">2</span></a>
     </div>
 
     <!-- list pane -->
@@ -98,13 +98,13 @@ code{font-family:"Red Hat Mono",monospace;font-size:12.5px;background:#f6f8f8;pa
         </label>
         <div style="display: flex; gap: 6px; flex-wrap: wrap">
           <span class="filt">All <span class="n">8</span></span>
-          <span class="filt on">Unread <span class="n">3</span></span>
+          <span class="filt on">Unread <span class="n">2</span></span>
           <span class="filt">Working <span class="n">2</span></span>
           <span class="filt">Mine <span class="n">1</span></span>
           <span class="filt">Errored <span class="n">1</span></span>
           <span class="filt" style="border-color: #6b4bd6; color: #6b4bd6">Incidents <span class="n">1</span></span>
-          <span class="filt">Closed</span>
           <span class="filt" style="border-style: dashed">Pipeline ▾</span>
+          <span class="filt">Closed</span>
         </div>
         <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding-top: 2px">
           <span style="font-size: 12px; color: #5c656d; margin-right: 2px">Ask</span>
@@ -121,10 +121,10 @@ code{font-family:"Red Hat Mono",monospace;font-size:12.5px;background:#f6f8f8;pa
           <div style="min-width: 0"><div class="l1"><span class="t">CrashLoopBackOff in storefront/cart</span><span class="time">4s</span></div>
           <div class="l2"><span class="s">alert-triage opened it · waiting for a runtime slot</span><span class="tag new">new</span></div></div>
         </div>
-        <div class="row unread sel">
+        <div class="row sel">
           <div class="av"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot working"></span></div>
           <div style="min-width: 0"><div class="l1"><span class="t">checkout-api is restarting</span><span class="time">2m</span></div>
-          <div class="l2"><span class="s"><em>k8s-engineer is working…</em> · oncall: Does the same setting affect…</span><span class="cnt">2</span></div></div>
+          <div class="l2"><span class="s"><em>k8s-engineer is working…</em> · oncall: Does the same setting affect…</span></div></div>
         </div>
         <div class="row unread" style="grid-template-columns: 12px 40px 1fr">
           <span style="font-size: 11px; color: #5c656d; padding-top: 12px">▸</span>
@@ -139,8 +139,8 @@ code{font-family:"Red Hat Mono",monospace;font-size:12.5px;background:#f6f8f8;pa
         </div>
         <div class="row unread">
           <div class="av alert"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg><span class="dot failed"></span></div>
-          <div style="min-width: 0"><div class="l1"><span class="t">TLS certificate for api.example.com expires in 6 days</span><span class="time">18m</span></div>
-          <div class="l2"><span class="s">signal: cert-manager reports the renewal order failed twice</span><span class="tag err">run failed</span></div></div>
+          <div style="min-width: 0"><div class="l1"><span class="t">TLS certificate for api.example.com expires in 6 days</span><span class="tag err">run failed</span><span class="time">18m</span></div>
+          <div class="l2"><span class="s">signal: cert-manager reports the renewal order failed twice</span><span class="cnt">1</span></div></div>
         </div>
         <div class="row">
           <div class="av"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot idle"></span></div>

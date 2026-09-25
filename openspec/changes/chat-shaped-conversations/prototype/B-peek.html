@@ -84,7 +84,7 @@ code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padd
   <div style="flex: 1; min-height: 0; display: flex">
     <div class="nav" style="width: 200px; flex: none; background: #ffffff; border-right: 1px solid #cfd6da; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px">
       <a href="#nav">Overview</a><a href="#nav">Queues</a><a href="#nav">Configuration</a><a href="#nav">Topology</a>
-      <a href="#nav" class="on" style="display: flex; justify-content: space-between; align-items: center">Conversations <span class="cnt">3</span></a>
+      <a href="#nav" class="on" style="display: flex; justify-content: space-between; align-items: center">Conversations <span class="cnt">2</span></a>
     </div>
 
     <!-- table -->
@@ -99,15 +99,15 @@ code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padd
       </div>
       <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
         <span class="filt">All <span class="n">11</span></span>
-        <span class="filt on">Unread <span class="n">3</span></span>
+        <span class="filt on">Unread <span class="n">2</span></span>
         <span class="filt">Working <span class="n">3</span></span>
         <span class="filt">Mine <span class="n">1</span></span>
         <span class="filt">Errored <span class="n">1</span></span>
         <span class="filt" style="border-color: #6b4bd6; color: #6b4bd6">Incidents <span class="n">1</span></span>
-        <span class="filt">Closed <span class="n">1</span></span>
         <span style="width: 1px; height: 20px; background: #cfd6da; margin: 0 4px"></span>
         <span class="filt" style="border-style: dashed">Pipeline ▾</span>
         <span class="filt" style="border-style: dashed">Profile ▾</span>
+        <span class="filt">Closed <span class="n">1</span></span>
         <span style="flex: 1"></span>
         <span style="font-size: 12px; color: #5c656d">select-all is this page only</span>
       </div>
@@ -126,7 +126,7 @@ code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padd
           <thead><tr><th style="width: 30px"><input type="checkbox" aria-label="select all on this page"></th><th style="width: 46%">Title</th><th>Phase</th><th>Pipeline</th><th style="text-align: right">Activity</th></tr></thead>
           <tbody>
             <tr class="new"><td style="width: 30px"><input type="checkbox"></td><td><div class="t"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b32c3f" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg>CrashLoopBackOff in storefront/cart <span class="tag new">new</span></div><div class="nm">prometheus-alerts-2e9c11</div></td><td><span class="ph p"><span class="d"></span>Pending</span></td><td>alert-triage</td><td style="text-align: right">4s</td></tr>
-            <tr class="unread sel"><td style="width: 30px"><input type="checkbox"></td><td><div class="t"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0a615c" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>checkout-api is restarting <span class="cnt">2</span></div><div class="nm">cluster-events-7c1d4e</div></td><td><span class="ph w"><span class="d"></span>Working</span></td><td>k8s-observe</td><td style="text-align: right">2m</td></tr>
+            <tr class="sel"><td style="width: 30px"><input type="checkbox"></td><td><div class="t"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0a615c" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>checkout-api is restarting</div><div class="nm">cluster-events-7c1d4e</div></td><td><span class="ph w"><span class="d"></span>Working</span></td><td>k8s-observe</td><td style="text-align: right">2m</td></tr>
             <tr class="unread"><td style="width: 30px"><input type="checkbox"></td><td><div class="t"><span style="color: #5c656d; font-size: 11px">▾</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b4bd6" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg>payments rollout is stuck <span class="cnt">1</span> <span class="tag" style="border-color: #6b4bd6; color: #6b4bd6">4 members · 2 levels</span></div><div class="nm">cluster-events-a17f02 · turn 2/6</div></td><td><span class="ph w"><span class="d"></span>Working</span></td><td style="color: #6b4bd6">rollout-coordinator</td><td style="text-align: right">1m</td></tr>
             <tr style="background: #fafbfb"><td style="width: 30px"><input type="checkbox"></td><td style="padding-left: 34px"><div class="t"><span style="color: #5c656d; font-size: 11px">▾</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6b4bd6" stroke-width="2" stroke-dasharray="2 2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg>k8s-diagnoser <span class="nm" style="color: #6b4bd6">as diagnose</span></div></td><td><span class="ph w"><span class="d"></span>Working</span></td><td style="color: #5c656d">member</td><td style="text-align: right">48s</td></tr>
             <tr style="background: #fafbfb"><td style="width: 30px"><input type="checkbox"></td><td style="padding-left: 58px"><div class="t">log-reader <span class="nm" style="color: #6b4bd6">as logs</span> <span class="tag" style="border-color: #1f7a4d; color: #1f7a4d">done</span></div></td><td><span class="ph i"><span class="d"></span>Idle</span></td><td style="color: #5c656d">member</td><td style="text-align: right">12s</td></tr>
