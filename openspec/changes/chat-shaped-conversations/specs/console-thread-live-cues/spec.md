@@ -1,6 +1,6 @@
 ## Purpose
 
-How the console shows that something is happening or has arrived: presence apart from unread, motion on arrival, the new-messages divider, the jump pill, autoscroll, the new-conversation toast, and run events inline in the transcript.
+How the console shows that something is happening or has arrived: presence apart from unread, motion on arrival, the new-messages divider, the control that jumps to arrived messages, autoscroll, the notice that a conversation opened, and run events inline in the transcript.
 
 ## ADDED Requirements
 
