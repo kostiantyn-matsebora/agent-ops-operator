@@ -12,22 +12,26 @@
 - [ ] 3.1 `failed-checks.py`: read the failed job's steps and exclude a `docs-task` job whose only failed step is the guard step, with a stated reason in its output. Verify: `.github/tests/failed-checks.test.sh` gains a case with a stubbed jobs listing, one where `docs-task` failed on the guard step (excluded) and one where it failed on the tasks-file step (kept)
 - [ ] 3.2 `land-dispatch.py`: a round whose work list is empty because every failed check was excluded ends as "nothing to do" and names the unanswered dispute. Verify: the land test's empty-work-list case names the dispute
 
-## 4. Unit tests
+## 4. The gate accepts what the carry carried
 
-- [ ] 4.1 `.github/tests/run.sh` passes, the four suites above included
+- [ ] 4.1 `review-dispatch.yml`, job `gate`: both bot re-checks ask the standing-grant rule `carry-grant.py` states, accepting `conveyor:run`, or `conveyor:archive` where the pull request says `Closes #<n>`. Verify: `.github/tests/review-dispatch.test.sh` gains a case where a bot start on an archive pull request whose issue carries `conveyor:archive` alone is accepted, and one where a plain pull request under the same issue is refused
 
-## 5. E2E tests
+## 5. Unit tests
 
-- [x] 5.1 Nothing here is decided by a cluster: every program runs on the runner against the platform's API, and the script suite stands `gh` in. Not applicable
+- [ ] 5.1 `.github/tests/run.sh` passes, the five suites above included
 
-## 6. Documentation
+## 6. E2E tests
 
-### 6.1 Reference docs
+- [x] 6.1 Nothing here is decided by a cluster: every program runs on the runner against the platform's API, and the script suite stands `gh` in. Not applicable
 
-- [ ] 6.1.1 `.claude/rules/worktree-delivery.md`: the loop bullets say a timed-out round counts, that `docs-task` asks the dispute question alone, and that a red made only of the guard starts no round
-- [ ] 6.1.2 `.claude/rules/gotchas.md`: the measurement on #248 — the cycle, the six replies, and why removing the grant by hand was the wrong fix
-- [ ] 6.1.3 `docs/CHANGELOG.md`: the three behaviours, unreleased
+## 7. Documentation
 
-### 6.2 Adopter site
+### 7.1 Reference docs
 
-- [ ] 6.2.1 Nothing on the adopter site describes the conveyor's rounds. Checked: `docs/index.md`, `docs/getting-started.md`, `docs/installation.md` and the integration pages name no fixing loop
+- [ ] 7.1.1 `.claude/rules/worktree-delivery.md`: the loop bullets say a timed-out round counts, that `docs-task` asks the dispute question alone, that a red made only of the guard starts no round, and that the gate accepts the archive grant the carry accepts
+- [ ] 7.1.2 `.claude/rules/gotchas.md`: the measurement on #248 — the cycle, the six replies, and why removing the grant by hand was the wrong fix
+- [ ] 7.1.3 `docs/CHANGELOG.md`: the three behaviours, unreleased
+
+### 7.2 Adopter site
+
+- [ ] 7.2.1 Nothing on the adopter site describes the conveyor's rounds. Checked: `docs/index.md`, `docs/getting-started.md`, `docs/installation.md` and the integration pages name no fixing loop

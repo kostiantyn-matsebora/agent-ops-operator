@@ -56,6 +56,13 @@ which the gate reads as a reason for the next round.
   so `collect` hands the fixer nothing and `land` ends the round as "nothing
   to do" with the dispute named. The step is matched by its name, read from
   `ci.yml` as the check names already are, never restated.
+- **The gate reads the grant rule from one place.** `carry-grant.py` already
+  states it: `conveyor:run` stands for every station, and `conveyor:archive`
+  stands for the archive pull request's fix station. The gate's two bot
+  re-checks call that same rule instead of grepping for `run_label`, so the
+  carry and the gate cannot disagree again. Alternative rejected: a second
+  grep for the archive label in the workflow. Two copies of the rule is how
+  #238 shipped half.
 - **The cancelled-queued case needs no code.** Once the running-round
   question leaves CI, a run queued by a thread reply and cancelled by the
   concurrency group refuses nothing. It is written down in `gotchas.md` as

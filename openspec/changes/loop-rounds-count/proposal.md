@@ -37,6 +37,12 @@ archive station its actor.
   check** — it follows from the second item, and the case is written down:
   six thread replies right after a push queued six runs and failed `docs-task`
   in its first ten seconds, three pushes in a row.
+- **The gate accepts the grant the carry accepted.** #238 made
+  `conveyor:archive` on the tracking issue its own grant for the archive pull
+  request's fix station, and `carry-grant.py` places `conveyor:fix` on it.
+  The gate in `review-dispatch.yml` still re-checks a bot-started round
+  against `conveyor:run` alone, so it refused the round on #254 that the
+  carry had just authorised. The gate reads the same rule as the carry.
 
 ## Capabilities
 
@@ -49,7 +55,8 @@ _None._
 - `conveyor-lifecycle`: the bound counts every round that ran, timed out
   included, and the line's own state is never a check's verdict — a running
   round is not a failed check, and a failed check that is only the loop's own
-  guard starts no round.
+  guard starts no round. Every program that re-checks a carried grant reads
+  the same rule for what a standing grant is.
 
 ## Impact
 
@@ -63,6 +70,9 @@ _None._
   mode.
 - `.github/scripts/failed-checks.py`: reads the failed job's steps and
   excludes `docs-task` failed by the guard step.
+- `.github/workflows/review-dispatch.yml` (`gate`): a bot-started round is
+  accepted when the named issue carries `conveyor:run`, or `conveyor:archive`
+  where the pull request is the archive one, in both places it re-checks.
 - `.github/tests/land-dispatch.test.sh`, `autofix-guard.test.sh`,
   `failed-checks.test.sh`: one case each.
 - `.claude/rules/worktree-delivery.md`, `.claude/rules/gotchas.md`,

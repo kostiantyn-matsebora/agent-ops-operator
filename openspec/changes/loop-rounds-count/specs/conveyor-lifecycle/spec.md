@@ -107,3 +107,30 @@ merged only after the grant was removed by hand.
 - **WHEN** a person runs the archive command on a change whose pull request
   has a round running
 - **THEN** the command is refused until the round ends, exactly as before
+
+### Requirement: Every re-check of a carried grant reads one rule
+
+A program that re-checks a grant a workflow carried SHALL read the same rule
+for what a standing grant is as the program that carried it.
+
+Where the carry accepts a label as the grant for a station, every gate on
+that station SHALL accept it too.
+
+**Two copies of the rule is how it ships half.** #238 made the archive label
+its own grant for the archive pull request's fix station in the carry, and the
+gate that starts the round kept looking for the standing instruction alone.
+
+The carry placed the label, and the gate refused the round it authorised.
+
+#### Scenario: A bot starts a round on the archive pull request
+
+- **WHEN** a workflow starts a round on the archive pull request of an issue
+  carrying the archive grant and no standing instruction
+- **THEN** the gate accepts it, exactly as the carry that placed the label did
+
+#### Scenario: A bot starts a round on an ordinary pull request under the archive grant
+
+- **WHEN** a workflow starts a round on a pull request that merely proposes or
+  applies a change whose issue carries the archive grant alone
+- **THEN** the gate refuses it, since that grant is for the archive station
+  only
