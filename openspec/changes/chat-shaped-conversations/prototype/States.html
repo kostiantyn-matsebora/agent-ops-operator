@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Prototype of the console conversations view. Composition reference only: behaviour is in ../specs/. Exported from the design canvas, static, opens in any browser. -->
+<title>Shared · unread rule, row states, thread affordances</title>
+</head>
+<body>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Text:wght@400;500;700&amp;family=Red+Hat+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#eef1f2;font-family:"Red Hat Text",system-ui,sans-serif;color:#16191c}
+a{color:#0d7d76}a:hover{color:#0a615c}
+h2{margin:0 0 10px;font-size:16px;font-weight:700}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;font-size:11.5px;color:#5c656d;font-weight:500;padding:6px 8px;border-bottom:1px solid #cfd6da}
+td{padding:7px 8px;border-bottom:1px solid #eef1f2;vertical-align:top}
+.yes{color:#1f7a4d;font-weight:700}.no{color:#b32c3f;font-weight:700}
+code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padding:1px 5px;border-radius:4px}
+.row{display:grid;grid-template-columns:36px 1fr;column-gap:10px;padding:8px 10px;border:1px solid #eef1f2;border-radius:8px;background:#fff;cursor:pointer}
+.row.new{animation:arrive 4s ease-out forwards}
+.av{width:36px;height:36px;border-radius:50%;background:#f3f5f6;border:1px solid #cfd6da;display:flex;align-items:center;justify-content:center;position:relative;color:#0a615c}
+.av.alert{color:#b32c3f}
+.dot{position:absolute;right:-2px;bottom:-2px;width:11px;height:11px;border-radius:50%;border:2px solid #fff;background:#9aa4ab}
+.dot.working{background:#0d7d76;animation:pulse 1.6s ease-out infinite}.dot.pending{background:#a86400}.dot.failed{background:#b32c3f}.dot.idle{background:#1f7a4d}
+.l1,.l2{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}
+.t{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row.unread .t{font-weight:700}
+.time{font-size:11.5px;color:#5c656d;flex:none}
+.s{font-size:12.5px;color:#5c656d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.s em{color:#0a615c}
+.cnt{flex:none;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#0d7d76;color:#fff;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.tag{flex:none;font-size:11px;padding:1px 7px;border-radius:9px;border:1px solid #cfd6da;color:#5c656d}
+.tag.new{border-color:#0d7d76;color:#0a615c}.tag.err{border-color:#b32c3f;color:#b32c3f}
+.cap{font-size:11.5px;color:#5c656d;margin-top:4px}
+.divider{display:flex;align-items:center;gap:12px;color:#0a615c;font-size:12px;font-weight:700;letter-spacing:.04em}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:#0d7d76}
+.typing{display:inline-flex;gap:4px;align-items:center;padding:8px 12px;border-radius:14px;background:#f3f5f6;border:1px solid #cfd6da}
+.typing i{width:6px;height:6px;border-radius:50%;background:#0d7d76;animation:bob 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+.jump{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:16px;background:#16191c;color:#fff;font-size:12px}
+.menu{background:#fff;border:1px solid #cfd6da;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px 0;width:200px;font-size:13px}
+.menu div{padding:7px 14px}.menu div.d{color:#b32c3f}.menu hr{border:0;border-top:1px solid #eef1f2;margin:4px 0}
+.qc{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:12px;border:1px solid #cfd6da;background:#fff;font-size:12px;white-space:nowrap}
+.qc.mono{font-family:"Red Hat Mono",monospace}
+.toast{background:#16191c;color:#e8ecee;border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:center;font-size:12.5px}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(13,125,118,.55)}100%{box-shadow:0 0 0 8px rgba(13,125,118,0)}}
+@keyframes arrive{0%{background:#d3ece9}100%{background:#f1f9f8}}
+@keyframes bob{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-4px)}}
+</style>
+<div style="width: 1440px; height: 700px; box-sizing: border-box; padding: 28px 32px; display: grid; grid-template-columns: 560px 1fr; gap: 32px; background: #ffffff">
+
+  <div style="display: flex; flex-direction: column; gap: 22px">
+    <div>
+      <h2>Unread is counted from messages, not from the row moving</h2>
+      <div style="font-size: 13px; color: #5c656d; margin-bottom: 10px">Today: <code>unread = status.lastActivity &gt; my watermark</code>. The manager stamps <code>lastActivity</code> when a run is <b>dispatched</b>, so your own question makes the row unread one second after you sent it, with only "On it…" behind it. Proposed: count messages on the console thread after the watermark, by kind.</div>
+      <table>
+        <thead><tr><th>Message on the console thread</th><th style="width: 70px">Counts</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td><code>signal</code> — the event that opened it</td><td class="yes">yes</td><td>somebody has to read what came in</td></tr>
+          <tr><td><code>agent</code> — an answer</td><td class="yes">yes</td><td>the thing you were waiting for</td></tr>
+          <tr><td><code>relay</code> — a colleague on another channel</td><td class="yes">yes</td><td>a person spoke, and you did not see it</td></tr>
+          <tr><td><code>ack</code> — "🔧 On it…", "⏳ Noted…"</td><td class="no">no</td><td>presence. Shown as the working dot and the typing row, never as a badge</td></tr>
+          <tr><td><code>local</code> — what you typed here</td><td class="no">no</td><td>you wrote it. Already true: sending advances your own mark</td></tr>
+          <tr><td>a run dispatched, a phase change, a pod event</td><td class="no">no</td><td>state, not a message. It moves the presence dot and the inline event line</td></tr>
+          <tr><td>a listing or a refusal (<code>/pipelines</code>, unknown command)</td><td class="no">no</td><td>an answer to you alone, on the surface you typed on</td></tr>
+        </tbody>
+      </table>
+      <div class="cap" style="margin-top: 8px">Cost: acks are not in <code>status.runs[]</code>, so the count is computed from the merged transcript the console already builds. Nothing changes on the CRD. The badge in the nav becomes a sum of counts rather than a count of rows.</div>
+    </div>
+    <div>
+      <h2>Presence and unread are two signals, drawn apart</h2>
+      <div style="display: flex; gap: 28px; font-size: 13px">
+        <div style="display: flex; align-items: center; gap: 10px"><span class="av" style="width: 28px; height: 28px"><span class="dot working"></span></span>pulsing dot = a run is inflight</div>
+        <div style="display: flex; align-items: center; gap: 10px"><span class="cnt">2</span>badge = messages you have not seen</div>
+        <div style="display: flex; align-items: center; gap: 10px"><span class="typing"><i></i><i></i><i></i></span>typing row = the ack, rendered as presence</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 18px">
+    <div>
+      <h2>Row states</h2>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px">
+        <div><div class="row new"><div class="av alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg><span class="dot pending"></span></div><div style="min-width: 0"><div class="l1"><span class="t">CrashLoopBackOff in storefront/cart</span><span class="time">4s</span></div><div class="l2"><span class="s">opened by alert-triage</span><span class="tag new">new</span></div></div></div><div class="cap">NEW — slides in at the top, tint fades over 4s, a toast names the pipeline. Stays "new" until first opened.</div></div>
+        <div><div class="row unread"><div class="av"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot working"></span></div><div style="min-width: 0"><div class="l1"><span class="t">checkout-api is restarting</span><span class="time">2m</span></div><div class="l2"><span class="s"><em>working</em> · oncall: Does the same setting…</span><span class="cnt">2</span></div></div></div><div class="cap">UNREAD + WORKING — bold title, teal time, count badge. Snippet is the last counted message, prefixed by who.</div></div>
+        <div><div class="row"><div class="av"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot working"></span></div><div style="min-width: 0"><div class="l1"><span class="t">Why is the payments deployment not rolling out?</span><span class="time">1m</span></div><div class="l2"><span class="s"><em>k8s-engineer is working…</em></span></div></div></div><div class="cap">WORKING, READ — you asked, it is thinking. No badge: the ack is not a message. This is the row that is wrongly unread today.</div></div>
+        <div><div class="row"><div class="av alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg><span class="dot pending"></span></div><div style="min-width: 0"><div class="l1"><span class="t">HighMemoryPressure on node-3</span><span class="time">27s</span></div><div class="l2"><span class="s">pending · behind 5 active runtimes</span><span class="tag">observed</span></div></div></div><div class="cap">OBSERVED — no console thread, so never unread and no composer. Snippet says why it waits.</div></div>
+        <div><div class="row unread"><div class="av alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg><span class="dot failed"></span></div><div style="min-width: 0"><div class="l1"><span class="t">TLS certificate expires in 6 days</span><span class="time">18m</span></div><div class="l2"><span class="s">signal: renewal order failed twice</span><span class="tag err">run failed</span></div></div></div><div class="cap">ERRORED — red dot and tag. Still unread: the signal itself was never read.</div></div>
+        <div><div class="row" style="color: #6a7178"><div class="av" style="color: #9aa4ab"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot"></span></div><div style="min-width: 0"><div class="l1"><span class="t" style="color: #6a7178">ingress-nginx admission webhook timed out</span><span class="time">1.1d</span></div><div class="l2"><span class="s">closed · 4 runs</span><span class="tag">closed</span></div></div></div><div class="cap">CLOSED — muted, in its own filter. Reopen from the row menu.</div></div>
+      </div>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: start">
+      <div>
+        <h2 style="font-size: 14px">In the thread</h2>
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <div class="divider">New messages</div>
+          <div class="cap" style="margin: 0">Sits above the first uncounted message. Opening scrolls to it, not to the end.</div>
+          <div><span class="jump">↓ 1 new message</span></div>
+          <div class="cap" style="margin: 0">When a message arrives while you are scrolled up. Autoscroll only when already at the bottom.</div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="qc" style="border-color: #0d7d76; color: #0a615c">＋ k8s-observe</span><span class="qc mono">/exit</span><span class="qc mono">/close</span><span class="qc">Apply the fix</span></div>
+          <div class="cap" style="margin: 0">Quick chips: Ready pipelines to start with, thread commands, and the last message's <code>choices[]</code>.</div>
+        </div>
+      </div>
+      <div>
+        <h2 style="font-size: 14px">Selection mode — every bulk action, and its rule</h2>
+        <div style="background: #16191c; color: #e8ecee; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap"><b>3 selected</b><span class="qc" style="height: 22px">Mark read</span><span class="qc" style="height: 22px">Mark unread</span><span class="qc" style="height: 22px; color: #b32c3f; border-color: #b32c3f">Close…</span><span class="qc" style="height: 22px; color: #9aa4ab">Delete</span><a href="#c" style="color: #7fded5; margin-left: auto">Clear</a></div>
+        <table style="margin-top: 8px">
+          <tbody>
+            <tr><td><b>Select all</b></td><td>this page's rows only. Never "everything matching the filter": a mis-set filter would close far more than was seen</td></tr>
+            <tr><td><b>Mark read / unread</b></td><td>not gated on write access. It instructs no agent. Unread is new: today only read exists</td></tr>
+            <tr><td><b>Close…</b></td><td>opens the modal. Working ones need the explicit "include working" opt-in, phase read server-side</td></tr>
+            <tr><td><b>Delete</b></td><td>enabled only when the WHOLE selection is closed. Mixed batches stay a two-step</td></tr>
+            <tr><td><b>Reopen</b></td><td>per row only, from the row menu. No bulk form: a batch would re-materialise threads nobody watches</td></tr>
+            <tr><td><b>A root</b></td><td>closing a root closes every member. Selecting a member alone is refused with the root named</td></tr>
+            <tr><td><b>Deleting</b></td><td>a row held by its finalizer cannot be selected</td></tr>
+          </tbody>
+        </table>
+        <div class="cap" style="margin-top: 6px">Direction A and C enter this mode from "Select" in the pane header, or by ⌘-clicking a row. B is always in it: the checkbox column stays.</div>
+      </div>
+      <div>
+        <h2 style="font-size: 14px">Row menu</h2>
+        <div class="cap" style="margin: 0 0 4px">a working row</div>
+        <div class="menu"><div>Mark unread</div><hr><div>Open in new tab</div><div>Copy link</div><hr><div>Exit runtime</div><div class="d">Close</div></div>
+        <div class="cap" style="margin: 8px 0 4px">a closed row</div>
+        <div class="menu"><div>Mark unread</div><hr><div>Open in new tab</div><div>Copy link</div><hr><div>Reopen</div><div class="d">Delete</div></div>
+        <div class="cap" style="margin-top: 8px">What a row's state or the viewer's rights do not allow is absent, never greyed. A member row offers Open incident in place of Close.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
