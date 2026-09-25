@@ -160,7 +160,12 @@ export function Viewport({
       <div
         ref={host}
         data-testid="graph-viewport"
+        tabIndex={0}
         onWheel={onWheel}
+        // The keyboard's way to what a background click does: drop the selection.
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onBackgroundClick?.()
+        }}
         onPointerDown={(e) => {
           if (e.button !== 0) return
           moved.current = false

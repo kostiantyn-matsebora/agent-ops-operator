@@ -31,7 +31,7 @@ export function foldToRoutes(g: ViewGraph): ViewGraph {
       .filter((n) => kept.has(n.id))
       .map((n) =>
         folded.has(n.id)
-          ? { ...n, facts: [...n.facts, ['Folds in', folded.get(n.id)!.map(short).sort().join(', ')]] }
+          ? { ...n, facts: [...n.facts, ['Folds in', folded.get(n.id)!.map(short).sort((a, b) => a.localeCompare(b)).join(', ')]] }
           : n,
       ),
     edges: g.edges.filter((e) => kept.has(e.from) && kept.has(e.to)),
