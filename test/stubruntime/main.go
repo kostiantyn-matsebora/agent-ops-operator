@@ -21,7 +21,7 @@
 //	die             exit without reporting
 //	stall           hold the unit past the idle TTL (never report)
 //	storage-outage  report the context as unreachable — the breaker's input
-//	calls           echo, and report two model turns and one MCP tool call
+//	calls           report two model turns and one MCP tool call, with a fixed result
 //
 // Anything else is `echo`. Identical input, identical report: no clock, no
 // randomness and no pod name reaches a result.
