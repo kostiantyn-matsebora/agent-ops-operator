@@ -393,7 +393,7 @@ class TheEndings(unittest.TestCase):
             d = c.ending(kind, number, cap, thread, waiting)
             with self.subTest(kind=kind, number=number, thread=thread, waiting=waiting):
                 self.assertIn(d.loop_event, ("end:continue", "end:mergeable", "end:stalled", "end:capped"))
-                self.assertEqual(kind in ("landed", "timed out"), d.counted)
+                self.assertEqual(kind not in c.NO_MODEL_RAN, d.counted)
                 if d.counted and number >= cap:
                     self.assertEqual("end:capped", d.loop_event)
                 elif kind == "landed":
@@ -409,10 +409,19 @@ class TheEndings(unittest.TestCase):
             self.assertEqual(("end:stalled", True), (d.loop_event, d.counted))
         self.assertEqual("end:capped", c.ending("timed out", 5, 5).loop_event)
 
-    def test_a_job_in_which_no_model_ran_spends_nothing(self):
-        for kind in ("failed", "no report"):
-            d = c.ending(kind, 5, 5)
-            self.assertEqual((False, "end:stalled"), (d.counted, d.loop_event))
+    def test_a_round_in_which_no_model_ran_spends_nothing(self):
+        for kind in ("failed", "clean"):
+            self.assertFalse(c.ending(kind, 5, 5).counted, kind)
+
+    def test_every_round_that_ran_a_model_counts_and_can_reach_the_cap(self):
+        for kind in ("landed", "timed out", "no report", "disputed", "stale patch", "waiting"):
+            self.assertTrue(c.ending(kind, 1, 5).counted, kind)
+            self.assertEqual("end:capped", c.ending(kind, 5, 5).loop_event, kind)
+
+    def test_a_loop_that_only_disputes_is_bounded_too(self):
+        # a person's answer restarts the loop each time, and the fifth still ends it
+        used = [c.ending("disputed", n, 5) for n in range(1, 6)]
+        self.assertEqual(["end:stalled"] * 4 + ["end:capped"], [d.loop_event for d in used])
 
     def test_an_unknown_ending_is_an_error_not_a_state(self):
         with self.assertRaises(ValueError):

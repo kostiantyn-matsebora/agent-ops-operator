@@ -476,6 +476,7 @@ def guard(vocab: dict, purpose: str, pr: PullRequest, running_rounds: int, unans
 # ---- the endings -----------------------------------------------------------------------------
 
 ENDINGS = ("landed", "clean", "timed out", "failed", "no report", "disputed", "stale patch", "waiting")
+NO_MODEL_RAN = ("clean", "failed")   # the two endings that spent no model: nothing was accepted / the job never started
 
 
 def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_on_person: bool = False) -> Decision:
@@ -483,15 +484,17 @@ def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_
 
     `number` is this round's number and `cap` the current ceiling.
 
-    EVERY ROUND THAT RAN COUNTS. A landed round spent the budget, and so did a
-    round that ran to its time limit (#248: three thirty-minute rounds at
-    "0 of 5"). A round in which no model ran at all, whether the job failed
-    before starting or wrote no report, spent nothing. A counted round that
-    reaches the ceiling ends the loop.
+    EVERY ROUND THAT RAN A MODEL COUNTS, whatever it ended as. A landed round
+    spent the budget, and so did a round that ran to its time limit (#248:
+    three thirty-minute rounds at "0 of 5"), one that disputed everything, one
+    that wrote no report and one whose patch went stale. Only a round in which
+    no model ran spends nothing: a clean one (nothing was accepted, so the
+    fixing job was skipped) and a fixing job that failed before starting. A
+    counted round that reaches the ceiling ends the loop.
     """
     if kind not in ENDINGS:
         raise ValueError(f"unknown ending {kind!r}")
-    counted = kind in ("landed", "timed out")
+    counted = kind not in NO_MODEL_RAN
     if counted and number >= cap:
         return Decision("capped", f"{cap} rounds have run", loop_event="end:capped", counted=True)
     if kind == "landed":

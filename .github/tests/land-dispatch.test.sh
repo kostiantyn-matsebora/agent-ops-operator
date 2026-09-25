@@ -480,6 +480,10 @@ assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "disputes only** — @an-approver"
 assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
 assert_not_contains "$(cat "$GH_CALLS")" "resolveReviewThread"
+# A ROUND THAT RAN A MODEL COUNTS, disputed or not: its marker rides on the summary
+# because no landing comment carries it, so the gate's count of the bound sees it.
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 1 -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 1 of 3"
 
 # ENDING: clean.
 it "labelled: with nothing to do, posts ONE summary saying the pull request is clean"
@@ -500,6 +504,19 @@ out=$(THREAD_CHECK_EXIT=1 WORK="$tmp/none.json" land_all); rc=$?
 assert_status 0 "$rc"
 assert_contains "$out" "a review thread opened since collect ran"
 assert_not_contains "$(loop_label)" "mergeable"
+# STALLED, never left `running`: refresh-loop-state.py skips a label that says a round is in
+# progress, so a clean round held by a thread used to lie until the next round.
+assert_equals "stalled" "$(loop_label)"
+
+it "labelled: a clean round whose only red check is the loop's own guard is stalled and says it waits for a person"
+fresh_repo
+printf '{"consulted":true,"checks":[],"items":[],"waiting":[{"job":"docs-task","reason":"failed only on the loop guard step"}]}' > "$tmp/checks-waiting.json"
+out=$(CHECKS="$tmp/checks-waiting.json" WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "stalled" "$(loop_label)"
+assert_not_contains "$(loop_label)" "mergeable"
+# no model ran: a clean round spends nothing
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
 
 it "labelled: a clean ending, but the thread check CRASHES (not exit 1), withholds mergeable with an accurate reason -- never claims a thread opened it never saw"
 fresh_repo
@@ -529,6 +546,7 @@ assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "stale patch** — @an-approver"
 assert_not_contains "$(cat "$GH_CALLS")" "/replies"
 assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 1 of 3"
 
 # SILENCE AND REFUSAL ARE DIFFERENT FACTS. An item a REAL report simply never
 # names is UNADDRESSED -- worded as such, never folded into "disputed" (which
@@ -575,6 +593,9 @@ assert_not_contains "$(cat "$GH_CALLS")" "/replies"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no report** — @an-approver"
 assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
 assert_equals "stalled" "$(loop_label)"
+# a model ran and wrote nothing: it spent the round
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 1 -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 1 of 3"
 
 # ENDING: the fixing JOB failed -- no model ran. Measured on #220: the action
 # refused a bot-dispatched run, `land` was skipped, and the pull request showed
@@ -590,6 +611,7 @@ assert_not_contains "$(cat "$GH_CALLS")" "/replies"
 assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "fixing step failed** — @an-approver"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no model looked at any item"
+# a job that FAILED never started a model, so it spent nothing and leaves no marker
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
 assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
 assert_not_contains "$(cat "$GH_CALLS")" "conveyor:round"
@@ -599,7 +621,7 @@ assert_equals "stalled" "$(loop_label)"
 # this as `cancelled`, never `failure`, so it needs its own flag rather than
 # reusing --fix-failed and mislabelling a hang as a crash. Measured on #243:
 # the model step sat in_progress for 15+ hours with no bound at all.
-it "labelled: a timed-out fixing job ends the round as 'fixing step timed out', disputing nothing, counting no round, and stalls the loop label"
+it "labelled: a timed-out fixing job ends the round as 'fixing step timed out', disputing nothing, COUNTING the round, and stalls the loop label"
 fresh_repo
 : > "$tmp/empty.patch"
 printf '{"items":[]}' > "$tmp/empty-report.json"
@@ -610,10 +632,39 @@ assert_not_contains "$(cat "$GH_CALLS")" "/replies"
 assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "fixing step timed out** — @an-approver"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "ran past its time limit"
-assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
+# MEASURED ON #248: three thirty-minute rounds, each "0 of 5", the cap never came. A model
+# ran for the whole bound, so the round is counted and its marker rides on the summary.
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 1 -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 1 of 3"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "starts round 2"
 assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
-assert_not_contains "$(cat "$GH_CALLS")" "conveyor:round"
 assert_equals "stalled" "$(loop_label)"
+
+it "labelled: a timed-out round that reaches the bound ends the loop as capped, naming keep-going"
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"}]' > "$GH_COMMENTS"
+out=$(FIX_TIMED_OUT=1 PATCH="$tmp/empty.patch" REPORT="$tmp/empty-report.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 3 -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 3 of 3"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "reaches the bound of 3"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "conveyor:keep-going"
+assert_equals "capped" "$(loop_label)"
+printf '[]' > "$GH_COMMENTS"
+
+it "labelled: a loop that only times out is bounded: rounds 1 and 2 stall it, round 3 (the bound) caps it"
+for n in 1 2 3; do
+  fresh_repo
+  python3 - "$n" > "$GH_COMMENTS" <<'PY'
+import json, sys
+n = int(sys.argv[1]) - 1
+print(json.dumps([{"body": f"<!-- conveyor:round {i} -->", "created_at": "2026-08-29T11:00:00Z"} for i in range(1, n + 1)]))
+PY
+  out=$(FIX_TIMED_OUT=1 PATCH="$tmp/empty.patch" REPORT="$tmp/empty-report.json" land_all)
+  want=$([ "$n" -ge 3 ] && echo capped || echo stalled)
+  assert_equals "$want" "$(loop_label)"
+done
+printf '[]' > "$GH_COMMENTS"
 
 it "labelled: the fixing job failing is not 'no report' -- the two endings are told apart"
 assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no report**"
@@ -638,7 +689,7 @@ out=$(cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" --work
         --approver an-approver --since 2026-08-29T10:00:00Z --max-rounds 3 --sonar "$tmp/sonar.json" \
         --checks "$tmp/checks-none.json" --state-script "$tmp/not-there.py" --push-starts-workflows 2>&1); rc=$?
 assert_status 0 "$rc"
-assert_contains "$out" "::notice::loop state \`stalled\` not recorded"
+assert_contains "$out" "::notice::loop event \`end:stalled\` not recorded"
 assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 
 # MEASURED LIVE ON #233. `land`'s job restores conveyor-state.py to a FLAT
@@ -655,7 +706,7 @@ assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 it "labelled: the state script is called with --vocabulary explicitly, so a COPIED script (the real runtime shape) still finds the label names"
 fresh_repo
 mkdir -p "$tmp/restored"
-cp "$ROOT/.github/scripts/conveyor-state.py" "$tmp/restored/conveyor-state.py"
+cp "$ROOT/.github/scripts/conveyor-state.py" "$ROOT/.github/scripts/conveyor.py" "$tmp/restored/"
 out=$(cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" --work-list "$tmp/work-all.json" \
         --patch "$tmp/empty.patch" --report "$tmp/report-disp.json" --dispatched-by github-actions --mode all \
         --approver an-approver --since 2026-08-29T10:00:00Z --max-rounds 3 --sonar "$tmp/sonar.json" \
