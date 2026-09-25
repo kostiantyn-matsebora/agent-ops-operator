@@ -107,7 +107,7 @@ the topology and the cards read as text where a glance should do.
 
 | Area | Change |
 |---|---|
-| `api/v1alpha1/` | `Icon` on eight kinds, `match` on both Pipeline ref lists with CEL on the operator, `severity` on `SignalProvenance` and `ConversationInputSpec`, regenerated deepcopy and CRDs |
+| `api/v1alpha1/` | `Icon` on nine kinds (eight new, Pipeline moved onto the shared type), `match` on both Pipeline ref lists with CEL on the operator, `severity` on `SignalProvenance` and `ConversationInputSpec`, regenerated deepcopy and CRDs |
 | `internal/httpapi/signals.go` | `severity` on the normalized signal, vocabulary validation, matcher evaluation over the claiming Pipelines and the channel snapshot |
 | `internal/chat/pipelines.go`, `message.go` | matching helper, the signal message's new fields, icon resolution |
 | `internal/dispatch/` | the metadata block in both templates |
