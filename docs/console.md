@@ -436,7 +436,7 @@ status, latency, and what it carried.
 | an op | its message type and body |
 | an adapter report | its delivery report |
 | `model.call` | model, tokens in and out, cache reads, stop reason |
-| `tool.call` | tool, target server, result size |
+| `tool.call` | tool, target server, duration, result size |
 
 **Content is joined from its durable home.** The event carries ids and a
 bounded `data` map, never content.

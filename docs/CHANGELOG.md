@@ -52,7 +52,6 @@ for the source and the reference material beside this file.
 - **The console reads `cronjobs` in its namespace**, read-only, beside its
   existing pod and deployment grant, so the housekeeping CronJob is drawn as a
   component.
-
 - A fourth built-in, risk-split toolset, `agentops-websearch` (`WebSearch`),
   beside `agentops-observe`/`-shell`/`-edit`. The kubernetes bundle's admin
   route (`k8s-operate`) and the home-assistant bundle's ops route (`ha-ops`)

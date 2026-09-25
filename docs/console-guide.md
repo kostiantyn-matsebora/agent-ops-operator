@@ -58,8 +58,10 @@ Six views, one question each.
 
   Click an edge, a pulse or a feed row to see **what crossed** it. Narrow the
   picture to one pipeline's route, or **replay** a past window or one
-  conversation hop by hop. The picture fits the screen, and the navigation,
-  the panels beside the canvas and the charts under it each fold away.
+  conversation hop by hop.
+
+  The picture fits the screen. The navigation, the panels beside the canvas
+  and the charts under it each fold away.
 
   ![The Model view: sources, adapters, three pipelines, profiles, runtimes, toolsets and channels, boxed by the bundle that installs them, with a live hop feed beside the graph listing model and tool calls.]({{ '/assets/img/console/topology-light.png' | relative_url }})
 
