@@ -21,6 +21,7 @@
 //	die             exit without reporting
 //	stall           hold the unit past the idle TTL (never report)
 //	storage-outage  report the context as unreachable — the breaker's input
+//	calls           report two model turns and one MCP tool call, with a fixed result
 //
 // Anything else is `echo`. Identical input, identical report: no clock, no
 // randomness and no pod name reaches a result.
@@ -62,17 +63,47 @@ type unit struct {
 }
 
 type report struct {
-	Convo            string `json:"convo"`
-	RunID            string `json:"runId"`
-	Status           string `json:"status"`
-	ExitCode         *int32 `json:"exitCode,omitempty"`
-	RuntimeContextID string `json:"runtimeContextId,omitempty"`
-	Continuity       string `json:"continuity,omitempty"`
-	ContinuityReason string `json:"continuityReason,omitempty"`
-	Result           string `json:"result,omitempty"`
+	Convo            string     `json:"convo"`
+	RunID            string     `json:"runId"`
+	Status           string     `json:"status"`
+	ExitCode         *int32     `json:"exitCode,omitempty"`
+	RuntimeContextID string     `json:"runtimeContextId,omitempty"`
+	Continuity       string     `json:"continuity,omitempty"`
+	ContinuityReason string     `json:"continuityReason,omitempty"`
+	Result           string     `json:"result,omitempty"`
+	Turns            []turn     `json:"turns,omitempty"`
+	ToolCalls        []toolCall `json:"toolCalls,omitempty"`
 }
 
-var directives = []string{"echo", "fail", "stale-context", "no-context", "die", "stall", "storage-outage"}
+type turn struct {
+	Model           string `json:"model"`
+	TokensIn        int64  `json:"tokensIn"`
+	TokensOut       int64  `json:"tokensOut"`
+	CacheReadTokens int64  `json:"cacheReadTokens"`
+	StopReason      string `json:"stopReason"`
+}
+
+type toolCall struct {
+	Tool        string `json:"tool"`
+	Server      string `json:"server,omitempty"`
+	DurationMs  int64  `json:"durationMs"`
+	ResultBytes int64  `json:"resultBytes"`
+}
+
+// scriptedCalls is what the `calls` directive reports: fixed, so identical
+// input still gives an identical report.
+var scriptedCalls = struct {
+	turns []turn
+	tools []toolCall
+}{
+	turns: []turn{
+		{Model: "stub-model", TokensIn: 120, TokensOut: 12, CacheReadTokens: 0, StopReason: "tool_use"},
+		{Model: "stub-model", TokensIn: 180, TokensOut: 30, CacheReadTokens: 110, StopReason: "end_turn"},
+	},
+	tools: []toolCall{{Tool: "mcp__stub__lookup", Server: "stub", DurationMs: 5, ResultBytes: 64}},
+}
+
+var directives = []string{"echo", "fail", "stale-context", "no-context", "die", "stall", "storage-outage", "calls"}
 
 // input extracts the task text a unit carries: USER_TASK when the manager
 // left rendering to the runtime; else the task the manager's own template
@@ -181,6 +212,11 @@ func perform(u unit) (report, bool) {
 		r.Status, r.ExitCode = "failed", &code
 		r.Continuity, r.ContinuityReason = "unavailable", "context storage unreachable (stub storage-outage)"
 		r.Result = resultPrefix + "context storage unreachable"
+	case "calls":
+		r.Result = resultPrefix + "made two model calls and one tool call"
+		r.Continuity = continuity(handle)
+		r.RuntimeContextID = keep(u.Convo, handle)
+		r.Turns, r.ToolCalls = scriptedCalls.turns, scriptedCalls.tools
 	default: // echo
 		r.Result = resultPrefix + rest
 		r.Continuity = continuity(handle)

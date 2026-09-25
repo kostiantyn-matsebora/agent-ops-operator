@@ -133,3 +133,23 @@ func TestContractLoopAndDie(t *testing.T) {
 		t.Fatalf("poll query: %q", polls[0])
 	}
 }
+
+// The calls directive reports the turns and tool calls the e2e lane asserts
+// the manager turns into hops; every other directive reports none.
+func TestCallsDirectiveReportsTurnsAndToolCalls(t *testing.T) {
+	withHome(t)
+	r, ok := perform(unit{RunID: "r", Convo: "c", PromptVars: map[string]string{"USER_TASK": "calls"}})
+	if !ok || r.Status != "succeeded" || len(r.Turns) != 2 || len(r.ToolCalls) != 1 || r.ToolCalls[0].Server != "stub" {
+		t.Fatalf("calls: %+v", r)
+	}
+	body, _ := json.Marshal(r)
+	var wire map[string]any
+	_ = json.Unmarshal(body, &wire)
+	if _, has := wire["turns"]; !has {
+		t.Fatalf("turns must be on the wire: %s", body)
+	}
+	echo, _ := perform(unit{RunID: "r", Convo: "d", PromptVars: map[string]string{"USER_TASK": "echo hi"}})
+	if echo.Turns != nil || echo.ToolCalls != nil {
+		t.Fatalf("echo reports no calls: %+v", echo)
+	}
+}

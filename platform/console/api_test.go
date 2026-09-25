@@ -545,3 +545,16 @@ func TestDetailReturnsOpaqueConfigUntouched(t *testing.T) {
 		t.Fatalf("YAML view wrong:\n%s", out.YAML)
 	}
 }
+
+// A Pipeline's icon reaches its list row as it reaches the graph and the
+// vocabulary: verbatim, and only where one is declared.
+func TestInventoryPublishesThePipelineIcon(t *testing.T) {
+	iconed := inventoryRow(obj("pipelines", "iconed", "1", `{"profileRef":{"name":"p"},"icon":"aops:kubernetes"}`, "{}"), 0)
+	if iconed.Icon != "aops:kubernetes" {
+		t.Fatalf("icon = %q, want aops:kubernetes", iconed.Icon)
+	}
+	plain := inventoryRow(obj("channels", "plain", "1", `{"adapter":"console"}`, "{}"), 0)
+	if plain.Icon != "" {
+		t.Fatalf("icon = %q, want none on a channel", plain.Icon)
+	}
+}

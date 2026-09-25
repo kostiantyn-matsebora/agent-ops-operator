@@ -1,20 +1,27 @@
 import { useMemo } from 'react'
 import {
-  Alert, Card, CardBody, CardTitle, Label, PageSection, Stack, StackItem, Title,
+  Alert, Card, CardBody, CardTitle, Label, PageSection, Stack, StackItem,
 } from '@patternfly/react-core'
 import { ErrorState, Loading } from '../components/States'
-import { useTopology } from '../api/hooks'
+import { useActivityBuffer, useTopology } from '../api/hooks'
 import { useDisplay } from '../graph/display'
 import { useStream } from '../api/stream'
 import { Graph } from '../graph/Graph'
+import { mergeEvents } from '../graph/hops'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'
 import { HistoryCharts } from './History'
 
 export function TopologyPage() {
   const windowSeconds = useDisplay((s) => s.windowSeconds)
+  const historyOpen = useDisplay((s) => s.historyOpen)
   const { data, isLoading, error } = useTopology(windowSeconds)
   const liveEvents = useStream((s) => s.events)
+  // What the console held when the page opened, then the stream on top: the
+  // window's rates and a replay read the same hops a pulse does.
+  const buffer = useActivityBuffer()
+  const events = useMemo(() => mergeEvents(buffer.data?.events ?? [], liveEvents), [buffer.data, liveEvents])
+  const bufferStart = data?.oldestEvent ? Date.parse(data.oldestEvent) : undefined
 
   // A window longer than the buffer holds is reported as such rather than
   // rendered as a quiet one — "we cannot see that far back" and "nothing
@@ -32,11 +39,9 @@ export function TopologyPage() {
     <>
       <Crumbs items={[{ label: 'Topology' }]} />
       <PageSection>
+      {/* No title under the crumb: the crumb names the page, and every row
+          above the canvas is a row the picture does not get. */}
       <Stack hasGutter>
-        <StackItem>
-          <Title headingLevel="h1">Topology</Title>
-        </StackItem>
-
         {!bufferCovers && (
           <StackItem>
             {/* Two DIFFERENT situations that the same sentence used to describe,
@@ -82,7 +87,7 @@ export function TopologyPage() {
         )}
 
         <StackItem>
-          <Graph topology={data.topology} liveEvents={liveEvents} />
+          <Graph topology={data.topology} events={events} bufferStart={bufferStart} reserveBelow={132} />
         </StackItem>
 
         {(data.unjoinedPipelines ?? []).length > 0 && (
@@ -106,7 +111,11 @@ export function TopologyPage() {
         )}
 
         <StackItem>
-          <HistoryCharts available={data.metricsAvailable} />
+          <HistoryCharts
+            available={data.metricsAvailable}
+            expanded={historyOpen}
+            onToggle={() => useDisplay.getState().setHistoryOpen(!historyOpen)}
+          />
         </StackItem>
       </Stack>
       </PageSection>

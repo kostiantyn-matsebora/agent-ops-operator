@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const baseSystemPrompt = `You are an operations agent running inside a Kubernetes cluster on behalf of agent-ops. ` +
@@ -55,8 +56,16 @@ func failed(code int32, result string) RunResult {
 }
 
 // Run executes one unit end to end. It never panics on a bad unit and never
-// returns an empty result on failure.
+// returns an empty result on failure. Every ending carries the calls the run
+// made before it, a failed one included.
 func (a *Agent) Run(ctx context.Context, u WorkUnit) RunResult {
+	calls := &callLog{}
+	res := a.run(ctx, u, calls)
+	res.Turns, res.ToolCalls = calls.report()
+	return res
+}
+
+func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 	prompt, err := a.resolvePrompt(u)
 	if err != nil {
 		return failed(-1, err.Error())
@@ -151,6 +160,7 @@ func (a *Agent) Run(ctx context.Context, u WorkUnit) RunResult {
 			return RunResult{Status: "failed", ExitCode: 1, RuntimeContextID: t.ID, Continuity: continuity,
 				Result: "inference failed: " + err.Error()}
 		}
+		calls.turn(resp.Usage)
 		turn = append(turn, resp)
 		if len(resp.ToolCalls) == 0 {
 			result := strings.TrimSpace(resp.Content)
@@ -178,7 +188,9 @@ func (a *Agent) Run(ctx context.Context, u WorkUnit) RunResult {
 				args = args[:160] + "…"
 			}
 			fmt.Fprintf(a.Out, "[tool] %s %s\n", name, args)
+			started := time.Now()
 			text, isErr := a.execute(ctx, granted, call)
+			calls.tool(name, time.Since(started), len(text))
 			outcome := "ok"
 			if isErr {
 				outcome = "error"

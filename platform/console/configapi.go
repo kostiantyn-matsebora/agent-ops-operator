@@ -287,6 +287,9 @@ func (a *API) handleKinds(w http.ResponseWriter, r *http.Request) {
 // InventoryRow is one CR in a per-kind listing.
 type InventoryRow struct {
 	Name string `json:"name"`
+	// Icon is a Pipeline's declared icon reference, verbatim, so a list draws
+	// it beside the name as every other mention of the Pipeline does.
+	Icon string `json:"icon,omitempty"`
 	// UID/Created/Labels/Annotations come along because a list is where an
 	// operator scans, and leaving them out sends them to kubectl for facts the
 	// watch cache already holds.
@@ -336,7 +339,7 @@ func (a *API) handleInventory(w http.ResponseWriter, r *http.Request) {
 func inventoryRow(o *Object, findings int) InventoryRow {
 	h, _, _ := health(o)
 	return InventoryRow{
-		Name: o.Metadata.Name, UID: o.Metadata.UID,
+		Name: o.Metadata.Name, Icon: iconOf(o), UID: o.Metadata.UID,
 		Created: o.Metadata.CreationTimestamp,
 		Labels:  o.Metadata.Labels, Annotations: o.Metadata.Annotations,
 		Health: h, Conditions: o.Conditions(), Summary: summaryLine(o),
@@ -353,6 +356,15 @@ func (a *API) InventoryRowFor(kind string, o *Object) InventoryRow {
 		}
 	}
 	return inventoryRow(o, n)
+}
+
+// iconOf is the declared icon reference of an object that carries one — a
+// Pipeline's `spec.icon` — and empty for every other kind.
+func iconOf(o *Object) string {
+	if o.Kind == "pipelines" {
+		return decodeSpec[pipelineSpec](o.Spec).Icon
+	}
+	return ""
 }
 
 // kindColumns is the per-kind column set. Purpose-built on purpose: a Pipeline

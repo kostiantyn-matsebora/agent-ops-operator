@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Button, Card, CardBody, CardTitle, ClipboardCopy,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
@@ -9,7 +9,7 @@ import {
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useParams } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../components/States'
-import { useConversation, useConversationGraph, useMarkRead, useSession, useVocabulary } from '../api/hooks'
+import { useConversation, useConversationGraph, useMarkRead, useSession, useTopology, useVocabulary } from '../api/hooks'
 import { useStream } from '../api/stream'
 import { PlainText, RawText } from '../components/Text'
 import { Markdown } from '../components/Markdown'
@@ -17,8 +17,11 @@ import { Blocks, Fold, agentText } from '../components/Blocks'
 import { parse } from '../api/blocks'
 import { fence } from '../api/fence'
 import { Graph } from '../graph/Graph'
+import { useDisplay } from '../graph/display'
+import { mergeEvents } from '../graph/hops'
 import { api, ApiError } from '../api/client'
 import { Crumbs } from '../components/Crumbs'
+import { PipelineName } from '../components/PipelineName'
 import { ComposerHint } from '../components/ComposerHint'
 import { Icon, stripLeadingIcon } from '../components/Icon'
 import { matchEntries } from './NewConversation'
@@ -778,19 +781,30 @@ function RunTimeline({ detail }: { detail: NonNullable<ReturnType<typeof useConv
 }
 
 function ConversationGraphTab({ name }: { name: string }) {
+  // The drift report reads the bindings this conversation MATERIALIZED; the
+  // picture is the install's own graph, opened on this conversation's replay,
+  // so every view dims what its run did not touch.
   const { data, isLoading, error } = useConversationGraph(name)
-  if (isLoading && !data) return <Loading />
+  const windowSeconds = useDisplay((s) => s.windowSeconds)
+  const topology = useTopology(windowSeconds)
+  const live = useStream((s) => s.events)
+  const events = useMemo(() => mergeEvents(data?.events ?? [], live), [data?.events, live])
+  if ((isLoading && !data) || (topology.isLoading && !topology.data)) return <Loading />
   if (error || !data) return <ErrorState title="Could not build the graph">{String(error)}</ErrorState>
+  if (topology.error || !topology.data) {
+    return <ErrorState title="Could not load the topology">{String(topology.error)}</ErrorState>
+  }
+  const oldest = topology.data.oldestEvent
   return (
     <Stack hasGutter>
       {data.diverged && (
         <StackItem>
-          {/* The graph shows what the run ACTUALLY had. Reading the live
+          {/* The run's bindings are what it ACTUALLY had. Reading the live
               pipeline instead would silently rewrite history, and the forensic
               value of this view is precisely that it does not. */}
           <Alert variant="info" isInline title="The pipeline has been re-wired since this ran">
-            This graph shows the bindings this conversation materialized, not{' '}
-            <PlainText>{data.pipeline}</PlainText>'s current wiring.
+            This conversation materialized different bindings from{' '}
+            <PipelineName name={data.pipeline ?? 'the pipeline'} />'s current wiring, which the graph below draws.
             <ul>
               {(data.drift ?? []).map((d, i) => (
                 <li key={i}>
@@ -803,8 +817,10 @@ function ConversationGraphTab({ name }: { name: string }) {
       )}
       <StackItem>
         <Graph
-          topology={data}
-          liveEvents={data.events ?? []}
+          topology={topology.data.topology}
+          events={events}
+          bufferStart={oldest ? Date.parse(oldest) : undefined}
+          conversation={name}
           emptyMessage="This conversation involved no elements the Display panel is showing."
         />
       </StackItem>

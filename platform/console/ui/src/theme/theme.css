@@ -193,3 +193,18 @@ body {
   color: var(--ao-code-comment);
   font-style: italic;
 }
+
+/* The navigation folded to its icons. The page's grid reads the sidebar width
+   from this variable, so it is set on the page, never on the sidebar itself —
+   set there, the column keeps its width and only the contents shrink. */
+.pf-v6-c-page.ao-nav-collapsed {
+  --pf-v6-c-page__sidebar--Width: 4.25rem;
+}
+
+.ao-nav-collapsed .pf-v6-c-nav__link {
+  justify-content: center;
+}
+
+.ao-nav-collapsed .pf-v6-c-nav__link-icon {
+  margin-inline-end: 0;
+}

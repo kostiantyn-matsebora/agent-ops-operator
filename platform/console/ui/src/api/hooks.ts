@@ -160,8 +160,23 @@ export function useReopenConversation() {
   })
 }
 
-export function useConversation(name: string) {
-  return useQuery({ queryKey: ['conversation', name], queryFn: () => api.conversation(name) })
+export function useConversation(name: string, enabled = true) {
+  return useQuery({ queryKey: ['conversation', name], queryFn: () => api.conversation(name), enabled })
+}
+
+/**
+ * Everything the console's activity window holds, oldest first — FIRST LOAD.
+ * The stream appends to it from then on, so it is never re-read to observe a
+ * change; a replay reaching further back than it is told so rather than shown
+ * quiet.
+ */
+export function useActivityBuffer() {
+  return useQuery({
+    queryKey: ['activity'],
+    queryFn: () => api.activity(),
+    staleTime: Infinity,
+    retry: false,
+  })
 }
 
 export function useConversationGraph(name: string) {
@@ -178,6 +193,17 @@ export function useSources() {
 /** The Pipelines a message can address — Ready only, exactly like `/agents`. */
 export function useVocabulary() {
   return useQuery({ queryKey: ['vocabulary'], queryFn: api.vocabulary })
+}
+
+/**
+ * A Pipeline's declared icon, by name, from the vocabulary — which is fetched
+ * once and shared, so every mention of a Pipeline draws the same icon at no
+ * extra cost. Undefined for a name the vocabulary does not list.
+ */
+export function usePipelineIcon(): (name?: string) => string | undefined {
+  const vocabulary = useVocabulary()
+  return (name?: string) =>
+    name ? vocabulary.data?.entries.find((e) => e.kind === 'pipeline' && e.name === name)?.icon : undefined
 }
 
 /** Which historical charts the backend can answer, and whether one exists. */

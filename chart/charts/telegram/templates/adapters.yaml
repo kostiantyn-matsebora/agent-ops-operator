@@ -14,6 +14,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: {{ printf "%s:%s" $ca.image.repository (toString $ca.image.tag) | quote }}
   # Receives forwarded topic updates: the reconciler owns Service
@@ -24,6 +25,12 @@ spec:
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
+  # Metadata only: what this implementation faces outside the install. The
+  # manager verifies none of it and grants nothing from it.
+  # The router polls the same API, but it is no adapter and declares nothing.
+  externals:
+    - name: Telegram Bot API
+      kind: api
   # Interface metadata: makes `kubectl get channeladapter` answer "what goes in
   # spec.config?" without reading adapter source. Advisory — the manager
   # reports ConfigValid, the adapter stays the authority.
@@ -70,6 +77,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: {{ printf "%s:%s" $sa.image.repository (toString $sa.image.tag) | quote }}
   # Receives forwarded general-surface updates.

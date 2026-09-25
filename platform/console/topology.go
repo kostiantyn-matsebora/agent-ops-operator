@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type pipelineSpec struct {
 	SignalSourceRefs []Ref  `json:"signalSourceRefs,omitempty"`
 	ChannelRefs      []Ref  `json:"channelRefs,omitempty"`
 	ProfileRef       Ref    `json:"profileRef"`
+	RuntimeRef       *Ref   `json:"runtimeRef,omitempty"`
 	Toolsets         *struct {
 		Mode string `json:"mode,omitempty"`
 		Refs []Ref  `json:"refs,omitempty"`
@@ -40,6 +42,33 @@ type pipelineSpec struct {
 // as the graph cares: which adapter implementation serves it.
 type servedSpec struct {
 	Adapter string `json:"adapter,omitempty"`
+}
+
+// adapterSpec is the console's read of ChannelAdapter.spec and
+// SignalAdapter.spec: the implementation's image, whose process serves it,
+// and the systems outside the install it declares it faces.
+type adapterSpec struct {
+	Image    string `json:"image,omitempty"`
+	ServedBy *struct {
+		Kind string `json:"kind"`
+		Name string `json:"name"`
+	} `json:"servedBy,omitempty"`
+	Externals []ExternalRef `json:"externals,omitempty"`
+}
+
+// ExternalRef is one system outside the install an adapter declares it faces,
+// VERBATIM from the adapter CR. Metadata: nothing is verified or granted from
+// it, and an adapter declaring none is drawn facing nothing.
+type ExternalRef struct {
+	Name string `json:"name"`
+	// Kind is sender (pushes to the adapter), api (called by the adapter) or
+	// kubernetes (the cluster's own API).
+	Kind string `json:"kind"`
+}
+
+// runtimeSpec is the console's read of AgentRuntime.spec.
+type runtimeSpec struct {
+	Image string `json:"image,omitempty"`
 }
 
 // profileSpec is the console's read of AgentProfile.spec (identity only —
@@ -109,13 +138,36 @@ type Node struct {
 	// Active/Recent are live conversation counts, set for pipeline nodes.
 	Active int `json:"active"`
 	Recent int `json:"recent"`
+
+	// Icon is a Pipeline's declared icon reference, verbatim: the graph draws
+	// it in the pipeline's mark, as the list draws it beside the name.
+	Icon string `json:"icon,omitempty"`
+	// Bundle is the chart bundle that installs the object, read from its
+	// `helm.sh/chart` label with the version dropped. Empty for the parent
+	// chart's shared substrate and for anything applied by hand.
+	Bundle string `json:"bundle,omitempty"`
+	// Image is the implementation's image: an adapter's or a runtime's spec.
+	Image string `json:"image,omitempty"`
+	// Harness and Vendor are set on runtimes whose image is one this
+	// repository builds. A derived image is not guessed at.
+	Harness string `json:"harness,omitempty"`
+	Vendor  string `json:"vendor,omitempty"`
+	// Externals is an adapter's declared externals, verbatim.
+	Externals []ExternalRef `json:"externals,omitempty"`
+	// ServedBy names the adapter node whose process serves this one.
+	ServedBy string `json:"servedBy,omitempty"`
+	// Phase is a conversation's status.phase.
+	Phase string `json:"phase,omitempty"`
+	// RuntimePod is a conversation's current pod, as a pod id.
+	RuntimePod string `json:"runtimePod,omitempty"`
 }
 
 // Edge is one directed wiring reference.
 type Edge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
-	// Kind labels why the edge exists: feeds | answers | posts | served-by | uses.
+	// Kind labels why the edge exists. Model: feeds | answers | posts |
+	// served-by | uses | runs-on | opened. Components: sends | calls.
 	Kind string `json:"kind"`
 	// Dangling marks a reference to an object that does not exist — drawn as a
 	// broken edge to a placeholder rather than silently omitted.
@@ -152,6 +204,21 @@ type Topology struct {
 	// served rather than hardcoded in the SPA because the manager owns the
 	// vocabulary and this is the one place the two meet.
 	EventNodeKinds map[string]string `json:"eventNodeKinds"`
+
+	// Components are the facts the Components view is drawn from: one per
+	// component the repository builds, plus the systems outside. Their ids
+	// are `<activity node kind>/<name>` wherever the activity vocabulary names
+	// one, so a hop's endpoint IS a component id with no translation.
+	Components []Component `json:"components"`
+	// ComponentEdges are the component relationships DECLARED somewhere:
+	// an adapter and the externals it faces. Architecture edges (the manager
+	// to its adapters, the pod's sidecars) are the view's to draw.
+	ComponentEdges []Edge `json:"componentEdges"`
+	// Pods are the facts the Infrastructure view is drawn from.
+	Pods []Pod `json:"pods"`
+	// Hops is every windowed hop, in the activity vocabulary, so each view
+	// credits traffic with the same mapping it animates a live hop with.
+	Hops []EdgeStat `json:"hops"`
 }
 
 // eventNodeKinds translates an activity event's node kind to a resource plural.
@@ -168,25 +235,27 @@ var eventNodeKinds = map[string]string{
 	"channel-adapter": "channeladapters",
 	"toolset":         "mcptoolsets",
 	"mcp-config":      "mcpconfigs",
+	"conversation":    "conversations",
 }
 
-// applyTraffic attaches windowed edge stats to the graph.
+// applyTraffic attaches windowed edge stats to the graph, serves them raw for
+// the views drawn in the browser, and adds the components only a hop names.
 //
-// A hop is not always ONE drawn edge, and this is where that is reconciled.
-// Three mismatches would otherwise leave most of the flow invisible — which is
-// exactly what a first look at the live graph showed, with only
+// A hop is not always the drawn edge it names, and this is where that is
+// reconciled. Two mismatches would otherwise leave most of the flow invisible —
+// which is exactly what a first look at the live graph showed, with only
 // source -> pipeline animating while everything else moved in silence:
 //
 //  1. DIRECTION. A signal travels adapter -> source; the graph draws that
 //     relationship as source -> adapter (`served-by`). Traffic on an edge means
 //     "these two exchanged something", so matching is UNDIRECTED.
-//  2. PATHS. A run is one hop pipeline -> runtime, but the wiring reaches the
-//     runtime through the profile (pipeline -answers-> profile -uses-> runtime).
-//     One hop lights both edges, because the work crossed both.
-//  3. NON-WIRING ENDPOINTS. Ops and inbound messages name a CONVERSATION, which
-//     the wiring graph has no node for. The conversation is attributed to its
-//     pipeline and the hop is credited to that pipeline's edge — the movement
-//     is real and it did cross that edge.
+//  2. CONVERSATION ENDPOINTS. Ops and inbound messages name a CONVERSATION,
+//     which has no edge to a channel or an adapter. The conversation is
+//     attributed to its pipeline and the hop is credited to that pipeline's
+//     edge — the movement is real and it did cross that edge.
+//
+// A run needs no reconciling any more: the runtime edge is drawn from the
+// Pipeline, which is where the run hop starts.
 //
 // What is still credited to nothing: hops whose endpoints resolve to no wiring
 // pair at all. Those belong to the per-conversation view, and inventing an edge
@@ -231,7 +300,9 @@ func (a *API) applyTraffic(t *Topology, stats []EdgeStat, window time.Duration) 
 	for i := range stats {
 		s := &stats[i]
 		for _, pair := range a.wiringPairs(s.From, s.To) {
-			link(pair[0], pair[1], s)
+			if link(pair[0], pair[1], s) {
+				break
+			}
 		}
 	}
 
@@ -242,37 +313,37 @@ func (a *API) applyTraffic(t *Topology, stats []EdgeStat, window time.Duration) 
 	}
 	t.WindowSeconds = window.Seconds()
 	t.EventNodeKinds = eventNodeKinds
+	t.Hops = stats
+	if t.Hops == nil {
+		t.Hops = []EdgeStat{}
+	}
+	addObservedComponents(t, stats)
 }
 
-// wiringPairs resolves one hop's endpoints into the wiring node pairs it
-// crossed. Empty when the hop belongs to no drawn edge.
+// wiringPairs resolves one hop's endpoints into the wiring node pairs it may
+// have crossed, most direct first. The caller credits the first one drawn.
 func (a *API) wiringPairs(from, to NodeRef) [][2]string {
 	fromID, fromOK := a.wiringNode(from)
 	toID, toOK := a.wiringNode(to)
 
-	// A run reaches its runtime THROUGH the profile, so a pipeline<->runtime hop
-	// lights both legs of that path.
+	var out [][2]string
 	if fromOK && toOK {
-		if pair := a.expandRunPath(fromID, toID); pair != nil {
-			return pair
-		}
-		return [][2]string{{fromID, toID}}
+		out = append(out, [2]string{fromID, toID})
 	}
-
-	// One endpoint is a conversation (ops, inbound). Credit its pipeline: that
-	// is the wiring the movement travelled, and the conversation view shows the
-	// per-conversation detail.
+	// One endpoint is a conversation (ops, inbound) with no edge of its own to
+	// the other. Credit its pipeline: that is the wiring the movement
+	// travelled, and the conversation view shows the per-conversation detail.
 	if fromOK && to.Kind == "conversation" {
 		if p := a.pipelineOfConversation(to.Name); p != "" {
-			return [][2]string{{fromID, nodeID("pipelines", p)}}
+			out = append(out, [2]string{fromID, nodeID("pipelines", p)})
 		}
 	}
 	if toOK && from.Kind == "conversation" {
 		if p := a.pipelineOfConversation(from.Name); p != "" {
-			return [][2]string{{nodeID("pipelines", p), toID}}
+			out = append(out, [2]string{nodeID("pipelines", p), toID})
 		}
 	}
-	return nil
+	return out
 }
 
 // wiringNode maps an activity node reference to a graph node id.
@@ -282,30 +353,6 @@ func (a *API) wiringNode(n NodeRef) (string, bool) {
 		return "", false
 	}
 	return nodeID(kind, n.Name), true
-}
-
-// expandRunPath turns a pipeline<->runtime hop into the two edges the wiring
-// actually connects them with.
-func (a *API) expandRunPath(fromID, toID string) [][2]string {
-	pipelineID, runtimeID := fromID, toID
-	if strings.HasPrefix(toID, "pipelines/") {
-		pipelineID, runtimeID = toID, fromID
-	}
-	if !strings.HasPrefix(pipelineID, "pipelines/") || !strings.HasPrefix(runtimeID, "agentruntimes/") {
-		return nil
-	}
-	p := a.cache.Get("pipelines", strings.TrimPrefix(pipelineID, "pipelines/"))
-	if p == nil {
-		return nil
-	}
-	profile := decodeSpec[pipelineSpec](p.Spec).ProfileRef.Name
-	if profile == "" {
-		return nil
-	}
-	return [][2]string{
-		{pipelineID, nodeID("agentprofiles", profile)},
-		{nodeID("agentprofiles", profile), runtimeID},
-	}
 }
 
 // pipelineOfConversation attributes a conversation, cached per request-ish by
@@ -345,10 +392,66 @@ func health(obj *Object) (Health, string, string) {
 
 func newNode(obj *Object) Node {
 	h, reason, msg := health(obj)
-	return Node{
+	n := Node{
 		ID: nodeID(obj.Kind, obj.Metadata.Name), Kind: obj.Kind, Name: obj.Metadata.Name,
-		Health: h, Reason: reason, Message: msg,
+		Health: h, Reason: reason, Message: msg, Bundle: bundleOf(obj),
 	}
+	switch obj.Kind {
+	case "pipelines":
+		n.Icon = iconOf(obj)
+	case "channeladapters", "signaladapters":
+		spec := decodeSpec[adapterSpec](obj.Spec)
+		n.Image, n.Externals = spec.Image, spec.Externals
+		if spec.ServedBy != nil && spec.ServedBy.Name != "" {
+			n.ServedBy = nodeID("channeladapters", spec.ServedBy.Name)
+		}
+	case "agentruntimes":
+		n.Image = decodeSpec[runtimeSpec](obj.Spec).Image
+		n.Harness, n.Vendor = runtimeFacts(n.Image)
+	case "conversations":
+		v := conversationView(obj)
+		n.Phase = v.Status.Phase
+		if v.Status.RuntimePod != "" {
+			n.RuntimePod = nodeID("pods", v.Status.RuntimePod)
+		}
+	}
+	return n
+}
+
+// chartLabel is Helm's own label naming the chart, and version, that rendered
+// an object. The chart stamps it on every CR a bundle renders.
+const chartLabel = "helm.sh/chart"
+
+var chartVersion = regexp.MustCompile(`-v?[0-9]+\.[0-9]+\.[0-9]+.*$`)
+
+// bundleOf reads the bundle that installed an object from its Helm label.
+func bundleOf(obj *Object) string {
+	return chartVersion.ReplaceAllString(obj.Metadata.Labels[chartLabel], "")
+}
+
+// knownRuntimes are the runtime images this repository builds, keyed by the
+// image's last path segment. A derived image matches nothing and is shown
+// with no harness and no vendor rather than a guessed one.
+var knownRuntimes = map[string][2]string{
+	"agentops-runtime-claude":  {"Claude Code", "Anthropic"},
+	"agentops-runtime-ollama":  {"agent-ops", "Ollama"},
+	"agentops-runtime-copilot": {"Copilot SDK", "GitHub"},
+}
+
+// runtimeFacts names the harness and vendor of a runtime image.
+func runtimeFacts(image string) (harness, vendor string) {
+	repo := image
+	if at := strings.IndexByte(repo, '@'); at >= 0 {
+		repo = repo[:at]
+	}
+	if slash := strings.LastIndexByte(repo, '/'); slash >= 0 {
+		repo = repo[slash+1:]
+	}
+	if colon := strings.IndexByte(repo, ':'); colon >= 0 {
+		repo = repo[:colon]
+	}
+	f := knownRuntimes[repo]
+	return f[0], f[1]
 }
 
 // missingNode stands in for a reference that resolves to nothing, so a typo in
@@ -390,13 +493,14 @@ func BuildTopology(c *Cache) Topology {
 		return false
 	}
 
-	// ALL NINE KINDS, not just the wiring spine. "What can this agent actually
+	// ALL TEN KINDS, not just the wiring spine. "What can this agent actually
 	// reach" is a question about MCPToolsets, MCPConfigs and AgentRuntimes, so
 	// they are on the graph and the Display panel folds them away — rather than
 	// being absent and unfoldable.
 	for _, kind := range []string{
 		"signalsources", "channels", "agentprofiles", "agentruntimes",
 		"pipelines", "channeladapters", "signaladapters", "mcptoolsets", "mcpconfigs",
+		"conversations",
 	} {
 		for _, obj := range c.List(kind) {
 			add(obj)
@@ -455,25 +559,21 @@ func BuildTopology(c *Cache) Topology {
 				edges = append(edges, Edge{From: pid, To: nodeID("mcpconfigs", ref.Name), Kind: "uses", Dangling: !exists})
 			}
 		}
+		// pipeline → runtime: what EXECUTES the route. Execution is wiring, so
+		// the edge starts at the Pipeline and never at the profile.
+		if name := pipelineRuntime(c, spec); name != "" {
+			exists := reference("agentruntimes", name)
+			edges = append(edges, Edge{From: pid, To: nodeID("agentruntimes", name), Kind: "runs-on", Dangling: !exists})
+		}
 	}
 
-	// profile → runtime: what EXECUTES the agent. Runtime selection stays on the
-	// profile (a Pipeline choosing a ServiceAccount would make pipeline-edit
-	// rights a privilege escalation), so the edge starts at the profile.
-	for _, obj := range c.List("agentprofiles") {
-		spec := decodeSpec[profileSpec](obj.Spec)
-		name := spec.RuntimeRef.Name
-		if name == "" {
-			if c.Get("agentruntimes", "default") == nil {
-				continue // falls back to bootstrap config: no node to point at
-			}
-			name = "default"
+	// pipeline → conversation: what each route opened. A conversation no
+	// pipeline can be attributed to stands alone rather than on a guess.
+	pipelines := c.List("pipelines")
+	for _, conv := range c.List("conversations") {
+		if p := AttributePipeline(conv, pipelines); p != "" {
+			edges = append(edges, Edge{From: nodeID("pipelines", p), To: nodeID("conversations", conv.Metadata.Name), Kind: "opened"})
 		}
-		exists := reference("agentruntimes", name)
-		edges = append(edges, Edge{
-			From: nodeID("agentprofiles", obj.Metadata.Name), To: nodeID("agentruntimes", name),
-			Kind: "uses", Dangling: !exists,
-		})
 	}
 
 	// live activity per pipeline
@@ -500,13 +600,38 @@ func BuildTopology(c *Cache) Topology {
 		}
 		return out[i].Name < out[j].Name
 	})
+	sortEdges(edges)
+	t := Topology{Nodes: out, Edges: edges, Hops: []EdgeStat{}}
+	buildComponents(c, &t)
+	return t
+}
+
+func sortEdges(edges []Edge) {
 	sort.Slice(edges, func(i, j int) bool {
 		if edges[i].From != edges[j].From {
 			return edges[i].From < edges[j].From
 		}
 		return edges[i].To < edges[j].To
 	})
-	return Topology{Nodes: out, Edges: edges}
+}
+
+// pipelineRuntime names the runtime a Pipeline runs on, by the manager's own
+// chain: the Pipeline's ref, then the profile's deprecated one, then
+// `default` when it exists. Empty means the bootstrap fallback, which has no
+// node to point at.
+func pipelineRuntime(c *Cache, spec pipelineSpec) string {
+	if spec.RuntimeRef != nil && spec.RuntimeRef.Name != "" {
+		return spec.RuntimeRef.Name
+	}
+	if p := c.Get("agentprofiles", spec.ProfileRef.Name); p != nil {
+		if name := decodeSpec[profileSpec](p.Spec).RuntimeRef.Name; name != "" {
+			return name
+		}
+	}
+	if c.Get("agentruntimes", "default") != nil {
+		return "default"
+	}
+	return ""
 }
 
 type activityCount struct{ active, recent int }

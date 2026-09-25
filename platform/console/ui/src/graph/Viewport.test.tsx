@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Viewport } from './Viewport'
+import { Viewport, aspectHeight } from './Viewport'
 
 // The fit contract. The defect this pins: a graph rendered inside a container
 // that is in the DOM but not displayed — an inactive tab — measured a 0x0 host,
@@ -122,5 +122,46 @@ describe('Viewport fitting', () => {
     // ...and the fit control gives fitting back on demand
     await userEvent.click(screen.getByLabelText('fit to view'))
     expect(canvas()).toBe('translate(12,106) scale(0.94)')
+  })
+
+  it('fits a picture that does not start at the origin, as a layout centred on zero does', () => {
+    measuring(800, 400)
+    render(
+      <Viewport contentX={-200} contentY={-100} contentWidth={400} contentHeight={200}>
+        <rect />
+      </Viewport>,
+    )
+    // the picture's own middle lands in the host's middle
+    expect(canvas()).toBe('translate(400,200) scale(1)')
+  })
+})
+
+describe('Viewport aspect', () => {
+  it('takes the picture\'s aspect, bounded, so the fit is bound by width', () => {
+    // a wide picture on a wide host is short, never below the floor
+    expect(aspectHeight(1000, 800, 200)).toBe(520)
+    // a tall one is tall, never past the window
+    expect(aspectHeight(1000, 400, 400)).toBe(Math.max(600, window.innerHeight - 160))
+    // in between, width times the picture's aspect
+    expect(aspectHeight(1000, 1000, 480)).toBe(580)
+    // never over what the viewport has left, whatever the picture wants
+    expect(aspectHeight(1000, 400, 400, 500)).toBe(500)
+    expect(aspectHeight(1000, 800, 200, 400)).toBe(400)
+  })
+
+  it('sizes the canvas from its width when asked', () => {
+    measuring(1000, 400)
+    render(
+      <Viewport contentWidth={1000} contentHeight={480} aspect>
+        <rect />
+      </Viewport>,
+    )
+    expect(screen.getByTestId('graph-viewport').style.height).toBe('580px')
+  })
+
+  it('keeps the fixed canvas when not asked', () => {
+    measuring(1000, 400)
+    draw()
+    expect(screen.getByTestId('graph-viewport').style.height).toBe('68vh')
   })
 })

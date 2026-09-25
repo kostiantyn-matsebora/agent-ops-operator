@@ -15,9 +15,9 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | [MCPToolset](#mcptoolset) | yes | 1 |
 | [MCPConfig](#mcpconfig) | yes | 5 |
 | [SignalSource](#signalsource) | yes | 8 |
-| [SignalAdapter](#signaladapter) | yes | 18 |
+| [SignalAdapter](#signaladapter) | yes | 21 |
 | [Channel](#channel) | yes | 4 |
-| [ChannelAdapter](#channeladapter) | yes | 16 |
+| [ChannelAdapter](#channeladapter) | yes | 19 |
 | [AgentRuntime](#agentruntime) | yes | 46 |
 | [Conversation](#conversation) | no — the operator does | 40 |
 | [ConversationInput](#conversationinput) | no — the operator does | 5 |
@@ -226,6 +226,9 @@ SignalAdapterSpec declares a signal-type IMPLEMENTATION — nothing more. The CR
 | `credentialKeys[].description` | `string` |  | Description of what this key holds. Documentation only -- the manager reads no Secrets. |
 | `credentialKeys[].key` | `string` | **yes** | Key is the Secret key (projected as env <credentialEnvPrefix><KEY>). |
 | `credentialKeys[].required` | `boolean` |  | Required marks a key the implementation cannot work without. |
+| `externals` | `[]object` |  | Externals names the systems outside the install this implementation faces. Interface metadata like CredentialKeys: the manager reads no config to verify it and grants nothing from it. An adapter declaring none is drawn with no external, which is a normal answer. |
+| `externals[].kind` | `string` | **yes** | Kind is how the adapter meets it: `sender` pushes to the adapter, `api` is called by the adapter, `kubernetes` is the cluster's own API. |
+| `externals[].name` | `string` | **yes** | Name is the system as a reader knows it: "Alertmanager", "Telegram Bot API", "Kubernetes API". |
 | `image` | `string` |  | Image implementing the signal adapter contract. Required UNLESS servedBy names the workload that already serves this identity. |
 | `port` | `integer` |  | Port the image's own HTTP surface listens on (webhook-receiving implementations). When set, the reconciler owns a Service agentops-signal-<name> targeting it and injects LISTEN_ADDR — enabling the adapter is a complete appliance. Unset = no inbound surface (e.g. cron). |
 | `resources` | `object` |  | ResourceRequirements describes the compute resource requirements. |
@@ -296,6 +299,9 @@ ChannelAdapterSpec declares a channel-type IMPLEMENTATION — nothing more. The 
 | `credentialKeys[].key` | `string` | **yes** | Key is the Secret key (projected as env <credentialEnvPrefix><KEY>). |
 | `credentialKeys[].required` | `boolean` |  | Required marks a key the implementation cannot work without. |
 | `echoesOwnMessages` | `boolean` |  | EchoesOwnMessages says whether this transport shows a person the message they just typed on it. INTERFACE METADATA, like configSchema: it holds no configuration and grants nothing — it states one fact about the implementation that only the implementation knows. It is what makes the delivery rule per DESTINATION. A message is delivered to every bound channel except the surface that DISPLAYED it, and displaying is a property of the transport: a chat app puts your own message in your thread, a viewer that renders only what it is sent does not — so withholding it there is how a console user's own question went missing from the transcript it started. Defaults to TRUE, which is the conservative reading: an adapter that has not been asked keeps today's behaviour, and nobody sees their own message twice. A viewer sets it false. |
+| `externals` | `[]object` |  | Externals names the systems outside the install this implementation faces. Interface metadata like CredentialKeys: the manager reads no config to verify it and grants nothing from it. An adapter declaring none is drawn with no external, which is a normal answer. |
+| `externals[].kind` | `string` | **yes** | Kind is how the adapter meets it: `sender` pushes to the adapter, `api` is called by the adapter, `kubernetes` is the cluster's own API. |
+| `externals[].name` | `string` | **yes** | Name is the system as a reader knows it: "Alertmanager", "Telegram Bot API", "Kubernetes API". |
 | `image` | `string` | **yes** | Image implementing the adapter contract. |
 | `port` | `integer` |  | Port the image's own HTTP surface listens on (implementations that are PUSHED to rather than polling — e.g. a channel adapter receiving updates forwarded by an ingest router). When set, the reconciler owns a Service agentops-adapter-<name> targeting it and injects LISTEN_ADDR, so enabling the adapter is a complete appliance and the chart ships no connectivity. Unset = no inbound surface. Identical semantics to SignalAdapter.port. |
 | `resources` | `object` |  | ResourceRequirements describes the compute resource requirements. |

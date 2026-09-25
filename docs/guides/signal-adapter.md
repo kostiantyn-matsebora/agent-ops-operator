@@ -167,7 +167,7 @@ architectural error, not merely a noisy one.
 
 ## Declare the SignalAdapter
 
-<!-- generated: template kind=SignalAdapter name=my-signals fields=image,port,serviceAccountName,configSchema,credentialKeys comments=off -->
+<!-- generated: template kind=SignalAdapter name=my-signals fields=image,port,serviceAccountName,configSchema,credentialKeys,externals comments=off -->
 ```yaml
 apiVersion: agentops.dev/v1alpha1
 kind: SignalAdapter
@@ -180,6 +180,9 @@ spec:
   configSchema: {}
   credentialKeys:
   - key: <key>
+  externals:
+  - kind: sender   # sender | api | kubernetes
+    name: <name>
 ```
 <!-- /generated -->
 
@@ -190,6 +193,12 @@ reconciler then owns the Service `agentops-signal-<name>` and injects
 `configSchema` and `credentialKeys` are interface metadata, and they are worth
 filling in. They let an operator learn what your `config` needs without reading
 your source.
+
+`externals` is interface metadata too. It names each system outside the install
+your implementation faces, with a `kind` of `sender`, `api` or `kubernetes`.
+
+The console's topology draws each one beside your adapter. **It grants
+nothing**: no RBAC, no network policy and no credential follows from it.
 
 {: .ao-callout}
 > **`serviceAccountName` is a reference, and naming one mounts its token.** No

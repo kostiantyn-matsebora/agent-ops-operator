@@ -255,6 +255,7 @@ func TestResourcePathsCoverBothAPIRoots(t *testing.T) {
 		"conversations": "/apis/agentops.dev/v1alpha1/namespaces/agent-ops/conversations",
 		"deployments":   "/apis/apps/v1/namespaces/agent-ops/deployments",
 		"pods":          "/api/v1/namespaces/agent-ops/pods",
+		"cronjobs":      "/apis/batch/v1/namespaces/agent-ops/cronjobs",
 	}
 	for kind, want := range cases {
 		if got := k.resourcePath(kind); got != want {

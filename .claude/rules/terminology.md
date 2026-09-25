@@ -255,6 +255,27 @@ thing wearing it would make every sentence about either ambiguous.
   hardlinks into the previous generation.
 
 
+### The topology's three VIEWS, never "lanes"
+
+**The console's Topology is Model, Components and Infrastructure**, three views
+of ONE activity feed. The six-lane column graph is gone, and "lane" names no
+part of it.
+
+| View | A node is |
+|---|---|
+| Model | a declared CR |
+| Components | a component the repository builds, or a system outside |
+| Infrastructure | a pod, or a system outside |
+
+- **A VIEW is a node identity, not a filter.** The same hop moves an edge on
+  all three.
+- **The SPINE is the one class a view cannot hide**: pipelines, the manager,
+  the manager's pod.
+- **A BOX is ownership, never kind**: bundle or route on Model, cluster node
+  on Infrastructure, none on Components.
+- **"Lane" keeps its other meaning.** An ingest lane is still a SignalSource,
+  and the chat lane is still the chat lane.
+
 ### API group
 
 **`agentops.dev/v1alpha1`.** Provisional — a rename is possible pre-1.0.

@@ -359,6 +359,39 @@ then sat at `Wired=False`.
 **What makes `servedBy` legitimate** is that an externally-served source
 **originates real conversations for a Pipeline that claims it**.
 
+### Interface metadata: `configSchema`, `credentialKeys`, `externals`
+
+Both adapter kinds may declare three facts about their IMPLEMENTATION. None of
+them is configuration, and none grants anything.
+
+| Field | Declares | Read by |
+|---|---|---|
+| `spec.configSchema` | a JSON Schema for the `config` of the Channels or SignalSources it serves | the reconciler, which reports `SchemaValid` and, on each served CR, an advisory `ConfigValid` — see [contracts](contracts.md#discovering-what-config-needs) |
+| `spec.credentialKeys[]` | the Secret keys it expects in a served CR's `credentialsSecretRef` | people. The manager reads no Secrets, so it can never verify them |
+| `spec.externals[]` | each system outside the install the implementation faces, as a `name` and a `kind` | the console's topology, which draws each one beside the adapter, verbatim |
+
+**`externals[].kind` is a closed set**, enforced by the API server:
+
+| `kind` | The adapter meets it as |
+|---|---|
+| `sender` | a system that pushes to the adapter — Alertmanager, a browser |
+| `api` | a system the adapter calls — the Telegram Bot API |
+| `kubernetes` | the cluster's own API |
+
+`name` is the system as a reader knows it, 1 to 63 characters, and unique
+within the list.
+
+**`externals` is metadata only, and nothing verifies it.**
+
+- **It grants nothing.** No RBAC, no network policy and no credential follows
+  from declaring the Kubernetes API. What an adapter may do is still granted
+  by the chart against the account it names.
+- **The manager reads no config to check it.** A wrong declaration draws a
+  wrong picture, which is why the bundles declare their own externals beside
+  the adapters they ship, reviewed together.
+- **Declaring none is a normal answer.** The adapter draws with no external,
+  and nothing else about it changes.
+
 ### Pipeline
 
 **The wiring.** N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus

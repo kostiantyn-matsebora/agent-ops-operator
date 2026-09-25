@@ -26,6 +26,7 @@ const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog } = requi
 const { translate, decide } = require('./vocabulary');
 const { loadMcpServers } = require('./mcp');
 const { confirmContextMissing } = require('./continuity');
+const { newCallRecorder } = require('./report');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
@@ -185,6 +186,7 @@ async function checkInventory(available) {
 
 function onEvent(ev, state) {
   try {
+    if (state.calls) state.calls.note(ev);
     switch (ev.type) {
       case 'session.start':
       case 'session.resume':
@@ -291,7 +293,7 @@ async function openSession(c, unit, cfg) {
 }
 
 async function attempt(c, unit, cfg, prompt, denials = []) {
-  const state = { lastText: '', toolCalls: 0, turns: 0, errors: [], toolNames: new Map() };
+  const state = { lastText: '', toolCalls: 0, turns: 0, errors: [], toolNames: new Map(), calls: newCallRecorder() };
   let opened;
   try {
     opened = await openSession(c, unit, cfg);
@@ -328,7 +330,7 @@ async function attempt(c, unit, cfg, prompt, denials = []) {
     try { await session.disconnect(); } catch {}
   }
   process.stdout.write(`\n=== RESULT (${status}, ${state.turns} turns, ${state.toolCalls} tool calls, ${Math.round((Date.now() - started) / 1000)}s) ===\n${result}\n`);
-  return { status, exitCode: status === 'succeeded' ? 0 : 1, sessionId: id, result: result.slice(0, 2000) };
+  return { status, exitCode: status === 'succeeded' ? 0 : 1, sessionId: id, result: result.slice(0, 2000), ...state.calls.report() };
 }
 
 const NOT_FOUND = /session not found/i;

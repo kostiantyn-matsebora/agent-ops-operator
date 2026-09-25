@@ -24,6 +24,10 @@ type podSpecView struct {
 	Containers []struct {
 		Name  string `json:"name"`
 		Image string `json:"image"`
+		Env   []struct {
+			Name  string `json:"name"`
+			Value string `json:"value,omitempty"`
+		} `json:"env,omitempty"`
 	} `json:"containers"`
 	NodeName string `json:"nodeName,omitempty"`
 }

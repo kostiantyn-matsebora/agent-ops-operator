@@ -47,11 +47,27 @@ Six views, one question each.
 
 - **Topology** — What is moving between components?
 
-  The whole install as a graph, in four lanes: where signals enter, what claims
-  them, who answers, and where answers go. Click any element to narrow the graph
-  to **what it is connected to**.
+  The install as a network, in **three views of one activity feed**. Every
+  hop moves on all three.
 
-  ![Signal adapters and sources on the left, then three pipelines, the profiles and runtimes that execute them, and the channels the answers reach, with traffic rates on the edges between them.]({{ '/assets/img/console/topology-light.png' | relative_url }})
+  | View | Shows |
+  |---|---|
+  | Model | what you declared, and what references what |
+  | Components | what runs: adapters, the manager, runtime images, sidecars, and the models, MCP servers and systems outside |
+  | Infrastructure | every pod, boxed by the cluster node it runs on |
+
+  Click an edge, a pulse or a feed row to see **what crossed** it. Narrow the
+  picture to one pipeline's route, or **replay** a past window or one
+  conversation hop by hop.
+
+  The picture fits the screen. The navigation, the panels beside the canvas
+  and the charts under it each fold away.
+
+  ![The Model view: sources, adapters, three pipelines, profiles, runtimes, toolsets and channels, boxed by the bundle that installs them, with a live hop feed beside the graph listing model and tool calls.]({{ '/assets/img/console/topology-light.png' | relative_url }})
+
+  ![The Components view: the manager at the centre, the adapters and sidecars around it, and the model, the MCP server, the repository and the external systems on the rim.]({{ '/assets/img/console/topology-components-light.png' | relative_url }})
+
+  ![The Infrastructure view: each pod boxed by the cluster node it runs on, the conversation pods among them, with the model and the external systems outside every box.]({{ '/assets/img/console/topology-infrastructure-light.png' | relative_url }})
 
 - **Conversations** — What has the fleet been asked, and what has nobody read?
 
@@ -62,8 +78,8 @@ Six views, one question each.
 
 - **Conversation** — What did one agent actually do?
 
-  The transcript, every run with its result, the graph of that conversation
-  alone, and the object's YAML.
+  The transcript, every run with its result, the graph opened on that
+  conversation's replay, and the object's YAML.
 
   The transcript reads from the **message that started it**, and rebuilds after
   a reload or a restart. Only acks are lost.
@@ -119,7 +135,8 @@ Six views, one question each.
 
 - **See the wiring, not a diagram of it**
 
-  The graph is built from the CRs. When the wiring changes, the picture changes.
+  The graph is built from the CRs and the pods. When the wiring changes, the
+  picture changes, and every model and tool call an agent makes moves on it.
 
 - **Read the objects themselves**
 

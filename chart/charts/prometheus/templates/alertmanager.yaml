@@ -22,10 +22,21 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-signal-alertmanager
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: "{{ .Values.alertmanager.image.repository }}:{{ .Values.alertmanager.image.tag }}"
   port: 8080
   singleton: true
+  # Metadata only: what this implementation faces outside the install. The
+  # manager verifies none of it and grants nothing from it.
+  externals:
+    - name: Alertmanager
+      kind: sender
+    {{- if $reg.enabled }}
+    # self-registration writes the sender's routing as a VMAlertmanagerConfig
+    - name: Kubernetes API
+      kind: kubernetes
+    {{- end }}
   # The config contract for SignalSources with `adapter: {{ $name }}` — this is
   # the richest config in the system, so it is the one most worth declaring.
   # Mirrors registerSpec in signals/alertmanager/register.go; bump both in one

@@ -40,16 +40,33 @@ function named(ref: string): { prefix: string; name: string } | null {
   return m ? { prefix: m[1].toLowerCase(), name: m[2].toLowerCase() } : null
 }
 
-export function Icon({ icon, size = '1em' }: { icon?: string; size?: string }) {
+/** What a reference resolves to, for whichever surface draws it: a bundled path, a fetched image, or text. */
+export type ResolvedIcon = { kind: 'path'; d: string } | { kind: 'image'; src: string } | { kind: 'text'; text: string }
+
+/** One resolution for the list and the graph, so both draw the same thing or nothing. */
+export function resolveIcon(icon?: string): ResolvedIcon | null {
   const ref = icon?.trim()
   if (!ref) return null
-
   const set = named(ref)
-
   // The built-in set. Bundled, so it needs nothing and cannot 404.
   if (set?.prefix === 'aops') {
-    const path = BUILTIN_ICONS[set.name]
-    if (!path) return null
+    const d = BUILTIN_ICONS[set.name]
+    return d ? { kind: 'path', d } : null
+  }
+  if (isUrl(ref)) return { kind: 'image', src: ref }
+  if (set) {
+    if (!ICON_SERVICE) return null
+    const src = ICON_SERVICE.replace('{prefix}', encodeURIComponent(set.prefix)).replace('{name}', encodeURIComponent(set.name))
+    return { kind: 'image', src }
+  }
+  // Anything else is text — which is what an emoji is.
+  return { kind: 'text', text: ref }
+}
+
+export function Icon({ icon, size = '1em' }: { icon?: string; size?: string }) {
+  const r = resolveIcon(icon)
+  if (!r) return null
+  if (r.kind === 'path') {
     return (
       <svg
         viewBox="0 0 24 24"
@@ -60,26 +77,16 @@ export function Icon({ icon, size = '1em' }: { icon?: string; size?: string }) {
         focusable="false"
         style={{ verticalAlign: '-0.125em', flex: 'none' }}
       >
-        <path d={path} />
+        <path d={r.d} />
       </svg>
     )
   }
-
-  if (isUrl(ref)) {
-    return <img src={ref} alt="" width={size} height={size} style={{ verticalAlign: '-0.125em', flex: 'none' }} />
+  if (r.kind === 'image') {
+    return <img src={r.src} alt="" width={size} height={size} style={{ verticalAlign: '-0.125em', flex: 'none' }} />
   }
-
-  if (set) {
-    if (!ICON_SERVICE) return null
-    const url = ICON_SERVICE.replace('{prefix}', encodeURIComponent(set.prefix))
-      .replace('{name}', encodeURIComponent(set.name))
-    return <img src={url} alt="" width={size} height={size} style={{ verticalAlign: '-0.125em', flex: 'none' }} />
-  }
-
-  // Anything else is text — which is what an emoji is.
   return (
     <span aria-hidden style={{ flex: 'none' }}>
-      {ref}
+      {r.text}
     </span>
   )
 }

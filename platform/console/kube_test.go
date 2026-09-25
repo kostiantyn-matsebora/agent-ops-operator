@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -388,5 +390,63 @@ func TestWatchDecodeErrorMidStream(t *testing.T) {
 	}
 	if seen != 1 {
 		t.Fatalf("the frame before the bad one must still have been delivered: %d", seen)
+	}
+}
+
+// The install kinds converge exactly as the agentops kinds do: each is listed
+// at its own group's path, watched from the list's resourceVersion, and
+// relisted when that watch expires. Driven through the real client against a
+// fake API server, so the path table and the resume logic are both exercised.
+func TestInstallKindsListWatchAndRelistOn410(t *testing.T) {
+	var mu sync.Mutex
+	lists := map[string]int{}
+	watchRVs := map[string][]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		kind := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		mu.Lock()
+		if r.URL.Query().Get("watch") == "" {
+			lists[kind]++
+			n := lists[kind]
+			mu.Unlock()
+			fmt.Fprintf(w, `{"metadata":{"resourceVersion":"%d"},"items":[{"metadata":{"name":"%s-%d"}}]}`, n*10, kind, n)
+			return
+		}
+		watchRVs[kind] = append(watchRVs[kind], r.URL.Query().Get("resourceVersion"))
+		first := len(watchRVs[kind]) == 1
+		mu.Unlock()
+		if first {
+			w.WriteHeader(http.StatusGone)
+			return
+		}
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	for kind, want := range map[string]string{
+		"cronjobs": "/apis/batch/v1/", "deployments": "/apis/apps/v1/", "pods": "/api/v1/",
+	} {
+		if p := (&Kube{Namespace: "ns"}).resourcePath(kind); !strings.HasPrefix(p, want) {
+			t.Fatalf("%s is served under %s, got %s", kind, want, p)
+		}
+	}
+
+	k := &Kube{BaseURL: srv.URL, Namespace: "agent-ops", HTTP: srv.Client()}
+	c := NewCache(k, InstallKinds)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Run(ctx)
+
+	for _, kind := range InstallKinds {
+		waitFor(t, func() bool { return c.Get(kind, kind+"-2") != nil })
+		if c.Get(kind, kind+"-1") != nil {
+			t.Fatalf("%s: the relist after 410 must replace the store", kind)
+		}
+		waitFor(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			rvs := watchRVs[kind]
+			return len(rvs) >= 2 && rvs[0] == "10" && rvs[1] == "20"
+		})
 	}
 }

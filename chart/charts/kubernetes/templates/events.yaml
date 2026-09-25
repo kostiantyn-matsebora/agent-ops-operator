@@ -17,6 +17,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-kubernetes
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: {{ printf "%s:%s" $ea.image.repository (toString $ea.image.tag) | quote }}
   # This adapter's DATA SOURCE is the Kubernetes API, so it mounts its own SA
@@ -31,6 +32,11 @@ spec:
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
+  # Metadata only: what this implementation faces outside the install. The
+  # manager verifies none of it and grants nothing from it.
+  externals:
+    - name: Kubernetes API
+      kind: kubernetes
   # Interface metadata: makes `kubectl get signaladapter` answer "what goes in
   # spec.config?" without reading adapter source.
   configSchema:
@@ -309,6 +315,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-kubernetes
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   # a REFERENCE to the SignalAdapter CR above — its implementation defines the
   # schema of the config below

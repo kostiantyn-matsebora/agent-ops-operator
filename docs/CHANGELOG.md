@@ -12,6 +12,46 @@ for the source and the reference material beside this file.
 
 ### Added
 
+- **The console's topology is a network, in three views of one activity
+  feed.** Model draws the declared objects, Components one node per component
+  plus the systems outside, and Infrastructure every pod. Each view has its
+  own element classes, and remembers its own layout (concentric, cola or
+  dagre) and boxes (bundle or route on Model, cluster node on
+  Infrastructure). Traffic is a rate-driven stream with every recorded hop
+  drawn as a clickable pulse.
+  - A hop feed, per-edge hop history and a content panel show what each hop
+    carried, joined from the conversation's status.
+  - A pipeline selector, scope-to-route with depth, and find and hide narrow
+    the picture, each counting what it hides.
+  - Window replay (1, 5, 10 or 30 minutes, ten-second frames, three speeds)
+    and conversation replay (one run, hop by hop).
+  - The runtime edge is drawn from the Pipeline, never from the profile.
+  - The canvas fits the viewport. The navigation folds to its icons, the
+    column beside the canvas folds to a strip, and the Display, hop feed and
+    History cards each fold to their title, so the picture takes the whole
+    screen. Every mark's glyph clears its outline, and an unrouted edge bows
+    around the marks between its ends, both held by tests. A pipeline wears
+    the icon `spec.icon` declares in its mark and beside its name wherever the
+    console names it.
+  - See [console.md](console.md#topology). Console 0.39.0.
+- **Model calls and tool calls are recorded as activity.** A runtime may
+  report `turns[]` and `toolCalls[]` with its work result, and the manager
+  emits one `model.call` or `tool.call` hop each, with the runtime image as
+  `from`. Events gain a bounded `data` map, and the metrics gain
+  `agentops_model_calls_total`, `agentops_model_call_tokens`,
+  `agentops_tool_calls_total` and `agentops_tool_call_duration_seconds`. A
+  report over its bounds is refused with `400`. See
+  [contracts.md](contracts.md#what-the-run-did-turns-and-toolcalls). Manager
+  0.58.0, runtime-claude 0.10.0, runtime-ollama 0.2.0, runtime-copilot 0.2.0.
+- **`SignalAdapter` and `ChannelAdapter` gain `spec.externals[]`**, a `name`
+  and a `kind` (`sender`, `api` or `kubernetes`) for each system the
+  implementation faces. Metadata only: nothing verifies it and it grants
+  nothing. The console draws each one beside its adapter. The console,
+  `prometheus`, `kubernetes`, `home-assistant` and `telegram` bundles declare
+  the externals of the adapters they ship.
+- **The console reads `cronjobs` in its namespace**, read-only, beside its
+  existing pod and deployment grant, so the housekeeping CronJob is drawn as a
+  component.
 - A fourth built-in, risk-split toolset, `agentops-websearch` (`WebSearch`),
   beside `agentops-observe`/`-shell`/`-edit`. The kubernetes bundle's admin
   route (`k8s-operate`) and the home-assistant bundle's ops route (`ha-ops`)
@@ -72,11 +112,20 @@ for the source and the reference material beside this file.
 
 ### Upgrade
 
-1. `helm upgrade`. Nothing to restate — the check arrives with the manager
+1. **Apply the CRDs first** — `kubectl apply -f chart/crds/` — before
+   `helm upgrade`. Helm never upgrades a CRD, and an old one silently prunes
+   `spec.externals` from every adapter CR.
+2. `helm upgrade`. Nothing to restate — the check arrives with the manager
    image.
-2. A Pipeline already carrying a dangling `runtimeRef` turns `Ready=False`.
+3. A Pipeline already carrying a dangling `runtimeRef` turns `Ready=False`.
    Apply the missing `AgentRuntime`, or correct the name, and `Ready`
    converges with no further edit.
+4. **Nothing else is owed, since the topology change is additive.**
+   - A runtime image older than this release reports no turns, and the graph
+     simply draws no model or tool hops for it.
+   - An adapter CR with no `externals` draws no senders beside it.
+   - The console's persisted display selections are re-keyed per view, so a
+     selection saved by the old graph is dropped rather than misapplied.
 
 ## [13.4.0] — 2026-09-06
 

@@ -393,5 +393,16 @@ what lives HERE is the implementation:
   anywhere is `POST /channel/inbound`.
 - **Names `agentops-adapter-console`**, which the CHART renders beside the
   read-only Role it binds to it.
-- **Conversations carry no `pipelineRef`**, so pipeline attribution is INFERRED
-  from the materialized bindings and left blank when ambiguous. Never guessed.
+- **A conversation predating `spec.pipelineRef` carries none**, so its pipeline
+  attribution falls back to the materialized bindings and is left blank when
+  ambiguous. Never guessed. One that carries the ref is attributed by it —
+  see `terminology.md`.
+- **The topology is THREE VIEWS of one activity feed** — Model, Components,
+  Infrastructure — built in `platform/console/ui/src/graph/views/`, one
+  function per view from the base graph and a hop to that view's nodes.
+  `topology.go` and `components.go` serve the facts, and the browser maps each
+  RECORDED hop onto a view's nodes from those facts. It infers no motion: an
+  edge with no recorded hop stays still.
+  - **It also watches pods, deployments and cronjobs**, read-only, because
+    Components and Infrastructure are drawn from them.
+  - **`docs/console.md` owns the detail.** This is only where it lives.

@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog, resolveBin, buildClaudeArgs } = require('./tools');
 const { DEFAULT_LIMIT, newSpinWatch, noteToolUse, spinMessage, discardedNotice } = require('./spin');
+const { newCallRecorder } = require('./report');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
@@ -193,6 +194,7 @@ async function spawnClaude(args, unit, isResume) {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let buf = '', sessionId = null, result = '', stderr = '';
+      const calls = newCallRecorder();
       // Tool calls the model could not FORM. Nothing executes them, so a run
       // that only makes those looks busy and answers from whatever it already
       // had — see spin.js.
@@ -209,6 +211,7 @@ async function spawnClaude(args, unit, isResume) {
           try { ev = JSON.parse(line); } catch { console.log(line); continue; }
           if (ev.session_id && !sessionId) sessionId = ev.session_id;
           if (ev.type === 'result') result = (ev.result || '').slice(0, 2000);
+          calls.note(ev);
           const txt = formatEvent(ev, line);
           if (txt) process.stdout.write(txt);
           if (ev.type === 'assistant' && !spin) {
@@ -235,14 +238,14 @@ async function spawnClaude(args, unit, isResume) {
         stderr += c;
         process.stderr.write(c);
       });
-      p.on('error', (e) => resolve({ status: 'failed', exitCode: -1, sessionId, result: `spawn: ${e.message}`, stderr }));
+      p.on('error', (e) => resolve({ status: 'failed', exitCode: -1, sessionId, result: `spawn: ${e.message}`, stderr, ...calls.report() }));
       p.on('close', (code) => {
         if (kill) clearTimeout(kill);
         if (spin) {
           // FAILED, and said plainly. The alternative is what happened before
           // this existed: a run reported success while every tool call in it
           // had been discarded unread.
-          return resolve({ status: 'failed', exitCode: code ?? -1, sessionId, result: spinMessage(spin), stderr });
+          return resolve({ status: 'failed', exitCode: code ?? -1, sessionId, result: spinMessage(spin), stderr, ...calls.report() });
         }
         if (watch.total > 0) {
           // Recovered on its own, which is the common case — by ABANDONING the
@@ -254,7 +257,7 @@ async function spawnClaude(args, unit, isResume) {
           const notice = discardedNotice(watch);
           if (notice && result) result = `${result}\n\n${notice}`;
         }
-        resolve({ status: code === 0 ? 'succeeded' : 'failed', exitCode: code, sessionId, result, stderr });
+        resolve({ status: code === 0 ? 'succeeded' : 'failed', exitCode: code, sessionId, result, stderr, ...calls.report() });
       });
     });
 

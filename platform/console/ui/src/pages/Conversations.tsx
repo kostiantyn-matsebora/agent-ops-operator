@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../components/States'
 import {
   useCloseConversations, useConversations, useDeleteConversations,
-  useMarkRead, useReopenConversation, useSession, useVocabulary,
+  useMarkRead, usePipelineIcon, useReopenConversation, useSession,
 } from '../api/hooks'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'
@@ -43,13 +43,8 @@ function age(seconds: number): string {
 export function ConversationsPage() {
   const [phase, setPhase] = useState('')
   const [pipeline, setPipeline] = useState('')
-  // The route's declared icon, by name. The vocabulary is already fetched for
-  // the header chips, so this costs nothing extra.
-  const vocabulary = useVocabulary()
-  const iconFor = (name?: string) =>
-    name
-      ? vocabulary.data?.entries.find((e) => e.kind === 'pipeline' && e.name === name)?.icon
-      : undefined
+  // The route's declared icon, by name, from the shared lookup.
+  const iconFor = usePipelineIcon()
   const [profile, setProfile] = useState('')
   const [errored, setErrored] = useState(false)
   // Unread is a FILTER like every other one — evaluated server-side, so a

@@ -1,135 +1,149 @@
-import type { ReactElement } from 'react'
-
-// Per-kind shape and glyph.
+// Per-class mark: an outline and a glyph, drawn at the origin.
 //
 // Kiali gives each element class its own silhouette so a graph is readable
-// before you read any label — you learn "hexagons are where traffic enters" once
-// and never re-read that column again. The same idea here, mapped onto our nine
-// kinds plus pods and conversations.
+// before any label is. The outlines are sized for a mark scaled by MARK_SCALE,
+// and the glyphs sit inside them on the same origin — one path each, so a node
+// is a <g> of two paths and nothing fights over sizing or fill.
 //
-// The glyphs are hand-drawn paths on a 24×24 grid rather than PatternFly icon
-// components: an icon component renders its own <svg>, and nesting one inside a
-// node's <g> means fighting sizing and fill inheritance for every kind. A path
-// is a path.
+// A GLYPH NEVER TOUCHES ITS OUTLINE. Every shape states the rectangles the
+// outline stays out of (CLEARANCE), every glyph stays inside one of them, and
+// shapes.test.ts flattens both paths to check it. The cloud shipped with the
+// globe crossing its bottom line once; the numbers are here so it cannot again.
 
 export type ShapeKind =
-  | 'hexagon' // things traffic ENTERS through — sources
-  | 'plaque' // implementations that serve them — adapters
-  | 'rect' // the wiring spine — pipelines
-  | 'circle' // identities — profiles
-  | 'stadium' // execution — runtimes, pods
-  | 'diamond' // capabilities — toolsets, MCP configs
-  | 'cylinder' // surfaces work is delivered to — channels
-  | 'note' // work items — conversations
+  | 'hexagon' | 'plaque' | 'rect' | 'chip' | 'cloud' | 'server' | 'hub'
+  | 'circle' | 'stadium' | 'diamond' | 'diamond2' | 'cylinder' | 'note' | 'box'
+
+export const MARK_SCALE = 1.95
+/** How far from a node's centre an edge stops. */
+export const MARK_RADIUS = 38
+export const LABEL_Y = 54
+export const CAPTION_Y = 70
+
+const SHAPES: Record<ShapeKind, string> = {
+  hexagon: 'M-18 0 L-9 -15 L9 -15 L18 0 L9 15 L-9 15 Z',
+  plaque: 'M-18 -12 h36 v24 h-36 z M-18 -6 h-3 M-18 6 h-3',
+  rect: 'M-22 -13 h44 a3 3 0 0 1 3 3 v20 a3 3 0 0 1 -3 3 h-44 a3 3 0 0 1 -3 -3 v-20 a3 3 0 0 1 3 -3 z',
+  chip: 'M-17 -11 h34 v22 h-34 z',
+  cloud: 'M-18 13 a9 9 0 0 1 1 -18 a13 13 0 0 1 25 -3 a10 10 0 0 1 10 21 z',
+  server: 'M-17 -14 h34 v10 h-34 z M-17 4 h34 v10 h-34 z',
+  hub: 'M-26 -17 h52 a4 4 0 0 1 4 4 v26 a4 4 0 0 1 -4 4 h-52 a4 4 0 0 1 -4 -4 v-26 a4 4 0 0 1 4 -4 z',
+  circle: 'M-15 0 a15 15 0 1 0 30 0 a15 15 0 1 0 -30 0',
+  stadium: 'M-12 -12 h24 a12 12 0 0 1 0 24 h-24 a12 12 0 0 1 0 -24 z',
+  diamond: 'M0 -17 L17 0 L0 17 L-17 0 Z',
+  diamond2: 'M0 -17 L17 0 L0 17 L-17 0 Z M-17 0 h-4 M17 0 h4',
+  cylinder: 'M-16 -10 a16 5 0 0 0 32 0 a16 5 0 0 0 -32 0 v20 a16 5 0 0 0 32 0 v-20',
+  note: 'M-13 -15 h18 l8 8 v22 h-26 z M5 -15 v8 h8',
+  box: 'M-10 -10 h20 v20 h-20 z M-10 -10 l5 -5 h20 v20 l-5 5 M10 -10 l5 -5',
+}
+
+/** Half the side of the box a declared icon is drawn in, centred on the mark: inside every shape's clearance. */
+export const ICON_HALF = 9
+
+/** [x0, y0, x1, y1] in mark units: where a shape's outline never goes, and where its glyph always is. */
+export type Clearance = [number, number, number, number]
+
+export const CLEARANCE: Record<ShapeKind, Clearance[]> = {
+  hexagon: [[-12, -8, 12, 8]],
+  plaque: [[-16, -10, 16, 10]],
+  rect: [[-22, -11, 22, 11]],
+  chip: [[-15, -9, 15, 9]],
+  cloud: [[-8, -7, 8, 7]],
+  // Two slabs: a glyph decorates each rather than crossing the gap between them.
+  server: [[-15, -12, 15, -6], [-15, 6, 15, 12]],
+  hub: [[-26, -14, 26, 14]],
+  circle: [[-10, -10, 10, 10]],
+  stadium: [[-18, -10, 18, 10]],
+  diamond: [[-8, -8, 8, 8]],
+  diamond2: [[-8, -8, 8, 8]],
+  // The rim's front edge dips to y=-5, so the clear area starts below it.
+  cylinder: [[-13, -4, 13, 12]],
+  note: [[-11, -5, 11, 13]],
+  // The cube's front face, on the origin; the two other faces sit above and to the right.
+  box: [[-9, -9, 9, 9]],
+}
+
+const GLYPHS = {
+  source: 'M2 -7 L-4 1 h4 l-1 6 6 -8 h-4 z',
+  adapter: 'M-4 -6 v4 M4 -6 v4 M-6 -2 h12 v2 a6 6 0 0 1 -12 0 z M0 6 v3',
+  pipeline: 'M-8 -4 h5 a3 3 0 0 1 3 3 v2 a3 3 0 0 0 3 3 h5 M6 2 l2 2 -2 2',
+  profile: 'M0 -6 a3 3 0 1 1 0 6 a3 3 0 0 1 0 -6 M-6 7 a6 6 0 0 1 12 0 z',
+  runtime: 'M-5 -5 h10 v10 h-10 z M-2 -2 h4 v4 h-4 z',
+  toolset: 'M5 -5 a3 3 0 0 1 -4 4 l-5 5 -1 -1 5 -5 a3 3 0 0 1 4 -4 z',
+  mcpconfig: 'M-6 -5 h12 v4 h-12 z M-6 1 h12 v4 h-12 z',
+  channel: 'M-6 -3 h12 v8 h-6 l-3 3 v-3 h-3 z',
+  conversation: 'M-5 -2 h10 M-5 2 h6',
+  pod: 'M-4 -4 h8 v8 h-8 z',
+  manager: 'M-7 -5 h14 v10 h-14 z M-7 -1 h14 M-3 3 h.01 M0 3 h.01',
+  image: 'M-6 -6 h12 v12 h-12 z M-2 -2 h4 v4 h-4 z M0 -9 v3 M0 6 v3 M-9 0 h3 M6 0 h3',
+  model: 'M0 -5 l1.5 3.5 3.5 1.5 -3.5 1.5 -1.5 3.5 -1.5 -3.5 -3.5 -1.5 3.5 -1.5 z',
+  mcpserver: 'M-7 -9 h14 M-7 9 h14',
+  // A pod running an MCP server wears a small server: the slab bars above sit
+  // in the server SHAPE's slabs, and on a cube's face they would hug its edges.
+  server: 'M-6 -6 h12 v4 h-12 z M-6 2 h12 v4 h-12 z',
+  container: 'M-6 -4 h12 M-6 0 h12 M-6 4 h12',
+  gateway: 'M-7 0 h14 M3 -4 l4 4 -4 4 M-3 -4 l-4 4 4 4',
+  job: 'M0 -6 a6 6 0 1 0 0.01 0 M0 -3 v3 l2 2',
+  external: 'M0 -6.5 a6.5 6.5 0 1 0 0.01 0 M-6.5 0 h13 M0 -6.5 c-3.4 3.2 -3.4 9.8 0 13 M0 -6.5 c3.4 3.2 3.4 9.8 0 13',
+  repository: 'M-3 -6 a2 2 0 1 0 0.01 0 M-3 6 a2 2 0 1 0 0.01 0 M5 -2 a2 2 0 1 0 0.01 0 M-3 -4 v8 M-3 0 c0 -3 8 0 8 -2',
+} as const
 
 export interface NodeStyle {
   shape: ShapeKind
-  /** 24×24 glyph, drawn in the node's accent colour. */
+  /** Drawn on a grid centred at the origin, about ±9 across. */
   glyph: string
   label: string
-  /** Which lane the node belongs to (see layout.ts). */
-  lane: LaneId
 }
-
-export type LaneId = 'ingest' | 'wiring' | 'execution' | 'capability' | 'delivery' | 'work'
-
-export const LANES: { id: LaneId; title: string; hint: string }[] = [
-  { id: 'ingest', title: 'Ingest', hint: 'where signals enter' },
-  { id: 'wiring', title: 'Wiring', hint: 'what claims them' },
-  { id: 'execution', title: 'Execution', hint: 'who answers, and on what' },
-  { id: 'capability', title: 'Capabilities', hint: 'what the route may reach' },
-  { id: 'delivery', title: 'Delivery', hint: 'where answers go' },
-  { id: 'work', title: 'Work', hint: 'conversations and their pods' },
-]
-
-// Glyphs: deliberately simple, legible at 14px.
-const GLYPH = {
-  bolt: 'M13 2 L4 14 h6 l-1 8 9-12 h-6 z',
-  plug: 'M8 2 v6 M16 2 v6 M5 8 h14 v3 a7 7 0 0 1 -14 0 z M12 18 v4',
-  flow: 'M3 6 h7 a4 4 0 0 1 4 4 v4 a4 4 0 0 0 4 4 h3 M18 15 l3 3 -3 3',
-  person: 'M12 3 a4 4 0 1 1 0 8 a4 4 0 0 1 0-8 M4 21 a8 8 0 0 1 16 0 z',
-  cpu: 'M9 3 v2 M15 3 v2 M9 19 v2 M15 19 v2 M3 9 h2 M3 15 h2 M19 9 h2 M19 15 h2 M5 5 h14 v14 h-14 z M9 9 h6 v6 h-6 z',
-  wrench: 'M20 5 a5 5 0 0 1 -6.5 6.5 L5 20 l-1-1 8.5-8.5 A5 5 0 0 1 19 4 l-3 3 1 1 3-3 z',
-  server: 'M3 4 h18 v6 h-18 z M3 14 h18 v6 h-18 z M6.5 7 h.01 M6.5 17 h.01',
-  chat: 'M4 4 h16 v11 h-9 l-5 4 v-4 h-2 z',
-  box: 'M12 2 l9 5 v10 l-9 5 -9-5 v-10 z M12 12 l9-5 M12 12 l-9-5 M12 12 v10',
-  note: 'M6 3 h9 l4 4 v14 h-13 z M15 3 v4 h4 M9 12 h7 M9 16 h5',
-} as const
 
 export const NODE_STYLES: Record<string, NodeStyle> = {
-  signalsources: { shape: 'hexagon', glyph: GLYPH.bolt, label: 'Signal source', lane: 'ingest' },
-  signaladapters: { shape: 'plaque', glyph: GLYPH.plug, label: 'Signal adapter', lane: 'ingest' },
-  pipelines: { shape: 'rect', glyph: GLYPH.flow, label: 'Pipeline', lane: 'wiring' },
-  agentprofiles: { shape: 'circle', glyph: GLYPH.person, label: 'Profile', lane: 'execution' },
-  agentruntimes: { shape: 'stadium', glyph: GLYPH.cpu, label: 'Runtime', lane: 'execution' },
-  mcptoolsets: { shape: 'diamond', glyph: GLYPH.wrench, label: 'Toolset', lane: 'capability' },
-  mcpconfigs: { shape: 'diamond', glyph: GLYPH.server, label: 'MCP config', lane: 'capability' },
-  channels: { shape: 'cylinder', glyph: GLYPH.chat, label: 'Channel', lane: 'delivery' },
-  channeladapters: { shape: 'plaque', glyph: GLYPH.plug, label: 'Channel adapter', lane: 'delivery' },
-  conversations: { shape: 'note', glyph: GLYPH.note, label: 'Conversation', lane: 'work' },
-  pods: { shape: 'stadium', glyph: GLYPH.box, label: 'Runtime pod', lane: 'work' },
+  // Model
+  signaladapters: { shape: 'plaque', glyph: GLYPHS.adapter, label: 'Signal adapter' },
+  signalsources: { shape: 'hexagon', glyph: GLYPHS.source, label: 'Signal source' },
+  pipelines: { shape: 'rect', glyph: GLYPHS.pipeline, label: 'Pipeline' },
+  agentprofiles: { shape: 'circle', glyph: GLYPHS.profile, label: 'Profile' },
+  agentruntimes: { shape: 'stadium', glyph: GLYPHS.runtime, label: 'Runtime' },
+  mcptoolsets: { shape: 'diamond', glyph: GLYPHS.toolset, label: 'Toolset' },
+  mcpconfigs: { shape: 'diamond2', glyph: GLYPHS.mcpconfig, label: 'MCP config' },
+  channels: { shape: 'cylinder', glyph: GLYPHS.channel, label: 'Channel' },
+  channeladapters: { shape: 'plaque', glyph: GLYPHS.adapter, label: 'Channel adapter' },
+  conversations: { shape: 'note', glyph: GLYPHS.conversation, label: 'Conversation' },
+  // Components
+  manager: { shape: 'hub', glyph: GLYPHS.manager, label: 'Manager' },
+  'signal-adapter': { shape: 'plaque', glyph: GLYPHS.adapter, label: 'Signal adapter' },
+  'channel-adapter': { shape: 'plaque', glyph: GLYPHS.adapter, label: 'Channel adapter' },
+  gateway: { shape: 'plaque', glyph: GLYPHS.gateway, label: 'Gateway' },
+  'runtime-image': { shape: 'stadium', glyph: GLYPHS.image, label: 'Runtime image' },
+  sidecar: { shape: 'chip', glyph: GLYPHS.container, label: 'Sidecar' },
+  housekeeping: { shape: 'box', glyph: GLYPHS.job, label: 'Housekeeping' },
+  model: { shape: 'cloud', glyph: GLYPHS.model, label: 'Model' },
+  'mcp-server': { shape: 'server', glyph: GLYPHS.mcpserver, label: 'MCP server' },
+  repository: { shape: 'circle', glyph: GLYPHS.repository, label: 'Repository' },
+  external: { shape: 'cloud', glyph: GLYPHS.external, label: 'External system' },
+  workload: { shape: 'box', glyph: GLYPHS.pod, label: 'Workload' },
+  // Infrastructure
+  pod: { shape: 'box', glyph: GLYPHS.pod, label: 'Pod' },
+  container: { shape: 'chip', glyph: GLYPHS.container, label: 'Container' },
 }
 
-export function styleFor(kind: string): NodeStyle {
-  return NODE_STYLES[kind] ?? { shape: 'rect', glyph: GLYPH.box, label: kind, lane: 'wiring' }
+/** A pod's glyph is what it runs: a pod is a pod, but each one has a purpose. */
+export const ROLE_GLYPH: Record<string, string> = {
+  manager: GLYPHS.manager,
+  'signal-adapter': GLYPHS.adapter,
+  'channel-adapter': GLYPHS.adapter,
+  gateway: GLYPHS.gateway,
+  'runtime-image': GLYPHS.image,
+  housekeeping: GLYPHS.job,
+  'mcp-server': GLYPHS.server,
 }
 
-export const NODE_W = 176
-export const NODE_H = 56
-
-/**
- * shapePath returns the outline for a shape at the origin. Every shape occupies
- * the same NODE_W×NODE_H box so the layout does not have to know which is which
- * — silhouettes differ, footprints do not.
- */
-export function shapePath(shape: ShapeKind, w = NODE_W, h = NODE_H): string {
-  const r = 8
-  switch (shape) {
-    case 'hexagon': {
-      const c = 14
-      return `M ${c} 0 H ${w - c} L ${w} ${h / 2} L ${w - c} ${h} H ${c} L 0 ${h / 2} Z`
-    }
-    case 'plaque': {
-      // clipped top-left / bottom-right corners: an implementation, not a thing
-      const c = 12
-      return `M ${c} 0 H ${w} V ${h - c} L ${w - c} ${h} H 0 V ${c} Z`
-    }
-    case 'circle': {
-      // a wide ellipse, so a long name still fits
-      return `M 0 ${h / 2} A ${w / 2} ${h / 2} 0 1 0 ${w} ${h / 2} A ${w / 2} ${h / 2} 0 1 0 0 ${h / 2} Z`
-    }
-    case 'stadium':
-      return `M ${h / 2} 0 H ${w - h / 2} A ${h / 2} ${h / 2} 0 0 1 ${w - h / 2} ${h} H ${h / 2} A ${h / 2} ${h / 2} 0 0 1 ${h / 2} 0 Z`
-    case 'diamond': {
-      const c = 18
-      return `M ${c} 0 H ${w - c} L ${w} ${h / 2} L ${w - c} ${h} H ${c} L 0 ${h / 2} Z`
-    }
-    case 'cylinder': {
-      const e = 9
-      return `M 0 ${e} A ${w / 2} ${e} 0 0 1 ${w} ${e} V ${h - e} A ${w / 2} ${e} 0 0 1 0 ${h - e} Z`
-    }
-    case 'note': {
-      const f = 14
-      return `M 0 ${r} q 0 -${r} ${r} -${r} H ${w - f} L ${w} ${f} V ${h - r} q 0 ${r} -${r} ${r} H ${r} q -${r} 0 -${r} -${r} Z`
-    }
-    default:
-      return `M ${r} 0 H ${w - r} q ${r} 0 ${r} ${r} V ${h - r} q 0 ${r} -${r} ${r} H ${r} q -${r} 0 -${r} -${r} V ${r} q 0 -${r} ${r} -${r} Z`
-  }
+export function styleFor(cls: string): NodeStyle {
+  return NODE_STYLES[cls] ?? { shape: 'rect', glyph: GLYPHS.pod, label: cls }
 }
 
-/** The cylinder's top ellipse, drawn as a separate stroke so it reads as 3D. */
-export function shapeDecoration(shape: ShapeKind, w = NODE_W): ReactElement | null {
-  if (shape !== 'cylinder') return null
-  const e = 9
-  return <path d={`M 0 ${e} A ${w / 2} ${e} 0 0 0 ${w} ${e}`} fill="none" stroke="currentColor" strokeWidth={1.5} />
+export function shapePath(shape: ShapeKind): string {
+  return SHAPES[shape]
 }
 
-/** Glyph rendered at 14px inside the node, scaled from the 24×24 grid. */
-export function Glyph({ d, x, y, size = 15 }: { d: string; x: number; y: number; size?: number }) {
-  const s = size / 24
-  return (
-    <g transform={`translate(${x},${y}) scale(${s})`} aria-hidden="true">
-      <path d={d} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-    </g>
-  )
+export function plural(label: string): string {
+  return /[^aeiou]y$/.test(label) ? `${label.slice(0, -1)}ies` : `${label}s`
 }
