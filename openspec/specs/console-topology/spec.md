@@ -32,9 +32,12 @@ onto every view's nodes, so the same event animates each view.
 
 **Model.** The declared objects and what references what: SignalSources,
 SignalAdapters, Pipelines, AgentProfiles, AgentRuntimes, Channels,
-ChannelAdapters, MCPToolsets, MCPConfigs and Conversations. The runtime edge
-SHALL run from the Pipeline, never from the profile. A runtime's image,
-harness and vendor SHALL be facts in its panel, not nodes.
+ChannelAdapters, MCPToolsets, MCPConfigs and Conversations.
+
+Edges SHALL cover `feeds`, `answers`, `runs-on`, `posts`, `served-by`, `uses`
+and `opened`. The runtime edge SHALL run from the Pipeline, never from the
+profile. A runtime's image, harness and vendor SHALL be facts in its panel,
+not nodes.
 
 **Components.** One node per component the repository builds: each signal and
 channel adapter, the gateway, the manager, each runtime image, context-sync,
