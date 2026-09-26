@@ -180,6 +180,12 @@ per tool call, attributed to the conversation, pipeline and run, with the
 runtime image as `from` and the model or MCP server as `to`. A built-in tool
 call SHALL carry no `to`.
 
+**The recorded `from`/`to` name the ENDPOINTS**, never a step the traffic
+passes through. Where egress mediation sits between them, the Components
+view draws it as a static edge alongside the recorded hop.
+
+That static edge is not a `from` or `to` the event itself carries.
+
 These hops SHALL carry their facts in a bounded structured `data` map. No
 prompt text, tool input or tool output SHALL be recorded in telemetry.
 

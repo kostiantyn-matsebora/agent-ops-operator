@@ -262,6 +262,28 @@ to.
 - **WHEN** the operator scopes a graph, navigates away and returns, or reloads
 - **THEN** the graph opens unscoped, while the display control's selections are restored
 
+### Requirement: Find and hide are one grammar, over the view's own facts
+
+A find or hide expression SHALL be terms joined by `and`, each testing one
+fact of the view's own nodes: health (`healthy`, `!healthy`), activity
+(`idle`, `!idle`), attachment (`detached`), or an equality/match on `kind`,
+`name` (`=` exact, `~` substring), `bundle`, `node` or `pipeline`.
+
+A term the grammar does not recognise SHALL match nothing and SHALL be named
+to the operator, never silently dropped.
+
+**Find** SHALL narrow the view to matching nodes and what reaches them.
+**Hide** SHALL remove matching nodes from the view. Both SHALL count what
+they put out of view exactly as the other scoping mechanisms do.
+
+#### Scenario: An unknown term matches nothing and says so
+- **WHEN** an expression contains a term the grammar has no rule for
+- **THEN** it hides or finds nothing on that term's account, and the term is named as unknown
+
+#### Scenario: Terms combine with `and`
+- **WHEN** the expression is `kind=pipeline and !healthy`
+- **THEN** only unhealthy pipelines match
+
 #### Scenario: An operator asks what one element is wired to
 - **WHEN** an element on the graph is selected and scoped
 - **THEN** the graph shows that element and everything on its route, and names the element it is scoped to
@@ -366,12 +388,15 @@ Components. A dragged node SHALL keep its new place until the next layout.
 
 ### Requirement: Boxes are ownership, never kind
 
-A box SHALL group elements by who owns them: on Model, the bundle that
-installs an object, read from its Helm labels, or the route, computed as what
-only one pipeline reaches.
+A box SHALL group elements by who owns them.
+
+**On Model, boxing is an operator CHOICE between two criteria, never both at
+once**: bundle (the bundle that installs an object, read from its Helm
+labels) or route (computed as what only one pipeline reaches). A third
+choice, none, draws no boxes.
 
 On Infrastructure, the cluster node a pod runs on. On Components, no box.
-Shared substrate SHALL stay unboxed.
+Shared substrate SHALL stay unboxed under either Model criterion.
 
 No rule SHALL position a box. A box SHALL sit where its members' edges put
 it, and an element that belongs to no box SHALL never sit inside one.
@@ -379,6 +404,10 @@ it, and an element that belongs to no box SHALL never sit inside one.
 #### Scenario: A bundle is a box
 - **WHEN** the Model view is boxed by bundle
 - **THEN** the objects one bundle installs share one box, the runtime two bundles use is unboxed, and the boxes lie wherever their edges place them
+
+#### Scenario: A route is a box
+- **WHEN** the Model view is boxed by route instead
+- **THEN** each pipeline's own box holds only what no other pipeline also reaches, and an element two pipelines reach sits in neither
 
 #### Scenario: An external is not on a node
 - **WHEN** the Infrastructure view is boxed by cluster node
